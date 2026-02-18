@@ -656,6 +656,7 @@
             }
 
             this.updateURL();
+            window.scrollTo(0, 0);
             await this.loadCurrentLevel(thisNavVersion);
         },
 
@@ -1171,20 +1172,24 @@
             // Brand-specific regex patterns for extracting product codes
             // These patterns match the manufacturer part number format
             const patterns = {
-                // Brother: LC series (ink), TN series (toner), DR series (drum), HC series (high-capacity), PRINK (ribbon)
-                // Matches: LC131, LC131BK, LC23EC, LC431B, LC431XLB, TN660, DR420, HC05BK, PRINKB
-                brother: /\b(LC[-]?\d{2,5}(?:XL)?[A-Z]{0,3}|TN[-]?\d{3,4}[A-Z]?|DR[-]?\d{3,4}|HC\d{2,4}[A-Z]{0,3}|PRINK[A-Z]?)\b/gi,
-                // Canon: PG/CL/PGI/CLI (ink), CART (toner/drum), EP, NPG, TG/GPR, T (toner), LK, NB, MC, WT
-                canon: /\b((?:PG|CL|PGI|CLI)[-]?\d{2,4}(?:XL)?[A-Z]{0,2}|CART[-]?\d{3}(?:II)?|EP[-]?\d{2,3}|NPG[-]?\d{2,3}|TG[-]?\d{2,3}|GPR[-]?\d{2,3}|T\d{2}[A-Z]?|LK[-]?\d{2,3}|NB[-]?CP\d[A-Z]*|MC[-]?G\d{2}|WT[-]?[A-Z]\d)\b/gi,
-                // Epson: T series
-                epson: /\b(T\d{2,4}(?:XL)?[A-Z]?|C13T\d+|\d{2,3}(?:XL)?)\b/gi,
-                // HP: numeric series, CF/CE/W series
-                hp: /\b(\d{2,3}(?:XL)?[AX]?|C[A-Z]?\d{3,4}[AX]?|CC\d{3}[AX]?|CF\d{3}[AX]?|CE\d{3}[AX]?|W\d{4}[AX]?|Q\d{4}[AX]?)\b/gi,
-                samsung: /\b((?:MLT[-]?D|CLT[-]?[CKMY])\d{3}[SL]?)\b/gi,
-                lexmark: /\b(\d{2}[A-Z]\d{3,6}[A-Z]?)\b/gi,
-                oki: /\b([BCM]{1,2}\d{3,4}|4\d{7})\b/gi,
-                'fuji-xerox': /\b(CT\d{6}|CWAA\d{4})\b/gi,
-                kyocera: /\b(TK[-]?\d{3,4}|DK[-]?\d{3,4})\b/gi
+                // Brother: LC (ink), TN (toner), DR (drum), TZe/DK (labels), PC (fax), BU/WT (belt/waste), BT (bottles), HC, PRINK
+                brother: /\b(LC[-]?\d{2,5}(?:X{1,3}L)?[A-Z]{0,3}|TN[-]?\d{3,4}(?:X{1,3}L)?[A-Z]{0,4}|DR[-]?\d{3,4}[A-Z]{0,2}|TZE?[-]?[A-Z]{0,3}\d{3,4}|DK[-]?\d{4,5}|PC[-]?\d{3}|BU[-]?\d{3}[A-Z]{0,2}|WT[-]?\d{3}[A-Z]{0,2}|BT[-]?\d{3,4}[A-Z]{0,3}|HC\d{2,4}[A-Z]{0,3}|PRINK[A-Z]?)\b/gi,
+                // Canon: PG/CL/PGI/CLI/BCI (ink), GI (bottles), PFI (pro ink), CART (toner), FX (fax), EP, NPG, TG/GPR, T, LK, NB, MC, WT
+                canon: /\b((?:PG|CL|PGI|CLI|BCI|GI|PFI)[-]?\d{1,4}(?:X{1,3}L)?[A-Z]{0,2}|CART[-]?\d{3}[A-Z]{0,4}(?:II)?|EP[-]?\d{2,3}|NPG[-]?\d{2,3}|TG[-]?\d{2,3}|GPR[-]?\d{2,3}|FX[-]?\d{1,2}|T\d{2}[A-Z]?|LK[-]?\d{2,3}|NB[-]?CP\d[A-Z]*|MC[-]?G\d{2}|WT[-]?[A-Z]\d|\d[A-Z]{2}\d{2}[A-Z])\b/gi,
+                // Epson: T series, C13T (OEM), ERC (ribbon), N-suffix codes (73N, 81N), numeric codes
+                epson: /\b(T\d{2,4}(?:X{1,3}L)?[A-Z]?|C13T\d+|ERC[-]?\d{2,3}|\d{2,3}N|\d{2,5}(?:XL)?)\b/gi,
+                // HP: numeric series, CF/CE/CC/W/Q/C series, alphanumeric large format codes
+                hp: /\b(\d{2,3}(?:X{1,3}L)?[A-Z]?|C[A-Z]?\d{3,4}[A-Z]?|CC\d{3}[A-Z]?|CF\d{3}[A-Z]?|CE\d{3}[A-Z]?|W\d{4}[A-Z]?|Q\d{4}[A-Z]?|[A-Z]\d[A-Z]\d{2}[A-Z])\b/gi,
+                // Samsung: MLT-D/R/W (toner/drum/waste), CLT-C/K/M/Y/W/R/P (color toner/waste/drum/pack)
+                samsung: /\b((?:MLT[-]?[DRW]|CLT[-]?[CKMYWRP])\d{3}[A-Z]?|(?:ML|CLP|CLX|SCX|SL[-]?[MC])\d{3,5})\b/gi,
+                // Lexmark: 7-char alphanumeric codes (20N3HC0, C540H1CG, 50F3000, 78C6UCE, etc.)
+                lexmark: /\b(\d{2}[A-Z][A-Z0-9]{4,5}|[CBXETW]\d{2,4}[A-Z0-9]{2,5})\b/gi,
+                // OKI: B/C/MC model codes (with optional DN suffix)
+                oki: /\b([BCM]{1,2}\d{3,4}(?:DN)?)\b/gi,
+                // Fuji Xerox: CT, CWAA, Xerox numeric (106R, 108R), E/EC/EL prefix codes
+                'fuji-xerox': /\b(CT\d{6}|CWAA\d{4}|\d{3}R\d{5}|E[CL]?\d{5,6})\b/gi,
+                // Kyocera: TK (toner), DK (drum), WT (waste) — allow color suffix on TK
+                kyocera: /\b(TK[-]?\d{3,4}[A-Z]?|DK[-]?\d{3,4}|WT[-]?\d{3,4})\b/gi
             };
 
             // Brand prefixes used in SKUs (internal codes, not manufacturer codes)
@@ -1243,7 +1248,7 @@
 
                 // Fallback if no codes found - try generic pattern on name
                 if (foundCodes.size === 0) {
-                    const fallbackPattern = /\b[A-Z]{1,3}[-]?\d{2,4}(?:XL)?[A-Z]{0,3}\b/gi;
+                    const fallbackPattern = /\b[A-Z]{1,3}[-]?\d{1,4}(?:XL)?[A-Z]{0,3}\b/gi;
                     const fallbackMatches = name.matchAll(fallbackPattern);
                     for (const match of fallbackMatches) {
                         const code = this.normalizeCode(match[0], brand);
@@ -1289,9 +1294,12 @@
                     // For Canon products
                     else if (brand === 'canon') {
                         if (!skuCode.startsWith('PG') && !skuCode.startsWith('CL') &&
-                            !skuCode.startsWith('PGI') && !skuCode.startsWith('CLI')) {
-                            // Canon ink cartridges typically use PG (black) or CL (color)
-                            // Without knowing the color, we can't reliably add prefix
+                            !skuCode.startsWith('PGI') && !skuCode.startsWith('CLI') &&
+                            !skuCode.startsWith('BCI') && !skuCode.startsWith('GI') &&
+                            !skuCode.startsWith('PFI') && !skuCode.startsWith('CART') &&
+                            !skuCode.startsWith('FX')) {
+                            // Canon ink cartridges have diverse prefixes
+                            // Without knowing the series, we can't reliably add prefix
                         }
                     }
                     // For Epson products
@@ -1303,6 +1311,13 @@
                                     skuCode = 'T' + skuCode;
                                 }
                             }
+                        }
+                    }
+                    // For OKI products: SKU like O831Y → strip O prefix + color suffix → 831 → C831
+                    else if (brand === 'oki') {
+                        const okiModelMatch = skuCode.match(/^(\d{3,4})/);
+                        if (okiModelMatch) {
+                            skuCode = 'C' + okiModelMatch[1];
                         }
                     }
 
@@ -1323,6 +1338,25 @@
                                         .substring(0, 20);
                     if (nameCode) {
                         foundCodes.add(nameCode);
+                    }
+                }
+
+                // For HP: prefer numeric series codes over OEM part numbers
+                // Product names like "HP 62 Ink Cartridge Black (C2P04AA)" contain both
+                // the series (62) and OEM code (C2P04) — only keep the numeric series
+                if (brand === 'hp' && foundCodes.size > 1) {
+                    const numericCodes = new Set();
+                    const otherCodes = new Set();
+                    foundCodes.forEach(code => {
+                        if (/^\d{2,3}$/.test(code)) {
+                            numericCodes.add(code);
+                        } else {
+                            otherCodes.add(code);
+                        }
+                    });
+                    if (numericCodes.size > 0 && otherCodes.size > 0) {
+                        foundCodes.clear();
+                        numericCodes.forEach(code => foundCodes.add(code));
                     }
                 }
 
@@ -1356,110 +1390,155 @@
                 normalized = normalized.substring(2);
             }
 
-            // For Brother: Accept LC/TN/DR codes and other known series (HC, PRINK, etc.)
+            // For Brother: LC/TN/DR/TZe/DK/PC/BU/WT/BT/HC/PRINK
             if (brand === 'brother') {
-                // Standard Brother series: LC (ink), TN (toner), DR (drum)
-                const standardMatch = normalized.match(/^((?:LC|TN|DR)\d{2,4}(?:XL)?)/i);
-                if (standardMatch) {
-                    return standardMatch[1]; // Return base code (strip color suffix)
-                }
-                // High-capacity/specialty series: HC (high-capacity ink)
+                // LC (ink) — strip color suffix, support XXL
+                const lcMatch = normalized.match(/^(LC\d{2,5}(?:X{1,3}L)?)/i);
+                if (lcMatch) return lcMatch[1];
+                // TN (toner) — strip color suffix, support XXL
+                const tnMatch = normalized.match(/^(TN\d{3,4}(?:X{1,3}L)?)/i);
+                if (tnMatch) return tnMatch[1];
+                // DR (drum) — strip CL/color suffix
+                const drMatch = normalized.match(/^(DR\d{3,4})/i);
+                if (drMatch) return drMatch[1];
+                // TZe label tapes (TZe231, TZEFX431, etc.) — normalize to TZE + digits
+                const tzeMatch = normalized.match(/^TZE?[A-Z]{0,3}(\d{3,4})/i);
+                if (tzeMatch) return 'TZE' + tzeMatch[1];
+                // DK label rolls
+                const dkMatch = normalized.match(/^(DK\d{4,5})/i);
+                if (dkMatch) return dkMatch[1];
+                // PC fax film
+                const pcMatch = normalized.match(/^(PC\d{3})/i);
+                if (pcMatch) return pcMatch[1];
+                // BU belt unit — strip suffix
+                const buMatch = normalized.match(/^(BU\d{3})/i);
+                if (buMatch) return buMatch[1];
+                // WT waste toner — strip suffix
+                const wtMatch = normalized.match(/^(WT\d{3})/i);
+                if (wtMatch) return wtMatch[1];
+                // BT ink bottles — strip color suffix
+                const btMatch = normalized.match(/^(BT\d{3,4})/i);
+                if (btMatch) return btMatch[1];
+                // HC high-capacity ink
                 const hcMatch = normalized.match(/^(HC\d{2,4})/i);
-                if (hcMatch) {
-                    return hcMatch[1];
-                }
-                // Ribbon series: PRINK
-                if (normalized.startsWith('PRINK')) {
-                    return 'PRINK';
-                }
-                // Reject codes that don't match any Brother format
+                if (hcMatch) return hcMatch[1];
+                // PRINK ribbon
+                if (normalized.startsWith('PRINK')) return 'PRINK';
                 return null;
             }
-            // For Canon: PG/CL/PGI/CLI (ink), CART (toner/drum), EP, NPG, TG, GPR, T, LK, NB, MC, WT
+            // For Canon: PG/CL/PGI/CLI/BCI/GI/PFI (ink), CART (toner), FX (fax), EP, NPG, TG, GPR, T, LK, NB, MC, WT
             else if (brand === 'canon') {
-                // Ink: PG, CL, PGI, CLI
-                const inkMatch = normalized.match(/^((?:PGI?|CLI?)[-]?\d{2,4}(?:XL)?)/i);
+                // Ink: PG, CL, PGI, CLI, BCI, GI, PFI — support single-digit and XXL
+                const inkMatch = normalized.match(/^((?:PGI?|CLI?|BCI|GI|PFI)\d{1,4}(?:X{1,3}L)?)/i);
                 if (inkMatch) return inkMatch[1];
-                // Toner/drum: CART + number (strip color/HY suffixes)
-                const cartMatch = normalized.match(/^(CART[-]?\d{3}(?:II)?)/i);
+                // Toner/drum: CART + number (strip color/HY suffixes, keep II)
+                const cartMatch = normalized.match(/^(CART\d{3}(?:II)?)/i);
                 if (cartMatch) return cartMatch[1];
+                // FX fax series
+                const fxMatch = normalized.match(/^(FX\d{1,2})/i);
+                if (fxMatch) return fxMatch[1];
                 // EP series
-                const epMatch = normalized.match(/^(EP[-]?\d{2,3})/i);
+                const epMatch = normalized.match(/^(EP\d{2,3})/i);
                 if (epMatch) return epMatch[1];
                 // NPG series (strip color suffix)
-                const npgMatch = normalized.match(/^(NPG[-]?\d{2,3})/i);
+                const npgMatch = normalized.match(/^(NPG\d{2,3})/i);
                 if (npgMatch) return npgMatch[1];
                 // TG/GPR series (strip color suffix)
-                const tgMatch = normalized.match(/^(TG[-]?\d{2,3})/i);
+                const tgMatch = normalized.match(/^(TG\d{2,3})/i);
                 if (tgMatch) return tgMatch[1];
-                const gprMatch = normalized.match(/^(GPR[-]?\d{2,3})/i);
+                const gprMatch = normalized.match(/^(GPR\d{2,3})/i);
                 if (gprMatch) return gprMatch[1];
                 // T series toner (T10, T12)
                 const tMatch = normalized.match(/^(T\d{2})/i);
                 if (tMatch) return tMatch[1];
                 // LK, NB, MC, WT series
-                const miscMatch = normalized.match(/^(LK[-]?\d{2,3}|NB[-]?CP\d[A-Z]*|MC[-]?G\d{2}|WT[-]?[A-Z]\d)/i);
+                const miscMatch = normalized.match(/^(LK\d{2,3}|NBCP\d[A-Z]*|MCG\d{2}|WT[A-Z]\d)/i);
                 if (miscMatch) return miscMatch[1];
+                // OEM alphanumeric part numbers (e.g., 3ED49A)
+                const oemMatch = normalized.match(/^(\d[A-Z]{2}\d{2}[A-Z])/i);
+                if (oemMatch) return oemMatch[1];
                 return null;
             }
-            // For Epson: ONLY accept T series codes
+            // For Epson: T series, ERC ribbons, N-suffix codes
             else if (brand === 'epson') {
-                const epsonMatch = normalized.match(/^(T\d{2,4}(?:XL)?)/i);
-                if (epsonMatch) {
-                    return epsonMatch[1];
-                }
+                const tMatch = normalized.match(/^(T\d{2,4}(?:X{1,3}L)?)/i);
+                if (tMatch) return tMatch[1];
+                const ercMatch = normalized.match(/^(ERC\d{2,3})/i);
+                if (ercMatch) return ercMatch[1];
+                // N-suffix codes (e.g., 73N, 81N)
+                const nMatch = normalized.match(/^(\d{2,3}N)/i);
+                if (nMatch) return nMatch[1];
+                // Numeric codes (e.g., 502, 522, 277, 288)
+                const numMatch = normalized.match(/^(\d{2,5})(?:XL)?/i);
+                if (numMatch) return numMatch[1];
                 return null;
             }
-            // For HP: accept numeric codes and part number codes (CE, CF, CC, W, Q, C series)
+            // For HP: numeric codes, part number codes (CE, CF, CC, W, Q, C series), alphanumeric large format
             else if (brand === 'hp') {
-                // Numeric codes like 05A, 119A, 143A (strip letter suffix)
-                const numMatch = normalized.match(/^(\d{2,3})(?:XL)?[AX]?/i);
+                // Numeric codes like 05, 119, 143 (strip letter/XL suffix)
+                const numMatch = normalized.match(/^(\d{2,3})(?:X{1,3}L)?[A-Z]?/i);
                 if (numMatch) return numMatch[1];
                 // Part number codes (CE505A, CF226X, CC530A, W2090A, Q3984A, C4096A)
-                const partMatch = normalized.match(/^((?:CE|CF|CC|W|Q|C)\d{3,4})[AX]?/i);
+                const partMatch = normalized.match(/^((?:CE|CF|CC|CZ|W|Q|C)\d{3,4})[A-Z]?/i);
                 if (partMatch) return partMatch[1];
+                // Alphanumeric large format codes (P2V68A, 3ED50A, L0R08A)
+                const alphaMatch = normalized.match(/^([A-Z]\d[A-Z]\d{2})/i);
+                if (alphaMatch) return alphaMatch[1];
                 return null;
             }
-            // For Samsung
+            // For Samsung: MLT-D/R/W, CLT-C/K/M/Y/W/R/P, printer models (ML, CLP, CLX, SCX, SL)
             else if (brand === 'samsung') {
-                const samsungMatch = normalized.match(/^((?:MLT[-]?D|CLT[-]?[CKMY])\d{3})/i);
-                if (samsungMatch) {
-                    return samsungMatch[1];
-                }
+                // MLT/CLT toner codes — strip suffix letter (S/L/C etc.)
+                const samsungMatch = normalized.match(/^((?:MLT[DRW]|CLT[CKMYWRP])\d{3})/i);
+                if (samsungMatch) return samsungMatch[1];
+                // Samsung printer model codes as fallback (ML1660, CLP360, CLX3305, etc.)
+                const modelMatch = normalized.match(/^((?:ML|CLP|CLX|SCX|SL[MC]?)\d{3,5})/i);
+                if (modelMatch) return modelMatch[1];
                 return null;
             }
-            // For Lexmark
+            // For Lexmark: 7-char alphanumeric codes (diverse formats)
             else if (brand === 'lexmark') {
-                const lexmarkMatch = normalized.match(/^(\d{2}[A-Z]\d{3,6})/i);
-                if (lexmarkMatch) {
-                    return lexmarkMatch[1];
-                }
+                // Numeric-start 7-char codes: 20N3HC0, 50F3000, 71C1HC0, 78C6UCE, 12017SR, etc.
+                const numMatch = normalized.match(/^(\d{2}[A-Z][A-Z0-9]{4,5})/i);
+                if (numMatch) return numMatch[1];
+                // Letter-prefix codes: C540H1CG, C236HK0, X203A11G, B226H00, E250A11P, T650A11P, W850H21G
+                const letterMatch = normalized.match(/^([CBXETW]\d{2,4}[A-Z0-9]{2,5})/i);
+                if (letterMatch) return letterMatch[1];
                 return null;
             }
-            // For OKI: accept B/C/MC model codes and OKI part numbers
+            // For OKI: B/C/MC model codes — strip DN suffix
             else if (brand === 'oki') {
                 const okiMatch = normalized.match(/^([BCM]{1,2}\d{3,4})/i);
                 if (okiMatch) return okiMatch[1];
-                // OKI numeric part numbers like 44992407
-                const partMatch = normalized.match(/^(4\d{7})/);
-                if (partMatch) return partMatch[1];
                 return null;
             }
-            // For Fuji Xerox: CT and CWAA codes
+            // For Fuji Xerox: CT, CWAA, Xerox numeric codes (106R, 108R), E/EC/EL prefix
             else if (brand === 'fuji-xerox') {
-                const fxMatch = normalized.match(/^(CT\d{6}|CWAA\d{4})/i);
-                if (fxMatch) return fxMatch[1];
+                const ctMatch = normalized.match(/^(CT\d{6})/i);
+                if (ctMatch) return ctMatch[1];
+                const cwaaMatch = normalized.match(/^(CWAA\d{4})/i);
+                if (cwaaMatch) return cwaaMatch[1];
+                // Xerox numeric codes: 106R01160, 108R00645, 013R00623
+                const xeroxMatch = normalized.match(/^(\d{3}R\d{5})/);
+                if (xeroxMatch) return xeroxMatch[1];
+                // E/EC/EL prefix codes: E3300067, EC101791, EL300637
+                const eMatch = normalized.match(/^(E[CL]?\d{5,6})/i);
+                if (eMatch) return eMatch[1];
                 return null;
             }
-            // For Kyocera: TK and DK codes
+            // For Kyocera: TK (strip color suffix), DK, WT
             else if (brand === 'kyocera') {
-                const kyoMatch = normalized.match(/^((?:TK|DK)[-]?\d{3,4})/i);
-                if (kyoMatch) return kyoMatch[1];
+                const tkMatch = normalized.match(/^(TK\d{3,4})/i);
+                if (tkMatch) return tkMatch[1];
+                const dkMatch = normalized.match(/^(DK\d{3,4})/i);
+                if (dkMatch) return dkMatch[1];
+                const wtMatch = normalized.match(/^(WT\d{3,4})/i);
+                if (wtMatch) return wtMatch[1];
                 return null;
             }
             // For other brands, try to extract a valid-looking code
             else {
-                const genericMatch = normalized.match(/^([A-Z]{1,4}\d{2,6}(?:XL)?)/i);
+                const genericMatch = normalized.match(/^([A-Z]{1,4}\d{1,6}(?:XL)?)/i);
                 if (genericMatch) {
                     return genericMatch[1];
                 }
@@ -2577,23 +2656,6 @@
                                 <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M16 8a6 6 0 0 1 6 6v7h-4v-7a2 2 0 0 0-2-2 2 2 0 0 0-2 2v7h-4v-7a6 6 0 0 1 6-6z"/><rect x="2" y="9" width="4" height="12"/><circle cx="4" cy="4" r="2"/></svg>
                             </a>
                         </div>
-                    </div>
-
-                    <!-- Shop column -->
-                    <div class="footer-column">
-                        <h3 class="footer-column__heading">Shop</h3>
-                        <ul class="footer-links">
-                            <li><a href="/html/shop.html">Browse All Products</a></li>
-                            <li><a href="/html/shop.html?brand=brother">Brother</a></li>
-                            <li><a href="/html/shop.html?brand=canon">Canon</a></li>
-                            <li><a href="/html/shop.html?brand=epson">Epson</a></li>
-                            <li><a href="/html/shop.html?brand=hp">HP</a></li>
-                            <li><a href="/html/shop.html?brand=samsung">Samsung</a></li>
-                            <li><a href="/html/shop.html?brand=lexmark">Lexmark</a></li>
-                            <li><a href="/html/shop.html?brand=oki">OKI</a></li>
-                            <li><a href="/html/shop.html?brand=fuji-xerox">Fuji Xerox</a></li>
-                            <li><a href="/html/shop.html?brand=kyocera">Kyocera</a></li>
-                        </ul>
                     </div>
 
                     <!-- Support column -->

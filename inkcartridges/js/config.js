@@ -28,7 +28,10 @@ const Config = {
     // Business settings (loaded from server, these are fallback defaults)
     settings: {
         FREE_SHIPPING_THRESHOLD: 100,
-        SHIPPING_FEE: 5,
+        SHIPPING_FEE_AUCKLAND: 7.95,
+        SHIPPING_FEE_NORTH_ISLAND: 9.95,
+        SHIPPING_FEE_SOUTH_ISLAND: 13.95,
+        HEAVY_SURCHARGE: 4.00,
         LOW_STOCK_THRESHOLD: 10,
         CRITICAL_STOCK_THRESHOLD: 2,
         GST_RATE: 0.15,

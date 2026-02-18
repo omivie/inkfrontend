@@ -165,606 +165,28 @@
             </div>
         </section>
 
-        <!-- Category Cards Section -->
-        <section class="ribbons-categories">
-            <div class="container">
-                <h2 class="section-title">Shop by Category</h2>
-                <div class="category-grid">
-                    <a href="#typewriter-ribbons" class="ribbon-category-card" data-category="typewriter">
-                        <div class="ribbon-category-card__icon">
-                            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-                                <rect x="2" y="6" width="20" height="12" rx="2"/>
-                                <line x1="6" y1="10" x2="6" y2="10.01"/>
-                                <line x1="10" y1="10" x2="10" y2="10.01"/>
-                                <line x1="14" y1="10" x2="14" y2="10.01"/>
-                                <line x1="18" y1="10" x2="18" y2="10.01"/>
-                                <line x1="8" y1="14" x2="16" y2="14"/>
-                            </svg>
-                        </div>
-                        <h3 class="ribbon-category-card__title">Typewriter Ribbons</h3>
-                        <p class="ribbon-category-card__desc">Manual & electric typewriters</p>
-                        <span class="ribbon-category-card__count">8 products</span>
-                    </a>
-                    <a href="#dot-matrix-ribbons" class="ribbon-category-card" data-category="dot-matrix">
-                        <div class="ribbon-category-card__icon">
-                            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-                                <rect x="3" y="3" width="18" height="18" rx="2"/>
-                                <path d="M7 8h10"/>
-                                <path d="M7 12h10"/>
-                                <path d="M7 16h6"/>
-                            </svg>
-                        </div>
-                        <h3 class="ribbon-category-card__title">Dot Matrix Ribbons</h3>
-                        <p class="ribbon-category-card__desc">Impact & line printers</p>
-                        <span class="ribbon-category-card__count">7 products</span>
-                    </a>
-                    <a href="#pos-ribbons" class="ribbon-category-card" data-category="pos-receipt">
-                        <div class="ribbon-category-card__icon">
-                            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-                                <rect x="2" y="4" width="20" height="16" rx="2"/>
-                                <path d="M6 8h.01"/>
-                                <path d="M10 8h.01"/>
-                                <path d="M14 8h.01"/>
-                                <path d="M18 8h.01"/>
-                                <path d="M8 12h8"/>
-                                <path d="M8 16h8"/>
-                            </svg>
-                        </div>
-                        <h3 class="ribbon-category-card__title">POS & Receipt Ribbons</h3>
-                        <p class="ribbon-category-card__desc">Point of sale & kitchen printers</p>
-                        <span class="ribbon-category-card__count">5 products</span>
-                    </a>
-                    <a href="#time-clock-ribbons" class="ribbon-category-card" data-category="time-clock">
-                        <div class="ribbon-category-card__icon">
-                            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-                                <circle cx="12" cy="12" r="10"/>
-                                <polyline points="12 6 12 12 16 14"/>
-                            </svg>
-                        </div>
-                        <h3 class="ribbon-category-card__title">Time Clock Ribbons</h3>
-                        <p class="ribbon-category-card__desc">Attendance & time recorders</p>
-                        <span class="ribbon-category-card__count">2 products</span>
-                    </a>
-                </div>
-            </div>
-        </section>
-
-        <!-- Filter Bar -->
-        <section class="ribbons-filters">
-            <div class="container">
-                <div class="filter-bar">
-                    <div class="filter-bar__left">
-                        <span class="filter-bar__count"><strong id="product-count">20</strong> products</span>
-                    </div>
-                    <div class="filter-bar__right">
-                        <div class="filter-group">
-                            <label for="brand-filter" class="filter-label">Brand:</label>
-                            <select id="brand-filter" class="filter-select">
-                                <option value="">All Brands</option>
-                                <option value="epson">Epson</option>
-                                <option value="brother">Brother</option>
-                                <option value="oki">OKI</option>
-                                <option value="citizen">Citizen</option>
-                                <option value="star">Star Micronics</option>
-                                <option value="olivetti">Olivetti</option>
-                                <option value="swintec">Swintec</option>
-                                <option value="ibm">IBM</option>
-                            </select>
-                        </div>
-                        <div class="filter-group">
-                            <label for="type-filter" class="filter-label">Type:</label>
-                            <select id="type-filter" class="filter-select">
-                                <option value="">All Types</option>
-                                <option value="genuine">Genuine</option>
-                                <option value="compatible">Compatible</option>
-                            </select>
-                        </div>
-                        <div class="filter-group">
-                            <label for="sort-filter" class="filter-label">Sort:</label>
-                            <select id="sort-filter" class="filter-select">
-                                <option value="relevance">Relevance</option>
-                                <option value="price-low">Price: Low to High</option>
-                                <option value="price-high">Price: High to Low</option>
-                                <option value="name">Name A-Z</option>
-                            </select>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </section>
-
-        <!-- Typewriter Ribbons Section -->
-        <section class="ribbons-section" id="typewriter-ribbons">
-            <div class="container">
-                <h2 class="ribbons-section__title">Typewriter Ribbons</h2>
-                <p class="ribbons-section__desc">High-quality ribbons for manual and electric typewriters from Brother, IBM, Olivetti, and more.</p>
-                <div class="products-grid" id="typewriter-grid">
-                    <!-- Brother 1030 -->
-                    <article class="product-card">
-                        <div class="product-card__image">
-                            <img src="/assets/images/placeholder-product.svg" alt="Brother 1030 Correctable Film Ribbon" loading="lazy">
-                            <span class="product-card__badge product-card__badge--genuine">Genuine</span>
-                        </div>
-                        <div class="product-card__content">
-                            <span class="product-card__brand">Brother</span>
-                            <h3 class="product-card__title">Brother 1030 Correctable Film Ribbon</h3>
-                            <p class="product-card__compat">Fits: AX-10, AX-15, AX-20, GX-6750</p>
-                            <div class="product-card__meta">
-                                <span class="product-card__yield">50,000 chars</span>
-                                <span class="product-card__color">Black</span>
-                            </div>
-                            <div class="product-card__pricing">
-                                <span class="product-card__price">$16.99</span>
-                            </div>
-                            <button class="btn btn--primary product-card__add-btn" data-product-id="brother-1030-ribbon">Add to Cart</button>
-                        </div>
-                    </article>
-
-                    <!-- Brother 3015 Correction -->
-                    <article class="product-card">
-                        <div class="product-card__image">
-                            <img src="/assets/images/placeholder-product.svg" alt="Brother 3015 Lift-Off Correction Tape" loading="lazy">
-                            <span class="product-card__badge product-card__badge--genuine">Genuine</span>
-                        </div>
-                        <div class="product-card__content">
-                            <span class="product-card__brand">Brother</span>
-                            <h3 class="product-card__title">Brother 3015 Lift-Off Correction Tape</h3>
-                            <p class="product-card__compat">Fits: AX series, GX series, WP series</p>
-                            <div class="product-card__meta">
-                                <span class="product-card__yield">275 chars</span>
-                                <span class="product-card__color">Correction</span>
-                            </div>
-                            <div class="product-card__pricing">
-                                <span class="product-card__price">$9.99</span>
-                            </div>
-                            <button class="btn btn--primary product-card__add-btn" data-product-id="brother-3015-ribbon">Add to Cart</button>
-                        </div>
-                    </article>
-
-                    <!-- IBM Wheelwriter -->
-                    <article class="product-card">
-                        <div class="product-card__image">
-                            <img src="/assets/images/placeholder-product.svg" alt="IBM Wheelwriter Correctable Ribbon" loading="lazy">
-                            <span class="product-card__badge product-card__badge--compatible">Compatible</span>
-                            <span class="product-card__badge product-card__badge--sale">Sale</span>
-                        </div>
-                        <div class="product-card__content">
-                            <span class="product-card__brand">IBM</span>
-                            <h3 class="product-card__title">IBM Wheelwriter Correctable Ribbon</h3>
-                            <p class="product-card__compat">Fits: Wheelwriter 3, 5, 6, 10, 15</p>
-                            <div class="product-card__meta">
-                                <span class="product-card__yield">50,000 chars</span>
-                                <span class="product-card__color">Black</span>
-                            </div>
-                            <div class="product-card__pricing">
-                                <span class="product-card__price product-card__price--sale">$15.99</span>
-                                <span class="product-card__price--was">$18.99</span>
-                            </div>
-                            <button class="btn btn--primary product-card__add-btn" data-product-id="ibm-wheelwriter-ribbon">Add to Cart</button>
-                        </div>
-                    </article>
-
-                    <!-- IBM Selectric -->
-                    <article class="product-card">
-                        <div class="product-card__image">
-                            <img src="/assets/images/placeholder-product.svg" alt="IBM Selectric II/III Ribbon Cartridge" loading="lazy">
-                            <span class="product-card__badge product-card__badge--compatible">Compatible</span>
-                        </div>
-                        <div class="product-card__content">
-                            <span class="product-card__brand">IBM</span>
-                            <h3 class="product-card__title">IBM Selectric II/III Ribbon Cartridge</h3>
-                            <p class="product-card__compat">Fits: Selectric II, III, Memory Typewriter</p>
-                            <div class="product-card__meta">
-                                <span class="product-card__yield">100,000 chars</span>
-                                <span class="product-card__color">Black</span>
-                            </div>
-                            <div class="product-card__pricing">
-                                <span class="product-card__price">$21.99</span>
-                            </div>
-                            <button class="btn btn--primary product-card__add-btn" data-product-id="ibm-selectric-ribbon">Add to Cart</button>
-                        </div>
-                    </article>
-
-                    <!-- Olivetti Lettera -->
-                    <article class="product-card">
-                        <div class="product-card__image">
-                            <img src="/assets/images/placeholder-product.svg" alt="Olivetti Lettera Universal Typewriter Ribbon" loading="lazy">
-                            <span class="product-card__badge product-card__badge--compatible">Compatible</span>
-                        </div>
-                        <div class="product-card__content">
-                            <span class="product-card__brand">Olivetti</span>
-                            <h3 class="product-card__title">Olivetti Lettera Universal Ribbon</h3>
-                            <p class="product-card__compat">Fits: Lettera 32, 35, 36, most manuals</p>
-                            <div class="product-card__meta">
-                                <span class="product-card__yield">200,000 chars</span>
-                                <span class="product-card__color">Black</span>
-                            </div>
-                            <div class="product-card__pricing">
-                                <span class="product-card__price">$12.99</span>
-                            </div>
-                            <button class="btn btn--primary product-card__add-btn" data-product-id="olivetti-lettera-ribbon">Add to Cart</button>
-                        </div>
-                    </article>
-
-                    <!-- Swintec 1146 -->
-                    <article class="product-card">
-                        <div class="product-card__image">
-                            <img src="/assets/images/placeholder-product.svg" alt="Swintec 1146 CM Electronic Typewriter Ribbon" loading="lazy">
-                            <span class="product-card__badge product-card__badge--compatible">Compatible</span>
-                        </div>
-                        <div class="product-card__content">
-                            <span class="product-card__brand">Swintec</span>
-                            <h3 class="product-card__title">Swintec 1146 CM Typewriter Ribbon</h3>
-                            <p class="product-card__compat">Fits: 1146 CM, 2400, 2410, 2600</p>
-                            <div class="product-card__meta">
-                                <span class="product-card__yield">50,000 chars</span>
-                                <span class="product-card__color">Black</span>
-                            </div>
-                            <div class="product-card__pricing">
-                                <span class="product-card__price">$14.99</span>
-                            </div>
-                            <button class="btn btn--primary product-card__add-btn" data-product-id="swintec-1146-ribbon">Add to Cart</button>
-                        </div>
-                    </article>
-
-                    <!-- Universal Black/Red -->
-                    <article class="product-card">
-                        <div class="product-card__image">
-                            <img src="/assets/images/placeholder-product.svg" alt="Universal Typewriter Ribbon Black/Red" loading="lazy">
-                            <span class="product-card__badge product-card__badge--compatible">Compatible</span>
-                            <span class="product-card__badge product-card__badge--sale">Sale</span>
-                        </div>
-                        <div class="product-card__content">
-                            <span class="product-card__brand">Universal</span>
-                            <h3 class="product-card__title">Universal Typewriter Ribbon (Black/Red)</h3>
-                            <p class="product-card__compat">Fits: Most manual typewriters, 1/2" spool</p>
-                            <div class="product-card__meta">
-                                <span class="product-card__yield">150,000 chars</span>
-                                <span class="product-card__color">Black/Red</span>
-                            </div>
-                            <div class="product-card__pricing">
-                                <span class="product-card__price product-card__price--sale">$7.99</span>
-                                <span class="product-card__price--was">$9.99</span>
-                            </div>
-                            <button class="btn btn--primary product-card__add-btn" data-product-id="generic-universal-nylon">Add to Cart</button>
-                        </div>
-                    </article>
-                </div>
-            </div>
-        </section>
-
-        <!-- Dot Matrix Ribbons Section -->
-        <section class="ribbons-section ribbons-section--alt" id="dot-matrix-ribbons">
-            <div class="container">
-                <h2 class="ribbons-section__title">Dot Matrix Printer Ribbons</h2>
-                <p class="ribbons-section__desc">Reliable ribbons for Epson, OKI, and other dot matrix impact printers.</p>
-                <div class="products-grid" id="dot-matrix-grid">
-                    <!-- Epson LQ-590 -->
-                    <article class="product-card">
-                        <div class="product-card__image">
-                            <img src="/assets/images/placeholder-product.svg" alt="Epson LQ-590 Black Ribbon Cartridge" loading="lazy">
-                            <span class="product-card__badge product-card__badge--genuine">Genuine</span>
-                        </div>
-                        <div class="product-card__content">
-                            <span class="product-card__brand">Epson</span>
-                            <h3 class="product-card__title">Epson LQ-590 Black Ribbon Cartridge</h3>
-                            <p class="product-card__compat">Fits: LQ-590, LQ-590II, FX-890, FX-890II</p>
-                            <div class="product-card__meta">
-                                <span class="product-card__yield">4M chars</span>
-                                <span class="product-card__color">Black</span>
-                            </div>
-                            <div class="product-card__pricing">
-                                <span class="product-card__price">$24.99</span>
-                            </div>
-                            <button class="btn btn--primary product-card__add-btn" data-product-id="epson-lq590-ribbon">Add to Cart</button>
-                        </div>
-                    </article>
-
-                    <!-- Epson LX-350 -->
-                    <article class="product-card">
-                        <div class="product-card__image">
-                            <img src="/assets/images/placeholder-product.svg" alt="Epson LX-350 Fabric Ribbon" loading="lazy">
-                            <span class="product-card__badge product-card__badge--genuine">Genuine</span>
-                            <span class="product-card__badge product-card__badge--sale">Sale</span>
-                        </div>
-                        <div class="product-card__content">
-                            <span class="product-card__brand">Epson</span>
-                            <h3 class="product-card__title">Epson LX-350 Fabric Ribbon</h3>
-                            <p class="product-card__compat">Fits: LX-350, LX-300+II, LX-300+</p>
-                            <div class="product-card__meta">
-                                <span class="product-card__yield">4M chars</span>
-                                <span class="product-card__color">Black</span>
-                            </div>
-                            <div class="product-card__pricing">
-                                <span class="product-card__price product-card__price--sale">$15.99</span>
-                                <span class="product-card__price--was">$18.99</span>
-                            </div>
-                            <button class="btn btn--primary product-card__add-btn" data-product-id="epson-lx350-ribbon">Add to Cart</button>
-                        </div>
-                    </article>
-
-                    <!-- Epson FX-890 3-Pack -->
-                    <article class="product-card">
-                        <div class="product-card__image">
-                            <img src="/assets/images/placeholder-product.svg" alt="Epson FX-890 Compatible Ribbon 3-Pack" loading="lazy">
-                            <span class="product-card__badge product-card__badge--compatible">Compatible</span>
-                            <span class="product-card__badge product-card__badge--sale">Sale</span>
-                        </div>
-                        <div class="product-card__content">
-                            <span class="product-card__brand">Epson</span>
-                            <h3 class="product-card__title">Epson FX-890 Compatible Ribbon (3-Pack)</h3>
-                            <p class="product-card__compat">Fits: FX-890, FX-890II, LQ-590, LQ-590II</p>
-                            <div class="product-card__meta">
-                                <span class="product-card__yield">4M chars each</span>
-                                <span class="product-card__color">Black</span>
-                            </div>
-                            <div class="product-card__pricing">
-                                <span class="product-card__price product-card__price--sale">$24.99</span>
-                                <span class="product-card__price--was">$29.99</span>
-                            </div>
-                            <button class="btn btn--primary product-card__add-btn" data-product-id="epson-fx890-comp-ribbon">Add to Cart</button>
-                        </div>
-                    </article>
-
-                    <!-- OKI ML320 -->
-                    <article class="product-card">
-                        <div class="product-card__image">
-                            <img src="/assets/images/placeholder-product.svg" alt="OKI ML320/321 Ribbon Cartridge" loading="lazy">
-                            <span class="product-card__badge product-card__badge--genuine">Genuine</span>
-                            <span class="product-card__badge product-card__badge--sale">Sale</span>
-                        </div>
-                        <div class="product-card__content">
-                            <span class="product-card__brand">OKI</span>
-                            <h3 class="product-card__title">OKI ML320/321 Ribbon Cartridge</h3>
-                            <p class="product-card__compat">Fits: ML320, ML321, ML320 Turbo</p>
-                            <div class="product-card__meta">
-                                <span class="product-card__yield">3M chars</span>
-                                <span class="product-card__color">Black</span>
-                            </div>
-                            <div class="product-card__pricing">
-                                <span class="product-card__price product-card__price--sale">$19.99</span>
-                                <span class="product-card__price--was">$22.99</span>
-                            </div>
-                            <button class="btn btn--primary product-card__add-btn" data-product-id="oki-ml320-ribbon">Add to Cart</button>
-                        </div>
-                    </article>
-
-                    <!-- OKI ML590 -->
-                    <article class="product-card">
-                        <div class="product-card__image">
-                            <img src="/assets/images/placeholder-product.svg" alt="OKI ML590/591 Black Ribbon" loading="lazy">
-                            <span class="product-card__badge product-card__badge--genuine">Genuine</span>
-                        </div>
-                        <div class="product-card__content">
-                            <span class="product-card__brand">OKI</span>
-                            <h3 class="product-card__title">OKI ML590/591 Black Ribbon</h3>
-                            <p class="product-card__compat">Fits: ML590, ML591, ML520, ML521</p>
-                            <div class="product-card__meta">
-                                <span class="product-card__yield">4M chars</span>
-                                <span class="product-card__color">Black</span>
-                            </div>
-                            <div class="product-card__pricing">
-                                <span class="product-card__price">$28.99</span>
-                            </div>
-                            <button class="btn btn--primary product-card__add-btn" data-product-id="oki-ml590-ribbon">Add to Cart</button>
-                        </div>
-                    </article>
-
-                    <!-- Citizen DP-600 -->
-                    <article class="product-card">
-                        <div class="product-card__image">
-                            <img src="/assets/images/placeholder-product.svg" alt="Citizen DP-600 Printer Ribbon" loading="lazy">
-                            <span class="product-card__badge product-card__badge--compatible">Compatible</span>
-                        </div>
-                        <div class="product-card__content">
-                            <span class="product-card__brand">Citizen</span>
-                            <h3 class="product-card__title">Citizen DP-600 Printer Ribbon</h3>
-                            <p class="product-card__compat">Fits: DP-600, DP-611, DP-612</p>
-                            <div class="product-card__meta">
-                                <span class="product-card__yield">2.5M chars</span>
-                                <span class="product-card__color">Black</span>
-                            </div>
-                            <div class="product-card__pricing">
-                                <span class="product-card__price">$14.99</span>
-                            </div>
-                            <button class="btn btn--primary product-card__add-btn" data-product-id="citizen-dp600-ribbon">Add to Cart</button>
-                        </div>
-                    </article>
-
-                    <!-- Olivetti PR2 -->
-                    <article class="product-card">
-                        <div class="product-card__image">
-                            <img src="/assets/images/placeholder-product.svg" alt="Olivetti PR2 Passbook Printer Ribbon" loading="lazy">
-                            <span class="product-card__badge product-card__badge--genuine">Genuine</span>
-                        </div>
-                        <div class="product-card__content">
-                            <span class="product-card__brand">Olivetti</span>
-                            <h3 class="product-card__title">Olivetti PR2 Passbook Printer Ribbon</h3>
-                            <p class="product-card__compat">Fits: PR2, PR2 Plus, PR2E</p>
-                            <div class="product-card__meta">
-                                <span class="product-card__yield">8M chars</span>
-                                <span class="product-card__color">Black</span>
-                            </div>
-                            <div class="product-card__pricing">
-                                <span class="product-card__price">$32.99</span>
-                            </div>
-                            <button class="btn btn--primary product-card__add-btn" data-product-id="olivetti-pr2-ribbon">Add to Cart</button>
-                        </div>
-                    </article>
-                </div>
-            </div>
-        </section>
-
-        <!-- POS & Receipt Ribbons Section -->
-        <section class="ribbons-section" id="pos-ribbons">
-            <div class="container">
-                <h2 class="ribbons-section__title">POS & Receipt Printer Ribbons</h2>
-                <p class="ribbons-section__desc">Ribbons for Epson, Star, and other point-of-sale and kitchen receipt printers.</p>
-                <div class="products-grid" id="pos-grid">
-                    <!-- Epson ERC-09 -->
-                    <article class="product-card">
-                        <div class="product-card__image">
-                            <img src="/assets/images/placeholder-product.svg" alt="Epson ERC-09 POS Ribbon" loading="lazy">
-                            <span class="product-card__badge product-card__badge--genuine">Genuine</span>
-                        </div>
-                        <div class="product-card__content">
-                            <span class="product-card__brand">Epson</span>
-                            <h3 class="product-card__title">Epson ERC-09 POS Ribbon</h3>
-                            <p class="product-card__compat">Fits: M160, M180, M190, POS systems</p>
-                            <div class="product-card__meta">
-                                <span class="product-card__yield">1.5M chars</span>
-                                <span class="product-card__color">Black</span>
-                            </div>
-                            <div class="product-card__pricing">
-                                <span class="product-card__price">$12.99</span>
-                            </div>
-                            <button class="btn btn--primary product-card__add-btn" data-product-id="epson-erc-09-ribbon">Add to Cart</button>
-                        </div>
-                    </article>
-
-                    <!-- Epson ERC-38 Black/Red -->
-                    <article class="product-card">
-                        <div class="product-card__image">
-                            <img src="/assets/images/placeholder-product.svg" alt="Epson ERC-38 Black/Red Ribbon" loading="lazy">
-                            <span class="product-card__badge product-card__badge--genuine">Genuine</span>
-                        </div>
-                        <div class="product-card__content">
-                            <span class="product-card__brand">Epson</span>
-                            <h3 class="product-card__title">Epson ERC-38 Black/Red Ribbon</h3>
-                            <p class="product-card__compat">Fits: TM-U220, TM-U210, kitchen printers</p>
-                            <div class="product-card__meta">
-                                <span class="product-card__yield">1.5M chars</span>
-                                <span class="product-card__color">Black/Red</span>
-                            </div>
-                            <div class="product-card__pricing">
-                                <span class="product-card__price">$14.99</span>
-                            </div>
-                            <button class="btn btn--primary product-card__add-btn" data-product-id="epson-erc-38-ribbon-br">Add to Cart</button>
-                        </div>
-                    </article>
-
-                    <!-- Star SP700 -->
-                    <article class="product-card">
-                        <div class="product-card__image">
-                            <img src="/assets/images/placeholder-product.svg" alt="Star SP700 POS Ribbon Cartridge" loading="lazy">
-                            <span class="product-card__badge product-card__badge--genuine">Genuine</span>
-                        </div>
-                        <div class="product-card__content">
-                            <span class="product-card__brand">Star Micronics</span>
-                            <h3 class="product-card__title">Star SP700 POS Ribbon Cartridge</h3>
-                            <p class="product-card__compat">Fits: SP700, SP712, SP717, SP742</p>
-                            <div class="product-card__meta">
-                                <span class="product-card__yield">3M chars</span>
-                                <span class="product-card__color">Black</span>
-                            </div>
-                            <div class="product-card__pricing">
-                                <span class="product-card__price">$11.99</span>
-                            </div>
-                            <button class="btn btn--primary product-card__add-btn" data-product-id="star-sp700-ribbon">Add to Cart</button>
-                        </div>
-                    </article>
-
-                    <!-- Star SP500 Black/Red -->
-                    <article class="product-card">
-                        <div class="product-card__image">
-                            <img src="/assets/images/placeholder-product.svg" alt="Star SP500 Black/Red Ribbon" loading="lazy">
-                            <span class="product-card__badge product-card__badge--genuine">Genuine</span>
-                            <span class="product-card__badge product-card__badge--sale">Sale</span>
-                        </div>
-                        <div class="product-card__content">
-                            <span class="product-card__brand">Star Micronics</span>
-                            <h3 class="product-card__title">Star SP500 Black/Red Ribbon</h3>
-                            <p class="product-card__compat">Fits: SP500, SP512, SP542</p>
-                            <div class="product-card__meta">
-                                <span class="product-card__yield">2.5M chars</span>
-                                <span class="product-card__color">Black/Red</span>
-                            </div>
-                            <div class="product-card__pricing">
-                                <span class="product-card__price product-card__price--sale">$11.99</span>
-                                <span class="product-card__price--was">$13.99</span>
-                            </div>
-                            <button class="btn btn--primary product-card__add-btn" data-product-id="star-sp500-ribbon-br">Add to Cart</button>
-                        </div>
-                    </article>
-                </div>
-            </div>
-        </section>
-
-        <!-- Time Clock Ribbons Section -->
-        <section class="ribbons-section ribbons-section--alt" id="time-clock-ribbons">
-            <div class="container">
-                <h2 class="ribbons-section__title">Time Clock Ribbons</h2>
-                <p class="ribbons-section__desc">Ribbons for time clocks, attendance recorders, and time stamp machines.</p>
-                <div class="products-grid" id="time-clock-grid">
-                    <!-- Amano PIX -->
-                    <article class="product-card">
-                        <div class="product-card__image">
-                            <img src="/assets/images/placeholder-product.svg" alt="Amano PIX Time Clock Ribbon" loading="lazy">
-                            <span class="product-card__badge product-card__badge--compatible">Compatible</span>
-                        </div>
-                        <div class="product-card__content">
-                            <span class="product-card__brand">Amano</span>
-                            <h3 class="product-card__title">Amano PIX Time Clock Ribbon</h3>
-                            <p class="product-card__compat">Fits: PIX-10, PIX-15, PIX-21, PIX-28, PIX-55</p>
-                            <div class="product-card__meta">
-                                <span class="product-card__yield">1,000 prints</span>
-                                <span class="product-card__color">Black/Red</span>
-                            </div>
-                            <div class="product-card__pricing">
-                                <span class="product-card__price">$8.99</span>
-                            </div>
-                            <button class="btn btn--primary product-card__add-btn" data-product-id="amano-pix-ribbon">Add to Cart</button>
-                        </div>
-                    </article>
-
-                    <!-- Acroprint 125 -->
-                    <article class="product-card">
-                        <div class="product-card__image">
-                            <img src="/assets/images/placeholder-product.svg" alt="Acroprint 125/150 Time Recorder Ribbon" loading="lazy">
-                            <span class="product-card__badge product-card__badge--compatible">Compatible</span>
-                        </div>
-                        <div class="product-card__content">
-                            <span class="product-card__brand">Acroprint</span>
-                            <h3 class="product-card__title">Acroprint 125/150 Time Recorder Ribbon</h3>
-                            <p class="product-card__compat">Fits: Acroprint 125, 150, 175</p>
-                            <div class="product-card__meta">
-                                <span class="product-card__yield">1,500 prints</span>
-                                <span class="product-card__color">Blue</span>
-                            </div>
-                            <div class="product-card__pricing">
-                                <span class="product-card__price">$7.99</span>
-                            </div>
-                            <button class="btn btn--primary product-card__add-btn" data-product-id="acroprint-125-ribbon">Add to Cart</button>
-                        </div>
-                    </article>
-                </div>
-            </div>
-        </section>
-
-        <!-- Info Banner -->
-        <section class="ribbons-info">
-            <div class="container">
-                <div class="info-banner">
-                    <div class="info-banner__item">
-                        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M12 5l7 7-7 7"/></svg>
-                        <div>
-                            <strong>Fast NZ Shipping</strong>
-                            <p>Free delivery on orders over $50</p>
-                        </div>
-                    </div>
-                    <div class="info-banner__item">
-                        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
-                        <div>
-                            <strong>Quality Guaranteed</strong>
-                            <p>30-day money back guarantee</p>
-                        </div>
-                    </div>
-                    <div class="info-banner__item">
-                        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
-                        <div>
-                            <strong>Expert Support</strong>
-                            <p>Call us on 0800 INK KART</p>
-                        </div>
+        <!-- Coming Soon Section -->
+        <section class="ribbons-coming-soon" style="padding: 4rem 0; text-align: center;">
+            <div class="container" style="max-width: 640px;">
+                <div style="background: #f0f7fc; border: 2px solid #267FB5; border-radius: 12px; padding: 3rem 2rem;">
+                    <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="#267FB5" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="margin-bottom: 1.5rem;">
+                        <circle cx="12" cy="12" r="10"/>
+                        <polyline points="12 6 12 12 16 14"/>
+                    </svg>
+                    <h2 style="color: #1a1a1a; font-size: 2rem; margin: 0 0 1rem;">Coming Soon</h2>
+                    <p style="color: #4b5563; font-size: 1.1rem; line-height: 1.7; margin: 0 0 2rem;">
+                        We're currently loading our full range of typewriter and printer ribbon products.
+                        If you'd like to purchase ribbons now, please get in touch and we'll be happy to help.
+                    </p>
+                    <div style="display: flex; flex-direction: column; gap: 1rem; align-items: center;">
+                        <a href="tel:0800465275" style="display: inline-flex; align-items: center; gap: 0.5rem; color: #267FB5; font-size: 1.1rem; font-weight: 600; text-decoration: none;">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
+                            0800 INK KART (465 275)
+                        </a>
+                        <a href="mailto:support@inkcartridges.co.nz" style="display: inline-flex; align-items: center; gap: 0.5rem; color: #267FB5; font-size: 1.1rem; font-weight: 600; text-decoration: none;">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
+                            support@inkcartridges.co.nz
+                        </a>
                     </div>
                 </div>
             </div>
@@ -776,44 +198,105 @@
          FOOTER
          ============================================ -->
     <footer class="site-footer">
-        <div class="container">
-            <div class="footer-grid">
-                <div class="footer-section">
-                    <h4>Shop</h4>
-                    <ul>
-                        <li><a href="/html/shop.html">All Products</a></li>
-                        <li><a href="/html/shop.html?category=ink">Ink Cartridges</a></li>
-                        <li><a href="/html/shop.html?category=toner">Toner</a></li>
-                        <li><a href="/html/ribbons.html">Typewriter & Printer Ribbons</a></li>
-                    </ul>
+        <div class="footer-main">
+            <div class="container">
+                <div class="footer-grid">
+                    <!-- Brand column -->
+                    <div class="footer-brand">
+                        <a href="/html/index.html" class="footer-brand__logo">
+                            <span class="logo__text">Ink<span>Cartridges</span>.co.nz</span>
+                        </a>
+                        <p class="footer-brand__description">
+                            New Zealand's trusted source for quality printing supplies.
+                            We help homes and businesses keep printing with genuine and
+                            compatible ink and toner cartridges.
+                        </p>
+                        <div class="footer-brand__social">
+                            <a href="#" aria-label="Facebook">
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M18 2h-3a5 5 0 0 0-5 5v3H7v4h3v8h4v-8h3l1-4h-4V7a1 1 0 0 1 1-1h3z"/></svg>
+                            </a>
+                            <a href="#" aria-label="Instagram">
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="2" width="20" height="20" rx="5" ry="5"/><path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z"/><line x1="17.5" y1="6.5" x2="17.51" y2="6.5"/></svg>
+                            </a>
+                            <a href="#" aria-label="LinkedIn">
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M16 8a6 6 0 0 1 6 6v7h-4v-7a2 2 0 0 0-2-2 2 2 0 0 0-2 2v7h-4v-7a6 6 0 0 1 6-6z"/><rect x="2" y="9" width="4" height="12"/><circle cx="4" cy="4" r="2"/></svg>
+                            </a>
+                        </div>
+                    </div>
+
+                    <!-- Support column -->
+                    <div class="footer-column">
+                        <h3 class="footer-column__heading">Support</h3>
+                        <ul class="footer-links">
+                            <li><a href="/html/contact.html">Contact Us</a></li>
+                            <li><a href="/html/faq.html">FAQs</a></li>
+                            <li><a href="/html/returns.html">Returns & Refunds</a></li>
+                            <li><a href="/html/about.html">About Us</a></li>
+                            <li><a href="/html/business.html">Business Accounts</a></li>
+                        </ul>
+                    </div>
+
+                    <!-- Contact column -->
+                    <div class="footer-column">
+                        <h3 class="footer-column__heading">Contact</h3>
+                        <ul class="footer-links">
+                            <li>
+                                <strong>Phone:</strong><br>
+                                <a href="tel:0800465275">0800 INK KART (465 275)</a>
+                            </li>
+                            <li>
+                                <strong>Email:</strong><br>
+                                <a href="mailto:support@inkcartridges.co.nz">support@inkcartridges.co.nz</a>
+                            </li>
+                            <li>
+                                <strong>Hours:</strong><br>
+                                8am - 8pm, 7 days a week
+                            </li>
+                        </ul>
+                    </div>
                 </div>
-                <div class="footer-section">
-                    <h4>Support</h4>
-                    <ul>
-                        <li><a href="/html/contact.html">Contact Us</a></li>
-                        <li><a href="/html/faq.html">FAQs</a></li>
-                        <li><a href="/html/returns.html">Returns</a></li>
-                        <li><a href="/html/account/track-order.html">Track Order</a></li>
-                    </ul>
-                </div>
-                <div class="footer-section">
-                    <h4>Company</h4>
-                    <ul>
-                        <li><a href="/html/about.html">About Us</a></li>
-                        <li><a href="/html/business.html">Business Accounts</a></li>
-                        <li><a href="/html/privacy.html">Privacy Policy</a></li>
-                        <li><a href="/html/terms.html">Terms & Conditions</a></li>
-                    </ul>
-                </div>
-                <div class="footer-section footer-section--contact">
-                    <h4>Contact</h4>
-                    <p><strong>Phone:</strong> 0800 INK KART (465 275)</p>
-                    <p><strong>Email:</strong> support@inkcartridges.co.nz</p>
-                    <p><strong>Hours:</strong> Mon-Fri 9am-5pm</p>
+
+                <!-- Trust badges -->
+                <div class="footer-trust">
+                    <div class="footer-trust__item">
+                        <svg class="footer-trust__icon" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+                        <span>100% NZ Owned</span>
+                    </div>
+                    <div class="footer-trust__item">
+                        <svg class="footer-trust__icon" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+                        <span>Secure Checkout</span>
+                    </div>
+                    <div class="footer-trust__item">
+                        <svg class="footer-trust__icon" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="1" y="3" width="15" height="13"/><polygon points="16 8 20 8 23 11 23 16 16 16 16 8"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/></svg>
+                        <span>Fast NZ Delivery</span>
+                    </div>
+                    <div class="footer-trust__item">
+                        <svg class="footer-trust__icon" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+                        <span>NZ-Based Support</span>
+                    </div>
                 </div>
             </div>
-            <div class="footer-bottom">
-                <p>&copy; 2026 InkCartridges.co.nz. All rights reserved.</p>
+        </div>
+
+        <div class="footer-bottom">
+            <div class="container">
+                <p class="footer-copyright">
+                    &copy; <span id="current-year">2025</span> InkCartridges.co.nz. All rights reserved.
+                </p>
+                <div class="footer-legal">
+                    <a href="/html/privacy.html">Privacy Policy</a>
+                    <a href="/html/terms.html">Terms & Conditions</a>
+                </div>
+                <div class="footer-payment">
+                    <span class="footer-payment__label">We accept:</span>
+                    <div class="footer-payment__icons">
+                        <span title="Visa">Visa</span>
+                        <span title="Mastercard">MC</span>
+                        <span title="PayPal">PayPal</span>
+                        <span title="Afterpay">Afterpay</span>
+                        <span title="POLi">POLi</span>
+                    </div>
+                </div>
             </div>
         </div>
     </footer>
@@ -829,7 +312,6 @@
     <script src="/js/main.js"></script>
     <script src="/js/mega-nav.js"></script>
     <script src="/js/modern-effects.js"></script>
-    <script src="/js/ribbons.js"></script>
     <script src="/js/analytics.js"></script>
 </body>
 </html>

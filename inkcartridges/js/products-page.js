@@ -18,8 +18,26 @@ const ProductsPage = {
             if (!isAdmin) return;
             this.loadProducts().then(() => {
                 this.bindEvents();
+                this.readUrlFilters();
             });
         });
+    },
+
+    readUrlFilters() {
+        var params = new URLSearchParams(window.location.search);
+        var filter = params.get('filter');
+        if (filter === 'low_stock') {
+            // Activate the Low Stock chip
+            var chips = document.querySelectorAll('.filter-chip[data-stock]');
+            chips.forEach(function(c) { c.classList.remove('filter-chip--active'); });
+            var lowStockChip = document.querySelector('.filter-chip[data-stock="low-stock"]');
+            if (lowStockChip) lowStockChip.classList.add('filter-chip--active');
+            this.filters.stock = 'low-stock';
+            this.currentPage = 1;
+            this.applyFilters();
+            // Clean URL
+            history.replaceState(null, '', window.location.pathname);
+        }
     },
 
     bindEvents() {

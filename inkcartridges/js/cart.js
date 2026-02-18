@@ -1036,9 +1036,13 @@ const Cart = {
         if (this.serverSummary && this.serverSummary.shipping !== undefined) {
             return this.serverSummary.shipping;
         }
-        // DISPLAY ONLY estimate - actual shipping calculated by backend at checkout
+        // DISPLAY ONLY estimate via Shipping module
+        if (typeof Shipping !== 'undefined') {
+            return Shipping.calculate(this.items, this.getSubtotal()).fee;
+        }
+        // Ultimate fallback (North Island rate)
         const threshold = typeof Config !== 'undefined' ? Config.getSetting('FREE_SHIPPING_THRESHOLD', 100) : 100;
-        const fee = typeof Config !== 'undefined' ? Config.getSetting('SHIPPING_FEE', 5) : 5;
+        const fee = typeof Config !== 'undefined' ? Config.getSetting('SHIPPING_FEE_NORTH_ISLAND', 9.95) : 9.95;
         return this.getSubtotal() >= threshold ? 0 : fee;
     },
 
@@ -1321,6 +1325,21 @@ const Cart = {
                     shippingMsgEl.hidden = false;
                     shippingMsgEl.classList.remove('cart-summary__shipping-message--success');
                     shippingMsgEl.querySelector('span').textContent = `Add ${formatPrice(remaining)} more for FREE shipping`;
+                }
+            }
+
+            // Show shipping tier info (zone-based estimate)
+            const tierEl = document.getElementById('cart-shipping-tier');
+            if (tierEl && typeof Shipping !== 'undefined') {
+                const shippingResult = Shipping.calculate(this.items, subtotal);
+                if (shippingResult.tier === 'heavy') {
+                    tierEl.textContent = '(Heavy)';
+                    tierEl.hidden = false;
+                } else if (!shippingResult.freeShipping) {
+                    tierEl.textContent = '(est.)';
+                    tierEl.hidden = false;
+                } else {
+                    tierEl.hidden = true;
                 }
             }
 

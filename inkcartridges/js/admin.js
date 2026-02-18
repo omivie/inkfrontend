@@ -17,6 +17,9 @@ const Admin = {
     },
 
     async init() {
+        // 0. Render unified nav immediately (before auth, so sidebar isn't empty)
+        if (typeof AdminNav !== 'undefined') AdminNav.render();
+
         // 1. Auth via AdminAuth (no duplicated logic)
         var hasAccess = false;
         try {
@@ -28,27 +31,32 @@ const Admin = {
 
         // 2. Load preferences
         this.loadPreferences();
-        this.applyTheme();
 
-        // 3. Init global filter state
-        DashboardState.load();
-        this.state.activeTab = localStorage.getItem('admin-tab') || 'overview';
-
-        // 4. Set initial UI
-        this.updateDateDisplay();
+        // 3. Common UI for all admin pages
         this.updateAdminUserInfo();
-        this.syncPeriodButtons();
-        this.syncActiveTab();
 
-        // 5. Bind events
-        this.bindEvents();
+        // 4. Dashboard-specific init (only on main dashboard page)
+        if (typeof DashboardState !== 'undefined' && typeof Dashboard !== 'undefined') {
+            DashboardState.load();
 
-        // 6. Init drawer
-        Dashboard.initDrawerEvents();
+            // Read ?tab= query param for deep linking from nav
+            var urlTab = new URLSearchParams(window.location.search).get('tab');
+            if (urlTab) {
+                this.state.activeTab = urlTab;
+                localStorage.setItem('admin-tab', urlTab);
+                history.replaceState(null, '', window.location.pathname);
+            } else {
+                this.state.activeTab = localStorage.getItem('admin-tab') || 'overview';
+            }
 
-        // 7. Show skeletons, then load data
-        Dashboard.renderKPISkeletons();
-        await this.loadDashboard();
+            this.updateDateDisplay();
+            this.syncPeriodButtons();
+            this.syncActiveTab();
+            this.bindEvents();
+            Dashboard.initDrawerEvents();
+            Dashboard.renderKPISkeletons();
+            await this.loadDashboard();
+        }
     },
 
     /* ================================================================
@@ -190,13 +198,30 @@ const Admin = {
        DATA LOADING (core first, analytics async)
        ================================================================ */
 
+    async loadAllProducts() {
+        var allProducts = [];
+        var page = 1;
+        var limit = 100;
+
+        while (true) {
+            var response = await API.getAdminProducts({ limit: limit, page: page });
+            if (!response || !response.success) break;
+            var products = response.data.products || response.data || [];
+            allProducts = allProducts.concat(products);
+            if (products.length < limit) break;
+            page++;
+        }
+        return allProducts;
+    },
+
     async loadDashboard() {
         this.state.loading = true;
 
         try {
             // Phase 1: Core data (non-blocking, essential)
+            // Load all products via pagination, orders + brands in parallel
             var results = await Promise.allSettled([
-                API.getAdminProducts({ limit: 100 }),
+                this.loadAllProducts(),
                 API.getAdminOrders({ limit: 100 }),
                 API.getBrands()
             ]);
@@ -260,8 +285,15 @@ const Admin = {
     },
 
     processResponses: function(productsRes, ordersRes, brandsRes) {
-        var products = productsRes.status === 'fulfilled' && productsRes.value && productsRes.value.success
-            ? (productsRes.value.data.products || productsRes.value.data || []) : [];
+        // Products may be a plain array (from loadAllProducts) or API response
+        var products = [];
+        if (productsRes.status === 'fulfilled' && productsRes.value) {
+            if (Array.isArray(productsRes.value)) {
+                products = productsRes.value;
+            } else if (productsRes.value.success) {
+                products = productsRes.value.data.products || productsRes.value.data || [];
+            }
+        }
         var orders = ordersRes.status === 'fulfilled' && ordersRes.value && ordersRes.value.success
             ? (ordersRes.value.data.orders || ordersRes.value.data || []) : [];
         var brands = brandsRes.status === 'fulfilled' && brandsRes.value && brandsRes.value.success

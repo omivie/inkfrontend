@@ -125,6 +125,39 @@
             color: #1a1a1a;
             font-weight: 700;
         }
+        /* Shipping info block */
+        .checkout-summary__shipping-info {
+            padding: 0.75rem 0;
+            border-top: 1px solid #e5e7eb;
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+        .checkout-summary__shipping-info p {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            margin: 0;
+            font-size: 0.8125rem;
+            color: #4b5563;
+        }
+        .checkout-summary__shipping-info svg {
+            flex-shrink: 0;
+            color: #267FB5;
+        }
+        .checkout-summary__spend-more {
+            color: #92400e !important;
+        }
+        .checkout-summary__spend-more svg {
+            color: #F4C430 !important;
+        }
+        .checkout-summary__eta {
+            color: #267FB5 !important;
+        }
+        .checkout-summary__split-shipment {
+            color: #6b7280 !important;
+            font-style: italic;
+        }
         /* Trust signals */
         .checkout-summary__trust-item svg {
             color: #267FB5;
@@ -464,8 +497,8 @@
                                     <span id="checkout-subtotal">$0.00</span>
                                 </div>
                                 <div class="checkout-summary__row">
-                                    <span>Shipping (est.)</span>
-                                    <span id="checkout-shipping">$5.00</span>
+                                    <span id="checkout-shipping-label">Shipping (est.)</span>
+                                    <span id="checkout-shipping">$9.95</span>
                                 </div>
                                 <div class="checkout-summary__row checkout-summary__row--discount" id="checkout-discount-row" hidden>
                                     <span>Discount</span>
@@ -481,6 +514,22 @@
                                 </div>
                             </div>
 
+                            <!-- Shipping info block -->
+                            <div class="checkout-summary__shipping-info" id="checkout-shipping-info">
+                                <p class="checkout-summary__spend-more" id="checkout-spend-more" hidden>
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="1" y="3" width="15" height="13"/><polygon points="16 8 20 8 23 11 23 16 16 16 16 8"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/></svg>
+                                    <span id="checkout-spend-more-text"></span>
+                                </p>
+                                <p class="checkout-summary__eta" id="checkout-eta" hidden>
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                                    <span id="checkout-eta-text"></span>
+                                </p>
+                                <p class="checkout-summary__split-shipment" id="checkout-split-shipment" hidden>
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 3h5v5"/><path d="M8 3H3v5"/><path d="M12 22v-8.3a4 4 0 0 0-1.172-2.872L3 3"/><path d="m15 9 6-6"/></svg>
+                                    <span>Your order may ship in multiple packages</span>
+                                </p>
+                            </div>
+
                             <!-- Trust signals -->
                             <div class="checkout-summary__trust">
                                 <div class="checkout-summary__trust-item">
@@ -489,7 +538,7 @@
                                 </div>
                                 <div class="checkout-summary__trust-item">
                                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
-                                    <span>30-day returns</span>
+                                    <span>Free returns within 30 days</span>
                                 </div>
                                 <div class="checkout-summary__trust-item">
                                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
@@ -532,23 +581,6 @@
                                 <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M16 8a6 6 0 0 1 6 6v7h-4v-7a2 2 0 0 0-2-2 2 2 0 0 0-2 2v7h-4v-7a6 6 0 0 1 6-6z"/><rect x="2" y="9" width="4" height="12"/><circle cx="4" cy="4" r="2"/></svg>
                             </a>
                         </div>
-                    </div>
-
-                    <!-- Shop column -->
-                    <div class="footer-column">
-                        <h3 class="footer-column__heading">Shop</h3>
-                        <ul class="footer-links">
-                            <li><a href="/html/shop.html">Browse All Products</a></li>
-                            <li><a href="/html/shop.html?brand=brother">Brother</a></li>
-                            <li><a href="/html/shop.html?brand=canon">Canon</a></li>
-                            <li><a href="/html/shop.html?brand=epson">Epson</a></li>
-                            <li><a href="/html/shop.html?brand=hp">HP</a></li>
-                            <li><a href="/html/shop.html?brand=samsung">Samsung</a></li>
-                            <li><a href="/html/shop.html?brand=lexmark">Lexmark</a></li>
-                            <li><a href="/html/shop.html?brand=oki">OKI</a></li>
-                            <li><a href="/html/shop.html?brand=fuji-xerox">Fuji Xerox</a></li>
-                            <li><a href="/html/shop.html?brand=kyocera">Kyocera</a></li>
-                        </ul>
                     </div>
 
                     <!-- Support column -->
@@ -631,6 +663,7 @@
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="/js/config.js"></script>
     <script src="/js/security.js"></script>
+    <script src="/js/shipping.js"></script>
     <script src="/js/api.js"></script>
     <script src="/js/utils.js"></script>
     <script src="/js/auth.js"></script>
@@ -919,19 +952,16 @@
             }
         },
 
-        // Update shipping cost
+        // Update shipping cost and UI info (ETA, spend-more, split shipment)
         // NOTE: Final shipping cost is validated server-side during checkout
         // These are estimates only - backend has final authority
         async updateShippingCost() {
-            const shippingMethod = document.querySelector('input[name="shipping"]:checked')?.value || 'free';
-            const postcode = document.getElementById('postcode')?.value;
-
-            // Shipping is flat rate from backend: $5 NZD, free over $100
-            // Final shipping cost is validated server-side during order creation
-            this.setFallbackShipping(shippingMethod);
+            // Calculate shipping via Shipping module
+            this.setFallbackShipping();
 
             this.totals.total = this.totals.subtotal - this.totals.discount + this.totals.shipping;
             this.updateTotalsDisplay();
+            this.updateShippingInfo();
         },
 
         /**
@@ -940,21 +970,86 @@
          * Backend calculates actual shipping in API.createOrder()
          * The PaymentIntent amount is set server-side.
          */
-        setFallbackShipping(shippingMethod) {
+        setFallbackShipping() {
             // DISPLAY ONLY - backend has final authority on shipping cost
-            switch (shippingMethod) {
-                case 'express':
-                    this.totals.shipping = 12.99;
-                    break;
-                case 'overnight':
-                    this.totals.shipping = 19.99;
-                    break;
-                case 'free':
-                case 'standard':
-                default:
-                    // Flat rate: $5 NZD, free over $100 (backend validates this)
-                    this.totals.shipping = this.totals.subtotal >= 100 ? 0 : 5;
-                    break;
+            const region = document.getElementById('region')?.value || '';
+            if (typeof Shipping !== 'undefined') {
+                const result = Shipping.calculate(this.cartItems, this.totals.subtotal, region);
+                this.totals.shipping = result.fee;
+                this._shippingResult = result;
+            } else {
+                this.totals.shipping = this.totals.subtotal >= 100 ? 0 : 9.95;
+                this._shippingResult = null;
+            }
+        },
+
+        /**
+         * Update shipping info display (ETA, spend-more, tier label, split shipment)
+         */
+        updateShippingInfo() {
+            if (typeof Shipping === 'undefined') return;
+
+            const region = document.getElementById('region')?.value || '';
+            const result = this._shippingResult || Shipping.calculate(this.cartItems, this.totals.subtotal, region);
+
+            // Update shipping label with zone and tier
+            const labelEl = document.getElementById('checkout-shipping-label');
+            if (labelEl) {
+                const zoneLabel = result.zoneLabel || '';
+                if (result.tier === 'free') {
+                    labelEl.textContent = 'Shipping';
+                } else if (result.tier === 'heavy' && zoneLabel) {
+                    labelEl.textContent = `Heavy \u2013 ${zoneLabel} (est.)`;
+                } else if (zoneLabel) {
+                    labelEl.textContent = `${zoneLabel} Shipping (est.)`;
+                } else {
+                    labelEl.textContent = 'Shipping (est.)';
+                }
+            }
+
+            // Spend-more message
+            const spendMoreEl = document.getElementById('checkout-spend-more');
+            const spendMoreText = document.getElementById('checkout-spend-more-text');
+            if (spendMoreEl && spendMoreText) {
+                const spendMore = Shipping.getSpendMore(this.totals.subtotal);
+                if (!spendMore.qualifies) {
+                    const priceStr = typeof formatPrice === 'function' ? formatPrice(spendMore.needed) : `$${spendMore.needed.toFixed(2)}`;
+                    spendMoreText.textContent = `Add ${priceStr} more for FREE shipping`;
+                    spendMoreEl.hidden = false;
+                } else {
+                    spendMoreEl.hidden = true;
+                }
+            }
+
+            // ETA based on selected region (reuses `region` from line above)
+            const etaEl = document.getElementById('checkout-eta');
+            const etaText = document.getElementById('checkout-eta-text');
+            if (etaEl && etaText) {
+                const eta = Shipping.getETA(region);
+                if (eta) {
+                    etaText.textContent = `Estimated delivery: ${eta}`;
+                    etaEl.hidden = false;
+                } else {
+                    etaEl.hidden = true;
+                }
+            }
+
+            // Split shipment flag
+            const splitEl = document.getElementById('checkout-split-shipment');
+            if (splitEl) {
+                splitEl.hidden = !Shipping.maySplitShipment(this.cartItems);
+            }
+
+            // Track analytics event (once per region change)
+            if (typeof Analytics !== 'undefined' && region) {
+                Analytics.track('shipping_calculated', {
+                    tier: result.tier,
+                    fee: result.fee,
+                    zone: result.zone,
+                    region: region,
+                    freeShipping: result.freeShipping,
+                    splitShipment: Shipping.maySplitShipment(this.cartItems)
+                });
             }
         },
 
@@ -1022,6 +1117,14 @@
                     this.updateShippingCost();
                 });
             });
+
+            // Region change recalculates shipping fee and updates ETA
+            const regionSelect = document.getElementById('region');
+            if (regionSelect) {
+                regionSelect.addEventListener('change', () => {
+                    this.updateShippingCost();
+                });
+            }
         },
 
         // Setup billing address same as shipping toggle
@@ -1308,6 +1411,10 @@
                     orderNotes: formData.get('orderNotes'),
                     // Save address preference
                     saveAddress: formData.get('saveAddress') === 'on',
+                    // Shipping tier and zone (for backend)
+                    shippingTier: this._shippingResult?.tier || 'standard',
+                    shippingZone: this._shippingResult?.zone || '',
+                    estimatedShipping: this.totals.shipping,
                     // Terms accepted
                     termsAccepted: document.getElementById('terms')?.checked || false,
                     // Timestamp

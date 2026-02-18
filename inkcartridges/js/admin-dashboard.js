@@ -3,6 +3,8 @@
  * ==================
  * Tab renderers, chart builders, KPI logic, drawer, and table rendering
  * for the admin dashboard. All dynamic content uses Security.escapeHtml().
+ *
+ * UI screenshots: see docs/admin-ui/ for reference captures.
  */
 
 'use strict';
@@ -36,6 +38,12 @@ const DashboardState = {
         return map[this.filters.period] || 7;
     }
 };
+
+function getBrandName(brand) {
+    if (!brand) return 'Unknown';
+    if (typeof brand === 'string') return brand;
+    return brand.name || brand.brand_name || String(brand);
+}
 
 const Dashboard = {
     renderedTabs: new Set(),
@@ -91,13 +99,21 @@ const Dashboard = {
             { label: 'Net Profit', value: data.netProfit !== null ? formatPrice(data.netProfit) : '--', trend: null, spark: null },
             { label: 'Refund Rate', value: data.refundRate !== null ? (data.refundRate.toFixed(1) + '%') : '--', trend: null, spark: null, warnIf: data.refundRate > 5 },
             { label: 'Fulfilment', value: data.avgFulfilmentTime !== null ? (data.avgFulfilmentTime.toFixed(1) + 'd') : '--', trend: null, spark: null },
-            { label: 'Low Stock', value: String(data.lowStockProducts.length), trend: null, spark: null, warnIf: data.lowStockProducts.length > 5 }
+            { label: 'Low Stock', value: String(data.lowStockProducts.length), trend: null, spark: null, warnIf: data.lowStockProducts.length > 5, link: '/html/admin/products.html?filter=low_stock' }
         ];
 
         strip.innerHTML = '';
         kpis.forEach(function(kpi) {
             var div = document.createElement('div');
             div.className = 'admin-kpi-item';
+
+            if (kpi.link) {
+                div.classList.add('admin-kpi-item--clickable');
+                div.setAttribute('role', 'link');
+                div.setAttribute('tabindex', '0');
+                div.addEventListener('click', function() { window.location.href = kpi.link; });
+                div.addEventListener('keydown', function(e) { if (e.key === 'Enter') window.location.href = kpi.link; });
+            }
 
             var labelEl = document.createElement('div');
             labelEl.className = 'admin-kpi-item__label';
@@ -182,13 +198,19 @@ const Dashboard = {
                         '<div class="admin-card__body"><div style="height:200px;"><canvas id="chart-ov-orders"></canvas></div></div>' +
                     '</div>' +
                     '<div class="admin-card">' +
-                        '<div class="admin-card__header"><h4 class="admin-card__title">Top Products</h4><a href="/html/admin/products.html" class="admin-card__action">View All</a></div>' +
-                        '<div class="admin-card__body admin-card__body--no-padding"><table class="admin-table"><thead><tr><th>Product</th><th>Price</th><th>Stock</th></tr></thead><tbody id="ov-top-products"></tbody></table></div>' +
+                        '<div class="admin-card__header"><h4 class="admin-card__title">Most Sold</h4><a href="/html/admin/products.html" class="admin-card__action">View All</a></div>' +
+                        '<div class="admin-card__body admin-card__body--no-padding"><table class="admin-table"><thead><tr><th>Product</th><th>Units Sold</th><th>Stock</th></tr></thead><tbody id="ov-top-sold"></tbody></table></div>' +
                     '</div>' +
                 '</div>' +
-                '<div class="admin-card">' +
-                    '<div class="admin-card__header"><h4 class="admin-card__title">Recent Orders</h4><a href="/html/admin/orders.html" class="admin-card__action">View All</a></div>' +
-                    '<div class="admin-card__body admin-card__body--no-padding"><table class="admin-table"><thead><tr><th>Order</th><th>Customer</th><th>Date</th><th>Status</th><th>Total</th></tr></thead><tbody id="ov-recent-orders"></tbody></table></div>' +
+                '<div class="admin-grid-2" style="margin-bottom:var(--spacing-4);">' +
+                    '<div class="admin-card">' +
+                        '<div class="admin-card__header"><h4 class="admin-card__title">Most Revenue</h4><a href="/html/admin/products.html" class="admin-card__action">View All</a></div>' +
+                        '<div class="admin-card__body admin-card__body--no-padding"><table class="admin-table"><thead><tr><th>Product</th><th>Revenue</th><th>Stock</th></tr></thead><tbody id="ov-top-revenue"></tbody></table></div>' +
+                    '</div>' +
+                    '<div class="admin-card">' +
+                        '<div class="admin-card__header"><h4 class="admin-card__title">Recent Orders</h4><a href="/html/admin/orders.html" class="admin-card__action">View All</a></div>' +
+                        '<div class="admin-card__body admin-card__body--no-padding"><table class="admin-table"><thead><tr><th>Order</th><th>Customer</th><th>Items</th><th>Status</th><th>Total</th></tr></thead><tbody id="ov-recent-orders"></tbody></table></div>' +
+                    '</div>' +
                 '</div>';
             this.renderedTabs.add('overview');
         }
@@ -197,7 +219,8 @@ const Dashboard = {
         this.buildLineChart('chart-ov-revenue', agg.labels, agg.values, 'Revenue');
         var aggO = this.aggregateByPeriod(data.orders, 'count');
         this.buildBarChart('chart-ov-orders', aggO.labels, aggO.values, 'Orders');
-        this.fillTopProducts('ov-top-products', data.products);
+        this.fillTopProductsAsync('ov-top-sold', 'quantity', data.products);
+        this.fillTopProductsAsync('ov-top-revenue', 'revenue', data.products);
         this.fillRecentOrders('ov-recent-orders', data.orders);
     },
 
@@ -236,7 +259,7 @@ const Dashboard = {
         // Revenue by brand
         var brandMap = {};
         data.products.forEach(function(p) {
-            var b = p.brand || 'Unknown';
+            var b = getBrandName(p.brand);
             if (!brandMap[b]) brandMap[b] = 0;
             brandMap[b] += (p.retail_price || 0);
         });
@@ -333,7 +356,7 @@ const Dashboard = {
         // Stock by brand
         var brandStock = {};
         prods.forEach(function(p) {
-            var b = p.brand || 'Unknown';
+            var b = getBrandName(p.brand);
             if (!brandStock[b]) brandStock[b] = 0;
             brandStock[b] += (p.stock_quantity || 0);
         });
@@ -417,31 +440,17 @@ const Dashboard = {
         // Brand performance (products count per brand)
         var brandCnt = {};
         data.products.forEach(function(p) {
-            var b = p.brand || 'Unknown';
+            var b = getBrandName(p.brand);
             if (!brandCnt[b]) brandCnt[b] = 0;
             brandCnt[b]++;
         });
         var bLabels = Object.keys(brandCnt).sort(function(a, b) { return brandCnt[b] - brandCnt[a]; }).slice(0, 8);
         this.buildBarChart('chart-ops-brand', bLabels, bLabels.map(function(l) { return brandCnt[l]; }), 'Products');
 
-        // Funnel (placeholder)
+        // Conversion Funnel - try real data, fallback to placeholder
         var funnel = document.getElementById('ops-funnel');
         if (funnel) {
-            var total = data.totalOrders || 1;
-            var steps = [
-                { label: 'Visitors', value: '--', pct: 100, color: 'var(--cyan-primary)' },
-                { label: 'Product Views', value: '--', pct: 60, color: '#8b5cf6' },
-                { label: 'Add to Cart', value: '--', pct: 25, color: 'var(--yellow-primary)' },
-                { label: 'Checkout', value: '--', pct: 10, color: 'var(--magenta-primary)' },
-                { label: 'Purchase', value: String(total), pct: 5, color: '#34D399' }
-            ];
-            funnel.innerHTML = '<div class="admin-funnel">' + steps.map(function(s) {
-                return '<div class="admin-funnel__step">' +
-                    '<div class="admin-funnel__label">' + Security.escapeHtml(s.label) + '</div>' +
-                    '<div class="admin-funnel__bar" style="width:' + s.pct + '%;background:' + s.color + ';"></div>' +
-                    '<div class="admin-funnel__value">' + Security.escapeHtml(s.value) + '</div></div>';
-            }).join('') + '</div>' +
-            '<p style="font-size:12px;color:var(--color-text-muted);margin-top:var(--spacing-3);">Funnel data requires analytics backend endpoints</p>';
+            this.loadConversionFunnel(funnel, data.totalOrders || 0);
         }
     },
 
@@ -632,6 +641,58 @@ const Dashboard = {
        TABLE RENDERERS
        ================================================================ */
 
+    // TODO: see BACKEND_ADMIN_GAPS.md #1/#2 - top products by quantity/revenue
+    fillTopProductsAsync(tbodyId, metric, products) {
+        var tbody = document.getElementById(tbodyId);
+        if (!tbody) return;
+
+        // Fallback: sort client-side by price (backend doesn't yet return units_sold/total_revenue)
+        var sorted = products.slice().sort(function(a, b) { return (b.retail_price || 0) - (a.retail_price || 0); });
+        var top = sorted.slice(0, 8);
+
+        if (top.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="3" class="admin-empty" style="padding:var(--spacing-6);">No products</td></tr>';
+            return;
+        }
+        tbody.innerHTML = '';
+        top.forEach(function(p) {
+            var tr = document.createElement('tr');
+            tr.style.cursor = 'pointer';
+            tr.onclick = function() { Dashboard.openProductDrawer(p); };
+
+            var nameCell = document.createElement('td');
+            var nameDiv = document.createElement('div');
+            nameDiv.style.fontWeight = '500';
+            nameDiv.textContent = p.name || '';
+            var skuDiv = document.createElement('div');
+            skuDiv.style.cssText = 'font-size:11px;color:var(--color-text-muted);font-family:var(--font-family-mono);';
+            skuDiv.textContent = p.sku || '';
+            nameCell.appendChild(nameDiv);
+            nameCell.appendChild(skuDiv);
+            tr.appendChild(nameCell);
+
+            var metricCell = document.createElement('td');
+            metricCell.style.fontFamily = 'var(--font-family-mono)';
+            if (metric === 'quantity') {
+                metricCell.textContent = p.units_sold != null ? String(p.units_sold) : '--';
+            } else {
+                metricCell.textContent = p.total_revenue != null ? formatPrice(p.total_revenue) : formatPrice(p.retail_price || 0);
+            }
+            tr.appendChild(metricCell);
+
+            var stockCell = document.createElement('td');
+            var badge = document.createElement('span');
+            var isOut = !p.in_stock || (p.stock_quantity || 0) === 0;
+            var isLow = p.in_stock && (p.stock_quantity || 0) <= 10;
+            badge.className = 'admin-badge admin-badge--' + (isOut ? 'danger' : isLow ? 'warning' : 'success');
+            badge.textContent = isOut ? 'Out' : String(p.stock_quantity || 0);
+            stockCell.appendChild(badge);
+            tr.appendChild(stockCell);
+
+            tbody.appendChild(tr);
+        });
+    },
+
     fillTopProducts(tbodyId, products, showBrand) {
         var tbody = document.getElementById(tbodyId);
         if (!tbody) return;
@@ -659,7 +720,7 @@ const Dashboard = {
 
             if (showBrand) {
                 var brandCell = document.createElement('td');
-                brandCell.textContent = p.brand || '';
+                brandCell.textContent = getBrandName(p.brand);
                 tr.appendChild(brandCell);
             }
 
@@ -700,14 +761,26 @@ const Dashboard = {
             idCell.textContent = '#' + (o.order_number || o.id || '');
             tr.appendChild(idCell);
 
+            // Customer name + email subtitle
             var custCell = document.createElement('td');
-            custCell.textContent = o.shipping_recipient_name || o.customer_email || '';
+            var custName = document.createElement('div');
+            custName.style.fontWeight = '500';
+            custName.textContent = o.shipping_recipient_name || o.customer_email || '';
+            custCell.appendChild(custName);
+            if (o.customer_email && o.shipping_recipient_name) {
+                var custEmail = document.createElement('div');
+                custEmail.style.cssText = 'font-size:11px;color:var(--color-text-muted);';
+                custEmail.textContent = o.customer_email;
+                custCell.appendChild(custEmail);
+            }
             tr.appendChild(custCell);
 
-            var dateCell = document.createElement('td');
-            dateCell.style.cssText = 'font-size:12px;color:var(--color-text-muted);';
-            dateCell.textContent = o.created_at ? new Date(o.created_at).toLocaleDateString('en-NZ') : '';
-            tr.appendChild(dateCell);
+            // TODO: see BACKEND_ADMIN_GAPS.md #4 - order line items
+            var itemsCell = document.createElement('td');
+            itemsCell.style.cssText = 'font-size:12px;color:var(--color-text-muted);';
+            var lineItems = o.items || o.line_items || o.order_items || [];
+            itemsCell.textContent = lineItems.length > 0 ? lineItems.length + ' item' + (lineItems.length !== 1 ? 's' : '') : '--';
+            tr.appendChild(itemsCell);
 
             var statusCell = document.createElement('td');
             var badge = document.createElement('span');
@@ -784,7 +857,26 @@ const Dashboard = {
         html += '<hr class="admin-drawer__divider">';
         html += '<div class="admin-drawer__section"><div class="admin-drawer__section-title">Customer</div>' +
             '<div class="admin-drawer__row"><span class="admin-drawer__label">Name</span><span class="admin-drawer__value">' + Security.escapeHtml(order.shipping_recipient_name || '') + '</span></div>' +
-            '<div class="admin-drawer__row"><span class="admin-drawer__label">Email</span><span class="admin-drawer__value">' + Security.escapeHtml(order.customer_email || '') + '</span></div></div>';
+            '<div class="admin-drawer__row"><span class="admin-drawer__label">Email</span><span class="admin-drawer__value">' + Security.escapeHtml(order.customer_email || '') + '</span></div>';
+        // TODO: see BACKEND_ADMIN_GAPS.md #5 - customer phone
+        if (order.shipping_phone) {
+            html += '<div class="admin-drawer__row"><span class="admin-drawer__label">Phone</span><span class="admin-drawer__value">' + Security.escapeHtml(order.shipping_phone) + '</span></div>';
+        }
+        html += '</div>';
+
+        // TODO: see BACKEND_ADMIN_GAPS.md #4 - order line items
+        var lineItems = order.items || order.line_items || order.order_items || [];
+        if (lineItems.length > 0) {
+            html += '<hr class="admin-drawer__divider">';
+            html += '<div class="admin-drawer__section"><div class="admin-drawer__section-title">Items Ordered</div>';
+            lineItems.forEach(function(item) {
+                var itemName = Security.escapeHtml(item.product_name || item.name || 'Item');
+                var qty = item.quantity || 1;
+                var price = item.line_total || item.price || 0;
+                html += '<div class="admin-drawer__row"><span class="admin-drawer__label">' + itemName + ' &times; ' + qty + '</span><span class="admin-drawer__value">' + Security.escapeHtml(formatPrice(price)) + '</span></div>';
+            });
+            html += '</div>';
+        }
 
         // Timeline
         html += '<hr class="admin-drawer__divider">';
@@ -806,7 +898,7 @@ const Dashboard = {
             '<div class="admin-drawer__section-title">Product Info</div>' +
             '<div class="admin-drawer__row"><span class="admin-drawer__label">Name</span><span class="admin-drawer__value" style="font-family:inherit;">' + Security.escapeHtml(product.name || '') + '</span></div>' +
             '<div class="admin-drawer__row"><span class="admin-drawer__label">SKU</span><span class="admin-drawer__value">' + Security.escapeHtml(product.sku || '') + '</span></div>' +
-            '<div class="admin-drawer__row"><span class="admin-drawer__label">Brand</span><span class="admin-drawer__value" style="font-family:inherit;">' + Security.escapeHtml(product.brand || '') + '</span></div>' +
+            '<div class="admin-drawer__row"><span class="admin-drawer__label">Brand</span><span class="admin-drawer__value" style="font-family:inherit;">' + Security.escapeHtml(getBrandName(product.brand)) + '</span></div>' +
             '<div class="admin-drawer__row"><span class="admin-drawer__label">Category</span><span class="admin-drawer__value" style="font-family:inherit;">' + Security.escapeHtml(product.category || '') + '</span></div>' +
             '</div>';
 
@@ -845,12 +937,63 @@ const Dashboard = {
        ================================================================ */
 
     onThemeChange(data) {
-        this.destroyAllCharts();
-        this.renderedTabs.clear();
-        // Re-render the active tab
+        // Only destroy charts in the active tab and re-render it (not all tabs)
         var activeTab = document.querySelector('.admin-tab--active');
-        if (activeTab && data) {
-            this.renderTab(activeTab.dataset.tab, data);
+        var activeTabId = activeTab ? activeTab.dataset.tab : null;
+        if (activeTabId) {
+            // Destroy only charts belonging to the active tab panel
+            var panel = document.getElementById('tab-' + activeTabId);
+            if (panel) {
+                var canvases = panel.querySelectorAll('canvas');
+                var self = this;
+                canvases.forEach(function(c) { self.destroyChart(c.id); });
+            }
+            this.renderedTabs.delete(activeTabId);
+            if (data) this.renderTab(activeTabId, data);
+        }
+    },
+
+    // TODO: see BACKEND_ADMIN_GAPS.md #3 - conversion funnel endpoint
+    loadConversionFunnel: function(container, totalOrders) {
+        var renderFunnel = function(steps, note) {
+            container.innerHTML = '<div class="admin-funnel">' + steps.map(function(s) {
+                return '<div class="admin-funnel__step">' +
+                    '<div class="admin-funnel__label">' + Security.escapeHtml(s.label) + '</div>' +
+                    '<div class="admin-funnel__bar" style="width:' + s.pct + '%;background:' + s.color + ';"></div>' +
+                    '<div class="admin-funnel__value">' + Security.escapeHtml(String(s.value)) + '</div></div>';
+            }).join('') + '</div>' +
+            (note ? '<p style="font-size:12px;color:var(--color-text-muted);margin-top:var(--spacing-3);">' + Security.escapeHtml(note) + '</p>' : '');
+        };
+
+        // Try backend first
+        if (typeof AnalyticsAPI !== 'undefined' && AnalyticsAPI.getConversionFunnel) {
+            AnalyticsAPI.getConversionFunnel().then(function(res) {
+                if (res && res.success && res.data && Array.isArray(res.data.steps)) {
+                    var steps = res.data.steps.map(function(s) {
+                        return { label: s.label, value: s.count || s.value || 0, pct: s.percentage || 0, color: s.color || 'var(--cyan-primary)' };
+                    });
+                    renderFunnel(steps, null);
+                    return;
+                }
+                throw new Error('no data');
+            }).catch(function() {
+                // Fallback to placeholder
+                renderFunnel([
+                    { label: 'Visitors', value: '--', pct: 100, color: 'var(--cyan-primary)' },
+                    { label: 'Product Views', value: '--', pct: 60, color: '#8b5cf6' },
+                    { label: 'Add to Cart', value: '--', pct: 25, color: 'var(--yellow-primary)' },
+                    { label: 'Checkout', value: '--', pct: 10, color: 'var(--magenta-primary)' },
+                    { label: 'Purchase', value: totalOrders, pct: 5, color: '#34D399' }
+                ], 'Funnel data requires analytics backend endpoints');
+            });
+        } else {
+            renderFunnel([
+                { label: 'Visitors', value: '--', pct: 100, color: 'var(--cyan-primary)' },
+                { label: 'Product Views', value: '--', pct: 60, color: '#8b5cf6' },
+                { label: 'Add to Cart', value: '--', pct: 25, color: 'var(--yellow-primary)' },
+                { label: 'Checkout', value: '--', pct: 10, color: 'var(--magenta-primary)' },
+                { label: 'Purchase', value: totalOrders, pct: 5, color: '#34D399' }
+            ], 'Funnel data requires analytics backend endpoints');
         }
     }
 };
