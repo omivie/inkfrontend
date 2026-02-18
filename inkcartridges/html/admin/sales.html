@@ -1,0 +1,511 @@
+<!DOCTYPE html>
+<html lang="en-NZ">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Sales Analytics - InkCartridges.co.nz Admin">
+    <meta name="robots" content="noindex, nofollow">
+    <link rel="icon" type="image/svg+xml" href="/assets/icons/favicon.svg">
+    <title>Sales Analytics | InkCartridges.co.nz Admin</title>
+    <link rel="stylesheet" href="/css/base.css">
+    <link rel="stylesheet" href="/css/layout.css">
+    <link rel="stylesheet" href="/css/components.css">
+    <link rel="stylesheet" href="/css/modern-effects.css">
+    <link rel="stylesheet" href="/css/admin.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    <style>
+        .admin-page-content { padding: var(--spacing-6); width: 100%; box-sizing: border-box; }
+        .admin-kpi-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--spacing-5); margin-bottom: var(--spacing-6); }
+        .admin-kpi { background: var(--color-background); border-radius: var(--radius-lg); border: 1px solid var(--color-border); padding: var(--spacing-5); }
+        .admin-kpi__header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: var(--spacing-3); }
+        .admin-kpi__icon { width: 40px; height: 40px; border-radius: var(--radius-md); display: flex; align-items: center; justify-content: center; }
+        .admin-kpi__icon--primary { background: var(--cyan-light); color: var(--cyan-primary); }
+        .admin-kpi__icon--success { background: #D1FAE5; color: #059669; }
+        .admin-kpi__icon--warning { background: var(--yellow-light); color: var(--yellow-dark); }
+        .admin-kpi__icon--danger { background: var(--magenta-light); color: var(--magenta-primary); }
+        .admin-kpi__trend { font-size: var(--font-size-xs); font-weight: var(--font-weight-medium); display: flex; align-items: center; gap: 4px; }
+        .admin-kpi__trend--up { color: #059669; }
+        .admin-kpi__trend--down { color: var(--magenta-primary); }
+        .admin-kpi__value { font-size: var(--font-size-2xl); font-weight: var(--font-weight-bold); margin-bottom: var(--spacing-1); }
+        .admin-kpi__label { font-size: var(--font-size-sm); color: var(--color-text-muted); }
+        .admin-chart-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: var(--spacing-6); margin-bottom: var(--spacing-6); }
+        .admin-chart { background: var(--color-background); border-radius: var(--radius-lg); border: 1px solid var(--color-border); padding: var(--spacing-5); }
+        .admin-chart__header { margin-bottom: var(--spacing-4); }
+        .admin-chart__title { font-size: var(--font-size-lg); font-weight: var(--font-weight-semibold); margin: 0; }
+        .admin-chart__body { height: 300px; }
+        .admin-card { background: var(--color-background); border-radius: var(--radius-lg); border: 1px solid var(--color-border); }
+        .admin-card__header { padding: var(--spacing-5); border-bottom: 1px solid var(--color-border-light); display: flex; justify-content: space-between; align-items: center; }
+        .admin-card__title { font-size: var(--font-size-lg); font-weight: var(--font-weight-semibold); margin: 0; }
+        .admin-card__body { padding: var(--spacing-5); }
+        .admin-table { width: 100%; border-collapse: collapse; }
+        .admin-table th, .admin-table td { padding: var(--spacing-3) var(--spacing-4); text-align: left; border-bottom: 1px solid var(--color-border-light); }
+        .admin-table th { font-size: var(--font-size-xs); font-weight: var(--font-weight-semibold); color: var(--color-text-muted); text-transform: uppercase; letter-spacing: var(--letter-spacing-wide); background: var(--color-background-alt); }
+        .admin-table__status { display: inline-flex; padding: var(--spacing-1) var(--spacing-3); border-radius: var(--radius-full); font-size: var(--font-size-xs); font-weight: var(--font-weight-medium); }
+        .admin-table__status--warning { background: var(--yellow-light); color: var(--yellow-dark); }
+        .admin-table__status--info { background: var(--cyan-light); color: var(--cyan-dark); }
+        .admin-table__status--success { background: #D1FAE5; color: #059669; }
+        .admin-table__status--danger { background: var(--magenta-light); color: var(--magenta-dark); }
+        .admin-chart__period { display: flex; gap: var(--spacing-2); }
+        .admin-chart__period-btn { padding: var(--spacing-2) var(--spacing-3); border: 1px solid var(--color-border); border-radius: var(--radius-md); background: var(--color-background); font-size: var(--font-size-sm); cursor: pointer; }
+        .admin-chart__period-btn--active { background: var(--cyan-primary); color: white; border-color: var(--cyan-primary); }
+        @media (max-width: 1200px) { .admin-kpi-grid { grid-template-columns: repeat(2, 1fr); } }
+        @media (max-width: 768px) { .admin-kpi-grid, .admin-chart-grid { grid-template-columns: 1fr; } }
+    </style>
+</head>
+<body class="admin-body">
+    <aside class="admin-sidebar">
+        <div class="admin-sidebar__logo">
+            <a href="/html/admin/index.html">
+                <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9V2h12v7"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
+                <span>InkCartridges</span>
+            </a>
+        </div>
+        <nav class="admin-nav">
+            <ul class="admin-nav__list">
+                <li class="admin-nav__item"><a href="/html/admin/index.html" class="admin-nav__link"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>Dashboard</a></li>
+                <li class="admin-nav__item"><a href="/html/admin/orders.html" class="admin-nav__link"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="8" height="4" rx="1"/></svg>Orders<span class="admin-nav__badge" id="orders-badge">0</span></a></li>
+                <li class="admin-nav__item"><a href="/html/admin/products.html" class="admin-nav__link"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"/><line x1="3" y1="6" x2="21" y2="6"/><path d="M16 10a4 4 0 0 1-8 0"/></svg>Products</a></li>
+                <li class="admin-nav__item"><a href="/html/admin/customers.html" class="admin-nav__link"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>Customers</a></li>
+                <li class="admin-nav__separator">Analytics</li>
+                <li class="admin-nav__item"><a href="/html/admin/financial-health.html" class="admin-nav__link"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>Financial Health</a></li>
+                <li class="admin-nav__item"><a href="/html/admin/customer-intelligence.html" class="admin-nav__link"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>Customer Intelligence</a></li>
+                <li class="admin-nav__item"><a href="/html/admin/operations.html" class="admin-nav__link"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>Operations</a></li>
+                <li class="admin-nav__item"><a href="/html/admin/sales.html" class="admin-nav__link admin-nav__link--active"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="20" x2="12" y2="10"/><line x1="18" y1="20" x2="18" y2="4"/><line x1="6" y1="20" x2="6" y2="16"/></svg>Sales Analytics</a></li>
+                <li class="admin-nav__item"><a href="/html/admin/marketing.html" class="admin-nav__link"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>Marketing</a></li>
+                <li class="admin-nav__separator">System</li>
+                <li class="admin-nav__item"><a href="/html/admin/settings.html" class="admin-nav__link"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>Settings</a></li>
+            </ul>
+        </nav>
+        <div class="admin-sidebar__user">
+            <div class="admin-sidebar__avatar" id="admin-avatar">A</div>
+            <div>
+                <div style="font-weight: 500; font-size: 14px;" id="admin-name">Admin</div>
+                <div style="font-size: 12px; opacity: 0.7;" id="admin-email">admin@example.com</div>
+            </div>
+        </div>
+        <div style="padding: var(--spacing-4) var(--spacing-6); border-top: 1px solid rgba(255,255,255,0.1);">
+            <a href="/html/index.html" style="display: flex; align-items: center; gap: 8px; color: rgba(255,255,255,0.7); text-decoration: none; font-size: 14px;">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+                View Store
+            </a>
+        </div>
+    </aside>
+
+    <main class="admin-main">
+        <header class="admin-header" style="background: var(--color-background); border-bottom: 1px solid var(--color-border); padding: var(--spacing-4) var(--spacing-6); display: flex; justify-content: space-between; align-items: center;">
+            <div>
+                <h1 style="font-size: var(--font-size-xl); font-weight: var(--font-weight-bold); margin: 0;">Sales Analytics</h1>
+                <p style="font-size: var(--font-size-sm); color: var(--color-text-muted); margin: var(--spacing-1) 0 0;">Track revenue and order performance</p>
+            </div>
+            <div class="admin-chart__period">
+                <button class="admin-chart__period-btn" data-period="1h">1H</button>
+                <button class="admin-chart__period-btn" data-period="12h">12H</button>
+                <button class="admin-chart__period-btn" data-period="24h">24H</button>
+                <button class="admin-chart__period-btn admin-chart__period-btn--active" data-period="7d">7D</button>
+                <button class="admin-chart__period-btn" data-period="1m">1M</button>
+                <button class="admin-chart__period-btn" data-period="3m">3M</button>
+                <button class="admin-chart__period-btn" data-period="6m">6M</button>
+                <button class="admin-chart__period-btn" data-period="1y">1Y</button>
+                <button class="admin-chart__period-btn" data-period="2y">2Y</button>
+            </div>
+        </header>
+
+        <div class="admin-page-content">
+            <!-- KPI Cards -->
+            <div class="admin-kpi-grid">
+                <div class="admin-kpi" data-metric="total-revenue">
+                    <div class="admin-kpi__header">
+                        <div class="admin-kpi__icon admin-kpi__icon--primary">
+                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+                        </div>
+                        <div class="admin-kpi__trend" id="revenue-trend">--</div>
+                    </div>
+                    <div class="admin-kpi__value">$0.00</div>
+                    <div class="admin-kpi__label">Total Revenue</div>
+                </div>
+
+                <div class="admin-kpi" data-metric="total-orders">
+                    <div class="admin-kpi__header">
+                        <div class="admin-kpi__icon admin-kpi__icon--success">
+                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="8" height="4" rx="1"/></svg>
+                        </div>
+                        <div class="admin-kpi__trend" id="orders-trend">--</div>
+                    </div>
+                    <div class="admin-kpi__value">0</div>
+                    <div class="admin-kpi__label">Total Orders</div>
+                </div>
+
+                <div class="admin-kpi" data-metric="avg-order">
+                    <div class="admin-kpi__header">
+                        <div class="admin-kpi__icon admin-kpi__icon--warning">
+                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"/></svg>
+                        </div>
+                        <div class="admin-kpi__trend" id="avg-order-trend">--</div>
+                    </div>
+                    <div class="admin-kpi__value">$0.00</div>
+                    <div class="admin-kpi__label">Average Order Value</div>
+                </div>
+
+                <div class="admin-kpi" data-metric="conversion">
+                    <div class="admin-kpi__header">
+                        <div class="admin-kpi__icon admin-kpi__icon--danger">
+                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+                        </div>
+                        <div class="admin-kpi__trend" id="conversion-trend">--</div>
+                    </div>
+                    <div class="admin-kpi__value">0%</div>
+                    <div class="admin-kpi__label">Conversion Rate</div>
+                </div>
+            </div>
+
+            <!-- Charts Row -->
+            <div class="admin-chart-grid">
+                <div class="admin-chart">
+                    <div class="admin-chart__header">
+                        <h2 class="admin-chart__title">Revenue Over Time</h2>
+                    </div>
+                    <div class="admin-chart__body">
+                        <canvas id="revenueChart"></canvas>
+                    </div>
+                </div>
+
+                <div class="admin-chart">
+                    <div class="admin-chart__header">
+                        <h2 class="admin-chart__title">Orders by Status</h2>
+                    </div>
+                    <div class="admin-chart__body">
+                        <canvas id="ordersStatusChart"></canvas>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Second Charts Row -->
+            <div class="admin-chart-grid">
+                <div class="admin-chart">
+                    <div class="admin-chart__header">
+                        <h2 class="admin-chart__title">Sales by Brand</h2>
+                    </div>
+                    <div class="admin-chart__body">
+                        <canvas id="salesByBrandChart"></canvas>
+                    </div>
+                </div>
+
+                <div class="admin-card">
+                    <div class="admin-card__header">
+                        <h2 class="admin-card__title">Top Selling Products</h2>
+                    </div>
+                    <div class="admin-card__body" style="padding: 0;">
+                        <table class="admin-table">
+                            <thead>
+                                <tr>
+                                    <th>Product</th>
+                                    <th>Sales</th>
+                                    <th>Revenue</th>
+                                </tr>
+                            </thead>
+                            <tbody id="topProductsTable">
+                                <tr>
+                                    <td colspan="3" style="text-align: center; padding: 40px; color: var(--color-text-muted);">Loading...</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Recent Orders Table -->
+            <div class="admin-card">
+                <div class="admin-card__header">
+                    <h2 class="admin-card__title">Recent Orders</h2>
+                    <a href="/html/admin/orders.html" class="btn btn--secondary btn--sm">View All</a>
+                </div>
+                <div class="admin-card__body" style="padding: 0;">
+                    <table class="admin-table">
+                        <thead>
+                            <tr>
+                                <th>Order</th>
+                                <th>Customer</th>
+                                <th>Date</th>
+                                <th>Total</th>
+                                <th>Status</th>
+                            </tr>
+                        </thead>
+                        <tbody id="recentOrdersTable">
+                            <tr>
+                                <td colspan="5" style="text-align: center; padding: 40px; color: var(--color-text-muted);">Loading...</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="/js/config.js"></script>
+    <script src="/js/utils.js"></script>
+    <script src="/js/api.js"></script>
+    <script src="/js/auth.js"></script>
+    <script src="/js/admin.js"></script>
+    <script>
+    const SalesPage = {
+        charts: {},
+
+        currentPeriod: '7d',
+
+        async init() {
+            this.bindEvents();
+            await this.loadData();
+        },
+
+        bindEvents() {
+            document.querySelectorAll('.admin-chart__period-btn').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    document.querySelectorAll('.admin-chart__period-btn').forEach(b => {
+                        b.classList.remove('admin-chart__period-btn--active');
+                    });
+                    e.target.classList.add('admin-chart__period-btn--active');
+                    this.currentPeriod = e.target.dataset.period;
+                    this.loadData();
+                });
+            });
+        },
+
+        getPeriodConfig() {
+            const configs = {
+                '1h': { points: 12, unit: 'minute', step: 5, isTime: true, format: { hour: 'numeric', minute: '2-digit' } },
+                '12h': { points: 24, unit: 'minute', step: 30, isTime: true, format: { hour: 'numeric', minute: '2-digit' } },
+                '24h': { points: 24, unit: 'hour', step: 1, isTime: true, format: { hour: 'numeric', minute: '2-digit' } },
+                '7d': { points: 7, unit: 'day', step: 1, isTime: false, format: { month: 'short', day: 'numeric' } },
+                '1m': { points: 30, unit: 'day', step: 1, isTime: false, format: { month: 'short', day: 'numeric' } },
+                '3m': { points: 12, unit: 'week', step: 1, isTime: false, format: { month: 'short', day: 'numeric' } },
+                '6m': { points: 24, unit: 'week', step: 1, isTime: false, format: { month: 'short', day: 'numeric' } },
+                '1y': { points: 12, unit: 'month', step: 1, isTime: false, format: { month: 'short', year: '2-digit' } },
+                '2y': { points: 24, unit: 'month', step: 1, isTime: false, format: { month: 'short', year: '2-digit' } }
+            };
+            return configs[this.currentPeriod] || configs['7d'];
+        },
+
+        async loadData() {
+            try {
+                const ordersResponse = await API.getOrders({ limit: 100 });
+                const orders = ordersResponse.success ? (ordersResponse.data?.orders || []) : [];
+
+                const totalRevenue = orders.reduce((sum, o) => sum + (o.total || 0), 0);
+                const totalOrders = orders.length;
+                const avgOrder = totalOrders > 0 ? totalRevenue / totalOrders : 0;
+
+                this.updateKPI('total-revenue', formatPrice(totalRevenue));
+                this.updateKPI('total-orders', totalOrders.toString());
+                this.updateKPI('avg-order', formatPrice(avgOrder));
+                this.updateKPI('conversion', '3.2%');
+
+                this.renderRevenueChart(orders);
+                this.renderOrdersStatusChart(orders);
+                this.renderSalesByBrandChart(orders);
+                this.renderTopProducts(orders);
+                this.renderRecentOrders(orders);
+
+            } catch (error) {
+                console.error('Error loading sales data:', error);
+            }
+        },
+
+        updateKPI(id, value) {
+            const kpi = document.querySelector(`[data-metric="${id}"]`);
+            if (kpi) {
+                const valueEl = kpi.querySelector('.admin-kpi__value');
+                if (valueEl) valueEl.textContent = value;
+            }
+        },
+
+        renderRevenueChart(orders) {
+            const ctx = document.getElementById('revenueChart');
+            if (!ctx) return;
+
+            if (this.charts.revenue) this.charts.revenue.destroy();
+
+            const config = this.getPeriodConfig();
+            const periodData = {};
+            const labels = [...Array(config.points)].map((_, i) => {
+                const d = new Date();
+                if (config.unit === 'minute') d.setMinutes(d.getMinutes() - (config.points - 1 - i) * config.step);
+                else if (config.unit === 'hour') d.setHours(d.getHours() - (config.points - 1 - i));
+                else if (config.unit === 'day') d.setDate(d.getDate() - (config.points - 1 - i));
+                else if (config.unit === 'week') d.setDate(d.getDate() - (config.points - 1 - i) * 7);
+                else if (config.unit === 'month') d.setMonth(d.getMonth() - (config.points - 1 - i));
+                const key = d.toISOString().split('T')[0];
+                periodData[key] = 0;
+                return {
+                    key,
+                    label: config.isTime ? d.toLocaleTimeString('en-NZ', config.format) : d.toLocaleDateString('en-NZ', config.format)
+                };
+            });
+
+            orders.forEach(order => {
+                const date = order.created_at?.split('T')[0];
+                if (date && periodData[date] !== undefined) {
+                    periodData[date] += order.total || 0;
+                }
+            });
+
+            this.charts.revenue = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: labels.map(l => l.label),
+                    datasets: [{
+                        label: 'Revenue',
+                        data: labels.map(l => periodData[l.key] || 0),
+                        borderColor: '#267FB5',
+                        backgroundColor: 'rgba(38, 127, 181, 0.1)',
+                        fill: true,
+                        tension: 0.4
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { legend: { display: false } },
+                    scales: {
+                        y: { beginAtZero: true, ticks: { callback: v => '$' + v } }
+                    }
+                }
+            });
+        },
+
+        renderOrdersStatusChart(orders) {
+            const ctx = document.getElementById('ordersStatusChart');
+            if (!ctx) return;
+
+            if (this.charts.status) this.charts.status.destroy();
+
+            const statusCounts = { pending: 0, paid: 0, processing: 0, shipped: 0, completed: 0, cancelled: 0 };
+            orders.forEach(order => {
+                if (statusCounts[order.status] !== undefined) {
+                    statusCounts[order.status]++;
+                }
+            });
+
+            this.charts.status = new Chart(ctx, {
+                type: 'doughnut',
+                data: {
+                    labels: ['Pending', 'Paid', 'Processing', 'Shipped', 'Completed', 'Cancelled'],
+                    datasets: [{
+                        data: Object.values(statusCounts),
+                        backgroundColor: ['#F4C430', '#267FB5', '#8b5cf6', '#06b6d4', '#10b981', '#C71F6E']
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { legend: { position: 'bottom' } }
+                }
+            });
+        },
+
+        renderSalesByBrandChart(orders) {
+            const ctx = document.getElementById('salesByBrandChart');
+            if (!ctx) return;
+
+            if (this.charts.brands) this.charts.brands.destroy();
+
+            const brandSales = {};
+            orders.forEach(order => {
+                (order.order_items || order.items || []).forEach(item => {
+                    const brand = item.product?.brand?.name || 'Unknown';
+                    brandSales[brand] = (brandSales[brand] || 0) + (item.line_total || 0);
+                });
+            });
+
+            const sortedBrands = Object.entries(brandSales).sort((a, b) => b[1] - a[1]).slice(0, 8);
+
+            this.charts.brands = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: sortedBrands.map(b => b[0]),
+                    datasets: [{
+                        label: 'Sales',
+                        data: sortedBrands.map(b => b[1]),
+                        backgroundColor: '#267FB5'
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { legend: { display: false } },
+                    scales: {
+                        y: { beginAtZero: true, ticks: { callback: v => '$' + v } }
+                    }
+                }
+            });
+        },
+
+        renderTopProducts(orders) {
+            const tbody = document.getElementById('topProductsTable');
+            if (!tbody) return;
+
+            const productSales = {};
+            orders.forEach(order => {
+                (order.order_items || order.items || []).forEach(item => {
+                    const name = item.product_name || 'Unknown';
+                    if (!productSales[name]) {
+                        productSales[name] = { quantity: 0, revenue: 0 };
+                    }
+                    productSales[name].quantity += item.quantity || 0;
+                    productSales[name].revenue += item.line_total || 0;
+                });
+            });
+
+            const sorted = Object.entries(productSales).sort((a, b) => b[1].revenue - a[1].revenue).slice(0, 5);
+
+            if (sorted.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="3" style="text-align: center; padding: 40px; color: var(--color-text-muted);">No sales data</td></tr>';
+                return;
+            }
+
+            tbody.innerHTML = sorted.map(([name, data]) => `
+                <tr>
+                    <td>${name}</td>
+                    <td>${data.quantity}</td>
+                    <td>${formatPrice(data.revenue)}</td>
+                </tr>
+            `).join('');
+        },
+
+        renderRecentOrders(orders) {
+            const tbody = document.getElementById('recentOrdersTable');
+            if (!tbody) return;
+
+            const recent = orders.slice(0, 10);
+
+            if (recent.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="5" style="text-align: center; padding: 40px; color: var(--color-text-muted);">No orders yet</td></tr>';
+                return;
+            }
+
+            tbody.innerHTML = recent.map(order => {
+                const statusClass = {
+                    pending: 'warning', paid: 'info', processing: 'info',
+                    shipped: 'info', completed: 'success', cancelled: 'danger'
+                }[order.status] || 'info';
+
+                return `
+                    <tr>
+                        <td><strong>${order.order_number}</strong></td>
+                        <td>${order.shipping_recipient_name || order.email || 'Guest'}</td>
+                        <td>${new Date(order.created_at).toLocaleDateString('en-NZ')}</td>
+                        <td>${formatPrice(order.total)}</td>
+                        <td><span class="admin-table__status admin-table__status--${statusClass}">${order.status}</span></td>
+                    </tr>
+                `;
+            }).join('');
+        }
+    };
+
+    document.addEventListener('DOMContentLoaded', () => {
+        setTimeout(() => { SalesPage.init(); }, 500);
+    });
+    </script>
+    <script src="/js/modern-effects.js"></script>
+</body>
+</html>

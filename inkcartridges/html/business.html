@@ -1,0 +1,600 @@
+<!DOCTYPE html>
+<html lang="en-NZ">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Business accounts for schools, offices, and organisations. Get bulk discounts, credit terms, and dedicated support for your printing supplies.">
+    <meta name="robots" content="index, follow">
+
+    <link rel="icon" type="image/svg+xml" href="/assets/icons/favicon.svg">
+    <title>Business Accounts | InkCartridges.co.nz</title>
+
+    <!-- Google Analytics 4 (with consent mode) -->
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-SDQELG0FGD"></script>
+    <script>
+        window.dataLayer = window.dataLayer || [];
+        function gtag(){dataLayer.push(arguments);}
+        gtag('consent', 'default', {
+            analytics_storage: localStorage.getItem('cookie_consent') === 'accepted' ? 'granted' : 'denied'
+        });
+        gtag('js', new Date());
+        gtag('config', 'G-SDQELG0FGD');
+    </script>
+
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="stylesheet" href="/css/base.css">
+    <link rel="stylesheet" href="/css/layout.css">
+    <link rel="stylesheet" href="/css/components.css">
+    <link rel="stylesheet" href="/css/modern-effects.css">
+    <link rel="stylesheet" href="/css/pages.css">
+</head>
+<body>
+    <a href="#main-content" class="skip-link">Skip to main content</a>
+
+    <!-- ============================================
+         HEADER
+         ============================================ -->
+    <header class="site-header">
+        <!-- Main header -->
+        <div class="header-main">
+            <div class="container">
+                <!-- Contact info -->
+                <div class="header-contact">
+                    <a href="tel:0800465275" class="header-contact__item">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
+                        0800 INK KART (465 275)
+                    </a>
+                    <a href="mailto:support@inkcartridges.co.nz" class="header-contact__item">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
+                        support@inkcartridges.co.nz
+                    </a>
+                </div>
+
+                <div class="logo-block">
+                    <a href="/html/index.html" class="logo" aria-label="InkCartridges.co.nz Home">
+                        <span class="logo__text">Ink<span>Cartridges</span>.co.nz</span>
+                    </a>
+                    <a href="/html/index.html" class="logo__tagline">Get the full picture on image quality</a>
+                </div>
+
+                <!-- Header actions -->
+                <div class="header-actions">
+                    <a href="/html/account/index.html" class="header-actions__item">
+                        <span class="header-actions__icon">
+                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+                        </span>
+                        <span>Account</span>
+                    </a>
+                    <a href="/html/account/favourites.html" class="header-actions__item">
+                        <span class="header-actions__icon">
+                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
+                        </span>
+                        <span>Favourites</span>
+                    </a>
+                    <a href="/html/cart.html" class="header-actions__item">
+                        <span class="header-actions__icon">
+                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"/></svg>
+                            <span class="cart-badge" id="cart-count">0</span>
+                        </span>
+                        <span>Cart</span>
+                    </a>
+                </div>
+            </div>
+        </div>
+
+        <!-- Primary navigation -->
+        <nav class="primary-nav" aria-label="Main navigation">
+            <div class="container">
+                <button class="nav-toggle" aria-expanded="false" aria-controls="nav-menu">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+                    <span class="visually-hidden">Menu</span>
+                </button>
+
+                <ul id="nav-menu" class="nav-menu">
+                    <li class="nav-menu__item">
+                        <a href="/html/index.html" class="nav-menu__link">Home</a>
+                    </li>
+                    <li class="nav-menu__item">
+                        <a href="/html/shop.html" class="nav-menu__link">Shop</a>
+                    </li>
+                    <li class="nav-menu__item nav-menu__item--mega">
+                        <button class="nav-menu__link nav-mega-toggle" type="button"
+                                aria-haspopup="true" aria-expanded="false" aria-controls="brands-mega">
+                            Ink Cartridge Brands
+                            <svg class="nav-menu__arrow" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+                        </button>
+                    </li>
+                    <li class="nav-menu__item">
+                        <a href="/html/ribbons.html" class="nav-menu__link">Typewriter &amp; Printer Ribbons</a>
+                    </li>
+                </ul>
+
+                <!-- Search bar -->
+                <form class="search-form search-form--nav" action="/html/shop.html" method="GET" role="search">
+                    <label for="search-input" class="visually-hidden">Search for products</label>
+                    <input
+                        type="search"
+                        id="search-input"
+                        name="q"
+                        class="search-form__input"
+                        placeholder="Search..."
+                        autocomplete="off"
+                        maxlength="200"
+                    >
+                    <button type="submit" class="search-form__button" aria-label="Search">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                    </button>
+                </form>
+            </div>
+        </nav>
+
+        <!-- Brands Mega Dropdown -->
+        <div class="brands-mega" id="brands-mega" hidden role="region" aria-label="Browse brands">
+            <div class="container">
+                <div class="brands-mega__cards"></div>
+                <a href="/html/shop.html" class="brands-mega__view-all">
+                    View All Brands
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
+                </a>
+            </div>
+        </div>
+    </header>
+
+    <!-- ============================================
+         MAIN CONTENT - BUSINESS ACCOUNTS PAGE
+         ============================================ -->
+    <main id="main-content" class="site-main">
+
+        <!-- Business hero -->
+        <section class="business-hero">
+            <div class="container">
+                <div class="business-hero__content">
+                    <h1 class="business-hero__title">Printing Supplies for Your Business</h1>
+                    <p class="business-hero__subtitle">
+                        Get volume discounts, flexible credit terms, and dedicated support. Perfect for offices, schools, and organisations of all sizes.
+                    </p>
+                    <div class="business-hero__cta">
+                        <a href="/html/business/apply.html" class="btn btn--primary btn--large">Apply for Business Account</a>
+                        <a href="#benefits" class="btn btn--secondary btn--large">Learn More</a>
+                    </div>
+                </div>
+                <div class="business-hero__image">
+                    <svg width="100%" height="300" viewBox="0 0 400 300" fill="none" aria-hidden="true">
+                        <rect width="400" height="300" rx="16" fill="#F0F9FF"/>
+                        <rect x="50" y="80" width="120" height="140" rx="8" fill="#E0F2FE"/>
+                        <rect x="60" y="100" width="100" height="60" rx="4" fill="#0891B2"/>
+                        <rect x="70" y="170" width="30" height="30" rx="2" fill="#22D3EE"/>
+                        <rect x="110" y="170" width="30" height="30" rx="2" fill="#22D3EE"/>
+                        <rect x="230" y="60" width="120" height="160" rx="8" fill="#E0F2FE"/>
+                        <rect x="240" y="80" width="100" height="70" rx="4" fill="#0891B2"/>
+                        <rect x="250" y="160" width="40" height="40" rx="2" fill="#22D3EE"/>
+                        <rect x="300" y="160" width="30" height="40" rx="2" fill="#A5F3FC"/>
+                        <circle cx="200" cy="250" r="30" fill="#0891B2" opacity="0.2"/>
+                        <path d="M185 250 L200 235 L215 250 L200 265 Z" fill="#0891B2"/>
+                    </svg>
+                </div>
+            </div>
+        </section>
+
+        <!-- Trust indicators -->
+        <section class="business-trust">
+            <div class="container">
+                <ul class="business-trust__list">
+                    <li class="business-trust__item">
+                        <span class="business-trust__stat">500+</span>
+                        <span class="business-trust__label">Business customers across NZ</span>
+                    </li>
+                    <li class="business-trust__item">
+                        <span class="business-trust__stat">20%</span>
+                        <span class="business-trust__label">Average savings for businesses</span>
+                    </li>
+                    <li class="business-trust__item">
+                        <span class="business-trust__stat">Same Day</span>
+                        <span class="business-trust__label">Dispatch for orders before 2pm</span>
+                    </li>
+                </ul>
+            </div>
+        </section>
+
+        <!-- Benefits section -->
+        <section id="benefits" class="business-benefits" aria-labelledby="benefits-heading">
+            <div class="container">
+                <div class="section-heading">
+                    <h2 id="benefits-heading" class="section-heading__title">Business Account Benefits</h2>
+                    <p class="section-heading__subtitle">Everything you need to manage your organisation's printing supplies efficiently</p>
+                </div>
+
+                <div class="benefits-grid">
+                    <article class="benefit-card">
+                        <span class="benefit-card__icon">
+                            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                <path d="M12 1v22"/>
+                                <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>
+                            </svg>
+                        </span>
+                        <h3 class="benefit-card__title">Volume Discounts</h3>
+                        <p class="benefit-card__description">
+                            Save more when you buy more. Tiered pricing means the more you order, the better your rates.
+                        </p>
+                    </article>
+
+                    <article class="benefit-card">
+                        <span class="benefit-card__icon">
+                            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                <rect x="1" y="4" width="22" height="16" rx="2" ry="2"/>
+                                <line x1="1" y1="10" x2="23" y2="10"/>
+                            </svg>
+                        </span>
+                        <h3 class="benefit-card__title">Credit Terms</h3>
+                        <p class="benefit-card__description">
+                            Approved businesses can access 30-day accounts. Order now, pay later with no interest.
+                        </p>
+                    </article>
+
+                    <article class="benefit-card">
+                        <span class="benefit-card__icon">
+                            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                                <polyline points="14 2 14 8 20 8"/>
+                                <line x1="16" y1="13" x2="8" y2="13"/>
+                                <line x1="16" y1="17" x2="8" y2="17"/>
+                                <polyline points="10 9 9 9 8 9"/>
+                            </svg>
+                        </span>
+                        <h3 class="benefit-card__title">Easy Invoicing</h3>
+                        <p class="benefit-card__description">
+                            Receive proper tax invoices with each order. Monthly statements for easy reconciliation.
+                        </p>
+                    </article>
+
+                    <article class="benefit-card">
+                        <span class="benefit-card__icon">
+                            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+                            </svg>
+                        </span>
+                        <h3 class="benefit-card__title">Dedicated Support</h3>
+                        <p class="benefit-card__description">
+                            Get a dedicated account manager who understands your business and can help with orders.
+                        </p>
+                    </article>
+
+                    <article class="benefit-card">
+                        <span class="benefit-card__icon">
+                            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                <rect x="1" y="3" width="15" height="13"/>
+                                <polygon points="16 8 20 8 23 11 23 16 16 16 16 8"/>
+                                <circle cx="5.5" cy="18.5" r="2.5"/>
+                                <circle cx="18.5" cy="18.5" r="2.5"/>
+                            </svg>
+                        </span>
+                        <h3 class="benefit-card__title">Priority Shipping</h3>
+                        <p class="benefit-card__description">
+                            Business accounts get priority processing and free shipping on orders over $100.
+                        </p>
+                    </article>
+
+                    <article class="benefit-card">
+                        <span class="benefit-card__icon">
+                            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                <line x1="18" y1="20" x2="18" y2="10"/>
+                                <line x1="12" y1="20" x2="12" y2="4"/>
+                                <line x1="6" y1="20" x2="6" y2="14"/>
+                            </svg>
+                        </span>
+                        <h3 class="benefit-card__title">Spending Reports</h3>
+                        <p class="benefit-card__description">
+                            Track your printing costs with detailed reports. Perfect for budgeting and procurement.
+                        </p>
+                    </article>
+                </div>
+            </div>
+        </section>
+
+        <!-- Who we serve -->
+        <section class="business-segments" aria-labelledby="segments-heading">
+            <div class="container">
+                <div class="section-heading">
+                    <h2 id="segments-heading" class="section-heading__title">Who We Serve</h2>
+                    <p class="section-heading__subtitle">Trusted by organisations across New Zealand</p>
+                </div>
+
+                <div class="segments-grid">
+                    <article class="segment-card">
+                        <div class="segment-card__image">
+                            <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                <rect x="2" y="7" width="20" height="14" rx="2" ry="2"/>
+                                <path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/>
+                            </svg>
+                        </div>
+                        <h3 class="segment-card__title">Offices & Corporates</h3>
+                        <p class="segment-card__description">
+                            From small offices to large corporates, we supply the printing consumables to keep your business running.
+                        </p>
+                    </article>
+
+                    <article class="segment-card">
+                        <div class="segment-card__image">
+                            <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                <path d="M22 10v6M2 10l10-5 10 5-10 5z"/>
+                                <path d="M6 12v5c3 3 9 3 12 0v-5"/>
+                            </svg>
+                        </div>
+                        <h3 class="segment-card__title">Schools & Education</h3>
+                        <p class="segment-card__description">
+                            Special pricing for schools and educational institutions. We understand school budgets.
+                        </p>
+                    </article>
+
+                    <article class="segment-card">
+                        <div class="segment-card__image">
+                            <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                <path d="M3 21h18"/>
+                                <path d="M9 21v-6a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v6"/>
+                                <path d="M5 21V8l7-4 7 4v13"/>
+                            </svg>
+                        </div>
+                        <h3 class="segment-card__title">Government & NGOs</h3>
+                        <p class="segment-card__description">
+                            We're experienced with government procurement processes and can work with your requirements.
+                        </p>
+                    </article>
+
+                    <article class="segment-card">
+                        <div class="segment-card__image">
+                            <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/>
+                                <circle cx="9" cy="7" r="4"/>
+                                <path d="M22 21v-2a4 4 0 0 0-3-3.87"/>
+                                <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+                            </svg>
+                        </div>
+                        <h3 class="segment-card__title">Resellers & IT Providers</h3>
+                        <p class="segment-card__description">
+                            Partner with us for wholesale pricing. Support your clients with reliable supply.
+                        </p>
+                    </article>
+                </div>
+            </div>
+        </section>
+
+        <!-- How it works -->
+        <section class="business-process" aria-labelledby="process-heading">
+            <div class="container">
+                <div class="section-heading">
+                    <h2 id="process-heading" class="section-heading__title">How It Works</h2>
+                    <p class="section-heading__subtitle">Get started in four simple steps</p>
+                </div>
+
+                <ol class="process-steps">
+                    <li class="process-step">
+                        <span class="process-step__number">1</span>
+                        <h3 class="process-step__title">Apply Online</h3>
+                        <p class="process-step__description">
+                            Fill out our simple application form. Takes less than 5 minutes.
+                        </p>
+                    </li>
+                    <li class="process-step">
+                        <span class="process-step__number">2</span>
+                        <h3 class="process-step__title">We Review</h3>
+                        <p class="process-step__description">
+                            Our team reviews your application, usually within 1-2 business days.
+                        </p>
+                    </li>
+                    <li class="process-step">
+                        <span class="process-step__number">3</span>
+                        <h3 class="process-step__title">Get Approved</h3>
+                        <p class="process-step__description">
+                            Once approved, you'll receive your business account login and credit limit.
+                        </p>
+                    </li>
+                    <li class="process-step">
+                        <span class="process-step__number">4</span>
+                        <h3 class="process-step__title">Start Ordering</h3>
+                        <p class="process-step__description">
+                            Place orders online or via your account manager. Enjoy your business benefits!
+                        </p>
+                    </li>
+                </ol>
+            </div>
+        </section>
+
+        <!-- CTA section -->
+        <section class="business-cta">
+            <div class="container">
+                <div class="business-cta__content">
+                    <h2 class="business-cta__title">Ready to Get Started?</h2>
+                    <p class="business-cta__description">
+                        Apply for a business account today and start saving on your printing supplies.
+                    </p>
+                    <div class="business-cta__buttons">
+                        <a href="/html/business/apply.html" class="btn btn--primary btn--large">Apply Now</a>
+                        <a href="/html/contact.html" class="btn btn--secondary-light btn--large">Talk to Us First</a>
+                    </div>
+                    <p class="business-cta__contact">
+                        Questions? Call us at <a href="tel:0800465278">0800 INK CART</a> or email <a href="mailto:business@inkcartridges.co.nz">business@inkcartridges.co.nz</a>
+                    </p>
+                </div>
+            </div>
+        </section>
+
+        <!-- FAQ preview -->
+        <section class="business-faq" aria-labelledby="faq-heading">
+            <div class="container">
+                <div class="section-heading">
+                    <h2 id="faq-heading" class="section-heading__title">Frequently Asked Questions</h2>
+                </div>
+
+                <div class="faq-list">
+                    <details class="faq-item">
+                        <summary class="faq-item__question">What are the requirements for a business account?</summary>
+                        <div class="faq-item__answer">
+                            <p>We require a valid NZBN or similar business registration. You'll need to provide your company details and a primary contact. Credit accounts require a credit check, but you can start with a prepaid account immediately.</p>
+                        </div>
+                    </details>
+                    <details class="faq-item">
+                        <summary class="faq-item__question">How long does approval take?</summary>
+                        <div class="faq-item__answer">
+                            <p>Most applications are reviewed within 1-2 business days. Prepaid business accounts can be approved instantly. Credit account approval may take 3-5 business days depending on the credit check process.</p>
+                        </div>
+                    </details>
+                    <details class="faq-item">
+                        <summary class="faq-item__question">Can I have multiple users on one account?</summary>
+                        <div class="faq-item__answer">
+                            <p>Yes! Business accounts can have multiple authorised users with individual logins. You can set spending limits and approval workflows for each user. This is perfect for organisations with multiple departments or locations.</p>
+                        </div>
+                    </details>
+                    <details class="faq-item">
+                        <summary class="faq-item__question">What credit terms are available?</summary>
+                        <div class="faq-item__answer">
+                            <p>Subject to credit approval, we offer 30-day payment terms. Credit limits vary based on business size and history, typically starting from $500 to $10,000+. You can request a credit limit increase as your account history builds.</p>
+                        </div>
+                    </details>
+                </div>
+
+                <p class="business-faq__more">
+                    <a href="/html/faq.html#business">View all business FAQs</a>
+                </p>
+            </div>
+        </section>
+
+    </main>
+
+    <!-- ============================================
+         FOOTER
+         ============================================ -->
+    <footer class="site-footer">
+        <div class="footer-main">
+            <div class="container">
+                <div class="footer-grid">
+                    <!-- Brand column -->
+                    <div class="footer-brand">
+                        <a href="/html/index.html" class="footer-brand__logo">
+                            <span class="logo__text">Ink<span>Cartridges</span>.co.nz</span>
+                        </a>
+                        <p class="footer-brand__description">
+                            New Zealand's trusted source for quality printing supplies.
+                            We help homes and businesses keep printing with genuine and
+                            compatible ink and toner cartridges.
+                        </p>
+                        <div class="footer-brand__social">
+                            <a href="#" aria-label="Facebook">
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M18 2h-3a5 5 0 0 0-5 5v3H7v4h3v8h4v-8h3l1-4h-4V7a1 1 0 0 1 1-1h3z"/></svg>
+                            </a>
+                            <a href="#" aria-label="Instagram">
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="2" width="20" height="20" rx="5" ry="5"/><path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z"/><line x1="17.5" y1="6.5" x2="17.51" y2="6.5"/></svg>
+                            </a>
+                            <a href="#" aria-label="LinkedIn">
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M16 8a6 6 0 0 1 6 6v7h-4v-7a2 2 0 0 0-2-2 2 2 0 0 0-2 2v7h-4v-7a6 6 0 0 1 6-6z"/><rect x="2" y="9" width="4" height="12"/><circle cx="4" cy="4" r="2"/></svg>
+                            </a>
+                        </div>
+                    </div>
+
+                    <!-- Shop column -->
+                    <div class="footer-column">
+                        <h3 class="footer-column__heading">Shop</h3>
+                        <ul class="footer-links">
+                            <li><a href="/html/shop.html">Browse All Products</a></li>
+                            <li><a href="/html/shop.html?brand=brother">Brother</a></li>
+                            <li><a href="/html/shop.html?brand=canon">Canon</a></li>
+                            <li><a href="/html/shop.html?brand=epson">Epson</a></li>
+                            <li><a href="/html/shop.html?brand=hp">HP</a></li>
+                            <li><a href="/html/shop.html?brand=samsung">Samsung</a></li>
+                            <li><a href="/html/shop.html?brand=lexmark">Lexmark</a></li>
+                            <li><a href="/html/shop.html?brand=oki">OKI</a></li>
+                            <li><a href="/html/shop.html?brand=fuji-xerox">Fuji Xerox</a></li>
+                            <li><a href="/html/shop.html?brand=kyocera">Kyocera</a></li>
+                        </ul>
+                    </div>
+
+                    <!-- Support column -->
+                    <div class="footer-column">
+                        <h3 class="footer-column__heading">Support</h3>
+                        <ul class="footer-links">
+                            <li><a href="/html/contact.html">Contact Us</a></li>
+                            <li><a href="/html/faq.html">FAQs</a></li>
+                            <li><a href="/html/returns.html">Returns & Refunds</a></li>
+                            <li><a href="/html/about.html">About Us</a></li>
+                            <li><a href="/html/business.html">Business Accounts</a></li>
+                        </ul>
+                    </div>
+
+                    <!-- Contact column -->
+                    <div class="footer-column">
+                        <h3 class="footer-column__heading">Contact</h3>
+                        <ul class="footer-links">
+                            <li>
+                                <strong>Phone:</strong><br>
+                                <a href="tel:0800465275">0800 INK KART (465 275)</a>
+                            </li>
+                            <li>
+                                <strong>Email:</strong><br>
+                                <a href="mailto:support@inkcartridges.co.nz">support@inkcartridges.co.nz</a>
+                            </li>
+                            <li>
+                                <strong>Hours:</strong><br>
+                                8am - 8pm, 7 days a week
+                            </li>
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Trust badges -->
+                <div class="footer-trust">
+                    <div class="footer-trust__item">
+                        <svg class="footer-trust__icon" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+                        <span>100% NZ Owned</span>
+                    </div>
+                    <div class="footer-trust__item">
+                        <svg class="footer-trust__icon" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+                        <span>Secure Checkout</span>
+                    </div>
+                    <div class="footer-trust__item">
+                        <svg class="footer-trust__icon" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="1" y="3" width="15" height="13"/><polygon points="16 8 20 8 23 11 23 16 16 16 16 8"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/></svg>
+                        <span>Fast NZ Delivery</span>
+                    </div>
+                    <div class="footer-trust__item">
+                        <svg class="footer-trust__icon" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+                        <span>NZ-Based Support</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="footer-bottom">
+            <div class="container">
+                <p class="footer-copyright">
+                    &copy; <span id="current-year">2025</span> InkCartridges.co.nz. All rights reserved.
+                </p>
+                <div class="footer-legal">
+                    <a href="/html/privacy.html">Privacy Policy</a>
+                    <a href="/html/terms.html">Terms & Conditions</a>
+                </div>
+                <div class="footer-payment">
+                    <span class="footer-payment__label">We accept:</span>
+                    <div class="footer-payment__icons">
+                        <span title="Visa">Visa</span>
+                        <span title="Mastercard">MC</span>
+                        <span title="PayPal">PayPal</span>
+                        <span title="Afterpay">Afterpay</span>
+                        <span title="POLi">POLi</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </footer>
+
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="/js/config.js"></script>
+    <script src="/js/security.js"></script>
+    <script src="/js/utils.js"></script>
+    <script src="/js/api.js"></script>
+    <script src="/js/auth.js"></script>
+    <script src="/js/main.js"></script>
+    <script src="/js/mega-nav.js"></script>
+    <script src="/js/modern-effects.js"></script>
+    <script src="/js/cart.js"></script>
+    <script src="/js/analytics.js"></script>
+</body>
+</html>

@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="en-NZ">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Verify your email address to complete registration">
+    <meta name="robots" content="noindex, nofollow">
+
+    <link rel="icon" type="image/svg+xml" href="/assets/icons/favicon.svg">
+    <title>Verify Your Email | InkCartridges.co.nz</title>
+
+    <!-- Google Analytics 4 (with consent mode) -->
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-SDQELG0FGD"></script>
+    <script>
+        window.dataLayer = window.dataLayer || [];
+        function gtag(){dataLayer.push(arguments);}
+        gtag('consent', 'default', {
+            analytics_storage: localStorage.getItem('cookie_consent') === 'accepted' ? 'granted' : 'denied'
+        });
+        gtag('js', new Date());
+        gtag('config', 'G-SDQELG0FGD');
+    </script>
+
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="stylesheet" href="/css/base.css">
+    <link rel="stylesheet" href="/css/layout.css">
+    <link rel="stylesheet" href="/css/components.css">
+    <link rel="stylesheet" href="/css/modern-effects.css">
+    <link rel="stylesheet" href="/css/pages.css">
+</head>
+<body>
+    <a href="#main-content" class="skip-link">Skip to main content</a>
+
+    <!-- SIMPLIFIED HEADER -->
+    <header class="site-header site-header--minimal site-header--centered">
+        <div class="header-main">
+            <div class="container">
+                <a href="/html/index.html" class="logo" aria-label="InkCartridges.co.nz Home">
+                    <svg class="logo__icon" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <path d="M6 9V2h12v7"/>
+                        <path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/>
+                        <rect x="6" y="14" width="12" height="8"/>
+                    </svg>
+                    <span class="logo__text">InkCartridges<span class="logo__domain">.co.nz</span></span>
+                </a>
+            </div>
+        </div>
+    </header>
+
+    <!-- MAIN CONTENT -->
+    <main id="main-content" class="site-main">
+        <section class="verify-email-page">
+            <div class="container container--narrow">
+                <div class="verify-email-card">
+                    <div class="verify-email-icon">
+                        <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M22 12h-4l-3 9L9 3l-3 9H2"/>
+                        </svg>
+                    </div>
+
+                    <h1 class="verify-email-heading">Check Your Email</h1>
+
+                    <p class="verify-email-text">
+                        We've sent a verification link to your email address.
+                        Please check your inbox and click the link to verify your account.
+                    </p>
+
+                    <div class="verify-email-note">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <circle cx="12" cy="12" r="10"/>
+                            <line x1="12" y1="16" x2="12" y2="12"/>
+                            <line x1="12" y1="8" x2="12.01" y2="8"/>
+                        </svg>
+                        <span>Don't forget to check your spam folder if you don't see the email.</span>
+                    </div>
+
+                    <div class="verify-email-actions">
+                        <button id="resend-btn" class="btn btn--primary btn--large" style="display:none;">
+                            Resend Verification Email
+                        </button>
+                        <a href="/html/account/login.html" class="btn btn--secondary btn--large">
+                            Go to Sign In
+                        </a>
+                        <a href="/html/index.html" class="btn btn--secondary btn--large">
+                            Back to Home
+                        </a>
+                    </div>
+                    <p id="resend-status" class="verify-email-note" style="display:none;"></p>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <!-- FOOTER -->
+    <footer class="site-footer">
+        <div class="footer-bottom">
+            <div class="container">
+                <p class="footer-copyright">
+                    &copy; <span id="current-year">2025</span> InkCartridges.co.nz. All rights reserved.
+                </p>
+                <div class="footer-legal">
+                    <a href="/html/privacy.html">Privacy Policy</a>
+                    <a href="/html/terms.html">Terms & Conditions</a>
+                </div>
+            </div>
+        </div>
+    </footer>
+
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="/js/config.js"></script>
+    <script src="/js/api.js"></script>
+    <script src="/js/auth.js"></script>
+    <script>
+        // Update year
+        document.getElementById('current-year').textContent = new Date().getFullYear();
+
+        // Handle Supabase email verification callback if tokens are in URL
+        document.addEventListener('DOMContentLoaded', async () => {
+            const hashParams = new URLSearchParams(window.location.hash.substring(1));
+            const resendBtn = document.getElementById('resend-btn');
+            const resendStatus = document.getElementById('resend-status');
+
+            // Show resend button for authenticated users who haven't verified yet
+            if (typeof Auth !== 'undefined') {
+                await Auth.initialized;
+                if (Auth.isAuthenticated()) {
+                    resendBtn.style.display = '';
+                }
+            }
+
+            // Resend verification email handler
+            resendBtn.addEventListener('click', async () => {
+                resendBtn.disabled = true;
+                resendBtn.textContent = 'Sending...';
+                resendStatus.style.display = 'none';
+
+                try {
+                    const response = await API.resendVerificationEmail();
+                    if (response.success) {
+                        resendStatus.textContent = 'Verification email sent! Please check your inbox.';
+                        resendStatus.style.display = '';
+                        resendBtn.textContent = 'Email Sent';
+                        setTimeout(() => {
+                            resendBtn.disabled = false;
+                            resendBtn.textContent = 'Resend Verification Email';
+                        }, 30000);
+                    } else {
+                        resendStatus.textContent = response.error || 'Failed to send email. Please try again.';
+                        resendStatus.style.display = '';
+                        resendBtn.disabled = false;
+                        resendBtn.textContent = 'Resend Verification Email';
+                    }
+                } catch (error) {
+                    resendStatus.textContent = error.message || 'Failed to send email. Please try again.';
+                    resendStatus.style.display = '';
+                    resendBtn.disabled = false;
+                    resendBtn.textContent = 'Resend Verification Email';
+                }
+            });
+
+            // Check if this is a verification callback (has tokens in URL)
+            if (hashParams.get('access_token') || hashParams.get('type') === 'signup') {
+                const heading = document.querySelector('.verify-email-heading');
+                const text = document.querySelector('.verify-email-text');
+                const icon = document.querySelector('.verify-email-icon');
+
+                if (heading) heading.textContent = 'Verifying...';
+                if (text) text.textContent = 'Please wait while we verify your email address.';
+                if (resendBtn) resendBtn.style.display = 'none';
+
+                // Initialize Supabase and let it process the tokens
+                const supabaseClient = supabase.createClient(
+                    Config.SUPABASE_URL,
+                    Config.SUPABASE_ANON_KEY
+                );
+
+                // Listen for auth state change
+                supabaseClient.auth.onAuthStateChange((event, session) => {
+                    if (event === 'SIGNED_IN') {
+                        if (heading) heading.textContent = 'Email Verified!';
+                        if (text) text.textContent = 'Your email has been verified successfully. You can now sign in to your account.';
+                        if (icon) icon.innerHTML = `
+                            <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                                <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
+                                <polyline points="22 4 12 14.01 9 11.01"/>
+                            </svg>
+                        `;
+
+                        // Clean up URL
+                        window.history.replaceState({}, '', window.location.pathname);
+                    }
+                });
+            }
+        });
+    </script>
+    <script src="/js/modern-effects.js"></script>
+    <script src="/js/analytics.js"></script>
+</body>
+</html>

@@ -1,0 +1,820 @@
+<!DOCTYPE html>
+<html lang="en-NZ">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Edit Product - InkCartridges.co.nz Admin">
+    <meta name="robots" content="noindex, nofollow">
+    <link rel="icon" type="image/svg+xml" href="/assets/icons/favicon.svg">
+    <title>Edit Product | InkCartridges.co.nz Admin</title>
+    <link rel="stylesheet" href="/css/base.css">
+    <link rel="stylesheet" href="/css/layout.css">
+    <link rel="stylesheet" href="/css/components.css">
+    <link rel="stylesheet" href="/css/modern-effects.css">
+    <link rel="stylesheet" href="/css/admin.css">
+    <style>
+        .product-edit {
+            max-width: 1000px;
+            margin: 0 auto;
+            padding: var(--spacing-6);
+        }
+
+        .product-edit__header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: var(--spacing-6);
+        }
+
+        .product-edit__back {
+            display: inline-flex;
+            align-items: center;
+            gap: var(--spacing-2);
+            color: var(--color-text-muted);
+            text-decoration: none;
+            font-size: var(--font-size-sm);
+            margin-bottom: var(--spacing-2);
+        }
+
+        .product-edit__back:hover {
+            color: var(--color-primary);
+        }
+
+        .product-edit__title {
+            font-size: var(--font-size-2xl);
+            font-weight: var(--font-weight-bold);
+            margin: 0;
+        }
+
+        .product-edit__actions {
+            display: flex;
+            gap: var(--spacing-3);
+        }
+
+        /* Form Sections */
+        .form-section {
+            background: var(--color-background);
+            border: 1px solid var(--color-border);
+            border-radius: var(--radius-lg);
+            padding: var(--spacing-6);
+            margin-bottom: var(--spacing-5);
+        }
+
+        .form-section__title {
+            font-size: var(--font-size-lg);
+            font-weight: var(--font-weight-semibold);
+            margin: 0 0 var(--spacing-4) 0;
+            padding-bottom: var(--spacing-3);
+            border-bottom: 1px solid var(--color-border-light);
+        }
+
+        .form-section__subtitle {
+            font-size: var(--font-size-sm);
+            color: var(--color-text-muted);
+            margin: calc(-1 * var(--spacing-3)) 0 var(--spacing-4) 0;
+        }
+
+        /* Form Grid */
+        .form-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: var(--spacing-4);
+        }
+
+        .form-grid--single {
+            grid-template-columns: 1fr;
+        }
+
+        .form-group {
+            display: flex;
+            flex-direction: column;
+            gap: var(--spacing-2);
+        }
+
+        .form-group--full {
+            grid-column: 1 / -1;
+        }
+
+        .form-label {
+            font-size: var(--font-size-sm);
+            font-weight: var(--font-weight-medium);
+            color: var(--color-text);
+        }
+
+        .form-label--required::after {
+            content: ' *';
+            color: var(--color-error);
+        }
+
+        .form-input,
+        .form-textarea,
+        .form-select {
+            padding: var(--spacing-3);
+            border: 1px solid var(--color-border);
+            border-radius: var(--radius-md);
+            font-size: var(--font-size-base);
+            background: var(--color-background);
+            transition: border-color 0.15s, box-shadow 0.15s;
+        }
+
+        .form-input:focus,
+        .form-textarea:focus,
+        .form-select:focus {
+            outline: none;
+            border-color: var(--color-primary);
+            box-shadow: 0 0 0 3px rgba(38, 127, 181, 0.1);
+        }
+
+        .form-textarea {
+            min-height: 120px;
+            resize: vertical;
+        }
+
+        .form-hint {
+            font-size: var(--font-size-xs);
+            color: var(--color-text-muted);
+        }
+
+        .form-input--readonly {
+            background: var(--color-background-alt);
+            cursor: not-allowed;
+        }
+
+        /* Image Upload */
+        .image-upload {
+            display: flex;
+            flex-wrap: wrap;
+            gap: var(--spacing-4);
+        }
+
+        .image-upload__item {
+            position: relative;
+            width: 150px;
+            height: 150px;
+            border: 2px dashed var(--color-border);
+            border-radius: var(--radius-lg);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+            background: var(--color-background-alt);
+        }
+
+        .image-upload__item--filled {
+            border-style: solid;
+        }
+
+        .image-upload__item img {
+            max-width: 100%;
+            max-height: 100%;
+            object-fit: contain;
+        }
+
+        .image-upload__remove {
+            position: absolute;
+            top: var(--spacing-2);
+            right: var(--spacing-2);
+            width: 28px;
+            height: 28px;
+            background: var(--color-error);
+            color: white;
+            border: none;
+            border-radius: 50%;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            opacity: 0;
+            transition: opacity 0.15s;
+        }
+
+        .image-upload__item:hover .image-upload__remove {
+            opacity: 1;
+        }
+
+        .image-upload__add {
+            flex-direction: column;
+            gap: var(--spacing-2);
+            cursor: pointer;
+            transition: all 0.15s;
+            color: var(--color-text-muted);
+        }
+
+        .image-upload__add:hover {
+            border-color: var(--color-primary);
+            background: var(--cyan-light);
+            color: var(--color-primary);
+        }
+
+        .image-upload__add input {
+            display: none;
+        }
+
+        .image-upload__primary-badge {
+            position: absolute;
+            bottom: var(--spacing-2);
+            left: var(--spacing-2);
+            padding: 2px 8px;
+            background: var(--color-primary);
+            color: white;
+            font-size: 10px;
+            font-weight: var(--font-weight-bold);
+            text-transform: uppercase;
+            border-radius: var(--radius-sm);
+        }
+
+        /* Toggle Switch */
+        .toggle-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: var(--spacing-3) 0;
+            border-bottom: 1px solid var(--color-border-light);
+        }
+
+        .toggle-row:last-child {
+            border-bottom: none;
+        }
+
+        .toggle-label {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+        }
+
+        .toggle-label__title {
+            font-weight: var(--font-weight-medium);
+        }
+
+        .toggle-label__desc {
+            font-size: var(--font-size-sm);
+            color: var(--color-text-muted);
+        }
+
+        .toggle-switch {
+            position: relative;
+            width: 48px;
+            height: 26px;
+        }
+
+        .toggle-switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+
+        .toggle-slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: var(--color-border);
+            transition: 0.3s;
+            border-radius: 26px;
+        }
+
+        .toggle-slider:before {
+            position: absolute;
+            content: "";
+            height: 20px;
+            width: 20px;
+            left: 3px;
+            bottom: 3px;
+            background-color: white;
+            transition: 0.3s;
+            border-radius: 50%;
+        }
+
+        .toggle-switch input:checked + .toggle-slider {
+            background-color: var(--color-success);
+        }
+
+        .toggle-switch input:checked + .toggle-slider:before {
+            transform: translateX(22px);
+        }
+
+        /* Compatibility Section */
+        .compatibility-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: var(--spacing-2);
+            margin-top: var(--spacing-3);
+            min-height: 40px;
+            padding: var(--spacing-3);
+            background: var(--color-background-alt);
+            border-radius: var(--radius-md);
+        }
+
+        .compatibility-tag {
+            display: inline-flex;
+            align-items: center;
+            gap: var(--spacing-2);
+            padding: var(--spacing-2) var(--spacing-3);
+            background: var(--color-background);
+            border: 1px solid var(--color-border);
+            border-radius: var(--radius-full);
+            font-size: var(--font-size-sm);
+        }
+
+        .compatibility-tag__remove {
+            width: 16px;
+            height: 16px;
+            background: none;
+            border: none;
+            cursor: pointer;
+            color: var(--color-text-muted);
+            padding: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .compatibility-tag__remove:hover {
+            color: var(--color-error);
+        }
+
+        .compatibility-search {
+            display: flex;
+            gap: var(--spacing-3);
+            margin-top: var(--spacing-3);
+        }
+
+        .compatibility-search__input {
+            flex: 1;
+        }
+
+        .compatibility-dropdown {
+            position: absolute;
+            top: 100%;
+            left: 0;
+            right: 0;
+            background: var(--color-background);
+            border: 1px solid var(--color-border);
+            border-radius: var(--radius-md);
+            box-shadow: var(--shadow-lg);
+            max-height: 200px;
+            overflow-y: auto;
+            z-index: 100;
+            display: none;
+        }
+
+        .compatibility-dropdown.is-open {
+            display: block;
+        }
+
+        .compatibility-dropdown__item {
+            padding: var(--spacing-3);
+            cursor: pointer;
+            transition: background 0.15s;
+        }
+
+        .compatibility-dropdown__item:hover {
+            background: var(--color-background-alt);
+        }
+
+        .compatibility-dropdown__item--selected {
+            background: var(--cyan-light);
+        }
+
+        /* Character Count */
+        .char-count {
+            font-size: var(--font-size-xs);
+            color: var(--color-text-muted);
+            text-align: right;
+            margin-top: var(--spacing-1);
+        }
+
+        .char-count--warning {
+            color: var(--color-warning);
+        }
+
+        .char-count--error {
+            color: var(--color-error);
+        }
+
+        /* SEO Preview */
+        .seo-preview {
+            margin-top: var(--spacing-4);
+            padding: var(--spacing-4);
+            background: var(--color-background-alt);
+            border-radius: var(--radius-md);
+        }
+
+        .seo-preview__title {
+            font-size: var(--font-size-sm);
+            font-weight: var(--font-weight-semibold);
+            color: var(--color-text-muted);
+            margin-bottom: var(--spacing-3);
+        }
+
+        .seo-preview__result {
+            font-family: var(--font-family-primary);
+        }
+
+        .seo-preview__result-title {
+            color: #1a0dab;
+            font-size: 18px;
+            margin-bottom: 2px;
+        }
+
+        .seo-preview__result-url {
+            color: #006621;
+            font-size: 14px;
+            margin-bottom: 2px;
+        }
+
+        .seo-preview__result-desc {
+            color: #545454;
+            font-size: 13px;
+            line-height: 1.4;
+        }
+
+        /* Loading State */
+        .loading-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(255, 255, 255, 0.8);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+        }
+
+        .loading-overlay.hidden {
+            display: none;
+        }
+
+        .loading-spinner {
+            width: 40px;
+            height: 40px;
+            border: 3px solid var(--color-border);
+            border-top-color: var(--color-primary);
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        /* Toast Messages */
+        .toast {
+            position: fixed;
+            bottom: var(--spacing-6);
+            right: var(--spacing-6);
+            padding: var(--spacing-4) var(--spacing-5);
+            background: var(--color-text);
+            color: white;
+            border-radius: var(--radius-md);
+            box-shadow: var(--shadow-lg);
+            display: flex;
+            align-items: center;
+            gap: var(--spacing-3);
+            z-index: 1001;
+            transform: translateY(100px);
+            opacity: 0;
+            transition: all 0.3s;
+        }
+
+        .toast.is-visible {
+            transform: translateY(0);
+            opacity: 1;
+        }
+
+        .toast--success {
+            background: var(--color-success);
+        }
+
+        .toast--error {
+            background: var(--color-error);
+        }
+
+        /* Responsive */
+        @media (max-width: 768px) {
+            .form-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .product-edit__header {
+                flex-direction: column;
+                align-items: flex-start;
+                gap: var(--spacing-4);
+            }
+
+            .product-edit__actions {
+                width: 100%;
+            }
+
+            .product-edit__actions .btn {
+                flex: 1;
+            }
+        }
+    </style>
+</head>
+<body class="admin-body">
+    <!-- Admin Sidebar -->
+    <aside class="admin-sidebar">
+        <div class="admin-sidebar__logo">
+            <a href="/html/admin/index.html">
+                <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M6 9V2h12v7"/>
+                    <path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/>
+                    <rect x="6" y="14" width="12" height="8"/>
+                </svg>
+                <span>InkCartridges</span>
+            </a>
+        </div>
+
+        <nav class="admin-nav">
+            <ul class="admin-nav__list">
+                <li class="admin-nav__item"><a href="/html/admin/index.html" class="admin-nav__link"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>Dashboard</a></li>
+                <li class="admin-nav__item"><a href="/html/admin/orders.html" class="admin-nav__link"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="8" height="4" rx="1"/></svg>Orders</a></li>
+                <li class="admin-nav__item"><a href="/html/admin/products.html" class="admin-nav__link admin-nav__link--active"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"/><line x1="3" y1="6" x2="21" y2="6"/><path d="M16 10a4 4 0 0 1-8 0"/></svg>Products</a></li>
+                <li class="admin-nav__item"><a href="/html/admin/customers.html" class="admin-nav__link"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>Customers</a></li>
+                <li class="admin-nav__separator">Analytics</li>
+                <li class="admin-nav__item"><a href="/html/admin/financial-health.html" class="admin-nav__link"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>Financial Health</a></li>
+                <li class="admin-nav__item"><a href="/html/admin/customer-intelligence.html" class="admin-nav__link"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg>Customer Intelligence</a></li>
+                <li class="admin-nav__item"><a href="/html/admin/operations.html" class="admin-nav__link"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>Operations</a></li>
+                <li class="admin-nav__item"><a href="/html/admin/sales.html" class="admin-nav__link"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="20" x2="12" y2="10"/><line x1="18" y1="20" x2="18" y2="4"/><line x1="6" y1="20" x2="6" y2="16"/></svg>Sales Analytics</a></li>
+                <li class="admin-nav__item"><a href="/html/admin/marketing.html" class="admin-nav__link"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>Marketing</a></li>
+                <li class="admin-nav__separator">System</li>
+                <li class="admin-nav__item"><a href="/html/admin/settings.html" class="admin-nav__link"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>Settings</a></li>
+            </ul>
+        </nav>
+
+        <div class="admin-sidebar__user">
+            <div class="admin-sidebar__avatar" id="admin-avatar">A</div>
+            <div>
+                <div style="font-weight: 500; font-size: 14px;" id="admin-name">Admin</div>
+                <div style="font-size: 12px; opacity: 0.7;" id="admin-email">admin@example.com</div>
+            </div>
+        </div>
+
+        <div style="padding: var(--spacing-4) var(--spacing-6); border-top: 1px solid rgba(255,255,255,0.1);">
+            <a href="/html/index.html" style="display: flex; align-items: center; gap: 8px; color: rgba(255,255,255,0.7); text-decoration: none; font-size: 14px;">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
+                    <polyline points="15 3 21 3 21 9"/>
+                    <line x1="10" y1="14" x2="21" y2="3"/>
+                </svg>
+                View Store
+            </a>
+        </div>
+    </aside>
+
+    <!-- Main Content -->
+    <main class="admin-main">
+        <div class="product-edit">
+            <!-- Header -->
+            <div class="product-edit__header">
+                <div>
+                    <a href="/html/admin/products.html" class="product-edit__back">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M19 12H5M12 19l-7-7 7-7"/>
+                        </svg>
+                        Back to Products
+                    </a>
+                    <h1 class="product-edit__title" id="page-title">Edit Product</h1>
+                </div>
+                <div class="product-edit__actions">
+                    <button type="button" class="btn btn--ghost" id="btn-cancel">Cancel</button>
+                    <button type="button" class="btn btn--primary" id="btn-save">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/>
+                            <polyline points="17 21 17 13 7 13 7 21"/>
+                            <polyline points="7 3 7 8 15 8"/>
+                        </svg>
+                        Save Changes
+                    </button>
+                </div>
+            </div>
+
+            <form id="product-form">
+                <!-- Basic Information -->
+                <section class="form-section">
+                    <h2 class="form-section__title">Basic Information</h2>
+                    <div class="form-grid">
+                        <div class="form-group">
+                            <label class="form-label" for="product-sku">SKU</label>
+                            <input type="text" id="product-sku" class="form-input form-input--readonly" readonly>
+                            <span class="form-hint">SKU cannot be changed after creation</span>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label form-label--required" for="product-name">Product Name</label>
+                            <input type="text" id="product-name" class="form-input" required maxlength="200">
+                        </div>
+                        <div class="form-group form-group--full">
+                            <label class="form-label" for="product-description">Description</label>
+                            <textarea id="product-description" class="form-textarea" maxlength="2000" placeholder="Enter product description..."></textarea>
+                            <div class="char-count" id="desc-char-count">0 / 2000</div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Product Details -->
+                <section class="form-section">
+                    <h2 class="form-section__title">Product Details</h2>
+                    <div class="form-grid">
+                        <div class="form-group">
+                            <label class="form-label form-label--required" for="product-brand">Brand</label>
+                            <select id="product-brand" class="form-select" required>
+                                <option value="">Select brand...</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label form-label--required" for="product-category">Category</label>
+                            <select id="product-category" class="form-select" required>
+                                <option value="">Select category...</option>
+                                <option value="ink_cartridge">Ink Cartridge</option>
+                                <option value="toner">Toner</option>
+                                <option value="drum">Drum Unit</option>
+                                <option value="printer">Printer</option>
+                                <option value="paper">Paper</option>
+                                <option value="accessory">Accessory</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label" for="product-color">Color</label>
+                            <select id="product-color" class="form-select">
+                                <option value="">Select color...</option>
+                                <option value="black">Black</option>
+                                <option value="cyan">Cyan</option>
+                                <option value="magenta">Magenta</option>
+                                <option value="yellow">Yellow</option>
+                                <option value="photo_black">Photo Black</option>
+                                <option value="light_cyan">Light Cyan</option>
+                                <option value="light_magenta">Light Magenta</option>
+                                <option value="gray">Gray</option>
+                                <option value="matte_black">Matte Black</option>
+                                <option value="multipack">Multipack</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label" for="product-source">Source</label>
+                            <select id="product-source" class="form-select">
+                                <option value="genuine">Genuine / OEM</option>
+                                <option value="compatible">Compatible / Generic</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label" for="product-yield">Page Yield</label>
+                            <input type="text" id="product-yield" class="form-input" placeholder="e.g., 300 pages">
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Pricing -->
+                <section class="form-section">
+                    <h2 class="form-section__title">Pricing</h2>
+                    <div class="form-grid">
+                        <div class="form-group">
+                            <label class="form-label form-label--required" for="product-price">Retail Price (NZD)</label>
+                            <input type="number" id="product-price" class="form-input" step="0.01" min="0" required>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label" for="product-compare-price">Compare at Price (RRP)</label>
+                            <input type="number" id="product-compare-price" class="form-input" step="0.01" min="0">
+                            <span class="form-hint">Original price for showing savings</span>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label" for="product-cost">Cost Price</label>
+                            <input type="number" id="product-cost" class="form-input" step="0.01" min="0">
+                            <span class="form-hint">Your cost (not shown to customers)</span>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Inventory -->
+                <section class="form-section">
+                    <h2 class="form-section__title">Inventory</h2>
+                    <div class="form-grid">
+                        <div class="form-group">
+                            <label class="form-label form-label--required" for="product-stock">Stock Quantity</label>
+                            <input type="number" id="product-stock" class="form-input" min="0" required>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label" for="product-low-stock">Low Stock Threshold</label>
+                            <input type="number" id="product-low-stock" class="form-input" min="0" value="5">
+                            <span class="form-hint">Alert when stock falls below this</span>
+                        </div>
+                    </div>
+                    <div style="margin-top: var(--spacing-4);">
+                        <div class="toggle-row">
+                            <div class="toggle-label">
+                                <span class="toggle-label__title">Active</span>
+                                <span class="toggle-label__desc">Product is visible in the store</span>
+                            </div>
+                            <label class="toggle-switch">
+                                <input type="checkbox" id="product-active" checked>
+                                <span class="toggle-slider"></span>
+                            </label>
+                        </div>
+                        <div class="toggle-row">
+                            <div class="toggle-label">
+                                <span class="toggle-label__title">Track Inventory</span>
+                                <span class="toggle-label__desc">Automatically update stock when orders are placed</span>
+                            </div>
+                            <label class="toggle-switch">
+                                <input type="checkbox" id="product-track-inventory" checked>
+                                <span class="toggle-slider"></span>
+                            </label>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Images -->
+                <section class="form-section">
+                    <h2 class="form-section__title">Images</h2>
+                    <p class="form-section__subtitle">First image will be used as the primary product image</p>
+                    <div class="image-upload" id="image-upload">
+                        <!-- Images will be rendered here -->
+                        <label class="image-upload__item image-upload__add">
+                            <input type="file" accept="image/*" id="image-input" multiple>
+                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <line x1="12" y1="5" x2="12" y2="19"/>
+                                <line x1="5" y1="12" x2="19" y2="12"/>
+                            </svg>
+                            <span style="font-size: var(--font-size-sm);">Add Image</span>
+                        </label>
+                    </div>
+                </section>
+
+                <!-- Compatible Printers -->
+                <section class="form-section">
+                    <h2 class="form-section__title">Compatible Printers</h2>
+                    <p class="form-section__subtitle">Add printers that work with this product</p>
+                    <div style="position: relative;">
+                        <div class="compatibility-search">
+                            <input type="text" id="printer-search" class="form-input compatibility-search__input" placeholder="Search for a printer...">
+                        </div>
+                        <div class="compatibility-dropdown" id="printer-dropdown">
+                            <!-- Printer options will be loaded here -->
+                        </div>
+                    </div>
+                    <div class="compatibility-list" id="compatibility-list">
+                        <!-- Selected printers will appear here -->
+                        <span style="color: var(--color-text-muted); font-size: var(--font-size-sm);">No printers added yet</span>
+                    </div>
+                </section>
+
+                <!-- SEO / Meta -->
+                <section class="form-section">
+                    <h2 class="form-section__title">SEO & Meta</h2>
+                    <p class="form-section__subtitle">Optimize for search engines</p>
+                    <div class="form-grid form-grid--single">
+                        <div class="form-group">
+                            <label class="form-label" for="meta-title">Meta Title</label>
+                            <input type="text" id="meta-title" class="form-input" maxlength="70" placeholder="Page title for search results">
+                            <div class="char-count" id="meta-title-count">0 / 70</div>
+                            <span class="form-hint">Recommended: 50-60 characters</span>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label" for="meta-description">Meta Description</label>
+                            <textarea id="meta-description" class="form-textarea" maxlength="160" placeholder="Brief description for search results" style="min-height: 80px;"></textarea>
+                            <div class="char-count" id="meta-desc-count">0 / 160</div>
+                            <span class="form-hint">Recommended: 120-160 characters</span>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label" for="meta-keywords">Focus Keyword</label>
+                            <input type="text" id="meta-keywords" class="form-input" placeholder="e.g., HP 65XL ink cartridge">
+                            <span class="form-hint">Primary keyword for this product</span>
+                        </div>
+                    </div>
+
+                    <!-- SEO Preview -->
+                    <div class="seo-preview">
+                        <div class="seo-preview__title">Search Result Preview</div>
+                        <div class="seo-preview__result">
+                            <div class="seo-preview__result-title" id="seo-preview-title">Product Name | InkCartridges.co.nz</div>
+                            <div class="seo-preview__result-url" id="seo-preview-url">https://inkcartridges.co.nz/product/sku</div>
+                            <div class="seo-preview__result-desc" id="seo-preview-desc">Product description will appear here...</div>
+                        </div>
+                    </div>
+                </section>
+            </form>
+        </div>
+    </main>
+
+    <!-- Loading Overlay -->
+    <div class="loading-overlay hidden" id="loading-overlay">
+        <div class="loading-spinner"></div>
+    </div>
+
+    <!-- Toast -->
+    <div class="toast" id="toast">
+        <span id="toast-message"></span>
+    </div>
+
+    <!-- Scripts -->
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="/js/config.js"></script>
+    <script src="/js/utils.js"></script>
+    <script src="/js/api.js"></script>
+    <script src="/js/auth.js"></script>
+    <script src="/js/admin-auth.js"></script>
+    <script src="/js/admin.js"></script>
+    <script src="/js/admin-product-edit.js"></script>
+</body>
+</html>

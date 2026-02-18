@@ -1,0 +1,26 @@
+# Dependencies
+node_modules/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Archive (moved files, not needed in production)
+archive/
+
+# Claude Code memory
+.claude/
+
+# Playwright MCP debug files
+.playwright-mcp/

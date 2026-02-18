@@ -1,0 +1,686 @@
+<!DOCTYPE html>
+<html lang="en-NZ">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Marketing Analytics - InkCartridges.co.nz Admin">
+    <meta name="robots" content="noindex, nofollow">
+    <link rel="icon" type="image/svg+xml" href="/assets/icons/favicon.svg">
+    <title>Marketing | InkCartridges.co.nz Admin</title>
+    <link rel="stylesheet" href="/css/base.css">
+    <link rel="stylesheet" href="/css/layout.css">
+    <link rel="stylesheet" href="/css/components.css">
+    <link rel="stylesheet" href="/css/modern-effects.css">
+    <link rel="stylesheet" href="/css/admin.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    <style>
+        .admin-page-content { padding: var(--spacing-6); width: 100%; box-sizing: border-box; }
+        .admin-kpi-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--spacing-5); margin-bottom: var(--spacing-6); }
+        .admin-kpi { background: var(--color-background); border-radius: var(--radius-lg); border: 1px solid var(--color-border); padding: var(--spacing-5); }
+        .admin-kpi__header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: var(--spacing-3); }
+        .admin-kpi__icon { width: 40px; height: 40px; border-radius: var(--radius-md); display: flex; align-items: center; justify-content: center; }
+        .admin-kpi__icon--primary { background: var(--cyan-light); color: var(--cyan-primary); }
+        .admin-kpi__icon--success { background: #D1FAE5; color: #059669; }
+        .admin-kpi__icon--warning { background: var(--yellow-light); color: var(--yellow-dark); }
+        .admin-kpi__icon--danger { background: var(--magenta-light); color: var(--magenta-primary); }
+        .admin-kpi__trend { font-size: var(--font-size-xs); font-weight: var(--font-weight-medium); display: flex; align-items: center; gap: 4px; }
+        .admin-kpi__trend--up { color: #059669; }
+        .admin-kpi__trend--down { color: var(--magenta-primary); }
+        .admin-kpi__value { font-size: var(--font-size-2xl); font-weight: var(--font-weight-bold); margin-bottom: var(--spacing-1); }
+        .admin-kpi__label { font-size: var(--font-size-sm); color: var(--color-text-muted); }
+        .admin-chart-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: var(--spacing-6); margin-bottom: var(--spacing-6); }
+        .admin-chart { background: var(--color-background); border-radius: var(--radius-lg); border: 1px solid var(--color-border); padding: var(--spacing-5); }
+        .admin-chart__header { margin-bottom: var(--spacing-4); }
+        .admin-chart__title { font-size: var(--font-size-lg); font-weight: var(--font-weight-semibold); margin: 0; }
+        .admin-chart__body { height: 300px; }
+        .admin-card { background: var(--color-background); border-radius: var(--radius-lg); border: 1px solid var(--color-border); }
+        .admin-card__header { padding: var(--spacing-5); border-bottom: 1px solid var(--color-border-light); display: flex; justify-content: space-between; align-items: center; }
+        .admin-card__title { font-size: var(--font-size-lg); font-weight: var(--font-weight-semibold); margin: 0; }
+        .admin-card__body { padding: var(--spacing-5); }
+        .admin-table { width: 100%; border-collapse: collapse; }
+        .admin-table th, .admin-table td { padding: var(--spacing-3) var(--spacing-4); text-align: left; border-bottom: 1px solid var(--color-border-light); }
+        .admin-table th { font-size: var(--font-size-xs); font-weight: var(--font-weight-semibold); color: var(--color-text-muted); text-transform: uppercase; letter-spacing: var(--letter-spacing-wide); background: var(--color-background-alt); }
+        .admin-funnel { display: flex; flex-direction: column; gap: 16px; }
+        .admin-funnel__step { display: flex; align-items: center; gap: 16px; }
+        .admin-funnel__bar { height: 32px; border-radius: 4px; min-width: 20px; transition: width 0.5s ease; }
+        .admin-funnel__info { display: flex; flex-direction: column; min-width: 150px; }
+        .admin-funnel__label { font-size: 13px; color: var(--color-text-muted); }
+        .admin-funnel__value { font-size: 16px; font-weight: 600; }
+        .admin-chart__period { display: flex; gap: var(--spacing-2); }
+        .admin-chart__period-btn { padding: var(--spacing-2) var(--spacing-3); border: 1px solid var(--color-border); border-radius: var(--radius-md); background: var(--color-background); font-size: var(--font-size-sm); cursor: pointer; }
+        .admin-chart__period-btn--active { background: var(--cyan-primary); color: white; border-color: var(--cyan-primary); }
+        @media (max-width: 1200px) { .admin-kpi-grid { grid-template-columns: repeat(2, 1fr); } }
+        @media (max-width: 768px) { .admin-kpi-grid, .admin-chart-grid { grid-template-columns: 1fr; } }
+    </style>
+</head>
+<body class="admin-body">
+    <aside class="admin-sidebar">
+        <div class="admin-sidebar__logo">
+            <a href="/html/admin/index.html">
+                <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9V2h12v7"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
+                <span>InkCartridges</span>
+            </a>
+        </div>
+        <nav class="admin-nav">
+            <ul class="admin-nav__list">
+                <li class="admin-nav__item"><a href="/html/admin/index.html" class="admin-nav__link"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>Dashboard</a></li>
+                <li class="admin-nav__item"><a href="/html/admin/orders.html" class="admin-nav__link"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="8" height="4" rx="1"/></svg>Orders<span class="admin-nav__badge" id="orders-badge">0</span></a></li>
+                <li class="admin-nav__item"><a href="/html/admin/products.html" class="admin-nav__link"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"/><line x1="3" y1="6" x2="21" y2="6"/><path d="M16 10a4 4 0 0 1-8 0"/></svg>Products</a></li>
+                <li class="admin-nav__item"><a href="/html/admin/customers.html" class="admin-nav__link"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>Customers</a></li>
+                <li class="admin-nav__separator">Analytics</li>
+                <li class="admin-nav__item"><a href="/html/admin/financial-health.html" class="admin-nav__link"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>Financial Health</a></li>
+                <li class="admin-nav__item"><a href="/html/admin/customer-intelligence.html" class="admin-nav__link"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>Customer Intelligence</a></li>
+                <li class="admin-nav__item"><a href="/html/admin/operations.html" class="admin-nav__link"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>Operations</a></li>
+                <li class="admin-nav__item"><a href="/html/admin/sales.html" class="admin-nav__link"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="20" x2="12" y2="10"/><line x1="18" y1="20" x2="18" y2="4"/><line x1="6" y1="20" x2="6" y2="16"/></svg>Sales Analytics</a></li>
+                <li class="admin-nav__item"><a href="/html/admin/marketing.html" class="admin-nav__link admin-nav__link--active"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>Marketing</a></li>
+                <li class="admin-nav__separator">System</li>
+                <li class="admin-nav__item"><a href="/html/admin/settings.html" class="admin-nav__link"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>Settings</a></li>
+            </ul>
+        </nav>
+        <div class="admin-sidebar__user">
+            <div class="admin-sidebar__avatar" id="admin-avatar">A</div>
+            <div>
+                <div style="font-weight: 500; font-size: 14px;" id="admin-name">Admin</div>
+                <div style="font-size: 12px; opacity: 0.7;" id="admin-email">admin@example.com</div>
+            </div>
+        </div>
+        <div style="padding: var(--spacing-4) var(--spacing-6); border-top: 1px solid rgba(255,255,255,0.1);">
+            <a href="/html/index.html" style="display: flex; align-items: center; gap: 8px; color: rgba(255,255,255,0.7); text-decoration: none; font-size: 14px;">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+                View Store
+            </a>
+        </div>
+    </aside>
+
+    <main class="admin-main">
+        <header class="admin-header" style="background: var(--color-background); border-bottom: 1px solid var(--color-border); padding: var(--spacing-4) var(--spacing-6); display: flex; justify-content: space-between; align-items: center;">
+            <div>
+                <h1 style="font-size: var(--font-size-xl); font-weight: var(--font-weight-bold); margin: 0;">Marketing</h1>
+                <p style="font-size: var(--font-size-sm); color: var(--color-text-muted); margin: var(--spacing-1) 0 0;">Track website traffic and conversions</p>
+            </div>
+            <div class="admin-chart__period">
+                <button class="admin-chart__period-btn" data-period="1h">1H</button>
+                <button class="admin-chart__period-btn" data-period="12h">12H</button>
+                <button class="admin-chart__period-btn" data-period="24h">24H</button>
+                <button class="admin-chart__period-btn admin-chart__period-btn--active" data-period="7d">7D</button>
+                <button class="admin-chart__period-btn" data-period="1m">1M</button>
+                <button class="admin-chart__period-btn" data-period="3m">3M</button>
+                <button class="admin-chart__period-btn" data-period="6m">6M</button>
+                <button class="admin-chart__period-btn" data-period="1y">1Y</button>
+                <button class="admin-chart__period-btn" data-period="2y">2Y</button>
+            </div>
+        </header>
+
+        <div class="admin-page-content">
+            <!-- Marketing KPIs -->
+            <div class="admin-kpi-grid">
+                <div class="admin-kpi" data-metric="visitors">
+                    <div class="admin-kpi__header">
+                        <div class="admin-kpi__icon admin-kpi__icon--primary">
+                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+                        </div>
+                        <div class="admin-kpi__trend" id="visitors-trend">--</div>
+                    </div>
+                    <div class="admin-kpi__value" id="visitors-value">--</div>
+                    <div class="admin-kpi__label">Total Visitors</div>
+                </div>
+
+                <div class="admin-kpi" data-metric="page-views">
+                    <div class="admin-kpi__header">
+                        <div class="admin-kpi__icon admin-kpi__icon--success">
+                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                        </div>
+                        <div class="admin-kpi__trend" id="pageviews-trend">--</div>
+                    </div>
+                    <div class="admin-kpi__value" id="pageviews-value">--</div>
+                    <div class="admin-kpi__label">Page Views</div>
+                </div>
+
+                <div class="admin-kpi" data-metric="bounce-rate">
+                    <div class="admin-kpi__header">
+                        <div class="admin-kpi__icon admin-kpi__icon--warning">
+                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+                        </div>
+                        <div class="admin-kpi__trend" id="bounce-trend">--</div>
+                    </div>
+                    <div class="admin-kpi__value" id="bounce-value">--</div>
+                    <div class="admin-kpi__label">Bounce Rate</div>
+                </div>
+
+                <div class="admin-kpi" data-metric="avg-session">
+                    <div class="admin-kpi__header">
+                        <div class="admin-kpi__icon admin-kpi__icon--danger">
+                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                        </div>
+                        <div class="admin-kpi__trend" id="session-trend">--</div>
+                    </div>
+                    <div class="admin-kpi__value" id="session-value">--</div>
+                    <div class="admin-kpi__label">Avg. Session Duration</div>
+                </div>
+            </div>
+
+            <!-- Charts Row -->
+            <div class="admin-chart-grid">
+                <div class="admin-chart">
+                    <div class="admin-chart__header">
+                        <h2 class="admin-chart__title">Website Traffic</h2>
+                    </div>
+                    <div class="admin-chart__body">
+                        <canvas id="trafficChart"></canvas>
+                    </div>
+                </div>
+
+                <div class="admin-chart">
+                    <div class="admin-chart__header">
+                        <h2 class="admin-chart__title">Traffic Sources</h2>
+                    </div>
+                    <div class="admin-chart__body">
+                        <canvas id="sourcesChart"></canvas>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Conversion Funnel & Top Pages -->
+            <div class="admin-chart-grid">
+                <div class="admin-card">
+                    <div class="admin-card__header">
+                        <h2 class="admin-card__title">Conversion Funnel</h2>
+                    </div>
+                    <div class="admin-card__body">
+                        <div class="admin-funnel" id="conversion-funnel">
+                            <div class="admin-funnel__step">
+                                <div class="admin-funnel__bar" id="funnel-visitors-bar" style="width: 100%; background-color: #267FB5;"></div>
+                                <div class="admin-funnel__info">
+                                    <span class="admin-funnel__label">Visitors</span>
+                                    <span class="admin-funnel__value" id="funnel-visitors">--</span>
+                                </div>
+                            </div>
+                            <div class="admin-funnel__step">
+                                <div class="admin-funnel__bar" id="funnel-views-bar" style="width: 0%; background-color: #8b5cf6;"></div>
+                                <div class="admin-funnel__info">
+                                    <span class="admin-funnel__label">Product Views</span>
+                                    <span class="admin-funnel__value" id="funnel-views">--</span>
+                                </div>
+                            </div>
+                            <div class="admin-funnel__step">
+                                <div class="admin-funnel__bar" id="funnel-cart-bar" style="width: 0%; background-color: #F4C430;"></div>
+                                <div class="admin-funnel__info">
+                                    <span class="admin-funnel__label">Add to Cart</span>
+                                    <span class="admin-funnel__value" id="funnel-cart">--</span>
+                                </div>
+                            </div>
+                            <div class="admin-funnel__step">
+                                <div class="admin-funnel__bar" id="funnel-checkout-bar" style="width: 0%; background-color: #10b981;"></div>
+                                <div class="admin-funnel__info">
+                                    <span class="admin-funnel__label">Checkout Started</span>
+                                    <span class="admin-funnel__value" id="funnel-checkout">--</span>
+                                </div>
+                            </div>
+                            <div class="admin-funnel__step">
+                                <div class="admin-funnel__bar" id="funnel-purchase-bar" style="width: 0%; background-color: #C71F6E;"></div>
+                                <div class="admin-funnel__info">
+                                    <span class="admin-funnel__label">Purchases</span>
+                                    <span class="admin-funnel__value" id="funnel-purchase">--</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="admin-card">
+                    <div class="admin-card__header">
+                        <h2 class="admin-card__title">Top Pages</h2>
+                    </div>
+                    <div class="admin-card__body" style="padding: 0;">
+                        <table class="admin-table">
+                            <thead>
+                                <tr>
+                                    <th>Page</th>
+                                    <th>Views</th>
+                                    <th>Bounce</th>
+                                </tr>
+                            </thead>
+                            <tbody id="top-pages-table">
+                                <tr><td colspan="3" style="text-align: center; color: var(--color-text-muted);">Loading...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Search Keywords & Devices -->
+            <div class="admin-chart-grid">
+                <div class="admin-card">
+                    <div class="admin-card__header">
+                        <h2 class="admin-card__title">Popular Search Terms</h2>
+                    </div>
+                    <div class="admin-card__body" style="padding: 0;">
+                        <table class="admin-table">
+                            <thead>
+                                <tr>
+                                    <th>Keyword</th>
+                                    <th>Searches</th>
+                                    <th>Conversions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="searchTermsTable">
+                                <tr><td colspan="3" style="text-align: center; color: var(--color-text-muted);">Loading...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div class="admin-chart">
+                    <div class="admin-chart__header">
+                        <h2 class="admin-chart__title">Device Breakdown</h2>
+                    </div>
+                    <div class="admin-chart__body">
+                        <canvas id="devicesChart"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="/js/config.js"></script>
+    <script src="/js/utils.js"></script>
+    <script src="/js/api.js"></script>
+    <script src="/js/auth.js"></script>
+    <script src="/js/admin.js"></script>
+    <script>
+    const MarketingPage = {
+        charts: {},
+        period: '30d',
+
+        async init() {
+            this.setupPeriodButtons();
+            await this.loadData();
+        },
+
+        setupPeriodButtons() {
+            document.querySelectorAll('.admin-chart__period-btn').forEach(btn => {
+                btn.addEventListener('click', async (e) => {
+                    document.querySelectorAll('.admin-chart__period-btn').forEach(b =>
+                        b.classList.remove('admin-chart__period-btn--active'));
+                    e.target.classList.add('admin-chart__period-btn--active');
+                    this.period = e.target.dataset.period;
+                    await this.loadData();
+                });
+            });
+        },
+
+        async loadData() {
+            try {
+                const response = await fetch(`${Config.API_URL}/api/analytics/marketing?period=${this.period}`);
+                if (response.ok) {
+                    const result = await response.json();
+                    if (result.success && result.data) {
+                        this.updateKPIs(result.data.kpis);
+                        this.updateFunnel(result.data.funnel);
+                        this.updateTopPages(result.data.topPages);
+                        this.updateSearchTerms(result.data.searchTerms);
+                        this.renderCharts(result.data);
+                        return;
+                    }
+                }
+            } catch (error) {
+                console.warn('Marketing API not available:', error.message);
+            }
+            // Show "No data" state if API unavailable
+            this.showNoData();
+        },
+
+        updateKPIs(kpis) {
+            if (!kpis) return this.showNoData();
+
+            // Visitors
+            this.updateKPI('visitors', kpis.visitors, kpis.visitorsTrend);
+            // Page Views
+            this.updateKPI('pageviews', kpis.pageViews, kpis.pageViewsTrend);
+            // Bounce Rate
+            this.updateKPI('bounce', kpis.bounceRate + '%', kpis.bounceTrend, true);
+            // Session Duration
+            this.updateKPI('session', this.formatDuration(kpis.avgSessionDuration), kpis.sessionTrend);
+        },
+
+        updateKPI(id, value, trend, invertTrend = false) {
+            const valueEl = document.getElementById(`${id}-value`);
+            const trendEl = document.getElementById(`${id}-trend`);
+
+            if (valueEl) valueEl.textContent = typeof value === 'number' ? value.toLocaleString() : value;
+            if (trendEl && trend !== undefined) {
+                const isPositive = invertTrend ? trend < 0 : trend > 0;
+                const trendClass = isPositive ? 'admin-kpi__trend--up' : 'admin-kpi__trend--down';
+                const arrow = isPositive
+                    ? '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg>'
+                    : '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 18 13.5 8.5 8.5 13.5 1 6"/><polyline points="17 18 23 18 23 12"/></svg>';
+                trendEl.className = `admin-kpi__trend ${trendClass}`;
+                trendEl.innerHTML = `${arrow} ${trend > 0 ? '+' : ''}${trend.toFixed(1)}%`;
+            }
+        },
+
+        formatDuration(seconds) {
+            if (!seconds) return '--';
+            const mins = Math.floor(seconds / 60);
+            const secs = Math.floor(seconds % 60);
+            return `${mins}m ${secs}s`;
+        },
+
+        updateFunnel(funnel) {
+            if (!funnel) return;
+
+            const visitors = funnel.visitors || 0;
+            const steps = [
+                { id: 'visitors', value: visitors, pct: 100 },
+                { id: 'views', value: funnel.productViews || 0, pct: visitors ? ((funnel.productViews / visitors) * 100) : 0 },
+                { id: 'cart', value: funnel.addToCart || 0, pct: visitors ? ((funnel.addToCart / visitors) * 100) : 0 },
+                { id: 'checkout', value: funnel.checkoutStarted || 0, pct: visitors ? ((funnel.checkoutStarted / visitors) * 100) : 0 },
+                { id: 'purchase', value: funnel.purchases || 0, pct: visitors ? ((funnel.purchases / visitors) * 100) : 0 }
+            ];
+
+            steps.forEach(step => {
+                const valueEl = document.getElementById(`funnel-${step.id}`);
+                const barEl = document.getElementById(`funnel-${step.id}-bar`);
+                if (valueEl) {
+                    valueEl.textContent = step.id === 'visitors'
+                        ? step.value.toLocaleString()
+                        : `${step.value.toLocaleString()} (${step.pct.toFixed(1)}%)`;
+                }
+                if (barEl) barEl.style.width = `${step.pct}%`;
+            });
+        },
+
+        updateTopPages(pages) {
+            const tbody = document.getElementById('top-pages-table');
+            if (!tbody) return;
+
+            if (!pages || pages.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="3" style="text-align: center; color: var(--color-text-muted);">No data available</td></tr>';
+                return;
+            }
+
+            tbody.innerHTML = pages.map(page => `
+                <tr>
+                    <td>${this.escapeHtml(page.path)}</td>
+                    <td>${page.views.toLocaleString()}</td>
+                    <td>${page.bounceRate}%</td>
+                </tr>
+            `).join('');
+        },
+
+        updateSearchTerms(terms) {
+            const tbody = document.getElementById('searchTermsTable');
+            if (!tbody) return;
+
+            if (!terms || terms.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="3" style="text-align: center; color: var(--color-text-muted);">No data available</td></tr>';
+                return;
+            }
+
+            tbody.innerHTML = terms.map(term => `
+                <tr>
+                    <td>${this.escapeHtml(term.keyword)}</td>
+                    <td>${term.searches.toLocaleString()}</td>
+                    <td>${term.conversions}</td>
+                </tr>
+            `).join('');
+        },
+
+        escapeHtml(str) {
+            const div = document.createElement('div');
+            div.textContent = str;
+            return div.innerHTML;
+        },
+
+        async showNoData() {
+            ['visitors', 'pageviews', 'bounce', 'session'].forEach(id => {
+                const valueEl = document.getElementById(`${id}-value`);
+                const trendEl = document.getElementById(`${id}-trend`);
+                if (valueEl) valueEl.textContent = '--';
+                if (trendEl) { trendEl.className = 'admin-kpi__trend'; trendEl.textContent = '--'; }
+            });
+
+            const topPages = document.getElementById('top-pages-table');
+            if (topPages) topPages.innerHTML = '<tr><td colspan="3" style="text-align: center; color: var(--color-text-muted);">Analytics tracking not available</td></tr>';
+
+            const searchTerms = document.getElementById('searchTermsTable');
+            if (searchTerms) searchTerms.innerHTML = '<tr><td colspan="3" style="text-align: center; color: var(--color-text-muted);">Search tracking not available</td></tr>';
+
+            // Load real order data for funnel
+            await this.loadOrderDataForFunnel();
+
+            // Render empty charts
+            this.renderCharts({});
+        },
+
+        async loadOrderDataForFunnel() {
+            try {
+                // Fetch both order data and cart analytics
+                const [ordersResponse, analyticsResponse] = await Promise.all([
+                    API.getOrders({ limit: 100 }),
+                    this.fetchCartAnalytics()
+                ]);
+
+                let purchases = 0;
+                let checkouts = 0;
+
+                if (ordersResponse.success && ordersResponse.data?.orders) {
+                    const orders = ordersResponse.data.orders;
+                    const completedStatuses = ['completed', 'shipped', 'delivered'];
+                    const checkoutStatuses = ['pending', 'processing', 'paid', ...completedStatuses];
+                    purchases = orders.filter(o => completedStatuses.includes(o.status)).length;
+                    checkouts = orders.filter(o => checkoutStatuses.includes(o.status)).length;
+                }
+
+                // Use real analytics data if available
+                const analytics = analyticsResponse || {};
+                const cartViews = analytics.cart_viewed || 0;
+                const cartsCreated = analytics.add_to_cart || cartViews;
+                const checkoutStarted = analytics.checkout_started || checkouts;
+                const paymentStarted = analytics.payment_started || checkouts;
+                const ordersCompleted = analytics.order_completed || purchases;
+                const abandoned = analytics.potential_abandonment || 0;
+
+                // Calculate metrics
+                const totalSessions = Math.max(cartsCreated, checkoutStarted, 1);
+                const abandonmentRate = cartsCreated > 0 ? ((cartsCreated - ordersCompleted) / cartsCreated * 100) : 0;
+
+                // Update funnel with real data
+                const steps = [
+                    { id: 'visitors', value: totalSessions, pct: 100 },
+                    { id: 'views', value: cartViews || Math.round(totalSessions * 0.8), pct: 80 },
+                    { id: 'cart', value: cartsCreated, pct: totalSessions ? (cartsCreated / totalSessions * 100) : 0 },
+                    { id: 'checkout', value: checkoutStarted, pct: totalSessions ? (checkoutStarted / totalSessions * 100) : 0 },
+                    { id: 'purchase', value: ordersCompleted, pct: totalSessions ? (ordersCompleted / totalSessions * 100) : 0 }
+                ];
+
+                steps.forEach(step => {
+                    const valueEl = document.getElementById(`funnel-${step.id}`);
+                    const barEl = document.getElementById(`funnel-${step.id}-bar`);
+                    if (valueEl) {
+                        valueEl.textContent = step.value > 0
+                            ? `${step.value.toLocaleString()} (${step.pct.toFixed(1)}%)`
+                            : '0';
+                    }
+                    if (barEl) barEl.style.width = `${Math.max(step.pct, step.value > 0 ? 5 : 0)}%`;
+                });
+
+                // Update abandonment rate display if element exists
+                const abandonmentEl = document.getElementById('abandonment-rate');
+                if (abandonmentEl) {
+                    abandonmentEl.textContent = `${abandonmentRate.toFixed(1)}%`;
+                }
+
+                // Update abandoned carts count
+                const abandonedCountEl = document.getElementById('abandoned-carts');
+                if (abandonedCountEl) {
+                    abandonedCountEl.textContent = abandoned.toLocaleString();
+                }
+
+            } catch (error) {
+                console.warn('Could not load funnel data:', error.message);
+                ['visitors', 'views', 'cart', 'checkout', 'purchase'].forEach(id => {
+                    const el = document.getElementById(`funnel-${id}`);
+                    if (el) el.textContent = '--';
+                });
+            }
+        },
+
+        async fetchCartAnalytics() {
+            try {
+                const apiUrl = typeof Config !== 'undefined' ? Config.API_URL : '';
+                if (!apiUrl) return null;
+
+                const response = await fetch(`${apiUrl}/api/analytics/cart-summary`, {
+                    method: 'GET',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${Auth.session?.access_token || ''}`
+                    },
+                    credentials: 'include'
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    return data.success ? data.data : null;
+                }
+                return null;
+            } catch (error) {
+                console.warn('Could not fetch cart analytics:', error);
+                return null;
+            }
+        },
+
+        renderCharts(data) {
+            this.renderTrafficChart(data.trafficData);
+            this.renderSourcesChart(data.sourcesData);
+            this.renderDevicesChart(data.devicesData);
+        },
+
+        getPeriodConfig() {
+            const configs = {
+                '1h': { points: 12, unit: 'minute', step: 5, isTime: true, format: { hour: 'numeric', minute: '2-digit' } },
+                '12h': { points: 24, unit: 'minute', step: 30, isTime: true, format: { hour: 'numeric', minute: '2-digit' } },
+                '24h': { points: 24, unit: 'hour', step: 1, isTime: true, format: { hour: 'numeric', minute: '2-digit' } },
+                '7d': { points: 7, unit: 'day', step: 1, isTime: false, format: { month: 'short', day: 'numeric' } },
+                '1m': { points: 30, unit: 'day', step: 1, isTime: false, format: { month: 'short', day: 'numeric' } },
+                '3m': { points: 12, unit: 'week', step: 1, isTime: false, format: { month: 'short', day: 'numeric' } },
+                '6m': { points: 24, unit: 'week', step: 1, isTime: false, format: { month: 'short', day: 'numeric' } },
+                '1y': { points: 12, unit: 'month', step: 1, isTime: false, format: { month: 'short', year: '2-digit' } },
+                '2y': { points: 24, unit: 'month', step: 1, isTime: false, format: { month: 'short', year: '2-digit' } }
+            };
+            return configs[this.period] || configs['7d'];
+        },
+
+        renderTrafficChart(data) {
+            const ctx = document.getElementById('trafficChart');
+            if (!ctx) return;
+
+            if (this.charts.traffic) this.charts.traffic.destroy();
+
+            const config = this.getPeriodConfig();
+            const labels = [...Array(config.points)].map((_, i) => {
+                const d = new Date();
+                if (config.unit === 'minute') d.setMinutes(d.getMinutes() - (config.points - 1 - i) * config.step);
+                else if (config.unit === 'hour') d.setHours(d.getHours() - (config.points - 1 - i));
+                else if (config.unit === 'day') d.setDate(d.getDate() - (config.points - 1 - i));
+                else if (config.unit === 'week') d.setDate(d.getDate() - (config.points - 1 - i) * 7);
+                else if (config.unit === 'month') d.setMonth(d.getMonth() - (config.points - 1 - i));
+                return config.isTime ? d.toLocaleTimeString('en-NZ', config.format) : d.toLocaleDateString('en-NZ', config.format);
+            });
+
+            const visitors = data?.visitors || labels.map(() => 0);
+            const pageViews = data?.pageViews || labels.map(() => 0);
+
+            this.charts.traffic = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels,
+                    datasets: [
+                        {
+                            label: 'Visitors',
+                            data: visitors,
+                            borderColor: '#267FB5',
+                            backgroundColor: 'rgba(38, 127, 181, 0.1)',
+                            fill: true,
+                            tension: 0.4
+                        },
+                        {
+                            label: 'Page Views',
+                            data: pageViews,
+                            borderColor: '#10b981',
+                            backgroundColor: 'transparent',
+                            tension: 0.4
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { legend: { position: 'top' } },
+                    scales: { y: { beginAtZero: true } }
+                }
+            });
+        },
+
+        renderSourcesChart(data) {
+            const ctx = document.getElementById('sourcesChart');
+            if (!ctx) return;
+
+            if (this.charts.sources) this.charts.sources.destroy();
+
+            const labels = data?.labels || ['Organic Search', 'Direct', 'Social', 'Referral', 'Email'];
+            const values = data?.values || [0, 0, 0, 0, 0];
+
+            this.charts.sources = new Chart(ctx, {
+                type: 'doughnut',
+                data: {
+                    labels,
+                    datasets: [{
+                        data: values,
+                        backgroundColor: ['#267FB5', '#10b981', '#F4C430', '#8b5cf6', '#C71F6E']
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { legend: { position: 'bottom' } }
+                }
+            });
+        },
+
+        renderDevicesChart(data) {
+            const ctx = document.getElementById('devicesChart');
+            if (!ctx) return;
+
+            if (this.charts.devices) this.charts.devices.destroy();
+
+            const labels = data?.labels || ['Desktop', 'Mobile', 'Tablet'];
+            const values = data?.values || [0, 0, 0];
+
+            this.charts.devices = new Chart(ctx, {
+                type: 'pie',
+                data: {
+                    labels,
+                    datasets: [{
+                        data: values,
+                        backgroundColor: ['#267FB5', '#10b981', '#F4C430']
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { legend: { position: 'bottom' } }
+                }
+            });
+        }
+    };
+
+    document.addEventListener('DOMContentLoaded', () => {
+        setTimeout(() => { MarketingPage.init(); }, 500);
+    });
+    </script>
+    <script src="/js/modern-effects.js"></script>
+</body>
+</html>

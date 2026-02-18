@@ -1,0 +1,789 @@
+<!DOCTYPE html>
+<html lang="en-NZ">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Customer Intelligence - InkCartridges.co.nz Admin">
+    <meta name="robots" content="noindex, nofollow">
+    <link rel="icon" type="image/svg+xml" href="/assets/icons/favicon.svg">
+    <title>Customer Intelligence | InkCartridges.co.nz Admin</title>
+    <link rel="stylesheet" href="/css/base.css">
+    <link rel="stylesheet" href="/css/layout.css">
+    <link rel="stylesheet" href="/css/components.css">
+    <link rel="stylesheet" href="/css/modern-effects.css">
+    <link rel="stylesheet" href="/css/admin.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    <style>
+        .admin-page-content { padding: var(--spacing-6); width: 100%; box-sizing: border-box; }
+        .admin-chart__period { display: flex; gap: var(--spacing-2); }
+        .admin-chart__period-btn { padding: var(--spacing-2) var(--spacing-3); border: 1px solid var(--color-border); border-radius: var(--radius-md); background: var(--color-background); font-size: var(--font-size-sm); cursor: pointer; transition: all 0.15s ease; }
+        .admin-chart__period-btn:hover { background: var(--color-background-alt); }
+        .admin-chart__period-btn--active { background: var(--cyan-primary); color: white; border-color: var(--cyan-primary); }
+
+        /* KPI Grid */
+        .kpi-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: var(--spacing-5); margin-bottom: var(--spacing-6); }
+        .kpi-card { background: var(--color-background); border-radius: var(--radius-lg); border: 1px solid var(--color-border); padding: var(--spacing-5); }
+        .kpi-card--highlight { border-color: var(--cyan-primary); border-width: 2px; }
+        .kpi-card__header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: var(--spacing-3); }
+        .kpi-card__icon { width: 44px; height: 44px; border-radius: var(--radius-md); display: flex; align-items: center; justify-content: center; }
+        .kpi-card__icon--ltv { background: #DBEAFE; color: #2563EB; }
+        .kpi-card__icon--cac { background: var(--magenta-light); color: var(--magenta-primary); }
+        .kpi-card__icon--ratio { background: #D1FAE5; color: #059669; }
+        .kpi-card__icon--churn { background: var(--yellow-light); color: var(--yellow-dark); }
+        .kpi-card__icon--nps { background: #E0E7FF; color: #4F46E5; }
+        .kpi-card__trend { font-size: var(--font-size-xs); font-weight: var(--font-weight-medium); display: flex; align-items: center; gap: 4px; padding: 4px 8px; border-radius: var(--radius-full); }
+        .kpi-card__trend--up { background: #D1FAE5; color: #059669; }
+        .kpi-card__trend--down { background: var(--magenta-light); color: var(--magenta-primary); }
+        .kpi-card__value { font-size: var(--font-size-2xl); font-weight: var(--font-weight-bold); margin-bottom: var(--spacing-1); }
+        .kpi-card__label { font-size: var(--font-size-sm); color: var(--color-text-muted); }
+        .kpi-card__sublabel { font-size: var(--font-size-xs); color: var(--color-text-muted); margin-top: var(--spacing-2); }
+
+        /* Chart Grid */
+        .chart-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: var(--spacing-6); margin-bottom: var(--spacing-6); }
+        .chart-card { background: var(--color-background); border-radius: var(--radius-lg); border: 1px solid var(--color-border); }
+        .chart-card--full { grid-column: span 2; }
+        .chart-card__header { padding: var(--spacing-5); border-bottom: 1px solid var(--color-border-light); display: flex; justify-content: space-between; align-items: center; }
+        .chart-card__title { font-size: var(--font-size-lg); font-weight: var(--font-weight-semibold); margin: 0; }
+        .chart-card__body { padding: var(--spacing-5); }
+        .chart-container { height: 300px; position: relative; }
+
+        /* Cohort Table */
+        .cohort-table { width: 100%; border-collapse: collapse; font-size: var(--font-size-sm); }
+        .cohort-table th, .cohort-table td { padding: var(--spacing-2) var(--spacing-3); text-align: center; border: 1px solid var(--color-border-light); }
+        .cohort-table th { background: var(--color-background-alt); font-weight: var(--font-weight-semibold); }
+        .cohort-table th:first-child, .cohort-table td:first-child { text-align: left; font-weight: var(--font-weight-medium); }
+        .cohort-cell { border-radius: 4px; }
+        .cohort-cell--100 { background: #267FB5; color: white; }
+        .cohort-cell--80 { background: rgba(38, 127, 181, 0.8); color: white; }
+        .cohort-cell--60 { background: rgba(38, 127, 181, 0.6); color: white; }
+        .cohort-cell--40 { background: rgba(38, 127, 181, 0.4); }
+        .cohort-cell--20 { background: rgba(38, 127, 181, 0.2); }
+        .cohort-cell--10 { background: rgba(38, 127, 181, 0.1); }
+
+        /* Customer Table */
+        .customer-table { width: 100%; border-collapse: collapse; }
+        .customer-table th, .customer-table td { padding: var(--spacing-3) var(--spacing-4); text-align: left; border-bottom: 1px solid var(--color-border-light); }
+        .customer-table th { font-size: var(--font-size-xs); font-weight: var(--font-weight-semibold); color: var(--color-text-muted); text-transform: uppercase; letter-spacing: var(--letter-spacing-wide); background: var(--color-background-alt); }
+        .customer-table tbody tr:hover { background: var(--color-background-alt); }
+
+        /* Health Badge */
+        .health-badge { display: inline-flex; padding: 4px 10px; border-radius: var(--radius-full); font-size: var(--font-size-xs); font-weight: var(--font-weight-medium); }
+        .health-badge--excellent { background: #D1FAE5; color: #059669; }
+        .health-badge--good { background: #DBEAFE; color: #2563EB; }
+        .health-badge--neutral { background: var(--color-background-alt); color: var(--color-text-muted); }
+        .health-badge--at-risk { background: var(--yellow-light); color: var(--yellow-dark); }
+        .health-badge--critical { background: var(--magenta-light); color: var(--magenta-primary); }
+
+        /* Risk Score Bar */
+        .risk-bar { width: 60px; height: 8px; background: var(--color-background-alt); border-radius: 4px; overflow: hidden; }
+        .risk-bar__fill { height: 100%; transition: width 0.3s; }
+        .risk-bar__fill--low { background: #10b981; }
+        .risk-bar__fill--medium { background: #F4C430; }
+        .risk-bar__fill--high { background: #C71F6E; }
+
+        /* Segment Cards */
+        .segment-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--spacing-4); margin-bottom: var(--spacing-4); }
+        .segment-card { background: var(--color-background-alt); border-radius: var(--radius-md); padding: var(--spacing-4); text-align: center; cursor: pointer; transition: all 0.2s; border: 2px solid transparent; }
+        .segment-card:hover { border-color: var(--cyan-primary); }
+        .segment-card--active { border-color: var(--cyan-primary); background: var(--cyan-light); }
+        .segment-card__count { font-size: var(--font-size-xl); font-weight: var(--font-weight-bold); margin-bottom: 4px; }
+        .segment-card__label { font-size: var(--font-size-sm); color: var(--color-text-muted); }
+
+        /* Responsive */
+        @media (max-width: 1400px) { .kpi-grid { grid-template-columns: repeat(3, 1fr); } }
+        @media (max-width: 1200px) {
+            .kpi-grid { grid-template-columns: repeat(2, 1fr); }
+            .chart-grid { grid-template-columns: 1fr; }
+            .chart-card--full { grid-column: span 1; }
+            .segment-grid { grid-template-columns: repeat(2, 1fr); }
+        }
+        @media (max-width: 768px) {
+            .kpi-grid { grid-template-columns: 1fr; }
+            .segment-grid { grid-template-columns: 1fr; }
+        }
+    </style>
+</head>
+<body class="admin-body">
+    <aside class="admin-sidebar">
+        <div class="admin-sidebar__logo">
+            <a href="/html/admin/index.html">
+                <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9V2h12v7"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
+                <span>InkCartridges</span>
+            </a>
+        </div>
+        <nav class="admin-nav">
+            <ul class="admin-nav__list">
+                <li class="admin-nav__item"><a href="/html/admin/index.html" class="admin-nav__link"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>Dashboard</a></li>
+                <li class="admin-nav__item"><a href="/html/admin/orders.html" class="admin-nav__link"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="8" height="4" rx="1"/></svg>Orders</a></li>
+                <li class="admin-nav__item"><a href="/html/admin/products.html" class="admin-nav__link"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"/><line x1="3" y1="6" x2="21" y2="6"/><path d="M16 10a4 4 0 0 1-8 0"/></svg>Products</a></li>
+                <li class="admin-nav__separator">Analytics</li>
+                <li class="admin-nav__item"><a href="/html/admin/financial-health.html" class="admin-nav__link"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>Financial Health</a></li>
+                <li class="admin-nav__item"><a href="/html/admin/customer-intelligence.html" class="admin-nav__link admin-nav__link--active"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>Customer Intelligence</a></li>
+                <li class="admin-nav__item"><a href="/html/admin/operations.html" class="admin-nav__link"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>Operations</a></li>
+                <li class="admin-nav__item"><a href="/html/admin/sales.html" class="admin-nav__link"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="20" x2="12" y2="10"/><line x1="18" y1="20" x2="18" y2="4"/><line x1="6" y1="20" x2="6" y2="16"/></svg>Sales Analytics</a></li>
+                <li class="admin-nav__item"><a href="/html/admin/marketing.html" class="admin-nav__link"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>Marketing</a></li>
+                <li class="admin-nav__separator">System</li>
+                <li class="admin-nav__item"><a href="/html/admin/settings.html" class="admin-nav__link"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>Settings</a></li>
+            </ul>
+        </nav>
+        <div class="admin-sidebar__user">
+            <div class="admin-sidebar__avatar" id="admin-avatar">A</div>
+            <div>
+                <div style="font-weight: 500; font-size: 14px;" id="admin-name">Admin</div>
+                <div style="font-size: 12px; opacity: 0.7;" id="admin-email">admin@example.com</div>
+            </div>
+        </div>
+        <div style="padding: var(--spacing-4) var(--spacing-6); border-top: 1px solid rgba(255,255,255,0.1);">
+            <a href="/html/index.html" style="display: flex; align-items: center; gap: 8px; color: rgba(255,255,255,0.7); text-decoration: none; font-size: 14px;">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+                View Store
+            </a>
+        </div>
+    </aside>
+
+    <main class="admin-main">
+        <header class="admin-header" style="background: var(--color-background); border-bottom: 1px solid var(--color-border); padding: var(--spacing-4) var(--spacing-6); display: flex; justify-content: space-between; align-items: center;">
+            <div>
+                <h1 style="font-size: var(--font-size-xl); font-weight: var(--font-weight-bold); margin: 0;">Customer Intelligence</h1>
+                <p style="font-size: var(--font-size-sm); color: var(--color-text-muted); margin: var(--spacing-1) 0 0;">LTV, CAC, cohort analysis, and retention metrics</p>
+            </div>
+            <div style="display: flex; gap: var(--spacing-3); align-items: center;">
+                <div class="admin-chart__period">
+                    <button class="admin-chart__period-btn" data-period="1h">1H</button>
+                    <button class="admin-chart__period-btn" data-period="12h">12H</button>
+                    <button class="admin-chart__period-btn" data-period="24h">24H</button>
+                    <button class="admin-chart__period-btn admin-chart__period-btn--active" data-period="7d">7D</button>
+                    <button class="admin-chart__period-btn" data-period="1m">1M</button>
+                    <button class="admin-chart__period-btn" data-period="3m">3M</button>
+                    <button class="admin-chart__period-btn" data-period="6m">6M</button>
+                    <button class="admin-chart__period-btn" data-period="1y">1Y</button>
+                    <button class="admin-chart__period-btn" data-period="2y">2Y</button>
+                </div>
+                <button class="btn btn--secondary btn--sm" id="export-btn">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                    Export
+                </button>
+                <button class="btn btn--primary btn--sm" id="refresh-btn">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+                    Refresh Scores
+                </button>
+            </div>
+        </header>
+
+        <div class="admin-page-content">
+            <!-- KPI Cards -->
+            <div class="kpi-grid">
+                <div class="kpi-card kpi-card--highlight">
+                    <div class="kpi-card__header">
+                        <div class="kpi-card__icon kpi-card__icon--ltv">
+                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+                        </div>
+                        <div class="kpi-card__trend kpi-card__trend--up" id="ltv-trend">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/></svg>
+                            <span>+12%</span>
+                        </div>
+                    </div>
+                    <div class="kpi-card__value" id="avg-ltv">$0</div>
+                    <div class="kpi-card__label">Avg Customer LTV</div>
+                    <div class="kpi-card__sublabel">Lifetime value estimate</div>
+                </div>
+
+                <div class="kpi-card">
+                    <div class="kpi-card__header">
+                        <div class="kpi-card__icon kpi-card__icon--cac">
+                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M16 8h-6a2 2 0 1 0 0 4h4a2 2 0 1 1 0 4H8"/><path d="M12 18V6"/></svg>
+                        </div>
+                        <div class="kpi-card__trend kpi-card__trend--down" id="cac-trend">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 18 13.5 8.5 8.5 13.5 1 6"/></svg>
+                            <span>-8%</span>
+                        </div>
+                    </div>
+                    <div class="kpi-card__value" id="avg-cac">$0</div>
+                    <div class="kpi-card__label">Avg CAC</div>
+                    <div class="kpi-card__sublabel">Customer acquisition cost</div>
+                </div>
+
+                <div class="kpi-card">
+                    <div class="kpi-card__header">
+                        <div class="kpi-card__icon kpi-card__icon--ratio">
+                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+                        </div>
+                    </div>
+                    <div class="kpi-card__value" id="ltv-cac-ratio">0:1</div>
+                    <div class="kpi-card__label">LTV:CAC Ratio</div>
+                    <div class="kpi-card__sublabel">Target: 3:1 or higher</div>
+                </div>
+
+                <div class="kpi-card">
+                    <div class="kpi-card__header">
+                        <div class="kpi-card__icon kpi-card__icon--churn">
+                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="8.5" cy="7" r="4"/><line x1="18" y1="8" x2="23" y2="13"/><line x1="23" y1="8" x2="18" y2="13"/></svg>
+                        </div>
+                        <div class="kpi-card__trend kpi-card__trend--down" id="churn-trend">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 18 13.5 8.5 8.5 13.5 1 6"/></svg>
+                            <span>-2%</span>
+                        </div>
+                    </div>
+                    <div class="kpi-card__value" id="churn-rate">0%</div>
+                    <div class="kpi-card__label">Churn Rate</div>
+                    <div class="kpi-card__sublabel">180+ days inactive</div>
+                </div>
+
+                <div class="kpi-card">
+                    <div class="kpi-card__header">
+                        <div class="kpi-card__icon kpi-card__icon--nps">
+                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3zM7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3"/></svg>
+                        </div>
+                    </div>
+                    <div class="kpi-card__value" id="nps-score">--</div>
+                    <div class="kpi-card__label">NPS Score</div>
+                    <div class="kpi-card__sublabel">Net Promoter Score</div>
+                </div>
+            </div>
+
+            <!-- Customer Segments -->
+            <div class="chart-card" style="margin-bottom: var(--spacing-6);">
+                <div class="chart-card__header">
+                    <h2 class="chart-card__title">Customer Segments</h2>
+                </div>
+                <div class="chart-card__body">
+                    <div class="segment-grid">
+                        <div class="segment-card segment-card--active" data-segment="all">
+                            <div class="segment-card__count" id="segment-all">0</div>
+                            <div class="segment-card__label">All Customers</div>
+                        </div>
+                        <div class="segment-card" data-segment="active">
+                            <div class="segment-card__count" id="segment-active" style="color: #10b981;">0</div>
+                            <div class="segment-card__label">Active (30 days)</div>
+                        </div>
+                        <div class="segment-card" data-segment="at-risk">
+                            <div class="segment-card__count" id="segment-at-risk" style="color: #F4C430;">0</div>
+                            <div class="segment-card__label">At Risk (90+ days)</div>
+                        </div>
+                        <div class="segment-card" data-segment="churned">
+                            <div class="segment-card__count" id="segment-churned" style="color: #C71F6E;">0</div>
+                            <div class="segment-card__label">Churned (180+ days)</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Charts Row -->
+            <div class="chart-grid">
+                <div class="chart-card">
+                    <div class="chart-card__header">
+                        <h2 class="chart-card__title">LTV Distribution</h2>
+                    </div>
+                    <div class="chart-card__body">
+                        <div class="chart-container">
+                            <canvas id="ltv-distribution-chart"></canvas>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="chart-card">
+                    <div class="chart-card__header">
+                        <h2 class="chart-card__title">CAC by Channel</h2>
+                    </div>
+                    <div class="chart-card__body">
+                        <div class="chart-container">
+                            <canvas id="cac-channel-chart"></canvas>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Cohort Retention Analysis -->
+            <div class="chart-card chart-card--full" style="margin-bottom: var(--spacing-6);">
+                <div class="chart-card__header">
+                    <h2 class="chart-card__title">Cohort Retention Analysis</h2>
+                    <div style="font-size: var(--font-size-sm); color: var(--color-text-muted);">
+                        Percentage of customers who made a repeat purchase
+                    </div>
+                </div>
+                <div class="chart-card__body" style="overflow-x: auto;">
+                    <table class="cohort-table" id="cohort-table">
+                        <thead>
+                            <tr>
+                                <th>Cohort</th>
+                                <th>Size</th>
+                                <th>Month 0</th>
+                                <th>Month 1</th>
+                                <th>Month 2</th>
+                                <th>Month 3</th>
+                                <th>Month 4</th>
+                                <th>Month 5</th>
+                                <th>Month 6</th>
+                            </tr>
+                        </thead>
+                        <tbody id="cohort-tbody">
+                            <!-- Populated by JS -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Customer Health Table -->
+            <div class="chart-card">
+                <div class="chart-card__header">
+                    <h2 class="chart-card__title">Customer Health Scores</h2>
+                    <select class="btn btn--secondary btn--sm" id="health-filter" style="padding: 6px 12px;">
+                        <option value="all">All Customers</option>
+                        <option value="at_risk">At Risk</option>
+                        <option value="critical">Critical</option>
+                        <option value="excellent">High Value</option>
+                    </select>
+                </div>
+                <div class="chart-card__body" style="padding: 0;">
+                    <table class="customer-table">
+                        <thead>
+                            <tr>
+                                <th>Customer</th>
+                                <th>Status</th>
+                                <th>Orders</th>
+                                <th>Total Spent</th>
+                                <th>Last Order</th>
+                                <th>Churn Risk</th>
+                                <th>Est. LTV</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="customer-health-tbody">
+                            <tr>
+                                <td colspan="8" style="text-align: center; padding: var(--spacing-6); color: var(--color-text-muted);">
+                                    Loading customer data...
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="/js/config.js"></script>
+    <script src="/js/utils.js"></script>
+    <script src="/js/api.js"></script>
+    <script src="/js/auth.js"></script>
+    <script src="/js/admin.js"></script>
+    <script src="/js/analytics-api.js"></script>
+    <script>
+    const CustomerIntelligencePage = {
+        charts: {},
+        customers: [],
+        selectedSegment: 'all',
+
+        async init() {
+            this.bindEvents();
+            await this.loadData();
+        },
+
+        bindEvents() {
+            // Period filter buttons
+            document.querySelectorAll('.admin-chart__period-btn').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    document.querySelectorAll('.admin-chart__period-btn').forEach(b =>
+                        b.classList.remove('admin-chart__period-btn--active'));
+                    e.target.classList.add('admin-chart__period-btn--active');
+                    this.currentPeriod = e.target.dataset.period;
+                    this.loadData();
+                });
+            });
+
+            // Segment cards
+            document.querySelectorAll('.segment-card').forEach(card => {
+                card.addEventListener('click', () => {
+                    document.querySelectorAll('.segment-card').forEach(c => c.classList.remove('segment-card--active'));
+                    card.classList.add('segment-card--active');
+                    this.selectedSegment = card.dataset.segment;
+                    this.filterCustomers();
+                });
+            });
+
+            // Health filter
+            document.getElementById('health-filter').addEventListener('change', (e) => {
+                this.filterCustomers(e.target.value);
+            });
+
+            // Refresh button
+            document.getElementById('refresh-btn').addEventListener('click', () => {
+                this.loadData();
+            });
+        },
+
+        async loadData() {
+            try {
+                // Load orders to calculate customer metrics
+                const ordersResponse = await API.getOrders({ limit: 1000 });
+                const orders = ordersResponse.success ? (ordersResponse.data?.orders || []) : [];
+
+                // Aggregate customer data from orders
+                this.processCustomerData(orders);
+
+                // Update KPIs
+                this.updateKPIs();
+
+                // Render charts
+                this.renderLTVChart();
+                this.renderCACChart();
+                this.renderCohortTable();
+
+                // Render customer table
+                this.renderCustomerTable();
+
+            } catch (error) {
+                console.error('Error loading customer data:', error);
+            }
+        },
+
+        processCustomerData(orders) {
+            const customerMap = new Map();
+
+            orders.forEach(order => {
+                if (order.status === 'cancelled' || order.status === 'refunded') return;
+
+                const email = order.email || order.user_id || 'unknown';
+                if (!customerMap.has(email)) {
+                    customerMap.set(email, {
+                        email,
+                        name: order.shipping_recipient_name || 'Customer',
+                        orders: [],
+                        totalSpent: 0,
+                        firstOrderDate: null,
+                        lastOrderDate: null
+                    });
+                }
+
+                const customer = customerMap.get(email);
+                customer.orders.push(order);
+                customer.totalSpent += order.total || 0;
+
+                const orderDate = new Date(order.created_at);
+                if (!customer.firstOrderDate || orderDate < customer.firstOrderDate) {
+                    customer.firstOrderDate = orderDate;
+                }
+                if (!customer.lastOrderDate || orderDate > customer.lastOrderDate) {
+                    customer.lastOrderDate = orderDate;
+                }
+            });
+
+            // Calculate metrics for each customer
+            this.customers = Array.from(customerMap.values()).map(customer => {
+                const daysSinceLastOrder = customer.lastOrderDate
+                    ? Math.floor((new Date() - customer.lastOrderDate) / (1000 * 60 * 60 * 24))
+                    : 999;
+
+                const orderCount = customer.orders.length;
+                const avgOrderValue = orderCount > 0 ? customer.totalSpent / orderCount : 0;
+
+                // Calculate LTV
+                let ltv = avgOrderValue * 1.5; // Default for single order
+                if (orderCount >= 2) {
+                    const daysBetween = (customer.lastOrderDate - customer.firstOrderDate) / (1000 * 60 * 60 * 24);
+                    const avgDaysBetweenOrders = daysBetween / (orderCount - 1);
+                    const annualOrders = avgDaysBetweenOrders > 0 ? 365 / avgDaysBetweenOrders : 1;
+                    ltv = avgOrderValue * annualOrders * 3;
+                }
+
+                // Determine status
+                let status = 'active';
+                let churnRisk = 10;
+                if (daysSinceLastOrder > 180) {
+                    status = 'churned';
+                    churnRisk = 100;
+                } else if (daysSinceLastOrder > 90) {
+                    status = 'at_risk';
+                    churnRisk = 75;
+                } else if (daysSinceLastOrder > 45) {
+                    status = 'cooling';
+                    churnRisk = 50;
+                } else if (daysSinceLastOrder > 21) {
+                    churnRisk = 25;
+                }
+
+                // Health score
+                let healthStatus = 'neutral';
+                if (churnRisk >= 75) healthStatus = 'critical';
+                else if (churnRisk >= 50) healthStatus = 'at-risk';
+                else if (orderCount >= 3 && avgOrderValue > 100) healthStatus = 'excellent';
+                else if (orderCount >= 2) healthStatus = 'good';
+
+                return {
+                    ...customer,
+                    orderCount,
+                    avgOrderValue,
+                    daysSinceLastOrder,
+                    ltv,
+                    status,
+                    churnRisk,
+                    healthStatus
+                };
+            });
+
+            // Sort by LTV descending
+            this.customers.sort((a, b) => b.ltv - a.ltv);
+        },
+
+        updateKPIs() {
+            const activeCustomers = this.customers.filter(c => c.status !== 'churned');
+
+            // Average LTV
+            const avgLTV = activeCustomers.length > 0
+                ? activeCustomers.reduce((sum, c) => sum + c.ltv, 0) / activeCustomers.length
+                : 0;
+            document.getElementById('avg-ltv').textContent = formatPrice(avgLTV);
+
+            // Estimated CAC (placeholder - would come from marketing spend / new customers)
+            const estimatedCAC = 25; // Placeholder
+            document.getElementById('avg-cac').textContent = formatPrice(estimatedCAC);
+
+            // LTV:CAC Ratio
+            const ratio = estimatedCAC > 0 ? (avgLTV / estimatedCAC).toFixed(1) : 0;
+            document.getElementById('ltv-cac-ratio').textContent = `${ratio}:1`;
+
+            // Churn rate
+            const totalWithOrders = this.customers.length;
+            const churned = this.customers.filter(c => c.status === 'churned').length;
+            const churnRate = totalWithOrders > 0 ? (churned / totalWithOrders * 100) : 0;
+            document.getElementById('churn-rate').textContent = churnRate.toFixed(1) + '%';
+
+            // Update segment counts
+            document.getElementById('segment-all').textContent = this.customers.length;
+            document.getElementById('segment-active').textContent = this.customers.filter(c => c.daysSinceLastOrder <= 30).length;
+            document.getElementById('segment-at-risk').textContent = this.customers.filter(c => c.status === 'at_risk').length;
+            document.getElementById('segment-churned').textContent = this.customers.filter(c => c.status === 'churned').length;
+        },
+
+        renderLTVChart() {
+            const ctx = document.getElementById('ltv-distribution-chart');
+            if (!ctx) return;
+
+            if (this.charts.ltv) this.charts.ltv.destroy();
+
+            // Create LTV distribution buckets
+            const buckets = {
+                '$0-50': 0,
+                '$50-100': 0,
+                '$100-200': 0,
+                '$200-500': 0,
+                '$500-1000': 0,
+                '$1000+': 0
+            };
+
+            this.customers.forEach(c => {
+                if (c.ltv < 50) buckets['$0-50']++;
+                else if (c.ltv < 100) buckets['$50-100']++;
+                else if (c.ltv < 200) buckets['$100-200']++;
+                else if (c.ltv < 500) buckets['$200-500']++;
+                else if (c.ltv < 1000) buckets['$500-1000']++;
+                else buckets['$1000+']++;
+            });
+
+            this.charts.ltv = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: Object.keys(buckets),
+                    datasets: [{
+                        label: 'Customers',
+                        data: Object.values(buckets),
+                        backgroundColor: '#267FB5',
+                        borderRadius: 4
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { legend: { display: false } },
+                    scales: {
+                        y: { beginAtZero: true, title: { display: true, text: 'Customers' } },
+                        x: { title: { display: true, text: 'Lifetime Value' } }
+                    }
+                }
+            });
+        },
+
+        renderCACChart() {
+            const ctx = document.getElementById('cac-channel-chart');
+            if (!ctx) return;
+
+            if (this.charts.cac) this.charts.cac.destroy();
+
+            // CAC by channel - data comes from attribution API
+            this.charts.cac = new Chart(ctx, {
+                type: 'doughnut',
+                data: {
+                    labels: ['Organic Search', 'Google Ads', 'Social', 'Direct', 'Referral'],
+                    datasets: [{
+                        data: [0, 0, 0, 0, 0],
+                        backgroundColor: ['#267FB5', '#C71F6E', '#F4C430', '#10b981', '#8b5cf6']
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { position: 'bottom' },
+                        tooltip: {
+                            callbacks: {
+                                label: (ctx) => `${ctx.label}: $${ctx.raw} CAC`
+                            }
+                        }
+                    }
+                }
+            });
+        },
+
+        renderCohortTable() {
+            const tbody = document.getElementById('cohort-tbody');
+
+            // Group customers by cohort (first order month)
+            const cohorts = {};
+            this.customers.forEach(c => {
+                if (!c.firstOrderDate) return;
+                const cohortMonth = c.firstOrderDate.toISOString().slice(0, 7);
+                if (!cohorts[cohortMonth]) {
+                    cohorts[cohortMonth] = { total: 0, months: {} };
+                }
+                cohorts[cohortMonth].total++;
+
+                // Track which months they ordered
+                c.orders.forEach(order => {
+                    const orderMonth = new Date(order.created_at);
+                    const monthDiff = Math.floor((orderMonth - c.firstOrderDate) / (30 * 24 * 60 * 60 * 1000));
+                    if (monthDiff >= 0 && monthDiff <= 6) {
+                        if (!cohorts[cohortMonth].months[monthDiff]) {
+                            cohorts[cohortMonth].months[monthDiff] = new Set();
+                        }
+                        cohorts[cohortMonth].months[monthDiff].add(c.email);
+                    }
+                });
+            });
+
+            // Get last 6 cohorts
+            const sortedCohorts = Object.keys(cohorts).sort().reverse().slice(0, 6);
+
+            if (sortedCohorts.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="9" style="text-align: center; padding: var(--spacing-6);">No cohort data available</td></tr>';
+                return;
+            }
+
+            tbody.innerHTML = sortedCohorts.map(month => {
+                const cohort = cohorts[month];
+                const cells = [];
+
+                for (let i = 0; i <= 6; i++) {
+                    const activeCount = cohort.months[i] ? cohort.months[i].size : 0;
+                    const retention = cohort.total > 0 ? (activeCount / cohort.total * 100) : 0;
+
+                    let cellClass = 'cohort-cell';
+                    if (retention >= 80) cellClass += ' cohort-cell--80';
+                    else if (retention >= 60) cellClass += ' cohort-cell--60';
+                    else if (retention >= 40) cellClass += ' cohort-cell--40';
+                    else if (retention >= 20) cellClass += ' cohort-cell--20';
+                    else if (retention > 0) cellClass += ' cohort-cell--10';
+
+                    cells.push(`<td><span class="${cellClass}" style="padding: 4px 8px;">${retention.toFixed(0)}%</span></td>`);
+                }
+
+                return `
+                    <tr>
+                        <td>${new Date(month + '-01').toLocaleDateString('en-NZ', { month: 'short', year: 'numeric' })}</td>
+                        <td>${cohort.total}</td>
+                        ${cells.join('')}
+                    </tr>
+                `;
+            }).join('');
+        },
+
+        renderCustomerTable() {
+            const tbody = document.getElementById('customer-health-tbody');
+            const filter = document.getElementById('health-filter').value;
+
+            let filtered = this.customers;
+
+            // Apply segment filter
+            if (this.selectedSegment === 'active') {
+                filtered = filtered.filter(c => c.daysSinceLastOrder <= 30);
+            } else if (this.selectedSegment === 'at-risk') {
+                filtered = filtered.filter(c => c.status === 'at_risk');
+            } else if (this.selectedSegment === 'churned') {
+                filtered = filtered.filter(c => c.status === 'churned');
+            }
+
+            // Apply health filter
+            if (filter !== 'all') {
+                if (filter === 'at_risk') {
+                    filtered = filtered.filter(c => c.healthStatus === 'at-risk' || c.healthStatus === 'critical');
+                } else if (filter === 'critical') {
+                    filtered = filtered.filter(c => c.healthStatus === 'critical');
+                } else if (filter === 'excellent') {
+                    filtered = filtered.filter(c => c.healthStatus === 'excellent' || c.healthStatus === 'good');
+                }
+            }
+
+            if (filtered.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="8" style="text-align: center; padding: var(--spacing-6); color: var(--color-text-muted);">No customers match the selected filters</td></tr>';
+                return;
+            }
+
+            tbody.innerHTML = filtered.slice(0, 50).map(customer => {
+                const healthClass = {
+                    'excellent': 'excellent',
+                    'good': 'good',
+                    'neutral': 'neutral',
+                    'at-risk': 'at-risk',
+                    'critical': 'critical'
+                }[customer.healthStatus] || 'neutral';
+
+                const riskBarClass = customer.churnRisk >= 75 ? 'high' : customer.churnRisk >= 50 ? 'medium' : 'low';
+
+                return `
+                    <tr>
+                        <td>
+                            <div style="font-weight: var(--font-weight-medium);">${customer.name}</div>
+                            <div style="font-size: var(--font-size-xs); color: var(--color-text-muted);">${customer.email}</div>
+                        </td>
+                        <td><span class="health-badge health-badge--${healthClass}">${customer.healthStatus.replace('-', ' ')}</span></td>
+                        <td>${customer.orderCount}</td>
+                        <td>${formatPrice(customer.totalSpent)}</td>
+                        <td>
+                            <div>${customer.lastOrderDate ? customer.lastOrderDate.toLocaleDateString('en-NZ') : 'Never'}</div>
+                            <div style="font-size: var(--font-size-xs); color: var(--color-text-muted);">${customer.daysSinceLastOrder} days ago</div>
+                        </td>
+                        <td>
+                            <div class="risk-bar">
+                                <div class="risk-bar__fill risk-bar__fill--${riskBarClass}" style="width: ${customer.churnRisk}%;"></div>
+                            </div>
+                            <div style="font-size: var(--font-size-xs); margin-top: 4px;">${customer.churnRisk}%</div>
+                        </td>
+                        <td>${formatPrice(customer.ltv)}</td>
+                        <td>
+                            <button class="btn btn--secondary btn--sm" onclick="CustomerIntelligencePage.viewCustomer('${customer.email}')">View</button>
+                        </td>
+                    </tr>
+                `;
+            }).join('');
+        },
+
+        filterCustomers(healthFilter) {
+            if (healthFilter) {
+                document.getElementById('health-filter').value = healthFilter;
+            }
+            this.renderCustomerTable();
+        },
+
+        viewCustomer(email) {
+            // Would open customer detail modal or navigate to customer page
+            console.log('View customer:', email);
+            alert('Customer detail view coming soon');
+        }
+    };
+
+    document.addEventListener('DOMContentLoaded', () => {
+        setTimeout(() => { CustomerIntelligencePage.init(); }, 500);
+    });
+    </script>
+    <script src="/js/modern-effects.js"></script>
+</body>
+</html>

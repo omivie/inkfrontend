@@ -1,0 +1,8 @@
+{
+  "name": "inkcartridges",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "npx serve inkcartridges -l 3000"
+  }
+}

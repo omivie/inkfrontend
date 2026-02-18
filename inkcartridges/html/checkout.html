@@ -1,0 +1,1462 @@
+<!DOCTYPE html>
+<html lang="en-NZ">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Secure checkout - InkCartridges.co.nz">
+    <meta name="robots" content="noindex, nofollow">
+
+    <link rel="icon" type="image/svg+xml" href="/assets/icons/favicon.svg">
+    <title>Checkout | InkCartridges.co.nz</title>
+
+    <!-- Google Analytics 4 (with consent mode) -->
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-SDQELG0FGD"></script>
+    <script>
+        window.dataLayer = window.dataLayer || [];
+        function gtag(){dataLayer.push(arguments);}
+        gtag('consent', 'default', {
+            analytics_storage: localStorage.getItem('cookie_consent') === 'accepted' ? 'granted' : 'denied'
+        });
+        gtag('js', new Date());
+        gtag('config', 'G-SDQELG0FGD');
+    </script>
+
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="stylesheet" href="/css/base.css">
+    <link rel="stylesheet" href="/css/layout.css">
+    <link rel="stylesheet" href="/css/components.css">
+    <link rel="stylesheet" href="/css/modern-effects.css">
+    <link rel="stylesheet" href="/css/pages.css">
+
+    <style>
+        /* Use website's CMYK color scheme */
+        .checkout-section__welcome {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.75rem 1rem;
+            background-color: #e8f4fc;
+            border: 1px solid #267FB5;
+            border-radius: 0.5rem;
+            color: #1a5a8a;
+            font-size: 0.9375rem;
+            margin-bottom: 1.5rem;
+        }
+        .checkout-section__welcome svg {
+            flex-shrink: 0;
+            color: #267FB5;
+        }
+        /* Section headings */
+        .checkout-section__heading {
+            color: #1a1a1a;
+            font-weight: 600;
+        }
+        /* Progress indicator colors */
+        .checkout-progress__step--active .checkout-progress__number {
+            background: #267FB5;
+            color: #fff;
+        }
+        .checkout-progress__step--active .checkout-progress__label {
+            color: #267FB5;
+            font-weight: 600;
+        }
+        .checkout-progress__step--completed .checkout-progress__number {
+            background: #267FB5;
+        }
+        /* Form focus states */
+        .form-input:focus,
+        .form-select:focus,
+        .form-textarea:focus {
+            border-color: #267FB5;
+            box-shadow: 0 0 0 3px rgba(38, 127, 181, 0.1);
+        }
+        /* Checkbox styling */
+        .form-checkbox:checked {
+            background-color: #267FB5;
+            border-color: #267FB5;
+        }
+        /* Button styling */
+        .checkout-submit__button {
+            background: #267FB5;
+            border-color: #267FB5;
+        }
+        .checkout-submit__button:hover {
+            background: #1a5a8a;
+            border-color: #1a5a8a;
+        }
+        /* Links */
+        .checkout-section__login-prompt a,
+        .checkout-summary__edit {
+            color: #267FB5;
+        }
+        .checkout-section__login-prompt a:hover,
+        .checkout-summary__edit:hover {
+            color: #C71F6E;
+        }
+        /* Verification required */
+        .verification-required {
+            background: #fef3c7;
+            border: 1px solid #F4C430;
+            border-radius: 8px;
+            padding: 1rem;
+            margin-bottom: 1.5rem;
+        }
+        .verification-required__title {
+            color: #92400e;
+            font-weight: 600;
+            margin: 0 0 0.5rem;
+        }
+        .verification-required__text {
+            color: #a16207;
+            margin: 0 0 0.75rem;
+            font-size: 0.9375rem;
+        }
+        .verification-required .btn {
+            font-size: 0.875rem;
+        }
+        /* Order summary */
+        .checkout-summary__heading {
+            color: #1a1a1a;
+            border-bottom: 2px solid #267FB5;
+            padding-bottom: 0.5rem;
+        }
+        .checkout-summary__row--total {
+            color: #1a1a1a;
+            font-weight: 700;
+        }
+        /* Trust signals */
+        .checkout-summary__trust-item svg {
+            color: #267FB5;
+        }
+    </style>
+</head>
+<body>
+    <a href="#main-content" class="skip-link">Skip to main content</a>
+
+    <!-- SIMPLIFIED CHECKOUT HEADER -->
+    <header class="site-header site-header--checkout">
+        <div class="header-main">
+            <div class="container">
+                <a href="/html/index.html" class="logo" aria-label="InkCartridges.co.nz Home">
+                    <span class="logo__text">Ink<span>Cartridges</span>.co.nz</span>
+                </a>
+
+                <div class="checkout-header__secure">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+                    <span>Secure Checkout</span>
+                </div>
+
+                <a href="/html/cart.html" class="checkout-header__back">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>
+                    Back to Cart
+                </a>
+            </div>
+        </div>
+    </header>
+
+    <!-- ============================================
+         MAIN CONTENT - CHECKOUT PAGE
+         ============================================ -->
+    <main id="main-content" class="site-main">
+        <section class="checkout-page">
+            <div class="container">
+                <!-- Header with title and progress -->
+                <div class="checkout-page__header">
+                    <h1 class="checkout-page__title">Checkout</h1>
+
+                    <!-- Progress indicator -->
+                    <div class="checkout-progress checkout-progress--compact" id="progress-top" aria-label="Checkout progress">
+                        <ol class="checkout-progress__steps">
+                            <li class="checkout-progress__step checkout-progress__step--completed" data-step="cart">
+                                <span class="checkout-progress__number">
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg>
+                                </span>
+                                <span class="checkout-progress__label">Cart</span>
+                            </li>
+                            <li class="checkout-progress__step checkout-progress__step--active" data-step="details">
+                                <span class="checkout-progress__number">2</span>
+                                <span class="checkout-progress__label">Details</span>
+                            </li>
+                            <li class="checkout-progress__step" data-step="payment">
+                                <span class="checkout-progress__number">3</span>
+                                <span class="checkout-progress__label">Payment</span>
+                            </li>
+                            <li class="checkout-progress__step" data-step="confirm">
+                                <span class="checkout-progress__number">4</span>
+                                <span class="checkout-progress__label">Confirm</span>
+                            </li>
+                        </ol>
+                    </div>
+                </div>
+
+                <div class="checkout-layout">
+                    <!-- Checkout form -->
+                    <div class="checkout-form-wrapper">
+                        <form class="checkout-form" id="checkout-form" novalidate>
+
+                            <!-- Contact information -->
+                            <fieldset class="checkout-section">
+                                <legend class="checkout-section__heading">
+                                    Contact Information
+                                </legend>
+
+                                <p class="checkout-section__login-prompt" id="login-prompt">
+                                    Already have an account? <a href="/html/account/login.html">Log in</a> for faster checkout.
+                                </p>
+                                <p class="checkout-section__welcome" id="welcome-message" style="display: none;">
+                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+                                    Welcome back, <strong id="user-display-name"></strong>!
+                                </p>
+
+                                <div class="form-row">
+                                    <div class="form-group">
+                                        <label for="email" class="form-label">Email Address <span class="required">*</span></label>
+                                        <input type="email" id="email" name="email" class="form-input" required autocomplete="email">
+                                        <span class="form-hint">We'll send your order confirmation here</span>
+                                    </div>
+                                </div>
+
+                                <div class="form-row">
+                                    <div class="form-group">
+                                        <label for="phone" class="form-label">Phone Number <span class="required">*</span></label>
+                                        <div class="phone-input-group">
+                                            <select id="phone-country" name="phone-country" class="phone-country-code" aria-label="Country code">
+                                                <option value="+64" selected>+64</option>
+                                                <option value="+61">+61</option>
+                                                <option value="+1">+1</option>
+                                                <option value="+44">+44</option>
+                                            </select>
+                                            <input type="tel" id="phone" name="phone" class="phone-number" required autocomplete="tel-national" placeholder="21 123 4567">
+                                        </div>
+                                        <span class="form-hint">For delivery updates</span>
+                                    </div>
+                                </div>
+
+                                <div class="form-row">
+                                    <div class="form-group form-group--checkbox">
+                                        <input type="checkbox" id="newsletter" name="newsletter" class="form-checkbox">
+                                        <label for="newsletter" class="form-label form-label--checkbox">
+                                            Email me with news and offers
+                                        </label>
+                                    </div>
+                                </div>
+                            </fieldset>
+
+                            <!-- Shipping address -->
+                            <fieldset class="checkout-section">
+                                <legend class="checkout-section__heading">
+                                    Shipping Address
+                                </legend>
+
+                                <div class="form-row form-row--two-col">
+                                    <div class="form-group">
+                                        <label for="first-name" class="form-label">First Name <span class="required">*</span></label>
+                                        <input type="text" id="first-name" name="firstName" class="form-input" required autocomplete="given-name" maxlength="100">
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="last-name" class="form-label">Last Name <span class="required">*</span></label>
+                                        <input type="text" id="last-name" name="lastName" class="form-input" required autocomplete="family-name" maxlength="100">
+                                    </div>
+                                </div>
+
+                                <div class="form-row">
+                                    <div class="form-group">
+                                        <label for="company" class="form-label">Company (optional)</label>
+                                        <input type="text" id="company" name="company" class="form-input" autocomplete="organization">
+                                    </div>
+                                </div>
+
+                                <div class="form-row">
+                                    <div class="form-group">
+                                        <label for="address1" class="form-label">Address <span class="required">*</span></label>
+                                        <input type="text" id="address1" name="address1" class="form-input" required autocomplete="address-line1" placeholder="Street address" maxlength="255">
+                                    </div>
+                                </div>
+
+                                <div class="form-row">
+                                    <div class="form-group">
+                                        <label for="address2" class="form-label">Apartment, suite, etc. (optional)</label>
+                                        <input type="text" id="address2" name="address2" class="form-input" autocomplete="address-line2">
+                                    </div>
+                                </div>
+
+                                <div class="form-row form-row--three-col">
+                                    <div class="form-group">
+                                        <label for="city" class="form-label">City <span class="required">*</span></label>
+                                        <input type="text" id="city" name="city" class="form-input" required autocomplete="address-level2" maxlength="100">
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="region" class="form-label">Region <span class="required">*</span></label>
+                                        <select id="region" name="region" class="form-select" required autocomplete="address-level1">
+                                            <option value="">Select region</option>
+                                            <option value="northland">Northland</option>
+                                            <option value="auckland">Auckland</option>
+                                            <option value="waikato">Waikato</option>
+                                            <option value="bay-of-plenty">Bay of Plenty</option>
+                                            <option value="gisborne">Gisborne</option>
+                                            <option value="hawkes-bay">Hawke's Bay</option>
+                                            <option value="taranaki">Taranaki</option>
+                                            <option value="manawatu-wanganui">Manawatu-Whanganui</option>
+                                            <option value="wellington">Wellington</option>
+                                            <option value="tasman">Tasman</option>
+                                            <option value="nelson">Nelson</option>
+                                            <option value="marlborough">Marlborough</option>
+                                            <option value="west-coast">West Coast</option>
+                                            <option value="canterbury">Canterbury</option>
+                                            <option value="otago">Otago</option>
+                                            <option value="southland">Southland</option>
+                                        </select>
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="postcode" class="form-label">Postcode <span class="required">*</span></label>
+                                        <input type="text" id="postcode" name="postcode" class="form-input" required autocomplete="postal-code" pattern="[0-9]{4}" maxlength="20">
+                                    </div>
+                                </div>
+
+                                <!-- Save address option - only shown for authenticated users -->
+                                <div class="form-row" id="save-address-row" style="display: none;">
+                                    <div class="form-group form-group--checkbox">
+                                        <input type="checkbox" id="save-address" name="saveAddress" class="form-checkbox">
+                                        <label for="save-address" class="form-label form-label--checkbox">
+                                            Save this address for next time
+                                        </label>
+                                    </div>
+                                </div>
+                            </fieldset>
+
+                            <!-- Billing address -->
+                            <fieldset class="checkout-section">
+                                <legend class="checkout-section__heading">
+                                    Billing Address
+                                </legend>
+
+                                <div class="form-row">
+                                    <div class="form-group form-group--checkbox">
+                                        <input type="checkbox" id="same-as-shipping" name="sameAsShipping" class="form-checkbox" checked>
+                                        <label for="same-as-shipping" class="form-label form-label--checkbox">
+                                            Same as shipping address
+                                        </label>
+                                    </div>
+                                </div>
+
+                                <!-- Billing address fields (shown when "Same as shipping" is unchecked) -->
+                                <div id="billing-address-fields" style="display: none;">
+                                    <div class="form-row form-row--two-col">
+                                        <div class="form-group">
+                                            <label for="billing-first-name" class="form-label">First Name <span class="required">*</span></label>
+                                            <input type="text" id="billing-first-name" name="billingFirstName" class="form-input" autocomplete="billing given-name">
+                                        </div>
+                                        <div class="form-group">
+                                            <label for="billing-last-name" class="form-label">Last Name <span class="required">*</span></label>
+                                            <input type="text" id="billing-last-name" name="billingLastName" class="form-input" autocomplete="billing family-name">
+                                        </div>
+                                    </div>
+
+                                    <div class="form-row">
+                                        <div class="form-group">
+                                            <label for="billing-address1" class="form-label">Address <span class="required">*</span></label>
+                                            <input type="text" id="billing-address1" name="billingAddress1" class="form-input" autocomplete="billing address-line1" placeholder="Street address">
+                                        </div>
+                                    </div>
+
+                                    <div class="form-row">
+                                        <div class="form-group">
+                                            <label for="billing-address2" class="form-label">Apartment, suite, etc. (optional)</label>
+                                            <input type="text" id="billing-address2" name="billingAddress2" class="form-input" autocomplete="billing address-line2">
+                                        </div>
+                                    </div>
+
+                                    <div class="form-row form-row--three-col">
+                                        <div class="form-group">
+                                            <label for="billing-city" class="form-label">City <span class="required">*</span></label>
+                                            <input type="text" id="billing-city" name="billingCity" class="form-input" autocomplete="billing address-level2">
+                                        </div>
+                                        <div class="form-group">
+                                            <label for="billing-region" class="form-label">Region <span class="required">*</span></label>
+                                            <select id="billing-region" name="billingRegion" class="form-select" autocomplete="billing address-level1">
+                                                <option value="">Select region</option>
+                                                <option value="northland">Northland</option>
+                                                <option value="auckland">Auckland</option>
+                                                <option value="waikato">Waikato</option>
+                                                <option value="bay-of-plenty">Bay of Plenty</option>
+                                                <option value="gisborne">Gisborne</option>
+                                                <option value="hawkes-bay">Hawke's Bay</option>
+                                                <option value="taranaki">Taranaki</option>
+                                                <option value="manawatu-wanganui">Manawatu-Whanganui</option>
+                                                <option value="wellington">Wellington</option>
+                                                <option value="tasman">Tasman</option>
+                                                <option value="nelson">Nelson</option>
+                                                <option value="marlborough">Marlborough</option>
+                                                <option value="west-coast">West Coast</option>
+                                                <option value="canterbury">Canterbury</option>
+                                                <option value="otago">Otago</option>
+                                                <option value="southland">Southland</option>
+                                            </select>
+                                        </div>
+                                        <div class="form-group">
+                                            <label for="billing-postcode" class="form-label">Postcode <span class="required">*</span></label>
+                                            <input type="text" id="billing-postcode" name="billingPostcode" class="form-input" autocomplete="billing postal-code" pattern="[0-9]{4}">
+                                        </div>
+                                    </div>
+                                </div>
+                            </fieldset>
+
+                            <!-- Order notes -->
+                            <fieldset class="checkout-section checkout-section--notes">
+                                <legend class="checkout-section__heading">Order Notes (optional)</legend>
+                                <div class="form-row">
+                                    <div class="form-group">
+                                        <label for="order-notes" class="form-label visually-hidden">Order notes</label>
+                                        <textarea id="order-notes" name="orderNotes" class="form-textarea" rows="3" placeholder="Special instructions for delivery (e.g., leave at door, call on arrival)" maxlength="500"></textarea>
+                                    </div>
+                                </div>
+                            </fieldset>
+
+                            <!-- Terms and submit -->
+                            <div class="checkout-submit">
+                                <div class="form-group form-group--checkbox">
+                                    <input type="checkbox" id="terms" name="terms" class="form-checkbox" required>
+                                    <label for="terms" class="form-label form-label--checkbox">
+                                        I agree to the <a href="/html/terms.html" target="_blank">Terms & Conditions</a> and <a href="/html/privacy.html" target="_blank">Privacy Policy</a> <span class="required">*</span>
+                                    </label>
+                                </div>
+
+                                <!-- Continue to Payment - saves data and redirects to payment page -->
+                                <button type="button" id="continue-to-payment-btn" class="btn btn--primary btn--lg btn--full-width checkout-submit__button">
+                                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+                                    Continue to Payment
+                                </button>
+
+                                <p class="checkout-submit__secure">
+                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+                                    Your details are secure
+                                </p>
+                            </div>
+
+                        </form>
+                    </div>
+
+                    <!-- Order summary sidebar -->
+                    <aside class="checkout-summary">
+                        <div class="checkout-summary__inner">
+                            <h2 class="checkout-summary__heading">Order Summary</h2>
+
+                            <!-- Cart items preview (dynamically populated) -->
+                            <ul class="checkout-summary__items" id="checkout-items">
+                                <!-- Items loaded from cart -->
+                            </ul>
+
+                            <a href="/html/cart.html" class="checkout-summary__edit">Edit cart</a>
+
+                            <!-- Coupon -->
+                            <div class="checkout-summary__coupon">
+                                <div class="coupon-form">
+                                    <input type="text" name="coupon" placeholder="Discount code" class="coupon-form__input">
+                                    <button type="button" class="btn btn--secondary coupon-form__btn">Apply</button>
+                                </div>
+                            </div>
+
+                            <!-- Totals (estimates - final amount calculated at payment) -->
+                            <div class="checkout-summary__totals">
+                                <div class="checkout-summary__row">
+                                    <span>Subtotal</span>
+                                    <span id="checkout-subtotal">$0.00</span>
+                                </div>
+                                <div class="checkout-summary__row">
+                                    <span>Shipping (est.)</span>
+                                    <span id="checkout-shipping">$5.00</span>
+                                </div>
+                                <div class="checkout-summary__row checkout-summary__row--discount" id="checkout-discount-row" hidden>
+                                    <span>Discount</span>
+                                    <span id="checkout-discount" class="text-success">-$0.00</span>
+                                </div>
+                                <div class="checkout-summary__row">
+                                    <span>GST (15%)</span>
+                                    <span>Included</span>
+                                </div>
+                                <div class="checkout-summary__row checkout-summary__row--total">
+                                    <span>Estimated Total</span>
+                                    <span id="checkout-total">$0.00 NZD</span>
+                                </div>
+                            </div>
+
+                            <!-- Trust signals -->
+                            <div class="checkout-summary__trust">
+                                <div class="checkout-summary__trust-item">
+                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="1" y="3" width="15" height="13"/><polygon points="16 8 20 8 23 11 23 16 16 16 16 8"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/></svg>
+                                    <span>Free shipping over $100</span>
+                                </div>
+                                <div class="checkout-summary__trust-item">
+                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+                                    <span>30-day returns</span>
+                                </div>
+                                <div class="checkout-summary__trust-item">
+                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+                                    <span>Secure checkout</span>
+                                </div>
+                            </div>
+                        </div>
+                    </aside>
+                </div>
+
+            </div>
+        </section>
+    </main>
+
+    <!-- ============================================
+         FOOTER
+         ============================================ -->
+    <footer class="site-footer">
+        <div class="footer-main">
+            <div class="container">
+                <div class="footer-grid">
+                    <!-- Brand column -->
+                    <div class="footer-brand">
+                        <a href="/html/index.html" class="footer-brand__logo">
+                            <span class="logo__text">Ink<span>Cartridges</span>.co.nz</span>
+                        </a>
+                        <p class="footer-brand__description">
+                            New Zealand's trusted source for quality printing supplies.
+                            We help homes and businesses keep printing with genuine and
+                            compatible ink and toner cartridges.
+                        </p>
+                        <div class="footer-brand__social">
+                            <a href="#" aria-label="Facebook">
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M18 2h-3a5 5 0 0 0-5 5v3H7v4h3v8h4v-8h3l1-4h-4V7a1 1 0 0 1 1-1h3z"/></svg>
+                            </a>
+                            <a href="#" aria-label="Instagram">
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="2" width="20" height="20" rx="5" ry="5"/><path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z"/><line x1="17.5" y1="6.5" x2="17.51" y2="6.5"/></svg>
+                            </a>
+                            <a href="#" aria-label="LinkedIn">
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M16 8a6 6 0 0 1 6 6v7h-4v-7a2 2 0 0 0-2-2 2 2 0 0 0-2 2v7h-4v-7a6 6 0 0 1 6-6z"/><rect x="2" y="9" width="4" height="12"/><circle cx="4" cy="4" r="2"/></svg>
+                            </a>
+                        </div>
+                    </div>
+
+                    <!-- Shop column -->
+                    <div class="footer-column">
+                        <h3 class="footer-column__heading">Shop</h3>
+                        <ul class="footer-links">
+                            <li><a href="/html/shop.html">Browse All Products</a></li>
+                            <li><a href="/html/shop.html?brand=brother">Brother</a></li>
+                            <li><a href="/html/shop.html?brand=canon">Canon</a></li>
+                            <li><a href="/html/shop.html?brand=epson">Epson</a></li>
+                            <li><a href="/html/shop.html?brand=hp">HP</a></li>
+                            <li><a href="/html/shop.html?brand=samsung">Samsung</a></li>
+                            <li><a href="/html/shop.html?brand=lexmark">Lexmark</a></li>
+                            <li><a href="/html/shop.html?brand=oki">OKI</a></li>
+                            <li><a href="/html/shop.html?brand=fuji-xerox">Fuji Xerox</a></li>
+                            <li><a href="/html/shop.html?brand=kyocera">Kyocera</a></li>
+                        </ul>
+                    </div>
+
+                    <!-- Support column -->
+                    <div class="footer-column">
+                        <h3 class="footer-column__heading">Support</h3>
+                        <ul class="footer-links">
+                            <li><a href="/html/contact.html">Contact Us</a></li>
+                            <li><a href="/html/faq.html">FAQs</a></li>
+                            <li><a href="/html/returns.html">Returns & Refunds</a></li>
+                            <li><a href="/html/about.html">About Us</a></li>
+                            <li><a href="/html/business.html">Business Accounts</a></li>
+                        </ul>
+                    </div>
+
+                    <!-- Contact column -->
+                    <div class="footer-column">
+                        <h3 class="footer-column__heading">Contact</h3>
+                        <ul class="footer-links">
+                            <li>
+                                <strong>Phone:</strong><br>
+                                <a href="tel:0800465275">0800 INK KART (465 275)</a>
+                            </li>
+                            <li>
+                                <strong>Email:</strong><br>
+                                <a href="mailto:support@inkcartridges.co.nz">support@inkcartridges.co.nz</a>
+                            </li>
+                            <li>
+                                <strong>Hours:</strong><br>
+                                8am - 8pm, 7 days a week
+                            </li>
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Trust badges -->
+                <div class="footer-trust">
+                    <div class="footer-trust__item">
+                        <svg class="footer-trust__icon" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+                        <span>100% NZ Owned</span>
+                    </div>
+                    <div class="footer-trust__item">
+                        <svg class="footer-trust__icon" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+                        <span>Secure Checkout</span>
+                    </div>
+                    <div class="footer-trust__item">
+                        <svg class="footer-trust__icon" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="1" y="3" width="15" height="13"/><polygon points="16 8 20 8 23 11 23 16 16 16 16 8"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/></svg>
+                        <span>Fast NZ Delivery</span>
+                    </div>
+                    <div class="footer-trust__item">
+                        <svg class="footer-trust__icon" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+                        <span>NZ-Based Support</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="footer-bottom">
+            <div class="container">
+                <p class="footer-copyright">
+                    &copy; <span id="current-year">2025</span> InkCartridges.co.nz. All rights reserved.
+                </p>
+                <div class="footer-legal">
+                    <a href="/html/privacy.html">Privacy Policy</a>
+                    <a href="/html/terms.html">Terms & Conditions</a>
+                </div>
+                <div class="footer-payment">
+                    <span class="footer-payment__label">We accept:</span>
+                    <div class="footer-payment__icons">
+                        <span title="Visa">Visa</span>
+                        <span title="Mastercard">MC</span>
+                        <span title="PayPal">PayPal</span>
+                        <span title="Afterpay">Afterpay</span>
+                        <span title="POLi">POLi</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </footer>
+
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="/js/config.js"></script>
+    <script src="/js/security.js"></script>
+    <script src="/js/api.js"></script>
+    <script src="/js/utils.js"></script>
+    <script src="/js/auth.js"></script>
+    <script src="/js/cart.js"></script>
+    <script src="/js/cart-analytics.js"></script>
+    <script src="/js/main.js"></script>
+    <script src="/js/modern-effects.js"></script>
+
+    <script>
+    // Checkout page state
+    const CheckoutPage = {
+        cartItems: [],
+        totals: { subtotal: 0, shipping: 0, discount: 0, total: 0 },
+        appliedCoupon: null,
+        isSubmitting: false,
+        isEmailVerified: false,
+
+        // Get image HTML for an item (uses ProductColors from utils.js)
+        getItemImageHTML(item) {
+            const color = item.color || (typeof ProductColors !== 'undefined' ? ProductColors.detectFromName(item.name) : null);
+            const colorStyle = color && typeof ProductColors !== 'undefined' ? ProductColors.getStyle(color) : null;
+
+            const esc = typeof Security !== 'undefined' ? Security.escapeAttr : (s) => s;
+
+            if (item.image) {
+                if (colorStyle) {
+                    return `<img src="${esc(item.image)}" alt="${esc(item.name)}" width="50" height="50" style="object-fit: contain;"
+                                onerror="this.style.display='none'; this.nextElementSibling.style.display='block';">
+                            <div style="${colorStyle} width: 50px; height: 50px; border-radius: 4px; display: none;"></div>`;
+                } else {
+                    return `<img src="${esc(item.image)}" alt="${esc(item.name)}" width="50" height="50" style="object-fit: contain;"
+                                onerror="this.onerror=null; this.src='/assets/images/placeholder-product.svg';">`;
+                }
+            } else if (colorStyle) {
+                return `<div style="${colorStyle} width: 50px; height: 50px; border-radius: 4px;"></div>`;
+            }
+            return `<svg width="50" height="50" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1"><rect x="6" y="2" width="12" height="20" rx="2"/></svg>`;
+        },
+
+        // Initialize checkout page
+        async init() {
+            await this.loadCart();
+            this.renderCart();
+            this.setupFormHandlers();
+            this.setupShippingHandlers();
+            this.setupBillingAddressToggle();
+            this.setupProgressValidation();
+
+            // Wait for Auth to initialize, then check auth status
+            await this.checkAuthAndPrefill();
+
+            // Restore any saved checkout state (after auth prefill, so auth data takes priority)
+            this.restoreCheckoutState();
+
+            // Check email verification status
+            await this.checkEmailVerification();
+
+            // Track checkout started for analytics
+            if (typeof CartAnalytics !== 'undefined') {
+                CartAnalytics.trackCheckoutStarted();
+            }
+        },
+
+        // Check email verification status
+        async checkEmailVerification() {
+            if (typeof Auth === 'undefined' || !Auth.isAuthenticated()) {
+                // Not logged in - assume verified for guest checkout
+                this.isEmailVerified = true;
+                return;
+            }
+
+            try {
+                const response = await API.getVerificationStatus();
+                console.log('Verification status response:', response);
+
+                if (response.success && response.data) {
+                    this.isEmailVerified = response.data.email_verified;
+                } else {
+                    // If API returns success: false but no specific "not verified" indication, assume verified
+                    this.isEmailVerified = true;
+                }
+            } catch (error) {
+                console.log('Verification check error:', error.message);
+                // If error message contains "already verified" or "verified", they ARE verified
+                // Also if we get any error, assume verified to not block checkout
+                if (error.message) {
+                    const msg = error.message.toLowerCase();
+                    if (msg.includes('verified') || msg.includes('not found')) {
+                        this.isEmailVerified = true;
+                    }
+                }
+                // Default to verified to not block users
+                this.isEmailVerified = true;
+            }
+
+            // Only show verification required if explicitly NOT verified
+            if (this.isEmailVerified === false) {
+                this.showVerificationRequired();
+            } else {
+                // Remove any existing verification message
+                const existingMsg = document.getElementById('verification-required');
+                if (existingMsg) existingMsg.remove();
+            }
+        },
+
+        // Show verification required message
+        showVerificationRequired() {
+            const formWrapper = document.querySelector('.checkout-form-wrapper');
+            if (!formWrapper) return;
+
+            const existingMsg = document.getElementById('verification-required');
+            if (existingMsg) return;
+
+            const verificationDiv = document.createElement('div');
+            verificationDiv.id = 'verification-required';
+            verificationDiv.className = 'verification-required';
+            verificationDiv.innerHTML = `
+                <h3 class="verification-required__title">Email Verification Required</h3>
+                <p class="verification-required__text">Please verify your email address before completing your order. Check your inbox for a verification link.</p>
+                <button type="button" class="btn btn--secondary btn--sm" id="resend-verification-btn">
+                    Resend Verification Email
+                </button>
+            `;
+
+            formWrapper.insertBefore(verificationDiv, formWrapper.firstChild);
+
+            // Resend verification handler
+            document.getElementById('resend-verification-btn')?.addEventListener('click', async () => {
+                try {
+                    await API.resendVerificationEmail();
+                    alert('Verification email sent! Please check your inbox.');
+                } catch (error) {
+                    alert('Failed to resend verification email. Please try again.');
+                }
+            });
+        },
+
+        // Setup progress indicator validation
+        setupProgressValidation() {
+            const form = document.getElementById('checkout-form');
+            if (!form) return;
+
+            // Details section fields (Contact + Shipping Address + Shipping Method)
+            const detailsFields = ['email', 'phone', 'first-name', 'last-name', 'address1', 'city', 'region', 'postcode'];
+
+            // Payment section fields
+            const paymentFields = ['card-number', 'card-expiry', 'card-cvc', 'card-name'];
+
+            // Listen for input changes
+            form.addEventListener('input', () => {
+                this.updateProgressIndicators();
+            });
+
+            form.addEventListener('change', () => {
+                this.updateProgressIndicators();
+            });
+
+            // Initial check
+            this.updateProgressIndicators();
+        },
+
+        // Check if details section is complete
+        isDetailsComplete() {
+            const requiredFields = ['email', 'phone', 'first-name', 'last-name', 'address1', 'city', 'region', 'postcode'];
+
+            for (const fieldId of requiredFields) {
+                const field = document.getElementById(fieldId);
+                if (!field || !field.value.trim()) {
+                    return false;
+                }
+                // Basic email validation
+                if (fieldId === 'email' && !field.value.includes('@')) {
+                    return false;
+                }
+            }
+            return true;
+        },
+
+        // Payment happens on payment.html, so always false here
+        isPaymentComplete() {
+            return false;
+        },
+
+        // Update all progress indicators
+        updateProgressIndicators() {
+            const detailsComplete = this.isDetailsComplete();
+            const paymentComplete = this.isPaymentComplete();
+
+            // Get all progress indicator containers
+            const progressContainers = document.querySelectorAll('.checkout-progress');
+
+            progressContainers.forEach(container => {
+                const detailsStep = container.querySelector('[data-step="details"]');
+                const paymentStep = container.querySelector('[data-step="payment"]');
+
+                if (detailsStep) {
+                    if (detailsComplete) {
+                        detailsStep.classList.remove('checkout-progress__step--active');
+                        detailsStep.classList.add('checkout-progress__step--completed');
+                        detailsStep.querySelector('.checkout-progress__number').innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg>';
+                    } else {
+                        detailsStep.classList.add('checkout-progress__step--active');
+                        detailsStep.classList.remove('checkout-progress__step--completed');
+                        detailsStep.querySelector('.checkout-progress__number').textContent = '2';
+                    }
+                }
+
+                if (paymentStep) {
+                    if (paymentComplete && detailsComplete) {
+                        paymentStep.classList.remove('checkout-progress__step--active');
+                        paymentStep.classList.add('checkout-progress__step--completed');
+                        paymentStep.querySelector('.checkout-progress__number').innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg>';
+                    } else if (detailsComplete) {
+                        paymentStep.classList.add('checkout-progress__step--active');
+                        paymentStep.classList.remove('checkout-progress__step--completed');
+                        paymentStep.querySelector('.checkout-progress__number').textContent = '3';
+                    } else {
+                        paymentStep.classList.remove('checkout-progress__step--active');
+                        paymentStep.classList.remove('checkout-progress__step--completed');
+                        paymentStep.querySelector('.checkout-progress__number').textContent = '3';
+                    }
+                }
+            });
+        },
+
+        // Load cart from Cart object (server-first for authenticated users)
+        async loadCart() {
+            console.log('📦 CheckoutPage.loadCart() starting...');
+
+            // Wait for Cart to be initialized
+            if (typeof Cart !== 'undefined') {
+                console.log('📦 Cart found, loading:', Cart.loading, 'items:', Cart.items?.length);
+
+                // Wait for Cart to finish loading (with 10 second timeout)
+                const maxWait = 10000;
+                const startTime = Date.now();
+
+                await new Promise(resolve => {
+                    const check = () => {
+                        if (!Cart.loading) {
+                            console.log('📦 Cart finished loading, items:', Cart.items?.length);
+                            resolve();
+                        } else if (Date.now() - startTime > maxWait) {
+                            console.warn('📦 Cart loading timeout, proceeding anyway');
+                            resolve();
+                        } else {
+                            setTimeout(check, 50);
+                        }
+                    };
+                    check();
+                });
+
+                this.cartItems = Cart.items || [];
+                this.appliedCoupon = Cart.appliedCoupon;
+                console.log('📦 Loaded cartItems:', this.cartItems.length);
+            } else {
+                console.warn('📦 Cart not available');
+                this.cartItems = [];
+                this.appliedCoupon = null;
+            }
+
+            if (this.cartItems.length === 0) {
+                console.log('📦 Cart is empty, redirecting to cart page');
+                window.location.href = '/html/cart.html';
+                return;
+            }
+
+            console.log('📦 Proceeding with checkout, items:', this.cartItems.length);
+
+            // DISPLAY ONLY - Calculate estimated totals for UI
+            // SECURITY: These values are NEVER sent to payment processor.
+            // Backend recalculates all totals when creating the order in payment.html
+            this.totals.subtotal = this.cartItems.reduce((sum, item) => sum + (item.price * item.quantity), 0);
+            this.calculateDiscount();
+            this.updateShippingCost();
+        },
+
+        // SECURITY: Discount comes from backend only
+        // Cart object stores server-validated discount amount
+        calculateDiscount() {
+            // Use discount from Cart object (which is server-validated)
+            if (typeof Cart !== 'undefined' && Cart.discountAmount) {
+                this.totals.discount = Cart.discountAmount;
+            } else {
+                this.totals.discount = 0;
+            }
+        },
+
+        // Update shipping cost
+        // NOTE: Final shipping cost is validated server-side during checkout
+        // These are estimates only - backend has final authority
+        async updateShippingCost() {
+            const shippingMethod = document.querySelector('input[name="shipping"]:checked')?.value || 'free';
+            const postcode = document.getElementById('postcode')?.value;
+
+            // Shipping is flat rate from backend: $5 NZD, free over $100
+            // Final shipping cost is validated server-side during order creation
+            this.setFallbackShipping(shippingMethod);
+
+            this.totals.total = this.totals.subtotal - this.totals.discount + this.totals.shipping;
+            this.updateTotalsDisplay();
+        },
+
+        /**
+         * DISPLAY ONLY - Shipping estimate for UI
+         * SECURITY: These values are NEVER used for payment.
+         * Backend calculates actual shipping in API.createOrder()
+         * The PaymentIntent amount is set server-side.
+         */
+        setFallbackShipping(shippingMethod) {
+            // DISPLAY ONLY - backend has final authority on shipping cost
+            switch (shippingMethod) {
+                case 'express':
+                    this.totals.shipping = 12.99;
+                    break;
+                case 'overnight':
+                    this.totals.shipping = 19.99;
+                    break;
+                case 'free':
+                case 'standard':
+                default:
+                    // Flat rate: $5 NZD, free over $100 (backend validates this)
+                    this.totals.shipping = this.totals.subtotal >= 100 ? 0 : 5;
+                    break;
+            }
+        },
+
+        // Update totals display
+        updateTotalsDisplay() {
+            const subtotalEl = document.getElementById('checkout-subtotal');
+            const shippingEl = document.getElementById('checkout-shipping');
+            const discountRow = document.getElementById('checkout-discount-row');
+            const discountEl = document.getElementById('checkout-discount');
+            const totalEl = document.getElementById('checkout-total');
+
+            if (subtotalEl) subtotalEl.textContent = `$${this.totals.subtotal.toFixed(2)}`;
+            if (shippingEl) {
+                shippingEl.textContent = this.totals.shipping === 0 ? 'FREE' : `$${this.totals.shipping.toFixed(2)}`;
+                shippingEl.classList.toggle('text-success', this.totals.shipping === 0);
+            }
+
+            // Show discount if applied
+            if (discountRow && discountEl) {
+                if (this.totals.discount > 0) {
+                    discountRow.hidden = false;
+                    discountEl.textContent = `-$${this.totals.discount.toFixed(2)}`;
+                } else {
+                    discountRow.hidden = true;
+                }
+            }
+
+            if (totalEl) totalEl.textContent = `$${this.totals.total.toFixed(2)} NZD`;
+        },
+
+        // Render cart items
+        renderCart() {
+            const itemsContainer = document.getElementById('checkout-items');
+            if (!itemsContainer) return;
+
+            itemsContainer.innerHTML = this.cartItems.map(item => `
+                <li class="checkout-summary__item">
+                    <div class="checkout-summary__item-image">
+                        ${this.getItemImageHTML(item)}
+                        <span class="checkout-summary__item-qty">${item.quantity}</span>
+                    </div>
+                    <div class="checkout-summary__item-details">
+                        <h3 class="checkout-summary__item-title">${item.name}</h3>
+                        <p class="checkout-summary__item-variant">${item.brand || item.sku || ''}</p>
+                    </div>
+                    <span class="checkout-summary__item-price">$${(item.price * item.quantity).toFixed(2)}</span>
+                </li>
+            `).join('');
+
+            this.updateTotalsDisplay();
+        },
+
+        // Setup shipping option handlers
+        setupShippingHandlers() {
+            const shippingInputs = document.querySelectorAll('input[name="shipping"]');
+            shippingInputs.forEach(input => {
+                input.addEventListener('change', () => {
+                    // Update visual state
+                    document.querySelectorAll('.shipping-option').forEach(opt => {
+                        opt.classList.remove('shipping-option--selected');
+                    });
+                    input.closest('.shipping-option')?.classList.add('shipping-option--selected');
+
+                    // Recalculate shipping
+                    this.updateShippingCost();
+                });
+            });
+        },
+
+        // Setup billing address same as shipping toggle
+        setupBillingAddressToggle() {
+            const sameAsShippingCheckbox = document.getElementById('same-as-shipping');
+            const billingFields = document.getElementById('billing-address-fields');
+
+            if (!sameAsShippingCheckbox || !billingFields) return;
+
+            const toggleBillingFields = () => {
+                const isSameAsShipping = sameAsShippingCheckbox.checked;
+                billingFields.style.display = isSameAsShipping ? 'none' : 'block';
+
+                // Toggle required on billing fields
+                const requiredFields = billingFields.querySelectorAll('input:not([name="billingAddress2"]), select');
+                requiredFields.forEach(field => {
+                    field.required = !isSameAsShipping;
+                });
+            };
+
+            sameAsShippingCheckbox.addEventListener('change', toggleBillingFields);
+            // Initial state
+            toggleBillingFields();
+        },
+
+        // Validate billing address fields when not same as shipping
+        validateBillingAddress() {
+            const fields = [
+                { id: 'billing-first-name', name: 'First Name' },
+                { id: 'billing-last-name', name: 'Last Name' },
+                { id: 'billing-address1', name: 'Address' },
+                { id: 'billing-city', name: 'City' },
+                { id: 'billing-region', name: 'Region' },
+                { id: 'billing-postcode', name: 'Postcode' }
+            ];
+
+            for (const field of fields) {
+                const el = document.getElementById(field.id);
+                if (!el || !el.value.trim()) {
+                    return {
+                        valid: false,
+                        message: `Please enter your billing ${field.name.toLowerCase()}.`,
+                        focusField: field.id
+                    };
+                }
+            }
+
+            // Validate postcode format
+            const postcode = document.getElementById('billing-postcode')?.value;
+            if (postcode && !/^[0-9]{4}$/.test(postcode)) {
+                return {
+                    valid: false,
+                    message: 'Please enter a valid 4-digit postcode.',
+                    focusField: 'billing-postcode'
+                };
+            }
+
+            return { valid: true };
+        },
+
+        // Restore checkout state from session storage
+        restoreCheckoutState() {
+            try {
+                // Check both storage keys - checkoutData (from payment page flow) and checkout_state (older format)
+                let saved = sessionStorage.getItem('checkoutData');
+                let storageKey = 'checkoutData';
+
+                if (!saved) {
+                    saved = sessionStorage.getItem('checkout_state');
+                    storageKey = 'checkout_state';
+                }
+
+                if (!saved) return;
+
+                const state = JSON.parse(saved);
+                // Only restore if saved within last 30 minutes
+                if (Date.now() - state.savedAt > 30 * 60 * 1000) {
+                    sessionStorage.removeItem(storageKey);
+                    return;
+                }
+
+                // Restore form fields
+                const fields = [
+                    'email', 'phone', 'firstName', 'lastName', 'company',
+                    'address1', 'address2', 'city', 'region', 'postcode',
+                    'billingFirstName', 'billingLastName', 'billingAddress1',
+                    'billingAddress2', 'billingCity', 'billingRegion', 'billingPostcode',
+                    'orderNotes'
+                ];
+
+                fields.forEach(field => {
+                    const el = document.querySelector(`[name="${field}"]`);
+                    if (el && state[field]) {
+                        el.value = state[field];
+                    }
+                });
+
+                // Restore billing same as shipping
+                const sameAsShipping = document.getElementById('same-as-shipping');
+                if (sameAsShipping && state.sameAsShipping !== undefined) {
+                    sameAsShipping.checked = state.sameAsShipping;
+                    // Trigger toggle
+                    const billingFields = document.getElementById('billing-address-fields');
+                    if (billingFields) {
+                        billingFields.style.display = state.sameAsShipping ? 'none' : 'block';
+                    }
+                }
+
+                // Restore save address checkbox
+                const saveAddressCheckbox = document.getElementById('save-address');
+                if (saveAddressCheckbox && state.saveAddress) {
+                    saveAddressCheckbox.checked = true;
+                }
+
+                // Restore terms checkbox if it was checked
+                const termsCheckbox = document.getElementById('terms');
+                if (termsCheckbox && state.termsAccepted) {
+                    termsCheckbox.checked = true;
+                }
+
+                console.log('Restored checkout state from session');
+            } catch (e) {
+                console.warn('Failed to restore checkout state:', e);
+            }
+        },
+
+        // Setup form submission handler
+        setupFormHandlers() {
+            const form = document.getElementById('checkout-form');
+            if (!form) return;
+
+            const continueBtn = document.getElementById('continue-to-payment-btn');
+
+            // "Continue to Payment" - validates form and redirects to payment page
+            if (continueBtn) {
+                continueBtn.addEventListener('click', async (e) => {
+                    e.preventDefault();
+                    await this.handleContinueToPayment(form);
+                });
+            }
+
+            // Coupon code handler
+            this.setupCouponHandler();
+        },
+
+        // Setup coupon code handler
+        setupCouponHandler() {
+            const couponInput = document.querySelector('.coupon-form__input');
+            const couponBtn = document.querySelector('.coupon-form__btn');
+
+            if (!couponInput || !couponBtn) return;
+
+            couponBtn.addEventListener('click', async () => {
+                const code = couponInput.value.trim();
+                if (!code) {
+                    alert('Please enter a coupon code');
+                    return;
+                }
+
+                couponBtn.disabled = true;
+                couponBtn.textContent = 'Applying...';
+
+                try {
+                    const response = await API.applyCoupon(code);
+
+                    if (response.success && response.data) {
+                        this.appliedCoupon = response.data.code;
+                        this.totals.discount = response.data.discount_amount || 0;
+
+                        // Update display
+                        const discountRow = document.getElementById('checkout-discount-row');
+                        const discountEl = document.getElementById('checkout-discount');
+                        if (discountRow && discountEl) {
+                            discountRow.hidden = false;
+                            discountEl.textContent = `-$${this.totals.discount.toFixed(2)}`;
+                        }
+
+                        // Recalculate total
+                        this.totals.total = this.totals.subtotal - this.totals.discount + this.totals.shipping;
+                        document.getElementById('checkout-total').textContent = `$${this.totals.total.toFixed(2)} NZD`;
+
+                        // Show success
+                        couponInput.value = '';
+                        couponInput.placeholder = `${code} applied!`;
+                        couponBtn.textContent = 'Applied';
+                        couponBtn.style.background = '#10b981';
+
+                        alert(response.message || `Coupon applied! You saved $${this.totals.discount.toFixed(2)}`);
+                    } else {
+                        throw new Error(response.error || 'Invalid coupon code');
+                    }
+                } catch (error) {
+                    console.error('Coupon error:', error);
+                    alert(error.message || 'Invalid coupon code');
+                    couponBtn.textContent = 'Apply';
+                    couponBtn.disabled = false;
+                }
+            });
+
+            // Allow enter key to apply coupon
+            couponInput.addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    couponBtn.click();
+                }
+            });
+        },
+
+        // Handle "Continue to Payment" - validates form, saves data, redirects to payment page
+        async handleContinueToPayment(form) {
+            if (this.isSubmitting) return;
+
+            const continueBtn = document.getElementById('continue-to-payment-btn');
+            const originalBtnText = continueBtn.innerHTML;
+
+            // Validate form
+            if (!form.checkValidity()) {
+                form.reportValidity();
+                return;
+            }
+
+            // Validate billing address if not same as shipping
+            const sameAsShipping = document.getElementById('same-as-shipping')?.checked;
+            if (!sameAsShipping) {
+                const billingValidation = this.validateBillingAddress();
+                if (!billingValidation.valid) {
+                    alert(billingValidation.message);
+                    document.getElementById(billingValidation.focusField)?.focus();
+                    return;
+                }
+            }
+
+            // Check terms acceptance
+            const termsCheckbox = document.getElementById('terms');
+            if (!termsCheckbox.checked) {
+                alert('Please accept the Terms & Conditions to continue.');
+                termsCheckbox.focus();
+                return;
+            }
+
+            this.isSubmitting = true;
+            continueBtn.disabled = true;
+            continueBtn.innerHTML = `
+                <svg class="animate-spin" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="12" cy="12" r="10" stroke-opacity="0.25"/>
+                    <path d="M12 2a10 10 0 0 1 10 10" stroke-opacity="1"/>
+                </svg>
+                Saving Details...
+            `;
+
+            try {
+                // Collect all form data
+                const formData = new FormData(form);
+
+                // Combine country code and phone number
+                const phoneCountry = formData.get('phone-country') || '+64';
+                const phoneNumber = formData.get('phone') || '';
+                const fullPhone = phoneNumber ? `${phoneCountry} ${phoneNumber}` : '';
+
+                // Build checkout data object to pass to payment page
+                const checkoutData = {
+                    // Contact
+                    email: formData.get('email'),
+                    phone: fullPhone,
+                    // Shipping address
+                    firstName: formData.get('firstName'),
+                    lastName: formData.get('lastName'),
+                    company: formData.get('company'),
+                    address1: formData.get('address1'),
+                    address2: formData.get('address2'),
+                    city: formData.get('city'),
+                    region: formData.get('region'),
+                    postcode: formData.get('postcode'),
+                    // Billing
+                    sameAsShipping: sameAsShipping,
+                    billingFirstName: formData.get('billingFirstName'),
+                    billingLastName: formData.get('billingLastName'),
+                    billingAddress1: formData.get('billingAddress1'),
+                    billingAddress2: formData.get('billingAddress2'),
+                    billingCity: formData.get('billingCity'),
+                    billingRegion: formData.get('billingRegion'),
+                    billingPostcode: formData.get('billingPostcode'),
+                    // Notes
+                    orderNotes: formData.get('orderNotes'),
+                    // Save address preference
+                    saveAddress: formData.get('saveAddress') === 'on',
+                    // Terms accepted
+                    termsAccepted: document.getElementById('terms')?.checked || false,
+                    // Timestamp
+                    savedAt: Date.now()
+                };
+
+                // Save to sessionStorage
+                sessionStorage.setItem('checkoutData', JSON.stringify(checkoutData));
+                console.log('Checkout data saved, redirecting to payment page');
+
+                // Redirect to payment page
+                window.location.href = '/html/payment.html';
+
+            } catch (error) {
+                console.error('Error saving checkout data:', error);
+                alert('An error occurred. Please try again.');
+
+                continueBtn.disabled = false;
+                continueBtn.innerHTML = originalBtnText;
+                this.isSubmitting = false;
+            }
+        },
+
+        // Check auth and prefill form
+        async checkAuthAndPrefill() {
+            await new Promise(resolve => setTimeout(resolve, 100));
+
+            const loginPrompt = document.getElementById('login-prompt');
+            const welcomeMessage = document.getElementById('welcome-message');
+            const userDisplayName = document.getElementById('user-display-name');
+
+            if (typeof Auth !== 'undefined' && Auth.isAuthenticated()) {
+                const user = Auth.getUser();
+
+                if (loginPrompt) loginPrompt.style.display = 'none';
+                if (welcomeMessage) welcomeMessage.style.display = 'flex';
+
+                // Show "Save address for next time" checkbox for authenticated users
+                const saveAddressRow = document.getElementById('save-address-row');
+                if (saveAddressRow) {
+                    saveAddressRow.style.display = 'block';
+                }
+
+                const displayName = user?.user_metadata?.full_name ||
+                                   user?.email?.split('@')[0] ||
+                                   'Customer';
+                if (userDisplayName) userDisplayName.textContent = displayName;
+
+                // Pre-fill email
+                const emailInput = document.getElementById('email');
+                if (emailInput && user?.email) {
+                    emailInput.value = user.email;
+                }
+
+                // Pre-fill name if available
+                const fullName = user?.user_metadata?.full_name;
+                if (fullName) {
+                    const nameParts = fullName.split(' ');
+                    const firstNameInput = document.getElementById('first-name');
+                    const lastNameInput = document.getElementById('last-name');
+
+                    if (firstNameInput && nameParts[0]) {
+                        firstNameInput.value = nameParts[0];
+                    }
+                    if (lastNameInput && nameParts.length > 1) {
+                        lastNameInput.value = nameParts.slice(1).join(' ');
+                    }
+                }
+
+                // Pre-fill phone if available (handles "+64 21 123 4567" format)
+                const phone = user?.user_metadata?.phone;
+                if (phone) {
+                    const phoneInput = document.getElementById('phone');
+                    const phoneCountrySelect = document.getElementById('phone-country');
+
+                    // Try to parse country code from phone
+                    const phoneMatch = phone.match(/^(\+\d{1,3})\s*(.*)$/);
+                    if (phoneMatch && phoneCountrySelect && phoneInput) {
+                        const countryCode = phoneMatch[1];
+                        const phoneNumber = phoneMatch[2];
+                        // Set country code if it exists in the dropdown
+                        const option = phoneCountrySelect.querySelector(`option[value="${countryCode}"]`);
+                        if (option) {
+                            phoneCountrySelect.value = countryCode;
+                        }
+                        phoneInput.value = phoneNumber;
+                    } else if (phoneInput) {
+                        // Fallback: put whole number in phone field
+                        phoneInput.value = phone;
+                    }
+                }
+
+                // Try to load saved addresses
+                this.loadSavedAddresses();
+            }
+        },
+
+        // Load saved addresses for authenticated users
+        async loadSavedAddresses() {
+            try {
+                const response = await API.getAddresses();
+                if (response.success && response.data) {
+                    const addresses = Array.isArray(response.data) ? response.data : (response.data.addresses || []);
+                    const defaultAddress = addresses.find(a => a.is_default) || addresses[0];
+
+                    if (defaultAddress) {
+                        // Pre-fill shipping address from saved address
+                        const fields = {
+                            'first-name': defaultAddress.first_name || defaultAddress.recipient_name?.split(' ')[0],
+                            'last-name': defaultAddress.last_name || defaultAddress.recipient_name?.split(' ').slice(1).join(' '),
+                            'company': defaultAddress.company,
+                            'address1': defaultAddress.address_line1,
+                            'address2': defaultAddress.address_line2,
+                            'city': defaultAddress.city,
+                            'region': defaultAddress.region?.toLowerCase().replace(/\s+/g, '-'),
+                            'postcode': defaultAddress.postal_code
+                        };
+
+                        Object.entries(fields).forEach(([id, value]) => {
+                            if (value) {
+                                const input = document.getElementById(id);
+                                if (input && !input.value) {
+                                    input.value = value;
+                                }
+                            }
+                        });
+                    }
+                }
+            } catch (error) {
+                console.log('Could not load saved addresses:', error.message);
+            }
+        }
+    };
+
+    // Initialize checkout page
+    document.addEventListener('DOMContentLoaded', () => {
+        CheckoutPage.init();
+    });
+    </script>
+
+    <style>
+    .animate-spin {
+        animation: spin 1s linear infinite;
+    }
+    @keyframes spin {
+        from { transform: rotate(0deg); }
+        to { transform: rotate(360deg); }
+    }
+    </style>
+    <script src="/js/analytics.js"></script>
+</body>
+</html>

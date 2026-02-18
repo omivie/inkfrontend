@@ -1,0 +1,532 @@
+{
+  "categories": [
+    {
+      "id": "typewriter",
+      "name": "Typewriter Ribbons",
+      "description": "High-quality ribbons for manual and electric typewriters",
+      "image": "/assets/images/ribbons/typewriter-category.jpg"
+    },
+    {
+      "id": "dot-matrix",
+      "name": "Dot Matrix Printer Ribbons",
+      "description": "Reliable ribbons for dot matrix and impact printers",
+      "image": "/assets/images/ribbons/dot-matrix-category.jpg"
+    },
+    {
+      "id": "pos-receipt",
+      "name": "POS & Receipt Printer Ribbons",
+      "description": "Ribbons for point-of-sale and receipt printers",
+      "image": "/assets/images/ribbons/pos-category.jpg"
+    },
+    {
+      "id": "time-clock",
+      "name": "Time Clock Ribbons",
+      "description": "Ribbons for time clocks and attendance recorders",
+      "image": "/assets/images/ribbons/time-clock-category.jpg"
+    }
+  ],
+  "brands": [
+    {
+      "id": "epson",
+      "name": "Epson",
+      "logo": "/assets/brands/epson.png"
+    },
+    {
+      "id": "brother",
+      "name": "Brother",
+      "logo": "/assets/brands/brother.png"
+    },
+    {
+      "id": "oki",
+      "name": "OKI",
+      "logo": "/assets/brands/oki.svg"
+    },
+    {
+      "id": "citizen",
+      "name": "Citizen",
+      "logo": "/assets/brands/citizen.png"
+    },
+    {
+      "id": "star",
+      "name": "Star Micronics",
+      "logo": "/assets/brands/star.png"
+    },
+    {
+      "id": "olivetti",
+      "name": "Olivetti",
+      "logo": "/assets/brands/olivetti.png"
+    },
+    {
+      "id": "swintec",
+      "name": "Swintec",
+      "logo": "/assets/brands/swintec.png"
+    },
+    {
+      "id": "ibm",
+      "name": "IBM",
+      "logo": "/assets/brands/ibm.png"
+    }
+  ],
+  "products": [
+    {
+      "id": "epson-lq590-ribbon",
+      "sku": "RIB-EPS-LQ590",
+      "name": "Epson LQ-590 Black Ribbon Cartridge",
+      "brand": "epson",
+      "category": "dot-matrix",
+      "type": "genuine",
+      "price": 24.99,
+      "salePrice": null,
+      "yield": "4 million characters",
+      "color": "Black",
+      "compatibility": ["Epson LQ-590", "Epson LQ-590II", "Epson FX-890", "Epson FX-890II"],
+      "description": "Genuine Epson ribbon cartridge for LQ-590 series dot matrix printers. Delivers crisp, clear prints for invoices, receipts, and multipart forms.",
+      "features": [
+        "Genuine Epson quality",
+        "4 million character yield",
+        "Easy snap-in installation",
+        "Ideal for multipart forms"
+      ],
+      "image": "/assets/images/ribbons/epson-lq590-ribbon.jpg",
+      "inStock": true,
+      "stockQty": 45
+    },
+    {
+      "id": "epson-lx350-ribbon",
+      "sku": "RIB-EPS-LX350",
+      "name": "Epson LX-350 Fabric Ribbon",
+      "brand": "epson",
+      "category": "dot-matrix",
+      "type": "genuine",
+      "price": 18.99,
+      "salePrice": 15.99,
+      "yield": "4 million characters",
+      "color": "Black",
+      "compatibility": ["Epson LX-350", "Epson LX-300+II", "Epson LX-300+"],
+      "description": "Original Epson fabric ribbon for LX-350 and compatible printers. Long-lasting performance for everyday printing needs.",
+      "features": [
+        "Original Epson ribbon",
+        "Extended yield",
+        "Consistent print quality",
+        "Universal fit for LX series"
+      ],
+      "image": "/assets/images/ribbons/epson-lx350-ribbon.jpg",
+      "inStock": true,
+      "stockQty": 32
+    },
+    {
+      "id": "epson-erc-09-ribbon",
+      "sku": "RIB-EPS-ERC09",
+      "name": "Epson ERC-09 POS Ribbon",
+      "brand": "epson",
+      "category": "pos-receipt",
+      "type": "genuine",
+      "price": 12.99,
+      "salePrice": null,
+      "yield": "1.5 million characters",
+      "color": "Black",
+      "compatibility": ["Epson M160", "Epson M180", "Epson M190", "Various POS systems"],
+      "description": "Compact ribbon cartridge designed for Epson POS and receipt printers. Perfect for retail and hospitality environments.",
+      "features": [
+        "Compact design",
+        "Quick and easy replacement",
+        "Smudge-resistant prints",
+        "Wide POS compatibility"
+      ],
+      "image": "/assets/images/ribbons/epson-erc09-ribbon.jpg",
+      "inStock": true,
+      "stockQty": 78
+    },
+    {
+      "id": "epson-erc-38-ribbon-br",
+      "sku": "RIB-EPS-ERC38BR",
+      "name": "Epson ERC-38 Black/Red Ribbon",
+      "brand": "epson",
+      "category": "pos-receipt",
+      "type": "genuine",
+      "price": 14.99,
+      "salePrice": null,
+      "yield": "1.5 million characters",
+      "color": "Black/Red",
+      "compatibility": ["Epson TM-U220", "Epson TM-U210", "Various kitchen printers"],
+      "description": "Dual-color ribbon for Epson TM-U series receipt printers. Black for standard text, red for highlighting totals and promotions.",
+      "features": [
+        "Dual color printing",
+        "Black and red in one ribbon",
+        "Ideal for receipts with highlights",
+        "Kitchen printer compatible"
+      ],
+      "image": "/assets/images/ribbons/epson-erc38-br-ribbon.jpg",
+      "inStock": true,
+      "stockQty": 56
+    },
+    {
+      "id": "brother-1030-ribbon",
+      "sku": "RIB-BRO-1030",
+      "name": "Brother 1030 Correctable Film Ribbon",
+      "brand": "brother",
+      "category": "typewriter",
+      "type": "genuine",
+      "price": 16.99,
+      "salePrice": null,
+      "yield": "50,000 characters",
+      "color": "Black",
+      "compatibility": ["Brother AX-10", "Brother AX-15", "Brother AX-20", "Brother GX-6750"],
+      "description": "Correctable film ribbon for Brother electronic typewriters. Produces sharp, professional documents with easy correction capability.",
+      "features": [
+        "Correctable film technology",
+        "Crisp, professional output",
+        "Easy lift-off correction",
+        "Long ribbon life"
+      ],
+      "image": "/assets/images/ribbons/brother-1030-ribbon.jpg",
+      "inStock": true,
+      "stockQty": 23
+    },
+    {
+      "id": "brother-3015-ribbon",
+      "sku": "RIB-BRO-3015",
+      "name": "Brother 3015 Lift-Off Correction Tape",
+      "brand": "brother",
+      "category": "typewriter",
+      "type": "genuine",
+      "price": 9.99,
+      "salePrice": null,
+      "yield": "275 characters",
+      "color": "White (Correction)",
+      "compatibility": ["Brother AX series", "Brother GX series", "Brother WP series"],
+      "description": "Lift-off correction tape for Brother typewriters. Cleanly removes typed characters for error-free documents.",
+      "features": [
+        "Clean lift-off correction",
+        "No messy cover-up",
+        "Works with film ribbons",
+        "Professional results"
+      ],
+      "image": "/assets/images/ribbons/brother-3015-correction.jpg",
+      "inStock": true,
+      "stockQty": 41
+    },
+    {
+      "id": "oki-ml320-ribbon",
+      "sku": "RIB-OKI-ML320",
+      "name": "OKI ML320/321 Ribbon Cartridge",
+      "brand": "oki",
+      "category": "dot-matrix",
+      "type": "genuine",
+      "price": 22.99,
+      "salePrice": 19.99,
+      "yield": "3 million characters",
+      "color": "Black",
+      "compatibility": ["OKI ML320", "OKI ML321", "OKI ML320 Turbo", "OKI ML321 Turbo"],
+      "description": "Genuine OKI ribbon for ML320/321 series dot matrix printers. Reliable performance for high-volume printing environments.",
+      "features": [
+        "Genuine OKI quality",
+        "High yield capacity",
+        "Durable construction",
+        "Consistent darkness"
+      ],
+      "image": "/assets/images/ribbons/oki-ml320-ribbon.jpg",
+      "inStock": true,
+      "stockQty": 29
+    },
+    {
+      "id": "oki-ml590-ribbon",
+      "sku": "RIB-OKI-ML590",
+      "name": "OKI ML590/591 Black Ribbon",
+      "brand": "oki",
+      "category": "dot-matrix",
+      "type": "genuine",
+      "price": 28.99,
+      "salePrice": null,
+      "yield": "4 million characters",
+      "color": "Black",
+      "compatibility": ["OKI ML590", "OKI ML591", "OKI ML520", "OKI ML521"],
+      "description": "High-capacity ribbon for OKI 500 series wide-carriage printers. Ideal for spreadsheets and wide-format documents.",
+      "features": [
+        "Wide carriage compatible",
+        "Extra high yield",
+        "Sharp text reproduction",
+        "Heavy-duty construction"
+      ],
+      "image": "/assets/images/ribbons/oki-ml590-ribbon.jpg",
+      "inStock": true,
+      "stockQty": 18
+    },
+    {
+      "id": "citizen-dp600-ribbon",
+      "sku": "RIB-CIT-DP600",
+      "name": "Citizen DP-600 Printer Ribbon",
+      "brand": "citizen",
+      "category": "dot-matrix",
+      "type": "compatible",
+      "price": 14.99,
+      "salePrice": null,
+      "yield": "2.5 million characters",
+      "color": "Black",
+      "compatibility": ["Citizen DP-600", "Citizen DP-611", "Citizen DP-612"],
+      "description": "Compatible ribbon for Citizen DP-600 series printers. Cost-effective alternative with reliable print quality.",
+      "features": [
+        "Compatible replacement",
+        "Excellent value",
+        "Reliable performance",
+        "Easy installation"
+      ],
+      "image": "/assets/images/ribbons/citizen-dp600-ribbon.jpg",
+      "inStock": true,
+      "stockQty": 52
+    },
+    {
+      "id": "star-sp700-ribbon",
+      "sku": "RIB-STAR-SP700",
+      "name": "Star SP700 POS Ribbon Cartridge",
+      "brand": "star",
+      "category": "pos-receipt",
+      "type": "genuine",
+      "price": 11.99,
+      "salePrice": null,
+      "yield": "3 million characters",
+      "color": "Black",
+      "compatibility": ["Star SP700", "Star SP712", "Star SP717", "Star SP742"],
+      "description": "Genuine Star ribbon for SP700 series impact receipt printers. Delivers reliable prints in demanding retail and hospitality settings.",
+      "features": [
+        "Genuine Star quality",
+        "Kitchen-rated durability",
+        "High character yield",
+        "Drop-in installation"
+      ],
+      "image": "/assets/images/ribbons/star-sp700-ribbon.jpg",
+      "inStock": true,
+      "stockQty": 67
+    },
+    {
+      "id": "star-sp500-ribbon-br",
+      "sku": "RIB-STAR-SP500BR",
+      "name": "Star SP500 Black/Red Ribbon",
+      "brand": "star",
+      "category": "pos-receipt",
+      "type": "genuine",
+      "price": 13.99,
+      "salePrice": 11.99,
+      "yield": "2.5 million characters",
+      "color": "Black/Red",
+      "compatibility": ["Star SP500", "Star SP512", "Star SP542"],
+      "description": "Dual-color ribbon for Star SP500 receipt printers. Perfect for highlighting totals, discounts, or important information.",
+      "features": [
+        "Two-color printing",
+        "Retail receipt ideal",
+        "Crisp print quality",
+        "Long-lasting ribbon"
+      ],
+      "image": "/assets/images/ribbons/star-sp500-br-ribbon.jpg",
+      "inStock": true,
+      "stockQty": 43
+    },
+    {
+      "id": "olivetti-lettera-ribbon",
+      "sku": "RIB-OLI-LETTERA",
+      "name": "Olivetti Lettera Universal Typewriter Ribbon",
+      "brand": "olivetti",
+      "category": "typewriter",
+      "type": "compatible",
+      "price": 12.99,
+      "salePrice": null,
+      "yield": "200,000 characters",
+      "color": "Black",
+      "compatibility": ["Olivetti Lettera 32", "Olivetti Lettera 35", "Olivetti Lettera 36", "Most manual typewriters"],
+      "description": "Universal nylon ribbon for Olivetti manual typewriters. Also fits most standard manual typewriters with 1/2-inch ribbon width.",
+      "features": [
+        "Universal 1/2-inch width",
+        "Durable nylon construction",
+        "Rich black ink",
+        "Manual typewriter compatible"
+      ],
+      "image": "/assets/images/ribbons/olivetti-lettera-ribbon.jpg",
+      "inStock": true,
+      "stockQty": 34
+    },
+    {
+      "id": "olivetti-pr2-ribbon",
+      "sku": "RIB-OLI-PR2",
+      "name": "Olivetti PR2 Passbook Printer Ribbon",
+      "brand": "olivetti",
+      "category": "dot-matrix",
+      "type": "genuine",
+      "price": 32.99,
+      "salePrice": null,
+      "yield": "8 million characters",
+      "color": "Black",
+      "compatibility": ["Olivetti PR2", "Olivetti PR2 Plus", "Olivetti PR2E"],
+      "description": "Genuine ribbon for Olivetti PR2 passbook and forms printers. Designed for banking and financial document printing.",
+      "features": [
+        "Banking-grade quality",
+        "Ultra-high yield",
+        "Passbook printing optimised",
+        "Archival quality prints"
+      ],
+      "image": "/assets/images/ribbons/olivetti-pr2-ribbon.jpg",
+      "inStock": true,
+      "stockQty": 15
+    },
+    {
+      "id": "swintec-1146-ribbon",
+      "sku": "RIB-SWI-1146",
+      "name": "Swintec 1146 CM Electronic Typewriter Ribbon",
+      "brand": "swintec",
+      "category": "typewriter",
+      "type": "compatible",
+      "price": 14.99,
+      "salePrice": null,
+      "yield": "50,000 characters",
+      "color": "Black",
+      "compatibility": ["Swintec 1146 CM", "Swintec 2400", "Swintec 2410", "Swintec 2600"],
+      "description": "Correctable film ribbon for Swintec electronic typewriters. Clean, professional output with easy correction capability.",
+      "features": [
+        "Correctable film ribbon",
+        "Clean character lift-off",
+        "Professional results",
+        "Wide Swintec compatibility"
+      ],
+      "image": "/assets/images/ribbons/swintec-1146-ribbon.jpg",
+      "inStock": true,
+      "stockQty": 27
+    },
+    {
+      "id": "ibm-wheelwriter-ribbon",
+      "sku": "RIB-IBM-WHEEL",
+      "name": "IBM Wheelwriter Correctable Ribbon",
+      "brand": "ibm",
+      "category": "typewriter",
+      "type": "compatible",
+      "price": 18.99,
+      "salePrice": 15.99,
+      "yield": "50,000 characters",
+      "color": "Black",
+      "compatibility": ["IBM Wheelwriter 3", "IBM Wheelwriter 5", "IBM Wheelwriter 6", "IBM Wheelwriter 10", "IBM Wheelwriter 15"],
+      "description": "High-quality correctable ribbon for IBM Wheelwriter electronic typewriters. Delivers crisp, dark text with easy correction.",
+      "features": [
+        "IBM Wheelwriter compatible",
+        "Correctable film type",
+        "Premium ink formulation",
+        "Long ribbon life"
+      ],
+      "image": "/assets/images/ribbons/ibm-wheelwriter-ribbon.jpg",
+      "inStock": true,
+      "stockQty": 39
+    },
+    {
+      "id": "ibm-selectric-ribbon",
+      "sku": "RIB-IBM-SELECT",
+      "name": "IBM Selectric II/III Ribbon Cartridge",
+      "brand": "ibm",
+      "category": "typewriter",
+      "type": "compatible",
+      "price": 21.99,
+      "salePrice": null,
+      "yield": "100,000 characters",
+      "color": "Black",
+      "compatibility": ["IBM Selectric II", "IBM Selectric III", "IBM Memory Typewriter"],
+      "description": "Compatible ribbon cartridge for IBM Selectric series typewriters. Classic quality for these iconic machines.",
+      "features": [
+        "Selectric cartridge format",
+        "Easy snap-in installation",
+        "Dark, consistent output",
+        "Works with all Selectric II/III"
+      ],
+      "image": "/assets/images/ribbons/ibm-selectric-ribbon.jpg",
+      "inStock": true,
+      "stockQty": 22
+    },
+    {
+      "id": "amano-pix-ribbon",
+      "sku": "RIB-AMA-PIX",
+      "name": "Amano PIX Time Clock Ribbon",
+      "brand": "citizen",
+      "category": "time-clock",
+      "type": "compatible",
+      "price": 8.99,
+      "salePrice": null,
+      "yield": "1,000 impressions",
+      "color": "Black/Red",
+      "compatibility": ["Amano PIX-10", "Amano PIX-15", "Amano PIX-21", "Amano PIX-28", "Amano PIX-55"],
+      "description": "Dual-color ribbon for Amano PIX series time clocks. Black for in-punches, red for out-punches or late arrivals.",
+      "features": [
+        "Dual color function",
+        "Time clock optimised",
+        "Easy replacement",
+        "Clear date/time stamps"
+      ],
+      "image": "/assets/images/ribbons/amano-pix-ribbon.jpg",
+      "inStock": true,
+      "stockQty": 85
+    },
+    {
+      "id": "acroprint-125-ribbon",
+      "sku": "RIB-ACR-125",
+      "name": "Acroprint 125/150 Time Recorder Ribbon",
+      "brand": "citizen",
+      "category": "time-clock",
+      "type": "compatible",
+      "price": 7.99,
+      "salePrice": null,
+      "yield": "1,500 impressions",
+      "color": "Blue",
+      "compatibility": ["Acroprint 125", "Acroprint 150", "Acroprint 175"],
+      "description": "Blue ribbon for Acroprint time recorders. Standard replacement for employee attendance tracking.",
+      "features": [
+        "Standard blue colour",
+        "Time recorder compatible",
+        "Good impression yield",
+        "Affordable replacement"
+      ],
+      "image": "/assets/images/ribbons/acroprint-125-ribbon.jpg",
+      "inStock": true,
+      "stockQty": 63
+    },
+    {
+      "id": "generic-universal-nylon",
+      "sku": "RIB-GEN-UNIV",
+      "name": "Universal Typewriter Ribbon (Black/Red)",
+      "brand": "citizen",
+      "category": "typewriter",
+      "type": "compatible",
+      "price": 9.99,
+      "salePrice": 7.99,
+      "yield": "150,000 characters",
+      "color": "Black/Red",
+      "compatibility": ["Most manual typewriters", "Standard 1/2-inch spool", "Twin spool typewriters"],
+      "description": "Universal twin-spool nylon ribbon fits most manual typewriters. Black and red dual-color on single ribbon.",
+      "features": [
+        "Universal twin spool fit",
+        "Black/red dual color",
+        "Durable nylon fabric",
+        "Great value option"
+      ],
+      "image": "/assets/images/ribbons/universal-typewriter-ribbon.jpg",
+      "inStock": true,
+      "stockQty": 120
+    },
+    {
+      "id": "epson-fx890-comp-ribbon",
+      "sku": "RIB-EPS-FX890C",
+      "name": "Epson FX-890 Compatible Ribbon (3-Pack)",
+      "brand": "epson",
+      "category": "dot-matrix",
+      "type": "compatible",
+      "price": 29.99,
+      "salePrice": 24.99,
+      "yield": "4 million characters each",
+      "color": "Black",
+      "compatibility": ["Epson FX-890", "Epson FX-890II", "Epson LQ-590", "Epson LQ-590II"],
+      "description": "Value pack of 3 compatible ribbons for Epson FX/LQ series printers. Same great quality at a fraction of the price.",
+      "features": [
+        "3-pack value bundle",
+        "Compatible quality",
+        "Same yield as genuine",
+        "Significant savings"
+      ],
+      "image": "/assets/images/ribbons/epson-fx890-3pack-ribbon.jpg",
+      "inStock": true,
+      "stockQty": 38
+    }
+  ]
+}

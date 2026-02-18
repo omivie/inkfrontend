@@ -1,0 +1,823 @@
+<!DOCTYPE html>
+<html lang="en-NZ">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Order Confirmation - InkCartridges.co.nz">
+    <meta name="robots" content="noindex, nofollow">
+
+    <link rel="icon" type="image/svg+xml" href="/assets/icons/favicon.svg">
+    <title>Order Confirmed | InkCartridges.co.nz</title>
+
+    <!-- Google Analytics 4 (with consent mode) -->
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-SDQELG0FGD"></script>
+    <script>
+        window.dataLayer = window.dataLayer || [];
+        function gtag(){dataLayer.push(arguments);}
+        gtag('consent', 'default', {
+            analytics_storage: localStorage.getItem('cookie_consent') === 'accepted' ? 'granted' : 'denied'
+        });
+        gtag('js', new Date());
+        gtag('config', 'G-SDQELG0FGD');
+    </script>
+
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="stylesheet" href="/css/base.css">
+    <link rel="stylesheet" href="/css/layout.css">
+    <link rel="stylesheet" href="/css/components.css">
+    <link rel="stylesheet" href="/css/modern-effects.css">
+    <link rel="stylesheet" href="/css/pages.css">
+    <style>
+    .test-mode-banner {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+        padding: 1rem 1.25rem;
+        background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
+        border: 1px solid #f59e0b;
+        border-radius: 0.5rem;
+        color: #92400e;
+        font-size: 0.9375rem;
+        margin-bottom: 1.5rem;
+        box-shadow: 0 2px 4px rgba(245, 158, 11, 0.15);
+    }
+    .test-mode-banner svg {
+        flex-shrink: 0;
+        color: #d97706;
+    }
+    </style>
+</head>
+<body>
+    <a href="#main-content" class="skip-link">Skip to main content</a>
+
+    <!-- SIMPLIFIED HEADER (Checkout style) -->
+    <header class="site-header site-header--checkout">
+        <div class="header-main">
+            <div class="container">
+                <a href="/html/index.html" class="logo" aria-label="InkCartridges.co.nz Home">
+                    <svg class="logo__icon" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <path d="M6 9V2h12v7"/>
+                        <path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/>
+                        <rect x="6" y="14" width="12" height="8"/>
+                    </svg>
+                    <span class="logo__text">InkCartridges<span class="logo__domain">.co.nz</span></span>
+                </a>
+
+                <div class="checkout-header__secure">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
+                        <polyline points="22 4 12 14.01 9 11.01"/>
+                    </svg>
+                    <span>Order Complete</span>
+                </div>
+
+                <a href="/html/index.html" class="btn btn--secondary">Continue Shopping</a>
+            </div>
+        </div>
+    </header>
+
+    <!-- MAIN CONTENT - ORDER CONFIRMATION PAGE -->
+    <main id="main-content" class="site-main">
+        <section class="confirmation-page">
+            <div class="container">
+
+                <!-- Progress indicator (completed) -->
+                <div class="checkout-progress checkout-progress--complete" aria-label="Checkout progress">
+                    <ol class="checkout-progress__steps">
+                        <li class="checkout-progress__step checkout-progress__step--completed">
+                            <span class="checkout-progress__number">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" aria-hidden="true">
+                                    <polyline points="20 6 9 17 4 12"/>
+                                </svg>
+                            </span>
+                            <span class="checkout-progress__label">Cart</span>
+                        </li>
+                        <li class="checkout-progress__step checkout-progress__step--completed">
+                            <span class="checkout-progress__number">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" aria-hidden="true">
+                                    <polyline points="20 6 9 17 4 12"/>
+                                </svg>
+                            </span>
+                            <span class="checkout-progress__label">Details</span>
+                        </li>
+                        <li class="checkout-progress__step checkout-progress__step--completed">
+                            <span class="checkout-progress__number">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" aria-hidden="true">
+                                    <polyline points="20 6 9 17 4 12"/>
+                                </svg>
+                            </span>
+                            <span class="checkout-progress__label">Payment</span>
+                        </li>
+                        <li class="checkout-progress__step checkout-progress__step--completed checkout-progress__step--active">
+                            <span class="checkout-progress__number">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" aria-hidden="true">
+                                    <polyline points="20 6 9 17 4 12"/>
+                                </svg>
+                            </span>
+                            <span class="checkout-progress__label">Confirmation</span>
+                        </li>
+                    </ol>
+                </div>
+
+                <!-- Confirmation content -->
+                <div class="confirmation-content">
+                    <div class="confirmation-header">
+                        <div class="confirmation-header__icon">
+                            <!-- Green checkmark circle SVG -->
+                            <svg width="80" height="80" viewBox="0 0 80 80" fill="none" aria-hidden="true">
+                                <circle cx="40" cy="40" r="38" stroke="#10B981" stroke-width="4" fill="#ECFDF5"/>
+                                <path d="M24 40L35 51L56 30" stroke="#10B981" stroke-width="5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+                            </svg>
+                        </div>
+                        <h1 class="confirmation-header__title">Thank You for Your Order!</h1>
+                        <p class="confirmation-header__message">
+                            Your order has been received and is being processed. A confirmation email with your invoice has been sent to <strong id="confirmation-email">your email</strong>.
+                        </p>
+                    </div>
+
+                    <!-- Order details -->
+                    <div class="confirmation-details">
+                        <div class="confirmation-card">
+                            <h2 class="confirmation-card__heading">Order Details</h2>
+                            <dl class="confirmation-card__list">
+                                <div class="confirmation-card__row">
+                                    <dt>Order Number</dt>
+                                    <dd><strong id="order-number">Loading...</strong></dd>
+                                </div>
+                                <div class="confirmation-card__row" id="invoice-row" style="display: none;">
+                                    <dt>Invoice Number</dt>
+                                    <dd id="invoice-number">--</dd>
+                                </div>
+                                <div class="confirmation-card__row">
+                                    <dt>Order Date</dt>
+                                    <dd id="order-date">Loading...</dd>
+                                </div>
+                                <div class="confirmation-card__row">
+                                    <dt>Payment Method</dt>
+                                    <dd id="payment-method">Loading...</dd>
+                                </div>
+                                <div class="confirmation-card__row">
+                                    <dt>Order Total</dt>
+                                    <dd><strong id="order-total">Loading...</strong></dd>
+                                </div>
+                            </dl>
+                        </div>
+
+                        <div class="confirmation-card">
+                            <h2 class="confirmation-card__heading">Shipping Details</h2>
+                            <address class="confirmation-card__address" id="shipping-address">
+                                <span style="color: var(--color-text-muted);">Loading shipping details...</span>
+                            </address>
+                            <p class="confirmation-card__shipping-method">
+                                <strong>Shipping Method:</strong> <span id="shipping-method">Loading...</span><br>
+                                <strong>Estimated Delivery:</strong> <span id="estimated-delivery">--</span>
+                            </p>
+                        </div>
+                    </div>
+
+                    <!-- Order items -->
+                    <div class="confirmation-items">
+                        <h2 class="confirmation-items__heading">Items Ordered</h2>
+                        <ul class="confirmation-items__list" id="order-items">
+                            <!-- Items loaded dynamically from API -->
+                            <li class="confirmation-item" style="justify-content: center; padding: 2rem;">
+                                <p style="color: var(--color-text-muted);">Loading order items...</p>
+                            </li>
+                        </ul>
+
+                        <dl class="confirmation-totals" id="order-totals">
+                            <div class="confirmation-totals__row">
+                                <dt>Subtotal</dt>
+                                <dd id="totals-subtotal">--</dd>
+                            </div>
+                            <div class="confirmation-totals__row">
+                                <dt>Shipping</dt>
+                                <dd id="totals-shipping">--</dd>
+                            </div>
+                            <div class="confirmation-totals__row">
+                                <dt>GST (15%)</dt>
+                                <dd>Included</dd>
+                            </div>
+                            <div class="confirmation-totals__row confirmation-totals__row--total">
+                                <dt>Total Paid</dt>
+                                <dd id="totals-total">--</dd>
+                            </div>
+                        </dl>
+                    </div>
+
+                    <!-- What happens next -->
+                    <div class="confirmation-next">
+                        <h2 class="confirmation-next__heading">What Happens Next?</h2>
+                        <ol class="confirmation-next__steps">
+                            <li>
+                                <span class="confirmation-next__icon">
+                                    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                        <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/>
+                                        <polyline points="22,6 12,13 2,6"/>
+                                    </svg>
+                                </span>
+                                <div>
+                                    <h3>Invoice Email Sent</h3>
+                                    <p>Check your inbox for your order confirmation and invoice with all the details.</p>
+                                </div>
+                            </li>
+                            <li>
+                                <span class="confirmation-next__icon">
+                                    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                        <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/>
+                                        <polyline points="3.27 6.96 12 12.01 20.73 6.96"/>
+                                        <line x1="12" y1="22.08" x2="12" y2="12"/>
+                                    </svg>
+                                </span>
+                                <div>
+                                    <h3>Order Processing</h3>
+                                    <p>We'll pick and pack your order, usually within 1 business day for orders placed before 2pm.</p>
+                                </div>
+                            </li>
+                            <li>
+                                <span class="confirmation-next__icon">
+                                    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                        <rect x="1" y="3" width="15" height="13"/>
+                                        <polygon points="16 8 20 8 23 11 23 16 16 16 16 8"/>
+                                        <circle cx="5.5" cy="18.5" r="2.5"/>
+                                        <circle cx="18.5" cy="18.5" r="2.5"/>
+                                    </svg>
+                                </span>
+                                <div>
+                                    <h3>Shipping Notification</h3>
+                                    <p>Once dispatched, you'll receive an email with your tracking number so you can follow your delivery.</p>
+                                </div>
+                            </li>
+                            <li>
+                                <span class="confirmation-next__icon">
+                                    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                        <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
+                                        <polyline points="9 22 9 12 15 12 15 22"/>
+                                    </svg>
+                                </span>
+                                <div>
+                                    <h3>Delivery</h3>
+                                    <p>Your order will arrive at your delivery address. No signature required for standard deliveries.</p>
+                                </div>
+                            </li>
+                        </ol>
+                    </div>
+
+                    <!-- Post-Purchase Relationship Hooks -->
+                    <div class="confirmation-relationship" id="post-purchase-hooks" style="display: grid; gap: 1rem; margin-bottom: 2rem;">
+                        <!-- Account creation prompt (shown only for guest checkout) -->
+                        <div class="confirmation-card" id="create-account-prompt" hidden style="background: var(--cyan-light, #D4E8F5); border: 1px solid var(--cyan-primary, #267FB5); border-radius: 8px; padding: 1.25rem; text-align: center;">
+                            <h3 style="margin: 0 0 0.5rem; font-size: 1.1rem;">Save Your Details for Next Time</h3>
+                            <p style="margin: 0 0 1rem; color: var(--steel-600, #475569); font-size: 0.9375rem;">Create an account to track orders, reorder easily, and get exclusive deals.</p>
+                            <a href="/html/account/login.html" class="btn btn--primary" data-track="cta_click" data-track-cta="Create Account" data-track-location="post_purchase">Create Account</a>
+                        </div>
+
+                        <!-- Reorder reminder -->
+                        <div class="confirmation-card" style="background: var(--steel-50, #F8FAFC); border: 1px solid var(--steel-200, #E2E8F0); border-radius: 8px; padding: 1.25rem; text-align: center;">
+                            <h3 style="margin: 0 0 0.5rem; font-size: 1.1rem;">Running Low? Set a Reminder</h3>
+                            <p style="margin: 0 0 1rem; color: var(--steel-600, #475569); font-size: 0.9375rem;">Most customers reorder every 2-3 months. Save your printer to your account and we'll remind you when it's time.</p>
+                            <a href="/html/account/printers.html" class="btn btn--secondary" data-track="cta_click" data-track-cta="Save Printer" data-track-location="post_purchase">Save My Printer</a>
+                        </div>
+                    </div>
+
+                    <!-- Actions -->
+                    <div class="confirmation-actions">
+                        <a href="/html/account/index.html" class="btn btn--primary btn--large" data-track="cta_click" data-track-cta="Track Order" data-track-location="post_purchase">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                <circle cx="12" cy="12" r="10"/>
+                                <polyline points="12 6 12 12 16 14"/>
+                            </svg>
+                            Track Your Order
+                        </a>
+                        <a href="/html/index.html" class="btn btn--secondary btn--large">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                <circle cx="9" cy="21" r="1"/>
+                                <circle cx="20" cy="21" r="1"/>
+                                <path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"/>
+                            </svg>
+                            Continue Shopping
+                        </a>
+                    </div>
+
+                    <!-- Help section -->
+                    <div class="confirmation-help">
+                        <h3>Need Help?</h3>
+                        <p>
+                            Questions about your order? We're here to help!
+                        </p>
+                        <div class="confirmation-help__contact">
+                            <a href="tel:0800465278" class="confirmation-help__link">
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                    <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/>
+                                </svg>
+                                0800 INK CART
+                            </a>
+                            <a href="mailto:support@inkcartridges.co.nz" class="confirmation-help__link">
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                    <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/>
+                                    <polyline points="22,6 12,13 2,6"/>
+                                </svg>
+                                support@inkcartridges.co.nz
+                            </a>
+                            <a href="/html/faq.html" class="confirmation-help__link">
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                    <circle cx="12" cy="12" r="10"/>
+                                    <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/>
+                                    <line x1="12" y1="17" x2="12.01" y2="17"/>
+                                </svg>
+                                View FAQs
+                            </a>
+                        </div>
+                    </div>
+
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <!-- ============================================
+         FOOTER
+         ============================================ -->
+    <footer class="site-footer">
+        <div class="footer-main">
+            <div class="container">
+                <div class="footer-grid">
+                    <!-- Brand column -->
+                    <div class="footer-brand">
+                        <a href="/html/index.html" class="footer-brand__logo">
+                            <span class="logo__text">Ink<span>Cartridges</span>.co.nz</span>
+                        </a>
+                        <p class="footer-brand__description">
+                            New Zealand's trusted source for quality printing supplies.
+                            We help homes and businesses keep printing with genuine and
+                            compatible ink and toner cartridges.
+                        </p>
+                        <div class="footer-brand__social">
+                            <a href="#" aria-label="Facebook">
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M18 2h-3a5 5 0 0 0-5 5v3H7v4h3v8h4v-8h3l1-4h-4V7a1 1 0 0 1 1-1h3z"/></svg>
+                            </a>
+                            <a href="#" aria-label="Instagram">
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="2" width="20" height="20" rx="5" ry="5"/><path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z"/><line x1="17.5" y1="6.5" x2="17.51" y2="6.5"/></svg>
+                            </a>
+                            <a href="#" aria-label="LinkedIn">
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M16 8a6 6 0 0 1 6 6v7h-4v-7a2 2 0 0 0-2-2 2 2 0 0 0-2 2v7h-4v-7a6 6 0 0 1 6-6z"/><rect x="2" y="9" width="4" height="12"/><circle cx="4" cy="4" r="2"/></svg>
+                            </a>
+                        </div>
+                    </div>
+
+                    <!-- Shop column -->
+                    <div class="footer-column">
+                        <h3 class="footer-column__heading">Shop</h3>
+                        <ul class="footer-links">
+                            <li><a href="/html/shop.html">Browse All Products</a></li>
+                            <li><a href="/html/shop.html?brand=brother">Brother</a></li>
+                            <li><a href="/html/shop.html?brand=canon">Canon</a></li>
+                            <li><a href="/html/shop.html?brand=epson">Epson</a></li>
+                            <li><a href="/html/shop.html?brand=hp">HP</a></li>
+                            <li><a href="/html/shop.html?brand=samsung">Samsung</a></li>
+                            <li><a href="/html/shop.html?brand=lexmark">Lexmark</a></li>
+                            <li><a href="/html/shop.html?brand=oki">OKI</a></li>
+                            <li><a href="/html/shop.html?brand=fuji-xerox">Fuji Xerox</a></li>
+                            <li><a href="/html/shop.html?brand=kyocera">Kyocera</a></li>
+                        </ul>
+                    </div>
+
+                    <!-- Support column -->
+                    <div class="footer-column">
+                        <h3 class="footer-column__heading">Support</h3>
+                        <ul class="footer-links">
+                            <li><a href="/html/contact.html">Contact Us</a></li>
+                            <li><a href="/html/faq.html">FAQs</a></li>
+                            <li><a href="/html/returns.html">Returns & Refunds</a></li>
+                            <li><a href="/html/about.html">About Us</a></li>
+                            <li><a href="/html/business.html">Business Accounts</a></li>
+                        </ul>
+                    </div>
+
+                    <!-- Contact column -->
+                    <div class="footer-column">
+                        <h3 class="footer-column__heading">Contact</h3>
+                        <ul class="footer-links">
+                            <li>
+                                <strong>Phone:</strong><br>
+                                <a href="tel:0800465275">0800 INK KART (465 275)</a>
+                            </li>
+                            <li>
+                                <strong>Email:</strong><br>
+                                <a href="mailto:support@inkcartridges.co.nz">support@inkcartridges.co.nz</a>
+                            </li>
+                            <li>
+                                <strong>Hours:</strong><br>
+                                8am - 8pm, 7 days a week
+                            </li>
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Trust badges -->
+                <div class="footer-trust">
+                    <div class="footer-trust__item">
+                        <svg class="footer-trust__icon" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+                        <span>100% NZ Owned</span>
+                    </div>
+                    <div class="footer-trust__item">
+                        <svg class="footer-trust__icon" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+                        <span>Secure Checkout</span>
+                    </div>
+                    <div class="footer-trust__item">
+                        <svg class="footer-trust__icon" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="1" y="3" width="15" height="13"/><polygon points="16 8 20 8 23 11 23 16 16 16 16 8"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/></svg>
+                        <span>Fast NZ Delivery</span>
+                    </div>
+                    <div class="footer-trust__item">
+                        <svg class="footer-trust__icon" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+                        <span>NZ-Based Support</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="footer-bottom">
+            <div class="container">
+                <p class="footer-copyright">
+                    &copy; <span id="current-year">2025</span> InkCartridges.co.nz. All rights reserved.
+                </p>
+                <div class="footer-legal">
+                    <a href="/html/privacy.html">Privacy Policy</a>
+                    <a href="/html/terms.html">Terms & Conditions</a>
+                </div>
+                <div class="footer-payment">
+                    <span class="footer-payment__label">We accept:</span>
+                    <div class="footer-payment__icons">
+                        <span title="Visa">Visa</span>
+                        <span title="Mastercard">MC</span>
+                        <span title="PayPal">PayPal</span>
+                        <span title="Afterpay">Afterpay</span>
+                        <span title="POLi">POLi</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </footer>
+
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="/js/config.js"></script>
+    <script src="/js/security.js"></script>
+    <script src="/js/utils.js"></script>
+    <script src="/js/api.js"></script>
+    <script src="/js/auth.js"></script>
+    <script src="/js/main.js"></script>
+    <script src="/js/modern-effects.js"></script>
+    <script src="/js/cart.js"></script>
+
+    <script>
+    // Order confirmation page
+    const ConfirmationPage = {
+        orderData: null,
+
+        async init() {
+            // Try to load order data from sessionStorage first
+            const storedOrder = sessionStorage.getItem('lastOrder');
+            if (storedOrder) {
+                try {
+                    this.orderData = JSON.parse(storedOrder);
+                    this.renderOrderDetails();
+                    // Clear after loading (one-time use)
+                    sessionStorage.removeItem('lastOrder');
+                    return;
+                } catch (e) {
+                    console.error('Failed to parse stored order:', e);
+                }
+            }
+
+            // Try to load from URL params and API
+            const urlParams = new URLSearchParams(window.location.search);
+            const orderNumber = urlParams.get('order');
+
+            if (orderNumber) {
+                await this.loadOrderFromAPI(orderNumber);
+            }
+        },
+
+        async loadOrderFromAPI(orderNumber) {
+            try {
+                const response = await API.getOrder(orderNumber);
+                if (response.success && response.data) {
+                    this.orderData = this.transformAPIOrder(response.data);
+                    this.renderOrderDetails();
+                }
+            } catch (error) {
+                console.error('Failed to load order from API:', error);
+                // Show order number at minimum
+                const orderNumEl = document.getElementById('order-number');
+                if (orderNumEl) {
+                    orderNumEl.textContent = `#${orderNumber}`;
+                }
+            }
+        },
+
+        transformAPIOrder(apiOrder) {
+            // Build shipping address from flat fields (backend returns shipping_recipient_name, etc.)
+            const shippingAddress = apiOrder.shipping_address || {
+                recipient_name: apiOrder.shipping_recipient_name || '',
+                phone: apiOrder.shipping_phone || '',
+                address_line1: apiOrder.shipping_address_line1 || '',
+                address_line2: apiOrder.shipping_address_line2 || '',
+                city: apiOrder.shipping_city || '',
+                region: apiOrder.shipping_region || '',
+                postal_code: apiOrder.shipping_postal_code || '',
+                country: apiOrder.shipping_country || 'NZ'
+            };
+
+            return {
+                orderNumber: apiOrder.order_number || apiOrder.id,
+                email: apiOrder.email || apiOrder.customer_email,
+                total: apiOrder.total,
+                subtotal: apiOrder.subtotal,
+                gstAmount: apiOrder.gst_amount || 0,
+                shipping: apiOrder.shipping_method || 'Standard Shipping',
+                shippingCost: apiOrder.shipping_cost || 0,
+                items: (apiOrder.order_items || apiOrder.items || []).map(item => ({
+                    name: item.product?.name || item.product_name || item.name,
+                    sku: item.product?.sku || item.product_sku || item.sku,
+                    quantity: item.quantity,
+                    price: item.unit_price || item.price,
+                    image_url: item.product?.image_url || item.image_url || null,
+                    brand: item.product?.brand?.name || item.brand || null,
+                    source: item.product?.source || item.source || null
+                })),
+                shippingAddress: shippingAddress,
+                paymentMethod: apiOrder.payment_method,
+                createdAt: apiOrder.created_at,
+                customerNotes: apiOrder.customer_notes || null,
+                trackingNumber: apiOrder.tracking_number || null,
+                invoiceNumber: apiOrder.invoice?.invoice_number || null,
+                invoiceDate: apiOrder.invoice?.invoice_date || null
+            };
+        },
+
+        renderOrderDetails() {
+            if (!this.orderData) return;
+
+            const order = this.orderData;
+
+            // Show test mode banner if applicable (support both formats)
+            if (order.testMode || order.is_test_order) {
+                this.showTestModeBanner();
+            }
+
+            // Order number (support both formats)
+            const orderNumEl = document.getElementById('order-number');
+            if (orderNumEl) {
+                orderNumEl.textContent = `#${order.orderNumber || order.order_number}`;
+            }
+
+            // Invoice number (if available)
+            const invoiceNumber = order.invoiceNumber || order.invoice_number;
+            if (invoiceNumber) {
+                const invoiceRowEl = document.getElementById('invoice-row');
+                const invoiceNumEl = document.getElementById('invoice-number');
+                if (invoiceRowEl) invoiceRowEl.style.display = '';
+                if (invoiceNumEl) invoiceNumEl.textContent = invoiceNumber;
+            }
+
+            // Email
+            const emailEl = document.getElementById('confirmation-email');
+            if (emailEl && order.email) {
+                emailEl.textContent = order.email;
+            }
+
+            // Order date (support both formats)
+            const dateEl = document.getElementById('order-date');
+            if (dateEl) {
+                const dateValue = order.createdAt || order.created_at;
+                const date = dateValue ? new Date(dateValue) : new Date();
+                dateEl.textContent = date.toLocaleDateString('en-NZ', {
+                    day: 'numeric',
+                    month: 'long',
+                    year: 'numeric'
+                });
+            }
+
+            // Payment method (support both formats)
+            const paymentEl = document.getElementById('payment-method');
+            const paymentMethod = order.paymentMethod || order.payment_method;
+            if (paymentEl && paymentMethod) {
+                const paymentLabels = {
+                    'card': 'Credit/Debit Card',
+                    'paypal': 'PayPal',
+                    'afterpay': 'Afterpay',
+                    'poli': 'POLi Bank Transfer'
+                };
+                paymentEl.textContent = paymentLabels[paymentMethod] || paymentMethod;
+            }
+
+            // Order total
+            const totalEl = document.getElementById('order-total');
+            if (totalEl && order.total) {
+                totalEl.textContent = `$${parseFloat(order.total).toFixed(2)} NZD`;
+            }
+
+            // Shipping address (support both formats)
+            const addressEl = document.getElementById('shipping-address');
+            const addr = order.shippingAddress || order.shipping_address;
+            if (addressEl) {
+                if (addr && Object.keys(addr).length > 0) {
+                    const name = addr.firstName && addr.lastName
+                        ? `${addr.firstName} ${addr.lastName}`
+                        : (addr.first_name && addr.last_name ? `${addr.first_name} ${addr.last_name}` : addr.recipient_name || '');
+
+                    const parts = [
+                        name ? `<strong>${name}</strong>` : '',
+                        addr.company,
+                        addr.address1 || addr.address_line1,
+                        addr.address2 || addr.address_line2,
+                        addr.city,
+                        `${this.formatRegion(addr.region)} ${addr.postcode || addr.postal_code || ''}`.trim(),
+                        'New Zealand'
+                    ].filter(Boolean);
+
+                    if (parts.length > 1) {
+                        addressEl.innerHTML = parts.join('<br>');
+                    } else {
+                        addressEl.innerHTML = '<span style="color: var(--color-text-muted);">Address details not available</span>';
+                    }
+                } else {
+                    addressEl.innerHTML = '<span style="color: var(--color-text-muted);">Address details not available</span>';
+                }
+            }
+
+            // Shipping method
+            const shippingMethodEl = document.getElementById('shipping-method');
+            if (shippingMethodEl && order.shipping) {
+                shippingMethodEl.textContent = order.shipping;
+            }
+
+            // Estimated delivery
+            const deliveryEl = document.getElementById('estimated-delivery');
+            if (deliveryEl) {
+                const shipping = order.shipping?.toLowerCase() || '';
+                if (shipping.includes('overnight')) {
+                    deliveryEl.textContent = 'Next business day';
+                } else if (shipping.includes('express')) {
+                    deliveryEl.textContent = '1-2 business days';
+                } else {
+                    deliveryEl.textContent = '3-5 business days';
+                }
+            }
+
+            // Order items
+            if (order.items && order.items.length > 0) {
+                this.renderOrderItems(order.items);
+            }
+
+            // Update totals
+            this.renderTotals(order);
+        },
+
+        // Uses ProductColors from utils.js for color lookups
+        getItemImageHtml(item) {
+            const color = item.color || (typeof ProductColors !== 'undefined' ? ProductColors.detectFromName(item.name) : null);
+            const colorStyle = color && typeof ProductColors !== 'undefined' ? ProductColors.getStyle(color) : null;
+
+            const esc = typeof Security !== 'undefined' ? Security.escapeAttr : (s) => s;
+
+            if (item.image_url) {
+                if (colorStyle) {
+                    return `<img src="${esc(item.image_url)}" alt="${esc(item.name)}" loading="lazy"
+                                onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
+                            <div class="confirmation-item__color-block" style="display: none; ${colorStyle} width: 100%; height: 100%; border-radius: 6px;"></div>`;
+                } else {
+                    return `<img src="${esc(item.image_url)}" alt="${esc(item.name)}" loading="lazy" onerror="this.onerror=null; this.parentElement.innerHTML=ConfirmationPage.getPlaceholderSvg();">`;
+                }
+            } else if (colorStyle) {
+                return `<div class="confirmation-item__color-block" style="${colorStyle} width: 100%; height: 100%; border-radius: 6px;"></div>`;
+            } else {
+                return this.getPlaceholderSvg();
+            }
+        },
+
+        renderOrderItems(items) {
+            const itemsList = document.getElementById('order-items');
+            if (!itemsList) return;
+
+            itemsList.innerHTML = items.map(item => {
+                // Create image HTML - use actual product image, color block, or placeholder
+                const imageHtml = this.getItemImageHtml(item);
+
+                // Build meta info
+                const metaParts = [];
+                if (item.sku) metaParts.push(`<span>SKU: ${item.sku}</span>`);
+                if (item.brand) metaParts.push(`<span>${item.brand}</span>`);
+                if (item.source) metaParts.push(`<span class="badge badge--${item.source === 'genuine' ? 'primary' : 'secondary'}">${item.source === 'genuine' ? 'Genuine' : 'Compatible'}</span>`);
+
+                return `
+                    <li class="confirmation-item">
+                        <div class="confirmation-item__image">
+                            ${imageHtml}
+                        </div>
+                        <div class="confirmation-item__details">
+                            <h3 class="confirmation-item__title">${item.name}</h3>
+                            <p class="confirmation-item__meta">${metaParts.join(' ') || 'N/A'}</p>
+                        </div>
+                        <div class="confirmation-item__quantity">Qty: ${item.quantity}</div>
+                        <div class="confirmation-item__price">$${(item.price * item.quantity).toFixed(2)}</div>
+                    </li>
+                `;
+            }).join('');
+        },
+
+        getPlaceholderSvg() {
+            return `<svg width="60" height="60" viewBox="0 0 60 60" fill="none" aria-hidden="true">
+                <rect width="60" height="60" rx="8" fill="#F3F4F6"/>
+                <rect x="20" y="10" width="20" height="40" rx="3" stroke="#9CA3AF" stroke-width="2" fill="none"/>
+                <rect x="25" y="35" width="10" height="10" fill="#9CA3AF"/>
+            </svg>`;
+        },
+
+        renderTotals(order) {
+            const subtotal = order.subtotal || order.items?.reduce((sum, item) => sum + (item.price * item.quantity), 0) || 0;
+            const shippingCost = order.shippingCost || order.shipping_cost || 0;
+            const total = order.total || (subtotal + shippingCost);
+
+            // Update individual elements
+            const subtotalEl = document.getElementById('totals-subtotal');
+            const shippingEl = document.getElementById('totals-shipping');
+            const totalEl = document.getElementById('totals-total');
+
+            if (subtotalEl) {
+                subtotalEl.textContent = `$${parseFloat(subtotal).toFixed(2)}`;
+            }
+
+            if (shippingEl) {
+                if (shippingCost === 0) {
+                    shippingEl.innerHTML = '<span class="text-success">FREE</span>';
+                } else {
+                    shippingEl.textContent = `$${parseFloat(shippingCost).toFixed(2)}`;
+                }
+            }
+
+            if (totalEl) {
+                totalEl.textContent = `$${parseFloat(total).toFixed(2)} NZD`;
+            }
+        },
+
+        showTestModeBanner() {
+            const banner = document.createElement('div');
+            banner.className = 'test-mode-banner';
+            banner.innerHTML = `
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+                    <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+                </svg>
+                <span><strong>Test Order</strong> - This order was placed in test mode. No actual payment was processed.</span>
+            `;
+            document.querySelector('.confirmation-content')?.prepend(banner);
+        },
+
+        formatRegion(region) {
+            if (!region) return '';
+            // Convert slug back to display name
+            const regionMap = {
+                'northland': 'Northland',
+                'auckland': 'Auckland',
+                'waikato': 'Waikato',
+                'bay-of-plenty': 'Bay of Plenty',
+                'gisborne': 'Gisborne',
+                'hawkes-bay': "Hawke's Bay",
+                'taranaki': 'Taranaki',
+                'manawatu-wanganui': 'Manawatu-Whanganui',
+                'wellington': 'Wellington',
+                'tasman': 'Tasman',
+                'nelson': 'Nelson',
+                'marlborough': 'Marlborough',
+                'west-coast': 'West Coast',
+                'canterbury': 'Canterbury',
+                'otago': 'Otago',
+                'southland': 'Southland'
+            };
+            return regionMap[region.toLowerCase()] || region;
+        }
+    };
+
+    // Initialize on page load
+    document.addEventListener('DOMContentLoaded', () => {
+        ConfirmationPage.init();
+
+        // Show account creation prompt for guest users
+        if (typeof Auth !== 'undefined') {
+            Auth.getUser().then(user => {
+                if (!user) {
+                    const prompt = document.getElementById('create-account-prompt');
+                    if (prompt) prompt.hidden = false;
+                }
+            }).catch(() => {
+                const prompt = document.getElementById('create-account-prompt');
+                if (prompt) prompt.hidden = false;
+            });
+        }
+    });
+    </script>
+    <script src="/js/analytics.js"></script>
+</body>
+</html>

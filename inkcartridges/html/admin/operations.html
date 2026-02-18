@@ -1,0 +1,743 @@
+<!DOCTYPE html>
+<html lang="en-NZ">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Operations Intelligence - InkCartridges.co.nz Admin">
+    <meta name="robots" content="noindex, nofollow">
+    <link rel="icon" type="image/svg+xml" href="/assets/icons/favicon.svg">
+    <title>Operations | InkCartridges.co.nz Admin</title>
+    <link rel="stylesheet" href="/css/base.css">
+    <link rel="stylesheet" href="/css/layout.css">
+    <link rel="stylesheet" href="/css/components.css">
+    <link rel="stylesheet" href="/css/modern-effects.css">
+    <link rel="stylesheet" href="/css/admin.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    <style>
+        .admin-page-content { padding: var(--spacing-6); width: 100%; box-sizing: border-box; }
+        .admin-chart__period { display: flex; gap: var(--spacing-2); }
+        .admin-chart__period-btn { padding: var(--spacing-2) var(--spacing-3); border: 1px solid var(--color-border); border-radius: var(--radius-md); background: var(--color-background); font-size: var(--font-size-sm); cursor: pointer; transition: all 0.15s ease; }
+        .admin-chart__period-btn:hover { background: var(--color-background-alt); }
+        .admin-chart__period-btn--active { background: var(--cyan-primary); color: white; border-color: var(--cyan-primary); }
+
+        /* Alert Banner */
+        .alert-banner { padding: var(--spacing-4); border-radius: var(--radius-lg); margin-bottom: var(--spacing-6); display: flex; align-items: center; gap: var(--spacing-4); }
+        .alert-banner--warning { background: var(--yellow-light); border: 1px solid var(--yellow-primary); }
+        .alert-banner--critical { background: var(--magenta-light); border: 1px solid var(--magenta-primary); }
+        .alert-banner__icon { width: 40px; height: 40px; border-radius: 50%; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+        .alert-banner--warning .alert-banner__icon { background: var(--yellow-primary); color: white; }
+        .alert-banner--critical .alert-banner__icon { background: var(--magenta-primary); color: white; }
+        .alert-banner__content { flex: 1; }
+        .alert-banner__title { font-weight: var(--font-weight-semibold); margin-bottom: 4px; }
+        .alert-banner__text { font-size: var(--font-size-sm); opacity: 0.8; }
+
+        /* KPI Grid */
+        .kpi-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--spacing-5); margin-bottom: var(--spacing-6); }
+        .kpi-card { background: var(--color-background); border-radius: var(--radius-lg); border: 1px solid var(--color-border); padding: var(--spacing-5); }
+        .kpi-card--warning { border-color: var(--yellow-primary); }
+        .kpi-card--critical { border-color: var(--magenta-primary); }
+        .kpi-card__header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: var(--spacing-3); }
+        .kpi-card__icon { width: 44px; height: 44px; border-radius: var(--radius-md); display: flex; align-items: center; justify-content: center; }
+        .kpi-card__icon--turnover { background: #DBEAFE; color: #2563EB; }
+        .kpi-card__icon--dead { background: var(--magenta-light); color: var(--magenta-primary); }
+        .kpi-card__icon--velocity { background: #D1FAE5; color: #059669; }
+        .kpi-card__icon--lockup { background: var(--yellow-light); color: var(--yellow-dark); }
+        .kpi-card__value { font-size: var(--font-size-2xl); font-weight: var(--font-weight-bold); margin-bottom: var(--spacing-1); }
+        .kpi-card__label { font-size: var(--font-size-sm); color: var(--color-text-muted); }
+        .kpi-card__sublabel { font-size: var(--font-size-xs); color: var(--color-text-muted); margin-top: var(--spacing-2); }
+
+        /* Chart Grid */
+        .chart-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: var(--spacing-6); margin-bottom: var(--spacing-6); }
+        .chart-card { background: var(--color-background); border-radius: var(--radius-lg); border: 1px solid var(--color-border); }
+        .chart-card--full { grid-column: span 2; }
+        .chart-card__header { padding: var(--spacing-5); border-bottom: 1px solid var(--color-border-light); display: flex; justify-content: space-between; align-items: center; }
+        .chart-card__title { font-size: var(--font-size-lg); font-weight: var(--font-weight-semibold); margin: 0; }
+        .chart-card__body { padding: var(--spacing-5); }
+        .chart-container { height: 300px; position: relative; }
+
+        /* Inventory Table */
+        .inventory-table { width: 100%; border-collapse: collapse; }
+        .inventory-table th, .inventory-table td { padding: var(--spacing-3) var(--spacing-4); text-align: left; border-bottom: 1px solid var(--color-border-light); }
+        .inventory-table th { font-size: var(--font-size-xs); font-weight: var(--font-weight-semibold); color: var(--color-text-muted); text-transform: uppercase; letter-spacing: var(--letter-spacing-wide); background: var(--color-background-alt); }
+        .inventory-table tbody tr:hover { background: var(--color-background-alt); }
+
+        /* Status Badge */
+        .status-badge { display: inline-flex; padding: 4px 10px; border-radius: var(--radius-full); font-size: var(--font-size-xs); font-weight: var(--font-weight-medium); }
+        .status-badge--active { background: #D1FAE5; color: #059669; }
+        .status-badge--moderate { background: #DBEAFE; color: #2563EB; }
+        .status-badge--slow { background: var(--yellow-light); color: var(--yellow-dark); }
+        .status-badge--dead { background: var(--magenta-light); color: var(--magenta-primary); }
+
+        /* Velocity Bar */
+        .velocity-bar { width: 80px; height: 8px; background: var(--color-background-alt); border-radius: 4px; overflow: hidden; }
+        .velocity-bar__fill { height: 100%; background: #267FB5; transition: width 0.3s; }
+
+        /* Summary Cards */
+        .summary-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--spacing-4); margin-bottom: var(--spacing-4); }
+        .summary-card { background: var(--color-background-alt); border-radius: var(--radius-md); padding: var(--spacing-4); }
+        .summary-card__value { font-size: var(--font-size-xl); font-weight: var(--font-weight-bold); margin-bottom: 4px; }
+        .summary-card__label { font-size: var(--font-size-sm); color: var(--color-text-muted); }
+        .summary-card--warning { background: var(--yellow-light); }
+        .summary-card--danger { background: var(--magenta-light); }
+
+        /* Tab Navigation */
+        .tab-nav { display: flex; gap: var(--spacing-1); margin-bottom: var(--spacing-4); border-bottom: 1px solid var(--color-border); }
+        .tab-nav__btn { padding: var(--spacing-3) var(--spacing-4); background: none; border: none; font-size: var(--font-size-sm); font-weight: var(--font-weight-medium); color: var(--color-text-muted); cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -1px; }
+        .tab-nav__btn--active { color: var(--cyan-primary); border-bottom-color: var(--cyan-primary); }
+        .tab-nav__btn:hover { color: var(--color-text); }
+
+        /* Responsive */
+        @media (max-width: 1200px) {
+            .kpi-grid { grid-template-columns: repeat(2, 1fr); }
+            .chart-grid { grid-template-columns: 1fr; }
+            .chart-card--full { grid-column: span 1; }
+            .summary-grid { grid-template-columns: 1fr; }
+        }
+        @media (max-width: 768px) {
+            .kpi-grid { grid-template-columns: 1fr; }
+        }
+    </style>
+</head>
+<body class="admin-body">
+    <aside class="admin-sidebar">
+        <div class="admin-sidebar__logo">
+            <a href="/html/admin/index.html">
+                <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9V2h12v7"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
+                <span>InkCartridges</span>
+            </a>
+        </div>
+        <nav class="admin-nav">
+            <ul class="admin-nav__list">
+                <li class="admin-nav__item"><a href="/html/admin/index.html" class="admin-nav__link"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>Dashboard</a></li>
+                <li class="admin-nav__item"><a href="/html/admin/orders.html" class="admin-nav__link"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="8" height="4" rx="1"/></svg>Orders</a></li>
+                <li class="admin-nav__item"><a href="/html/admin/products.html" class="admin-nav__link"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"/><line x1="3" y1="6" x2="21" y2="6"/><path d="M16 10a4 4 0 0 1-8 0"/></svg>Products</a></li>
+                <li class="admin-nav__separator">Analytics</li>
+                <li class="admin-nav__item"><a href="/html/admin/financial-health.html" class="admin-nav__link"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>Financial Health</a></li>
+                <li class="admin-nav__item"><a href="/html/admin/customer-intelligence.html" class="admin-nav__link"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>Customer Intelligence</a></li>
+                <li class="admin-nav__item"><a href="/html/admin/operations.html" class="admin-nav__link admin-nav__link--active"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>Operations</a></li>
+                <li class="admin-nav__item"><a href="/html/admin/sales.html" class="admin-nav__link"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="20" x2="12" y2="10"/><line x1="18" y1="20" x2="18" y2="4"/><line x1="6" y1="20" x2="6" y2="16"/></svg>Sales Analytics</a></li>
+                <li class="admin-nav__item"><a href="/html/admin/marketing.html" class="admin-nav__link"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>Marketing</a></li>
+                <li class="admin-nav__separator">System</li>
+                <li class="admin-nav__item"><a href="/html/admin/settings.html" class="admin-nav__link"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>Settings</a></li>
+            </ul>
+        </nav>
+        <div class="admin-sidebar__user">
+            <div class="admin-sidebar__avatar" id="admin-avatar">A</div>
+            <div>
+                <div style="font-weight: 500; font-size: 14px;" id="admin-name">Admin</div>
+                <div style="font-size: 12px; opacity: 0.7;" id="admin-email">admin@example.com</div>
+            </div>
+        </div>
+        <div style="padding: var(--spacing-4) var(--spacing-6); border-top: 1px solid rgba(255,255,255,0.1);">
+            <a href="/html/index.html" style="display: flex; align-items: center; gap: 8px; color: rgba(255,255,255,0.7); text-decoration: none; font-size: 14px;">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+                View Store
+            </a>
+        </div>
+    </aside>
+
+    <main class="admin-main">
+        <header class="admin-header" style="background: var(--color-background); border-bottom: 1px solid var(--color-border); padding: var(--spacing-4) var(--spacing-6); display: flex; justify-content: space-between; align-items: center;">
+            <div>
+                <h1 style="font-size: var(--font-size-xl); font-weight: var(--font-weight-bold); margin: 0;">Operations Intelligence</h1>
+                <p style="font-size: var(--font-size-sm); color: var(--color-text-muted); margin: var(--spacing-1) 0 0;">Inventory turnover, dead stock, and operational efficiency</p>
+            </div>
+            <div style="display: flex; gap: var(--spacing-3); align-items: center;">
+                <div class="admin-chart__period">
+                    <button class="admin-chart__period-btn" data-period="1h">1H</button>
+                    <button class="admin-chart__period-btn" data-period="12h">12H</button>
+                    <button class="admin-chart__period-btn" data-period="24h">24H</button>
+                    <button class="admin-chart__period-btn admin-chart__period-btn--active" data-period="7d">7D</button>
+                    <button class="admin-chart__period-btn" data-period="1m">1M</button>
+                    <button class="admin-chart__period-btn" data-period="3m">3M</button>
+                    <button class="admin-chart__period-btn" data-period="6m">6M</button>
+                    <button class="admin-chart__period-btn" data-period="1y">1Y</button>
+                    <button class="admin-chart__period-btn" data-period="2y">2Y</button>
+                </div>
+                <button class="btn btn--secondary btn--sm" id="export-btn">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                    Export Report
+                </button>
+            </div>
+        </header>
+
+        <div class="admin-page-content">
+            <!-- Dead Stock Alert -->
+            <div class="alert-banner alert-banner--warning" id="dead-stock-alert" style="display: none;">
+                <div class="alert-banner__icon">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                </div>
+                <div class="alert-banner__content">
+                    <div class="alert-banner__title" id="dead-stock-alert-title">Dead Stock Warning</div>
+                    <div class="alert-banner__text" id="dead-stock-alert-text">You have inventory that hasn't sold in over 90 days.</div>
+                </div>
+                <button class="btn btn--sm" onclick="OperationsPage.scrollToDeadStock()">Review Items</button>
+            </div>
+
+            <!-- KPI Cards -->
+            <div class="kpi-grid">
+                <div class="kpi-card">
+                    <div class="kpi-card__header">
+                        <div class="kpi-card__icon kpi-card__icon--turnover">
+                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+                        </div>
+                    </div>
+                    <div class="kpi-card__value" id="turnover-rate">0x</div>
+                    <div class="kpi-card__label">Inventory Turnover</div>
+                    <div class="kpi-card__sublabel">Annual rate (target: 4-6x)</div>
+                </div>
+
+                <div class="kpi-card" id="dead-stock-card">
+                    <div class="kpi-card__header">
+                        <div class="kpi-card__icon kpi-card__icon--dead">
+                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><line x1="3.27" y1="6.96" x2="12" y2="12.01"/><line x1="12" y1="12.01" x2="20.73" y2="6.96"/></svg>
+                        </div>
+                    </div>
+                    <div class="kpi-card__value" id="dead-stock-value">$0</div>
+                    <div class="kpi-card__label">Dead Stock Value</div>
+                    <div class="kpi-card__sublabel" id="dead-stock-count">0 SKUs (90+ days)</div>
+                </div>
+
+                <div class="kpi-card">
+                    <div class="kpi-card__header">
+                        <div class="kpi-card__icon kpi-card__icon--velocity">
+                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="12" x2="2" y2="12"/><polyline points="15 5 22 12 15 19"/></svg>
+                        </div>
+                    </div>
+                    <div class="kpi-card__value" id="avg-velocity">0/mo</div>
+                    <div class="kpi-card__label">Avg Stock Velocity</div>
+                    <div class="kpi-card__sublabel">Units sold per month</div>
+                </div>
+
+                <div class="kpi-card" id="cash-lockup-card">
+                    <div class="kpi-card__header">
+                        <div class="kpi-card__icon kpi-card__icon--lockup">
+                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+                        </div>
+                    </div>
+                    <div class="kpi-card__value" id="cash-lockup">$0</div>
+                    <div class="kpi-card__label">Inventory Cash Lockup</div>
+                    <div class="kpi-card__sublabel" id="days-of-stock">Total inventory value</div>
+                </div>
+            </div>
+
+            <!-- Summary Cards -->
+            <div class="summary-grid" style="margin-bottom: var(--spacing-6);">
+                <div class="summary-card">
+                    <div class="summary-card__value" id="active-skus">0</div>
+                    <div class="summary-card__label">Active SKUs (sold in 30 days)</div>
+                </div>
+                <div class="summary-card summary-card--warning">
+                    <div class="summary-card__value" id="slow-moving-skus">0</div>
+                    <div class="summary-card__label">Slow Moving (45-90 days)</div>
+                </div>
+                <div class="summary-card summary-card--danger">
+                    <div class="summary-card__value" id="dead-skus">0</div>
+                    <div class="summary-card__label">Dead Stock (90+ days)</div>
+                </div>
+            </div>
+
+            <!-- Charts Row -->
+            <div class="chart-grid">
+                <div class="chart-card">
+                    <div class="chart-card__header">
+                        <h2 class="chart-card__title">Inventory Value by Status</h2>
+                    </div>
+                    <div class="chart-card__body">
+                        <div class="chart-container">
+                            <canvas id="inventory-status-chart"></canvas>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="chart-card">
+                    <div class="chart-card__header">
+                        <h2 class="chart-card__title">Stock Velocity Distribution</h2>
+                    </div>
+                    <div class="chart-card__body">
+                        <div class="chart-container">
+                            <canvas id="velocity-chart"></canvas>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Inventory Table with Tabs -->
+            <div class="chart-card">
+                <div class="chart-card__header">
+                    <h2 class="chart-card__title">Product Performance</h2>
+                    <select class="btn btn--secondary btn--sm" id="sort-select" style="padding: 6px 12px;">
+                        <option value="velocity-desc">Highest Velocity</option>
+                        <option value="velocity-asc">Lowest Velocity</option>
+                        <option value="value-desc">Highest Stock Value</option>
+                        <option value="days-desc">Most Days of Stock</option>
+                        <option value="margin-desc">Highest Margin</option>
+                    </select>
+                </div>
+                <div class="chart-card__body" style="padding: 0;">
+                    <div class="tab-nav">
+                        <button class="tab-nav__btn tab-nav__btn--active" data-tab="all">All Products</button>
+                        <button class="tab-nav__btn" data-tab="dead">Dead Stock</button>
+                        <button class="tab-nav__btn" data-tab="slow">Slow Moving</button>
+                        <button class="tab-nav__btn" data-tab="fast">Fast Movers</button>
+                    </div>
+                    <table class="inventory-table">
+                        <thead>
+                            <tr>
+                                <th>Product</th>
+                                <th>SKU</th>
+                                <th>Stock</th>
+                                <th>Stock Value</th>
+                                <th>Days of Stock</th>
+                                <th>Velocity</th>
+                                <th>Status</th>
+                                <th>Last Sale</th>
+                            </tr>
+                        </thead>
+                        <tbody id="inventory-tbody">
+                            <tr>
+                                <td colspan="8" style="text-align: center; padding: var(--spacing-6); color: var(--color-text-muted);">
+                                    Loading inventory data...
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="/js/config.js"></script>
+    <script src="/js/utils.js"></script>
+    <script src="/js/api.js"></script>
+    <script src="/js/auth.js"></script>
+    <script src="/js/admin.js"></script>
+    <script src="/js/analytics-api.js"></script>
+    <script>
+    const OperationsPage = {
+        charts: {},
+        products: [],
+        orderItems: [],
+        currentTab: 'all',
+        currentSort: 'velocity-desc',
+
+        async init() {
+            this.bindEvents();
+            await this.loadData();
+        },
+
+        bindEvents() {
+            // Period filter buttons
+            document.querySelectorAll('.admin-chart__period-btn').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    document.querySelectorAll('.admin-chart__period-btn').forEach(b =>
+                        b.classList.remove('admin-chart__period-btn--active'));
+                    e.target.classList.add('admin-chart__period-btn--active');
+                    this.currentPeriod = e.target.dataset.period;
+                    this.loadData();
+                });
+            });
+
+            // Tab navigation
+            document.querySelectorAll('.tab-nav__btn').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    document.querySelectorAll('.tab-nav__btn').forEach(b => b.classList.remove('tab-nav__btn--active'));
+                    btn.classList.add('tab-nav__btn--active');
+                    this.currentTab = btn.dataset.tab;
+                    this.renderInventoryTable();
+                });
+            });
+
+            // Sort select
+            document.getElementById('sort-select').addEventListener('change', (e) => {
+                this.currentSort = e.target.value;
+                this.renderInventoryTable();
+            });
+        },
+
+        async loadData() {
+            try {
+                // Load products
+                const productsResponse = await API.getProducts({ limit: 500 });
+                this.products = productsResponse.success ? (productsResponse.data?.products || []) : [];
+
+                // Load orders to calculate sales velocity
+                const ordersResponse = await API.getOrders({ limit: 500 });
+                const orders = ordersResponse.success ? (ordersResponse.data?.orders || []) : [];
+
+                // Extract order items
+                this.orderItems = [];
+                orders.forEach(order => {
+                    if (order.status === 'cancelled' || order.status === 'refunded') return;
+                    (order.items || order.order_items || []).forEach(item => {
+                        this.orderItems.push({
+                            ...item,
+                            order_date: new Date(order.created_at)
+                        });
+                    });
+                });
+
+                // Calculate metrics for each product
+                this.calculateProductMetrics();
+
+                // Update KPIs
+                this.updateKPIs();
+
+                // Render charts
+                this.renderInventoryStatusChart();
+                this.renderVelocityChart();
+
+                // Render table
+                this.renderInventoryTable();
+
+                // Check alerts
+                this.checkAlerts();
+
+            } catch (error) {
+                console.error('Error loading operations data:', error);
+            }
+        },
+
+        calculateProductMetrics() {
+            const now = new Date();
+            const thirtyDaysAgo = new Date(now - 30 * 24 * 60 * 60 * 1000);
+            const ninetyDaysAgo = new Date(now - 90 * 24 * 60 * 60 * 1000);
+
+            // Group sales by product
+            const salesByProduct = {};
+            this.orderItems.forEach(item => {
+                const productId = item.product_id || item.sku;
+                if (!salesByProduct[productId]) {
+                    salesByProduct[productId] = {
+                        totalUnits: 0,
+                        recentUnits: 0, // Last 30 days
+                        lastSaleDate: null,
+                        totalRevenue: 0
+                    };
+                }
+
+                salesByProduct[productId].totalUnits += item.quantity || 1;
+                salesByProduct[productId].totalRevenue += item.line_total || 0;
+
+                if (item.order_date > thirtyDaysAgo) {
+                    salesByProduct[productId].recentUnits += item.quantity || 1;
+                }
+
+                if (!salesByProduct[productId].lastSaleDate || item.order_date > salesByProduct[productId].lastSaleDate) {
+                    salesByProduct[productId].lastSaleDate = item.order_date;
+                }
+            });
+
+            // Calculate metrics for each product
+            this.products = this.products.map(product => {
+                const sales = salesByProduct[product.id] || salesByProduct[product.sku] || {
+                    totalUnits: 0,
+                    recentUnits: 0,
+                    lastSaleDate: null,
+                    totalRevenue: 0
+                };
+
+                const stockQuantity = product.stock_quantity || 0;
+                const costPrice = product.cost_price || product.price * 0.6; // Estimate 60% cost if not set
+                const stockValue = stockQuantity * costPrice;
+
+                // Monthly velocity (based on last 30 days)
+                const monthlyVelocity = sales.recentUnits;
+
+                // Days of stock
+                const daysOfStock = monthlyVelocity > 0
+                    ? Math.round(stockQuantity / (monthlyVelocity / 30))
+                    : 9999;
+
+                // Annual turnover rate
+                const annualSales = sales.totalUnits * (365 / 365); // Simplified
+                const turnoverRate = stockValue > 0 ? (annualSales * costPrice) / stockValue : 0;
+
+                // Determine status
+                let stockStatus = 'active';
+                let daysSinceLastSale = sales.lastSaleDate
+                    ? Math.floor((now - sales.lastSaleDate) / (1000 * 60 * 60 * 24))
+                    : 9999;
+
+                if (daysSinceLastSale > 180 || !sales.lastSaleDate) {
+                    stockStatus = 'dead';
+                } else if (daysSinceLastSale > 90) {
+                    stockStatus = 'dead';
+                } else if (daysSinceLastSale > 45) {
+                    stockStatus = 'slow';
+                } else if (monthlyVelocity >= 10) {
+                    stockStatus = 'fast';
+                }
+
+                return {
+                    ...product,
+                    stockValue,
+                    monthlyVelocity,
+                    daysOfStock,
+                    turnoverRate,
+                    stockStatus,
+                    lastSaleDate: sales.lastSaleDate,
+                    daysSinceLastSale,
+                    totalUnitsSold: sales.totalUnits,
+                    totalRevenue: sales.totalRevenue
+                };
+            });
+        },
+
+        updateKPIs() {
+            const productsWithStock = this.products.filter(p => (p.stock_quantity || 0) > 0);
+
+            // Inventory turnover (weighted average)
+            const totalCOGS = this.products.reduce((sum, p) => sum + (p.totalUnitsSold * (p.cost_price || p.price * 0.6)), 0);
+            const avgInventory = productsWithStock.reduce((sum, p) => sum + p.stockValue, 0) / 2;
+            const turnoverRate = avgInventory > 0 ? (totalCOGS / avgInventory).toFixed(1) : 0;
+            document.getElementById('turnover-rate').textContent = `${turnoverRate}x`;
+
+            // Dead stock value
+            const deadStock = productsWithStock.filter(p => p.stockStatus === 'dead');
+            const deadStockValue = deadStock.reduce((sum, p) => sum + p.stockValue, 0);
+            document.getElementById('dead-stock-value').textContent = formatPrice(deadStockValue);
+            document.getElementById('dead-stock-count').textContent = `${deadStock.length} SKUs (90+ days)`;
+
+            // Update card styling based on dead stock value
+            const deadStockCard = document.getElementById('dead-stock-card');
+            if (deadStockValue > 10000) {
+                deadStockCard.classList.add('kpi-card--critical');
+            } else if (deadStockValue > 5000) {
+                deadStockCard.classList.add('kpi-card--warning');
+            }
+
+            // Average velocity
+            const totalVelocity = productsWithStock.reduce((sum, p) => sum + p.monthlyVelocity, 0);
+            const avgVelocity = productsWithStock.length > 0 ? (totalVelocity / productsWithStock.length).toFixed(1) : 0;
+            document.getElementById('avg-velocity').textContent = `${avgVelocity}/mo`;
+
+            // Cash lockup
+            const totalStockValue = productsWithStock.reduce((sum, p) => sum + p.stockValue, 0);
+            document.getElementById('cash-lockup').textContent = formatPrice(totalStockValue);
+
+            const avgDaysOfStock = productsWithStock.length > 0
+                ? productsWithStock.reduce((sum, p) => sum + Math.min(p.daysOfStock, 365), 0) / productsWithStock.length
+                : 0;
+            document.getElementById('days-of-stock').textContent = `~${Math.round(avgDaysOfStock)} avg days of stock`;
+
+            // Summary cards
+            const activeSkus = productsWithStock.filter(p => p.daysSinceLastSale <= 30).length;
+            const slowSkus = productsWithStock.filter(p => p.stockStatus === 'slow').length;
+            const deadSkus = deadStock.length;
+
+            document.getElementById('active-skus').textContent = activeSkus;
+            document.getElementById('slow-moving-skus').textContent = slowSkus;
+            document.getElementById('dead-skus').textContent = deadSkus;
+        },
+
+        renderInventoryStatusChart() {
+            const ctx = document.getElementById('inventory-status-chart');
+            if (!ctx) return;
+
+            if (this.charts.status) this.charts.status.destroy();
+
+            const productsWithStock = this.products.filter(p => (p.stock_quantity || 0) > 0);
+
+            const statusValues = {
+                'Active': productsWithStock.filter(p => p.stockStatus === 'active' || p.stockStatus === 'fast').reduce((sum, p) => sum + p.stockValue, 0),
+                'Slow Moving': productsWithStock.filter(p => p.stockStatus === 'slow').reduce((sum, p) => sum + p.stockValue, 0),
+                'Dead Stock': productsWithStock.filter(p => p.stockStatus === 'dead').reduce((sum, p) => sum + p.stockValue, 0)
+            };
+
+            this.charts.status = new Chart(ctx, {
+                type: 'doughnut',
+                data: {
+                    labels: Object.keys(statusValues),
+                    datasets: [{
+                        data: Object.values(statusValues),
+                        backgroundColor: ['#10b981', '#F4C430', '#C71F6E']
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { position: 'bottom' },
+                        tooltip: {
+                            callbacks: {
+                                label: (ctx) => `${ctx.label}: ${formatPrice(ctx.raw)}`
+                            }
+                        }
+                    }
+                }
+            });
+        },
+
+        renderVelocityChart() {
+            const ctx = document.getElementById('velocity-chart');
+            if (!ctx) return;
+
+            if (this.charts.velocity) this.charts.velocity.destroy();
+
+            // Create velocity distribution buckets
+            const buckets = {
+                '0': 0,
+                '1-5': 0,
+                '6-10': 0,
+                '11-20': 0,
+                '21-50': 0,
+                '50+': 0
+            };
+
+            this.products.filter(p => (p.stock_quantity || 0) > 0).forEach(p => {
+                const v = p.monthlyVelocity;
+                if (v === 0) buckets['0']++;
+                else if (v <= 5) buckets['1-5']++;
+                else if (v <= 10) buckets['6-10']++;
+                else if (v <= 20) buckets['11-20']++;
+                else if (v <= 50) buckets['21-50']++;
+                else buckets['50+']++;
+            });
+
+            this.charts.velocity = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: Object.keys(buckets),
+                    datasets: [{
+                        label: 'Products',
+                        data: Object.values(buckets),
+                        backgroundColor: '#267FB5',
+                        borderRadius: 4
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { legend: { display: false } },
+                    scales: {
+                        y: { beginAtZero: true, title: { display: true, text: 'Number of Products' } },
+                        x: { title: { display: true, text: 'Units/Month' } }
+                    }
+                }
+            });
+        },
+
+        renderInventoryTable() {
+            const tbody = document.getElementById('inventory-tbody');
+
+            // Filter by tab
+            let filtered = this.products.filter(p => (p.stock_quantity || 0) > 0);
+
+            if (this.currentTab === 'dead') {
+                filtered = filtered.filter(p => p.stockStatus === 'dead');
+            } else if (this.currentTab === 'slow') {
+                filtered = filtered.filter(p => p.stockStatus === 'slow');
+            } else if (this.currentTab === 'fast') {
+                filtered = filtered.filter(p => p.stockStatus === 'fast' || p.monthlyVelocity >= 10);
+            }
+
+            // Sort
+            const [sortField, sortDir] = this.currentSort.split('-');
+            filtered.sort((a, b) => {
+                let aVal, bVal;
+                switch (sortField) {
+                    case 'velocity':
+                        aVal = a.monthlyVelocity;
+                        bVal = b.monthlyVelocity;
+                        break;
+                    case 'value':
+                        aVal = a.stockValue;
+                        bVal = b.stockValue;
+                        break;
+                    case 'days':
+                        aVal = a.daysOfStock;
+                        bVal = b.daysOfStock;
+                        break;
+                    case 'margin':
+                        aVal = a.price - (a.cost_price || a.price * 0.6);
+                        bVal = b.price - (b.cost_price || b.price * 0.6);
+                        break;
+                    default:
+                        aVal = a.monthlyVelocity;
+                        bVal = b.monthlyVelocity;
+                }
+                return sortDir === 'desc' ? bVal - aVal : aVal - bVal;
+            });
+
+            if (filtered.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="8" style="text-align: center; padding: var(--spacing-6); color: var(--color-text-muted);">No products match the selected filter</td></tr>';
+                return;
+            }
+
+            const maxVelocity = Math.max(...filtered.map(p => p.monthlyVelocity), 1);
+
+            tbody.innerHTML = filtered.slice(0, 50).map(product => {
+                const statusClass = {
+                    'active': 'active',
+                    'fast': 'active',
+                    'slow': 'slow',
+                    'dead': 'dead'
+                }[product.stockStatus] || 'moderate';
+
+                const velocityPct = (product.monthlyVelocity / maxVelocity) * 100;
+
+                return `
+                    <tr>
+                        <td>
+                            <div style="font-weight: var(--font-weight-medium);">${product.name || 'Unknown Product'}</div>
+                        </td>
+                        <td><code style="font-size: var(--font-size-xs);">${product.sku || '--'}</code></td>
+                        <td>${product.stock_quantity || 0}</td>
+                        <td>${formatPrice(product.stockValue)}</td>
+                        <td>${product.daysOfStock < 9999 ? Math.round(product.daysOfStock) + ' days' : '∞'}</td>
+                        <td>
+                            <div style="display: flex; align-items: center; gap: 8px;">
+                                <div class="velocity-bar">
+                                    <div class="velocity-bar__fill" style="width: ${velocityPct}%;"></div>
+                                </div>
+                                <span style="font-size: var(--font-size-xs);">${product.monthlyVelocity}/mo</span>
+                            </div>
+                        </td>
+                        <td><span class="status-badge status-badge--${statusClass}">${product.stockStatus}</span></td>
+                        <td>
+                            ${product.lastSaleDate
+                                ? `<div>${product.lastSaleDate.toLocaleDateString('en-NZ')}</div>
+                                   <div style="font-size: var(--font-size-xs); color: var(--color-text-muted);">${product.daysSinceLastSale} days ago</div>`
+                                : '<span style="color: var(--color-text-muted);">Never</span>'
+                            }
+                        </td>
+                    </tr>
+                `;
+            }).join('');
+        },
+
+        checkAlerts() {
+            const deadStock = this.products.filter(p => p.stockStatus === 'dead' && (p.stock_quantity || 0) > 0);
+            const deadStockValue = deadStock.reduce((sum, p) => sum + p.stockValue, 0);
+
+            if (deadStockValue > 5000 || deadStock.length > 20) {
+                const alertBanner = document.getElementById('dead-stock-alert');
+                alertBanner.style.display = 'flex';
+
+                if (deadStockValue > 10000) {
+                    alertBanner.className = 'alert-banner alert-banner--critical';
+                    document.getElementById('dead-stock-alert-title').textContent = 'Critical: High Dead Stock Value';
+                    document.getElementById('dead-stock-alert-text').textContent =
+                        `${formatPrice(deadStockValue)} locked in ${deadStock.length} dead stock items. Consider clearance or write-off.`;
+                } else {
+                    document.getElementById('dead-stock-alert-text').textContent =
+                        `${deadStock.length} items totaling ${formatPrice(deadStockValue)} haven't sold in 90+ days.`;
+                }
+            }
+        },
+
+        scrollToDeadStock() {
+            document.querySelector('[data-tab="dead"]').click();
+            document.querySelector('.inventory-table').scrollIntoView({ behavior: 'smooth' });
+        }
+    };
+
+    document.addEventListener('DOMContentLoaded', () => {
+        setTimeout(() => { OperationsPage.init(); }, 500);
+    });
+    </script>
+    <script src="/js/modern-effects.js"></script>
+</body>
+</html>

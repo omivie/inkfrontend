@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en-NZ">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>InkCartridges.co.nz</title>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script>
+        // Check if this is an auth callback (has tokens in URL hash)
+        const hashParams = new URLSearchParams(window.location.hash.substring(1));
+
+        if (hashParams.get('access_token') || hashParams.get('type')) {
+            // Check what type of callback this is
+            const type = hashParams.get('type');
+
+            if (type === 'recovery') {
+                // Password reset callback - redirect to reset password page
+                window.location.href = '/html/account/reset-password.html' + window.location.hash;
+            } else {
+                // Other auth callback (signup, magiclink) - redirect to login page
+                window.location.href = '/html/account/login.html' + window.location.hash;
+            }
+        } else {
+            // Normal visit - redirect to main site
+            window.location.href = '/html/index.html';
+        }
+    </script>
+</head>
+<body>
+    <p>Redirecting...</p>
+</body>
+</html>

@@ -1,0 +1,1524 @@
+<!DOCTYPE html>
+<html lang="en-NZ">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Complete your payment - InkCartridges.co.nz">
+    <meta name="robots" content="noindex, nofollow">
+
+    <link rel="icon" type="image/svg+xml" href="/assets/icons/favicon.svg">
+    <title>Payment | InkCartridges.co.nz</title>
+
+    <!-- Google Analytics 4 (with consent mode) -->
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-SDQELG0FGD"></script>
+    <script>
+        window.dataLayer = window.dataLayer || [];
+        function gtag(){dataLayer.push(arguments);}
+        gtag('consent', 'default', {
+            analytics_storage: localStorage.getItem('cookie_consent') === 'accepted' ? 'granted' : 'denied'
+        });
+        gtag('js', new Date());
+        gtag('config', 'G-SDQELG0FGD');
+    </script>
+
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="stylesheet" href="/css/base.css">
+    <link rel="stylesheet" href="/css/layout.css">
+    <link rel="stylesheet" href="/css/components.css">
+    <link rel="stylesheet" href="/css/modern-effects.css">
+    <link rel="stylesheet" href="/css/pages.css">
+
+    <!-- Stripe.js -->
+    <script src="https://js.stripe.com/v3/"></script>
+
+    <style>
+        :root {
+            --cyan: #267FB5;
+            --cyan-dark: #1a5a8a;
+            --cyan-light: #3a9fd5;
+            --magenta: #C71F6E;
+            --magenta-dark: #a01858;
+            --yellow: #F4C430;
+            --dark: #0d1b2a;
+            --dark-light: #1b2d45;
+            --gray-50: #f8fafc;
+            --gray-100: #f1f5f9;
+            --gray-200: #e2e8f0;
+            --gray-300: #cbd5e1;
+            --gray-400: #94a3b8;
+            --gray-500: #64748b;
+            --gray-600: #475569;
+            --gray-700: #334155;
+            --gray-800: #1e293b;
+            --gray-900: #0f172a;
+            --success: #10b981;
+            --error: #ef4444;
+            --radius: 12px;
+            --radius-sm: 8px;
+            --shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+            --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+        }
+
+        /* Back link */
+        .payment-page__back {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            color: var(--cyan);
+            text-decoration: none;
+            font-size: 0.9375rem;
+            font-weight: 500;
+            margin-bottom: 1.5rem;
+            transition: all 0.2s ease;
+        }
+        .payment-page__back:hover {
+            color: var(--magenta);
+            transform: translateX(-4px);
+        }
+
+        /* Shipping summary card */
+        .shipping-summary {
+            background: linear-gradient(135deg, var(--gray-50) 0%, white 100%);
+            border: 1px solid var(--gray-200);
+            border-left: 4px solid var(--cyan);
+            border-radius: var(--radius-sm);
+            padding: 1.25rem;
+            margin-bottom: 2rem;
+            transition: all 0.3s ease;
+        }
+        .shipping-summary:hover {
+            box-shadow: var(--shadow);
+        }
+        .shipping-summary__title {
+            font-weight: 600;
+            margin: 0 0 0.75rem;
+            font-size: 0.875rem;
+            color: var(--cyan);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        .shipping-summary__details {
+            font-size: 0.9375rem;
+            color: var(--gray-700);
+            line-height: 1.6;
+        }
+        .shipping-summary__details p {
+            margin: 0;
+        }
+        .shipping-summary__edit {
+            font-size: 0.8125rem;
+            font-weight: 500;
+            margin-top: 1rem;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.25rem;
+            color: var(--cyan);
+            text-decoration: none;
+            transition: all 0.2s ease;
+        }
+        .shipping-summary__edit:hover {
+            color: var(--magenta);
+        }
+
+        /* Progress indicator */
+        .checkout-progress__step--active .checkout-progress__number {
+            background: var(--cyan);
+            color: #fff;
+        }
+        .checkout-progress__step--active .checkout-progress__label {
+            color: var(--cyan);
+            font-weight: 600;
+        }
+        .checkout-progress__step--completed .checkout-progress__number {
+            background: var(--cyan);
+        }
+
+        /* Payment section */
+        .payment-section {
+            background: white;
+            border-radius: var(--radius);
+            box-shadow: var(--shadow);
+            overflow: hidden;
+        }
+
+        .payment-section__header {
+            background: linear-gradient(135deg, var(--dark) 0%, var(--dark-light) 100%);
+            padding: 1.25rem 1.5rem;
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+        }
+
+        .payment-section__icon {
+            width: 40px;
+            height: 40px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--cyan-light);
+        }
+
+        .payment-section__title {
+            color: white;
+            font-size: 1.125rem;
+            font-weight: 600;
+            margin: 0;
+        }
+
+        .payment-section__subtitle {
+            color: var(--gray-400);
+            font-size: 0.8125rem;
+            margin: 0.25rem 0 0;
+        }
+
+        .payment-section__body {
+            padding: 1.5rem;
+        }
+
+        /* Express Checkout (Apple Pay / Google Pay) */
+        .express-checkout {
+            margin-bottom: 1.5rem;
+        }
+
+        .express-checkout__label {
+            font-size: 0.8125rem;
+            font-weight: 600;
+            color: var(--gray-700);
+            margin-bottom: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .payment-request-button {
+            margin-bottom: 1rem;
+        }
+
+        .express-checkout__divider {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            color: var(--gray-400);
+            font-size: 0.8125rem;
+            margin-top: 1.25rem;
+        }
+
+        .express-checkout__divider::before,
+        .express-checkout__divider::after {
+            content: '';
+            flex: 1;
+            height: 1px;
+            background: var(--gray-200);
+        }
+
+        /* Card brands display */
+        .card-brands {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            margin-bottom: 1.5rem;
+            padding-bottom: 1rem;
+            border-bottom: 1px solid var(--gray-200);
+        }
+
+        .card-brands__label {
+            font-size: 0.8125rem;
+            color: var(--gray-500);
+            margin-right: auto;
+        }
+
+        .card-brand {
+            width: 40px;
+            height: 26px;
+            background: var(--gray-100);
+            border-radius: 4px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.625rem;
+            font-weight: 700;
+            color: var(--gray-600);
+            border: 1px solid var(--gray-200);
+        }
+
+        .card-brand--visa { background: linear-gradient(135deg, #1a1f71 0%, #2d3494 100%); color: white; }
+        .card-brand--mc { background: linear-gradient(135deg, #eb001b 0%, #f79e1b 100%); color: white; }
+        .card-brand--amex { background: linear-gradient(135deg, #006fcf 0%, #1d8acf 100%); color: white; }
+
+        /* Stripe card input styling */
+        .card-input-wrapper {
+            margin-bottom: 1.5rem;
+        }
+
+        .card-input-label {
+            display: block;
+            font-size: 0.8125rem;
+            font-weight: 600;
+            color: var(--gray-700);
+            margin-bottom: 0.5rem;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .card-input-container {
+            background: white;
+            border: 2px solid var(--gray-200);
+            border-radius: var(--radius-sm);
+            padding: 1rem 1rem;
+            transition: all 0.2s ease;
+            min-height: 52px;
+        }
+
+        .card-input-container:hover {
+            border-color: var(--gray-300);
+        }
+
+        .card-input-container--focus {
+            border-color: var(--cyan);
+            box-shadow: 0 0 0 4px rgba(38, 127, 181, 0.1);
+        }
+
+        .card-input-container--error {
+            border-color: var(--error);
+            box-shadow: 0 0 0 4px rgba(239, 68, 68, 0.1);
+        }
+
+        .card-input-container--complete {
+            border-color: var(--success);
+        }
+
+        #card-errors {
+            color: var(--error);
+            font-size: 0.8125rem;
+            margin-top: 0.5rem;
+            display: flex;
+            align-items: center;
+            gap: 0.375rem;
+        }
+
+        #card-errors:empty {
+            display: none;
+        }
+
+        /* Authorization box */
+        .payment-authorization {
+            margin-top: 1.5rem;
+            overflow: hidden;
+            max-height: 0;
+            opacity: 0;
+            transform: translateY(10px);
+            transition: all 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        .payment-authorization.visible {
+            max-height: 120px;
+            opacity: 1;
+            transform: translateY(0);
+        }
+
+        .payment-authorization.authorized {
+            opacity: 0;
+            max-height: 0;
+            margin-top: 0;
+            transform: translateY(-20px) scale(0.95);
+        }
+
+        .authorize-box {
+            background: linear-gradient(135deg, var(--dark) 0%, var(--dark-light) 100%);
+            border: 2px solid var(--cyan);
+            border-radius: var(--radius-sm);
+            padding: 1rem 1.25rem;
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .authorize-box::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: -100%;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(90deg, transparent, rgba(38, 127, 181, 0.1), transparent);
+            transition: left 0.5s ease;
+        }
+
+        .authorize-box:hover {
+            border-color: var(--cyan-light);
+            box-shadow: 0 8px 25px rgba(38, 127, 181, 0.25);
+            transform: translateY(-2px);
+        }
+
+        .authorize-box:hover::before {
+            left: 100%;
+        }
+
+        .authorize-checkbox {
+            width: 24px;
+            height: 24px;
+            min-width: 24px;
+            border: 2px solid var(--cyan);
+            border-radius: 6px;
+            background: transparent;
+            cursor: pointer;
+            appearance: none;
+            -webkit-appearance: none;
+            position: relative;
+            transition: all 0.2s ease;
+        }
+
+        .authorize-checkbox:checked {
+            background: var(--cyan);
+            border-color: var(--cyan);
+        }
+
+        .authorize-checkbox:checked::after {
+            content: '';
+            position: absolute;
+            left: 7px;
+            top: 3px;
+            width: 6px;
+            height: 12px;
+            border: solid white;
+            border-width: 0 2.5px 2.5px 0;
+            transform: rotate(45deg);
+            animation: checkmark 0.2s ease-out;
+        }
+
+        @keyframes checkmark {
+            from {
+                transform: rotate(45deg) scale(0);
+                opacity: 0;
+            }
+            to {
+                transform: rotate(45deg) scale(1);
+                opacity: 1;
+            }
+        }
+
+        .authorize-checkbox:focus {
+            outline: none;
+            box-shadow: 0 0 0 4px rgba(38, 127, 181, 0.3);
+        }
+
+        .authorize-content {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            flex: 1;
+        }
+
+        .authorize-icon {
+            width: 36px;
+            height: 36px;
+            background: rgba(38, 127, 181, 0.2);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--cyan-light);
+            flex-shrink: 0;
+        }
+
+        .authorize-text {
+            color: white;
+        }
+
+        .authorize-text__title {
+            font-size: 0.9375rem;
+            font-weight: 600;
+            margin: 0 0 0.125rem;
+        }
+
+        .authorize-text__subtitle {
+            font-size: 0.75rem;
+            color: var(--gray-400);
+            margin: 0;
+        }
+
+        /* Pay button */
+        .pay-button {
+            width: 100%;
+            padding: 1rem 2rem;
+            font-size: 1rem;
+            font-weight: 600;
+            color: white;
+            background: linear-gradient(135deg, var(--cyan) 0%, var(--cyan-dark) 100%);
+            border: none;
+            border-radius: var(--radius-sm);
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.75rem;
+            transition: all 0.3s ease;
+            position: relative;
+            overflow: hidden;
+            margin-top: 1.5rem;
+        }
+
+        .pay-button::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: -100%;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.2), transparent);
+            transition: left 0.5s ease;
+        }
+
+        .pay-button:hover:not(:disabled)::before {
+            left: 100%;
+        }
+
+        .pay-button:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 30px rgba(38, 127, 181, 0.4);
+        }
+
+        .pay-button:active:not(:disabled) {
+            transform: translateY(0);
+        }
+
+        .pay-button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            background: var(--gray-400);
+        }
+
+        .pay-button__icon {
+            width: 20px;
+            height: 20px;
+        }
+
+        /* Spinner animation */
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .animate-spin {
+            animation: spin 1s linear infinite;
+        }
+
+        /* Secure badge */
+        .secure-badge {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.5rem;
+            margin-top: 1rem;
+            padding: 0.75rem;
+            background: var(--gray-50);
+            border-radius: var(--radius-sm);
+            font-size: 0.8125rem;
+            color: var(--gray-600);
+        }
+
+        .secure-badge svg {
+            color: var(--success);
+        }
+
+        /* Order summary */
+        .checkout-summary__heading {
+            color: var(--gray-900);
+            border-bottom: 2px solid var(--cyan);
+            padding-bottom: 0.75rem;
+            font-size: 1.125rem;
+        }
+
+        .checkout-summary__row--total {
+            color: var(--gray-900);
+            font-weight: 700;
+            font-size: 1.125rem;
+        }
+
+        .checkout-summary__edit {
+            color: var(--cyan);
+            font-weight: 500;
+            transition: color 0.2s ease;
+        }
+
+        .checkout-summary__edit:hover {
+            color: var(--magenta);
+        }
+
+        .checkout-summary__trust-item svg {
+            color: var(--cyan);
+        }
+
+        /* Powered by Stripe */
+        .powered-by {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.5rem;
+            margin-top: 1.5rem;
+            padding-top: 1.5rem;
+            border-top: 1px solid var(--gray-200);
+            font-size: 0.75rem;
+            color: var(--gray-400);
+        }
+
+        .powered-by svg {
+            height: 20px;
+            width: auto;
+        }
+    </style>
+</head>
+<body>
+    <a href="#main-content" class="skip-link">Skip to main content</a>
+
+    <!-- SIMPLIFIED CHECKOUT HEADER -->
+    <header class="site-header site-header--checkout">
+        <div class="header-main">
+            <div class="container">
+                <a href="/html/index.html" class="logo" aria-label="InkCartridges.co.nz Home">
+                    <span class="logo__text">Ink<span>Cartridges</span>.co.nz</span>
+                </a>
+
+                <div class="checkout-header__secure">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+                    <span>Secure Payment</span>
+                </div>
+
+                <a href="/html/checkout.html" class="checkout-header__back">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>
+                    Back to Details
+                </a>
+            </div>
+        </div>
+    </header>
+
+    <!-- MAIN CONTENT - PAYMENT PAGE -->
+    <main id="main-content" class="site-main">
+        <section class="checkout-page">
+            <div class="container">
+                <!-- Header with title and progress -->
+                <div class="checkout-page__header">
+                    <h1 class="checkout-page__title">Payment</h1>
+
+                    <!-- Progress indicator -->
+                    <div class="checkout-progress checkout-progress--compact" aria-label="Checkout progress">
+                        <ol class="checkout-progress__steps">
+                            <li class="checkout-progress__step checkout-progress__step--completed" data-step="cart">
+                                <span class="checkout-progress__number">
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg>
+                                </span>
+                                <span class="checkout-progress__label">Cart</span>
+                            </li>
+                            <li class="checkout-progress__step checkout-progress__step--completed" data-step="details">
+                                <span class="checkout-progress__number">
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg>
+                                </span>
+                                <span class="checkout-progress__label">Details</span>
+                            </li>
+                            <li class="checkout-progress__step checkout-progress__step--active" data-step="payment">
+                                <span class="checkout-progress__number">3</span>
+                                <span class="checkout-progress__label">Payment</span>
+                            </li>
+                            <li class="checkout-progress__step" data-step="confirm">
+                                <span class="checkout-progress__number">4</span>
+                                <span class="checkout-progress__label">Confirm</span>
+                            </li>
+                        </ol>
+                    </div>
+                </div>
+
+                <div class="checkout-layout">
+                    <!-- Payment form -->
+                    <div class="checkout-form-wrapper">
+                        <a href="/html/checkout.html" class="payment-page__back">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>
+                            Back to shipping details
+                        </a>
+
+                        <!-- Shipping Summary -->
+                        <div class="shipping-summary" id="shipping-summary">
+                            <h3 class="shipping-summary__title">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="1" y="3" width="15" height="13"/><polygon points="16 8 20 8 23 11 23 16 16 16 16 8"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/></svg>
+                                Shipping to
+                            </h3>
+                            <div class="shipping-summary__details" id="shipping-details">
+                                <!-- Populated by JavaScript -->
+                            </div>
+                            <a href="/html/checkout.html" class="shipping-summary__edit">
+                                Edit details
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                            </a>
+                        </div>
+
+                        <form id="payment-form" novalidate>
+                            <!-- Payment Card Section -->
+                            <div class="payment-section">
+                                <div class="payment-section__header">
+                                    <div class="payment-section__icon">
+                                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="1" y="4" width="22" height="16" rx="2" ry="2"/><line x1="1" y1="10" x2="23" y2="10"/></svg>
+                                    </div>
+                                    <div>
+                                        <h2 class="payment-section__title">Card Payment</h2>
+                                        <p class="payment-section__subtitle">Enter your card details below</p>
+                                    </div>
+                                </div>
+
+                                <div class="payment-section__body">
+                                    <!-- Express Checkout (Apple Pay / Google Pay) -->
+                                    <div id="express-checkout-section" class="express-checkout" hidden>
+                                        <div class="express-checkout__label">Express checkout</div>
+                                        <div id="payment-request-button" class="payment-request-button">
+                                            <!-- Stripe Payment Request Button mounted here -->
+                                        </div>
+                                        <div class="express-checkout__divider">
+                                            <span>or pay with card</span>
+                                        </div>
+                                    </div>
+
+                                    <!-- Card brands -->
+                                    <div class="card-brands">
+                                        <span class="card-brands__label">We accept:</span>
+                                        <span class="card-brand card-brand--visa">VISA</span>
+                                        <span class="card-brand card-brand--mc">MC</span>
+                                        <span class="card-brand card-brand--amex">AMEX</span>
+                                    </div>
+
+                                    <!-- Card input -->
+                                    <div class="card-input-wrapper">
+                                        <label class="card-input-label" for="card-element">Card Details</label>
+                                        <div id="card-element" class="card-input-container">
+                                            <!-- Stripe Card Element mounted here -->
+                                        </div>
+                                        <div id="card-errors" role="alert"></div>
+                                    </div>
+
+                                    <!-- Authorization -->
+                                    <div id="payment-authorization" class="payment-authorization">
+                                        <label class="authorize-box" for="authorize-payment">
+                                            <input type="checkbox" id="authorize-payment" name="authorizePayment" class="authorize-checkbox" autocomplete="off">
+                                            <div class="authorize-content">
+                                                <div class="authorize-icon">
+                                                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+                                                </div>
+                                                <div class="authorize-text">
+                                                    <p class="authorize-text__title">I authorize this payment</p>
+                                                    <p class="authorize-text__subtitle">Confirm to proceed with secure payment</p>
+                                                </div>
+                                            </div>
+                                        </label>
+                                    </div>
+
+                                    <!-- Pay button -->
+                                    <button type="submit" id="pay-now-btn" class="pay-button" disabled>
+                                        <svg class="pay-button__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+                                        <span id="pay-button-text">Pay Now</span>
+                                    </button>
+
+                                    <!-- Secure message -->
+                                    <div class="secure-badge">
+                                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><polyline points="9 12 11 14 15 10"/></svg>
+                                        <span>Your payment is protected with 256-bit SSL encryption</span>
+                                    </div>
+
+                                    <!-- Powered by Stripe -->
+                                    <div class="powered-by">
+                                        <span>Powered by</span>
+                                        <svg viewBox="0 0 60 25" xmlns="http://www.w3.org/2000/svg" width="60" height="25">
+                                            <path fill="#635bff" d="M59.64 14.28h-8.06c.19 1.93 1.6 2.55 3.2 2.55 1.64 0 2.96-.37 4.05-.95v3.32a8.33 8.33 0 0 1-4.56 1.1c-4.01 0-6.83-2.5-6.83-7.48 0-4.19 2.39-7.52 6.3-7.52 3.92 0 5.96 3.28 5.96 7.5 0 .4-.02 1.04-.06 1.48zm-3.67-3.14c0-1.07-.37-2.87-2.22-2.87-1.61 0-2.32 1.64-2.42 2.87h4.64zM40.95 20.3V5.57l4.09-.86v15.58h-4.09zm0-17.87l4.09-.86v3.48l-4.09.86V2.43zm-5.43 8.02c0-1.99-.56-2.87-2.01-2.87-.79 0-1.63.4-2.33.97v11.75h-4.08V9.27c0-2.09-.08-3.48-.16-4.87h3.57l.24 1.55c1.11-.99 2.56-1.8 4.35-1.8 3.52 0 4.5 2.5 4.5 5.95v10.2h-4.08v-9.85zm-15.35 2.08c-1.54-.36-2.32-1.03-2.32-2.03 0-1.15.95-1.87 2.34-1.87.96 0 2.05.28 3.28.89l1.27-3.08a9.49 9.49 0 0 0-4.47-1.15c-3.52 0-6.09 1.98-6.09 5.23 0 2.43 1.55 4.07 4.23 4.79 1.74.44 2.39 1.03 2.39 2.03 0 1.15-.95 1.87-2.71 1.87-1.43 0-3.05-.5-4.29-1.27l-1.34 3.16a10.8 10.8 0 0 0 5.55 1.48c4.01 0 6.5-2.14 6.5-5.47 0-2.63-1.7-4.15-4.34-4.58zM7.65 11.65c0-1.87.73-3.01 2.49-3.01.51 0 .95.08 1.53.24l.72-3.76a6.02 6.02 0 0 0-1.89-.32C7.3 4.8 4.2 7.38 4.2 12.52c0 2.46.56 4.46 1.53 6.06l3.25-.4c-1-.89-1.33-3.39-1.33-6.53z"/>
+                                        </svg>
+                                    </div>
+                                </div>
+                            </div>
+                        </form>
+                    </div>
+
+                    <!-- Order summary sidebar -->
+                    <aside class="checkout-summary">
+                        <div class="checkout-summary__inner">
+                            <h2 class="checkout-summary__heading">Order Summary</h2>
+
+                            <!-- Cart items preview -->
+                            <ul class="checkout-summary__items" id="checkout-items">
+                                <!-- Items loaded from cart -->
+                            </ul>
+
+                            <a href="/html/cart.html" class="checkout-summary__edit">Edit cart</a>
+
+                            <!-- Totals -->
+                            <div class="checkout-summary__totals">
+                                <div class="checkout-summary__row">
+                                    <span>Subtotal</span>
+                                    <span id="checkout-subtotal">$0.00</span>
+                                </div>
+                                <div class="checkout-summary__row">
+                                    <span>Shipping</span>
+                                    <span id="checkout-shipping">$5.00</span>
+                                </div>
+                                <div class="checkout-summary__row checkout-summary__row--discount" id="checkout-discount-row" hidden>
+                                    <span>Discount</span>
+                                    <span id="checkout-discount" class="text-success">-$0.00</span>
+                                </div>
+                                <div class="checkout-summary__row">
+                                    <span>GST (15%)</span>
+                                    <span>Included</span>
+                                </div>
+                                <div class="checkout-summary__row checkout-summary__row--total">
+                                    <span>Total</span>
+                                    <span id="checkout-total">$0.00 NZD</span>
+                                </div>
+                            </div>
+
+                            <!-- Trust signals -->
+                            <div class="checkout-summary__trust">
+                                <div class="checkout-summary__trust-item">
+                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="1" y="3" width="15" height="13"/><polygon points="16 8 20 8 23 11 23 16 16 16 16 8"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/></svg>
+                                    <span>Free shipping over $100</span>
+                                </div>
+                                <div class="checkout-summary__trust-item">
+                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+                                    <span>30-day returns</span>
+                                </div>
+                                <div class="checkout-summary__trust-item">
+                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+                                    <span>Secure checkout</span>
+                                </div>
+                            </div>
+                        </div>
+                    </aside>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <!-- FOOTER -->
+    <footer class="site-footer">
+        <div class="footer-main">
+            <div class="container">
+                <div class="footer-grid">
+                    <div class="footer-brand">
+                        <a href="/html/index.html" class="footer-brand__logo">
+                            <span class="logo__text">Ink<span>Cartridges</span>.co.nz</span>
+                        </a>
+                        <p class="footer-brand__description">
+                            New Zealand's trusted source for quality printing supplies.
+                        </p>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="footer-bottom">
+            <div class="container">
+                <p class="footer-copyright">
+                    &copy; <span id="current-year">2025</span> InkCartridges.co.nz. All rights reserved.
+                </p>
+            </div>
+        </div>
+    </footer>
+
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="/js/config.js"></script>
+    <script src="/js/security.js"></script>
+    <script src="/js/api.js"></script>
+    <script src="/js/utils.js"></script>
+    <script src="/js/auth.js"></script>
+    <script src="/js/cart.js"></script>
+    <script src="/js/cart-analytics.js"></script>
+    <script src="/js/main.js"></script>
+    <script src="/js/modern-effects.js"></script>
+
+    <script>
+    /**
+     * PAYMENT PAGE - Stripe Integration
+     * Modern payment processing with Stripe Elements
+     */
+    const PaymentPage = {
+        // State
+        cartItems: [],
+        totals: { subtotal: 0, shipping: 0, discount: 0, total: 0 },
+        checkoutData: null,
+        isSubmitting: false,
+        paymentAuthorized: false,
+
+        // Stripe
+        stripe: null,
+        cardElement: null,
+        cardComplete: false,
+
+        /**
+         * Initialize the payment page
+         */
+        async init() {
+            console.log('Payment page initializing...');
+
+            // Load checkout data
+            this.checkoutData = this.loadCheckoutData();
+            if (!this.checkoutData) {
+                alert('No checkout data found. Please fill in your details first.');
+                window.location.href = '/html/checkout.html';
+                return;
+            }
+
+            // Display shipping summary
+            this.displayShippingSummary();
+
+            // Load cart
+            await this.loadCart();
+
+            // Initialize Stripe
+            this.initStripe();
+
+            // Setup event handlers
+            this.setupEventHandlers();
+
+            // Track payment page view for analytics
+            if (typeof CartAnalytics !== 'undefined') {
+                CartAnalytics.trackPaymentStarted();
+            }
+        },
+
+        /**
+         * Load checkout data from session storage
+         */
+        loadCheckoutData() {
+            try {
+                const data = sessionStorage.getItem('checkoutData');
+                return data ? JSON.parse(data) : null;
+            } catch (e) {
+                console.error('Failed to load checkout data:', e);
+                return null;
+            }
+        },
+
+        /**
+         * Display shipping summary
+         */
+        displayShippingSummary() {
+            const container = document.getElementById('shipping-details');
+            if (!container || !this.checkoutData) return;
+
+            const d = this.checkoutData;
+            const esc = typeof Security !== 'undefined' ? Security.escapeHtml : (s) => s;
+            container.innerHTML = `
+                <p><strong>${esc(d.firstName)} ${esc(d.lastName)}</strong></p>
+                <p>${esc(d.address1)}${d.address2 ? ', ' + esc(d.address2) : ''}</p>
+                <p>${esc(d.city)}, ${esc(d.region)} ${esc(d.postcode)}</p>
+                <p>${esc(d.email)}</p>
+                ${d.phone ? `<p>${esc(d.phone)}</p>` : ''}
+            `;
+        },
+
+        /**
+         * Load cart items from server (authoritative source)
+         */
+        async loadCart() {
+            try {
+                // First, validate cart exists with backend
+                const validateResponse = await API.validateCart();
+
+                if (!validateResponse.success) {
+                    // Cart validation failed (items out of stock, prices changed, etc.)
+                    console.error('Cart validation failed:', validateResponse.error);
+                    alert('Some items in your cart have changed. Please review your cart.');
+                    window.location.href = '/html/cart.html';
+                    return;
+                }
+
+                // Use Cart object if available (already synced with server)
+                if (typeof Cart !== 'undefined') {
+                    await Cart.init();
+                    this.cartItems = Cart.items || [];
+                } else {
+                    // Fallback: load from server directly
+                    const cartResponse = await API.getCart();
+                    if (cartResponse.success && cartResponse.data) {
+                        this.cartItems = cartResponse.data.items || [];
+                    }
+                }
+
+                if (this.cartItems.length === 0) {
+                    alert('Your cart is empty.');
+                    window.location.href = '/html/cart.html';
+                    return;
+                }
+
+                this.renderOrderSummary();
+                // Calculate totals from backend (async)
+                await this.calculateTotals();
+
+            } catch (error) {
+                console.error('Error loading cart:', error);
+                this.showError('Unable to load cart. Please try again.');
+            }
+        },
+
+        /**
+         * Render order summary items
+         */
+        renderOrderSummary() {
+            const container = document.getElementById('checkout-items');
+            if (!container) return;
+
+            if (this.cartItems.length === 0) {
+                container.innerHTML = '<li class="checkout-summary__empty">Your cart is empty</li>';
+                return;
+            }
+
+            const esc = typeof Security !== 'undefined' ? Security.escapeHtml : (s) => s;
+            const escAttr = typeof Security !== 'undefined' ? Security.escapeAttr : (s) => s;
+            container.innerHTML = this.cartItems.map(item => `
+                <li class="checkout-summary__item">
+                    <div class="checkout-summary__item-image">
+                        <img src="${escAttr(item.image || '/assets/images/placeholder.png')}" alt="${escAttr(item.name)}" loading="lazy">
+                        <span class="checkout-summary__item-qty">${parseInt(item.quantity) || 0}</span>
+                    </div>
+                    <div class="checkout-summary__item-details">
+                        <span class="checkout-summary__item-name">${esc(item.name)}</span>
+                        <span class="checkout-summary__item-variant">${esc(item.sku || '')}</span>
+                    </div>
+                    <span class="checkout-summary__item-price">$${(parseFloat(item.price) * parseInt(item.quantity)).toFixed(2)}</span>
+                </li>
+            `).join('');
+        },
+
+        /**
+         * Calculate totals from cart API
+         * Uses GET /api/cart which returns validated totals from backend
+         */
+        async calculateTotals() {
+            try {
+                // Show loading state
+                document.getElementById('checkout-subtotal').textContent = 'Loading...';
+                document.getElementById('checkout-shipping').textContent = 'Loading...';
+                document.getElementById('checkout-total').textContent = 'Loading...';
+                document.getElementById('pay-button-text').textContent = 'Loading...';
+
+                // Get cart with validated totals from backend
+                const response = await API.getCart();
+
+                if (!response.success || !response.data) {
+                    throw new Error(response.error || 'Failed to load cart');
+                }
+
+                const cartData = response.data;
+                const summary = cartData.summary || {};
+
+                // Use backend-validated prices — frontend never computes totals
+                this.totals = {
+                    subtotal: summary.subtotal || 0,
+                    shipping: summary.shipping ?? 0,
+                    discount: summary.discount || 0,
+                    total: summary.total || 0
+                };
+
+                // Update cart items from server response
+                if (cartData.items && cartData.items.length > 0) {
+                    this.cartItems = cartData.items.map(item => ({
+                        id: item.product?.id || item.id,
+                        sku: item.product?.sku || '',
+                        name: item.product?.name || 'Product',
+                        price: item.product?.retail_price || item.price_snapshot || 0,
+                        quantity: item.quantity,
+                        image: item.product?.image_url || '/assets/images/placeholder.png'
+                    }));
+                    this.renderOrderSummary();
+                }
+
+                // Update display with backend values
+                document.getElementById('checkout-subtotal').textContent = `$${this.totals.subtotal.toFixed(2)}`;
+                document.getElementById('checkout-shipping').textContent = this.totals.shipping === 0 ? 'FREE' : `$${this.totals.shipping.toFixed(2)}`;
+
+                // Show discount if present
+                const discountRow = document.getElementById('checkout-discount-row');
+                const discountEl = document.getElementById('checkout-discount');
+                if (discountRow && discountEl && this.totals.discount > 0) {
+                    discountRow.hidden = false;
+                    discountEl.textContent = `-$${this.totals.discount.toFixed(2)}`;
+                }
+
+                document.getElementById('checkout-total').textContent = `$${this.totals.total.toFixed(2)} NZD`;
+                document.getElementById('pay-button-text').textContent = `Pay $${this.totals.total.toFixed(2)} NZD`;
+
+                // Initialize Apple Pay / Google Pay if available
+                this.initPaymentRequestButton(this.totals.total);
+
+            } catch (error) {
+                console.error('Error calculating totals:', error);
+                this.showError('Unable to calculate order total. Please refresh and try again.');
+
+                // Disable payment if we can't validate prices
+                const payBtn = document.getElementById('pay-now-btn');
+                if (payBtn) payBtn.disabled = true;
+            }
+        },
+
+        /**
+         * Initialize Stripe
+         */
+        initStripe() {
+            if (typeof Stripe === 'undefined') {
+                console.error('Stripe.js not loaded');
+                this.showError('Payment system unavailable. Please refresh the page.');
+                return;
+            }
+
+            const stripeKey = typeof Config !== 'undefined' ? Config.STRIPE_PUBLISHABLE_KEY : null;
+            if (!stripeKey) {
+                console.error('Stripe publishable key not found');
+                this.showError('Payment configuration error. Please contact support.');
+                return;
+            }
+
+            // Initialize Stripe
+            this.stripe = Stripe(stripeKey);
+
+            // Create Elements with custom styling
+            const elements = this.stripe.elements({
+                fonts: [
+                    { cssSrc: 'https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap' }
+                ]
+            });
+
+            // Create Card Element
+            this.cardElement = elements.create('card', {
+                style: {
+                    base: {
+                        fontSize: '16px',
+                        fontFamily: '"Inter", system-ui, -apple-system, sans-serif',
+                        fontSmoothing: 'antialiased',
+                        color: '#1e293b',
+                        '::placeholder': {
+                            color: '#94a3b8'
+                        },
+                        iconColor: '#267FB5'
+                    },
+                    invalid: {
+                        color: '#ef4444',
+                        iconColor: '#ef4444'
+                    }
+                },
+                hidePostalCode: true,
+                disableLink: true
+            });
+
+            // Mount to container
+            this.cardElement.mount('#card-element');
+
+            // Handle card element events
+            this.cardElement.on('change', (event) => {
+                const container = document.getElementById('card-element');
+                const errorEl = document.getElementById('card-errors');
+
+                // Update container styling
+                container.classList.remove('card-input-container--focus', 'card-input-container--error', 'card-input-container--complete');
+
+                if (event.error) {
+                    container.classList.add('card-input-container--error');
+                    errorEl.innerHTML = `
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                        ${event.error.message}
+                    `;
+                } else {
+                    errorEl.textContent = '';
+                }
+
+                if (event.complete) {
+                    container.classList.add('card-input-container--complete');
+                    this.cardComplete = true;
+                    this.showAuthorizationBox();
+                } else {
+                    this.cardComplete = false;
+                    this.hideAuthorizationBox();
+                }
+
+                this.updatePayButton();
+            });
+
+            this.cardElement.on('focus', () => {
+                document.getElementById('card-element').classList.add('card-input-container--focus');
+            });
+
+            this.cardElement.on('blur', () => {
+                document.getElementById('card-element').classList.remove('card-input-container--focus');
+            });
+
+            console.log('Stripe initialized successfully');
+        },
+
+        /**
+         * Initialize Payment Request Button for Apple Pay / Google Pay
+         * Call this after order total is known
+         */
+        async initPaymentRequestButton(totalAmount, currency = 'nzd') {
+            if (!this.stripe) {
+                console.log('Stripe not initialized, skipping Payment Request Button');
+                return;
+            }
+
+            try {
+                // Create payment request
+                const paymentRequest = this.stripe.paymentRequest({
+                    country: 'NZ',
+                    currency: currency,
+                    total: {
+                        label: 'InkCartridges.co.nz',
+                        amount: Math.round(totalAmount * 100) // Convert to cents
+                    },
+                    requestPayerName: true,
+                    requestPayerEmail: true
+                });
+
+                // Check if Apple Pay / Google Pay is available
+                const result = await paymentRequest.canMakePayment();
+
+                if (result) {
+                    console.log('Express checkout available:', result.applePay ? 'Apple Pay' : 'Google Pay');
+
+                    // Create and mount the button
+                    const elements = this.stripe.elements();
+                    const prButton = elements.create('paymentRequestButton', {
+                        paymentRequest: paymentRequest,
+                        style: {
+                            paymentRequestButton: {
+                                type: 'default',
+                                theme: 'dark',
+                                height: '48px'
+                            }
+                        }
+                    });
+
+                    prButton.mount('#payment-request-button');
+
+                    // Show the express checkout section
+                    document.getElementById('express-checkout-section').hidden = false;
+
+                    // Handle payment method event
+                    paymentRequest.on('paymentmethod', async (ev) => {
+                        try {
+                            // Create order and get client secret
+                            const orderResult = await this.createOrder();
+                            if (!orderResult || !orderResult.clientSecret) {
+                                ev.complete('fail');
+                                return;
+                            }
+
+                            // Confirm the payment
+                            const { paymentIntent, error: confirmError } = await this.stripe.confirmCardPayment(
+                                orderResult.clientSecret,
+                                { payment_method: ev.paymentMethod.id },
+                                { handleActions: false }
+                            );
+
+                            if (confirmError) {
+                                ev.complete('fail');
+                                this.showError(confirmError.message);
+                            } else if (paymentIntent.status === 'requires_action') {
+                                ev.complete('success');
+                                // Handle 3D Secure if needed
+                                const { error } = await this.stripe.confirmCardPayment(orderResult.clientSecret);
+                                if (error) {
+                                    this.showError(error.message);
+                                } else {
+                                    this.handleSuccessfulPayment(paymentIntent, orderResult.orderNumber);
+                                }
+                            } else {
+                                ev.complete('success');
+                                this.handleSuccessfulPayment(paymentIntent, orderResult.orderNumber);
+                            }
+                        } catch (error) {
+                            ev.complete('fail');
+                            this.showError(error.message);
+                        }
+                    });
+                } else {
+                    console.log('Express checkout not available on this device/browser');
+                }
+            } catch (error) {
+                console.log('Payment Request Button error:', error.message);
+            }
+        },
+
+        /**
+         * Setup event handlers
+         */
+        setupEventHandlers() {
+            // Authorization checkbox
+            const authorizeCheckbox = document.getElementById('authorize-payment');
+            const authContainer = document.getElementById('payment-authorization');
+
+            if (authorizeCheckbox) {
+                // Reset state on page load
+                authorizeCheckbox.checked = false;
+                this.paymentAuthorized = false;
+
+                authorizeCheckbox.addEventListener('change', () => {
+                    this.paymentAuthorized = authorizeCheckbox.checked;
+
+                    if (authorizeCheckbox.checked && authContainer) {
+                        authContainer.classList.add('authorized');
+                    } else if (authContainer) {
+                        authContainer.classList.remove('authorized');
+                    }
+
+                    this.updatePayButton();
+                });
+            }
+
+            // Form submission
+            const form = document.getElementById('payment-form');
+            if (form) {
+                form.addEventListener('submit', async (e) => {
+                    e.preventDefault();
+                    await this.handlePayment();
+                });
+            }
+        },
+
+        /**
+         * Update pay button state
+         */
+        updatePayButton() {
+            const payBtn = document.getElementById('pay-now-btn');
+            if (!payBtn) return;
+
+            const canPay = this.cardComplete && this.paymentAuthorized;
+            payBtn.disabled = !canPay;
+        },
+
+        /**
+         * Handle payment submission - SECURE FLOW
+         * 1. Validate cart with backend (prices, stock)
+         * 2. Create order on backend (creates PaymentIntent, returns client_secret)
+         * 3. Confirm payment with Stripe using backend's client_secret
+         * 4. Clear cart and redirect to confirmation
+         */
+        async handlePayment() {
+            if (this.isSubmitting) return;
+
+            if (!this.paymentAuthorized) {
+                alert('Please authorize the payment before proceeding.');
+                return;
+            }
+
+            if (!this.cardComplete) {
+                alert('Please complete your card details.');
+                return;
+            }
+
+            const payBtn = document.getElementById('pay-now-btn');
+            const btnText = document.getElementById('pay-button-text');
+            const originalText = btnText.textContent;
+
+            this.isSubmitting = true;
+            payBtn.disabled = true;
+
+            try {
+                // STEP 1: Validate cart is still valid
+                btnText.innerHTML = this.getLoadingHTML('Validating cart...');
+
+                const validateResponse = await API.validateCart();
+                if (!validateResponse.success || (validateResponse.data && !validateResponse.data.is_valid)) {
+                    const issues = validateResponse.data?.issues || [];
+                    const issueMsg = issues.length > 0
+                        ? issues.map(i => i.issue).join(', ')
+                        : 'Cart validation failed. Items may have changed.';
+                    throw new Error(issueMsg);
+                }
+
+                // STEP 2: Create order on backend
+                // Backend creates PaymentIntent and validates all prices server-side
+                btnText.innerHTML = this.getLoadingHTML('Creating order...');
+
+                // Build items array from cart
+                const items = this.cartItems.map(item => ({
+                    product_id: item.id,
+                    quantity: item.quantity
+                }));
+
+                const orderResponse = await API.createOrder({
+                    items: items,
+                    shipping_address: {
+                        recipient_name: `${this.checkoutData.firstName} ${this.checkoutData.lastName}`,
+                        phone: this.checkoutData.phone || '',
+                        address_line1: this.checkoutData.address1,
+                        address_line2: this.checkoutData.address2 || '',
+                        city: this.checkoutData.city,
+                        region: this.checkoutData.region,
+                        postal_code: this.checkoutData.postcode,
+                        country: 'NZ'
+                    },
+                    save_address: true,
+                    customer_notes: this.checkoutData.orderNotes || '',
+                    idempotency_key: crypto.randomUUID().replace(/-/g, '')
+                });
+
+                if (!orderResponse.success) {
+                    throw new Error(orderResponse.error || 'Failed to create order');
+                }
+
+                const { client_secret, order_id, order_number, total_amount } = orderResponse.data;
+
+                // STEP 3: Confirm payment with Stripe
+                btnText.innerHTML = this.getLoadingHTML('Processing payment...');
+
+                const { error: stripeError, paymentIntent } = await this.stripe.confirmCardPayment(
+                    client_secret,
+                    {
+                        payment_method: {
+                            card: this.cardElement,
+                            billing_details: {
+                                name: `${this.checkoutData.firstName} ${this.checkoutData.lastName}`,
+                                email: this.checkoutData.email,
+                                phone: this.checkoutData.phone || undefined,
+                                address: {
+                                    line1: this.checkoutData.address1,
+                                    line2: this.checkoutData.address2 || undefined,
+                                    city: this.checkoutData.city,
+                                    state: this.checkoutData.region,
+                                    postal_code: this.checkoutData.postcode,
+                                    country: 'NZ'
+                                }
+                            }
+                        }
+                    }
+                );
+
+                if (stripeError) {
+                    console.error('Stripe error:', stripeError);
+                    throw new Error(stripeError.message);
+                }
+
+                if (paymentIntent.status !== 'succeeded') {
+                    throw new Error('Payment was not completed. Please try again.');
+                }
+
+                // STEP 4: Clear cart and redirect
+                // Backend webhook will update order status when payment succeeds
+                btnText.innerHTML = this.getLoadingHTML('Completing order...');
+
+                // Clear cart via API
+                try {
+                    await API.clearCart();
+                } catch (e) {
+                    console.warn('Could not clear cart via API:', e);
+                }
+
+                // Also clear local storage and update cart badge
+                if (typeof Cart !== 'undefined') {
+                    Cart.items = [];
+                    document.querySelectorAll('.cart-count, .cart-badge, #cart-count').forEach(el => {
+                        el.textContent = '0';
+                    });
+                }
+                localStorage.removeItem('inkcartridges_cart');
+
+                // Store minimal order data for confirmation page
+                sessionStorage.setItem('lastOrder', JSON.stringify({
+                    order_number: order_number,
+                    email: this.checkoutData.email
+                }));
+                sessionStorage.removeItem('checkoutData');
+
+                // Track order completed for analytics
+                if (typeof CartAnalytics !== 'undefined') {
+                    CartAnalytics.trackOrderCompleted({ order_number, total_amount });
+                }
+
+                // Redirect to confirmation
+                window.location.href = `/html/order-confirmation.html?order=${encodeURIComponent(order_number)}`;
+
+            } catch (error) {
+                console.error('Payment error:', error);
+                this.showError(error.message || 'Payment failed. Please try again.');
+
+                btnText.textContent = originalText;
+                payBtn.disabled = false;
+                this.isSubmitting = false;
+            }
+        },
+
+        /**
+         * Helper: Get loading spinner HTML
+         */
+        getLoadingHTML(text) {
+            return `
+                <svg class="animate-spin" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="12" cy="12" r="10" stroke-opacity="0.25"/>
+                    <path d="M12 2a10 10 0 0 1 10 10" stroke-opacity="1"/>
+                </svg>
+                ${text}
+            `;
+        },
+
+        /**
+         * Show error message
+         */
+        showError(message) {
+            const errorEl = document.getElementById('card-errors');
+            if (errorEl) {
+                errorEl.innerHTML = `
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                    ${message}
+                `;
+            }
+        },
+
+        /**
+         * Show authorization box when card is complete
+         */
+        showAuthorizationBox() {
+            const authContainer = document.getElementById('payment-authorization');
+            if (authContainer && !authContainer.classList.contains('authorized')) {
+                authContainer.classList.add('visible');
+            }
+        },
+
+        /**
+         * Hide authorization box when card is incomplete
+         */
+        hideAuthorizationBox() {
+            const authContainer = document.getElementById('payment-authorization');
+            const authorizeCheckbox = document.getElementById('authorize-payment');
+
+            if (authContainer) {
+                authContainer.classList.remove('visible');
+                authContainer.classList.remove('authorized');
+            }
+
+            // Reset authorization state
+            if (authorizeCheckbox) {
+                authorizeCheckbox.checked = false;
+            }
+            this.paymentAuthorized = false;
+        }
+    };
+
+    // Initialize when ready
+    document.addEventListener('DOMContentLoaded', () => {
+        if (typeof Auth !== 'undefined') {
+            const checkAuth = setInterval(() => {
+                if (Auth.initialized) {
+                    clearInterval(checkAuth);
+                    PaymentPage.init();
+                }
+            }, 100);
+
+            setTimeout(() => {
+                clearInterval(checkAuth);
+                PaymentPage.init();
+            }, 3000);
+        } else {
+            PaymentPage.init();
+        }
+    });
+    </script>
+    <script src="/js/analytics.js"></script>
+</body>
+</html>

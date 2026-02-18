@@ -1,0 +1,546 @@
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
+
+/**
+ * BASE.CSS
+ * ========
+ * Foundation styles for InkCartridges.co.nz
+ *
+ * Colour Philosophy - Bold, Sleek, Premium Value:
+ * - Cyan: Primary CTAs, trust, action-driving
+ * - Magenta: Energy, promotions, secondary actions
+ * - Yellow: Attention, alerts, value highlights
+ * - Ink as identity — controlled, layered, precise
+ */
+
+/* ==========================================================================
+   CSS CUSTOM PROPERTIES (Variables)
+   ========================================================================== */
+
+:root {
+    /* ==========================================
+       CMYK BRAND COLOURS
+       Bold + Sleek + Premium + Value
+       ========================================== */
+
+    /* Blue - Primary Action & Trust */
+    --cyan-primary: #267FB5;
+    --cyan-light: #D4E8F5;
+    --cyan-dark: #1A5A82;
+
+    /* Magenta - Energy & Conversion Accent */
+    --magenta-primary: #C71F6E;
+    --magenta-light: #F6D6E4;
+    --magenta-dark: #7E1244;
+
+    /* Yellow - Attention & Ink Pop */
+    --yellow-primary: #F4C430;
+    --yellow-light: #FFF1C2;
+    --yellow-dark: #B08A00;
+
+    /* Neutrals - Professional Backbone */
+    --black-primary: #111111;
+    --black-soft: #2A2A2A;
+    --white-primary: #FFFFFF;
+    --off-white: #F9F9F9;
+
+    /* Steel Grays - Industrial Precision */
+    --steel-50: #F8FAFC;
+    --steel-100: #F1F5F9;
+    --steel-200: #E2E8F0;
+    --steel-300: #CBD5E1;
+    --steel-400: #94A3B8;
+    --steel-500: #64748B;
+    --steel-600: #475569;
+    --steel-700: #334155;
+    --steel-800: #1E293B;
+    --steel-900: #0F172A;
+
+    /* Ink Wash - Dark Atmospherics */
+    --ink-wash: #0C1222;
+    --ink-wash-light: #162032;
+    --ink-wash-medium: #111827;
+
+    /* ==========================================
+       SEMANTIC COLOUR MAPPING
+       ========================================== */
+
+    /* Primary - Cyan (CTAs, links, trust) */
+    --color-primary: var(--cyan-primary);
+    --color-primary-dark: var(--cyan-dark);
+    --color-primary-light: var(--cyan-light);
+    --color-primary-bg: var(--cyan-light);
+
+    /* Secondary - Magenta (promotions, energy) */
+    --color-secondary: var(--magenta-primary);
+    --color-secondary-dark: var(--magenta-dark);
+    --color-secondary-light: var(--magenta-light);
+    --color-secondary-bg: var(--magenta-light);
+
+    /* Accent - Yellow (alerts, notices) */
+    --color-accent: var(--yellow-primary);
+    --color-accent-dark: var(--yellow-dark);
+    --color-accent-light: var(--yellow-light);
+    --color-accent-bg: var(--yellow-light);
+
+    /* ==========================================
+       NEUTRAL COLOURS
+       ========================================== */
+
+    /* Text colours — mapped to steel */
+    --color-text: var(--steel-700);
+    --color-text-heading: var(--steel-900);
+    --color-text-light: var(--steel-600);
+    --color-text-muted: var(--steel-400);
+    --color-text-inverse: var(--white-primary);
+
+    /* Background colours */
+    --color-background: var(--white-primary);
+    --color-background-alt: var(--steel-50);
+    --color-background-dark: var(--steel-900);
+    --color-background-overlay: rgba(15, 23, 42, 0.7);
+
+    /* Border colours — mapped to steel */
+    --color-border: var(--steel-200);
+    --color-border-light: var(--steel-100);
+    --color-border-dark: var(--steel-300);
+
+    /* ==========================================
+       SEMANTIC COLOURS
+       ========================================== */
+
+    /* Success - Cyan based */
+    --color-success: var(--cyan-primary);
+    --color-success-bg: var(--cyan-light);
+
+    /* Warning - Yellow based */
+    --color-warning: var(--yellow-primary);
+    --color-warning-bg: var(--yellow-light);
+
+    /* Error - Magenta based */
+    --color-error: var(--magenta-dark);
+    --color-error-bg: var(--magenta-light);
+
+    /* Info - Cyan based */
+    --color-info: var(--cyan-primary);
+    --color-info-bg: var(--cyan-light);
+
+    /* ==========================================
+       TYPOGRAPHY
+       ========================================== */
+
+    /* Font families
+       Inter: Clean readable body text
+       Plus Jakarta Sans: Elegant geometric headings
+       JetBrains Mono: Technical data, SKUs, codes */
+    --font-family-primary: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+    --font-family-heading: 'Plus Jakarta Sans', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+    --font-family-mono: 'JetBrains Mono', 'SF Mono', 'Fira Code', 'Roboto Mono', monospace;
+
+    /* Font sizes - using rem for accessibility (respects user preferences) */
+    --font-size-xs: 0.8125rem;          /* 13px - fine print */
+    --font-size-sm: 0.9375rem;          /* 15px - labels, captions */
+    --font-size-base: 1.0625rem;        /* 17px - body text */
+    --font-size-md: 1.1875rem;          /* 19px - emphasized text */
+    --font-size-lg: 1.3125rem;          /* 21px - card headings */
+    --font-size-xl: 1.5625rem;          /* 25px - section headings */
+    --font-size-2xl: 1.875rem;          /* 30px - page headings */
+    --font-size-3xl: 2.375rem;          /* 38px - hero headings */
+    --font-size-4xl: 3.125rem;          /* 50px - large hero */
+
+    /* Font weights */
+    --font-weight-normal: 400;
+    --font-weight-medium: 500;
+    --font-weight-semibold: 600;
+    --font-weight-bold: 700;
+    --font-weight-extrabold: 800;
+
+    /* Line heights */
+    --line-height-tight: 1.25;          /* Headings */
+    --line-height-normal: 1.5;          /* Body text */
+    --line-height-relaxed: 1.75;        /* Long-form content */
+
+    /* Letter spacing */
+    --letter-spacing-tight: -0.03em;    /* Large headings */
+    --letter-spacing-normal: 0;
+    --letter-spacing-wide: 0.025em;     /* Uppercase labels */
+    --letter-spacing-extra-wide: 0.15em; /* Mono labels, industrial caps */
+
+    /* ==========================================
+       SPACING (8px base unit)
+       ========================================== */
+
+    --spacing-px: 1px;
+    --spacing-0: 0;
+    --spacing-1: 0.25rem;               /* 4px */
+    --spacing-2: 0.5rem;                /* 8px */
+    --spacing-3: 0.75rem;               /* 12px */
+    --spacing-4: 1rem;                  /* 16px */
+    --spacing-5: 1.25rem;               /* 20px */
+    --spacing-6: 1.5rem;                /* 24px */
+    --spacing-8: 2rem;                  /* 32px */
+    --spacing-10: 2.5rem;               /* 40px */
+    --spacing-12: 3rem;                 /* 48px */
+    --spacing-16: 4rem;                 /* 64px */
+    --spacing-20: 5rem;                 /* 80px */
+    --spacing-24: 6rem;                 /* 96px */
+
+    /* Semantic spacing aliases */
+    --spacing-xs: var(--spacing-1);
+    --spacing-sm: var(--spacing-2);
+    --spacing-md: var(--spacing-4);
+    --spacing-lg: var(--spacing-6);
+    --spacing-xl: var(--spacing-8);
+    --spacing-2xl: var(--spacing-12);
+    --spacing-3xl: var(--spacing-16);
+
+    /* ==========================================
+       BORDERS & RADIUS
+       ========================================== */
+
+    --border-width: 1px;
+    --border-width-2: 2px;
+
+    --radius-sm: 3px;                    /* Sharp small elements */
+    --radius-md: 6px;                   /* Buttons, inputs */
+    --radius-lg: 8px;                   /* Cards */
+    --radius-xl: 12px;                  /* Large cards */
+    --radius-2xl: 16px;                 /* Modals */
+    --radius-full: 9999px;              /* Pills, avatars */
+
+    /* ==========================================
+       SHADOWS
+       ========================================== */
+
+    --shadow-xs: 0 1px 2px 0 rgba(15, 23, 42, 0.05);
+    --shadow-sm: 0 1px 3px 0 rgba(15, 23, 42, 0.08), 0 1px 2px -1px rgba(15, 23, 42, 0.08);
+    --shadow-md: 0 4px 6px -1px rgba(15, 23, 42, 0.08), 0 2px 4px -2px rgba(15, 23, 42, 0.06);
+    --shadow-lg: 0 10px 15px -3px rgba(15, 23, 42, 0.1), 0 4px 6px -4px rgba(15, 23, 42, 0.08);
+    --shadow-xl: 0 20px 25px -5px rgba(15, 23, 42, 0.1), 0 8px 10px -6px rgba(15, 23, 42, 0.08);
+    --shadow-2xl: 0 25px 50px -12px rgba(15, 23, 42, 0.25);
+    --shadow-inset: inset 0 1px 2px rgba(15, 23, 42, 0.06);
+
+    /* Colored shadows - Bold CMYK */
+    --shadow-cyan: 0 4px 20px 0 rgba(0, 159, 183, 0.3);
+    --shadow-magenta: 0 4px 20px 0 rgba(199, 31, 110, 0.3);
+    --shadow-yellow: 0 4px 20px 0 rgba(244, 196, 48, 0.4);
+
+    /* Legacy aliases */
+    --shadow-primary: var(--shadow-cyan);
+    --shadow-secondary: var(--shadow-magenta);
+    --shadow-accent: var(--shadow-yellow);
+
+    /* Texture tokens */
+    --grain-opacity: 0.03;
+    --accent-strip-gradient: linear-gradient(90deg, var(--cyan-primary) 25%, var(--magenta-primary) 25%, var(--magenta-primary) 50%, var(--yellow-primary) 50%, var(--yellow-primary) 75%, var(--steel-900) 75%);
+
+    /* ==========================================
+       TRANSITIONS
+       ========================================== */
+
+    --transition-fast: 150ms ease;
+    --transition-normal: 250ms ease;
+    --transition-slow: 350ms ease;
+
+    --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
+    --ease-out: cubic-bezier(0, 0, 0.2, 1);
+    --ease-in: cubic-bezier(0.4, 0, 1, 1);
+
+    /* ==========================================
+       LAYOUT
+       ========================================== */
+
+    --container-max-width: 1200px;
+    --container-padding: var(--spacing-8);  /* 32px margins for breathing room */
+
+    /* Breakpoints (for reference in JS, CSS uses media queries) */
+    --breakpoint-sm: 640px;
+    --breakpoint-md: 768px;
+    --breakpoint-lg: 1024px;
+    --breakpoint-xl: 1280px;
+
+    /* ==========================================
+       Z-INDEX LAYERS
+       ========================================== */
+
+    --z-dropdown: 100;
+    --z-sticky: 200;
+    --z-fixed: 300;
+    --z-modal-backdrop: 400;
+    --z-modal: 500;
+    --z-popover: 600;
+    --z-tooltip: 700;
+}
+
+
+/* ==========================================================================
+   CSS RESET
+   ==========================================================================
+   Modern CSS reset for consistent cross-browser rendering.
+   ========================================================================== */
+
+*,
+*::before,
+*::after {
+    box-sizing: border-box;
+}
+
+* {
+    margin: 0;
+    padding: 0;
+}
+
+html {
+    font-size: 100%;                    /* Respects user's browser settings */
+    scroll-behavior: smooth;
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+}
+
+body {
+    font-family: var(--font-family-primary);
+    font-size: var(--font-size-base);
+    font-weight: var(--font-weight-normal);
+    line-height: var(--line-height-normal);
+    color: var(--color-text);
+    background-color: var(--color-background);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+}
+
+img,
+picture,
+video,
+canvas,
+svg {
+    display: block;
+    max-width: 100%;
+    height: auto;
+}
+
+input,
+button,
+textarea,
+select {
+    font: inherit;
+    color: inherit;
+}
+
+button {
+    cursor: pointer;
+    background: none;
+    border: none;
+}
+
+a {
+    color: var(--color-primary);
+    text-decoration: none;
+    transition: color var(--transition-fast);
+}
+
+a:hover {
+    color: var(--color-primary-dark);
+    text-decoration: underline;
+}
+
+a:focus-visible {
+    outline: 2px solid var(--color-primary);
+    outline-offset: 2px;
+    border-radius: var(--radius-sm);
+}
+
+ul,
+ol {
+    list-style: none;
+}
+
+table {
+    border-collapse: collapse;
+    width: 100%;
+}
+
+address {
+    font-style: normal;
+}
+
+/* Remove default focus styles (we add custom ones) */
+:focus {
+    outline: none;
+}
+
+/* Custom focus styles for keyboard navigation */
+:focus-visible {
+    outline: 2px solid var(--color-primary);
+    outline-offset: 2px;
+}
+
+
+/* ==========================================================================
+   BASE TYPOGRAPHY
+   ========================================================================== */
+
+h1, h2, h3, h4, h5, h6 {
+    font-family: var(--font-family-heading);
+    font-weight: var(--font-weight-bold);
+    line-height: var(--line-height-tight);
+    color: var(--color-text);
+    letter-spacing: var(--letter-spacing-tight);
+}
+
+h1 {
+    font-size: var(--font-size-3xl);
+    font-weight: var(--font-weight-extrabold);
+    margin-bottom: var(--spacing-6);
+}
+
+h2 {
+    font-size: var(--font-size-2xl);
+    margin-bottom: var(--spacing-4);
+}
+
+h3 {
+    font-size: var(--font-size-xl);
+    margin-bottom: var(--spacing-4);
+}
+
+h4 {
+    font-size: var(--font-size-lg);
+    margin-bottom: var(--spacing-3);
+}
+
+h5 {
+    font-size: var(--font-size-md);
+    margin-bottom: var(--spacing-2);
+}
+
+h6 {
+    font-size: var(--font-size-base);
+    font-weight: var(--font-weight-semibold);
+    margin-bottom: var(--spacing-2);
+}
+
+p {
+    margin-bottom: var(--spacing-4);
+}
+
+p:last-child {
+    margin-bottom: 0;
+}
+
+strong, b {
+    font-weight: var(--font-weight-semibold);
+}
+
+small {
+    font-size: var(--font-size-sm);
+}
+
+mark {
+    background-color: var(--color-warning-bg);
+    color: var(--color-text);
+    padding: 0.1em 0.3em;
+    border-radius: var(--radius-sm);
+}
+
+hr {
+    border: none;
+    border-top: 1px solid var(--color-border);
+    margin: var(--spacing-8) 0;
+}
+
+
+/* ==========================================================================
+   UTILITY CLASSES
+   ========================================================================== */
+
+/* Screen reader only - visually hidden but accessible */
+.visually-hidden,
+.sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+}
+
+/* Skip link for accessibility */
+.skip-link {
+    position: absolute;
+    top: -100%;
+    left: 50%;
+    transform: translateX(-50%);
+    background: var(--color-primary);
+    color: var(--color-text-inverse);
+    padding: var(--spacing-2) var(--spacing-4);
+    z-index: var(--z-tooltip);
+    border-radius: var(--radius-md);
+    font-weight: var(--font-weight-medium);
+    transition: top var(--transition-fast);
+}
+
+.skip-link:focus {
+    top: var(--spacing-4);
+    text-decoration: none;
+}
+
+/* Text alignment */
+.text-left { text-align: left; }
+.text-center { text-align: center; }
+.text-right { text-align: right; }
+
+/* Text colours */
+.text-primary { color: var(--color-primary); }
+.text-secondary { color: var(--color-secondary); }
+.text-accent { color: var(--color-accent); }
+.text-muted { color: var(--color-text-muted); }
+.text-success { color: var(--color-success); }
+.text-warning { color: var(--color-warning); }
+.text-error { color: var(--color-error); }
+
+/* Font weights */
+.font-normal { font-weight: var(--font-weight-normal); }
+.font-medium { font-weight: var(--font-weight-medium); }
+.font-semibold { font-weight: var(--font-weight-semibold); }
+.font-bold { font-weight: var(--font-weight-bold); }
+
+/* Required field indicator */
+.required {
+    color: var(--color-error);
+}
+
+/* Hidden utility */
+[hidden] {
+    display: none !important;
+}
+
+/* Clearfix */
+.clearfix::after {
+    content: '';
+    display: table;
+    clear: both;
+}
+
+/* Industrial typography utilities */
+.font-mono {
+    font-family: var(--font-family-mono);
+}
+
+.text-uppercase-industrial {
+    text-transform: uppercase;
+    letter-spacing: var(--letter-spacing-extra-wide);
+    font-size: var(--font-size-xs);
+    font-weight: var(--font-weight-semibold);
+}
+
+.cmyk-strip::after {
+    content: '';
+    display: block;
+    height: 3px;
+    background: var(--accent-strip-gradient);
+}

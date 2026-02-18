@@ -1,0 +1,690 @@
+<!DOCTYPE html>
+<html lang="en-NZ">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="My Account - InkCartridges.co.nz">
+    <meta name="robots" content="noindex, nofollow">
+
+    <link rel="icon" type="image/svg+xml" href="/assets/icons/favicon.svg">
+    <title>My Account | InkCartridges.co.nz</title>
+
+    <!-- Google Analytics 4 (with consent mode) -->
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-SDQELG0FGD"></script>
+    <script>
+        window.dataLayer = window.dataLayer || [];
+        function gtag(){dataLayer.push(arguments);}
+        gtag('consent', 'default', {
+            analytics_storage: localStorage.getItem('cookie_consent') === 'accepted' ? 'granted' : 'denied'
+        });
+        gtag('js', new Date());
+        gtag('config', 'G-SDQELG0FGD');
+    </script>
+
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="stylesheet" href="/css/base.css">
+    <link rel="stylesheet" href="/css/layout.css">
+    <link rel="stylesheet" href="/css/components.css">
+    <link rel="stylesheet" href="/css/modern-effects.css">
+    <link rel="stylesheet" href="/css/pages.css">
+</head>
+<body>
+    <a href="#main-content" class="skip-link">Skip to main content</a>
+
+    <header class="site-header">
+        <!-- Main header -->
+        <div class="header-main">
+            <div class="container">
+                <!-- Contact info -->
+                <div class="header-contact">
+                    <a href="tel:0800465275" class="header-contact__item">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
+                        0800 INK KART (465 275)
+                    </a>
+                    <a href="mailto:support@inkcartridges.co.nz" class="header-contact__item">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
+                        support@inkcartridges.co.nz
+                    </a>
+                </div>
+
+                <div class="logo-block">
+                    <a href="/html/index.html" class="logo" aria-label="InkCartridges.co.nz Home">
+                        <span class="logo__text">Ink<span>Cartridges</span>.co.nz</span>
+                    </a>
+                    <a href="/html/index.html" class="logo__tagline">Get the full picture on image quality</a>
+                </div>
+
+                <!-- Header actions -->
+                <div class="header-actions">
+                    <a href="/html/account/index.html" class="header-actions__item">
+                        <span class="header-actions__icon">
+                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+                        </span>
+                        <span>Account</span>
+                    </a>
+                    <a href="/html/account/favourites.html" class="header-actions__item">
+                        <span class="header-actions__icon">
+                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
+                        </span>
+                        <span>Favourites</span>
+                    </a>
+                    <a href="/html/cart.html" class="header-actions__item">
+                        <span class="header-actions__icon">
+                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"/></svg>
+                            <span class="cart-badge" id="cart-count">0</span>
+                        </span>
+                        <span>Cart</span>
+                    </a>
+                </div>
+            </div>
+        </div>
+
+        <!-- Primary navigation -->
+        <nav class="primary-nav" aria-label="Main navigation">
+            <div class="container">
+                <button class="nav-toggle" aria-expanded="false" aria-controls="nav-menu">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+                    <span class="visually-hidden">Menu</span>
+                </button>
+
+                <ul id="nav-menu" class="nav-menu">
+                    <li class="nav-menu__item">
+                        <a href="/html/index.html" class="nav-menu__link">Home</a>
+                    </li>
+                    <li class="nav-menu__item">
+                        <a href="/html/shop.html" class="nav-menu__link">Shop</a>
+                    </li>
+                    <li class="nav-menu__item nav-menu__item--mega">
+                        <button class="nav-menu__link nav-mega-toggle" type="button"
+                                aria-haspopup="true" aria-expanded="false" aria-controls="brands-mega">
+                            Ink Cartridge Brands
+                            <svg class="nav-menu__arrow" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+                        </button>
+                    </li>
+                    <li class="nav-menu__item">
+                        <a href="/html/ribbons.html" class="nav-menu__link">Typewriter &amp; Printer Ribbons</a>
+                    </li>
+                </ul>
+
+                <!-- Search bar -->
+                <form class="search-form search-form--nav" action="/html/shop.html" method="GET" role="search">
+                    <label for="search-input" class="visually-hidden">Search for products</label>
+                    <input
+                        type="search"
+                        id="search-input"
+                        name="q"
+                        class="search-form__input"
+                        placeholder="Search..."
+                        autocomplete="off"
+                        maxlength="200"
+                    >
+                    <button type="submit" class="search-form__button" aria-label="Search">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                    </button>
+                </form>
+            </div>
+        </nav>
+
+        <!-- Brands Mega Dropdown -->
+        <div class="brands-mega" id="brands-mega" hidden role="region" aria-label="Browse brands">
+            <div class="container">
+                <div class="brands-mega__cards"></div>
+                <a href="/html/shop.html" class="brands-mega__view-all">
+                    View All Brands
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
+                </a>
+            </div>
+        </div>
+    </header>
+
+    <!-- ============================================
+         MAIN CONTENT - ACCOUNT DASHBOARD
+         ============================================ -->
+    <main id="main-content" class="site-main">
+
+        <!-- Breadcrumb -->
+        <nav class="breadcrumb" aria-label="Breadcrumb">
+            <div class="container">
+                <ol class="breadcrumb__list">
+                    <li class="breadcrumb__item"><a href="/html/index.html">Home</a></li>
+                    <li class="breadcrumb__item breadcrumb__item--current" aria-current="page">My Account</li>
+                </ol>
+            </div>
+        </nav>
+
+        <section class="account-page">
+            <div class="container">
+                <div class="account-layout">
+
+                    <!-- ==============================
+                         A) SIDEBAR (improved)
+                         ============================== -->
+                    <aside class="account-sidebar">
+                        <div class="account-sidebar__user">
+                            <div class="account-sidebar__avatar">
+                                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                    <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
+                                    <circle cx="12" cy="7" r="4"/>
+                                </svg>
+                            </div>
+                            <div class="account-sidebar__details">
+                                <span class="account-sidebar__name" id="user-name"></span>
+                                <span class="account-sidebar__email" id="user-email"></span>
+                            </div>
+                        </div>
+
+                        <nav class="account-nav" aria-label="Account navigation">
+                            <ul class="account-nav__list">
+                                <!-- Account section -->
+                                <li class="account-nav__divider" aria-hidden="true">Account</li>
+                                <li class="account-nav__item account-nav__item--active">
+                                    <a href="/html/account/index.html">
+                                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+                                        Dashboard
+                                    </a>
+                                </li>
+                                <li class="account-nav__item">
+                                    <a href="/html/account/settings.html">
+                                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+                                        Settings
+                                    </a>
+                                </li>
+                                <li class="account-nav__item">
+                                    <a href="/html/account/addresses.html">
+                                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
+                                        Addresses
+                                    </a>
+                                </li>
+
+                                <!-- Orders section -->
+                                <li class="account-nav__divider" aria-hidden="true">Orders</li>
+                                <li class="account-nav__item">
+                                    <a href="/html/account/orders.html">
+                                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="8" height="4" rx="1" ry="1"/></svg>
+                                        Order History
+                                    </a>
+                                </li>
+                                <li class="account-nav__item">
+                                    <a href="/html/account/track-order.html">
+                                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
+                                        Track Order
+                                    </a>
+                                </li>
+                                <li class="account-nav__item">
+                                    <a href="/html/account/printers.html">
+                                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 9V2h12v7"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
+                                        My Printers
+                                    </a>
+                                </li>
+
+                                <!-- Business section -->
+                                <li class="account-nav__divider" aria-hidden="true">Business</li>
+                                <li class="account-nav__item">
+                                    <a href="/html/business.html">
+                                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="2" y="7" width="20" height="14" rx="2" ry="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></svg>
+                                        Business Accounts
+                                    </a>
+                                </li>
+                                <li class="account-nav__item account-nav__item--admin" id="admin-nav-item" hidden>
+                                    <a href="/html/admin/index.html">
+                                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+                                        Admin Panel
+                                    </a>
+                                </li>
+                                <li class="account-nav__item account-nav__item--logout">
+                                    <a href="#" class="logout-link">
+                                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+                                        Logout
+                                    </a>
+                                </li>
+                            </ul>
+                        </nav>
+
+                        <!-- Trust micro-panel -->
+                        <div class="account-sidebar__trust">
+                            <div class="account-sidebar__trust-item">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+                                100% NZ Owned
+                            </div>
+                            <div class="account-sidebar__trust-item">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="1" y="3" width="15" height="13"/><polygon points="16 8 20 8 23 11 23 16 16 16 16 8"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/></svg>
+                                Fast NZ-wide dispatch
+                            </div>
+                            <div class="account-sidebar__trust-item">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>
+                                30-day returns
+                            </div>
+                        </div>
+                    </aside>
+
+                    <!-- ==============================
+                         MAIN CONTENT
+                         ============================== -->
+                    <div class="account-content">
+                        <h1 class="account-content__heading">My Account</h1>
+                        <p class="account-content__welcome" id="welcome-msg">Welcome back<span id="welcome-name"></span></p>
+
+                        <!-- ==============================
+                             B) ACTION CENTER
+                             ============================== -->
+                        <div class="dash-action-center">
+
+                            <!-- Quick Reorder Card -->
+                            <div class="dash-card dash-card--primary" id="quick-reorder-card">
+                                <div class="dash-card__header">
+                                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+                                    <h2 class="dash-card__title">Quick Reorder</h2>
+                                </div>
+
+                                <!-- Skeleton loading state -->
+                                <div class="dash-card__skeleton" id="reorder-skeleton">
+                                    <div class="skeleton-line skeleton-line--lg"></div>
+                                    <div class="skeleton-line skeleton-line--sm"></div>
+                                    <div class="skeleton-line skeleton-line--btn"></div>
+                                </div>
+
+                                <!-- Populated state -->
+                                <div class="dash-reorder" id="reorder-content" hidden>
+                                    <div class="dash-reorder__product">
+                                        <div class="dash-reorder__thumb" id="reorder-thumb">
+                                            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z"/></svg>
+                                        </div>
+                                        <div class="dash-reorder__details">
+                                            <span class="dash-reorder__name" id="reorder-name"></span>
+                                            <span class="dash-reorder__meta" id="reorder-meta"></span>
+                                        </div>
+                                    </div>
+                                    <div class="dash-reorder__actions">
+                                        <a href="#" class="btn btn--primary" id="reorder-buy-btn">Buy Again</a>
+                                        <a href="#" class="dash-reorder__link" id="reorder-view-link">View order</a>
+                                    </div>
+                                </div>
+
+                                <!-- Empty state -->
+                                <div class="dash-card__empty" id="reorder-empty" hidden>
+                                    <p>No orders yet &mdash; add your printer to reorder in seconds.</p>
+                                    <div class="dash-card__empty-actions">
+                                        <a href="/html/account/printers.html" class="btn btn--primary">Add a Printer</a>
+                                        <a href="/html/shop.html" class="dash-card__empty-link">Shop best sellers</a>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Order Status Card -->
+                            <div class="dash-card" id="order-status-card">
+                                <div class="dash-card__header">
+                                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="1" y="3" width="15" height="13"/><polygon points="16 8 20 8 23 11 23 16 16 16 16 8"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/></svg>
+                                    <h2 class="dash-card__title">Order Status</h2>
+                                </div>
+
+                                <!-- Skeleton loading state -->
+                                <div class="dash-card__skeleton" id="status-skeleton">
+                                    <div class="skeleton-line skeleton-line--md"></div>
+                                    <div class="skeleton-line skeleton-line--sm"></div>
+                                    <div class="skeleton-line skeleton-line--btn"></div>
+                                </div>
+
+                                <!-- Populated: active order -->
+                                <div class="dash-status" id="status-content" hidden>
+                                    <div class="dash-status__info">
+                                        <span class="dash-status__order-num" id="status-order-num"></span>
+                                        <span class="dash-status__badge" id="status-badge"></span>
+                                    </div>
+                                    <p class="dash-status__eta" id="status-eta"></p>
+                                    <a href="#" class="btn btn--secondary" id="status-track-btn">Track Order</a>
+                                </div>
+
+                                <!-- Empty: no active orders -->
+                                <div class="dash-card__empty" id="status-empty" hidden>
+                                    <p>No active orders.</p>
+                                    <a href="/html/account/orders.html" class="dash-card__empty-link">View order history</a>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- ==============================
+                             C) MY PRINTERS
+                             ============================== -->
+                        <section class="dash-printers" aria-labelledby="dash-printers-heading">
+                            <div class="dash-section-header">
+                                <h2 id="dash-printers-heading" class="dash-section-title">My Printers</h2>
+                                <a href="/html/account/printers.html" class="dash-section-link">Manage all</a>
+                            </div>
+
+                            <!-- Skeleton -->
+                            <div class="dash-printers__skeleton" id="printers-skeleton">
+                                <div class="skeleton-card"></div>
+                                <div class="skeleton-card"></div>
+                            </div>
+
+                            <!-- Populated grid -->
+                            <div class="dash-printers__grid" id="dash-printers-grid" hidden>
+                                <!-- Printer cards rendered by JS -->
+                            </div>
+
+                            <!-- Add printer button (shown alongside grid) -->
+                            <a href="/html/account/printers.html" class="dash-printers__add-btn" id="dash-printers-add" hidden>
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                                Add Printer
+                            </a>
+
+                            <!-- Empty state -->
+                            <div class="dash-printers__empty" id="dash-printers-empty" hidden>
+                                <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M6 9V2h12v7"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
+                                <p>Save your printers to reorder ink in seconds.</p>
+                                <a href="/html/account/printers.html" class="btn btn--primary">Add Your First Printer</a>
+                            </div>
+                        </section>
+
+                        <!-- ==============================
+                             YOUR SAVINGS (kept, shown conditionally)
+                             ============================== -->
+                        <section class="account-section account-savings" id="savings-section" hidden aria-labelledby="savings-heading">
+                            <div class="account-section__header">
+                                <h2 id="savings-heading" class="account-section__title">Your Savings</h2>
+                            </div>
+                            <div class="savings-summary">
+                                <div class="savings-card savings-card--total">
+                                    <span class="savings-card__icon">
+                                        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1v22M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+                                    </span>
+                                    <div class="savings-card__content">
+                                        <span class="savings-card__label">Total Saved</span>
+                                        <span class="savings-card__value" id="total-savings">$0.00</span>
+                                    </div>
+                                </div>
+                                <div class="savings-card">
+                                    <span class="savings-card__icon">
+                                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="1" y="3" width="22" height="18" rx="2"/><line x1="1" y1="9" x2="23" y2="9"/></svg>
+                                    </span>
+                                    <div class="savings-card__content">
+                                        <span class="savings-card__label">Set Discounts</span>
+                                        <span class="savings-card__value" id="set-savings">$0.00</span>
+                                    </div>
+                                </div>
+                                <div class="savings-card">
+                                    <span class="savings-card__icon">
+                                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>
+                                    </span>
+                                    <div class="savings-card__content">
+                                        <span class="savings-card__label">Bundle Savings</span>
+                                        <span class="savings-card__value" id="bundle-savings">$0.00</span>
+                                    </div>
+                                </div>
+                                <div class="savings-card">
+                                    <span class="savings-card__icon">
+                                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                                    </span>
+                                    <div class="savings-card__content">
+                                        <span class="savings-card__label">Coupon Discounts</span>
+                                        <span class="savings-card__value" id="coupon-savings">$0.00</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </section>
+
+                        <!-- ==============================
+                             D) SECONDARY NAVIGATION TILES
+                             ============================== -->
+                        <div class="dash-tiles">
+                            <a href="/html/account/orders.html" class="dash-tile">
+                                <span class="dash-tile__icon">
+                                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="8" height="4" rx="1" ry="1"/></svg>
+                                </span>
+                                <div class="dash-tile__text">
+                                    <h3 class="dash-tile__title">Order History</h3>
+                                    <p class="dash-tile__desc">Track, download invoices, reorder fast</p>
+                                </div>
+                                <svg class="dash-tile__arrow" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><polyline points="9 18 15 12 9 6"/></svg>
+                            </a>
+                            <a href="/html/account/addresses.html" class="dash-tile">
+                                <span class="dash-tile__icon">
+                                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
+                                </span>
+                                <div class="dash-tile__text">
+                                    <h3 class="dash-tile__title">Addresses</h3>
+                                    <p class="dash-tile__desc">Delivery &amp; billing</p>
+                                </div>
+                                <svg class="dash-tile__arrow" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><polyline points="9 18 15 12 9 6"/></svg>
+                            </a>
+                            <a href="/html/account/settings.html" class="dash-tile">
+                                <span class="dash-tile__icon">
+                                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+                                </span>
+                                <div class="dash-tile__text">
+                                    <h3 class="dash-tile__title">Account Settings</h3>
+                                    <p class="dash-tile__desc">Profile, password, preferences</p>
+                                </div>
+                                <svg class="dash-tile__arrow" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><polyline points="9 18 15 12 9 6"/></svg>
+                            </a>
+                        </div>
+
+                        <!-- ==============================
+                             E) BUSINESS UPGRADE PROMPT
+                             ============================== -->
+                        <div class="dash-business-prompt">
+                            <div class="dash-business-prompt__content">
+                                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="2" y="7" width="20" height="14" rx="2" ry="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></svg>
+                                <div>
+                                    <h3 class="dash-business-prompt__title">Business printing?</h3>
+                                    <p class="dash-business-prompt__text">Apply for a Business Account for volume discounts and priority support.</p>
+                                </div>
+                            </div>
+                            <div class="dash-business-prompt__actions">
+                                <a href="/html/business.html" class="btn btn--secondary btn--small">Apply / Learn More</a>
+                                <a href="/html/contact.html" class="dash-business-prompt__link">Contact support</a>
+                            </div>
+                        </div>
+
+                    </div>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <!-- ============================================
+         FOOTER
+         ============================================ -->
+    <footer class="site-footer">
+        <div class="footer-main">
+            <div class="container">
+                <div class="footer-grid">
+                    <div class="footer-brand">
+                        <a href="/html/index.html" class="footer-brand__logo">
+                            <span class="logo__text">Ink<span>Cartridges</span>.co.nz</span>
+                        </a>
+                        <p class="footer-brand__description">
+                            New Zealand's trusted source for quality printing supplies.
+                            We help homes and businesses keep printing with genuine and
+                            compatible ink and toner cartridges.
+                        </p>
+                        <div class="footer-brand__social">
+                            <a href="#" aria-label="Facebook"><svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M18 2h-3a5 5 0 0 0-5 5v3H7v4h3v8h4v-8h3l1-4h-4V7a1 1 0 0 1 1-1h3z"/></svg></a>
+                            <a href="#" aria-label="Instagram"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="2" width="20" height="20" rx="5" ry="5"/><path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z"/><line x1="17.5" y1="6.5" x2="17.51" y2="6.5"/></svg></a>
+                            <a href="#" aria-label="LinkedIn"><svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M16 8a6 6 0 0 1 6 6v7h-4v-7a2 2 0 0 0-2-2 2 2 0 0 0-2 2v7h-4v-7a6 6 0 0 1 6-6z"/><rect x="2" y="9" width="4" height="12"/><circle cx="4" cy="4" r="2"/></svg></a>
+                        </div>
+                    </div>
+                    <div class="footer-column">
+                        <h3 class="footer-column__heading">Shop</h3>
+                        <ul class="footer-links">
+                            <li><a href="/html/shop.html">Browse All Products</a></li>
+                            <li><a href="/html/shop.html?brand=brother">Brother</a></li>
+                            <li><a href="/html/shop.html?brand=canon">Canon</a></li>
+                            <li><a href="/html/shop.html?brand=epson">Epson</a></li>
+                            <li><a href="/html/shop.html?brand=hp">HP</a></li>
+                            <li><a href="/html/shop.html?brand=samsung">Samsung</a></li>
+                            <li><a href="/html/shop.html?brand=lexmark">Lexmark</a></li>
+                            <li><a href="/html/shop.html?brand=oki">OKI</a></li>
+                            <li><a href="/html/shop.html?brand=fuji-xerox">Fuji Xerox</a></li>
+                            <li><a href="/html/shop.html?brand=kyocera">Kyocera</a></li>
+                        </ul>
+                    </div>
+                    <div class="footer-column">
+                        <h3 class="footer-column__heading">Support</h3>
+                        <ul class="footer-links">
+                            <li><a href="/html/contact.html">Contact Us</a></li>
+                            <li><a href="/html/faq.html">FAQs</a></li>
+                            <li><a href="/html/returns.html">Returns & Refunds</a></li>
+                            <li><a href="/html/about.html">About Us</a></li>
+                            <li><a href="/html/business.html">Business Accounts</a></li>
+                        </ul>
+                    </div>
+                    <div class="footer-column">
+                        <h3 class="footer-column__heading">Contact</h3>
+                        <ul class="footer-links">
+                            <li><strong>Phone:</strong><br><a href="tel:0800465275">0800 INK KART (465 275)</a></li>
+                            <li><strong>Email:</strong><br><a href="mailto:support@inkcartridges.co.nz">support@inkcartridges.co.nz</a></li>
+                            <li><strong>Hours:</strong><br>8am - 8pm, 7 days a week</li>
+                        </ul>
+                    </div>
+                </div>
+                <div class="footer-trust">
+                    <div class="footer-trust__item"><svg class="footer-trust__icon" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg><span>100% NZ Owned</span></div>
+                    <div class="footer-trust__item"><svg class="footer-trust__icon" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg><span>Secure Checkout</span></div>
+                    <div class="footer-trust__item"><svg class="footer-trust__icon" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="1" y="3" width="15" height="13"/><polygon points="16 8 20 8 23 11 23 16 16 16 16 8"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/></svg><span>Fast NZ Delivery</span></div>
+                    <div class="footer-trust__item"><svg class="footer-trust__icon" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg><span>NZ-Based Support</span></div>
+                </div>
+            </div>
+        </div>
+        <div class="footer-bottom">
+            <div class="container">
+                <p class="footer-copyright">&copy; <span id="current-year">2025</span> InkCartridges.co.nz. All rights reserved.</p>
+                <div class="footer-legal">
+                    <a href="/html/privacy.html">Privacy Policy</a>
+                    <a href="/html/terms.html">Terms & Conditions</a>
+                </div>
+                <div class="footer-payment">
+                    <span class="footer-payment__label">We accept:</span>
+                    <div class="footer-payment__icons">
+                        <span title="Visa">Visa</span>
+                        <span title="Mastercard">MC</span>
+                        <span title="PayPal">PayPal</span>
+                        <span title="Afterpay">Afterpay</span>
+                        <span title="POLi">POLi</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </footer>
+
+    <!-- Logout Confirmation Modal -->
+    <div id="logout-modal" class="modal" hidden>
+        <div class="modal__backdrop"></div>
+        <div class="modal__content">
+            <div class="modal__icon">
+                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
+                    <polyline points="16 17 21 12 16 7"/>
+                    <line x1="21" y1="12" x2="9" y2="12"/>
+                </svg>
+            </div>
+            <h2 class="modal__title">Sign Out?</h2>
+            <p class="modal__text">Are you sure you want to sign out of your account?</p>
+            <div class="modal__actions">
+                <button type="button" class="btn btn--secondary" id="logout-cancel">Cancel</button>
+                <button type="button" class="btn btn--primary" id="logout-confirm">Yes, Sign Out</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="/js/config.js"></script>
+    <script src="/js/security.js"></script>
+    <script src="/js/utils.js"></script>
+    <script src="/js/api.js"></script>
+    <script src="/js/auth.js"></script>
+    <script src="/js/main.js"></script>
+    <script src="/js/mega-nav.js"></script>
+    <script src="/js/modern-effects.js"></script>
+    <script src="/js/cart.js"></script>
+    <script src="/js/printer-data.js"></script>
+    <script src="/js/account.js"></script>
+    <script>
+        // Logout confirmation modal
+        document.addEventListener('DOMContentLoaded', () => {
+            const logoutLink = document.querySelector('.logout-link');
+            const logoutModal = document.getElementById('logout-modal');
+            const logoutCancel = document.getElementById('logout-cancel');
+            const logoutConfirm = document.getElementById('logout-confirm');
+            const modalBackdrop = logoutModal?.querySelector('.modal__backdrop');
+
+            if (logoutLink && logoutModal) {
+                logoutLink.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    logoutModal.hidden = false;
+                    document.body.style.overflow = 'hidden';
+                });
+
+                logoutCancel.addEventListener('click', () => {
+                    logoutModal.hidden = true;
+                    document.body.style.overflow = '';
+                });
+
+                modalBackdrop.addEventListener('click', () => {
+                    logoutModal.hidden = true;
+                    document.body.style.overflow = '';
+                });
+
+                logoutConfirm.addEventListener('click', async () => {
+                    logoutConfirm.disabled = true;
+                    logoutConfirm.textContent = 'Signing out...';
+
+                    const urlParams = new URLSearchParams(window.location.search);
+                    if (urlParams.get('dev') === 'true') {
+                        window.location.href = '/html/index.html';
+                        return;
+                    }
+
+                    if (typeof Auth !== 'undefined') {
+                        await Auth.signOut();
+                    }
+                    window.location.href = '/html/index.html';
+                });
+
+                document.addEventListener('keydown', (e) => {
+                    if (e.key === 'Escape' && !logoutModal.hidden) {
+                        logoutModal.hidden = true;
+                        document.body.style.overflow = '';
+                    }
+                });
+            }
+        });
+
+        // Load user savings data
+        document.addEventListener('DOMContentLoaded', async () => {
+            await new Promise(resolve => setTimeout(resolve, 600));
+
+            if (!Auth.isAuthenticated()) return;
+
+            try {
+                const response = await API.getUserSavings();
+                if (response.success && response.data) {
+                    const savings = response.data;
+                    const section = document.getElementById('savings-section');
+
+                    if (savings.total_savings > 0) {
+                        section.hidden = false;
+
+                        const formatNZD = (amount) => '$' + (amount || 0).toFixed(2);
+
+                        document.getElementById('total-savings').textContent = formatNZD(savings.total_savings);
+
+                        const byType = savings.savings_by_type || [];
+                        const setSavings = byType.find(s => s.type === 'set_discount')?.total || 0;
+                        const bundleSavings = byType.find(s => s.type === 'bundle')?.total || 0;
+                        const couponSavings = byType.find(s => s.type === 'coupon')?.total || 0;
+
+                        document.getElementById('set-savings').textContent = formatNZD(setSavings);
+                        document.getElementById('bundle-savings').textContent = formatNZD(bundleSavings);
+                        document.getElementById('coupon-savings').textContent = formatNZD(couponSavings);
+                    }
+                }
+            } catch (error) {
+                console.log('Savings not available:', error.message);
+            }
+        });
+    </script>
+    <script src="/js/analytics.js"></script>
+</body>
+</html>

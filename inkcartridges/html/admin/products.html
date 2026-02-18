@@ -1,0 +1,467 @@
+<!DOCTYPE html>
+<html lang="en-NZ">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Products - InkCartridges.co.nz Admin">
+    <meta name="robots" content="noindex, nofollow">
+    <link rel="icon" type="image/svg+xml" href="/assets/icons/favicon.svg">
+    <title>Products | InkCartridges.co.nz Admin</title>
+    <link rel="stylesheet" href="/css/base.css">
+    <link rel="stylesheet" href="/css/layout.css">
+    <link rel="stylesheet" href="/css/components.css">
+    <link rel="stylesheet" href="/css/modern-effects.css">
+    <link rel="stylesheet" href="/css/admin.css">
+    <!-- jsPDF for PDF export -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.1/jspdf.plugin.autotable.min.js"></script>
+    <style>
+        .admin-page-content {
+            padding: var(--spacing-6);
+            width: 100%;
+            box-sizing: border-box;
+        }
+
+        /* Filter Bar */
+        .filter-bar {
+            background: var(--color-background);
+            border: 1px solid var(--color-border);
+            border-radius: var(--radius-lg);
+            padding: var(--spacing-4);
+            margin-bottom: var(--spacing-5);
+        }
+        .filter-bar__row {
+            display: flex;
+            align-items: center;
+            gap: var(--spacing-3);
+            flex-wrap: wrap;
+        }
+        .filter-bar__search {
+            position: relative;
+            flex: 1;
+            min-width: 200px;
+            max-width: 320px;
+        }
+        .filter-bar__search-icon {
+            position: absolute;
+            left: var(--spacing-3);
+            top: 50%;
+            transform: translateY(-50%);
+            color: var(--color-text-muted);
+            pointer-events: none;
+        }
+        .filter-bar__search-input {
+            width: 100%;
+            padding: var(--spacing-2) var(--spacing-3) var(--spacing-2) 40px;
+            border: 1px solid var(--color-border);
+            border-radius: var(--radius-md);
+            font-size: var(--font-size-sm);
+            background: var(--color-background);
+            transition: border-color 0.15s, box-shadow 0.15s;
+        }
+        .filter-bar__search-input:focus {
+            outline: none;
+            border-color: var(--color-primary);
+            box-shadow: 0 0 0 3px rgba(38, 127, 181, 0.1);
+        }
+        .filter-bar__divider {
+            width: 1px;
+            height: 24px;
+            background: var(--color-border);
+        }
+        .filter-bar__select {
+            padding: var(--spacing-1) var(--spacing-6) var(--spacing-1) var(--spacing-3);
+            border: 1px solid var(--color-border);
+            border-radius: var(--radius-full);
+            font-size: var(--font-size-xs);
+            font-weight: var(--font-weight-medium);
+            background: var(--color-background) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 24 24' fill='none' stroke='%23777' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E") no-repeat right 12px center;
+            cursor: pointer;
+            appearance: none;
+            transition: all 0.15s;
+        }
+        .filter-bar__select:hover { border-color: var(--color-primary); background-color: var(--cyan-light); }
+        .filter-bar__select:focus { outline: none; border-color: var(--color-primary); }
+        .filter-bar__chips {
+            display: flex;
+            gap: var(--spacing-2);
+            flex-wrap: wrap;
+        }
+        .filter-chip {
+            display: inline-flex;
+            align-items: center;
+            gap: var(--spacing-1);
+            padding: var(--spacing-1) var(--spacing-3);
+            border: 1px solid var(--color-border);
+            border-radius: var(--radius-full);
+            font-size: var(--font-size-xs);
+            font-weight: var(--font-weight-medium);
+            background: var(--color-background);
+            cursor: pointer;
+            transition: all 0.15s;
+        }
+        .filter-chip:hover { border-color: var(--color-primary); background: var(--cyan-light); }
+        .filter-chip--active { background: var(--color-primary); color: white; border-color: var(--color-primary); }
+        .filter-bar__actions {
+            display: flex;
+            align-items: center;
+            gap: var(--spacing-2);
+            margin-left: auto;
+        }
+        .filter-bar__btn {
+            display: inline-flex;
+            align-items: center;
+            gap: var(--spacing-1);
+            padding: var(--spacing-2) var(--spacing-3);
+            border: 1px solid var(--color-border);
+            border-radius: var(--radius-md);
+            font-size: var(--font-size-sm);
+            font-weight: var(--font-weight-medium);
+            background: var(--color-background);
+            cursor: pointer;
+            transition: all 0.15s;
+        }
+        .filter-bar__btn:hover { background: var(--color-background-alt); }
+        .filter-bar__btn--primary { background: var(--color-primary); color: white; border-color: var(--color-primary); }
+        .filter-bar__btn--primary:hover { background: var(--cyan-dark); }
+        .filter-bar__results {
+            font-size: var(--font-size-sm);
+            color: var(--color-text-muted);
+        }
+        .filter-bar__results strong { color: var(--color-text); }
+
+        .products-table-card {
+            background: var(--color-background);
+            border-radius: var(--radius-lg);
+            border: 1px solid var(--color-border);
+            overflow: hidden;
+        }
+
+        .products-table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        .products-table th,
+        .products-table td {
+            padding: var(--spacing-4);
+            text-align: left;
+            border-bottom: 1px solid var(--color-border-light);
+        }
+
+        .products-table th {
+            font-size: var(--font-size-xs);
+            font-weight: var(--font-weight-semibold);
+            color: var(--color-text-muted);
+            text-transform: uppercase;
+            letter-spacing: var(--letter-spacing-wide);
+            background: var(--color-background-alt);
+        }
+
+        .products-table td {
+            font-size: var(--font-size-sm);
+            color: var(--color-text);
+        }
+
+        .products-table tbody tr:hover {
+            background: var(--color-background-alt);
+        }
+
+        .products-table tbody tr:last-child td {
+            border-bottom: none;
+        }
+
+        .product-name {
+            font-weight: var(--font-weight-medium);
+        }
+
+        .product-sku {
+            font-size: var(--font-size-xs);
+            color: var(--color-text-muted);
+            margin-top: 2px;
+        }
+
+        .product-image {
+            width: 48px;
+            height: 48px;
+            background: var(--color-background-alt);
+            border-radius: var(--radius-md);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+        }
+
+        .product-image img {
+            max-width: 100%;
+            max-height: 100%;
+            object-fit: contain;
+        }
+
+        .product-status {
+            display: inline-flex;
+            padding: var(--spacing-1) var(--spacing-3);
+            border-radius: var(--radius-full);
+            font-size: var(--font-size-xs);
+            font-weight: var(--font-weight-medium);
+        }
+
+        .product-status--active {
+            background: #D1FAE5;
+            color: #059669;
+        }
+
+        .product-status--low-stock {
+            background: var(--yellow-light);
+            color: var(--yellow-dark);
+        }
+
+        .product-status--out-of-stock {
+            background: var(--magenta-light);
+            color: var(--magenta-dark);
+        }
+
+        .action-link {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            padding: 6px 12px;
+            border-radius: var(--radius-md);
+            text-decoration: none;
+            font-size: var(--font-size-xs);
+            font-weight: var(--font-weight-medium);
+            margin-right: var(--spacing-2);
+            transition: all 0.15s;
+        }
+
+        .action-link--edit {
+            background: var(--color-primary);
+            color: white;
+        }
+
+        .action-link--edit:hover {
+            background: var(--cyan-dark);
+        }
+
+        .action-link--view {
+            background: var(--color-background-alt);
+            color: var(--color-text);
+            border: 1px solid var(--color-border);
+        }
+
+        .action-link--view:hover {
+            background: var(--color-border-light);
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: var(--spacing-12);
+            color: var(--color-text-muted);
+        }
+
+        .pagination {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: var(--spacing-4);
+            border-top: 1px solid var(--color-border-light);
+            background: var(--color-background-alt);
+        }
+
+        .pagination-info {
+            font-size: var(--font-size-sm);
+            color: var(--color-text-muted);
+        }
+
+        .pagination-buttons {
+            display: flex;
+            gap: var(--spacing-2);
+        }
+
+        .pagination-btn {
+            padding: var(--spacing-2) var(--spacing-3);
+            border: 1px solid var(--color-border);
+            background: var(--color-background);
+            border-radius: var(--radius-md);
+            font-size: var(--font-size-sm);
+            cursor: pointer;
+        }
+
+        .pagination-btn:hover:not(:disabled) {
+            background: var(--color-background-alt);
+        }
+
+        .pagination-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+    </style>
+</head>
+<body class="admin-body">
+    <!-- Admin Sidebar -->
+    <aside class="admin-sidebar">
+        <div class="admin-sidebar__logo">
+            <a href="/html/admin/index.html">
+                <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M6 9V2h12v7"/>
+                    <path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/>
+                    <rect x="6" y="14" width="12" height="8"/>
+                </svg>
+                <span>InkCartridges</span>
+            </a>
+        </div>
+
+        <nav class="admin-nav">
+            <ul class="admin-nav__list">
+                <li class="admin-nav__item"><a href="/html/admin/index.html" class="admin-nav__link"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>Dashboard</a></li>
+                <li class="admin-nav__item"><a href="/html/admin/orders.html" class="admin-nav__link"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="8" height="4" rx="1"/></svg>Orders<span class="admin-nav__badge" id="orders-badge">0</span></a></li>
+                <li class="admin-nav__item"><a href="/html/admin/products.html" class="admin-nav__link admin-nav__link--active"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"/><line x1="3" y1="6" x2="21" y2="6"/><path d="M16 10a4 4 0 0 1-8 0"/></svg>Products</a></li>
+                <li class="admin-nav__item"><a href="/html/admin/customers.html" class="admin-nav__link"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>Customers</a></li>
+                <li class="admin-nav__separator">Analytics</li>
+                <li class="admin-nav__item"><a href="/html/admin/financial-health.html" class="admin-nav__link"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>Financial Health</a></li>
+                <li class="admin-nav__item"><a href="/html/admin/customer-intelligence.html" class="admin-nav__link"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>Customer Intelligence</a></li>
+                <li class="admin-nav__item"><a href="/html/admin/operations.html" class="admin-nav__link"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>Operations</a></li>
+                <li class="admin-nav__item"><a href="/html/admin/sales.html" class="admin-nav__link"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="20" x2="12" y2="10"/><line x1="18" y1="20" x2="18" y2="4"/><line x1="6" y1="20" x2="6" y2="16"/></svg>Sales Analytics</a></li>
+                <li class="admin-nav__item"><a href="/html/admin/marketing.html" class="admin-nav__link"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>Marketing</a></li>
+                <li class="admin-nav__separator">System</li>
+                <li class="admin-nav__item"><a href="/html/admin/settings.html" class="admin-nav__link"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>Settings</a></li>
+            </ul>
+        </nav>
+
+        <div class="admin-sidebar__user">
+            <div class="admin-sidebar__avatar" id="admin-avatar">A</div>
+            <div>
+                <div style="font-weight: 500; font-size: 14px;" id="admin-name">Admin</div>
+                <div style="font-size: 12px; opacity: 0.7;" id="admin-email">admin@example.com</div>
+            </div>
+        </div>
+
+        <div style="padding: var(--spacing-4) var(--spacing-6); border-top: 1px solid rgba(255,255,255,0.1);">
+            <a href="/html/index.html" style="display: flex; align-items: center; gap: 8px; color: rgba(255,255,255,0.7); text-decoration: none; font-size: 14px;">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
+                    <polyline points="15 3 21 3 21 9"/>
+                    <line x1="10" y1="14" x2="21" y2="3"/>
+                </svg>
+                View Store
+            </a>
+        </div>
+    </aside>
+
+    <!-- Main Content -->
+    <main class="admin-main">
+        <header class="admin-header" style="background: var(--color-background); border-bottom: 1px solid var(--color-border); padding: var(--spacing-4) var(--spacing-6); display: flex; justify-content: space-between; align-items: center;">
+            <div>
+                <h1 style="font-size: var(--font-size-xl); font-weight: var(--font-weight-bold); margin: 0;">Products</h1>
+                <p style="font-size: var(--font-size-sm); color: var(--color-text-muted); margin: var(--spacing-1) 0 0;">Manage your product catalog</p>
+            </div>
+        </header>
+
+        <div class="admin-page-content">
+            <!-- Modern Filter Bar -->
+            <div class="filter-bar">
+                <div class="filter-bar__row">
+                    <!-- Search -->
+                    <div class="filter-bar__search">
+                        <svg class="filter-bar__search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+                        <input type="search" class="filter-bar__search-input" placeholder="Search by name, SKU, brand..." id="product-search">
+                    </div>
+
+                    <div class="filter-bar__divider"></div>
+
+                    <!-- Quick Stock Chips -->
+                    <div class="filter-bar__chips">
+                        <button class="filter-chip filter-chip--active" data-stock="">All</button>
+                        <button class="filter-chip" data-stock="in-stock">In Stock</button>
+                        <button class="filter-chip" data-stock="low-stock">Low Stock</button>
+                        <button class="filter-chip" data-stock="out-of-stock">Out of Stock</button>
+                    </div>
+
+                    <div class="filter-bar__divider"></div>
+
+                    <!-- Brand Filter -->
+                    <select class="filter-bar__select" id="brand-filter">
+                        <option value="">All Brands</option>
+                    </select>
+
+                    <!-- Category Filter -->
+                    <select class="filter-bar__select" id="category-filter">
+                        <option value="">All Categories</option>
+                        <option value="ink">Ink Cartridges</option>
+                        <option value="toner">Toner</option>
+                        <option value="drum">Drum Units</option>
+                    </select>
+
+                    <!-- Sort -->
+                    <select class="filter-bar__select" id="sort-filter">
+                        <option value="stock-low" selected>Stock: Low to High</option>
+                        <option value="stock-high">Stock: High to Low</option>
+                        <option value="name-asc">Name: A-Z</option>
+                        <option value="name-desc">Name: Z-A</option>
+                        <option value="price-low">Price: Low to High</option>
+                        <option value="price-high">Price: High to Low</option>
+                    </select>
+
+                    <!-- Actions -->
+                    <div class="filter-bar__actions">
+                        <span class="filter-bar__results" id="results-count"><strong>0</strong> products</span>
+                        <select class="filter-bar__select" id="export-format">
+                            <option value="">Export As...</option>
+                            <option value="pdf">PDF Table</option>
+                            <option value="html">HTML Table</option>
+                            <option value="csv">CSV</option>
+                            <option value="json">JSON</option>
+                            <option value="xml">XML</option>
+                        </select>
+                        <button class="filter-bar__btn--primary filter-bar__btn" id="add-product-btn">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                            Add Product
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="products-table-card">
+                <table class="products-table">
+                    <thead>
+                        <tr>
+                            <th style="width: 60px;"></th>
+                            <th>Product</th>
+                            <th>SKU</th>
+                            <th>Category</th>
+                            <th>Price</th>
+                            <th>Stock</th>
+                            <th>Status</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="products-table-body">
+                        <tr>
+                            <td colspan="8" class="empty-state">Loading products...</td>
+                        </tr>
+                    </tbody>
+                </table>
+                <div class="pagination">
+                    <span class="pagination-info" id="pagination-info">Showing 0 of 0 products</span>
+                    <div class="pagination-buttons">
+                        <button class="pagination-btn" id="prev-page" disabled>Previous</button>
+                        <button class="pagination-btn" id="next-page" disabled>Next</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- Scripts -->
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="/js/config.js"></script>
+    <script src="/js/security.js"></script>
+    <script src="/js/utils.js"></script>
+    <script src="/js/api.js"></script>
+    <script src="/js/auth.js"></script>
+    <script src="/js/admin-auth.js"></script>
+    <script src="/js/admin.js"></script>
+    <script src="/js/products-page.js"></script>
+    <script src="/js/modern-effects.js"></script>
+</body>
+</html>
