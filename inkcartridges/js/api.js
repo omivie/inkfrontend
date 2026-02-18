@@ -58,7 +58,11 @@ const API = {
                         // Retry with new token
                         headers['Authorization'] = `Bearer ${Auth.session.access_token}`;
                         const retryResponse = await fetch(url, { ...options, headers, credentials: 'include' });
-                        return await retryResponse.json();
+                        const retryData = await retryResponse.json();
+                        if (!retryResponse.ok) {
+                            throw new Error(retryData.error || retryData.message || 'Request failed after token refresh');
+                        }
+                        return retryData;
                     }
                 }
                 throw new Error('Please sign in to continue.');
@@ -723,15 +727,50 @@ const API = {
         const formData = new FormData();
         formData.append('image', file);
 
+        const headers = {};
+        if (token) headers['Authorization'] = `Bearer ${token}`;
+
         const response = await fetch(url, {
             method: 'POST',
-            headers: {
-                'Authorization': `Bearer ${token}`
-            },
-            body: formData
+            headers,
+            body: formData,
+            credentials: 'include'
         });
 
-        return response.json();
+        // Handle rate limiting (mirrors request() wrapper)
+        if (response.status === 429) {
+            const retryAfter = response.headers.get('Retry-After') || 60;
+            console.warn(`Rate limited. Retry after ${retryAfter}s`);
+            throw new Error('Too many requests. Please wait a moment.');
+        }
+
+        // Handle 401 — refresh token and retry (mirrors request() wrapper)
+        if (response.status === 401) {
+            if (typeof Auth !== 'undefined') {
+                const refreshed = await Auth.refreshSession();
+                if (refreshed) {
+                    headers['Authorization'] = `Bearer ${Auth.session.access_token}`;
+                    const retryResponse = await fetch(url, {
+                        method: 'POST',
+                        headers,
+                        body: formData,
+                        credentials: 'include'
+                    });
+                    const retryData = await retryResponse.json();
+                    if (!retryResponse.ok) {
+                        throw new Error(retryData.error || retryData.message || 'Image upload failed after token refresh');
+                    }
+                    return retryData;
+                }
+            }
+            throw new Error('Please sign in to continue.');
+        }
+
+        const data = await response.json();
+        if (!response.ok) {
+            throw new Error(data.error || data.message || 'Image upload failed');
+        }
+        return data;
     },
 
     /**

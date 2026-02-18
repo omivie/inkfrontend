@@ -544,3 +544,44 @@ hr {
     height: 3px;
     background: var(--accent-strip-gradient);
 }
+
+/* ==========================================================================
+   DARK MODE OVERRIDES
+   ========================================================================== */
+
+[data-theme="dark"] {
+    --color-text: var(--steel-300);
+    --color-text-heading: var(--steel-50);
+    --color-text-light: var(--steel-400);
+    --color-text-muted: var(--steel-500);
+    --color-text-inverse: var(--white-primary);
+
+    --color-background: var(--steel-900);
+    --color-background-alt: var(--steel-800);
+    --color-background-dark: var(--ink-wash);
+    --color-background-overlay: rgba(0, 0, 0, 0.7);
+
+    --color-border: var(--steel-700);
+    --color-border-light: var(--steel-800);
+    --color-border-dark: var(--steel-600);
+
+    --color-success: #34D399;
+    --color-success-bg: rgba(52, 211, 153, 0.15);
+    --color-warning: #FBBF24;
+    --color-warning-bg: rgba(251, 191, 36, 0.15);
+    --color-error: #F87171;
+    --color-error-bg: rgba(248, 113, 113, 0.15);
+    --color-info: #60A5FA;
+    --color-info-bg: rgba(96, 165, 250, 0.15);
+
+    --color-primary-bg: rgba(38, 127, 181, 0.15);
+    --color-secondary-bg: rgba(199, 31, 110, 0.15);
+    --color-accent-bg: rgba(244, 196, 48, 0.15);
+
+    --shadow-xs: 0 1px 2px 0 rgba(0, 0, 0, 0.2);
+    --shadow-sm: 0 1px 3px 0 rgba(0, 0, 0, 0.3), 0 1px 2px -1px rgba(0, 0, 0, 0.3);
+    --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.4), 0 2px 4px -2px rgba(0, 0, 0, 0.3);
+    --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.5), 0 4px 6px -4px rgba(0, 0, 0, 0.4);
+    --shadow-xl: 0 20px 25px -5px rgba(0, 0, 0, 0.5), 0 8px 10px -6px rgba(0, 0, 0, 0.4);
+    --shadow-2xl: 0 25px 50px -12px rgba(0, 0, 0, 0.6);
+}

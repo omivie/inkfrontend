@@ -67,6 +67,15 @@ const Auth = {
                             // Favourites sync failed silently
                         }
                     }
+
+                    // Claim $5 signup coupon (idempotent — safe on every login)
+                    if (typeof API !== 'undefined') {
+                        try {
+                            await API.claimSignupCoupon();
+                        } catch (e) {
+                            // Coupon claim failed silently — user may already have one
+                        }
+                    }
                 }
 
                 // Handle sign out - notify favourites to reload from localStorage
