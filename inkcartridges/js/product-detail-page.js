@@ -200,6 +200,61 @@
                     }
                 ]
             },
+            ribbon: {
+                description: (p) => `
+                    <div class="product-details-section">
+                        <p class="product-details-meta">
+                            <strong>Model:</strong> ${Security.escapeHtml(p.manufacturer_part_number || p.sku)}
+                            <span style="margin-left: 1.5rem;"><strong>SKU:</strong> ${Security.escapeHtml(p.sku)}</span>
+                        </p>
+                        <p class="product-details-intro">
+                            Quality ${Security.escapeHtml(p.brandName)} printer ribbon for reliable, consistent output. Our ribbons are manufactured to high standards to ensure clean, crisp printing every time.
+                        </p>
+                    </div>
+
+                    <h3 class="product-details-heading">Features & Benefits</h3>
+                    <ul class="product-features-list">
+                        ${p.color ? `<li><strong>Colour:</strong> ${Security.escapeHtml(p.color)}</li>` : ''}
+                        <li>Compatible with ${Security.escapeHtml(p.brandName)} printers and typewriters</li>
+                        <li>Consistent, high-quality print output</li>
+                        <li>Easy installation - simply remove and replace</li>
+                        <li>Long-lasting ribbon life</li>
+                    </ul>
+
+                    <h3 class="product-details-heading">What's Included</h3>
+                    <ul class="product-features-list">
+                        <li>1 x ${Security.escapeHtml(p.displayName)}</li>
+                    </ul>
+                `,
+                features: (p) => [
+                    `${Security.escapeHtml(p.brandName)} printer ribbon`,
+                    'Consistent print quality',
+                    'Easy installation',
+                    p.color ? `Colour: ${Security.escapeHtml(p.color)}` : null,
+                    'Long-lasting ribbon life'
+                ].filter(Boolean),
+                faqs: (p) => [
+                    {
+                        q: 'How do I install this ribbon?',
+                        a: `<p>Installing your ribbon is straightforward:</p>
+                            <ol>
+                                <li>Turn off your printer or typewriter</li>
+                                <li>Open the ribbon access cover</li>
+                                <li>Remove the old ribbon cartridge</li>
+                                <li>Insert the new ribbon, ensuring it is properly threaded</li>
+                                <li>Close the cover and test with a few prints</li>
+                            </ol>`
+                    },
+                    {
+                        q: 'How should I store unused ribbons?',
+                        a: `<p>Store unopened ribbons in their original sealed packaging in a cool, dry place away from direct sunlight and heat. Properly stored ribbons typically last 2-3 years. Avoid humidity as it can affect the ink quality.</p>`
+                    },
+                    {
+                        q: 'How do I know when to replace my ribbon?',
+                        a: `<p>Replace your ribbon when print output becomes noticeably lighter or uneven. If you see faded characters, missing dots, or inconsistent print density across the page, it's time for a new ribbon.</p>`
+                    }
+                ]
+            },
             default: {
                 description: (p) => `
                     <div class="product-details-section">
@@ -244,6 +299,7 @@
         async init() {
             const params = new URLSearchParams(window.location.search);
             const sku = params.get('sku');
+            this._productType = params.get('type') || null; // 'ribbon' or null
 
             if (!sku) {
                 this.showError('No product specified');
@@ -251,8 +307,9 @@
             }
 
             try {
+                // Always use getProduct — it handles ribbons too (type=ribbon products)
                 const response = await API.getProduct(sku);
-                if (!response.success || !response.data) {
+                if (!response.ok || !response.data) {
                     this.showError('Product not found');
                     return;
                 }
@@ -270,7 +327,7 @@
             const name = p.name || '';
             const isCompatible = name.toLowerCase().startsWith('compatible ');
             const displayName = isCompatible ? name.substring(11).trim() : name;
-            const brandName = p.brand?.name || this.extractBrand(name) || 'Unknown';
+            const brandName = p.brand?.name || (typeof p.brand === 'string' ? p.brand : null) || this.extractBrand(name) || 'Unknown';
             const category = p.category || this.detectCategory(name);
             const pageYield = p.page_yield || p.yield || null;
 
@@ -296,7 +353,12 @@
         },
 
         detectCategory(name) {
+            // Check URL type param or product_type field first
+            if (this._productType === 'ribbon') return 'ribbon';
+            const p = this.product;
+            if (p && (p.product_type === 'ribbon' || (p.category || '').toLowerCase().includes('ribbon'))) return 'ribbon';
             const lower = name.toLowerCase();
+            if (lower.includes('ribbon')) return 'ribbon';
             if (lower.includes('toner')) return 'toner';
             if (lower.includes('drum')) return 'drum';
             if (lower.includes('ink') || lower.includes('cartridge')) return 'ink';
@@ -371,18 +433,27 @@
             this.updateProductSchema(info, price);
 
             // Breadcrumb
-            const categoryName = info.category === 'toner' ? 'Toner Cartridges' :
+            const isRibbon = info.category === 'ribbon';
+            const categoryName = isRibbon ? 'Ribbons' :
+                                 info.category === 'toner' ? 'Toner Cartridges' :
                                  info.category === 'drum' ? 'Drums' : 'Ink Cartridges';
             const brandSlug = info.brandName.toLowerCase().replace(/\s+/g, '-');
-            document.getElementById('breadcrumb-category').innerHTML = `<a href="/html/shop.html?brand=${Security.escapeAttr(brandSlug)}&category=${Security.escapeAttr(info.category)}">${Security.escapeHtml(categoryName)}</a>`;
-            document.getElementById('breadcrumb-brand').innerHTML = `<a href="/html/shop.html?brand=${Security.escapeAttr(brandSlug)}">${Security.escapeHtml(info.brandName)}</a>`;
+            if (isRibbon) {
+                document.getElementById('breadcrumb-category').innerHTML = `<a href="/html/ribbons.html">${Security.escapeHtml(categoryName)}</a>`;
+                document.getElementById('breadcrumb-brand').innerHTML = `<a href="/html/ribbons.html?brand=${Security.escapeAttr(info.brandName)}">${Security.escapeHtml(info.brandName)}</a>`;
+            } else {
+                document.getElementById('breadcrumb-category').innerHTML = `<a href="/html/shop.html?brand=${Security.escapeAttr(brandSlug)}&category=${Security.escapeAttr(info.category)}">${Security.escapeHtml(categoryName)}</a>`;
+                document.getElementById('breadcrumb-brand').innerHTML = `<a href="/html/shop.html?brand=${Security.escapeAttr(brandSlug)}">${Security.escapeHtml(info.brandName)}</a>`;
+            }
 
-            // Add product code breadcrumb (e.g., LC37)
-            const productCode = this.extractProductCode(info);
-            const breadcrumbCode = document.getElementById('breadcrumb-code');
-            if (productCode && breadcrumbCode) {
-                breadcrumbCode.innerHTML = `<a href="/html/shop.html?brand=${Security.escapeAttr(brandSlug)}&category=${Security.escapeAttr(info.category)}&code=${Security.escapeAttr(productCode)}">${Security.escapeHtml(productCode)}</a>`;
-                breadcrumbCode.hidden = false;
+            // Add product code breadcrumb (e.g., LC37) — skip for ribbons
+            if (!isRibbon) {
+                const productCode = this.extractProductCode(info);
+                const breadcrumbCode = document.getElementById('breadcrumb-code');
+                if (productCode && breadcrumbCode) {
+                    breadcrumbCode.innerHTML = `<a href="/html/shop.html?brand=${Security.escapeAttr(brandSlug)}&category=${Security.escapeAttr(info.category)}&code=${Security.escapeAttr(productCode)}">${Security.escapeHtml(productCode)}</a>`;
+                    breadcrumbCode.hidden = false;
+                }
             }
 
             document.getElementById('breadcrumb-product').textContent = info.displayName;
@@ -501,8 +572,10 @@
                 </details>
             `).join('') || '<p>No FAQs available for this product.</p>';
 
-            // Compatible Printers
-            this.renderCompatiblePrinters(info);
+            // Compatible Printers (skip for ribbons)
+            if (info.category !== 'ribbon') {
+                this.renderCompatiblePrinters(info);
+            }
 
             // Set up event listeners
             this.setupEventListeners(info);
@@ -526,7 +599,7 @@
                             search: code,
                             limit: 10
                         });
-                        if (searchResponse.success && searchResponse.data?.products) {
+                        if (searchResponse.ok && searchResponse.data?.products) {
                             for (const product of searchResponse.data.products) {
                                 if (product.sku && product.sku !== info.sku) {
                                     printers = await this._fetchPrinters(product.sku);
@@ -564,7 +637,7 @@
         async _fetchPrinters(sku) {
             try {
                 const response = await API.getCompatiblePrinters(sku);
-                if (!response.success || !response.data) return [];
+                if (!response.ok || !response.data) return [];
 
                 const printers = response.data.printers || response.data.compatible_printers || response.data;
                 if (!Array.isArray(printers) || printers.length === 0) return [];
@@ -675,7 +748,8 @@
             const categoryNames = {
                 'toner': 'toner cartridge',
                 'ink': 'ink cartridge',
-                'drum': 'drum unit'
+                'drum': 'drum unit',
+                'ribbon': 'printer ribbon'
             };
             parts.push(categoryNames[info.category] || 'printing supply');
 
@@ -712,7 +786,8 @@
                     "@type": "Brand",
                     "name": info.brandName
                 },
-                "category": info.category === 'toner' ? 'Toner Cartridges' :
+                "category": info.category === 'ribbon' ? 'Printer Ribbons' :
+                           info.category === 'toner' ? 'Toner Cartridges' :
                            info.category === 'drum' ? 'Drum Units' : 'Ink Cartridges',
                 "offers": {
                     "@type": "Offer",

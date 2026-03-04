@@ -58,6 +58,7 @@
             levelCodes: document.getElementById('level-codes'),
             levelProducts: document.getElementById('level-products'),
             brandsGrid: document.getElementById('brands-grid'),
+            ribbonsBrandsGrid: document.getElementById('ribbons-brands-grid'),
             categoriesGrid: document.getElementById('categories-grid'),
             codesGrid: document.getElementById('codes-grid'),
             genuineProducts: document.getElementById('genuine-products'),
@@ -424,7 +425,7 @@
                     // Check if navigation changed during fetch
                     if (navVersion !== undefined && this.navigationVersion !== navVersion) return;
 
-                    if (response.success && response.data) {
+                    if (response.ok && response.data) {
                         this.cache.brands = response.data;
                     } else {
                         // Fallback to static brands
@@ -440,6 +441,7 @@
                 if (navVersion !== undefined && this.navigationVersion !== navVersion) return;
 
                 this.renderBrands(this.cache.brands);
+                this.renderRibbonBrands();
                 this.elements.levelBrands.hidden = false;
             } catch (error) {
                 DebugLog.error('Failed to load brands:', error);
@@ -453,6 +455,7 @@
                     slug: id
                 }));
                 this.renderBrands(this.cache.brands);
+                this.renderRibbonBrands();
                 this.elements.levelBrands.hidden = false;
             }
 
@@ -483,6 +486,29 @@
             });
         },
 
+        // Ribbon brands data
+        ribbonBrands: [
+            'Amano', 'Brother', 'Canon', 'Citizen', 'Epson',
+            'Fujitsu', 'IBM', 'Nakajima', 'NEC', 'NCR',
+            'OKI', 'Olivetti', 'Olympia', 'Panasonic', 'Printronix',
+            'Seiko', 'Sharp', 'Star', 'Triumph-Adler', 'Universal'
+        ],
+
+        renderRibbonBrands() {
+            const grid = this.elements.ribbonsBrandsGrid;
+            if (!grid) return;
+            grid.innerHTML = '';
+
+            this.ribbonBrands.forEach((brand, i) => {
+                const box = document.createElement('a');
+                box.className = 'drilldown-box drilldown-box--ribbon';
+                box.href = `/html/ribbons.html?brand=${encodeURIComponent(brand)}`;
+                box.style.animationDelay = `${60 + i * 30}ms`;
+                box.innerHTML = `<span class="drilldown-box__label">${Security.escapeHtml(brand)}</span>`;
+                grid.appendChild(box);
+            });
+        },
+
         async loadCategories(navVersion) {
             const grid = this.elements.categoriesGrid;
             grid.innerHTML = '';
@@ -510,7 +536,7 @@
                         // Check if navigation changed during fetch
                         if (navVersion !== undefined && this.navigationVersion !== navVersion) return null;
 
-                        if (response.success && response.data?.products) {
+                        if (response.ok && response.data?.products) {
                             allProducts = allProducts.concat(response.data.products);
                             const pagination = response.data.pagination;
                             hasMore = pagination && page < pagination.total_pages;
@@ -678,7 +704,7 @@
 
                         while (hasMore) {
                             const response = await API.getProducts({ ...params, page, limit: 100 });
-                            if (response.success && response.data?.products) {
+                            if (response.ok && response.data?.products) {
                                 allProducts = allProducts.concat(response.data.products);
                                 const pagination = response.data.pagination;
                                 hasMore = pagination && page < pagination.total_pages;
@@ -1335,7 +1361,7 @@
                 // Check if navigation changed during fetch
                 if (navVersion !== undefined && this.navigationVersion !== navVersion) return;
 
-                if (response.success && response.data) {
+                if (response.ok && response.data) {
                     const printerData = response.data.printer;
                     // API returns 'products' array (per product_pages.md documentation)
                     const products = response.data.products || response.data.compatible_products || [];
@@ -1745,7 +1771,7 @@
                 // Check if navigation changed during fetch
                 if (navVersion !== undefined && this.navigationVersion !== navVersion) return;
 
-                let products = (response.success && response.data?.products) ? response.data.products : [];
+                let products = (response.ok && response.data?.products) ? response.data.products : [];
 
                 // Filter out irrelevant results where the search term only matches
                 // as a substring of an unrelated word (e.g. "T10" in "Pla-t10-um")
@@ -1976,15 +2002,15 @@
             // Keep full product name including "Compatible" prefix
             const displayName = product.name || '';
 
-            // For compatible products, show color block instead of image
+            // Show product image if available, otherwise color block for compatible or placeholder for genuine
             let imageContent;
-            if (isCompatible) {
+            if (product.image_url) {
+                imageContent = `<img src="${product.image_url}" alt="${product.name}" loading="lazy">`;
+            } else if (color) {
                 const colorStyle = this.getColorStyle(color);
                 imageContent = `<div class="product-card__color-block" style="${colorStyle}"></div>`;
             } else {
-                imageContent = product.image_url
-                    ? `<img src="${product.image_url}" alt="${product.name}" loading="lazy">`
-                    : `<svg width="60" height="60" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1">
+                imageContent = `<svg width="60" height="60" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1">
                         <rect x="6" y="2" width="12" height="20" rx="2"/>
                         <path d="M9 6h6M9 10h6"/>
                     </svg>`;
@@ -2225,7 +2251,7 @@
             if (firstProduct && firstProduct.sku) {
                 try {
                     const response = await API.getCompatiblePrinters(firstProduct.sku);
-                    if (response.success && response.data) {
+                    if (response.ok && response.data) {
                         const printers = response.data.printers || response.data.compatible_printers || response.data;
 
                         if (Array.isArray(printers) && printers.length > 0) {
@@ -2274,18 +2300,21 @@
                 this.elements.productTypeLabel.hidden = false;
                 // Note: yieldBanner is shown/hidden by displayProductInfo based on data
             } else {
-                // Show main title on other levels
-                this.elements.title.hidden = false;
                 // Hide yield banner on non-product levels
                 this.elements.yieldBanner.hidden = true;
 
                 const titles = {
-                    brands: 'Select a Brand',
                     categories: `${this.brandInfo[this.state.brand]?.name || ''} - Select a Category`,
                     codes: `Select a Product Code`
                 };
 
-                this.elements.title.textContent = titles[this.state.level] || '';
+                const titleText = titles[this.state.level] || '';
+                if (titleText) {
+                    this.elements.title.textContent = titleText;
+                    this.elements.title.hidden = false;
+                } else {
+                    this.elements.title.hidden = true;
+                }
             }
         }
     };

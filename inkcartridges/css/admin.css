@@ -163,9 +163,18 @@
   min-height: 100vh;
   padding-top: 3px;
 }
-.admin-main {
-  display: flex; flex-direction: column; min-height: 100vh; min-width: 0;
+.admin-content-wrapper {
   grid-column: 2;
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  min-width: 0;
+}
+.admin-main {
+  display: flex; flex-direction: column; min-height: 0; min-width: 0;
+  flex: 1;
+  padding: 24px 24px 16px;
+  max-width: 1440px; width: 100%; margin: 0 auto;
 }
 .admin-content {
   flex: 1; padding: 24px 24px 16px;
@@ -870,7 +879,7 @@
 }
 @media (max-width: 768px) {
   .admin-shell { grid-template-columns: 1fr; }
-  .admin-main { grid-column: 1; }
+  .admin-content-wrapper { grid-column: 1; }
   .admin-sidebar { transform: translateX(-100%); width: 280px; }
   .admin-sidebar.open { transform: translateX(0); }
   .admin-topbar__hamburger { display: flex; }
@@ -1164,6 +1173,7 @@
   .admin-sidebar, .admin-topbar, .admin-reg-strip, .admin-toasts,
   .admin-drawer-backdrop, .admin-modal-backdrop, .admin-filters { display: none !important; }
   .admin-shell { grid-template-columns: 1fr; }
+  .admin-content-wrapper { grid-column: 1; }
   .admin { background: #fff; color: #000; }
   .admin-card { border: 1px solid #ddd; box-shadow: none; }
 }

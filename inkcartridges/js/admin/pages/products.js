@@ -484,7 +484,7 @@ async function uploadImage(productId, file) {
 }
 
 function renderDiagnostics(container) {
-  if (!AdminAuth.isOwner() || !_diagnostics) return;
+  if (!_container || !AdminAuth.isOwner() || !_diagnostics) return;
   const d = _diagnostics;
 
   const section = document.createElement('div');
@@ -505,7 +505,9 @@ function renderDiagnostics(container) {
       ${diagKpi('Missing Prices', d.missing_prices ?? MISSING)}
     </div>
   `;
-  container.insertBefore(section, container.querySelector('.admin-mb-lg') || container.lastChild);
+  const ref = container.querySelector(':scope > .admin-mb-lg');
+  if (ref) container.insertBefore(section, ref);
+  else container.appendChild(section);
 
   section.querySelector('#bulk-images-btn')?.addEventListener('click', () => bulkGenerateImages());
   section.querySelector('#bulk-seo-btn')?.addEventListener('click', () => bulkGenerateSEO());
@@ -1146,6 +1148,7 @@ export default {
       }
     } catch { /* ignore */ }
 
+    if (!_table) return; // destroyed during await
     renderDiagnostics(container);
   },
 

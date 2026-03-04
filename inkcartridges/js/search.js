@@ -275,6 +275,7 @@ function createSmartSearch() {
 
                 // Normalize ribbon fields to match product schema
                 for (const ribbon of ribbons) {
+                    ribbon._isRibbon = true;
                     if (!ribbon.image_url && ribbon.image_path) {
                         ribbon.image_url = typeof storageUrl === 'function' ? storageUrl(ribbon.image_path) : ribbon.image_path;
                     }
@@ -329,6 +330,7 @@ function createSmartSearch() {
                         if (!Array.isArray(fbRibbons)) fbRibbons = [];
 
                         for (const ribbon of fbRibbons) {
+                            ribbon._isRibbon = true;
                             if (!ribbon.image_url && ribbon.image_path) {
                                 ribbon.image_url = typeof storageUrl === 'function' ? storageUrl(ribbon.image_path) : ribbon.image_path;
                             }
@@ -658,9 +660,13 @@ function createSmartSearch() {
 
         _navigateToProduct(product) {
             const sku = product.sku || product.code || product.product_code || '';
-            const url = sku
-                ? '/html/product/?sku=' + encodeURIComponent(sku)
-                : searchConfig.buildShopUrl(product, this._currentQuery);
+            let url;
+            if (sku) {
+                url = '/html/product/index.html?sku=' + encodeURIComponent(sku);
+                if (product._isRibbon) url += '&type=ribbon';
+            } else {
+                url = searchConfig.buildShopUrl(product, this._currentQuery);
+            }
             this._hide();
             window.location.href = url;
         },

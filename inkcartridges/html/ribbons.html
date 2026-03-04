@@ -4,18 +4,18 @@
     <meta charset="UTF-8">
     <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.jsdelivr.net https://js.stripe.com https://www.googletagmanager.com https://challenges.cloudflare.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://fonts.gstatic.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' https: data:; connect-src 'self' https://ink-backend-zaeq.onrender.com https://*.supabase.co https://*.stripe.com https://*.google-analytics.com https://cdn.jsdelivr.net https://challenges.cloudflare.com; frame-ancestors 'self'; frame-src https://js.stripe.com https://challenges.cloudflare.com;">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="description" content="Shop typewriter ribbons, dot matrix printer ribbons, POS receipt printer ribbons, and time clock ribbons. Quality ribbons for all your legacy printing needs.">
+    <meta name="description" content="Browse typewriter and printer ribbons by brand. Compatible ribbons for Epson, Brother, Star, OKI and more.">
     <meta name="robots" content="index, follow">
 
     <!-- Open Graph -->
     <meta property="og:title" content="Typewriter & Printer Ribbons | InkCartridges.co.nz">
-    <meta property="og:description" content="Shop typewriter ribbons, dot matrix printer ribbons, POS receipt printer ribbons, and time clock ribbons. Quality ribbons for all your legacy printing needs.">
+    <meta property="og:description" content="Browse compatible typewriter and printer ribbons by brand. Free NZ shipping over $100.">
     <meta property="og:type" content="website">
     <meta property="og:url" content="https://inkcartridges.co.nz/html/ribbons.html">
     <meta property="og:site_name" content="InkCartridges.co.nz">
 
     <link rel="icon" type="image/svg+xml" href="/assets/icons/favicon.svg">
-    <title>Typewriter & Printer Ribbons | InkCartridges.co.nz</title>
+    <title>Typewriter & Printer Ribbons NZ | InkCartridges.co.nz</title>
 
     <!-- Google Analytics 4 (with consent mode) -->
     <script async src="https://www.googletagmanager.com/gtag/js?id=G-SDQELG0FGD"></script>
@@ -42,13 +42,13 @@
             <div class="container">
                 <!-- Contact info -->
                 <div class="header-contact">
-                    <a href="tel:0800465275" class="header-contact__item">
+                    <a href="tel:0274740115" class="header-contact__item">
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
-                        0800 INK KART (465 275)
+                        027 474 0115
                     </a>
-                    <a href="mailto:support@inkcartridges.co.nz" class="header-contact__item">
+                    <a href="mailto:inkandtoner@windowslive.com" class="header-contact__item">
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
-                        support@inkcartridges.co.nz
+                        inkandtoner@windowslive.com
                     </a>
                 </div>
 
@@ -107,12 +107,12 @@
                         </button>
                     </li>
                     <li class="nav-menu__item nav-menu__item--mega">
-                        <button class="nav-menu__link nav-ribbons-toggle"
+                        <button class="nav-menu__link nav-ribbons-toggle nav-menu__link--active"
                                 type="button"
                                 aria-haspopup="true"
                                 aria-expanded="false"
                                 aria-controls="ribbons-mega">
-                            Typewriter &amp; Printer Ribbons
+                            Ribbons
                             <svg class="nav-menu__arrow" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
                         </button>
                     </li>
@@ -120,21 +120,26 @@
 
                 <!-- Search bar -->
                 <div class="search-wrapper">
-                    <form class="search-form search-form--nav" action="/html/ribbons.html" method="GET" role="search">
-                        <label for="ribbon-search-input" class="visually-hidden">Search for ribbons</label>
+                    <form class="search-form search-form--nav" id="shop-search-form" action="/html/shop.html" method="GET" role="search">
+                        <label for="search-input" class="visually-hidden">Search for products</label>
                         <input
                             type="search"
-                            id="ribbon-search-input"
+                            id="search-input"
                             name="q"
                             class="search-form__input"
                             placeholder="Search..."
                             autocomplete="off"
                             maxlength="200"
                         >
+                        <input type="hidden" id="search-preserve-brand" name="brand" value="" disabled>
+                        <input type="hidden" id="search-preserve-type" name="type" value="" disabled>
                         <button type="submit" class="search-form__button" aria-label="Search">
                             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
                         </button>
                     </form>
+                    <div class="search-results" id="search-results" hidden>
+                        <ul class="search-results__list" id="search-results-list"></ul>
+                    </div>
                 </div>
             </div>
         </nav>
@@ -163,115 +168,106 @@
     </header>
 
     <!-- ============================================
-         MAIN CONTENT - RIBBONS PAGE
+         MAIN CONTENT - RIBBONS PAGE (2-Level Drill-Down)
          ============================================ -->
     <main id="main-content" class="site-main">
-
-        <!-- Hero Section for Ribbons -->
-        <section class="ribbons-hero">
+        <div class="shop-page shop-page--drilldown">
             <div class="container">
-                <div class="ribbons-hero__content">
-                    <h1 class="ribbons-hero__title">Typewriter & Printer Ribbons</h1>
-                    <p class="ribbons-hero__subtitle">Quality ribbons for typewriters, dot matrix printers, POS systems, and time clocks. Keep your legacy equipment running smoothly.</p>
+                <!-- Breadcrumb Navigation -->
+                <div class="drilldown-header">
+                    <div class="drilldown-header__left">
+                        <nav class="drilldown-breadcrumb" aria-label="Ribbons navigation">
+                            <ol class="drilldown-breadcrumb__list" id="breadcrumb-list">
+                                <li class="drilldown-breadcrumb__item drilldown-breadcrumb__item--current">
+                                    <span>Ribbons</span>
+                                </li>
+                            </ol>
+                        </nav>
+                    </div>
+                </div>
+
+                <!-- Level Title (shown on products level) -->
+                <h1 class="drilldown-title" id="drilldown-title" hidden></h1>
+
+                <!-- Drill-down Content Area -->
+                <section class="drilldown-content">
+                    <!-- Level 1: Ribbon Brands -->
+                    <div class="drilldown-level" id="level-brands">
+                        <div class="shop-section-card">
+                            <div class="shop-section-card__header">
+                                <div class="shop-section-card__icon shop-section-card__icon--ribbon">
+                                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="3"/></svg>
+                                </div>
+                                <h2 class="shop-section-card__title">Typewriter &amp; Printer Ribbons</h2>
+                            </div>
+                            <div class="drilldown-grid drilldown-grid--ribbons" id="ribbons-brands-grid">
+                                <!-- Ribbon brand boxes loaded dynamically -->
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Level 2: Products for a brand -->
+                    <div class="drilldown-level" id="level-products" hidden>
+                        <div class="ribbon-products-grid" id="ribbon-products-grid">
+                            <!-- Product cards loaded here -->
+                        </div>
+                        <div class="pagination" id="ribbon-pagination"></div>
+                    </div>
+
+                    <!-- Loading State -->
+                    <div class="drilldown-loading" id="drilldown-loading" hidden>
+                        <div class="drilldown-skeleton drilldown-skeleton--brands" id="skeleton-brands">
+                            <div class="drilldown-grid drilldown-grid--ribbons">
+                                <div class="skeleton skeleton--brand-box"></div>
+                                <div class="skeleton skeleton--brand-box"></div>
+                                <div class="skeleton skeleton--brand-box"></div>
+                                <div class="skeleton skeleton--brand-box"></div>
+                                <div class="skeleton skeleton--brand-box"></div>
+                                <div class="skeleton skeleton--brand-box"></div>
+                                <div class="skeleton skeleton--brand-box"></div>
+                                <div class="skeleton skeleton--brand-box"></div>
+                                <div class="skeleton skeleton--brand-box"></div>
+                                <div class="skeleton skeleton--brand-box"></div>
+                            </div>
+                        </div>
+                        <div class="drilldown-skeleton drilldown-skeleton--products" id="skeleton-products" hidden>
+                            <div class="ribbon-products-grid">
+                                <div class="skeleton skeleton--product-card"></div>
+                                <div class="skeleton skeleton--product-card"></div>
+                                <div class="skeleton skeleton--product-card"></div>
+                                <div class="skeleton skeleton--product-card"></div>
+                                <div class="skeleton skeleton--product-card"></div>
+                                <div class="skeleton skeleton--product-card"></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Empty State -->
+                    <div class="drilldown-empty" id="drilldown-empty" hidden>
+                        <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                            <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+                        </svg>
+                        <h3>No ribbons found</h3>
+                        <p id="empty-message">Try selecting a different brand.</p>
+                    </div>
+                </section>
+            </div>
+        </div>
+
+        <!-- Need Help Banner -->
+        <section class="container">
+            <div class="need-help" data-track="support_impression" data-track-location="ribbons_page">
+                <svg class="need-help__icon" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                <div class="need-help__text">
+                    <strong>Need help finding your ribbon?</strong>
+                    Call <a href="tel:0274740115" data-track="contact_click" data-track-type="phone" data-track-location="ribbons_help">027 474 0115</a> or
+                    <a href="mailto:inkandtoner@windowslive.com" data-track="contact_click" data-track-type="email" data-track-location="ribbons_help">email us</a> — we'll match it for you.
                 </div>
             </div>
         </section>
-
-        <!-- Category Cards -->
-        <section class="ribbons-categories">
-            <div class="container">
-                <div class="ribbons-categories__grid">
-                    <a href="#ribbons-grid" class="ribbon-category-card" data-category="printer_ribbon">
-                        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="6" width="20" height="12" rx="2"/><path d="M6 12h12M6 9h12M6 15h12"/></svg>
-                        <h3>Printer Ribbons</h3>
-                        <p>Dot matrix, POS, time clock &amp; more</p>
-                    </a>
-                    <a href="#ribbons-grid" class="ribbon-category-card" data-category="typewriter_ribbon">
-                        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M6 20h12"/><circle cx="12" cy="12" r="3"/></svg>
-                        <h3>Typewriter Ribbons</h3>
-                        <p>Brother, IBM, Olivetti &amp; more</p>
-                    </a>
-                    <a href="#ribbons-grid" class="ribbon-category-card" data-category="correction_tape">
-                        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 22C6.5 22 2 17.5 2 12S6.5 2 12 2s10 4.5 10 10-4.5 10-10 10z"/><path d="M8 12h8"/></svg>
-                        <h3>Correction Tapes</h3>
-                        <p>Lift-off &amp; correction ribbons</p>
-                    </a>
-                </div>
-            </div>
-        </section>
-
-        <!-- Filters & Products -->
-        <section class="ribbons-products">
-            <div class="container">
-                <div class="ribbons-toolbar">
-                    <div class="ribbons-toolbar__filters">
-                        <select id="brand-filter" class="ribbons-toolbar__select" aria-label="Filter by brand">
-                            <option value="">All Brands</option>
-                        </select>
-                        <select id="type-filter" class="ribbons-toolbar__select" aria-label="Filter by ribbon type">
-                            <option value="">All Types</option>
-                            <option value="printer_ribbon">Printer Ribbon</option>
-                            <option value="typewriter_ribbon">Typewriter Ribbon</option>
-                            <option value="correction_tape">Correction Tape</option>
-                        </select>
-                        <select id="sort-filter" class="ribbons-toolbar__select" aria-label="Sort by">
-                            <option value="name-asc">Name: A-Z</option>
-                            <option value="name-desc">Name: Z-A</option>
-                            <option value="price-asc">Price: Low to High</option>
-                            <option value="price-desc">Price: High to Low</option>
-                        </select>
-                    </div>
-                    <div class="ribbons-toolbar__device-filters">
-                        <select id="device-brand-filter" class="ribbons-toolbar__select" aria-label="Filter by device brand">
-                            <option value="">All Device Brands</option>
-                        </select>
-                        <select id="device-model-filter" class="ribbons-toolbar__select" aria-label="Filter by device model" disabled>
-                            <option value="">All Models</option>
-                        </select>
-                    </div>
-                    <div class="ribbons-toolbar__count">
-                        Showing <span id="product-count">0</span> products
-                    </div>
-                </div>
-
-                <!-- Loading state -->
-                <div id="ribbons-loading" class="ribbons-loading" hidden>
-                    <div class="spinner"></div>
-                    <p>Loading ribbons&hellip;</p>
-                </div>
-
-                <!-- Empty state -->
-                <div id="ribbons-empty" class="ribbons-empty" hidden>
-                    <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-                    <p>No ribbons found matching your filters.</p>
-                    <button class="btn btn--outline" onclick="location.href='/html/ribbons.html'">Clear Filters</button>
-                </div>
-
-                <!-- Dynamic product grid -->
-                <div id="ribbons-grid" class="products-grid"></div>
-
-                <!-- Pagination -->
-                <div id="ribbons-pagination"></div>
-
-                <!-- Contact CTA -->
-                <div class="ribbons-cta">
-                    <h3>Can't find what you need?</h3>
-                    <p>We carry a wide range of ribbons not listed here. Contact us for availability and pricing.</p>
-                    <div class="ribbons-cta__actions">
-                        <a href="tel:0800465275" class="btn btn--primary">
-                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
-                            0800 INK KART
-                        </a>
-                        <a href="mailto:support@inkcartridges.co.nz" class="btn btn--outline">
-                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
-                            Email Us
-                        </a>
-                    </div>
-                </div>
-            </div>
-        </section>
-
     </main>
+
+    <script src="/js/ribbons-page.js"></script>
 
     <!-- ============================================
          FOOTER
@@ -290,18 +286,7 @@
                             We help homes and businesses keep printing with genuine and
                             compatible ink and toner cartridges.
                         </p>
-                        <div class="footer-brand__social">
-                            <a href="#" aria-label="Facebook">
-                                <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M18 2h-3a5 5 0 0 0-5 5v3H7v4h3v8h4v-8h3l1-4h-4V7a1 1 0 0 1 1-1h3z"/></svg>
-                            </a>
-                            <a href="#" aria-label="Instagram">
-                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="2" width="20" height="20" rx="5" ry="5"/><path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z"/><line x1="17.5" y1="6.5" x2="17.51" y2="6.5"/></svg>
-                            </a>
-                            <a href="#" aria-label="LinkedIn">
-                                <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M16 8a6 6 0 0 1 6 6v7h-4v-7a2 2 0 0 0-2-2 2 2 0 0 0-2 2v7h-4v-7a6 6 0 0 1 6-6z"/><rect x="2" y="9" width="4" height="12"/><circle cx="4" cy="4" r="2"/></svg>
-                            </a>
                         </div>
-                    </div>
 
                     <!-- Support column -->
                     <div class="footer-column">
@@ -321,11 +306,11 @@
                         <ul class="footer-links">
                             <li>
                                 <strong>Phone:</strong><br>
-                                <a href="tel:0800465275">0800 INK KART (465 275)</a>
+                                <a href="tel:0274740115">027 474 0115</a>
                             </li>
                             <li>
                                 <strong>Email:</strong><br>
-                                <a href="mailto:support@inkcartridges.co.nz">support@inkcartridges.co.nz</a>
+                                <a href="mailto:inkandtoner@windowslive.com">inkandtoner@windowslive.com</a>
                             </li>
                             <li>
                                 <strong>Hours:</strong><br>
@@ -380,19 +365,18 @@
         </div>
     </footer>
 
-    <!-- Scripts -->
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.98.0" integrity="sha384-Sm2s7OXxsAMTyJ4iIyRBgVpeGUvMPk2lRQnnZhE78Wej7oggIoolKt+SCt0XJbUB" crossorigin="anonymous"></script>
-    <script src="/js/security.js"></script>
     <script src="/js/config.js"></script>
-    <script src="/js/utils.js"></script>
+    <script src="/js/security.js"></script>
     <script src="/js/api.js"></script>
+    <script src="/js/utils.js"></script>
     <script src="/js/auth.js"></script>
     <script src="/js/cart.js"></script>
+    <script src="/js/favourites.js"></script>
     <script src="/js/search-normalize.js"></script>
     <script src="/js/search.js"></script>
     <script src="/js/main.js"></script>
     <script src="/js/mega-nav.js"></script>
-    <script src="/js/ribbons.js"></script>
     <script src="/js/modern-effects.js"></script>
     <script src="/js/analytics.js"></script>
 </body>
