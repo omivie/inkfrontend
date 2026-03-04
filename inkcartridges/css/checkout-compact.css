@@ -1,0 +1,928 @@
+/* ==================================================
+   CHECKOUT-COMPACT.CSS
+   Spacing compression + new component styles
+   for cart / checkout / payment pages.
+   Load AFTER pages.css — overrides via cascade.
+   ================================================== */
+
+
+/* ==============================================
+   1. SHARED: Progress bar compression
+   ============================================== */
+
+.checkout-progress--compact {
+    margin-bottom: var(--spacing-sm);
+}
+
+.checkout-progress__number {
+    width: 28px;
+    height: 28px;
+    font-size: 0.75rem;
+}
+
+.checkout-progress__label {
+    font-size: var(--font-size-xs, 0.8125rem);
+}
+
+
+/* ==============================================
+   2. CART PAGE: Compact items + summary
+   ============================================== */
+
+.cart-page {
+    padding: var(--spacing-xs, 4px) 0 var(--spacing-lg, 24px);
+}
+
+.cart-page__header {
+    margin-bottom: var(--spacing-sm, 8px);
+}
+
+section.cart-page .cart-layout {
+    gap: var(--spacing-lg, 24px);
+}
+
+/* Compact cart items */
+section.cart-page .cart-item {
+    padding: 6px var(--spacing-sm, 8px);
+    min-height: 64px;
+    gap: var(--spacing-sm, 8px);
+}
+
+section.cart-page .cart-item__image {
+    width: 56px;
+    height: 56px;
+}
+
+section.cart-page .cart-item__name {
+    font-size: 0.8125rem;
+    line-height: 1.25;
+}
+
+section.cart-page .cart-item__brand {
+    margin-bottom: 0;
+    font-size: 0.6875rem;
+}
+
+section.cart-page .cart-item__sku {
+    font-size: 0.625rem;
+}
+
+/* Compact summary sidebar */
+section.cart-page .cart-summary {
+    padding: var(--spacing-md, 16px);
+}
+
+section.cart-page .cart-summary__heading {
+    font-size: var(--font-size-base, 1rem);
+    margin-bottom: var(--spacing-sm, 8px);
+    padding-bottom: var(--spacing-xs, 4px);
+}
+
+section.cart-page .cart-summary__row {
+    padding: var(--spacing-xs, 4px) 0;
+    font-size: var(--font-size-sm, 0.875rem);
+}
+
+section.cart-page .cart-summary__row--total {
+    padding-top: var(--spacing-sm, 8px);
+}
+
+section.cart-page .cart-summary__coupon {
+    margin-bottom: var(--spacing-sm, 8px);
+    padding-bottom: var(--spacing-sm, 8px);
+}
+
+section.cart-page .cart-summary__shipping-message {
+    padding: var(--spacing-xs, 4px) 0;
+    font-size: var(--font-size-xs, 0.8125rem);
+}
+
+section.cart-page .cart-summary__shipping-bar {
+    margin-top: var(--spacing-xs, 4px);
+}
+
+section.cart-page .cart-summary__actions {
+    margin-top: var(--spacing-md, 16px);
+}
+
+section.cart-page .cart-summary__express {
+    margin-top: var(--spacing-md, 16px);
+}
+
+section.cart-page .cart-summary__trust {
+    padding-top: var(--spacing-sm, 8px);
+    margin-top: var(--spacing-sm, 8px);
+}
+
+section.cart-page .cart-actions {
+    padding: var(--spacing-sm, 8px) 0;
+}
+
+section.cart-page .cart-empty {
+    padding: var(--spacing-lg, 24px) var(--spacing-md, 16px);
+}
+
+
+/* ==============================================
+   3. CHECKOUT PAGE: Compact form sections
+   ============================================== */
+
+.checkout-page {
+    padding: var(--spacing-sm, 8px) 0 var(--spacing-xl, 32px);
+}
+
+.checkout-page__header {
+    margin-bottom: var(--spacing-sm, 8px);
+}
+
+section.checkout-page .checkout-layout {
+    gap: var(--spacing-lg, 24px);
+}
+
+/* Sidebar wrapper for progress card + summary card */
+.checkout-sidebar {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-md, 16px);
+    align-self: start;
+}
+
+/* Progress card — white background, standalone */
+.checkout-progress-card {
+    background: #fff;
+    border-radius: var(--radius-xl, 12px);
+    border: 1px solid var(--color-border, #e5e7eb);
+    padding: var(--spacing-md, 16px) var(--spacing-lg, 24px);
+}
+
+.checkout-progress-card .checkout-progress {
+    margin-bottom: 0;
+}
+
+/* Completed step connector lines — full span, cyan */
+.checkout-progress__step--completed:not(:last-child)::after {
+    background-color: #267FB5 !important;
+}
+
+/* Quantity badge overlay on product image */
+.checkout-summary__item-image {
+    position: relative;
+}
+
+.checkout-summary__item-qty-badge {
+    position: absolute;
+    top: -6px;
+    right: -6px;
+    background: #267FB5;
+    color: #fff;
+    font-size: 0.6875rem;
+    font-weight: 700;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    line-height: 1;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.15);
+}
+
+/* Free shipping upsell banner */
+.checkout-summary__free-shipping-banner {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-sm, 8px);
+    background: linear-gradient(135deg, #e0f4ff 0%, #f0f9ff 100%);
+    border: 1px solid #267FB5;
+    border-radius: var(--radius-md, 8px);
+    padding: 10px 14px;
+    margin-top: var(--spacing-sm, 8px);
+    font-size: var(--font-size-sm, 0.875rem);
+    font-weight: 600;
+    color: #1a5a8a;
+}
+
+.checkout-summary__free-shipping-banner svg {
+    flex-shrink: 0;
+    color: #267FB5;
+}
+
+/* Tighter form sections */
+section.checkout-page .checkout-section {
+    padding: var(--spacing-md, 16px) 20px;
+    margin-bottom: var(--spacing-sm, 8px);
+}
+
+section.checkout-page .checkout-section__heading {
+    font-size: 0.8125rem;
+    margin-bottom: var(--spacing-sm, 8px);
+}
+
+section.checkout-page .form-row {
+    margin-bottom: var(--spacing-sm, 8px);
+}
+
+section.checkout-page .form-label {
+    margin-bottom: var(--spacing-xs, 4px);
+    font-size: var(--font-size-xs, 0.8125rem);
+}
+
+section.checkout-page .form-input,
+section.checkout-page .form-select,
+section.checkout-page .form-textarea {
+    padding: 8px 12px;
+    font-size: var(--font-size-sm, 0.875rem);
+}
+
+section.checkout-page .form-hint {
+    margin-top: 2px;
+    font-size: 0.75rem;
+}
+
+section.checkout-page .checkout-section__login-prompt {
+    margin-bottom: var(--spacing-md, 16px);
+}
+
+section.checkout-page .checkout-section__welcome {
+    margin-bottom: var(--spacing-md, 16px);
+}
+
+/* Compact checkout summary sidebar */
+section.checkout-page .checkout-summary {
+    padding: var(--spacing-md, 16px);
+}
+
+section.checkout-page .checkout-summary__heading {
+    font-size: var(--font-size-base, 1rem);
+    margin-bottom: var(--spacing-sm, 8px);
+    padding-bottom: var(--spacing-xs, 4px);
+}
+
+section.checkout-page .checkout-summary__items {
+    margin-bottom: var(--spacing-sm, 8px);
+    padding-bottom: var(--spacing-sm, 8px);
+}
+
+section.checkout-page .checkout-summary__item {
+    margin-bottom: var(--spacing-xs, 4px);
+    gap: var(--spacing-sm, 8px);
+}
+
+section.checkout-page .checkout-summary__item-image {
+    width: 44px;
+    height: 44px;
+}
+
+section.checkout-page .checkout-summary__item-image img {
+    width: 44px;
+    height: 44px;
+}
+
+section.checkout-page .checkout-summary__totals {
+    padding: var(--spacing-sm, 8px) 0;
+}
+
+section.checkout-page .checkout-summary__row {
+    font-size: var(--font-size-xs, 0.8125rem);
+}
+
+section.checkout-page .checkout-summary__row--total {
+    font-size: var(--font-size-base, 1rem);
+}
+
+section.checkout-page .checkout-summary__edit {
+    margin-bottom: var(--spacing-sm, 8px);
+    font-size: var(--font-size-xs, 0.8125rem);
+}
+
+/* Trust signals removed from checkout summary */
+
+section.checkout-page .checkout-summary__coupon {
+    padding: var(--spacing-sm, 8px) 0;
+}
+
+section.checkout-page .checkout-summary__shipping-info {
+    padding: var(--spacing-xs, 4px) 0;
+}
+
+/* Tighter submit area */
+section.checkout-page .checkout-submit {
+    padding-top: var(--spacing-lg, 24px);
+    border: none;
+}
+
+section.checkout-page .checkout-submit .form-group--checkbox {
+    margin-bottom: 2px;
+}
+
+section.checkout-page .checkout-submit .checkout-submit__button {
+    margin-top: 8px;
+}
+
+section.checkout-page .checkout-submit__secure {
+    margin-top: var(--spacing-sm, 8px);
+    font-size: var(--font-size-xs, 0.8125rem);
+}
+
+
+/* ==============================================
+   4. PAYMENT PAGE: Compact payment section
+   ============================================== */
+
+section.checkout-page .shipping-summary {
+    padding: 1rem;
+    margin-bottom: 1.25rem;
+}
+
+section.checkout-page .payment-section__header {
+    padding: 1rem 1.25rem;
+}
+
+section.checkout-page .payment-section__body {
+    padding: 1rem 1.25rem;
+}
+
+section.checkout-page .card-input-wrapper {
+    margin-bottom: 1rem;
+}
+
+section.checkout-page .pay-button {
+    margin-top: 1rem;
+    padding: 0.875rem 1.5rem;
+}
+
+section.checkout-page .secure-badge {
+    margin-top: 0.75rem;
+    padding: 0.5rem;
+}
+
+section.checkout-page .powered-by {
+    margin-top: 1rem;
+    padding-top: 1rem;
+}
+
+section.checkout-page .payment-page__back {
+    margin-bottom: 1rem;
+}
+
+section.checkout-page .payment-authorization {
+    margin-top: 1rem;
+}
+
+
+/* ==============================================
+   5. ORDER CONFIRMATION: Compact
+   ============================================== */
+
+.confirmation-page {
+    padding: var(--spacing-sm, 8px) 0 var(--spacing-xl, 32px);
+}
+
+.confirmation-page .confirmation-header {
+    margin-bottom: var(--spacing-lg, 24px);
+}
+
+.confirmation-page .confirmation-details {
+    gap: var(--spacing-md, 16px);
+    margin-bottom: var(--spacing-lg, 24px);
+}
+
+.confirmation-page .confirmation-card {
+    padding: var(--spacing-md, 16px);
+}
+
+.confirmation-page .confirmation-items {
+    margin-bottom: var(--spacing-lg, 24px);
+}
+
+.confirmation-page .confirmation-next {
+    margin-bottom: var(--spacing-lg, 24px);
+}
+
+.confirmation-page .confirmation-next__steps li {
+    margin-bottom: var(--spacing-sm, 8px);
+}
+
+
+/* ==============================================
+   6. COMPONENT: Trust bullets
+   ============================================== */
+
+.trust-bullets {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--spacing-xs, 4px) var(--spacing-md, 16px);
+    margin-top: var(--spacing-sm, 8px);
+    padding: var(--spacing-sm, 8px) 0;
+}
+
+.trust-bullets__item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.75rem;
+    color: var(--steel-500, #64748b);
+    white-space: nowrap;
+}
+
+.trust-bullets__icon {
+    width: 14px;
+    height: 14px;
+    color: var(--cyan-primary, #267FB5);
+    flex-shrink: 0;
+}
+
+/* Centered variant for payment page */
+.trust-bullets--centered {
+    justify-content: center;
+}
+
+
+/* ==============================================
+   7. COMPONENT: Support request form
+   ============================================== */
+
+.support-form-wrapper {
+    margin-top: var(--spacing-md, 16px);
+    border: 1px solid var(--steel-200, #e2e8f0);
+    border-radius: var(--radius-md, 6px);
+    background: var(--steel-50, #f8fafc);
+    overflow: hidden;
+}
+
+.support-form__toggle {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-sm, 8px);
+    padding: var(--spacing-sm, 8px) var(--spacing-md, 16px);
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-size: var(--font-size-sm, 0.875rem);
+    font-weight: var(--font-weight-medium, 500);
+    font-family: inherit;
+    color: var(--cyan-primary, #267FB5);
+    transition: background-color var(--transition-fast, 150ms ease);
+    text-align: left;
+}
+
+.support-form__toggle:hover {
+    background: var(--cyan-light, #D4E8F5);
+}
+
+.support-form__toggle-icon {
+    width: 16px;
+    height: 16px;
+    flex-shrink: 0;
+}
+
+.support-form__chevron {
+    width: 12px;
+    height: 12px;
+    margin-left: auto;
+    transition: transform var(--transition-fast, 150ms ease);
+    flex-shrink: 0;
+}
+
+.support-form__toggle[aria-expanded="true"] .support-form__chevron {
+    transform: rotate(180deg);
+}
+
+/* Collapsed: hidden + not tabbable */
+.support-form__body {
+    display: none;
+}
+
+/* Expanded: visible */
+.support-form__body[aria-hidden="false"] {
+    display: block;
+}
+
+.support-form__content {
+    padding: 0 var(--spacing-md, 16px) var(--spacing-md, 16px);
+}
+
+.support-form__form .form-row {
+    margin-bottom: var(--spacing-sm, 8px);
+}
+
+.support-form__form .form-label__optional {
+    font-weight: var(--font-weight-normal, 400);
+    color: var(--steel-400, #94a3b8);
+}
+
+/* Honeypot field — hidden from real users */
+.support-form__hp {
+    position: absolute;
+    left: -9999px;
+    top: -9999px;
+    opacity: 0;
+    width: 0;
+    height: 0;
+    overflow: hidden;
+    pointer-events: none;
+}
+
+/* Result messages */
+.support-form__result {
+    padding: var(--spacing-sm, 8px) var(--spacing-md, 16px);
+    border-radius: var(--radius-sm, 3px);
+    font-size: var(--font-size-sm, 0.875rem);
+    margin-bottom: var(--spacing-sm, 8px);
+}
+
+.support-form__result--success {
+    background: var(--cyan-light, #D4E8F5);
+    color: var(--cyan-dark, #1A5A82);
+    border: 1px solid var(--cyan-primary, #267FB5);
+}
+
+.support-form__result--error {
+    background: var(--magenta-light, #F6D6E4);
+    color: var(--magenta-dark, #7E1244);
+    border: 1px solid var(--magenta-primary, #C71F6E);
+}
+
+
+/* ==============================================
+   8. COMPONENT: Collapsible checkout sections
+   ============================================== */
+
+.checkout-section--collapsible > .checkout-section__heading {
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    user-select: none;
+}
+
+.checkout-section__chevron {
+    width: 16px;
+    height: 16px;
+    margin-left: auto;
+    transition: transform var(--transition-fast, 150ms ease);
+    flex-shrink: 0;
+    color: var(--steel-400, #94a3b8);
+}
+
+/* Collapsed: content hidden + not tabbable */
+.checkout-section--collapsible .checkout-section__collapsible-content {
+    display: none;
+}
+
+/* Expanded: content visible */
+.checkout-section--collapsible.is-expanded .checkout-section__collapsible-content {
+    display: block;
+}
+
+.checkout-section--collapsible.is-expanded .checkout-section__chevron {
+    transform: rotate(180deg);
+}
+
+/* Billing section — collapsed by default via CSS,
+   expanded by JS when #same-as-shipping is unchecked.
+   The existing CheckoutPage.setupBillingAddressToggle() handles
+   #billing-address-fields display — we add visual card collapse. */
+.checkout-section--billing.checkout-section--collapsible .checkout-section__collapsible-content {
+    display: none;
+}
+
+.checkout-section--billing.checkout-section--collapsible.is-expanded .checkout-section__collapsible-content {
+    display: block;
+}
+
+
+/* ==============================================
+   8b. BILLING TOGGLE (inside shipping section)
+   ============================================== */
+
+.billing-toggle-row {
+    margin-top: var(--spacing-sm, 8px);
+    padding-top: var(--spacing-sm, 8px);
+    border-top: 1px solid var(--steel-200, #e2e8f0);
+}
+
+.billing-toggle {
+    display: flex;
+    gap: var(--spacing-sm, 8px);
+    margin-top: 6px;
+}
+
+.billing-toggle__option {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 20px;
+    border: 1px solid var(--steel-200, #e2e8f0);
+    border-radius: var(--radius-sm, 3px);
+    cursor: pointer;
+    font-size: var(--font-size-sm, 0.875rem);
+    color: var(--steel-600, #475569);
+    transition: border-color 150ms, background 150ms;
+    justify-content: center;
+    white-space: nowrap;
+}
+
+.billing-toggle__option:hover {
+    border-color: var(--steel-300, #cbd5e1);
+    background: var(--steel-50, #f8fafc);
+}
+
+.billing-toggle__option:has(.billing-toggle__radio:checked) {
+    border-color: var(--cyan-primary, #267FB5);
+    background: var(--cyan-light, #D4E8F5);
+    color: var(--cyan-dark, #1A5A82);
+    font-weight: 500;
+}
+
+.billing-toggle__radio {
+    appearance: none;
+    -webkit-appearance: none;
+    width: 0;
+    height: 0;
+    margin: 0;
+    padding: 0;
+    position: absolute;
+    opacity: 0;
+    pointer-events: none;
+}
+
+
+/* ==============================================
+   8c. ORDER NOTES (plain text box)
+   ============================================== */
+
+/* Delivery type selector (always visible outside accordion) */
+.checkout-delivery-type {
+    padding: 6px 20px;
+    margin-bottom: 4px;
+    border: none;
+}
+
+.checkout-delivery-type > .form-label {
+    font-size: var(--font-size-xs, 0.8125rem);
+    margin-bottom: var(--spacing-xs, 4px);
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+}
+
+.delivery-type-options {
+    display: flex;
+    gap: var(--spacing-sm, 8px);
+}
+
+.delivery-type-option {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 14px;
+    border: 2px solid var(--color-border, #e2e8f0);
+    border-radius: var(--radius-md, 8px);
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+.delivery-type-option:hover {
+    border-color: var(--color-primary-light, #60a5fa);
+}
+
+.delivery-type-option:has(input:checked) {
+    border-color: var(--color-primary, #267FB5);
+    background-color: var(--color-primary-bg, #f0f7fc);
+}
+
+.delivery-type-option__radio {
+    margin: 0;
+    flex-shrink: 0;
+}
+
+.delivery-type-option__name {
+    font-weight: var(--font-weight-semibold, 600);
+    white-space: nowrap;
+}
+
+.delivery-type-option__desc {
+    flex: 1;
+    font-size: var(--font-size-sm, 0.875rem);
+    color: var(--color-text-light, #64748b);
+    white-space: nowrap;
+}
+
+.delivery-type-option__price {
+    font-weight: var(--font-weight-semibold, 600);
+    white-space: nowrap;
+    margin-left: auto;
+}
+
+/* Hide stray lines from hidden billing fieldset */
+.checkout-billing-fields[style*="display: none"],
+.checkout-billing-fields[style*="display:none"] {
+    border: none !important;
+}
+
+/* Notes + Billing toggle side-by-side */
+.checkout-notes-billing {
+    display: flex;
+    gap: var(--spacing-md, 16px);
+    margin-bottom: 4px;
+    padding: 8px 20px;
+    border: none;
+}
+
+.checkout-order-notes {
+    flex: 3;
+    min-width: 0;
+}
+
+.checkout-order-notes .form-label {
+    margin-bottom: var(--spacing-xs, 4px);
+    font-size: var(--font-size-xs, 0.8125rem);
+}
+
+.checkout-order-notes .form-textarea {
+    padding: 8px 12px;
+    font-size: var(--font-size-sm, 0.875rem);
+    resize: vertical;
+    height: 100%;
+    min-height: 56px;
+}
+
+.checkout-billing-toggle {
+    flex: 1;
+    min-width: 0;
+}
+
+.checkout-billing-toggle .form-label {
+    margin-bottom: var(--spacing-xs, 4px);
+    font-size: var(--font-size-xs, 0.8125rem);
+}
+
+.billing-toggle--vertical {
+    flex-direction: column;
+}
+
+/* Different billing address section */
+.checkout-billing-fields {
+    padding: var(--spacing-md, 16px) 20px;
+    margin-bottom: 12px;
+    border: 1.5px solid var(--cyan-primary, #267FB5);
+    border-radius: var(--radius-md, 8px);
+    background: var(--cyan-light, #f0f7fc);
+}
+
+.checkout-billing-fields__heading {
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--steel-800, #1e293b);
+    margin: 0 0 var(--spacing-sm, 8px);
+}
+
+
+/* ==============================================
+   9. ACCORDION CHECKOUT
+   ============================================== */
+
+/* When accordion is active, override old collapsible styles */
+.checkout-form--accordion .checkout-section__heading { display: none; }
+.checkout-form--accordion .checkout-section__chevron { display: none; }
+.checkout-form--accordion .checkout-section--collapsible .checkout-section__collapsible-content {
+    display: block;
+}
+.checkout-form--accordion .checkout-section {
+    padding: 0;
+    margin-bottom: 8px;
+    border: 1px solid var(--steel-200, #e2e8f0);
+    border-radius: var(--radius-md, 6px);
+    overflow: hidden;
+}
+
+/* Accordion header — replaces legend as visual header */
+.acc-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    padding: 12px 16px;
+    background: none;
+    border: none;
+    cursor: pointer;
+    font: inherit;
+    font-size: 0.8125rem;
+    font-weight: 600;
+    color: var(--steel-800, #1e293b);
+    text-align: left;
+}
+
+.acc-header:hover {
+    background: var(--steel-50, #f8fafc);
+}
+
+/* Step number circle */
+.acc-step {
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    background: var(--steel-200, #e2e8f0);
+    color: var(--steel-600, #475569);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.75rem;
+    font-weight: 700;
+    flex-shrink: 0;
+    transition: background 200ms, color 200ms;
+}
+
+/* Active section — cyan step circle */
+.acc-header[aria-expanded="true"] .acc-step {
+    background: var(--cyan-primary, #267FB5);
+    color: #fff;
+}
+
+/* Completed section — checkmark replaces number */
+[data-acc-section].is-complete .acc-step {
+    background: var(--cyan-primary, #267FB5);
+    color: #fff;
+}
+
+.acc-check { display: none; }
+[data-acc-section].is-complete .acc-check { display: block; }
+[data-acc-section].is-complete .acc-step-num { display: none; }
+
+/* Chevron */
+.acc-chevron {
+    width: 16px;
+    height: 16px;
+    margin-left: auto;
+    transition: transform 200ms;
+    color: var(--steel-400, #94a3b8);
+}
+
+.acc-header[aria-expanded="true"] .acc-chevron {
+    transform: rotate(180deg);
+}
+
+/* Panel — hidden by default */
+.acc-panel[hidden] { display: none; }
+.acc-panel {
+    padding: 0 16px 16px;
+}
+
+/* Next button */
+.acc-next {
+    margin-top: 12px;
+}
+
+/* Summary text shown when section is collapsed + complete */
+.acc-summary {
+    font-size: 0.9375rem;
+    font-weight: 500;
+    color: var(--steel-700, #334155);
+    margin-left: 32px;
+    padding-bottom: 8px;
+    line-height: 1.4;
+}
+
+.acc-header[aria-expanded="true"] + .acc-summary { display: none; }
+
+
+/* ==============================================
+   10. RESPONSIVE: Mobile overrides
+   ============================================== */
+
+@media (max-width: 768px) {
+    /* Trust bullets stack vertically */
+    .trust-bullets {
+        flex-direction: column;
+        gap: var(--spacing-xs, 4px);
+    }
+
+    /* Cart items even tighter */
+    section.cart-page .cart-item__image {
+        width: 48px;
+        height: 48px;
+    }
+
+    section.cart-page .cart-item {
+        min-height: auto;
+    }
+
+    /* Support form full width */
+    .support-form-wrapper {
+        margin-top: var(--spacing-sm, 8px);
+    }
+
+    /* Checkout sections tighter */
+    section.checkout-page .checkout-section {
+        padding: var(--spacing-sm, 8px) var(--spacing-md, 16px);
+    }
+
+    /* Accordion mobile */
+    .acc-summary { margin-left: 0; }
+
+    /* Notes + billing stack on mobile */
+    .checkout-notes-billing {
+        flex-direction: column;
+    }
+}

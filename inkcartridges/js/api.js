@@ -7,6 +7,11 @@
 
 const API = {
     /**
+     * Default request timeout in milliseconds
+     */
+    REQUEST_TIMEOUT_MS: 15000,
+
+    /**
      * Get the current access token from Supabase session
      */
     async getToken() {
@@ -14,6 +19,73 @@ const API = {
             return Auth.session.access_token;
         }
         return null;
+    },
+
+    /**
+     * Shared fetch helper with timeout, 429 retry, and 401 token refresh.
+     * Used by both request() and uploadProductImage().
+     *
+     * @param {string} url - Full URL to fetch
+     * @param {object} fetchOptions - Options passed to fetch()
+     * @param {object} opts - Extra options
+     * @param {number} opts.timeoutMs - Timeout in ms (default: REQUEST_TIMEOUT_MS)
+     * @param {boolean} opts.isRetry - Whether this is already a retry (prevents infinite loops)
+     * @returns {Promise<Response>} The fetch Response object
+     */
+    MAX_AUTH_RETRIES: 2,
+
+    async _fetchWithAuth(url, fetchOptions = {}, opts = {}) {
+        const timeoutMs = opts.timeoutMs || this.REQUEST_TIMEOUT_MS;
+        const retryCount = opts.retryCount || 0;
+
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+        try {
+            const response = await fetch(url, {
+                ...fetchOptions,
+                signal: controller.signal,
+                credentials: 'include'
+            });
+            clearTimeout(timeoutId);
+
+            // Handle rate limiting — fail immediately, do not retry
+            if (response.status === 429) {
+                DebugLog.warn(`Rate limited on ${url}`);
+                throw new Error('Too many requests. Please wait a moment.');
+            }
+
+            // Handle unauthorized — refresh token and retry with backoff
+            if (response.status === 401 && retryCount < this.MAX_AUTH_RETRIES) {
+                if (typeof Auth !== 'undefined') {
+                    // Backoff: 500ms, 1000ms
+                    const delay = 500 * (retryCount + 1);
+                    await new Promise(r => setTimeout(r, delay));
+
+                    const refreshed = await Auth.refreshSession();
+                    if (refreshed) {
+                        const headers = fetchOptions.headers instanceof Headers
+                            ? new Headers(fetchOptions.headers)
+                            : { ...fetchOptions.headers };
+                        if (headers instanceof Headers) {
+                            headers.set('Authorization', `Bearer ${Auth.session.access_token}`);
+                        } else {
+                            headers['Authorization'] = `Bearer ${Auth.session.access_token}`;
+                        }
+                        return this._fetchWithAuth(url, { ...fetchOptions, headers }, { timeoutMs, retryCount: retryCount + 1 });
+                    }
+                }
+                throw new Error('Please sign in to continue.');
+            }
+
+            return response;
+        } catch (error) {
+            clearTimeout(timeoutId);
+            if (error.name === 'AbortError') {
+                throw new Error('Request timed out. Please check your connection and try again.');
+            }
+            throw error;
+        }
     },
 
     /**
@@ -36,67 +108,81 @@ const API = {
         }
 
         try {
-            const response = await fetch(url, {
-                ...options,
-                headers,
-                credentials: 'include'  // Required for guest cart cookies
-            });
+            const response = await this._fetchWithAuth(url, { ...options, headers });
 
-            // Handle rate limiting
-            if (response.status === 429) {
-                const retryAfter = response.headers.get('Retry-After') || 60;
-                console.warn(`Rate limited. Retry after ${retryAfter}s`);
-                throw new Error('Too many requests. Please wait a moment.');
-            }
-
-            // Handle unauthorized
-            if (response.status === 401) {
-                // Token expired - try to refresh
-                if (typeof Auth !== 'undefined') {
-                    const refreshed = await Auth.refreshSession();
-                    if (refreshed) {
-                        // Retry with new token
-                        headers['Authorization'] = `Bearer ${Auth.session.access_token}`;
-                        const retryResponse = await fetch(url, { ...options, headers, credentials: 'include' });
-                        const retryData = await retryResponse.json();
-                        if (!retryResponse.ok) {
-                            throw new Error(retryData.error || retryData.message || 'Request failed after token refresh');
-                        }
-                        return retryData;
-                    }
+            // Parse JSON safely — gateway errors (502/503/504) may return HTML
+            let data;
+            try {
+                data = await response.json();
+            } catch (_jsonErr) {
+                const status = response.status;
+                if (status >= 500) {
+                    throw new Error('The server is temporarily unavailable. Please try again in a moment.');
                 }
-                throw new Error('Please sign in to continue.');
+                throw new Error(`Unexpected response from server (HTTP ${status}).`);
             }
 
-            const data = await response.json();
+            // Normalize backend envelope: { ok, data, meta, error: { code, message, details } }
+            // Map pagination from top-level meta into data for backward compat
+            if (data.meta && data.data && typeof data.data === 'object') {
+                data.data.pagination = data.meta;
+            }
 
-            if (!response.ok) {
-                // Log sanitized error info for debugging (never log full response — may contain tokens/PII)
-                console.warn('API Error:', response.status, data.error || data.message || 'Unknown error');
+            // Check both HTTP status and envelope ok field
+            const isError = !response.ok || data.ok === false;
 
-                // Return error response instead of throwing for EMAIL_NOT_VERIFIED
-                // This allows individual pages to handle verification status appropriately
-                if (data.code === 'EMAIL_NOT_VERIFIED') {
-                    return { success: false, error: data.error || 'Email not verified', code: 'EMAIL_NOT_VERIFIED' };
+            if (isError) {
+                // Extract error info from structured error object
+                const err = data.error || {};
+                const errorCode = (typeof err === 'object' && err !== null) ? err.code : data.code;
+                const errorMsg = (typeof err === 'object' && err !== null) ? (err.message || 'Unknown error') : (err || data.message || 'Unknown error');
+                const errorDetails = (typeof err === 'object' && err !== null) ? err.details : data.details;
+
+                DebugLog.warn('API Error:', response.status, errorMsg);
+
+                // Return error response instead of throwing for specific codes
+                // so callers can handle them with targeted UI
+                if (errorCode === 'EMAIL_NOT_VERIFIED') {
+                    return { ok: false, error: errorMsg, code: 'EMAIL_NOT_VERIFIED' };
+                }
+
+                // Return 409 conflicts with code so callers can handle them
+                if (response.status === 409 && errorCode) {
+                    return { ok: false, error: errorMsg, code: errorCode, data: data };
+                }
+
+                // Return order/payment errors with code so callers can show specific messages
+                if (errorCode === 'ORDER_DB_ERROR' || errorCode === 'PAYMENT_ERROR' || errorCode === 'ORDER_TOTAL_TOO_LOW') {
+                    return { ok: false, error: errorMsg, code: errorCode };
+                }
+
+                // Return validation errors with details so callers can show per-field messages
+                if (errorCode === 'VALIDATION_FAILED') {
+                    return { ok: false, error: errorMsg, code: errorCode, details: errorDetails };
+                }
+
+                // Return rate limit errors with retry_after so callers can handle them
+                if (response.status === 429 || errorCode === 'RATE_LIMITED') {
+                    return { ok: false, error: errorMsg, code: 'RATE_LIMITED', retry_after: data.retry_after };
                 }
 
                 // Build detailed error message
-                let errorMsg = data.error || data.message || 'Request failed';
-                if (data.details) {
-                    if (Array.isArray(data.details)) {
-                        errorMsg += ': ' + data.details.map(d => d.message || d).join(', ');
-                    } else if (typeof data.details === 'object') {
-                        errorMsg += ': ' + JSON.stringify(data.details);
+                let fullMsg = errorMsg;
+                if (errorDetails) {
+                    if (Array.isArray(errorDetails)) {
+                        fullMsg += ': ' + errorDetails.map(d => d.message || d).join(', ');
+                    } else if (typeof errorDetails === 'object') {
+                        fullMsg += ': ' + JSON.stringify(errorDetails);
                     } else {
-                        errorMsg += ': ' + data.details;
+                        fullMsg += ': ' + errorDetails;
                     }
                 }
-                throw new Error(errorMsg);
+                throw new Error(fullMsg);
             }
 
             return data;
         } catch (error) {
-            console.error('API Error:', error);
+            DebugLog.error('API Error:', error);
             throw error;
         }
     },
@@ -197,6 +283,63 @@ const API = {
     },
 
     // =========================================================================
+    // RIBBONS
+    // =========================================================================
+
+    /**
+     * Get ribbon device brands with counts
+     * @param {object} params - Optional { type }
+     */
+    async getRibbonDeviceBrands(params = {}) {
+        const query = new URLSearchParams(params).toString();
+        return this.get(`/api/ribbons/device-brands${query ? '?' + query : ''}`);
+    },
+
+    /**
+     * Get ribbon device models (filtered by device_brand)
+     * @param {object} params - { device_brand, type }
+     */
+    async getRibbonDeviceModels(params = {}) {
+        const query = new URLSearchParams(params).toString();
+        return this.get(`/api/ribbons/device-models${query ? '?' + query : ''}`);
+    },
+
+    /**
+     * Get distinct ribbon brands for filter dropdowns
+     * @param {object} params - Optional { type }
+     */
+    async getRibbonBrands(params = {}) {
+        const query = new URLSearchParams(params).toString();
+        return this.get(`/api/ribbons/brands${query ? '?' + query : ''}`);
+    },
+
+    /**
+     * Get distinct ribbon models for filter dropdowns
+     * @param {object} params - Optional { brand, type }
+     */
+    async getRibbonModels(params = {}) {
+        const query = new URLSearchParams(params).toString();
+        return this.get(`/api/ribbons/models${query ? '?' + query : ''}`);
+    },
+
+    /**
+     * Get ribbons with optional filters
+     * @param {object} params - Filter parameters (device_brand, device_model, brand, type, color, model, search, sort, page, limit)
+     */
+    async getRibbons(params = {}) {
+        const query = new URLSearchParams(params).toString();
+        return this.get(`/api/ribbons${query ? '?' + query : ''}`);
+    },
+
+    /**
+     * Get single ribbon by SKU
+     * @param {string} sku - Ribbon SKU
+     */
+    async getRibbon(sku) {
+        return this.get(`/api/ribbons/${encodeURIComponent(sku)}`);
+    },
+
+    // =========================================================================
     // BRANDS
     // =========================================================================
 
@@ -217,7 +360,7 @@ const API = {
      * @param {number} limit - Max suggestions
      */
     async getAutocomplete(query, limit = 8) {
-        if (!query || query.length < 2) return { success: true, data: { suggestions: [] } };
+        if (!query || query.length < 2) return { ok: true, data: { suggestions: [] } };
         return this.get(`/api/search/autocomplete?q=${encodeURIComponent(query)}&limit=${limit}`);
     },
 
@@ -248,6 +391,20 @@ const API = {
     },
 
     /**
+     * Smart search - returns product cards for autocomplete dropdown
+     * @param {string} query - Search query
+     * @param {number} limit - Max results (default 48)
+     */
+    async smartSearch(query, limit = 48) {
+        if (!query || query.length < 1) {
+            return { ok: true, data: { products: [], total: 0 } };
+        }
+        const endpoint = (typeof searchConfig !== 'undefined' ? searchConfig.apiUrl : '/api/search/smart')
+            + '?q=' + encodeURIComponent(query) + '&limit=' + limit;
+        return this.get(endpoint);
+    },
+
+    /**
      * Get all printers for a brand
      * @param {string} brand - Brand slug
      */
@@ -261,6 +418,18 @@ const API = {
      */
     async getCompatiblePrinters(sku) {
         return this.get(`/api/search/compatible-printers/${encodeURIComponent(sku)}`);
+    },
+
+    /**
+     * Search cartridges by printer name/model
+     * @param {string} query - Printer name or model query
+     * @param {object} options - { limit, page }
+     */
+    async searchByPrinter(query, options = {}) {
+        const params = new URLSearchParams({ q: query });
+        if (options.limit) params.append('limit', options.limit);
+        if (options.page) params.append('page', options.page);
+        return this.get(`/api/search/by-printer?${params}`);
     },
 
     // =========================================================================
@@ -382,6 +551,14 @@ const API = {
      */
     async getOrder(orderNumber) {
         return this.get(`/api/orders/${orderNumber}`);
+    },
+
+    /**
+     * Check for a recent pending order (checkout timeout recovery)
+     * Call when order creation times out to check if order was actually created
+     */
+    async checkPendingOrder() {
+        return this.get('/api/orders/check-pending');
     },
 
     // =========================================================================
@@ -656,6 +833,7 @@ const API = {
         if (options.page) params.append('page', options.page);
         if (options.limit) params.append('limit', options.limit);
         if (options.status) params.append('status', options.status);
+        if (options.search) params.append('search', options.search);
         if (options.customerEmail) params.append('customer_email', options.customerEmail);
         if (options.dateFrom) params.append('date_from', options.dateFrom);
         if (options.dateTo) params.append('date_to', options.dateTo);
@@ -680,6 +858,99 @@ const API = {
      */
     async updateOrderStatus(orderId, data) {
         return this.put(`/api/admin/orders/${orderId}`, data);
+    },
+
+    /**
+     * Get order events / audit trail (admin)
+     * @param {string} orderId - Order UUID
+     */
+    async getAdminOrderEvents(orderId) {
+        return this.get(`/api/admin/orders/${orderId}/events`);
+    },
+
+    /**
+     * Add a note/event to an order (admin)
+     * @param {string} orderId - Order UUID
+     * @param {object} data - { type, payload: { note } }
+     */
+    async createAdminOrderEvent(orderId, data) {
+        return this.post(`/api/admin/orders/${orderId}/events`, data);
+    },
+
+    // =========================================================================
+    // ADMIN REFUNDS
+    // =========================================================================
+
+    /**
+     * Get refunds list (admin)
+     * @param {object} options - { page, limit, dateFrom, dateTo, type, status, search }
+     */
+    async getAdminRefunds(options = {}) {
+        const params = new URLSearchParams();
+        if (options.page) params.append('page', options.page);
+        if (options.limit) params.append('limit', options.limit);
+        if (options.dateFrom) params.append('dateFrom', options.dateFrom);
+        if (options.dateTo) params.append('dateTo', options.dateTo);
+        if (options.type) params.append('type', options.type);
+        if (options.status) params.append('status', options.status);
+        if (options.search) params.append('search', options.search);
+
+        const queryString = params.toString();
+        return this.get(`/api/admin/refunds${queryString ? '?' + queryString : ''}`);
+    },
+
+    /**
+     * Create a refund or chargeback (admin)
+     * @param {object} data - { order_id, type, amount, reason_code, reason_note }
+     */
+    async createAdminRefund(data) {
+        return this.post('/api/admin/refunds', data);
+    },
+
+    /**
+     * Update refund status (admin)
+     * @param {string} refundId - Refund UUID
+     * @param {object} data - { status }
+     */
+    async updateAdminRefund(refundId, data) {
+        return this.put(`/api/admin/refunds/${refundId}`, data);
+    },
+
+    // =========================================================================
+    // ADMIN EXPORT
+    // =========================================================================
+
+    /**
+     * Export data as CSV (admin)
+     * @param {string} type - Export type ('orders' or 'refunds')
+     * @param {object} options - { from, to, statuses }
+     */
+    async getAdminExport(type, options = {}) {
+        const params = new URLSearchParams();
+        if (options.from) params.append('from', options.from);
+        if (options.to) params.append('to', options.to);
+        if (options.statuses) params.append('statuses', options.statuses);
+
+        const queryString = params.toString();
+        const url = `${Config.API_URL}/api/admin/export/${type}${queryString ? '?' + queryString : ''}`;
+        const token = await this.getToken();
+
+        const response = await this._fetchWithAuth(url, {
+            headers: token ? { 'Authorization': `Bearer ${token}` } : {}
+        });
+
+        if (!response.ok) throw new Error(`Export failed: ${response.status}`);
+
+        const blob = await response.blob();
+        const blobUrl = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = blobUrl;
+        a.download = `${type}-${new Date().toISOString().slice(0, 10)}.csv`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(blobUrl);
+        return true;
     },
 
     /**
@@ -730,45 +1001,19 @@ const API = {
         const headers = {};
         if (token) headers['Authorization'] = `Bearer ${token}`;
 
-        const response = await fetch(url, {
+        // Use shared helper — handles timeout, 429 retry, and 401 refresh
+        // Use longer timeout for file uploads (30s)
+        const response = await this._fetchWithAuth(url, {
             method: 'POST',
             headers,
-            body: formData,
-            credentials: 'include'
-        });
-
-        // Handle rate limiting (mirrors request() wrapper)
-        if (response.status === 429) {
-            const retryAfter = response.headers.get('Retry-After') || 60;
-            console.warn(`Rate limited. Retry after ${retryAfter}s`);
-            throw new Error('Too many requests. Please wait a moment.');
-        }
-
-        // Handle 401 — refresh token and retry (mirrors request() wrapper)
-        if (response.status === 401) {
-            if (typeof Auth !== 'undefined') {
-                const refreshed = await Auth.refreshSession();
-                if (refreshed) {
-                    headers['Authorization'] = `Bearer ${Auth.session.access_token}`;
-                    const retryResponse = await fetch(url, {
-                        method: 'POST',
-                        headers,
-                        body: formData,
-                        credentials: 'include'
-                    });
-                    const retryData = await retryResponse.json();
-                    if (!retryResponse.ok) {
-                        throw new Error(retryData.error || retryData.message || 'Image upload failed after token refresh');
-                    }
-                    return retryData;
-                }
-            }
-            throw new Error('Please sign in to continue.');
-        }
+            body: formData
+        }, { timeoutMs: 30000 });
 
         const data = await response.json();
         if (!response.ok) {
-            throw new Error(data.error || data.message || 'Image upload failed');
+            const err = data.error || {};
+            const msg = (typeof err === 'object' && err !== null) ? (err.message || 'Image upload failed') : (err || data.message || 'Image upload failed');
+            throw new Error(msg);
         }
         return data;
     },
@@ -817,12 +1062,15 @@ const API = {
 
     /**
      * Get admin customers list with order stats
-     * @param {object} options - Filter options (page, limit)
+     * @param {object} options - Filter options (page, limit, search, sort, order)
      */
     async getAdminCustomers(options = {}) {
         const params = new URLSearchParams();
         if (options.page) params.append('page', options.page);
         if (options.limit) params.append('limit', options.limit);
+        if (options.search) params.append('search', options.search);
+        if (options.sort) params.append('sort', options.sort);
+        if (options.order) params.append('order', options.order);
 
         const queryString = params.toString();
         return this.get(`/api/admin/customers${queryString ? '?' + queryString : ''}`);
@@ -903,27 +1151,7 @@ const API = {
     // COUPONS
     // =========================================================================
 
-    /**
-     * Claim the one-time $5 NZD signup coupon (idempotent)
-     */
-    async claimSignupCoupon() {
-        return this.post('/api/coupons/claim-signup');
-    },
-
-    /**
-     * Get user's coupons
-     */
-    async getMyCoupons() {
-        return this.get('/api/coupons/my');
-    },
-
-    /**
-     * Redeem a coupon against an order
-     * @param {object} data - Coupon redemption data
-     */
-    async redeemCoupon(data) {
-        return this.post('/api/coupons/redeem', data);
-    },
+    // Signup coupon endpoints removed — only promotional coupons (via cart) remain
 
     // =========================================================================
     // CONTACT
@@ -947,6 +1175,103 @@ const API = {
      */
     async getCompatibility(printerId) {
         return this.get(`/api/compatibility/${printerId}`);
+    },
+
+    // =========================================================================
+    // ADMIN REVIEWS
+    // =========================================================================
+
+    /**
+     * Get all reviews for moderation (admin)
+     * @param {object} options - { page, limit, status }
+     */
+    async getAdminReviews(options = {}) {
+        const params = new URLSearchParams();
+        if (options.page) params.append('page', options.page);
+        if (options.limit) params.append('limit', options.limit);
+        if (options.status) params.append('status', options.status);
+
+        const queryString = params.toString();
+        return this.get(`/api/admin/reviews${queryString ? '?' + queryString : ''}`);
+    },
+
+    /**
+     * Moderate a review (approve/reject)
+     * @param {string} reviewId - Review UUID
+     * @param {object} data - { status: 'approved'|'rejected', admin_notes }
+     */
+    async moderateReview(reviewId, data) {
+        return this.put(`/api/admin/reviews/${reviewId}`, data);
+    },
+
+    // =========================================================================
+    // ADMIN BUSINESS APPLICATIONS
+    // =========================================================================
+
+    /**
+     * Get business applications list (admin)
+     * @param {object} options - { page, limit, status }
+     */
+    async getAdminBusinessApplications(options = {}) {
+        const params = new URLSearchParams();
+        if (options.page) params.append('page', options.page);
+        if (options.limit) params.append('limit', options.limit);
+        if (options.status) params.append('status', options.status);
+
+        const queryString = params.toString();
+        return this.get(`/api/admin/business-applications${queryString ? '?' + queryString : ''}`);
+    },
+
+    /**
+     * Get single business application (admin)
+     * @param {string} applicationId - Application UUID
+     */
+    async getAdminBusinessApplication(applicationId) {
+        return this.get(`/api/admin/business-applications/${applicationId}`);
+    },
+
+    /**
+     * Update business application status (admin)
+     * @param {string} applicationId - Application UUID
+     * @param {object} data - { status: 'approved'|'rejected', notes }
+     */
+    async updateAdminBusinessApplication(applicationId, data) {
+        return this.put(`/api/admin/business-applications/${applicationId}`, data);
+    },
+
+    /**
+     * Get business application statistics (admin)
+     */
+    async getAdminBusinessApplicationStats() {
+        return this.get('/api/admin/business-applications-stats');
+    },
+
+    // =========================================================================
+    // ADMIN PRODUCT DIAGNOSTICS & BULK OPS
+    // =========================================================================
+
+    /**
+     * Get product diagnostics (admin - super_admin/stock_manager only)
+     */
+    async getAdminProductDiagnostics() {
+        return this.get('/api/admin/products/diagnostics');
+    },
+
+    /**
+     * Bulk activate products (admin - super_admin/stock_manager only)
+     * @param {object} data - { product_ids, activate_all, dry_run }
+     */
+    async bulkActivateProducts(data) {
+        return this.post('/api/admin/products/bulk-activate', data);
+    },
+
+    /**
+     * Update product by SKU (admin - super_admin/stock_manager only)
+     * @param {string} sku - Product SKU
+     * @param {object} data - { retail_price, stock_quantity, is_active }
+     */
+    async updateProductBySku(sku, data) {
+        return this.put(`/api/admin/products/by-sku/${encodeURIComponent(sku)}`, data);
     },
 
     // =========================================================================
@@ -989,10 +1314,26 @@ const API = {
  * @returns {string} Formatted price
  */
 function formatPrice(price) {
+    if (price == null) return '';
     return new Intl.NumberFormat(Config.LOCALE, {
         style: 'currency',
         currency: Config.CURRENCY
     }).format(price);
+}
+
+/**
+ * Extract GST from a GST-inclusive amount.
+ * Uses the rate from Config.settings if available, otherwise defaults to 15% NZ GST.
+ * Formula: GST = inclusive_amount * rate / (1 + rate)
+ * @param {number} inclusiveAmount - Total amount including GST
+ * @returns {number} The GST component
+ */
+function calculateGST(inclusiveAmount) {
+    if (inclusiveAmount == null || isNaN(inclusiveAmount)) return 0;
+    const rate = (typeof Config !== 'undefined' && Config.settings?.GST_RATE != null)
+        ? Config.settings.GST_RATE
+        : 0.15;
+    return inclusiveAmount * rate / (1 + rate);
 }
 
 /**
@@ -1001,7 +1342,8 @@ function formatPrice(price) {
  * @returns {object} Status with class and text
  */
 function getStockStatus(product) {
-    if (!product.in_stock) {
+    const inStock = product.in_stock ?? (product.stock_quantity != null ? product.stock_quantity > 0 : false);
+    if (!inStock) {
         return { class: 'out-of-stock', text: 'Out of Stock', icon: 'x-circle' };
     }
     if (product.is_low_stock) {

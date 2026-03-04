@@ -20,7 +20,7 @@ const AccountPage = {
 
         // Check authentication - redirect to login if not authenticated
         if (!Auth.isAuthenticated()) {
-            window.location.href = '/html/account/login.html?redirect=' + encodeURIComponent(window.location.href);
+            window.location.href = '/html/account/login?redirect=' + encodeURIComponent(window.location.href);
             return;
         }
 
@@ -38,16 +38,18 @@ const AccountPage = {
         // Load data based on current page
         const path = window.location.pathname;
 
-        if (path.includes('/account/index.html') || path.endsWith('/account/')) {
-            await this.loadDashboard();
-        } else if (path.includes('/account/orders.html')) {
+        if (path.includes('/account/orders')) {
             await this.loadOrders();
-        } else if (path.includes('/account/addresses.html')) {
+        } else if (path.includes('/account/addresses')) {
             await this.loadAddresses();
             this.setupAddressModalHandlers();
-        } else if (path.includes('/account/printers.html')) {
+        } else if (path.includes('/account/printers')) {
             await this.loadPrinters();
             this.setupPrinterModalHandlers();
+        } else if (path.includes('/account/personal-details')) {
+            // Personal details page — handled by its own inline script
+        } else if (path.includes('/account')) {
+            await this.loadDashboard();
         }
     },
 
@@ -257,7 +259,7 @@ const AccountPage = {
         try {
             const response = await API.getPrintersByBrand(brandName);
 
-            if (response.success && response.data) {
+            if (response.ok && response.data) {
                 const printers = Array.isArray(response.data) ? response.data : (response.data.printers || []);
 
                 if (printers.length > 0) {
@@ -279,6 +281,7 @@ const AccountPage = {
 
                         return {
                             id: (p.slug || modelName).toLowerCase().replace(/\s+/g, '-'),
+                            printerId: p.id || null,
                             name: modelName,
                             fullName: fullName,
                             slug: p.slug || '',
@@ -612,6 +615,7 @@ const AccountPage = {
         document.getElementById('printer-brand').value = PrinterData.BRAND_NAMES[state.selectedBrand] || state.selectedBrand;
         document.getElementById('printer-slug').value = model?.slug || modelId;
         document.getElementById('printer-full-name').value = fullName || model?.fullName || label;
+        document.getElementById('printer-printer-id').value = model?.printerId || '';
 
         // Show selected printer and nickname field
         document.getElementById('selected-printer-model').textContent = fullName || model?.fullName || label;
@@ -718,7 +722,7 @@ const AccountPage = {
                     if (attempts < maxAttempts) {
                         setTimeout(check, 100);
                     } else {
-                        console.warn('Auth initialization timed out');
+                        DebugLog.warn('Auth initialization timed out');
                         resolve();
                     }
                     return;
@@ -731,7 +735,7 @@ const AccountPage = {
                         const { data: { session }, error } = await Auth.supabase.auth.getSession();
 
                         if (error) {
-                            console.error('OAuth callback error:', error);
+                            DebugLog.error('OAuth callback error:', error);
                         }
 
                         // Update Auth state
@@ -743,7 +747,7 @@ const AccountPage = {
                             window.history.replaceState(null, '', window.location.pathname + window.location.search);
                         }
                     } catch (e) {
-                        console.error('Error processing OAuth callback:', e);
+                        DebugLog.error('Error processing OAuth callback:', e);
                     }
                 }
 
@@ -761,27 +765,40 @@ const AccountPage = {
     },
 
     async loadDashboard() {
-        // Sync profile to backend (ensures profile exists for OAuth users)
-        await this.syncProfileToBackend();
+        // Sync profile to backend (fire-and-forget, non-blocking)
+        this.syncProfileToBackend();
 
-        // Fetch orders once for both action center cards
-        let orders = [];
-        try {
-            const response = await API.getOrders({ limit: 5 });
-            const data = response.data?.orders || (Array.isArray(response.data) ? response.data : []);
-            if (response.success && data.length > 0) {
-                orders = data.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
-            }
-        } catch (error) {
-            console.error('Failed to load dashboard orders:', error);
-        }
-
-        // Load all dashboard sections in parallel
-        await Promise.all([
-            this.loadQuickReorder(orders),
-            this.loadOrderStatus(orders),
+        // Fetch orders and printers in parallel
+        const [ordersResult] = await Promise.allSettled([
+            API.getOrders({ limit: 5 }).catch(err => {
+                DebugLog.error('Failed to load dashboard orders:', err);
+                return { ok: false, data: [] };
+            }),
             this.loadDashboardPrinters()
         ]);
+
+        let orders = [];
+        const ordersResponse = ordersResult.value;
+        if (ordersResponse?.ok) {
+            const data = ordersResponse.data?.orders || (Array.isArray(ordersResponse.data) ? ordersResponse.data : []);
+            if (data.length > 0) {
+                orders = data.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+            }
+        }
+
+        // Populate order cards (always runs, even with empty orders)
+        this.loadQuickReorder(orders);
+        this.loadOrderStatus(orders);
+
+        // Signup coupon system removed — promotional coupons applied at checkout via cart
+    },
+
+    /**
+     * Signup coupon system removed — this function is no longer used.
+     * Promotional coupons are applied at checkout via cart, not displayed on dashboard.
+     */
+    async loadCoupons() {
+        // No-op: signup coupon endpoints removed from backend
     },
 
     /**
@@ -793,16 +810,10 @@ const AccountPage = {
         if (!user) return;
 
         try {
-            const userMeta = user.user_metadata || {};
-            await API.updateProfile({
-                first_name: userMeta.first_name || null,
-                last_name: userMeta.last_name || null,
-                full_name: userMeta.full_name || userMeta.name || user.email?.split('@')[0] || null,
-                phone: userMeta.phone || null,
-                marketing_consent: userMeta.marketing_consent || false
-            });
+            // Use accountSync (creates profile if missing, fills empty fields from OAuth metadata)
+            await API.accountSync();
         } catch (error) {
-            // Non-critical - profile may already exist or creation may need different endpoint
+            // Non-critical - auth.js onAuthStateChange also calls accountSync
         }
     },
 
@@ -817,8 +828,9 @@ const AccountPage = {
         if (!skeleton) return;
 
         const lastOrder = orders[0];
+        const items = lastOrder?.items || [];
 
-        if (lastOrder) {
+        if (lastOrder && items.length > 0) {
             const nameEl = document.getElementById('reorder-name');
             const metaEl = document.getElementById('reorder-meta');
             const buyBtn = document.getElementById('reorder-buy-btn');
@@ -829,32 +841,82 @@ const AccountPage = {
             const daysSince = Math.floor((new Date() - new Date(lastOrder.created_at)) / 86400000);
             const timeAgo = daysSince === 0 ? 'Today' : daysSince === 1 ? 'Yesterday' : `${daysSince} days ago`;
 
-            // Use first item if available, otherwise show order-level info
-            const item = lastOrder.items?.[0];
+            // Show item summary
+            const firstItem = items[0];
+            const productName = firstItem.product_name || firstItem.name || 'Product';
+            const totalItems = items.reduce((sum, i) => sum + (i.quantity || 1), 0);
+            const itemSummary = items.length === 1
+                ? productName
+                : `${productName} + ${items.length - 1} more`;
 
-            if (item) {
-                const productName = item.product_name || item.name || 'Product';
-                if (nameEl) nameEl.textContent = productName;
-                if (metaEl) metaEl.textContent = `Last ordered: ${timeAgo}`;
+            if (nameEl) nameEl.textContent = itemSummary;
+            if (metaEl) metaEl.textContent = `${totalItems} item${totalItems !== 1 ? 's' : ''} · ${timeAgo}`;
 
-                const productUrl = item.product_slug
-                    ? `/html/product/index.html?slug=${encodeURIComponent(item.product_slug)}`
-                    : `/html/shop.html?search=${encodeURIComponent(productName)}`;
-                if (buyBtn) buyBtn.href = productUrl;
-
-                if (thumbEl && item.image_url) {
-                    thumbEl.innerHTML = `<img src="${Security.escapeAttr(item.image_url)}" alt="${Security.escapeAttr(productName)}" width="48" height="48" loading="lazy">`;
-                }
-            } else {
-                if (nameEl) nameEl.textContent = `Order #${Security.escapeHtml(lastOrder.order_number)}`;
-                if (metaEl) metaEl.textContent = `Placed: ${timeAgo}`;
-                if (buyBtn) {
-                    buyBtn.href = '/html/shop.html';
-                    buyBtn.textContent = 'Shop Again';
-                }
+            if (thumbEl && firstItem.image_url) {
+                thumbEl.innerHTML = `<img src="${Security.escapeAttr(firstItem.image_url)}" alt="${Security.escapeAttr(productName)}" width="48" height="48" loading="lazy">`;
             }
 
-            if (viewLink) viewLink.href = `/html/account/order-detail.html?id=${encodeURIComponent(lastOrder.order_number)}`;
+            // Wire up reorder button to add all items to cart
+            if (buyBtn) {
+                buyBtn.addEventListener('click', async () => {
+                    buyBtn.disabled = true;
+                    buyBtn.textContent = 'Adding...';
+
+                    let added = 0;
+                    for (const item of items) {
+                        const productId = item.product_id || item.id;
+                        if (!productId) continue;
+                        try {
+                            await Cart.addItem({
+                                id: productId,
+                                name: item.product_name || item.name || 'Product',
+                                price: item.unit_price || item.price || 0,
+                                image: item.image_url || item.image || '',
+                                sku: item.sku || '',
+                                brand: item.brand || '',
+                                color: item.color || '',
+                                quantity: item.quantity || 1
+                            });
+                            added++;
+                        } catch (err) {
+                            DebugLog.error('Failed to reorder item:', err);
+                        }
+                    }
+
+                    if (added > 0 && typeof showToast === 'function') {
+                        showToast(`${added} item${added !== 1 ? 's' : ''} added to cart`, 'success');
+                    }
+
+                    buyBtn.textContent = 'Added!';
+                    setTimeout(() => {
+                        buyBtn.disabled = false;
+                        buyBtn.textContent = 'Add All to Cart';
+                    }, 2000);
+                });
+            }
+
+            if (viewLink) viewLink.href = `/html/account/order-detail?id=${encodeURIComponent(lastOrder.order_number)}`;
+
+            skeleton.hidden = true;
+            if (content) content.hidden = false;
+        } else if (lastOrder && items.length === 0) {
+            // Order exists but no items data — link to shop
+            const nameEl = document.getElementById('reorder-name');
+            const metaEl = document.getElementById('reorder-meta');
+            const buyBtn = document.getElementById('reorder-buy-btn');
+            const viewLink = document.getElementById('reorder-view-link');
+
+            if (nameEl) nameEl.textContent = `Order #${Security.escapeHtml(lastOrder.order_number)}`;
+            if (metaEl) metaEl.textContent = 'View your order to reorder items';
+            if (buyBtn) {
+                // Fall back to a link since we don't have item data
+                const link = document.createElement('a');
+                link.href = `/html/account/order-detail?id=${encodeURIComponent(lastOrder.order_number)}`;
+                link.className = buyBtn.className;
+                link.textContent = 'View Order';
+                buyBtn.replaceWith(link);
+            }
+            if (viewLink) viewLink.href = `/html/account/order-detail?id=${encodeURIComponent(lastOrder.order_number)}`;
 
             skeleton.hidden = true;
             if (content) content.hidden = false;
@@ -909,7 +971,7 @@ const AccountPage = {
                     trackBtn.target = '_blank';
                     trackBtn.rel = 'noopener noreferrer';
                 } else {
-                    trackBtn.href = `/html/account/order-detail.html?id=${encodeURIComponent(activeOrder.order_number)}`;
+                    trackBtn.href = `/html/account/order-detail?id=${encodeURIComponent(activeOrder.order_number)}`;
                 }
             }
 
@@ -935,7 +997,7 @@ const AccountPage = {
         try {
             let printers = [];
             const response = await API.getUserPrinters();
-            if (response.success && response.data) {
+            if (response.ok && response.data) {
                 printers = Array.isArray(response.data) ? response.data : (response.data.printers || []);
             }
 
@@ -951,7 +1013,7 @@ const AccountPage = {
                 if (empty) empty.hidden = false;
             }
         } catch (error) {
-            console.error('Failed to load printers:', error);
+            DebugLog.error('Failed to load printers:', error);
             skeleton.hidden = true;
             if (empty) empty.hidden = false;
         }
@@ -965,8 +1027,8 @@ const AccountPage = {
         const brand = printer.brand || '';
 
         const searchUrl = brand
-            ? `/html/shop.html?brand=${encodeURIComponent(brand)}&printer_model=${encodeURIComponent(model)}`
-            : `/html/shop.html?search=${encodeURIComponent(model)}`;
+            ? `/html/shop?brand=${encodeURIComponent(brand)}&printer_model=${encodeURIComponent(model)}`
+            : `/html/shop?search=${encodeURIComponent(model)}`;
 
         return `
             <div class="dash-printer-card">
@@ -1017,7 +1079,7 @@ const AccountPage = {
 
         try {
             const response = await API.verifyAdmin();
-            if (response.success && response.data?.is_admin) {
+            if (response.ok && response.data?.is_admin) {
                 adminNavItem.hidden = false;
             }
         } catch {
@@ -1041,11 +1103,11 @@ const AccountPage = {
         try {
             const response = await API.getOrders({ limit: 3 });
             const apiOrders = response.data?.orders || (Array.isArray(response.data) ? response.data : []);
-            if (response.success && apiOrders.length > 0) {
+            if (response.ok && apiOrders.length > 0) {
                 allOrders = apiOrders;
             }
         } catch (error) {
-            console.error('Failed to load orders from API:', error);
+            DebugLog.error('Failed to load orders from API:', error);
         }
 
         // Sort by date and take top 3
@@ -1079,7 +1141,7 @@ const AccountPage = {
         return `
             <tr class="orders-table__row">
                 <td data-label="Order #">
-                    <a href="/html/account/order-detail.html?id=${Security.escapeAttr(order.order_number)}">#${Security.escapeHtml(order.order_number)}</a>
+                    <a href="/html/account/order-detail?id=${Security.escapeAttr(order.order_number)}">#${Security.escapeHtml(order.order_number)}</a>
                 </td>
                 <td data-label="Date">${Security.escapeHtml(date)}</td>
                 <td data-label="Status">
@@ -1087,7 +1149,7 @@ const AccountPage = {
                 </td>
                 <td data-label="Total">${total}</td>
                 <td>
-                    <a href="/html/account/order-detail.html?id=${Security.escapeAttr(order.order_number)}" class="btn btn--small btn--text">View</a>
+                    <a href="/html/account/order-detail?id=${Security.escapeAttr(order.order_number)}" class="btn btn--small btn--text">View</a>
                 </td>
             </tr>
         `;
@@ -1144,7 +1206,7 @@ const AccountPage = {
             const response = await API.getAddresses();
 
             const addresses = Array.isArray(response.data) ? response.data : (response.data?.addresses || []);
-            if (response.success && addresses.length > 0) {
+            if (response.ok && addresses.length > 0) {
                 // Find default address or use first one
                 const defaultAddress = addresses.find(a => a.is_default) || addresses[0];
                 addressContent.innerHTML = this.formatAddress(defaultAddress);
@@ -1155,7 +1217,7 @@ const AccountPage = {
                 emptyState.hidden = false;
             }
         } catch (error) {
-            console.error('Failed to load addresses:', error);
+            DebugLog.error('Failed to load addresses:', error);
             if (addressCard) addressCard.hidden = true;
             emptyState.hidden = false;
         }
@@ -1190,7 +1252,7 @@ const AccountPage = {
             // Load from API (server-first)
             let printers = [];
             const response = await API.getUserPrinters();
-            if (response.success && response.data) {
+            if (response.ok && response.data) {
                 printers = Array.isArray(response.data) ? response.data : (response.data.printers || []);
             }
 
@@ -1206,7 +1268,7 @@ const AccountPage = {
                 emptyState.hidden = false;
             }
         } catch (error) {
-            console.error('Failed to load printers:', error);
+            DebugLog.error('Failed to load printers:', error);
             if (printersPreview) printersPreview.hidden = true;
             emptyState.hidden = false;
         }
@@ -1222,8 +1284,8 @@ const AccountPage = {
 
         // Build search URL - use brand + printer_model format (same as ink-finder)
         const searchUrl = brand
-            ? `/html/shop.html?brand=${encodeURIComponent(brand)}&printer_model=${encodeURIComponent(model)}`
-            : `/html/shop.html?search=${encodeURIComponent(model)}`;
+            ? `/html/shop?brand=${encodeURIComponent(brand)}&printer_model=${encodeURIComponent(model)}`
+            : `/html/shop?search=${encodeURIComponent(model)}`;
 
         return `
             <div class="printer-card-preview">
@@ -1257,11 +1319,11 @@ const AccountPage = {
         try {
             const response = await API.getOrders({ limit: 50 });
             const apiOrders = response.data?.orders || (Array.isArray(response.data) ? response.data : []);
-            if (response.success && apiOrders.length > 0) {
+            if (response.ok && apiOrders.length > 0) {
                 allOrders = apiOrders;
             }
         } catch (error) {
-            console.error('Failed to load orders from API:', error);
+            DebugLog.error('Failed to load orders from API:', error);
         }
 
         // Sort by date (newest first)
@@ -1291,7 +1353,7 @@ const AccountPage = {
             const response = await API.getAddresses();
             this.addresses = Array.isArray(response.data) ? response.data : (response.data?.addresses || []);
 
-            if (response.success && this.addresses.length > 0) {
+            if (response.ok && this.addresses.length > 0) {
                 // Sort so default address is first
                 const sortedAddresses = [...this.addresses].sort((a, b) => {
                     if (a.is_default) return -1;
@@ -1310,7 +1372,7 @@ const AccountPage = {
                 emptyState.hidden = false;
             }
         } catch (error) {
-            console.error('Failed to load addresses:', error);
+            DebugLog.error('Failed to load addresses:', error);
             grid.hidden = true;
             emptyState.hidden = false;
         }
@@ -1374,7 +1436,7 @@ const AccountPage = {
                 await this.loadAddresses();
             }
         } catch (error) {
-            console.error('Failed to set default address:', error);
+            DebugLog.error('Failed to set default address:', error);
             this.showToast('Failed to set default address', 'error');
             if (btn) {
                 btn.disabled = false;
@@ -1413,6 +1475,9 @@ const AccountPage = {
                 document.getElementById('address-postcode').value = address.postal_code || '';
                 document.getElementById('address-phone').value = address.phone || '';
                 document.getElementById('address-default').checked = address.is_default || false;
+                const deliveryType = address.delivery_type || 'urban';
+                const deliveryRadio = document.querySelector(`input[name="delivery_type"][value="${deliveryType}"]`);
+                if (deliveryRadio) deliveryRadio.checked = true;
             }
         } else {
             // Add mode
@@ -1475,6 +1540,8 @@ const AccountPage = {
         const isFirstAddress = !this.editingAddressId && (!this.addresses || this.addresses.length === 0);
         const shouldBeDefault = isFirstAddress || document.getElementById('address-default').checked;
 
+        const deliveryType = document.querySelector('input[name="delivery_type"]:checked')?.value || 'urban';
+
         const addressData = {
             recipient_name: `${firstName} ${lastName}`.trim(),
             address_line1: line1,
@@ -1482,7 +1549,8 @@ const AccountPage = {
             region: region,
             postal_code: postcode,
             country: 'NZ',
-            is_default: shouldBeDefault
+            is_default: shouldBeDefault,
+            delivery_type: deliveryType
         };
 
         const line2 = document.getElementById('address-line2').value.trim();
@@ -1500,7 +1568,7 @@ const AccountPage = {
             await this.loadAddresses();
             this.showToast(this.editingAddressId ? 'Address updated' : 'Address added', 'success');
         } catch (error) {
-            console.error('Failed to save address:', error);
+            DebugLog.error('Failed to save address:', error);
             errorEl.textContent = error.message || 'Failed to save address.';
             errorEl.hidden = false;
         } finally {
@@ -1539,7 +1607,7 @@ const AccountPage = {
             await this.loadAddresses();
             this.showToast('Address deleted', 'success');
         } catch (error) {
-            console.error('Failed to delete address:', error);
+            DebugLog.error('Failed to delete address:', error);
             this.showToast('Failed to delete address', 'error');
         } finally {
             if (btn) {
@@ -1677,7 +1745,7 @@ const AccountPage = {
             // Load from API (server-first)
             let printers = [];
             const response = await API.getUserPrinters();
-            if (response.success && response.data) {
+            if (response.ok && response.data) {
                 printers = Array.isArray(response.data) ? response.data : (response.data.printers || []);
             }
 
@@ -1693,7 +1761,7 @@ const AccountPage = {
                 emptyState.hidden = false;
             }
         } catch (error) {
-            console.error('Failed to load printers:', error);
+            DebugLog.error('Failed to load printers:', error);
             grid.hidden = true;
             emptyState.hidden = false;
         }
@@ -1727,8 +1795,8 @@ const AccountPage = {
 
         // Build search URL - use brand + printer_model format (same as ink-finder)
         const searchUrl = brand
-            ? `/html/shop.html?brand=${encodeURIComponent(brand)}&printer_model=${encodeURIComponent(model)}`
-            : `/html/shop.html?search=${encodeURIComponent(model)}`;
+            ? `/html/shop?brand=${encodeURIComponent(brand)}&printer_model=${encodeURIComponent(model)}`
+            : `/html/shop?search=${encodeURIComponent(model)}`;
 
         const escapedId = Security.escapeAttr(printer.id);
 
@@ -1936,27 +2004,27 @@ const AccountPage = {
         saveBtn.disabled = true;
         saveBtn.textContent = this.editingPrinterId ? 'Updating...' : 'Saving...';
 
-        const printerData = {
-            model: model,
-            brand: brand,
-            slug: slug,
-            full_name: fullName || `${brand} ${model}`.trim(),
-            nickname: nickname || null
-        };
-
         try {
             // Server-first: use API
             if (this.editingPrinterId) {
-                await API.updateUserPrinter(this.editingPrinterId, printerData);
+                await API.updateUserPrinter(this.editingPrinterId, { nickname: nickname || null });
             } else {
-                await API.addUserPrinter(printerData);
+                const printerId = document.getElementById('printer-printer-id').value;
+                if (!printerId) {
+                    errorEl.textContent = 'Could not find this printer in our system.';
+                    errorEl.hidden = false;
+                    saveBtn.disabled = false;
+                    saveBtn.textContent = 'Save Printer';
+                    return;
+                }
+                await API.addUserPrinter({ printer_id: printerId });
             }
 
             this.closePrinterModal();
             await this.loadPrinters();
             this.showToast(this.editingPrinterId ? 'Printer updated' : 'Printer added', 'success');
         } catch (error) {
-            console.error('Failed to save printer:', error);
+            DebugLog.error('Failed to save printer:', error);
             errorEl.textContent = error.message || 'Failed to save printer.';
             errorEl.hidden = false;
         } finally {
@@ -1997,7 +2065,7 @@ const AccountPage = {
             await this.loadPrinters();
             this.showToast('Printer removed', 'success');
         } catch (error) {
-            console.error('Failed to delete printer:', error);
+            DebugLog.error('Failed to delete printer:', error);
             this.showToast('Failed to remove printer', 'error');
         } finally {
             if (btn) {

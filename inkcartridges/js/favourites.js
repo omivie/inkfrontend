@@ -3,22 +3,15 @@
  * =============
  * Favourites/Wishlist functionality for InkCartridges.co.nz
  *
- * - Uses localStorage for guests
- * - Uses backend API for authenticated users
- * - Syncs localStorage to server on login
+ * Backend-only: requires authentication for all operations.
+ * Unauthenticated users are prompted to sign in.
  */
 
 'use strict';
 
 const Favourites = {
-    // Storage key for localStorage
-    STORAGE_KEY: 'inkcartridges_favourites',
-
-    // Favourites data (product IDs for localStorage, full objects for API)
+    // Favourites data (full objects from API)
     items: [],
-
-    // Track if user is authenticated
-    isAuthenticated: false,
 
     // Loading state
     isLoading: false,
@@ -27,15 +20,11 @@ const Favourites = {
      * Initialize favourites
      */
     async init() {
-        // Check authentication status
-        this.isAuthenticated = typeof Auth !== 'undefined' && Auth.isAuthenticated && Auth.isAuthenticated();
+        // Wait for Auth to finish initializing (async getSession)
+        await this._waitForAuth();
 
-        if (this.isAuthenticated) {
-            // Load from server for authenticated users
+        if (this._isAuthenticated()) {
             await this.loadFromServer();
-        } else {
-            // Load from localStorage for guests
-            this.loadFromStorage();
         }
 
         this.updateUI();
@@ -43,36 +32,52 @@ const Favourites = {
     },
 
     /**
-     * Load favourites from localStorage (for guests)
+     * Wait for Auth to be initialized (polls until Auth.initialized is true)
      */
-    loadFromStorage() {
-        try {
-            const stored = localStorage.getItem(this.STORAGE_KEY);
-            this.items = stored ? JSON.parse(stored) : [];
-        } catch (e) {
-            console.error('Failed to load favourites from storage:', e);
-            this.items = [];
-        }
+    _waitForAuth() {
+        return new Promise(resolve => {
+            if (typeof Auth !== 'undefined' && Auth.initialized) {
+                resolve();
+                return;
+            }
+            // Poll every 50ms, timeout after 3s
+            let elapsed = 0;
+            const interval = setInterval(() => {
+                elapsed += 50;
+                if ((typeof Auth !== 'undefined' && Auth.initialized) || elapsed >= 3000) {
+                    clearInterval(interval);
+                    resolve();
+                }
+            }, 50);
+        });
     },
 
     /**
-     * Save favourites to localStorage (for guests)
+     * Check if user is currently authenticated
      */
-    saveToStorage() {
-        try {
-            localStorage.setItem(this.STORAGE_KEY, JSON.stringify(this.items));
-        } catch (e) {
-            console.error('Failed to save favourites to storage:', e);
-        }
+    _isAuthenticated() {
+        return typeof Auth !== 'undefined' && Auth.isAuthenticated && Auth.isAuthenticated();
     },
 
     /**
-     * Load favourites from server (for authenticated users)
+     * Redirect to login if not authenticated.
+     * Returns true if authenticated, false if redirecting.
+     */
+    _requireAuth() {
+        if (this._isAuthenticated()) return true;
+
+        if (typeof showToast === 'function') {
+            showToast('Please sign in to use favourites', 'info');
+        }
+        return false;
+    },
+
+    /**
+     * Load favourites from server
      */
     async loadFromServer() {
         if (typeof API === 'undefined') {
-            console.warn('API not available, falling back to localStorage');
-            this.loadFromStorage();
+            DebugLog.warn('API not available');
             return;
         }
 
@@ -80,15 +85,14 @@ const Favourites = {
             this.isLoading = true;
             const response = await API.getFavourites();
 
-            if (response.success && response.data) {
-                // Convert server format to local format
+            if (response.ok && response.data) {
                 const favourites = Array.isArray(response.data) ? response.data : (response.data.favourites || []);
                 this.items = favourites.map(fav => ({
                     id: fav.product_id,
                     sku: fav.product_sku,
                     name: fav.product?.name || '',
                     price: fav.product?.retail_price || 0,
-                    image: fav.product?.image_url || '',
+                    image: typeof storageUrl === 'function' ? storageUrl(fav.product?.image_url) : (fav.product?.image_url || ''),
                     brand: fav.product?.brand?.name || '',
                     color: fav.product?.color || '',
                     in_stock: fav.product?.in_stock !== false,
@@ -97,162 +101,79 @@ const Favourites = {
                 }));
             }
         } catch (error) {
-            console.error('Failed to load favourites from server:', error);
-            // Fallback to localStorage if server fails
-            this.loadFromStorage();
+            DebugLog.error('Failed to load favourites from server:', error);
+            this.items = [];
         } finally {
             this.isLoading = false;
         }
     },
 
     /**
-     * Sync localStorage favourites to server on login
-     * Call this after successful authentication
-     */
-    async syncOnLogin() {
-        if (typeof API === 'undefined') return;
-
-        try {
-            // Get product IDs from localStorage
-            const localFavs = JSON.parse(localStorage.getItem(this.STORAGE_KEY) || '[]');
-            const productIds = localFavs.map(item => item.id).filter(id => id);
-
-            if (productIds.length === 0) {
-                // No local favourites to sync, just load from server
-                await this.loadFromServer();
-                this.updateUI();
-                return;
-            }
-
-            // Sync with server
-            const response = await API.syncFavourites(productIds);
-
-            if (response.success) {
-                // Clear localStorage after successful sync
-                localStorage.removeItem(this.STORAGE_KEY);
-                // Reload from server to get full product data
-                await this.loadFromServer();
-                this.updateUI();
-
-                if (typeof showToast === 'function' && response.data.synced > 0) {
-                    showToast(`${response.data.synced} favourite(s) synced to your account`, 'success');
-                }
-            }
-        } catch (error) {
-            console.error('Failed to sync favourites:', error);
-        }
-    },
-
-    /**
-     * Add item to favourites
+     * Add item to favourites (backend only)
      * @param {object} product - Product data
      */
     async addItem(product) {
-        // Check if already in favourites
-        if (this.isFavourite(product.id)) {
-            return false;
-        }
+        if (!this._requireAuth()) return false;
+        if (this.isFavourite(product.id)) return false;
 
-        if (this.isAuthenticated && typeof API !== 'undefined') {
-            // Use API for authenticated users
-            try {
-                const response = await API.addFavourite(product.id);
-                if (response.success) {
-                    this.items.push({
-                        id: product.id,
-                        sku: product.sku,
-                        name: product.name,
-                        price: product.price,
-                        image: product.image || '',
-                        brand: product.brand || '',
-                        color: product.color || '',
-                        addedAt: response.data.added_at || new Date().toISOString()
-                    });
-                    this.updateUI();
+        try {
+            const response = await API.addFavourite(product.id);
+            if (response.ok) {
+                this.items.push({
+                    id: product.id,
+                    sku: product.sku,
+                    name: product.name,
+                    price: product.price,
+                    image: product.image || '',
+                    brand: product.brand || '',
+                    color: product.color || '',
+                    addedAt: response.data.added_at || new Date().toISOString()
+                });
+                this.updateUI();
 
-                    if (typeof showToast === 'function') {
-                        showToast('Added to favourites', 'success');
-                    }
-                    return true;
-                }
-            } catch (error) {
-                console.error('Failed to add favourite:', error);
-                // Handle 409 conflict (already exists) gracefully
-                if (error.message && error.message.includes('already')) {
-                    if (typeof showToast === 'function') {
-                        showToast('Already in favourites', 'info');
-                    }
-                    return false;
-                }
                 if (typeof showToast === 'function') {
-                    showToast('Failed to add to favourites', 'error');
+                    showToast('Added to favourites', 'success');
+                }
+                return true;
+            }
+        } catch (error) {
+            DebugLog.error('Failed to add favourite:', error);
+            if (error.message && error.message.includes('already')) {
+                if (typeof showToast === 'function') {
+                    showToast('Already in favourites', 'info');
                 }
                 return false;
             }
-        } else {
-            // Use localStorage for guests
-            this.items.push({
-                id: product.id,
-                sku: product.sku,
-                name: product.name,
-                price: product.price,
-                image: product.image || '',
-                brand: product.brand || '',
-                color: product.color || '',
-                addedAt: new Date().toISOString()
-            });
-
-            this.saveToStorage();
-            this.updateUI();
-
             if (typeof showToast === 'function') {
-                showToast('Added to favourites', 'success');
+                showToast('Failed to add to favourites', 'error');
             }
-            return true;
         }
 
         return false;
     },
 
     /**
-     * Remove item from favourites
+     * Remove item from favourites (backend only)
      * @param {string} productId - Product ID
      */
     async removeItem(productId) {
-        const initialLength = this.items.length;
+        if (!this._requireAuth()) return false;
 
-        if (this.isAuthenticated && typeof API !== 'undefined') {
-            // Use API for authenticated users
-            try {
-                const response = await API.removeFavourite(productId);
-                if (response.success) {
-                    this.items = this.items.filter(item => item.id !== productId);
-                    this.updateUI();
-
-                    if (typeof showToast === 'function') {
-                        showToast('Removed from favourites', 'info');
-                    }
-                    return true;
-                }
-            } catch (error) {
-                console.error('Failed to remove favourite:', error);
-                if (typeof showToast === 'function') {
-                    showToast('Failed to remove from favourites', 'error');
-                }
-                return false;
-            }
-        } else {
-            // Use localStorage for guests
-            this.items = this.items.filter(item => item.id !== productId);
-
-            if (this.items.length < initialLength) {
-                this.saveToStorage();
+        try {
+            const response = await API.removeFavourite(productId);
+            if (response.ok) {
+                this.items = this.items.filter(item => item.id !== productId);
                 this.updateUI();
 
                 if (typeof showToast === 'function') {
                     showToast('Removed from favourites', 'info');
                 }
                 return true;
+            }
+        } catch (error) {
+            DebugLog.error('Failed to remove favourite:', error);
+            if (typeof showToast === 'function') {
+                showToast('Failed to remove from favourites', 'error');
             }
         }
 
@@ -265,6 +186,8 @@ const Favourites = {
      * @returns {Promise<boolean>} - New favourite state (true if added, false if removed)
      */
     async toggle(product) {
+        if (!this._requireAuth()) return false;
+
         if (this.isFavourite(product.id)) {
             await this.removeItem(product.id);
             return false;
@@ -295,16 +218,14 @@ const Favourites = {
      * Clear all favourites
      */
     async clear() {
-        if (this.isAuthenticated && typeof API !== 'undefined') {
-            // Remove each item via API
-            const removePromises = this.items.map(item =>
-                API.removeFavourite(item.id).catch(() => {})
-            );
-            await Promise.all(removePromises);
-        }
+        if (!this._requireAuth()) return;
+
+        const removePromises = this.items.map(item =>
+            API.removeFavourite(item.id).catch(() => {})
+        );
+        await Promise.all(removePromises);
 
         this.items = [];
-        this.saveToStorage();
         this.updateUI();
     },
 
@@ -320,7 +241,15 @@ const Favourites = {
                 e.preventDefault();
                 e.stopPropagation();
 
-                // Prevent double-clicks
+                if (!self._isAuthenticated()) {
+                    if (typeof Auth !== 'undefined' && Auth.requireAuth) {
+                        Auth.requireAuth();
+                    } else if (typeof showToast === 'function') {
+                        showToast('Please sign in to use favourites', 'info');
+                    }
+                    return;
+                }
+
                 if (btn.classList.contains('is-loading')) return;
 
                 const product = {
@@ -424,7 +353,7 @@ const Favourites = {
         // Render items
         grid.innerHTML = this.items.map(item => `
             <article class="favourite-item" data-item-id="${Security.escapeAttr(item.id)}">
-                <a href="/html/product/index.html?sku=${Security.escapeAttr(item.sku)}" class="favourite-item__link">
+                <a href="/html/product/?sku=${Security.escapeAttr(item.sku)}" class="favourite-item__link">
                     <div class="favourite-item__image">
                         ${this.getItemImageHTML(item)}
                     </div>
@@ -455,6 +384,20 @@ const Favourites = {
                 </div>
             </article>
         `).join('');
+
+        // Bind image error fallbacks
+        grid.querySelectorAll('img[data-fallback]').forEach(img => {
+            img.addEventListener('error', function() {
+                if (this.dataset.fallback === 'color-block') {
+                    this.style.display = 'none';
+                    const sibling = this.nextElementSibling;
+                    if (sibling) sibling.style.display = 'flex';
+                } else if (this.dataset.fallback === 'placeholder') {
+                    this.removeAttribute('data-fallback');
+                    this.src = '/assets/images/placeholder-product.svg';
+                }
+            }, { once: true });
+        });
 
         // Bind add to cart buttons
         grid.querySelectorAll('.favourite-item__add-cart').forEach(btn => {
@@ -496,10 +439,10 @@ const Favourites = {
 
         if (item.image) {
             if (colorStyle) {
-                return `<img src="${Security.escapeAttr(item.image)}" alt="${Security.escapeAttr(item.name)}" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
+                return `<img src="${Security.escapeAttr(item.image)}" alt="${Security.escapeAttr(item.name)}" data-fallback="color-block">
                         <div class="favourite-item__color-block" style="${colorStyle} display: none;"></div>`;
             }
-            return `<img src="${Security.escapeAttr(item.image)}" alt="${Security.escapeAttr(item.name)}" onerror="this.onerror=null; this.src='/assets/images/placeholder-product.svg';">`;
+            return `<img src="${Security.escapeAttr(item.image)}" alt="${Security.escapeAttr(item.name)}" data-fallback="placeholder">`;
         }
 
         if (colorStyle) {
@@ -540,21 +483,20 @@ const Favourites = {
     },
 
     /**
-     * Refresh authentication status and reload if needed
-     * Call this when auth state changes
+     * Handle auth state changes - reload from server on login, clear on logout
      */
     async onAuthStateChange(isAuthenticated) {
-        const wasAuthenticated = this.isAuthenticated;
-        this.isAuthenticated = isAuthenticated;
-
-        if (isAuthenticated && !wasAuthenticated) {
-            // User just logged in - sync favourites
-            await this.syncOnLogin();
-        } else if (!isAuthenticated && wasAuthenticated) {
-            // User just logged out - load from localStorage
-            this.loadFromStorage();
-            this.updateUI();
+        if (isAuthenticated) {
+            // Sync any guest favourites to server before loading
+            const localIds = this.items.map(i => i.product_id || i.id).filter(Boolean);
+            if (localIds.length > 0 && typeof API !== 'undefined') {
+                await API.syncFavourites(localIds).catch(() => {});
+            }
+            await this.loadFromServer();
+        } else {
+            this.items = [];
         }
+        this.updateUI();
     }
 };
 

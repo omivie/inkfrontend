@@ -2,148 +2,48 @@
 <html lang="en-NZ">
 <head>
     <meta charset="UTF-8">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://fonts.gstatic.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' https: data:; connect-src 'self' https://ink-backend-zaeq.onrender.com https://*.supabase.co; frame-ancestors 'self';">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="robots" content="noindex, nofollow">
     <link rel="icon" type="image/svg+xml" href="/assets/icons/favicon.svg">
     <title>Admin Dashboard | InkCartridges.co.nz</title>
     <!-- Google Analytics 4 (with consent mode) -->
     <script async src="https://www.googletagmanager.com/gtag/js?id=G-SDQELG0FGD"></script>
-    <script>
-        window.dataLayer = window.dataLayer || [];
-        function gtag(){dataLayer.push(arguments);}
-        gtag('consent', 'default', {
-            analytics_storage: localStorage.getItem('cookie_consent') === 'accepted' ? 'granted' : 'denied'
-        });
-        gtag('js', new Date());
-        gtag('config', 'G-SDQELG0FGD');
-    </script>
+    <script src="/js/gtag.js"></script>
     <link rel="stylesheet" href="/css/base.css">
     <link rel="stylesheet" href="/css/layout.css">
     <link rel="stylesheet" href="/css/components.css">
     <link rel="stylesheet" href="/css/modern-effects.css">
     <link rel="stylesheet" href="/css/admin.css">
-    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 </head>
 <body class="admin-body">
-    <script>(function(){var t=localStorage.getItem('admin-theme')||'dark';document.documentElement.setAttribute('data-theme',t);})()</script>
+    <script src="/js/admin-theme-init.js"></script>
 
-    <!-- Sidebar -->
-    <aside class="admin-sidebar" id="admin-sidebar">
-        <button class="admin-sidebar__collapse-btn" id="sidebar-toggle" aria-label="Toggle sidebar">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>
-        </button>
+    <!-- Loading screen -->
+    <div id="app-loading" class="admin-loading">
+        <div class="admin-loading__spinner"></div>
+        <p>Loading admin&hellip;</p>
+    </div>
 
-        <div class="admin-sidebar__logo">
-            <a href="/html/admin/index.html">
-                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9V2h12v7"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
-                <span>InkCartridges</span>
-            </a>
-        </div>
-
-        <nav class="admin-nav"></nav>
-
-        <div class="admin-sidebar__user">
-            <div class="admin-sidebar__avatar" id="admin-avatar">A</div>
-            <div class="admin-sidebar__user-info">
-                <div class="admin-sidebar__user-name" id="admin-name">Admin</div>
-                <div class="admin-sidebar__user-role" id="admin-email">admin@example.com</div>
-            </div>
-        </div>
-
-        <div class="admin-sidebar__store-link">
-            <a href="/html/index.html">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
-                <span>View Store</span>
-            </a>
-        </div>
-    </aside>
-
-    <!-- Main Content -->
-    <main class="admin-main">
-
-        <!-- Top Bar -->
-        <header class="admin-topbar">
-            <div class="admin-topbar__left">
-                <h1 class="admin-topbar__title">Dashboard</h1>
-                <span class="admin-topbar__date" id="current-date"></span>
-            </div>
-
-            <div class="admin-topbar__center">
-                <div class="admin-daterange" id="daterange">
-                    <button class="admin-daterange__btn" data-period="today">Today</button>
-                    <button class="admin-daterange__btn admin-daterange__btn--active" data-period="7d">7D</button>
-                    <button class="admin-daterange__btn" data-period="30d">30D</button>
-                    <button class="admin-daterange__btn" data-period="90d">90D</button>
-                    <button class="admin-daterange__btn" data-period="12m">12M</button>
-                </div>
-            </div>
-
-            <div class="admin-topbar__right">
-                <button class="admin-search-trigger" id="search-trigger">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-                    <span>Search...</span>
-                    <kbd>&#8984;K</kbd>
-                </button>
-                <button class="admin-theme-toggle" id="theme-toggle" aria-label="Toggle theme">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
-                </button>
-            </div>
-        </header>
-
-        <!-- KPI Strip -->
-        <div class="admin-kpi-strip" id="kpi-strip"></div>
-
-        <!-- Tab Navigation -->
-        <div class="admin-tabs" id="dashboard-tabs">
-            <button class="admin-tab admin-tab--active" data-tab="overview">Overview</button>
-            <button class="admin-tab" data-tab="revenue">Revenue Intelligence</button>
-            <button class="admin-tab" data-tab="customers-tab">Customers</button>
-            <button class="admin-tab" data-tab="inventory">Inventory</button>
-            <button class="admin-tab" data-tab="operations">Operations</button>
-        </div>
-
-        <!-- Tab Panels -->
-        <div id="tab-overview" class="admin-tab-panel admin-tab-panel--active"></div>
-        <div id="tab-revenue" class="admin-tab-panel"></div>
-        <div id="tab-customers-tab" class="admin-tab-panel"></div>
-        <div id="tab-inventory" class="admin-tab-panel"></div>
-        <div id="tab-operations" class="admin-tab-panel"></div>
-
-    </main>
-
-    <!-- Command Palette -->
-    <div class="admin-cmd-backdrop" id="cmd-backdrop">
-        <div class="admin-cmd" id="cmd-palette">
-            <input class="admin-cmd__input" id="cmd-input" placeholder="Search orders, products, customers..." autocomplete="off">
-            <div class="admin-cmd__results" id="cmd-results"></div>
+    <!-- SPA Shell (hidden until boot) -->
+    <div id="app-shell" hidden>
+        <div id="sidebar-backdrop" class="admin-sidebar-backdrop"></div>
+        <aside id="sidebar" class="admin-sidebar"></aside>
+        <div class="admin-content-wrapper">
+            <header id="topbar" class="admin-topbar"></header>
+            <div id="filter-bar" class="admin-filter-bar"></div>
+            <main id="main-content" class="admin-main"></main>
         </div>
     </div>
 
-    <!-- Drawer -->
-    <div class="admin-drawer-backdrop" id="drawer-backdrop"></div>
-    <div class="admin-drawer" id="admin-drawer">
-        <div class="admin-drawer__header">
-            <h3 class="admin-drawer__title" id="drawer-title">Details</h3>
-            <button class="admin-drawer__close" id="drawer-close" aria-label="Close">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-            </button>
-        </div>
-        <div class="admin-drawer__body" id="drawer-body"></div>
-        <div class="admin-drawer__footer" id="drawer-footer"></div>
-    </div>
-
-    <!-- Scripts: dependency order, admin.js LAST -->
-    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <!-- Scripts -->
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.98.0" integrity="sha384-Sm2s7OXxsAMTyJ4iIyRBgVpeGUvMPk2lRQnnZhE78Wej7oggIoolKt+SCt0XJbUB" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js" integrity="sha384-9nhczxUqK87bcKHh20fSQcTGD4qq5GhayNYSYWqwBkINBhOfQLg/P5HG5lF1urn4" crossorigin="anonymous"></script>
     <script src="/js/security.js"></script>
     <script src="/js/config.js"></script>
     <script src="/js/utils.js"></script>
     <script src="/js/api.js"></script>
     <script src="/js/auth.js"></script>
-    <script src="/js/admin-auth.js"></script>
-    <script src="/js/admin-nav.js"></script>
-    <script src="/js/analytics-api.js"></script>
-    <script src="/js/admin-dashboard.js"></script>
-    <script src="/js/admin-command-palette.js"></script>
-    <script src="/js/admin.js"></script>
+    <script type="module" src="/js/admin/app.js"></script>
 </body>
 </html>

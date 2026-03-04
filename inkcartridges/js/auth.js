@@ -10,14 +10,22 @@ const Auth = {
     user: null,
     listeners: [],
     initialized: false,
+    readyPromise: null,
+    _resolveReady: null,
 
     /**
      * Initialize Supabase client
      */
     async init() {
+        // Create ready promise if not already created
+        if (!this.readyPromise) {
+            this.readyPromise = new Promise(resolve => { this._resolveReady = resolve; });
+        }
+
         // Check if Supabase is loaded
         if (typeof supabase === 'undefined' || !supabase.createClient) {
-            console.warn('Supabase SDK not loaded. Auth features disabled.');
+            DebugLog.warn('Supabase SDK not loaded. Auth features disabled.');
+            if (this._resolveReady) this._resolveReady();
             return false;
         }
 
@@ -41,41 +49,44 @@ const Auth = {
 
                 // Handle sign in events - sync data
                 if (event === 'SIGNED_IN' || (isNowAuthenticated && !wasAuthenticated)) {
-                    // CRITICAL: Sync account profile (creates profile if first login)
+                    // CRITICAL: Sync account profile first (creates profile if first login)
                     if (typeof API !== 'undefined') {
                         try {
                             await API.accountSync();
                         } catch (e) {
-                            // Account sync failed silently — profile-dependent features may not work
+                            DebugLog.warn('accountSync failed:', e.message);
+                            if (typeof showToast === 'function') {
+                                showToast('Account sync failed. Some features may not work.', 'error');
+                            }
                         }
                     }
 
-                    // Merge guest cart to user cart
+                    // Run remaining calls in parallel — they are independent of each other
+                    const postLoginTasks = [];
+
                     if (typeof API !== 'undefined') {
-                        try {
-                            await API.mergeCart();
-                        } catch (e) {
-                            // Cart merge failed silently
-                        }
+                        postLoginTasks.push(
+                            API.mergeCart().catch(e => {
+                                DebugLog.warn('mergeCart failed:', e.message);
+                                if (typeof showToast === 'function') {
+                                    showToast('Could not merge your guest cart.', 'error');
+                                }
+                            }),
+                            API.getAccountMe().catch(e => {
+                                DebugLog.warn('getAccountMe failed:', e.message);
+                            })
+                        );
                     }
 
-                    // Sync favourites from localStorage to server
-                    if (typeof Favourites !== 'undefined' && Favourites.syncOnLogin) {
-                        try {
-                            await Favourites.syncOnLogin();
-                        } catch (e) {
-                            // Favourites sync failed silently
-                        }
+                    if (typeof Favourites !== 'undefined') {
+                        postLoginTasks.push(
+                            Favourites.onAuthStateChange(true).catch(e => {
+                                DebugLog.warn('loadFavourites failed:', e.message);
+                            })
+                        );
                     }
 
-                    // Claim $5 signup coupon (idempotent — safe on every login)
-                    if (typeof API !== 'undefined') {
-                        try {
-                            await API.claimSignupCoupon();
-                        } catch (e) {
-                            // Coupon claim failed silently — user may already have one
-                        }
-                    }
+                    await Promise.allSettled(postLoginTasks);
                 }
 
                 // Handle sign out - notify favourites to reload from localStorage
@@ -95,11 +106,13 @@ const Auth = {
 
             // Mark as initialized
             this.initialized = true;
+            if (this._resolveReady) this._resolveReady();
 
             return true;
         } catch (error) {
-            console.error('Auth init error:', error);
+            DebugLog.error('Auth init error:', error);
             this.initialized = true; // Mark initialized even on error so we don't hang
+            if (this._resolveReady) this._resolveReady();
             return false;
         }
     },
@@ -114,7 +127,10 @@ const Auth = {
 
         const { data, error } = await this.supabase.auth.signUp({
             email,
-            password
+            password,
+            options: {
+                emailRedirectTo: `${window.location.origin}/html/account/verify-email`
+            }
         });
 
         return { data, error };
@@ -149,10 +165,10 @@ const Auth = {
             Cart.clear();
         }
 
-        // Clear favourites localStorage to prevent data leakage on shared devices
-        try {
-            localStorage.removeItem('inkcartridges_favourites');
-        } catch (e) { /* storage may be unavailable */ }
+        // Clear favourites in memory on sign out
+        if (typeof Favourites !== 'undefined') {
+            Favourites.onAuthStateChange(false);
+        }
 
         // Clear any session-specific data (e.g., order data from payment flow)
         try {
@@ -167,7 +183,7 @@ const Auth = {
      * @param {string} newPassword - The new password
      */
     async updatePassword(newPassword) {
-        if (!this.supabase) return { success: false, error: 'Auth not initialized' };
+        if (!this.supabase) return { ok: false, error: 'Auth not initialized' };
 
         try {
             const { data, error } = await this.supabase.auth.updateUser({
@@ -175,12 +191,12 @@ const Auth = {
             });
 
             if (error) {
-                return { success: false, error: error.message };
+                return { ok: false, error: error.message };
             }
 
-            return { success: true, data };
+            return { ok: true, data };
         } catch (err) {
-            return { success: false, error: err.message };
+            return { ok: false, error: err.message };
         }
     },
 
@@ -192,7 +208,7 @@ const Auth = {
 
         const { data: { session }, error } = await this.supabase.auth.refreshSession();
         if (error) {
-            console.error('Session refresh failed:', error);
+            DebugLog.error('Session refresh failed:', error);
             return false;
         }
 
@@ -209,7 +225,7 @@ const Auth = {
         if (!this.supabase) return { error: { message: 'Auth not initialized' } };
 
         const { data, error } = await this.supabase.auth.resetPasswordForEmail(email, {
-            redirectTo: `${window.location.origin}/html/account/reset-password.html`
+            redirectTo: `${window.location.origin}/html/account/reset-password`
         });
 
         return { data, error };
@@ -224,7 +240,7 @@ const Auth = {
         const { data, error } = await this.supabase.auth.signInWithOAuth({
             provider: 'google',
             options: {
-                redirectTo: `${window.location.origin}/html/account/index.html`
+                redirectTo: `${window.location.origin}/html/account/`
             }
         });
 
@@ -290,7 +306,7 @@ const Auth = {
     requireAuth(redirectUrl = null) {
         if (!this.isAuthenticated()) {
             const returnUrl = redirectUrl || window.location.href;
-            window.location.href = `/html/account/login.html?redirect=${encodeURIComponent(returnUrl)}`;
+            window.location.href = `/html/account/login?redirect=${encodeURIComponent(returnUrl)}`;
             return false;
         }
         return true;
@@ -304,7 +320,7 @@ const Auth = {
 
         try {
             const response = await API.getVerificationStatus();
-            if (response.success && response.data) {
+            if (response.ok && response.data) {
                 const isVerified = response.data.email_verified;
                 if (!isVerified) {
                     this.showVerificationBanner();
@@ -358,7 +374,7 @@ const Auth = {
 
             try {
                 const response = await API.resendVerificationEmail();
-                if (response.success) {
+                if (response.ok) {
                     btn.textContent = 'Email Sent!';
                     setTimeout(() => {
                         btn.textContent = 'Resend Email';
@@ -380,6 +396,9 @@ const Auth = {
         });
     }
 };
+
+// Create ready promise eagerly so consumers can await it before init() runs
+Auth.readyPromise = new Promise(resolve => { Auth._resolveReady = resolve; });
 
 // Initialize auth when DOM is ready
 document.addEventListener('DOMContentLoaded', () => {

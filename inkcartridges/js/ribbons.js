@@ -1,254 +1,433 @@
 /**
  * RIBBONS PAGE JS
- * Handles filtering, sorting, and interactions for the ribbons page
+ * Fetches ribbon products from backend API and renders them dynamically.
+ * Supports brand, type, device brand/model, and sort filters with pagination.
  */
 
 (function() {
     'use strict';
 
-    // Ribbon products data (loaded from backend in production)
-    const ribbonProducts = [
-        { id: 'brother-1030-ribbon', brand: 'brother', category: 'typewriter', type: 'genuine', price: 16.99, name: 'Brother 1030 Correctable Film Ribbon' },
-        { id: 'brother-3015-ribbon', brand: 'brother', category: 'typewriter', type: 'genuine', price: 9.99, name: 'Brother 3015 Lift-Off Correction Tape' },
-        { id: 'ibm-wheelwriter-ribbon', brand: 'ibm', category: 'typewriter', type: 'compatible', price: 15.99, salePrice: 15.99, name: 'IBM Wheelwriter Correctable Ribbon' },
-        { id: 'ibm-selectric-ribbon', brand: 'ibm', category: 'typewriter', type: 'compatible', price: 21.99, name: 'IBM Selectric II/III Ribbon Cartridge' },
-        { id: 'olivetti-lettera-ribbon', brand: 'olivetti', category: 'typewriter', type: 'compatible', price: 12.99, name: 'Olivetti Lettera Universal Ribbon' },
-        { id: 'swintec-1146-ribbon', brand: 'swintec', category: 'typewriter', type: 'compatible', price: 14.99, name: 'Swintec 1146 CM Typewriter Ribbon' },
-        { id: 'generic-universal-nylon', brand: 'universal', category: 'typewriter', type: 'compatible', price: 7.99, salePrice: 7.99, name: 'Universal Typewriter Ribbon (Black/Red)' },
-        { id: 'epson-lq590-ribbon', brand: 'epson', category: 'dot-matrix', type: 'genuine', price: 24.99, name: 'Epson LQ-590 Black Ribbon Cartridge' },
-        { id: 'epson-lx350-ribbon', brand: 'epson', category: 'dot-matrix', type: 'genuine', price: 15.99, salePrice: 15.99, name: 'Epson LX-350 Fabric Ribbon' },
-        { id: 'epson-fx890-comp-ribbon', brand: 'epson', category: 'dot-matrix', type: 'compatible', price: 24.99, salePrice: 24.99, name: 'Epson FX-890 Compatible Ribbon (3-Pack)' },
-        { id: 'oki-ml320-ribbon', brand: 'oki', category: 'dot-matrix', type: 'genuine', price: 19.99, salePrice: 19.99, name: 'OKI ML320/321 Ribbon Cartridge' },
-        { id: 'oki-ml590-ribbon', brand: 'oki', category: 'dot-matrix', type: 'genuine', price: 28.99, name: 'OKI ML590/591 Black Ribbon' },
-        { id: 'citizen-dp600-ribbon', brand: 'citizen', category: 'dot-matrix', type: 'compatible', price: 14.99, name: 'Citizen DP-600 Printer Ribbon' },
-        { id: 'olivetti-pr2-ribbon', brand: 'olivetti', category: 'dot-matrix', type: 'genuine', price: 32.99, name: 'Olivetti PR2 Passbook Printer Ribbon' },
-        { id: 'epson-erc-09-ribbon', brand: 'epson', category: 'pos-receipt', type: 'genuine', price: 12.99, name: 'Epson ERC-09 POS Ribbon' },
-        { id: 'epson-erc-38-ribbon-br', brand: 'epson', category: 'pos-receipt', type: 'genuine', price: 14.99, name: 'Epson ERC-38 Black/Red Ribbon' },
-        { id: 'star-sp700-ribbon', brand: 'star', category: 'pos-receipt', type: 'genuine', price: 11.99, name: 'Star SP700 POS Ribbon Cartridge' },
-        { id: 'star-sp500-ribbon-br', brand: 'star', category: 'pos-receipt', type: 'genuine', price: 11.99, salePrice: 11.99, name: 'Star SP500 Black/Red Ribbon' },
-        { id: 'amano-pix-ribbon', brand: 'amano', category: 'time-clock', type: 'compatible', price: 8.99, name: 'Amano PIX Time Clock Ribbon' },
-        { id: 'acroprint-125-ribbon', brand: 'acroprint', category: 'time-clock', type: 'compatible', price: 7.99, name: 'Acroprint 125/150 Time Recorder Ribbon' }
-    ];
-
     // DOM elements
     const brandFilter = document.getElementById('brand-filter');
     const typeFilter = document.getElementById('type-filter');
+    const deviceBrandFilter = document.getElementById('device-brand-filter');
+    const deviceModelFilter = document.getElementById('device-model-filter');
     const sortFilter = document.getElementById('sort-filter');
     const productCount = document.getElementById('product-count');
+    const productsGrid = document.getElementById('ribbons-grid');
+    const loadingEl = document.getElementById('ribbons-loading');
+    const emptyEl = document.getElementById('ribbons-empty');
+    const paginationEl = document.getElementById('ribbons-pagination');
     const categoryCards = document.querySelectorAll('.ribbon-category-card');
 
     // State
     let currentFilters = {
         brand: '',
         type: '',
-        category: '',
-        sort: 'relevance'
+        device_brand: '',
+        device_model: '',
+        sort: 'name-asc',
+        page: 1,
+        limit: 48
     };
+    let isLoading = false;
 
     // Initialize
-    function init() {
-        if (!brandFilter || !typeFilter || !sortFilter) return;
+    async function init() {
+        if (!productsGrid) return;
 
-        // Load filters from URL
         loadFiltersFromURL();
 
-        // Attach event listeners
-        brandFilter.addEventListener('change', handleFilterChange);
-        typeFilter.addEventListener('change', handleFilterChange);
-        sortFilter.addEventListener('change', handleFilterChange);
+        // Attach filter change handlers
+        if (brandFilter) brandFilter.addEventListener('change', handleFilterChange);
+        if (typeFilter) typeFilter.addEventListener('change', handleFilterChange);
+        if (deviceBrandFilter) deviceBrandFilter.addEventListener('change', handleDeviceBrandChange);
+        if (deviceModelFilter) deviceModelFilter.addEventListener('change', handleFilterChange);
+        if (sortFilter) sortFilter.addEventListener('change', handleFilterChange);
 
-        // Category card smooth scroll with filter
+        // Category card clicks apply type filter
         categoryCards.forEach(card => {
             card.addEventListener('click', (e) => {
                 e.preventDefault();
                 const category = card.dataset.category;
-                const targetId = card.getAttribute('href');
-                const targetSection = document.querySelector(targetId);
+                if (category && typeFilter) {
+                    typeFilter.value = category;
+                    currentFilters.type = category;
+                    currentFilters.page = 1;
+                    updateURL();
+                    fetchRibbons();
 
-                if (targetSection) {
-                    targetSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                    // Scroll to grid
+                    productsGrid.scrollIntoView({ behavior: 'smooth', block: 'start' });
                 }
             });
         });
 
-        // Add to cart buttons
-        document.querySelectorAll('.product-card__add-btn').forEach(btn => {
-            btn.addEventListener('click', handleAddToCart);
-        });
-
-        // Apply initial filters
-        applyFilters();
+        // Populate filter dropdowns from API then fetch products
+        await Promise.all([
+            populateBrandFilter(),
+            populateDeviceBrandFilter()
+        ]);
+        await fetchRibbons();
     }
 
-    // Load filters from URL parameters
+    // --- Filter dropdown population ---
+
+    async function populateBrandFilter() {
+        if (!brandFilter) return;
+        try {
+            const response = await API.getRibbonBrands();
+            if (response.ok && response.data) {
+                const brands = response.data.brands || response.data || [];
+                // Keep "All Brands" as first option
+                const currentVal = brandFilter.value;
+                brandFilter.innerHTML = '<option value="">All Brands</option>';
+                for (const b of brands) {
+                    const value = typeof b === 'string' ? b : b.value || b.name || b;
+                    const label = typeof b === 'string' ? b : b.label || b.name || b;
+                    const opt = document.createElement('option');
+                    opt.value = value;
+                    opt.textContent = label;
+                    brandFilter.appendChild(opt);
+                }
+                if (currentVal) brandFilter.value = currentVal;
+            }
+        } catch (e) {
+            // Keep hardcoded options as fallback
+        }
+    }
+
+    async function populateDeviceBrandFilter() {
+        if (!deviceBrandFilter) return;
+        try {
+            const response = await API.getRibbonDeviceBrands();
+            if (response.ok && response.data) {
+                const brands = response.data.device_brands || response.data || [];
+                deviceBrandFilter.innerHTML = '<option value="">All Device Brands</option>';
+                for (const b of brands) {
+                    const value = typeof b === 'string' ? b : b.value || b;
+                    const label = typeof b === 'string' ? b : b.label || b;
+                    const count = typeof b === 'object' && b.count ? ` (${b.count})` : '';
+                    const opt = document.createElement('option');
+                    opt.value = value;
+                    opt.textContent = label + count;
+                    deviceBrandFilter.appendChild(opt);
+                }
+            }
+        } catch (e) {
+            // Hide device filters on error
+            if (deviceBrandFilter) deviceBrandFilter.closest('.ribbons-toolbar__device-filters')?.classList.add('hidden');
+        }
+    }
+
+    async function populateDeviceModelFilter(deviceBrand) {
+        if (!deviceModelFilter) return;
+        deviceModelFilter.innerHTML = '<option value="">All Models</option>';
+        if (!deviceBrand) {
+            deviceModelFilter.disabled = true;
+            return;
+        }
+        try {
+            const response = await API.getRibbonDeviceModels({ device_brand: deviceBrand });
+            if (response.ok && response.data) {
+                const models = response.data.device_models || response.data || [];
+                for (const m of models) {
+                    const value = typeof m === 'string' ? m : m.value || m;
+                    const label = typeof m === 'string' ? m : m.label || m;
+                    const count = typeof m === 'object' && m.count ? ` (${m.count})` : '';
+                    const opt = document.createElement('option');
+                    opt.value = value;
+                    opt.textContent = label + count;
+                    deviceModelFilter.appendChild(opt);
+                }
+                deviceModelFilter.disabled = false;
+            }
+        } catch (e) {
+            deviceModelFilter.disabled = true;
+        }
+    }
+
+    // --- URL state ---
+
     function loadFiltersFromURL() {
         const params = new URLSearchParams(window.location.search);
-
         if (params.get('brand')) {
             currentFilters.brand = params.get('brand');
-            brandFilter.value = currentFilters.brand;
+            if (brandFilter) brandFilter.value = currentFilters.brand;
         }
         if (params.get('type')) {
             currentFilters.type = params.get('type');
-            typeFilter.value = currentFilters.type;
+            if (typeFilter) typeFilter.value = currentFilters.type;
         }
-        if (params.get('category')) {
-            currentFilters.category = params.get('category');
+        if (params.get('device_brand')) {
+            currentFilters.device_brand = params.get('device_brand');
+            if (deviceBrandFilter) deviceBrandFilter.value = currentFilters.device_brand;
+        }
+        if (params.get('device_model')) {
+            currentFilters.device_model = params.get('device_model');
+            if (deviceModelFilter) deviceModelFilter.value = currentFilters.device_model;
         }
         if (params.get('sort')) {
             currentFilters.sort = params.get('sort');
-            sortFilter.value = currentFilters.sort;
+            if (sortFilter) sortFilter.value = currentFilters.sort;
+        }
+        if (params.get('page')) {
+            currentFilters.page = parseInt(params.get('page'), 10) || 1;
         }
     }
 
-    // Handle filter changes
-    function handleFilterChange() {
-        currentFilters.brand = brandFilter.value;
-        currentFilters.type = typeFilter.value;
-        currentFilters.sort = sortFilter.value;
-
-        applyFilters();
-        updateURL();
-    }
-
-    // Apply filters to product cards
-    function applyFilters() {
-        let visibleCount = 0;
-        const allCards = document.querySelectorAll('.product-card');
-
-        allCards.forEach(card => {
-            const productId = card.querySelector('.product-card__add-btn')?.dataset.productId;
-            const product = ribbonProducts.find(p => p.id === productId);
-
-            if (!product) {
-                card.style.display = '';
-                visibleCount++;
-                return;
-            }
-
-            let visible = true;
-
-            // Brand filter
-            if (currentFilters.brand && product.brand !== currentFilters.brand) {
-                visible = false;
-            }
-
-            // Type filter
-            if (currentFilters.type && product.type !== currentFilters.type) {
-                visible = false;
-            }
-
-            // Category filter
-            if (currentFilters.category && product.category !== currentFilters.category) {
-                visible = false;
-            }
-
-            card.style.display = visible ? '' : 'none';
-            if (visible) visibleCount++;
-        });
-
-        // Update count
-        if (productCount) {
-            productCount.textContent = visibleCount;
-        }
-
-        // Sort products within each grid
-        if (currentFilters.sort !== 'relevance') {
-            sortProducts();
-        }
-    }
-
-    // Sort products
-    function sortProducts() {
-        const grids = document.querySelectorAll('.products-grid');
-
-        grids.forEach(grid => {
-            const cards = Array.from(grid.querySelectorAll('.product-card'));
-
-            cards.sort((a, b) => {
-                const aId = a.querySelector('.product-card__add-btn')?.dataset.productId;
-                const bId = b.querySelector('.product-card__add-btn')?.dataset.productId;
-                const aProduct = ribbonProducts.find(p => p.id === aId);
-                const bProduct = ribbonProducts.find(p => p.id === bId);
-
-                if (!aProduct || !bProduct) return 0;
-
-                const aPrice = aProduct.salePrice || aProduct.price;
-                const bPrice = bProduct.salePrice || bProduct.price;
-
-                switch (currentFilters.sort) {
-                    case 'price-low':
-                        return aPrice - bPrice;
-                    case 'price-high':
-                        return bPrice - aPrice;
-                    case 'name':
-                        return aProduct.name.localeCompare(bProduct.name);
-                    default:
-                        return 0;
-                }
-            });
-
-            // Re-append sorted cards
-            cards.forEach(card => grid.appendChild(card));
-        });
-    }
-
-    // Update URL with current filters
     function updateURL() {
         const params = new URLSearchParams();
-
         if (currentFilters.brand) params.set('brand', currentFilters.brand);
         if (currentFilters.type) params.set('type', currentFilters.type);
-        if (currentFilters.category) params.set('category', currentFilters.category);
-        if (currentFilters.sort !== 'relevance') params.set('sort', currentFilters.sort);
+        if (currentFilters.device_brand) params.set('device_brand', currentFilters.device_brand);
+        if (currentFilters.device_model) params.set('device_model', currentFilters.device_model);
+        if (currentFilters.sort !== 'name-asc') params.set('sort', currentFilters.sort);
+        if (currentFilters.page > 1) params.set('page', currentFilters.page);
 
         const newURL = params.toString()
             ? `${window.location.pathname}?${params.toString()}`
             : window.location.pathname;
-
         history.replaceState(null, '', newURL);
     }
 
-    // Handle add to cart
-    function handleAddToCart(e) {
-        const btn = e.currentTarget;
-        const productId = btn.dataset.productId;
-        const product = ribbonProducts.find(p => p.id === productId);
+    // --- Filter change handlers ---
 
-        if (!product) {
-            console.error('Product not found:', productId);
+    function handleFilterChange() {
+        if (brandFilter) currentFilters.brand = brandFilter.value;
+        if (typeFilter) currentFilters.type = typeFilter.value;
+        if (deviceModelFilter) currentFilters.device_model = deviceModelFilter.value;
+        if (sortFilter) currentFilters.sort = sortFilter.value;
+        currentFilters.page = 1;
+        updateURL();
+        fetchRibbons();
+    }
+
+    async function handleDeviceBrandChange() {
+        currentFilters.device_brand = deviceBrandFilter.value;
+        currentFilters.device_model = '';
+        currentFilters.page = 1;
+        await populateDeviceModelFilter(currentFilters.device_brand);
+        updateURL();
+        fetchRibbons();
+    }
+
+    // --- Fetch and render ---
+
+    async function fetchRibbons() {
+        if (isLoading) return;
+        isLoading = true;
+
+        if (loadingEl) loadingEl.hidden = false;
+        if (emptyEl) emptyEl.hidden = true;
+        productsGrid.innerHTML = '';
+
+        // Build API params
+        const params = {
+            page: currentFilters.page,
+            limit: currentFilters.limit
+        };
+        if (currentFilters.brand) params.brand = currentFilters.brand;
+        if (currentFilters.type) params.type = currentFilters.type;
+        if (currentFilters.device_brand) params.device_brand = currentFilters.device_brand;
+        if (currentFilters.device_model) params.device_model = currentFilters.device_model;
+        if (currentFilters.sort) params.sort = currentFilters.sort;
+
+        try {
+            const response = await API.getRibbons(params);
+
+            if (loadingEl) loadingEl.hidden = true;
+
+            if (!response.ok) {
+                showError('Failed to load ribbons. Please try again.');
+                return;
+            }
+
+            const ribbons = response.data?.ribbons || response.data?.products || response.data || [];
+            const pagination = response.data?.pagination || response.meta || {};
+            const total = pagination.total || ribbons.length;
+
+            if (productCount) {
+                productCount.textContent = total;
+            }
+
+            if (ribbons.length === 0) {
+                if (emptyEl) emptyEl.hidden = false;
+                renderPagination(null);
+                return;
+            }
+
+            // Render product cards
+            const html = ribbons.map(ribbon => renderRibbonCard(ribbon)).join('');
+            productsGrid.innerHTML = html;
+
+            // Bind add to cart events
+            productsGrid.querySelectorAll('.product-card__add-btn').forEach(btn => {
+                btn.addEventListener('click', handleAddToCart);
+            });
+
+            // Bind image error fallback
+            productsGrid.querySelectorAll('img[data-fallback]').forEach(img => {
+                img.addEventListener('error', function() {
+                    this.src = '/assets/images/placeholder-product.svg';
+                }, { once: true });
+            });
+
+            renderPagination(pagination);
+        } catch (e) {
+            if (loadingEl) loadingEl.hidden = true;
+            showError('Could not connect to the server. Please try again later.');
+        } finally {
+            isLoading = false;
+        }
+    }
+
+    function renderRibbonCard(ribbon) {
+        const name = ribbon.name || '';
+        const sku = ribbon.sku || '';
+        const id = ribbon.id || '';
+        const brand = ribbon.brand || '';
+        const source = ribbon.source || '';
+        const price = ribbon.retail_price != null ? ribbon.retail_price : (ribbon.sale_price != null ? ribbon.sale_price : null);
+        const inStock = ribbon.in_stock !== false && (ribbon.stock_quantity == null || ribbon.stock_quantity > 0);
+        const imagePath = ribbon.image_url || ribbon.image_path || '';
+        const imageUrl = typeof storageUrl === 'function' ? storageUrl(imagePath) : (imagePath || '/assets/images/placeholder-product.svg');
+        const sourceBadge = typeof getSourceBadge === 'function' ? getSourceBadge(source) : null;
+
+        const esc = typeof Security !== 'undefined' ? Security.escapeHtml.bind(Security) : (s) => s;
+        const escAttr = typeof Security !== 'undefined' ? Security.escapeAttr.bind(Security) : (s) => s;
+        const priceText = price != null ? (typeof formatPrice === 'function' ? formatPrice(price) : `$${Number(price).toFixed(2)}`) : 'Price unavailable';
+
+        return `
+            <article class="product-card" data-product-id="${escAttr(id)}" data-sku="${escAttr(sku)}">
+                <a href="/html/product/?sku=${escAttr(sku)}" class="product-card__link">
+                    <div class="product-card__image-wrapper">
+                        <img src="${escAttr(imageUrl)}"
+                             alt="${escAttr(name)}"
+                             class="product-card__image"
+                             loading="lazy"
+                             data-fallback="placeholder">
+                        ${sourceBadge ? `<span class="product-card__badge ${sourceBadge.class}">${sourceBadge.text}</span>` : ''}
+                        ${!inStock ? '<span class="product-card__badge badge-out-of-stock">Out of Stock</span>' : ''}
+                    </div>
+                    <div class="product-card__content">
+                        <p class="product-card__brand">${esc(brand)}</p>
+                        <h3 class="product-card__title">${esc(name)}</h3>
+                        <p class="product-card__price">${priceText}</p>
+                    </div>
+                </a>
+                <button class="product-card__add-btn btn btn--primary"
+                        ${!inStock || price == null ? 'disabled' : ''}
+                        data-product-id="${escAttr(id)}"
+                        data-product-sku="${escAttr(sku)}"
+                        data-product-name="${escAttr(name)}"
+                        data-product-price="${escAttr(price)}"
+                        data-product-image="${escAttr(imageUrl)}">
+                    ${inStock ? 'Add to Cart' : 'Out of Stock'}
+                </button>
+            </article>
+        `;
+    }
+
+    // --- Pagination ---
+
+    function renderPagination(pagination) {
+        if (!paginationEl) return;
+        if (!pagination || !pagination.total_pages || pagination.total_pages <= 1) {
+            paginationEl.innerHTML = '';
             return;
         }
 
-        // Create cart item
-        const cartItem = {
-            id: product.id,
-            name: product.name,
-            price: product.salePrice || product.price,
-            quantity: 1,
-            image: '/assets/images/placeholder-product.svg',
-            category: 'ribbon'
-        };
+        const page = pagination.page || currentFilters.page;
+        const totalPages = pagination.total_pages;
+        let html = '<div class="pagination">';
 
-        // Add to cart using Cart module if available
+        // Previous
+        if (pagination.has_prev || page > 1) {
+            html += `<button class="pagination__btn" data-page="${page - 1}">&laquo; Prev</button>`;
+        }
+
+        // Page numbers (show up to 7 pages around current)
+        const start = Math.max(1, page - 3);
+        const end = Math.min(totalPages, page + 3);
+
+        if (start > 1) {
+            html += `<button class="pagination__btn" data-page="1">1</button>`;
+            if (start > 2) html += `<span class="pagination__ellipsis">&hellip;</span>`;
+        }
+
+        for (let i = start; i <= end; i++) {
+            html += `<button class="pagination__btn${i === page ? ' pagination__btn--active' : ''}" data-page="${i}">${i}</button>`;
+        }
+
+        if (end < totalPages) {
+            if (end < totalPages - 1) html += `<span class="pagination__ellipsis">&hellip;</span>`;
+            html += `<button class="pagination__btn" data-page="${totalPages}">${totalPages}</button>`;
+        }
+
+        // Next
+        if (pagination.has_next || page < totalPages) {
+            html += `<button class="pagination__btn" data-page="${page + 1}">Next &raquo;</button>`;
+        }
+
+        html += '</div>';
+        paginationEl.innerHTML = html;
+
+        // Bind page buttons
+        paginationEl.querySelectorAll('.pagination__btn[data-page]').forEach(btn => {
+            btn.addEventListener('click', () => {
+                currentFilters.page = parseInt(btn.dataset.page, 10);
+                updateURL();
+                fetchRibbons();
+                productsGrid.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            });
+        });
+    }
+
+    // --- Add to cart ---
+
+    function handleAddToCart(e) {
+        e.preventDefault();
+        const btn = e.currentTarget;
+        const productId = btn.dataset.productId;
+        const sku = btn.dataset.productSku;
+        const name = btn.dataset.productName;
+        const price = parseFloat(btn.dataset.productPrice);
+        const image = btn.dataset.productImage || '/assets/images/placeholder-product.svg';
+
+        if (!productId || isNaN(price)) return;
+
         if (typeof Cart !== 'undefined' && Cart.addItem) {
-            Cart.addItem(cartItem);
+            Cart.addItem({
+                id: productId,
+                sku: sku,
+                name: name,
+                price: price,
+                quantity: 1,
+                image: image,
+                category: 'ribbon'
+            });
+        }
 
-            // Visual feedback
-            btn.textContent = 'Added!';
-            btn.disabled = true;
-            setTimeout(() => {
-                btn.textContent = 'Add to Cart';
-                btn.disabled = false;
-            }, 1500);
-        } else {
-            // Fallback visual feedback
-            btn.textContent = 'Added!';
-            btn.disabled = true;
-            setTimeout(() => {
-                btn.textContent = 'Add to Cart';
-                btn.disabled = false;
-            }, 1500);
+        // Visual feedback
+        btn.textContent = 'Added!';
+        btn.disabled = true;
+        setTimeout(() => {
+            btn.textContent = 'Add to Cart';
+            btn.disabled = false;
+        }, 1500);
+    }
+
+    // --- Helpers ---
+
+    function showError(message) {
+        if (productsGrid) {
+            productsGrid.innerHTML = `
+                <div class="ribbons-error">
+                    <p>${typeof Security !== 'undefined' ? Security.escapeHtml(message) : message}</p>
+                    <button class="btn btn--outline" onclick="location.reload()">Retry</button>
+                </div>
+            `;
         }
     }
 

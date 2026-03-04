@@ -84,7 +84,7 @@ const Security = {
      * to a phishing page.
      *
      * Exploit path:
-     *   1. Attacker sends victim: login.html?redirect=https://evil.com/phish
+     *   1. Attacker sends victim: login?redirect=https://evil.com/phish
      *   2. Victim logs in successfully
      *   3. Code reads redirect param, navigates to evil.com
      *   4. Phishing page mimics InkCartridges, steals credentials
@@ -93,7 +93,7 @@ const Security = {
      * @param {string} fallback - Safe default if URL is invalid
      * @returns {string} A safe redirect URL (always same-origin)
      */
-    safeRedirect(url, fallback = '/html/account/index.html') {
+    safeRedirect(url, fallback = '/html/account/') {
         if (!url || typeof url !== 'string') return fallback;
         const trimmed = url.trim();
         // Must start with exactly one / (not // which is protocol-relative)

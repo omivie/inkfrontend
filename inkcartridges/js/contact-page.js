@@ -1,0 +1,54 @@
+    document.addEventListener('DOMContentLoaded', () => {
+        const form = document.getElementById('contact-form');
+        if (!form) return;
+
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+
+            // Basic validation
+            const name = form.querySelector('#contact-name')?.value.trim();
+            const email = form.querySelector('#contact-email')?.value.trim();
+            const subjectEl = form.querySelector('#contact-subject');
+            const subject = subjectEl?.options[subjectEl.selectedIndex]?.text || '';
+            const message = form.querySelector('#contact-message')?.value.trim();
+            const phoneCountry = form.querySelector('#contact-phone-country')?.value || '+64';
+            const phoneNumber = form.querySelector('#contact-phone')?.value.trim() || '';
+            const phone = phoneNumber ? `${phoneCountry}${phoneNumber}` : '';
+            const orderNumber = form.querySelector('#contact-order')?.value.trim() || '';
+
+            if (!name || !email || !subject || subject === 'Please select...' || !message) {
+                if (typeof showToast === 'function') {
+                    showToast('Please fill in all required fields.', 'error');
+                } else {
+                    alert('Please fill in all required fields.');
+                }
+                return;
+            }
+
+            const btn = form.querySelector('button[type="submit"]');
+            const originalText = btn.textContent;
+            btn.textContent = 'Sending...';
+            btn.disabled = true;
+
+            const payload = { name, email, subject, message };
+            if (phone) payload.phone = phone;
+            if (orderNumber) payload.order_number = orderNumber;
+
+            try {
+                await API.submitContactForm(payload);
+                if (typeof showToast === 'function') {
+                    showToast('Message sent! We\'ll get back to you shortly.', 'success');
+                }
+                form.reset();
+            } catch (error) {
+                if (typeof showToast === 'function') {
+                    showToast(error.message || 'Could not send message. Please try again.', 'error');
+                } else {
+                    alert('Could not send message. Please try again.');
+                }
+            }
+
+            btn.textContent = originalText;
+            btn.disabled = false;
+        });
+    });

@@ -175,7 +175,7 @@ const Filters = {
         // Build API filter params
         const apiFilters = {
             page: this.state.page,
-            limit: 20
+            limit: 200
         };
 
         // Map category filter to API category param
@@ -228,13 +228,14 @@ const Filters = {
             if (typeof API !== 'undefined' && typeof Products !== 'undefined') {
                 const response = await API.getProducts(apiFilters);
 
-                if (response.success && response.data) {
+                if (response.ok && response.data) {
                     const { products, pagination } = response.data;
 
                     // Render products
                     if (productGrid) {
                         productGrid.classList.remove('is-loading');
                         productGrid.innerHTML = Products.renderCards(products);
+                        Products.bindImageFallbacks(productGrid);
                         Products.bindAddToCartEvents(productGrid);
                     }
 
@@ -255,15 +256,16 @@ const Filters = {
                 }
             }
         } catch (error) {
-            console.error('Error fetching products:', error);
+            DebugLog.error('Error fetching products:', error);
             if (productGrid) {
                 productGrid.classList.remove('is-loading');
                 productGrid.innerHTML = `
                     <div class="products-error">
                         <p>Failed to load products. Please try again.</p>
-                        <button class="btn btn--secondary" onclick="Filters.applyFilters()">Retry</button>
+                        <button class="btn btn--secondary" data-action="retry-filters">Retry</button>
                     </div>
                 `;
+                productGrid.querySelector('[data-action="retry-filters"]')?.addEventListener('click', () => Filters.applyFilters());
             }
         }
     },

@@ -1,8 +1,9 @@
 /**
  * MEGA-NAV.JS
  * ===========
- * Brands mega dropdown for the top navigation.
- * Click "Brands" to open a panel showing all brand cards with category links.
+ * Mega dropdowns for the top navigation.
+ * - "Ink Cartridge Brands" panel: brand cards with category links
+ * - "Ribbons" panel: typewriter/printer ribbon brand buttons
  */
 
 'use strict';
@@ -10,17 +11,24 @@
 (function() {
 
     // ============================================
-    // DOM ELEMENTS
+    // DOM ELEMENTS — Brands panel
     // ============================================
-    const trigger = document.querySelector('.nav-mega-toggle');
-    const panel = document.getElementById('brands-mega');
+    const brandsTrigger = document.querySelector('.nav-mega-toggle');
+    const brandsPanel = document.getElementById('brands-mega');
 
-    if (!trigger || !panel) return;
+    if (!brandsTrigger || !brandsPanel) return;
 
-    const cardsContainer = panel.querySelector('.brands-mega__cards');
+    const brandsCardsContainer = brandsPanel.querySelector('.brands-mega__cards');
 
     // ============================================
-    // DATA
+    // DOM ELEMENTS — Ribbons panel
+    // ============================================
+    const ribbonsTrigger = document.querySelector('.nav-ribbons-toggle');
+    const ribbonsPanel = document.getElementById('ribbons-mega');
+    const ribbonsGrid = ribbonsPanel ? ribbonsPanel.querySelector('.ribbons-mega__grid') : null;
+
+    // ============================================
+    // DATA — Ink/Toner Brands
     // ============================================
     const BRANDS = [
         { slug: 'brother', name: 'Brother', logo: '/assets/brands/brother.png',
@@ -72,49 +80,97 @@
     ];
 
     // ============================================
-    // STATE
+    // DATA — Ribbon Brands
     // ============================================
-    let isOpen = false;
+    const RIBBON_BRANDS = [
+        'Amano', 'Brother', 'Canon', 'Citizen', 'Epson',
+        'Fujitsu', 'IBM', 'Nakajima', 'NEC', 'NCR',
+        'OKI', 'Olivetti', 'Olympia', 'Panasonic', 'Printronix',
+        'Seiko', 'Sharp', 'Star', 'Triumph-Adler', 'Universal'
+    ];
 
     // ============================================
-    // RENDER BRAND CARDS
+    // STATE
+    // ============================================
+    let brandsOpen = false;
+    let ribbonsOpen = false;
+
+    // ============================================
+    // RENDER BRAND CARDS (Ink/Toner)
     // ============================================
     function renderBrands() {
-        cardsContainer.innerHTML = BRANDS.map(brand => `
+        brandsCardsContainer.innerHTML = BRANDS.map(brand => `
             <div class="brands-mega__card">
                 <div class="brands-mega__logo-wrap">
-                    <img src="${brand.logo}" alt="${brand.name}" class="brands-mega__brand-logo brands-mega__brand-logo--${brand.slug}">
+                    <img src="${Security.escapeAttr(brand.logo)}" alt="${Security.escapeAttr(brand.name)}" class="brands-mega__brand-logo brands-mega__brand-logo--${Security.escapeAttr(brand.slug)}">
                 </div>
                 <div class="brands-mega__card-links">
                     ${brand.categories.map(cat =>
-                        `<a href="/html/shop.html?brand=${brand.slug}&category=${cat.param}" class="brands-mega__card-link">${cat.label}</a>`
+                        `<a href="/html/shop?brand=${Security.escapeAttr(brand.slug)}&category=${Security.escapeAttr(cat.param)}" class="brands-mega__card-link">${Security.escapeHtml(cat.label)}</a>`
                     ).join('\n                    ')}
-                    <a href="/html/shop.html?brand=${brand.slug}" class="brands-mega__card-link">All Products</a>
+                    <a href="/html/shop?brand=${Security.escapeAttr(brand.slug)}" class="brands-mega__card-link">All Products</a>
                 </div>
             </div>
         `).join('');
     }
 
     // ============================================
-    // OPEN / CLOSE
+    // RENDER RIBBON BRAND BUTTONS
     // ============================================
-    function open() {
-        panel.hidden = false;
-        trigger.setAttribute('aria-expanded', 'true');
-        isOpen = true;
+    function renderRibbons() {
+        if (!ribbonsGrid) return;
+        ribbonsGrid.innerHTML = RIBBON_BRANDS.map(brand =>
+            `<a href="/html/ribbons?brand=${Security.escapeAttr(brand)}" class="ribbons-mega__brand-btn">${Security.escapeHtml(brand)}</a>`
+        ).join('');
     }
 
-    function close() {
-        panel.hidden = true;
-        trigger.setAttribute('aria-expanded', 'false');
-        isOpen = false;
+    // ============================================
+    // OPEN / CLOSE — Brands
+    // ============================================
+    function openBrands() {
+        closeRibbons();
+        brandsPanel.hidden = false;
+        brandsTrigger.setAttribute('aria-expanded', 'true');
+        brandsOpen = true;
     }
 
-    function toggle() {
-        if (isOpen) {
-            close();
+    function closeBrands() {
+        brandsPanel.hidden = true;
+        brandsTrigger.setAttribute('aria-expanded', 'false');
+        brandsOpen = false;
+    }
+
+    function toggleBrands() {
+        if (brandsOpen) {
+            closeBrands();
         } else {
-            open();
+            openBrands();
+        }
+    }
+
+    // ============================================
+    // OPEN / CLOSE — Ribbons
+    // ============================================
+    function openRibbons() {
+        if (!ribbonsPanel || !ribbonsTrigger) return;
+        closeBrands();
+        ribbonsPanel.hidden = false;
+        ribbonsTrigger.setAttribute('aria-expanded', 'true');
+        ribbonsOpen = true;
+    }
+
+    function closeRibbons() {
+        if (!ribbonsPanel || !ribbonsTrigger) return;
+        ribbonsPanel.hidden = true;
+        ribbonsTrigger.setAttribute('aria-expanded', 'false');
+        ribbonsOpen = false;
+    }
+
+    function toggleRibbons() {
+        if (ribbonsOpen) {
+            closeRibbons();
+        } else {
+            openRibbons();
         }
     }
 
@@ -122,24 +178,41 @@
     // EVENT LISTENERS
     // ============================================
 
-    // Toggle on trigger click
-    trigger.addEventListener('click', (e) => {
+    // Toggle brands panel
+    brandsTrigger.addEventListener('click', (e) => {
         e.stopPropagation();
-        toggle();
+        toggleBrands();
     });
+
+    // Toggle ribbons panel
+    if (ribbonsTrigger) {
+        ribbonsTrigger.addEventListener('click', (e) => {
+            e.stopPropagation();
+            toggleRibbons();
+        });
+    }
 
     // Close on click outside
     document.addEventListener('click', (e) => {
-        if (isOpen && !panel.contains(e.target) && !trigger.contains(e.target)) {
-            close();
+        if (brandsOpen && !brandsPanel.contains(e.target) && !brandsTrigger.contains(e.target)) {
+            closeBrands();
+        }
+        if (ribbonsOpen && ribbonsPanel && ribbonsTrigger && !ribbonsPanel.contains(e.target) && !ribbonsTrigger.contains(e.target)) {
+            closeRibbons();
         }
     });
 
     // Close on ESC
     document.addEventListener('keydown', (e) => {
-        if (e.key === 'Escape' && isOpen) {
-            close();
-            trigger.focus();
+        if (e.key === 'Escape') {
+            if (brandsOpen) {
+                closeBrands();
+                brandsTrigger.focus();
+            }
+            if (ribbonsOpen && ribbonsTrigger) {
+                closeRibbons();
+                ribbonsTrigger.focus();
+            }
         }
     });
 
@@ -147,5 +220,6 @@
     // INITIALIZE
     // ============================================
     renderBrands();
+    renderRibbons();
 
 })();

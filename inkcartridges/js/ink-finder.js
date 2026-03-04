@@ -141,7 +141,7 @@
         if (printers.length === 0) {
             try {
                 const response = await API.getPrintersByBrand(brandName);
-                if (response.success && response.data) {
+                if (response.ok && response.data) {
                     printers = Array.isArray(response.data) ? response.data : (response.data.printers || []);
                 }
             } catch (error) {
@@ -155,19 +155,10 @@
                 const modelName = p.model_name || p.model || p.name || '';
                 const fullName = p.full_name || `${brandName} ${modelName}`;
 
-                // Determine series from model name
-                let seriesId = 'other';
-                let seriesName = 'Other Models';
-                const brandPatterns = PrinterData.SERIES_PATTERNS[brand] || [];
-
-                for (const pattern of brandPatterns) {
-                    if (modelName.toUpperCase().startsWith(pattern.prefix.toUpperCase())) {
-                        // Generate seriesId from series NAME (not prefix) to avoid duplicates
-                        seriesId = pattern.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
-                        seriesName = pattern.name;
-                        break;
-                    }
-                }
+                // Determine series from model name (uses normalized matching)
+                const series = PrinterData.getSeriesForModel(modelName, brand);
+                const seriesId = series.id;
+                const seriesName = series.name;
 
                 return {
                     id: (p.slug || modelName).toLowerCase().replace(/\s+/g, '-'),
@@ -176,6 +167,18 @@
                     seriesId: seriesId,
                     seriesName: seriesName
                 };
+            }).filter(p => {
+                const name = p.name.trim();
+                if (!name || name.length < 2) return false;
+                if (/\bprinters?\b/i.test(name)) return false;
+                if (/^(inkjet|laser|colour|color|toner|cartridges?|ink|ribbon|ribbons|drums?|fax)$/i.test(name)) return false;
+                if (/^\d+mm$/i.test(name)) return false;
+                if (!PrinterData.isInkToner(p.seriesName, p.name, brand)) return false;
+                // Exclude "Other Models" — series patterns are comprehensive enough
+                // that unmatched models are almost always non-ink devices (label makers,
+                // dot matrix stored without prefix, scanners, etc.)
+                if (p.seriesId === 'other') return false;
+                return true;
             });
 
             const series = PrinterData.groupPrintersBySeries(formattedPrinters);
@@ -239,49 +242,7 @@
                 { id: 'hl-3040cn', name: 'HL-3040CN', fullName: 'Brother HL-3040CN', seriesId: 'hl', seriesName: 'HL Series (Laser Printer)' },
                 { id: 'hl-3070cw', name: 'HL-3070CW', fullName: 'Brother HL-3070CW', seriesId: 'hl', seriesName: 'HL Series (Laser Printer)' },
                 { id: 'hl-4040cn', name: 'HL-4040CN', fullName: 'Brother HL-4040CN', seriesId: 'hl', seriesName: 'HL Series (Laser Printer)' },
-                { id: 'hl-4070cdw', name: 'HL-4070CDW', fullName: 'Brother HL-4070CDW', seriesId: 'hl', seriesName: 'HL Series (Laser Printer)' },
-                // PT Series (P-touch Label Printer)
-                { id: 'pt-1010', name: 'PT-1010', fullName: 'Brother PT-1010', seriesId: 'pt', seriesName: 'PT Series (P-touch Label)' },
-                { id: 'pt-1280', name: 'PT-1280', fullName: 'Brother PT-1280', seriesId: 'pt', seriesName: 'PT Series (P-touch Label)' },
-                { id: 'pt-1290', name: 'PT-1290', fullName: 'Brother PT-1290', seriesId: 'pt', seriesName: 'PT Series (P-touch Label)' },
-                { id: 'pt-1880', name: 'PT-1880', fullName: 'Brother PT-1880', seriesId: 'pt', seriesName: 'PT Series (P-touch Label)' },
-                { id: 'pt-2100', name: 'PT-2100', fullName: 'Brother PT-2100', seriesId: 'pt', seriesName: 'PT Series (P-touch Label)' },
-                { id: 'pt-2700', name: 'PT-2700', fullName: 'Brother PT-2700', seriesId: 'pt', seriesName: 'PT Series (P-touch Label)' },
-                { id: 'pt-d210', name: 'PT-D210', fullName: 'Brother PT-D210', seriesId: 'pt', seriesName: 'PT Series (P-touch Label)' },
-                { id: 'pt-d450', name: 'PT-D450', fullName: 'Brother PT-D450', seriesId: 'pt', seriesName: 'PT Series (P-touch Label)' },
-                { id: 'pt-d600', name: 'PT-D600', fullName: 'Brother PT-D600', seriesId: 'pt', seriesName: 'PT Series (P-touch Label)' },
-                { id: 'pt-e550w', name: 'PT-E550W', fullName: 'Brother PT-E550W', seriesId: 'pt', seriesName: 'PT Series (P-touch Label)' },
-                { id: 'pt-h110', name: 'PT-H110', fullName: 'Brother PT-H110', seriesId: 'pt', seriesName: 'PT Series (P-touch Label)' },
-                { id: 'pt-p700', name: 'PT-P700', fullName: 'Brother PT-P700', seriesId: 'pt', seriesName: 'PT Series (P-touch Label)' },
-                { id: 'pt-p750w', name: 'PT-P750W', fullName: 'Brother PT-P750W', seriesId: 'pt', seriesName: 'PT Series (P-touch Label)' },
-                { id: 'pt-p900w', name: 'PT-P900W', fullName: 'Brother PT-P900W', seriesId: 'pt', seriesName: 'PT Series (P-touch Label)' },
-                { id: 'pt-p950nw', name: 'PT-P950NW', fullName: 'Brother PT-P950NW', seriesId: 'pt', seriesName: 'PT Series (P-touch Label)' },
-                // QL Series (Label Printer)
-                { id: 'ql-500', name: 'QL-500', fullName: 'Brother QL-500', seriesId: 'ql', seriesName: 'QL Series (Label Printer)' },
-                { id: 'ql-550', name: 'QL-550', fullName: 'Brother QL-550', seriesId: 'ql', seriesName: 'QL Series (Label Printer)' },
-                { id: 'ql-570', name: 'QL-570', fullName: 'Brother QL-570', seriesId: 'ql', seriesName: 'QL Series (Label Printer)' },
-                { id: 'ql-580n', name: 'QL-580N', fullName: 'Brother QL-580N', seriesId: 'ql', seriesName: 'QL Series (Label Printer)' },
-                { id: 'ql-600', name: 'QL-600', fullName: 'Brother QL-600', seriesId: 'ql', seriesName: 'QL Series (Label Printer)' },
-                { id: 'ql-700', name: 'QL-700', fullName: 'Brother QL-700', seriesId: 'ql', seriesName: 'QL Series (Label Printer)' },
-                { id: 'ql-710w', name: 'QL-710W', fullName: 'Brother QL-710W', seriesId: 'ql', seriesName: 'QL Series (Label Printer)' },
-                { id: 'ql-720nw', name: 'QL-720NW', fullName: 'Brother QL-720NW', seriesId: 'ql', seriesName: 'QL Series (Label Printer)' },
-                { id: 'ql-800', name: 'QL-800', fullName: 'Brother QL-800', seriesId: 'ql', seriesName: 'QL Series (Label Printer)' },
-                { id: 'ql-810w', name: 'QL-810W', fullName: 'Brother QL-810W', seriesId: 'ql', seriesName: 'QL Series (Label Printer)' },
-                { id: 'ql-820nwb', name: 'QL-820NWB', fullName: 'Brother QL-820NWB', seriesId: 'ql', seriesName: 'QL Series (Label Printer)' },
-                { id: 'ql-1050', name: 'QL-1050', fullName: 'Brother QL-1050', seriesId: 'ql', seriesName: 'QL Series (Label Printer)' },
-                { id: 'ql-1060n', name: 'QL-1060N', fullName: 'Brother QL-1060N', seriesId: 'ql', seriesName: 'QL Series (Label Printer)' },
-                { id: 'ql-1100', name: 'QL-1100', fullName: 'Brother QL-1100', seriesId: 'ql', seriesName: 'QL Series (Label Printer)' },
-                { id: 'ql-1110nwb', name: 'QL-1110NWB', fullName: 'Brother QL-1110NWB', seriesId: 'ql', seriesName: 'QL Series (Label Printer)' },
-                // TD Series (Thermal Direct)
-                { id: 'td-2020', name: 'TD-2020', fullName: 'Brother TD-2020', seriesId: 'td', seriesName: 'TD Series (Thermal Direct)' },
-                { id: 'td-2120n', name: 'TD-2120N', fullName: 'Brother TD-2120N', seriesId: 'td', seriesName: 'TD Series (Thermal Direct)' },
-                { id: 'td-2130n', name: 'TD-2130N', fullName: 'Brother TD-2130N', seriesId: 'td', seriesName: 'TD Series (Thermal Direct)' },
-                { id: 'td-4000', name: 'TD-4000', fullName: 'Brother TD-4000', seriesId: 'td', seriesName: 'TD Series (Thermal Direct)' },
-                { id: 'td-4100n', name: 'TD-4100N', fullName: 'Brother TD-4100N', seriesId: 'td', seriesName: 'TD Series (Thermal Direct)' },
-                { id: 'td-4410d', name: 'TD-4410D', fullName: 'Brother TD-4410D', seriesId: 'td', seriesName: 'TD Series (Thermal Direct)' },
-                { id: 'td-4420dn', name: 'TD-4420DN', fullName: 'Brother TD-4420DN', seriesId: 'td', seriesName: 'TD Series (Thermal Direct)' },
-                { id: 'td-4520dn', name: 'TD-4520DN', fullName: 'Brother TD-4520DN', seriesId: 'td', seriesName: 'TD Series (Thermal Direct)' },
-                { id: 'td-4550dnwb', name: 'TD-4550DNWB', fullName: 'Brother TD-4550DNWB', seriesId: 'td', seriesName: 'TD Series (Thermal Direct)' }
+                { id: 'hl-4070cdw', name: 'HL-4070CDW', fullName: 'Brother HL-4070CDW', seriesId: 'hl', seriesName: 'HL Series (Laser Printer)' }
             ],
             canon: [
                 // PIXMA Series
@@ -629,7 +590,11 @@
         // The shop page will find ALL compatible products (genuine + compatible)
         // Brand is included for display purposes but doesn't limit the search
         const searchTerm = selectedPrinterName;
-        window.location.href = `/html/shop.html?printer_model=${encodeURIComponent(searchTerm)}&printer_brand=${encodeURIComponent(selectedBrand)}`;
+        let url = `/html/shop?printer_model=${encodeURIComponent(searchTerm)}&printer_brand=${encodeURIComponent(selectedBrand)}`;
+        if (selectedModel) {
+            url += `&printer_slug=${encodeURIComponent(selectedModel)}`;
+        }
+        window.location.href = url;
     }
 
     // ============================================

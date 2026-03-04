@@ -25,24 +25,23 @@ const Products = {
     getProductImageHTML(product) {
         const color = product.color || this.detectColorFromName(product.name);
         const colorStyle = color ? this.getColorStyle(color) : null;
+        const imageUrl = typeof storageUrl === 'function' ? storageUrl(product.image_url) : product.image_url;
 
-        if (product.image_url) {
-            // Has image URL - use it with onerror fallback
+        if (imageUrl && imageUrl !== '/assets/images/placeholder-product.svg') {
+            // Has image URL - use it with error fallback (listeners attached after DOM insertion)
             if (colorStyle) {
-                // Fallback to color block on error
-                return `<img src="${Security.escapeAttr(product.image_url)}"
+                return `<img src="${Security.escapeAttr(imageUrl)}"
                              alt="${Security.escapeAttr(product.name)}"
                              class="product-card__image"
                              loading="lazy"
-                             onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
+                             data-fallback="color-block">
                         <div class="product-card__color-block" style="${colorStyle}; display: none;"></div>`;
             } else {
-                // Fallback to placeholder on error
-                return `<img src="${Security.escapeAttr(product.image_url)}"
+                return `<img src="${Security.escapeAttr(imageUrl)}"
                              alt="${Security.escapeAttr(product.name)}"
                              class="product-card__image"
                              loading="lazy"
-                             onerror="this.onerror=null; this.src='/assets/images/placeholder-product.svg';">`;
+                             data-fallback="placeholder">`;
             }
         } else if (colorStyle) {
             // No image but has color - show color block
@@ -64,10 +63,11 @@ const Products = {
     renderCard(product) {
         const stockStatus = getStockStatus(product);
         const sourceBadge = getSourceBadge(product.source);
+        const resolvedImage = typeof storageUrl === 'function' ? storageUrl(product.image_url) : (product.image_url || '');
 
         return `
             <article class="product-card" data-product-id="${Security.escapeAttr(product.id)}" data-sku="${Security.escapeAttr(product.sku)}">
-                <a href="/html/product/index.html?sku=${Security.escapeAttr(product.sku)}" class="product-card__link">
+                <a href="/html/product/?sku=${Security.escapeAttr(product.sku)}" class="product-card__link">
                     <div class="product-card__image-wrapper">
                         ${this.getProductImageHTML(product)}
                         ${sourceBadge ? `<span class="product-card__badge ${sourceBadge.class}">${sourceBadge.text}</span>` : ''}
@@ -78,17 +78,17 @@ const Products = {
                         <h3 class="product-card__title">${Security.escapeHtml(product.name)}</h3>
                         ${product.color ? `<p class="product-card__color">${Security.escapeHtml(product.color)}</p>` : ''}
                         ${product.page_yield ? `<p class="product-card__yield">${Security.escapeHtml(product.page_yield)}</p>` : ''}
-                        <p class="product-card__price">${formatPrice(product.retail_price)}</p>
+                        <p class="product-card__price">${product.retail_price == null ? 'Price unavailable' : formatPrice(product.retail_price)}</p>
                         <p class="product-card__stock ${stockStatus.class}">${stockStatus.text}</p>
                     </div>
                 </a>
                 <button class="product-card__add-btn btn btn--primary"
-                        ${!product.in_stock ? 'disabled' : ''}
+                        ${!product.in_stock || product.retail_price == null ? 'disabled' : ''}
                         data-product-id="${Security.escapeAttr(product.id)}"
                         data-product-sku="${Security.escapeAttr(product.sku)}"
                         data-product-name="${Security.escapeAttr(product.name)}"
                         data-product-price="${Security.escapeAttr(product.retail_price)}"
-                        data-product-image="${Security.escapeAttr(product.image_url || '')}"
+                        data-product-image="${Security.escapeAttr(resolvedImage)}"
                         data-product-color="${Security.escapeAttr(product.color || this.detectColorFromName(product.name) || '')}">
                     ${product.in_stock ? 'Add to Cart' : 'Out of Stock'}
                 </button>
@@ -220,7 +220,7 @@ const Products = {
         try {
             const response = await API.getProducts(filters);
 
-            if (response.success && response.data) {
+            if (response.ok && response.data) {
                 const { products, pagination } = response.data;
 
                 // Render products
@@ -239,17 +239,19 @@ const Products = {
                     resultsCount.textContent = `Showing ${products.length} of ${pagination.total} products`;
                 }
 
-                // Bind add to cart buttons
+                // Bind image fallbacks and add to cart buttons
+                this.bindImageFallbacks(container);
                 this.bindAddToCartEvents(container);
             }
         } catch (error) {
-            console.error('Error loading products:', error);
+            DebugLog.error('Error loading products:', error);
             container.innerHTML = `
                 <div class="products-error">
                     <p>Failed to load products. Please try again.</p>
-                    <button class="btn btn--secondary" onclick="location.reload()">Retry</button>
+                    <button class="btn btn--secondary" data-action="reload">Retry</button>
                 </div>
             `;
+            container.querySelector('[data-action="reload"]')?.addEventListener('click', () => location.reload());
         }
     },
 
@@ -266,6 +268,24 @@ const Products = {
                     document.getElementById('products-grid')?.scrollIntoView({ behavior: 'smooth' });
                 }
             });
+        });
+    },
+
+    /**
+     * Bind image error fallback handlers (replaces inline onerror)
+     */
+    bindImageFallbacks(container) {
+        container.querySelectorAll('img[data-fallback]').forEach(img => {
+            img.addEventListener('error', function() {
+                if (this.dataset.fallback === 'color-block') {
+                    this.style.display = 'none';
+                    const sibling = this.nextElementSibling;
+                    if (sibling) sibling.style.display = 'flex';
+                } else if (this.dataset.fallback === 'placeholder') {
+                    this.removeAttribute('data-fallback');
+                    this.src = '/assets/images/placeholder-product.svg';
+                }
+            }, { once: true });
         });
     },
 
@@ -315,17 +335,18 @@ const Products = {
         try {
             const response = await API.getProducts({ limit: 8 });
 
-            if (response.success && response.data?.products) {
+            if (response.ok && response.data?.products) {
                 // Filter for featured if field exists, otherwise just use first 4
                 let products = response.data.products;
                 const featured = products.filter(p => p.is_featured);
                 products = featured.length >= 4 ? featured.slice(0, 4) : products.slice(0, 4);
 
                 container.innerHTML = products.map(p => this.renderCard(p)).join('');
+                this.bindImageFallbacks(container);
                 this.bindAddToCartEvents(container);
             }
         } catch (error) {
-            console.error('Error loading featured products:', error);
+            DebugLog.error('Error loading featured products:', error);
         }
     },
 
@@ -336,12 +357,12 @@ const Products = {
     async loadProductDetail(sku) {
         try {
             const response = await API.getProduct(sku);
-            if (response.success && response.data) {
+            if (response.ok && response.data) {
                 return response.data;
             }
             return null;
         } catch (error) {
-            console.error('Error loading product:', error);
+            DebugLog.error('Error loading product:', error);
             return null;
         }
     }

@@ -39,7 +39,11 @@ const PrinterData = {
             { prefix: 'MW', name: 'MW Series (Mobile Printer)' },
             { prefix: 'TJ', name: 'TJ Series (Industrial Printer)' },
             { prefix: 'DS', name: 'DS Series (Document Scanner)' },
-            { prefix: 'VC', name: 'VC Series (Color Laser)' }
+            { prefix: 'VC', name: 'VC Series (Color Laser)' },
+            // Alternate DB formats
+            { prefix: 'P-TOUCH', name: 'PT Series (P-touch Label)' },
+            { prefix: 'GL', name: 'GL Series (Garment Label)' },
+            { prefix: 'DPC', name: 'DCP Series (Digital Copier)' }
         ],
         canon: [
             // Full name prefixes (check first)
@@ -100,7 +104,19 @@ const PrinterData = {
             { prefix: 'BJC', name: 'BJC Series (BubbleJet)' },
             { prefix: 'BJ', name: 'BJ Series (BubbleJet)' },
             { prefix: 'S', name: 'S Series (Photo)' },
-            { prefix: 'CanoScan', name: 'CanoScan Series (Scanner)' }
+            { prefix: 'CanoScan', name: 'CanoScan Series (Scanner)' },
+            // Alternate DB formats
+            { prefix: 'FAX', name: 'FAX Series' },
+            { prefix: 'FAXPHONE', name: 'FAXPHONE Series' },
+            { prefix: 'LASER SHOT LBP', name: 'LaserShot LBP Series' },
+            { prefix: 'LASER SHOT', name: 'LaserShot Series' },
+            { prefix: 'LASERCLASS', name: 'LaserClass Series' },
+            { prefix: 'MULTIPASS', name: 'MultiPASS Series' },
+            { prefix: 'IMAGE PROGRAF', name: 'imagePROGRAF Series' },
+            { prefix: 'PV', name: 'PV Series (Mini Photo)' },
+            { prefix: 'I', name: 'i Series (Inkjet)' },
+            { prefix: 'L', name: 'L Series (Laser)' },
+            { prefix: 'P', name: 'P Series (Laser)' }
         ],
         epson: [
             // Full name prefixes
@@ -154,7 +170,12 @@ const PrinterData = {
             { prefix: 'BX', name: 'BX Series (Office)' },
             { prefix: 'DX', name: 'DX Series' },
             { prefix: 'T', name: 'T Series' },
-            { prefix: 'C', name: 'C Series (Stylus Color)' }
+            { prefix: 'C', name: 'C Series (Stylus Color)' },
+            // Dot matrix / other series
+            { prefix: 'FX', name: 'FX Series (Dot Matrix)' },
+            { prefix: 'LQ', name: 'LQ Series (Dot Matrix)' },
+            { prefix: 'LX', name: 'LX Series (Dot Matrix)' },
+            { prefix: 'M', name: 'M Series (Mono)' }
         ],
         hp: [
             // Full name prefixes
@@ -225,7 +246,23 @@ const PrinterData = {
             { prefix: '6', name: 'OfficeJet 6000 Series' },
             { prefix: '7', name: 'OfficeJet 7000 Series' },
             { prefix: '8', name: 'OfficeJet Pro 8000 Series' },
-            { prefix: '9', name: 'OfficeJet Pro 9000 Series' }
+            { prefix: '9', name: 'OfficeJet Pro 9000 Series' },
+            // Alternate DB formats
+            { prefix: 'Business Inkjet', name: 'Business Inkjet Series' },
+            { prefix: 'Color Copier', name: 'Color Copier Series' },
+            { prefix: 'Colour Copier', name: 'Color Copier Series' },
+            { prefix: 'Color Printer', name: 'Color LaserJet Series' },
+            { prefix: 'Colour Printer', name: 'Color LaserJet Series' },
+            { prefix: 'Colour LaserJet', name: 'Color LaserJet Series' },
+            { prefix: 'HPDeskJet', name: 'DeskJet Series' },
+            { prefix: 'HPDeskjet', name: 'DeskJet Series' },
+            { prefix: 'Tango', name: 'Tango Series' },
+            { prefix: 'AMP', name: 'AMP Series' },
+            { prefix: 'T21', name: 'DesignJet T Series' },
+            { prefix: 'T23', name: 'DesignJet T Series' },
+            { prefix: 'T25', name: 'DesignJet T Series' },
+            { prefix: 'T63', name: 'DesignJet T Series' },
+            { prefix: 'T65', name: 'DesignJet T Series' }
         ],
         samsung: [
             // Full name prefixes
@@ -281,7 +318,18 @@ const PrinterData = {
             { prefix: 'M26', name: 'Xpress M26 Series' },
             { prefix: 'M28', name: 'Xpress M28 Series' },
             { prefix: 'C48', name: 'Xpress C48 Series' },
-            { prefix: 'C43', name: 'Xpress C43 Series' }
+            { prefix: 'C43', name: 'Xpress C43 Series' },
+            // Alternate DB formats
+            { prefix: 'MultiXpress', name: 'MultiXpress Series' },
+            { prefix: 'MULTIXPRESS', name: 'MultiXpress Series' },
+            { prefix: 'X7', name: 'MultiXpress X Series' },
+            { prefix: 'X3', name: 'MultiXpress X Series' },
+            { prefix: 'M30', name: 'ProXpress M Series' },
+            { prefix: 'M33', name: 'Xpress M Series' },
+            { prefix: 'M40', name: 'ProXpress M Series' },
+            { prefix: 'C41', name: 'Xpress C Series' },
+            { prefix: 'C46', name: 'Xpress C Series' },
+            { prefix: 'CF', name: 'CF Series (Fax)' }
         ],
         lexmark: [
             // Current series (most specific first)
@@ -379,9 +427,11 @@ const PrinterData = {
             { prefix: 'ES', name: 'ES Series (Executive)' },
             { prefix: 'Pro9', name: 'Pro9000 Series' },
             { prefix: 'Pro8', name: 'Pro8000 Series' },
+            { prefix: 'Pro1', name: 'Pro1000 Series (Label)' },
             { prefix: 'Pro', name: 'Pro Series' },
-            // Label printers
-            { prefix: 'Pro1', name: 'Pro1000 Series (Label)' }
+            // Dot matrix series
+            { prefix: 'Microline', name: 'Microline Series (Dot Matrix)' },
+            { prefix: 'MICROLINE', name: 'Microline Series (Dot Matrix)' }
         ],
         'fuji-xerox': [
             // DocuPrint series (most specific first)
@@ -448,7 +498,28 @@ const PrinterData = {
             // Short form prefixes
             { prefix: 'CP', name: 'DocuPrint CP Series (Color)' },
             { prefix: 'CM', name: 'DocuPrint CM Series (Color MFP)' },
-            { prefix: 'SC', name: 'DocuCentre SC Series' }
+            { prefix: 'SC', name: 'DocuCentre SC Series' },
+            // Alternate DB formats (roman numeral short forms for DocuCentre)
+            { prefix: 'ColorQube', name: 'ColorQube Series' },
+            { prefix: 'COLORQUBE', name: 'ColorQube Series' },
+            { prefix: 'COLOURQUBE', name: 'ColorQube Series' },
+            { prefix: 'VII C', name: 'DocuCentre-VII Series' },
+            { prefix: 'VII', name: 'DocuCentre-VII Series' },
+            { prefix: 'VI C', name: 'DocuCentre-VI Series' },
+            { prefix: 'VI', name: 'DocuCentre-VI Series' },
+            { prefix: 'V C', name: 'DocuCentre-V Series' },
+            { prefix: 'V', name: 'DocuCentre-V Series' },
+            { prefix: 'IV C', name: 'DocuCentre-IV Series' },
+            { prefix: 'IV', name: 'DocuCentre-IV Series' },
+            { prefix: 'III C', name: 'DocuCentre Series' },
+            { prefix: 'III', name: 'DocuCentre Series' },
+            { prefix: 'DCC', name: 'DocuCentre Series' },
+            { prefix: 'DP', name: 'DocuPrint Series' },
+            { prefix: 'WC', name: 'WorkCentre Series' },
+            { prefix: 'CQ', name: 'ColorQube Series' },
+            { prefix: 'COLOUR', name: 'Colour Series' },
+            { prefix: 'C', name: 'DocuCentre C Series' },
+            { prefix: '700', name: 'Digital Color Press Series' }
         ],
         kyocera: [
             // ECOSYS series (most specific first)
@@ -479,7 +550,7 @@ const PrinterData = {
             { prefix: 'ECOSYS M20', name: 'ECOSYS M2000 Series (Mono MFP)' },
             { prefix: 'ECOSYS M', name: 'ECOSYS M Series (MFP)' },
             { prefix: 'ECOSYS', name: 'ECOSYS Series' },
-            // TASKalfa series
+            // TASKalfa series (includes TASKALPHA alternate spelling from database)
             { prefix: 'TASKalfa 80', name: 'TASKalfa 8000 Series' },
             { prefix: 'TASKalfa 70', name: 'TASKalfa 7000 Series' },
             { prefix: 'TASKalfa 60', name: 'TASKalfa 6000 Series' },
@@ -491,6 +562,17 @@ const PrinterData = {
             { prefix: 'TASKalfa 25', name: 'TASKalfa 2500 Series' },
             { prefix: 'TASKalfa 20', name: 'TASKalfa 2000 Series' },
             { prefix: 'TASKalfa', name: 'TASKalfa Series' },
+            { prefix: 'TASKALPHA 80', name: 'TASKalfa 8000 Series' },
+            { prefix: 'TASKALPHA 70', name: 'TASKalfa 7000 Series' },
+            { prefix: 'TASKALPHA 60', name: 'TASKalfa 6000 Series' },
+            { prefix: 'TASKALPHA 55', name: 'TASKalfa 5500 Series' },
+            { prefix: 'TASKALPHA 50', name: 'TASKalfa 5000 Series' },
+            { prefix: 'TASKALPHA 40', name: 'TASKalfa 4000 Series' },
+            { prefix: 'TASKALPHA 35', name: 'TASKalfa 3500 Series' },
+            { prefix: 'TASKALPHA 30', name: 'TASKalfa 3000 Series' },
+            { prefix: 'TASKALPHA 25', name: 'TASKalfa 2500 Series' },
+            { prefix: 'TASKALPHA 20', name: 'TASKalfa 2000 Series' },
+            { prefix: 'TASKALPHA', name: 'TASKalfa Series' },
             // Legacy FS series
             { prefix: 'FS-C8', name: 'FS-C8000 Series (Color)' },
             { prefix: 'FS-C5', name: 'FS-C5000 Series (Color)' },
@@ -549,6 +631,96 @@ const PrinterData = {
     },
 
     /**
+     * Series name keywords indicating non-ink/toner devices
+     */
+    NON_INK_SERIES_KEYWORDS: [
+        'Label', 'P-touch', 'Thermal Direct', 'Document Scanner',
+        'Portable Printer', 'PocketJet', 'Mobile Printer',
+        'Industrial Printer', 'Garment', 'Dot Matrix', 'Scanner',
+        'Compact Photo', 'Mini Photo', 'SELPHY'
+    ],
+
+    /**
+     * Brand-specific model prefixes for non-ink devices (catches "Other Models" entries)
+     */
+    NON_INK_MODEL_PREFIXES: {
+        brother: ['PT-', 'PT ', 'P-TOUCH', 'QL-', 'QL ', 'TD-', 'TD ',
+                  'ADS-', 'DS-', 'RJ-', 'PJ-', 'MW-', 'TJ-', 'GL-',
+                  'BF', 'RL', 'SC-'],
+        canon: ['CANOSCAN', 'SELPHY', 'PV-', 'PV '],
+        epson: ['FX-', 'FX ', 'LQ-', 'LQ ', 'LX-', 'LX ',
+                'PLQ-', 'PLQ ', 'TM-', 'TM '],
+        hp: ['SCANJET', 'SPROCKET'],
+        oki: ['MICROLINE', 'ML-', 'ML ', 'PRO1']
+    },
+
+    /**
+     * Brand-specific regex patterns for non-ink model names that use
+     * non-standard naming (e.g., numeric + suffix instead of series prefix)
+     */
+    NON_INK_MODEL_REGEX: {
+        brother: [
+            /^\d+TD$/i,    // Thermal direct (e.g., 650TD)
+            /^\d+B$/i,     // Stamp creators (e.g., 2020B, 1060B)
+            /^\d+PC$/i     // P-touch stored without prefix (e.g., 1230PC)
+        ]
+    },
+
+    /**
+     * Model name keywords (brand-agnostic, for remaining edge cases)
+     */
+    NON_INK_MODEL_KEYWORDS: [
+        'label maker', 'label printer', 'label writer',
+        'thermal printer', 'thermal direct', 'dot matrix', 'scanner'
+    ],
+
+    /**
+     * Check if a printer model uses ink or toner cartridges.
+     * Returns true for ink/toner devices, false for label makers, scanners, etc.
+     */
+    isInkToner(seriesName, modelName, brand) {
+        const seriesUpper = (seriesName || '').toUpperCase();
+        const modelUpper = (modelName || '').toUpperCase();
+
+        // Check series name keywords
+        for (const keyword of this.NON_INK_SERIES_KEYWORDS) {
+            if (seriesUpper.includes(keyword.toUpperCase())) {
+                return false;
+            }
+        }
+
+        // Check brand-specific model prefixes
+        const prefixes = this.NON_INK_MODEL_PREFIXES[brand];
+        if (prefixes) {
+            for (const prefix of prefixes) {
+                if (modelUpper.startsWith(prefix.toUpperCase())) {
+                    return false;
+                }
+            }
+        }
+
+        // Check brand-specific regex patterns (for numeric+suffix model names)
+        const regexPatterns = this.NON_INK_MODEL_REGEX[brand];
+        if (regexPatterns) {
+            for (const pattern of regexPatterns) {
+                if (pattern.test(modelName)) {
+                    return false;
+                }
+            }
+        }
+
+        // Check model name keywords
+        const modelLower = (modelName || '').toLowerCase();
+        for (const keyword of this.NON_INK_MODEL_KEYWORDS) {
+            if (modelLower.includes(keyword)) {
+                return false;
+            }
+        }
+
+        return true;
+    },
+
+    /**
      * Group printers by series
      */
     groupPrintersBySeries(printers) {
@@ -579,17 +751,35 @@ const PrinterData = {
     },
 
     /**
+     * Normalize a string for fuzzy prefix matching.
+     * Handles: spaces vs hyphens, compound words, COLOUR/COLOR spelling
+     */
+    _normalize(s) {
+        return s.toUpperCase().replace(/[-\s]+/g, '').replace(/COLOUR/g, 'COLOR');
+    },
+
+    /**
      * Get series for a printer model name
      */
     getSeriesForModel(modelName, brand) {
         const patterns = this.SERIES_PATTERNS[brand] || [];
+        const toSeriesId = name => name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
+
+        // First pass: exact case-insensitive prefix match
         for (const pattern of patterns) {
             if (modelName.toUpperCase().startsWith(pattern.prefix.toUpperCase())) {
-                // Generate seriesId from series NAME to avoid duplicates
-                const seriesId = pattern.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
-                return { id: seriesId, name: pattern.name };
+                return { id: toSeriesId(pattern.name), name: pattern.name };
             }
         }
+
+        // Second pass: normalized match (handles spaces vs hyphens, compound words, COLOUR/COLOR)
+        const normalizedModel = this._normalize(modelName);
+        for (const pattern of patterns) {
+            if (normalizedModel.startsWith(this._normalize(pattern.prefix))) {
+                return { id: toSeriesId(pattern.name), name: pattern.name };
+            }
+        }
+
         return { id: 'other', name: 'Other Models' };
     }
 };

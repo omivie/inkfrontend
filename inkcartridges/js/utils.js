@@ -215,11 +215,55 @@ function debounce(func, wait = 300) {
 }
 
 
+/**
+ * STORAGE URL UTILITY
+ * ===================
+ */
+
+/**
+ * Resolve a Supabase Storage relative path to a full URL.
+ * - Falsy path → placeholder image
+ * - Already absolute (http/https) → return as-is
+ * - Starts with "/" → local path, return as-is
+ * - Otherwise → prepend Supabase Storage public URL
+ *
+ * @param {string} path - Relative or absolute image path
+ * @returns {string} Full URL or placeholder
+ */
+function storageUrl(path) {
+    if (!path) return '/assets/images/placeholder-product.svg';
+    if (path.startsWith('http')) return path;
+    if (path.startsWith('/')) return path;
+    const baseUrl = typeof Config !== 'undefined' ? Config.SUPABASE_URL : '';
+    return `${baseUrl}/storage/v1/object/public/public-assets/${path}`;
+}
+
+
+/**
+ * DEBUG LOGGER
+ * ============
+ * Conditional logger that only outputs in development (localhost).
+ * Prevents information leakage in production.
+ */
+const DebugLog = {
+    _isDev: typeof window !== 'undefined' && (
+        window.location.hostname === 'localhost' ||
+        window.location.hostname === '127.0.0.1'
+    ),
+    log(...args) { if (this._isDev) console.log(...args); },
+    warn(...args) { if (this._isDev) console.warn(...args); },
+    error(...args) { if (this._isDev) console.error(...args); },
+    info(...args) { if (this._isDev) console.info(...args); }
+};
+window.DebugLog = DebugLog;
+
+
 // Export for module use (if needed in future)
 if (typeof module !== 'undefined' && module.exports) {
     module.exports = {
         $, $$, on,
         getStorage, setStorage,
-        debounce
+        debounce,
+        storageUrl
     };
 }

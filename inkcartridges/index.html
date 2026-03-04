@@ -2,29 +2,11 @@
 <html lang="en-NZ">
 <head>
     <meta charset="UTF-8">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.jsdelivr.net https://js.stripe.com https://www.googletagmanager.com https://challenges.cloudflare.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://fonts.gstatic.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' https: data:; connect-src 'self' https://ink-backend-zaeq.onrender.com https://*.supabase.co https://*.stripe.com https://*.google-analytics.com https://cdn.jsdelivr.net https://challenges.cloudflare.com; frame-ancestors 'self'; frame-src https://js.stripe.com https://challenges.cloudflare.com;">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>InkCartridges.co.nz</title>
-    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-    <script>
-        // Check if this is an auth callback (has tokens in URL hash)
-        const hashParams = new URLSearchParams(window.location.hash.substring(1));
-
-        if (hashParams.get('access_token') || hashParams.get('type')) {
-            // Check what type of callback this is
-            const type = hashParams.get('type');
-
-            if (type === 'recovery') {
-                // Password reset callback - redirect to reset password page
-                window.location.href = '/html/account/reset-password.html' + window.location.hash;
-            } else {
-                // Other auth callback (signup, magiclink) - redirect to login page
-                window.location.href = '/html/account/login.html' + window.location.hash;
-            }
-        } else {
-            // Normal visit - redirect to main site
-            window.location.href = '/html/index.html';
-        }
-    </script>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.98.0" integrity="sha384-Sm2s7OXxsAMTyJ4iIyRBgVpeGUvMPk2lRQnnZhE78Wej7oggIoolKt+SCt0XJbUB" crossorigin="anonymous"></script>
+    <script src="/js/auth-redirect.js"></script>
 </head>
 <body>
     <p>Redirecting...</p>

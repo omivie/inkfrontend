@@ -130,12 +130,56 @@ function initMegaPanels() {
  */
 
 function initSearch() {
-    const searchForm = $('.search-form');
-    const searchInput = $('#search-input');
+    const searchForms = $$('.search-form');
+    if (!searchForms.length) return;
 
-    if (!searchForm || !searchInput) return;
+    searchForms.forEach(function(searchForm) {
+        const searchInput = searchForm.querySelector('input[type="search"]');
+        if (!searchInput) return;
 
-    // Create autocomplete dropdown
+        // Only apply expand/overlay animation for forms inside .primary-nav
+        const primaryNav = searchForm.closest('.primary-nav');
+        if (primaryNav) {
+            const searchWrapper = searchForm.closest('.search-wrapper');
+            // Expand the outermost element (wrapper if present, otherwise form itself)
+            const expandTarget = searchWrapper || searchForm;
+
+            searchInput.addEventListener('focus', function() {
+                expandTarget.classList.add('is-expanded');
+                primaryNav.classList.add('search-active');
+            });
+
+            document.addEventListener('click', function(e) {
+                if (!expandTarget.contains(e.target)) {
+                    expandTarget.classList.remove('is-expanded');
+                    primaryNav.classList.remove('search-active');
+                }
+            });
+        }
+
+        // Autocomplete: use SmartSearch if loaded, else basic fallback
+        if (typeof SmartSearch !== 'undefined') {
+            SmartSearch.init(searchForm, searchInput);
+        } else {
+            initBasicAutocomplete(searchForm, searchInput);
+        }
+
+        // Handle form submission
+        searchForm.addEventListener('submit', function(e) {
+            e.preventDefault();
+            const query = searchInput.value.trim();
+            if (query) {
+                window.location.href = `/html/shop?search=${encodeURIComponent(query)}`;
+            }
+        });
+    });
+}
+
+/**
+ * Basic autocomplete fallback (original implementation)
+ * Used when search.js / SmartSearch is not loaded.
+ */
+function initBasicAutocomplete(searchForm, searchInput) {
     let dropdown = searchForm.querySelector('.search-autocomplete');
     if (!dropdown) {
         dropdown = document.createElement('div');
@@ -148,10 +192,8 @@ function initSearch() {
     let debounceTimer = null;
     let selectedIndex = -1;
 
-    // Handle input changes
     searchInput.addEventListener('input', function() {
         const query = this.value.trim();
-
         clearTimeout(debounceTimer);
 
         if (query.length < 2) {
@@ -162,10 +204,8 @@ function initSearch() {
         debounceTimer = setTimeout(() => fetchSuggestions(query), 300);
     });
 
-    // Fetch autocomplete suggestions
     async function fetchSuggestions(query) {
         try {
-            // Fetch both products and printers
             const [autocompleteRes, printersRes] = await Promise.all([
                 API.getAutocomplete(query, 5),
                 API.searchPrinters(query)
@@ -173,8 +213,7 @@ function initSearch() {
 
             const suggestions = [];
 
-            // Add printer suggestions first (higher priority for printer searches)
-            if (printersRes.success && printersRes.data) {
+            if (printersRes.ok && printersRes.data) {
                 const printers = Array.isArray(printersRes.data) ? printersRes.data : printersRes.data.printers || [];
                 printers.slice(0, 4).forEach(printer => {
                     suggestions.push({
@@ -188,8 +227,7 @@ function initSearch() {
                 });
             }
 
-            // Add product suggestions
-            if (autocompleteRes.success && autocompleteRes.data) {
+            if (autocompleteRes.ok && autocompleteRes.data) {
                 const products = autocompleteRes.data.suggestions || autocompleteRes.data || [];
                 products.slice(0, 4).forEach(item => {
                     if (item.type === 'product' || item.sku) {
@@ -206,12 +244,11 @@ function initSearch() {
 
             renderSuggestions(suggestions, query);
         } catch (error) {
-            console.error('Search error:', error);
+            DebugLog.error('Search error:', error);
             hideDropdown();
         }
     }
 
-    // Render suggestions
     function renderSuggestions(suggestions, query) {
         if (suggestions.length === 0) {
             list.innerHTML = `
@@ -259,7 +296,6 @@ function initSearch() {
             }
         }).join('');
 
-        // Add click handlers
         list.querySelectorAll('.search-autocomplete__item').forEach(item => {
             item.addEventListener('click', () => selectItem(item));
         });
@@ -268,24 +304,18 @@ function initSearch() {
         selectedIndex = -1;
     }
 
-    // Select an item
     function selectItem(item) {
         const type = item.dataset.type;
 
         if (type === 'printer') {
-            // Navigate to printer products page
-            const slug = item.dataset.slug;
-            window.location.href = `/html/shop.html?printer=${slug}`;
+            window.location.href = `/html/shop?printer=${encodeURIComponent(item.dataset.slug)}`;
         } else if (type === 'product') {
-            // Navigate to product detail page
-            const sku = item.dataset.sku;
-            window.location.href = `/html/product/index.html?sku=${sku}`;
+            window.location.href = `/html/product/?sku=${item.dataset.sku}`;
         }
 
         hideDropdown();
     }
 
-    // Keyboard navigation
     searchInput.addEventListener('keydown', function(e) {
         const items = list.querySelectorAll('.search-autocomplete__item');
 
@@ -320,19 +350,9 @@ function initSearch() {
         selectedIndex = -1;
     }
 
-    // Hide dropdown when clicking outside
     document.addEventListener('click', function(e) {
         if (!searchForm.contains(e.target)) {
             hideDropdown();
-        }
-    });
-
-    // Handle form submission - search for products
-    searchForm.addEventListener('submit', function(e) {
-        e.preventDefault();
-        const query = searchInput.value.trim();
-        if (query) {
-            window.location.href = `/html/shop.html?search=${encodeURIComponent(query)}`;
         }
     });
 }

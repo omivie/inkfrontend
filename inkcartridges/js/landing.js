@@ -74,6 +74,17 @@
     const newsletterForm = document.querySelector('.newsletter__form');
 
     if (newsletterForm) {
+        // Init Turnstile if configured
+        let newsletterTurnstileToken = null;
+        const siteKey = typeof Config !== 'undefined' && Config.TURNSTILE_SITE_KEY;
+        if (siteKey && typeof turnstile !== 'undefined') {
+            turnstile.render('#newsletter-turnstile', {
+                sitekey: siteKey,
+                callback: (token) => { newsletterTurnstileToken = token; },
+                'expired-callback': () => { newsletterTurnstileToken = null; }
+            });
+        }
+
         newsletterForm.addEventListener('submit', async (e) => {
             e.preventDefault();
 
@@ -89,17 +100,26 @@
 
             try {
                 if (typeof API !== 'undefined' && API.subscribe) {
-                    await API.subscribe({ email: email, source: 'landing' });
+                    const payload = { email: email, source: 'landing' };
+                    if (newsletterTurnstileToken) payload.turnstile_token = newsletterTurnstileToken;
+                    await API.subscribe(payload);
                 }
 
                 if (typeof showToast === 'function') {
-                    showToast('Thanks for subscribing! Check your inbox.', 'success');
+                    showToast('Thank you for subscribing!', 'success');
                 }
                 emailInput.value = '';
-            } catch {
-                if (typeof showToast === 'function') {
-                    showToast('Could not subscribe. Please try again.', 'error');
+                newsletterTurnstileToken = null;
+                if (siteKey && typeof turnstile !== 'undefined') turnstile.reset('#newsletter-turnstile');
+            } catch (err) {
+                const msg = err.message || 'Could not subscribe. Please try again.';
+                if (msg.includes('temporarily unavailable')) {
+                    if (typeof showToast === 'function') showToast('Service temporarily unavailable. Please try again later.', 'error');
+                } else if (typeof showToast === 'function') {
+                    showToast(msg, 'error');
                 }
+                if (siteKey && typeof turnstile !== 'undefined') turnstile.reset('#newsletter-turnstile');
+                newsletterTurnstileToken = null;
             }
 
             submitBtn.textContent = originalText;

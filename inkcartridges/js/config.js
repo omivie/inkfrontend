@@ -17,6 +17,9 @@ const Config = {
     // Stripe publishable key (test mode)
     STRIPE_PUBLISHABLE_KEY: 'pk_test_51SmAli1IMIpvFmJcy0StpBZo5F83MhzeekzEzhpRP6jYcJml636Sbr0cUoMBfPZltAOENBqDKcnyipfpx7gc7sN000XINyIZw8',
 
+    // Cloudflare Turnstile site key (empty = Turnstile disabled, set when backend enables it)
+    TURNSTILE_SITE_KEY: '',
+
     // App settings
     ITEMS_PER_PAGE: 20,
     SEARCH_DEBOUNCE_MS: 300,
@@ -26,12 +29,9 @@ const Config = {
     LOCALE: 'en-NZ',
 
     // Business settings (loaded from server, these are fallback defaults)
+    // Shipping fees are now zone + weight + delivery-type based (see shipping.js)
     settings: {
         FREE_SHIPPING_THRESHOLD: 100,
-        SHIPPING_FEE_AUCKLAND: 7.95,
-        SHIPPING_FEE_NORTH_ISLAND: 9.95,
-        SHIPPING_FEE_SOUTH_ISLAND: 13.95,
-        HEAVY_SURCHARGE: 4.00,
         LOW_STOCK_THRESHOLD: 10,
         CRITICAL_STOCK_THRESHOLD: 2,
         GST_RATE: 0.15,
@@ -44,11 +44,14 @@ const Config = {
      * Call this early in app initialization
      */
     async loadSettings() {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 5000);
         try {
-            const response = await fetch(`${this.API_URL}/api/settings`);
+            const response = await fetch(`${this.API_URL}/api/settings`, { signal: controller.signal });
+            clearTimeout(timeoutId);
             if (response.ok) {
                 const data = await response.json();
-                if (data.success && data.data) {
+                if (data.ok && data.data) {
                     this.settings = {
                         ...this.settings,
                         ...data.data,
@@ -57,7 +60,8 @@ const Config = {
                 }
             }
         } catch (error) {
-            console.warn('Could not load settings from server, using defaults:', error.message);
+            clearTimeout(timeoutId);
+            DebugLog.warn('Could not load settings from server, using defaults:', error.message);
         }
         return this.settings;
     },

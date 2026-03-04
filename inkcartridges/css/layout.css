@@ -386,6 +386,7 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
+    position: relative;
 }
 
 .nav-menu {
@@ -526,15 +527,60 @@
     margin-left: auto;
     flex-shrink: 1;
     min-width: 200px;
+    transition: none;
+    z-index: 10;
+}
+
+/* Expanded state: stretch to full container width */
+.search-form.search-form--nav.is-expanded {
+    position: absolute;
+    right: 0;
+    left: 0;
+    width: 100%;
+    max-width: 100%;
+}
+
+/* Expanded state for wrapper: stretch wrapper to full container width, stay anchored */
+.search-wrapper.is-expanded {
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    width: 100%;
+    max-width: 100%;
+    display: flex;
+    align-items: center;
+}
+
+/* Dark overlay below expanded search */
+.primary-nav.search-active::after {
+    content: '';
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.35);
+    z-index: 5;
 }
 
 .search-form--nav .search-form__input {
-    padding: 0.5rem var(--spacing-4);
+    padding: 0.375rem var(--spacing-4);
     border: none;
     border-radius: var(--radius-md) 0 0 var(--radius-md);
     font-size: var(--font-size-base);
     background-color: var(--white-primary);
     color: var(--steel-900);
+    transition: none;
+}
+
+.search-form--nav .search-form__input:focus {
+    border: none;
+    box-shadow: none;
+    outline: none;
+    background-color: var(--white-primary);
+    transform: none;
 }
 
 .search-form--nav .search-form__input::placeholder {
@@ -542,7 +588,7 @@
 }
 
 .search-form--nav .search-form__button {
-    padding: 0.5rem var(--spacing-5);
+    padding: 0.375rem var(--spacing-5);
     border-radius: 0 var(--radius-md) var(--radius-md) 0;
     background-color: var(--yellow-primary);
     border-color: var(--yellow-primary);
@@ -553,6 +599,7 @@
     background-color: var(--yellow-dark);
     border-color: var(--yellow-dark);
 }
+
 
 /* Mega Menu Toggle Button */
 .nav-mega-toggle {
@@ -649,6 +696,13 @@
 .brands-mega__brand-logo--fuji-xerox { height: 24px; }
 .brands-mega__brand-logo--kyocera { height: 22px; }
 
+.brands-mega__brand-text {
+    font-size: var(--font-size-sm);
+    font-weight: var(--font-weight-bold);
+    color: var(--color-text-heading);
+    line-height: 29px;
+}
+
 /* Category links under each card */
 .brands-mega__card-links {
     display: flex;
@@ -698,6 +752,91 @@
     .brands-mega__cards {
         grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
         gap: var(--spacing-md);
+    }
+}
+
+
+/* ============================================
+   RIBBONS MEGA DROPDOWN
+   ============================================ */
+
+.ribbons-mega {
+    background: var(--color-background-alt);
+    border-bottom: 2px solid var(--color-border);
+    padding: var(--spacing-md) 0;
+}
+
+.ribbons-mega[hidden] {
+    display: none;
+}
+
+/* Button grid — 5 per row on desktop */
+.ribbons-mega__grid {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: var(--spacing-sm);
+    margin-bottom: var(--spacing-md);
+}
+
+/* Individual brand button */
+.ribbons-mega__brand-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: var(--spacing-sm) var(--spacing-md);
+    background: #fff;
+    border: 1.5px solid var(--color-border);
+    border-radius: var(--radius-md);
+    font-size: var(--font-size-sm);
+    font-weight: var(--font-weight-semibold);
+    color: var(--color-text-heading);
+    text-decoration: none;
+    text-align: center;
+    transition: border-color var(--transition-fast), color var(--transition-fast), box-shadow var(--transition-fast);
+    cursor: pointer;
+}
+
+.ribbons-mega__brand-btn:hover {
+    border-color: var(--cyan-primary);
+    color: var(--cyan-primary);
+    box-shadow: 0 2px 8px rgba(8, 145, 178, 0.12);
+    text-decoration: none;
+}
+
+/* View all link — centered below the grid */
+.ribbons-mega__view-all {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: var(--spacing-xs);
+    font-size: var(--font-size-sm);
+    font-weight: var(--font-weight-semibold);
+    color: var(--cyan-primary);
+    text-decoration: none;
+    transition: gap var(--transition-fast);
+}
+
+.ribbons-mega__view-all:hover {
+    gap: var(--spacing-sm);
+    text-decoration: none;
+    color: var(--cyan-dark);
+}
+
+/* Responsive — Ribbons Mega Dropdown */
+@media (max-width: 1024px) {
+    .ribbons-mega__grid {
+        grid-template-columns: repeat(4, 1fr);
+    }
+}
+
+@media (max-width: 768px) {
+    .ribbons-mega {
+        padding: var(--spacing-lg) 0;
+    }
+
+    .ribbons-mega__grid {
+        grid-template-columns: repeat(2, 1fr);
+        gap: var(--spacing-xs);
     }
 }
 
@@ -1315,7 +1454,7 @@
     gap: var(--spacing-lg);
 }
 
-.product-grid--list .product-card__image {
+.product-grid--list .product-card__image-wrapper {
     aspect-ratio: 1;
 }
 

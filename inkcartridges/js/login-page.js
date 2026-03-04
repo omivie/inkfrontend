@@ -1,0 +1,402 @@
+        document.addEventListener('DOMContentLoaded', function() {
+            // Tab switching
+            const tabs = document.querySelectorAll('.auth-tabs__tab');
+            const panels = document.querySelectorAll('.auth-panel');
+            const switchBtns = document.querySelectorAll('.auth-switch-btn');
+
+            function switchTab(targetId) {
+                // Update tabs
+                tabs.forEach(tab => {
+                    const isActive = tab.getAttribute('aria-controls') === targetId;
+                    tab.classList.toggle('auth-tabs__tab--active', isActive);
+                    tab.setAttribute('aria-selected', isActive);
+                });
+
+                // Update panels
+                panels.forEach(panel => {
+                    const isActive = panel.id === targetId;
+                    panel.classList.toggle('auth-panel--active', isActive);
+                    panel.hidden = !isActive;
+                });
+            }
+
+            // Tab click handlers
+            tabs.forEach(tab => {
+                tab.addEventListener('click', () => {
+                    switchTab(tab.getAttribute('aria-controls'));
+                });
+            });
+
+            // Switch button handlers (e.g., "Create one" link)
+            switchBtns.forEach(btn => {
+                btn.addEventListener('click', () => {
+                    switchTab(btn.dataset.target);
+                });
+            });
+
+            // Handle Supabase email verification callback (from email link)
+            // Supabase may include tokens in URL hash or query params
+            const hashParams = new URLSearchParams(window.location.hash.substring(1));
+            const urlParams = new URLSearchParams(window.location.search);
+
+            // Check for Supabase auth callback in hash (access_token, type=recovery, etc.)
+            if (hashParams.get('access_token') || hashParams.get('type')) {
+                // Supabase will handle this automatically via onAuthStateChange
+                // Just show a loading state briefly
+                DebugLog.log('Processing email verification...');
+            }
+
+            // Check if user just verified their email (our custom redirect)
+            if (urlParams.get('verified') === 'true') {
+                // Show success message
+                const loginPanel = document.getElementById('login-panel');
+                if (loginPanel) {
+                    const successMsg = document.createElement('div');
+                    successMsg.className = 'auth-message auth-message--success';
+                    successMsg.innerHTML = `
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
+                            <polyline points="22 4 12 14.01 9 11.01"/>
+                        </svg>
+                        <span>Email verified successfully! You can now sign in.</span>
+                    `;
+                    const formWrapper = loginPanel.querySelector('.auth-form-wrapper');
+                    if (formWrapper) {
+                        formWrapper.insertBefore(successMsg, formWrapper.querySelector('.auth-form'));
+                    }
+                }
+                // Clean up URL
+                window.history.replaceState({}, '', window.location.pathname);
+            }
+
+            // Listen for auth state changes (handles verification callback)
+            if (typeof Auth !== 'undefined' && Auth.supabase) {
+                Auth.supabase.auth.onAuthStateChange((event, session) => {
+                    // Auth state change detected
+                    if (event === 'SIGNED_IN' && session) {
+                        // User just signed in (possibly via email verification)
+                        const params = new URLSearchParams(window.location.search);
+                        const redirect = Security.safeRedirect(params.get('redirect'));
+                        window.location.href = redirect;
+                    }
+                });
+            }
+
+            // Login form submission
+            const loginForm = document.getElementById('login-form');
+            if (loginForm) {
+                loginForm.addEventListener('submit', async (e) => {
+                    e.preventDefault();
+                    const email = document.getElementById('login-email').value;
+                    const password = document.getElementById('login-password').value;
+                    const submitBtn = loginForm.querySelector('button[type="submit"]');
+
+                    submitBtn.disabled = true;
+                    submitBtn.textContent = 'Signing in...';
+
+                    const { data, error } = await Auth.signIn(email, password);
+
+                    if (error) {
+
+                        // Show user-friendly error messages
+                        let errorMessage = error.message || 'Login failed. Please try again.';
+                        if (error.message?.includes('Invalid login credentials')) {
+                            errorMessage = 'Invalid email or password. Please check your credentials and try again.';
+                        } else if (error.message?.includes('Email not confirmed')) {
+                            errorMessage = 'Please verify your email address before signing in. Check your inbox for the verification link.';
+                        }
+
+                        // Show error inline instead of alert
+                        let loginError = document.getElementById('login-error');
+                        if (!loginError) {
+                            loginError = document.createElement('div');
+                            loginError.id = 'login-error';
+                            loginError.className = 'form-error';
+                            loginError.style.marginBottom = '16px';
+                            loginForm.insertBefore(loginError, loginForm.firstChild);
+                        }
+                        loginError.textContent = errorMessage;
+                        loginError.hidden = false;
+
+                        submitBtn.disabled = false;
+                        submitBtn.textContent = 'Sign In';
+                    } else {
+                        // Merge guest cart into user cart immediately after login
+                        // This transfers items from the guest cart cookie to the user's cart
+                        try {
+                            DebugLog.log('🛒 Merging guest cart...');
+                            const mergeResult = await API.mergeCart();
+                            if (mergeResult.success && mergeResult.data) {
+                                DebugLog.log('🛒 Cart merge result:', mergeResult.data);
+                                if (mergeResult.data.merged_count > 0 || mergeResult.data.added_count > 0) {
+                                    DebugLog.log(`🛒 Merged ${mergeResult.data.added_count} new items, ${mergeResult.data.merged_count} quantities updated`);
+                                }
+                            }
+                        } catch (mergeError) {
+                            // Non-critical - cart will sync on next page
+                            DebugLog.log('Cart merge:', mergeError.message);
+                        }
+
+                        // Sync profile to backend after successful login
+                        if (data.user) {
+                            try {
+                                const userMeta = data.user.user_metadata || {};
+                                await API.updateProfile({
+                                    first_name: userMeta.first_name || null,
+                                    last_name: userMeta.last_name || null,
+                                    full_name: userMeta.full_name || data.user.email?.split('@')[0] || null,
+                                    phone: userMeta.phone || null,
+                                    marketing_consent: userMeta.marketing_consent || false
+                                });
+                            } catch (profileError) {
+                                // Non-critical - continue to redirect
+                                DebugLog.log('Profile sync:', profileError.message);
+                            }
+                        }
+
+                        // Redirect to account or original page
+                        const params = new URLSearchParams(window.location.search);
+                        const redirect = Security.safeRedirect(params.get('redirect'));
+                        window.location.href = redirect;
+                    }
+                });
+            }
+
+            // Register form submission
+            const registerForm = document.getElementById('register-form');
+            if (registerForm) {
+                registerForm.addEventListener('submit', async (e) => {
+                    e.preventDefault();
+                    const firstName = document.getElementById('register-first-name').value.trim();
+                    const lastName = document.getElementById('register-last-name').value.trim();
+                    const email = document.getElementById('register-email').value.trim();
+                    const phone = document.getElementById('register-phone').value.trim();
+                    const password = document.getElementById('register-password').value;
+                    const confirmPassword = document.getElementById('register-confirm-password').value;
+                    const marketingConsent = document.getElementById('marketing-consent').checked;
+                    const termsConsent = document.getElementById('terms-consent').checked;
+                    const submitBtn = registerForm.querySelector('button[type="submit"]');
+
+                    // Get error elements
+                    const firstNameError = document.getElementById('first-name-error');
+                    const lastNameError = document.getElementById('last-name-error');
+                    const emailError = document.getElementById('email-error');
+                    const passwordError = document.getElementById('password-error');
+                    const termsError = document.getElementById('terms-error');
+
+                    // Clear previous errors
+                    if (firstNameError) firstNameError.hidden = true;
+                    if (lastNameError) lastNameError.hidden = true;
+                    if (emailError) emailError.hidden = true;
+                    if (passwordError) passwordError.hidden = true;
+                    if (termsError) termsError.hidden = true;
+
+                    // Validate required fields in order
+                    if (!firstName) {
+                        if (firstNameError) firstNameError.hidden = false;
+                        document.getElementById('register-first-name').focus();
+                        return;
+                    }
+
+                    if (!lastName) {
+                        if (lastNameError) lastNameError.hidden = false;
+                        document.getElementById('register-last-name').focus();
+                        return;
+                    }
+
+                    if (!email) {
+                        if (emailError) {
+                            emailError.textContent = 'Please enter your email address.';
+                            emailError.hidden = false;
+                        }
+                        document.getElementById('register-email').focus();
+                        return;
+                    }
+
+                    // Basic email format validation
+                    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+                    if (!emailRegex.test(email)) {
+                        if (emailError) {
+                            emailError.textContent = 'Please enter a valid email address.';
+                            emailError.hidden = false;
+                        }
+                        document.getElementById('register-email').focus();
+                        return;
+                    }
+
+                    if (!password) {
+                        if (passwordError) passwordError.hidden = false;
+                        document.getElementById('register-password').focus();
+                        return;
+                    }
+
+                    if (password.length < 8) {
+                        if (passwordError) {
+                            passwordError.textContent = 'Password must be at least 8 characters.';
+                            passwordError.hidden = false;
+                        }
+                        document.getElementById('register-password').focus();
+                        return;
+                    }
+
+                    if (!confirmPassword) {
+                        if (passwordError) {
+                            passwordError.textContent = 'Please confirm your password.';
+                            passwordError.hidden = false;
+                        }
+                        document.getElementById('register-confirm-password').focus();
+                        return;
+                    }
+
+                    if (password !== confirmPassword) {
+                        if (passwordError) {
+                            passwordError.textContent = 'Passwords do not match.';
+                            passwordError.hidden = false;
+                        }
+                        document.getElementById('register-confirm-password').focus();
+                        return;
+                    }
+
+                    if (!termsConsent) {
+                        if (termsError) termsError.hidden = false;
+                        return;
+                    }
+
+                    submitBtn.disabled = true;
+                    submitBtn.textContent = 'Creating account...';
+
+                    DebugLog.log('📧 Starting signup for:', email);
+                    DebugLog.log('🔗 Redirect URL:', `${window.location.origin}/html/account/login.html?verified=true`);
+
+                    // Sign up with Supabase
+                    const { data, error } = await Auth.supabase.auth.signUp({
+                        email,
+                        password,
+                        options: {
+                            emailRedirectTo: `${window.location.origin}/html/account/login.html?verified=true`,
+                            data: {
+                                full_name: `${firstName} ${lastName}`.trim(),
+                                first_name: firstName,
+                                last_name: lastName,
+                                phone: phone || null,
+                                marketing_consent: marketingConsent
+                            }
+                        }
+                    });
+
+                    DebugLog.log('📬 Supabase signup response:', { data, error });
+
+                    if (error) {
+                        DebugLog.error('❌ Signup error:', error);
+                        alert(error.message || 'Registration failed. Please try again.');
+                        submitBtn.disabled = false;
+                        submitBtn.textContent = 'Create Account';
+                    } else {
+                        DebugLog.log('✅ Signup successful!');
+                        DebugLog.log('👤 User:', data.user);
+                        DebugLog.log('🔐 Session:', data.session);
+                        DebugLog.log('📩 Identities:', data.user?.identities);
+
+                        // Try to create profile in backend (may require email verification first)
+                        if (data.user && data.session) {
+                            try {
+                                await API.updateProfile({
+                                    first_name: firstName,
+                                    last_name: lastName,
+                                    full_name: `${firstName} ${lastName}`.trim(),
+                                    phone: phone || null,
+                                    marketing_consent: marketingConsent
+                                });
+                            } catch (profileError) {
+                                // Profile will be created after email verification
+                                DebugLog.log('Profile will be synced after email verification');
+                            }
+                        }
+
+                        // Redirect to verify email page
+                        window.location.href = '/html/account/verify-email.html';
+                    }
+                });
+            }
+
+            // Google sign in
+            document.querySelectorAll('.btn--google').forEach(btn => {
+                btn.addEventListener('click', async () => {
+                    await Auth.signInWithGoogle();
+                });
+            });
+
+            // Clear field errors when user types
+            const fieldErrorPairs = [
+                { input: 'register-first-name', error: 'first-name-error' },
+                { input: 'register-last-name', error: 'last-name-error' },
+                { input: 'register-email', error: 'email-error' }
+            ];
+
+            fieldErrorPairs.forEach(({ input, error }) => {
+                const inputEl = document.getElementById(input);
+                const errorEl = document.getElementById(error);
+                if (inputEl && errorEl) {
+                    inputEl.addEventListener('input', () => {
+                        errorEl.hidden = true;
+                    });
+                }
+            });
+
+            // Clear terms error when checkbox is checked
+            const termsCheckbox = document.getElementById('terms-consent');
+            const termsErrorEl = document.getElementById('terms-error');
+            if (termsCheckbox && termsErrorEl) {
+                termsCheckbox.addEventListener('change', () => {
+                    if (termsCheckbox.checked) {
+                        termsErrorEl.hidden = true;
+                    }
+                });
+            }
+
+            // Clear password error when user types
+            const passwordInput = document.getElementById('register-password');
+            const confirmPasswordInput = document.getElementById('register-confirm-password');
+            const passwordErrorEl = document.getElementById('password-error');
+            if (passwordErrorEl) {
+                if (passwordInput) {
+                    passwordInput.addEventListener('input', () => {
+                        passwordErrorEl.hidden = true;
+                    });
+                }
+                if (confirmPasswordInput) {
+                    confirmPasswordInput.addEventListener('input', () => {
+                        passwordErrorEl.hidden = true;
+                    });
+                }
+            }
+
+            // Password toggle
+            document.querySelectorAll('.password-toggle').forEach(toggle => {
+                toggle.addEventListener('click', () => {
+                    const wrapper = toggle.closest('.password-input-wrapper');
+                    const input = wrapper.querySelector('input');
+                    const showIcon = toggle.querySelector('.password-toggle__show');
+                    const hideIcon = toggle.querySelector('.password-toggle__hide');
+
+                    if (input.type === 'password') {
+                        input.type = 'text';
+                        showIcon.style.display = 'none';
+                        hideIcon.style.display = 'block';
+                    } else {
+                        input.type = 'password';
+                        showIcon.style.display = 'block';
+                        hideIcon.style.display = 'none';
+                    }
+                });
+            });
+
+            // If already logged in, redirect to account
+            setTimeout(() => {
+                if (Auth.isAuthenticated()) {
+                    const params = new URLSearchParams(window.location.search);
+                    const redirect = Security.safeRedirect(params.get('redirect'));
+                    window.location.href = redirect;
+                }
+            }, 500);
+        });

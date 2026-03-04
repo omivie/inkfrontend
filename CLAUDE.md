@@ -51,7 +51,6 @@ inkcartridges/
     favourites.js      # Wishlist
     cart-analytics.js  # Cart event tracking
     modern-effects.js  # Scroll animations, ripple, image loading
-    ribbons.js         # Ribbons page filters
     products-page.js   # Admin products list + export
     orders-page.js     # Admin orders list
     customers-page.js  # Admin customers list
@@ -64,7 +63,6 @@ inkcartridges/
     admin.css          # Admin dashboard styles
     modern-effects.css # Animations and effects
   assets/              # Images, brand logos, icons
-  backend/data/        # ribbons.json (product data)
 ```
 
 ## Script Load Order (per HTML pages)

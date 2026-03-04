@@ -59,7 +59,7 @@ const CartAnalytics = {
         try {
             await this.sendToBackend(event);
         } catch (error) {
-            console.error('Failed to send analytics event:', error);
+            DebugLog.error('Failed to send analytics event:', error);
         }
     },
 
@@ -76,7 +76,7 @@ const CartAnalytics = {
             }
             localStorage.setItem('cart_analytics_events', JSON.stringify(events));
         } catch (e) {
-            console.error('Failed to store event locally:', e);
+            DebugLog.error('Failed to store event locally:', e);
         }
     },
 
@@ -287,7 +287,7 @@ const CartAnalytics = {
                 return items.reduce((sum, item) => sum + (item.price * item.quantity), 0);
             }
         } catch (e) {
-            console.error('Error getting cart value:', e);
+            DebugLog.error('Error getting cart value:', e);
         }
         return 0;
     },
@@ -306,7 +306,7 @@ const CartAnalytics = {
                 return items.reduce((sum, item) => sum + item.quantity, 0);
             }
         } catch (e) {
-            console.error('Error getting cart count:', e);
+            DebugLog.error('Error getting cart count:', e);
         }
         return 0;
     },

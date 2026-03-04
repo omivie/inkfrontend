@@ -46,6 +46,26 @@ const Cart = {
     // Debounce timer for quantity updates
     _quantityDebounceTimers: {},
 
+    // Per-item in-flight API call guard
+    _quantityInFlight: {},
+
+    // Queued quantity values while an API call is in-flight
+    _quantityQueued: {},
+
+    // Guard against concurrent mergeGuestCartAndLoad calls
+    _mergeInProgress: false,
+
+    /**
+     * Compute composite key for cart item identity.
+     * Uses source prefix + best available identifier (sku > slug > id).
+     * Ensures stable identity across cart items.
+     */
+    cartItemKey: function(item) {
+        const src = item.source || 'core';
+        const identifier = item.sku || item.slug || item.id;
+        return src + ':' + identifier;
+    },
+
     /**
      * Get color style for a product color (delegates to shared ProductColors in utils.js)
      */
@@ -67,15 +87,14 @@ const Cart = {
         const color = item.color || this.detectColorFromName(item.name);
         const colorStyle = color ? this.getColorStyle(color) : null;
         const escapedName = Security.escapeHtml(item.name);
+        const imageUrl = typeof storageUrl === 'function' ? storageUrl(item.image) : item.image;
 
-        if (item.image) {
+        if (imageUrl && imageUrl !== '/assets/images/placeholder-product.svg') {
             if (colorStyle) {
-                // Image with color block fallback on error
-                return `<img src="${Security.escapeHtml(item.image)}" alt="${escapedName}" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
+                return `<img src="${Security.escapeAttr(imageUrl)}" alt="${escapedName}" data-fallback="color-block">
                         <div class="cart-item__color-block" style="${colorStyle}; width: 100%; height: 100%; border-radius: 4px; display: none;"></div>`;
             } else {
-                // Image with placeholder fallback on error
-                return `<img src="${Security.escapeHtml(item.image)}" alt="${escapedName}" onerror="this.onerror=null; this.src='/assets/images/placeholder-product.svg';">`;
+                return `<img src="${Security.escapeAttr(imageUrl)}" alt="${escapedName}" data-fallback="placeholder">`;
             }
         }
 
@@ -84,6 +103,24 @@ const Cart = {
         }
 
         return `<img src="/assets/images/placeholder-product.svg" alt="${escapedName}">`;
+    },
+
+    /**
+     * Bind image error fallback handlers (replaces inline onerror)
+     */
+    bindImageFallbacks(container) {
+        container.querySelectorAll('img[data-fallback]').forEach(img => {
+            img.addEventListener('error', function() {
+                if (this.dataset.fallback === 'color-block') {
+                    this.style.display = 'none';
+                    const sibling = this.nextElementSibling;
+                    if (sibling) sibling.style.display = 'flex';
+                } else if (this.dataset.fallback === 'placeholder') {
+                    this.removeAttribute('data-fallback');
+                    this.src = '/assets/images/placeholder-product.svg';
+                }
+            }, { once: true });
+        });
     },
 
     /**
@@ -103,9 +140,12 @@ const Cart = {
 
             // Listen for auth state changes
             Auth.onAuthStateChange(async (event, session) => {
-                if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
+                if (event === 'SIGNED_IN') {
                     // User just logged in - merge guest cart to server and load server cart
                     await this.mergeGuestCartAndLoad();
+                } else if (event === 'TOKEN_REFRESHED') {
+                    // Just update auth flag, don't re-merge
+                    this.isAuthenticated = true;
                 } else if (event === 'SIGNED_OUT') {
                     // User logged out - clear cart state
                     this.items = [];
@@ -137,7 +177,7 @@ const Cart = {
         }
 
         if (!Auth.initialized) {
-            console.warn('Auth initialization timed out, proceeding with guest mode');
+            DebugLog.warn('Auth initialization timed out, proceeding with guest mode');
         }
     },
 
@@ -145,23 +185,36 @@ const Cart = {
      * Parse server cart response into local items + summary
      */
     _parseServerCart: function(responseData) {
-        const items = responseData.items.map(item => ({
-            id: item.product.id,
-            name: item.product.name,
-            price: item.product.retail_price,
-            image: item.product.image_url || '',
-            sku: item.product.sku,
-            brand: item.product.brand?.name || '',
-            color: item.product.color || '',
-            quantity: item.quantity,
-            inStock: item.in_stock !== false,
-            stockQuantity: item.product.stock_quantity
-        }));
+        const self = this;
+        const items = (responseData.items || []).filter(item => item.product != null).map(item => {
+            const parsed = {
+                id: item.product.id,
+                name: item.product.name,
+                price: item.product.retail_price,
+                image: item.product.image_url || '',
+                sku: item.product.sku,
+                brand: item.product.brand?.name || '',
+                color: item.product.color || '',
+                quantity: item.quantity,
+                inStock: item.in_stock !== false,
+                stockQuantity: item.product.stock_quantity,
+                source: 'core'
+            };
+            parsed.key = self.cartItemKey(parsed);
+            return parsed;
+        });
 
         // Store server summary if provided
         const summary = responseData.summary || null;
         const couponCode = responseData.coupon?.code || null;
         const discountAmount = responseData.coupon?.discount_amount || summary?.discount || 0;
+
+        // Notify user if backend auto-removed orphaned items (deleted products)
+        const removedItems = responseData.removed_items || [];
+        if (removedItems.length > 0 && typeof showToast === 'function') {
+            const count = removedItems.length;
+            showToast(`${count} item${count > 1 ? 's were' : ' was'} removed from your cart (no longer available)`, 'info');
+        }
 
         return { items, summary, couponCode, discountAmount };
     },
@@ -177,6 +230,7 @@ const Cart = {
         // Load from localStorage first for instant display (fallback data)
         this.loadFromLocalStorage();
         const localItemCount = this.items.length;
+        this._localStorageHadItems = localItemCount > 0;
 
         // Show localStorage items immediately for visual feedback
         this.updateUI();
@@ -195,7 +249,7 @@ const Cart = {
                     // Guest users: Server-first with localStorage fallback
                     try {
                         const response = await API.getCart();
-                        if (response.success && response.data) {
+                        if (response.ok && response.data) {
                             const parsed = this._parseServerCart(response.data);
 
                             // If server has items, use them (with fresh prices)
@@ -216,13 +270,13 @@ const Cart = {
                                     try {
                                         await API.addToCart(item.id, item.quantity);
                                     } catch (e) {
-                                        console.error('Failed to sync item to server:', e);
+                                        DebugLog.error('Failed to sync item to server:', e);
                                     }
                                 }
                                 // After syncing, reload from server to get fresh prices
                                 try {
                                     const refreshResponse = await API.getCart();
-                                    if (refreshResponse.success && refreshResponse.data) {
+                                    if (refreshResponse.ok && refreshResponse.data) {
                                         const refreshed = this._parseServerCart(refreshResponse.data);
                                         if (refreshed.items.length > 0) {
                                             this.items = refreshed.items;
@@ -232,7 +286,7 @@ const Cart = {
                                         }
                                     }
                                 } catch (e) {
-                                    console.warn('Failed to refresh after sync:', e);
+                                    DebugLog.warn('Failed to refresh after sync:', e);
                                 }
                             } else {
                                 this.serverSummary = null;
@@ -240,7 +294,7 @@ const Cart = {
                             }
                         }
                     } catch (error) {
-                        console.warn('Could not load guest cart from server:', error.message);
+                        DebugLog.warn('Could not load guest cart from server:', error.message);
                         // Keep localStorage data, but mark that we have no server totals
                         this.serverSummary = null;
                     }
@@ -273,7 +327,7 @@ const Cart = {
     async syncWithServer() {
         try {
             const response = await API.getCart();
-            if (response.success && response.data) {
+            if (response.ok && response.data) {
                 const parsed = this._parseServerCart(response.data);
 
                 this.items = parsed.items;
@@ -281,14 +335,12 @@ const Cart = {
                 this.appliedCoupon = parsed.couponCode;
                 this.discountAmount = parsed.discountAmount;
 
-                // Clear localStorage for authenticated users (server is source of truth)
-                // This prevents stale cached items from being mistakenly merged as guest items
-                localStorage.removeItem(this.STORAGE_KEY);
+                this.saveToLocalStorage();
 
                 this.updateUI();
             }
         } catch (error) {
-            console.warn('Could not sync cart with server:', error.message);
+            DebugLog.warn('Could not sync cart with server:', error.message);
             this.serverSummary = null;
             // Keep using localStorage data
         }
@@ -299,16 +351,16 @@ const Cart = {
      * Authenticated users use server as source of truth
      */
     saveToLocalStorage() {
-        // Only save to localStorage for guest users
-        // This prevents "doubling" bug when authenticated users' cached items
-        // get mistakenly merged as guest items on next login
-        if (this.isAuthenticated) {
-            return;
-        }
+        // For authenticated users, server is source of truth (don't save to localStorage)
+        // For guest users, save everything
         try {
-            localStorage.setItem(this.STORAGE_KEY, JSON.stringify(this.items));
+            if (this.isAuthenticated) {
+                localStorage.removeItem(this.STORAGE_KEY);
+            } else {
+                localStorage.setItem(this.STORAGE_KEY, JSON.stringify(this.items));
+            }
         } catch (e) {
-            console.error('Failed to save cart:', e);
+            DebugLog.error('Failed to save cart:', e);
         }
     },
 
@@ -318,7 +370,7 @@ const Cart = {
     async loadFromServer() {
         try {
             const response = await API.getCart();
-            if (response.success && response.data) {
+            if (response.ok && response.data) {
                 const parsed = this._parseServerCart(response.data);
 
                 this.items = parsed.items;
@@ -327,7 +379,7 @@ const Cart = {
                 this.discountAmount = parsed.discountAmount;
             }
         } catch (error) {
-            console.error('Failed to load cart from server:', error);
+            DebugLog.error('Failed to load cart from server:', error);
             this.serverSummary = null;
             // Keep existing items on failure (don't clear)
         }
@@ -342,7 +394,7 @@ const Cart = {
             this.items = stored ? JSON.parse(stored) : [];
             this.serverSummary = null; // localStorage has no server totals
         } catch (e) {
-            console.error('Failed to load guest cart:', e);
+            DebugLog.error('Failed to load guest cart:', e);
             this.items = [];
             this.serverSummary = null;
         }
@@ -355,50 +407,57 @@ const Cart = {
      * Also handles legacy localStorage items for backward compatibility
      */
     async mergeGuestCartAndLoad() {
-        this.isAuthenticated = true;
+        if (this._mergeInProgress) return;
+        this._mergeInProgress = true;
 
-        // Handle legacy localStorage items (backward compatibility)
-        let legacyItems = [];
         try {
-            const stored = localStorage.getItem(this.STORAGE_KEY);
-            if (stored) {
-                legacyItems = JSON.parse(stored);
-                localStorage.removeItem(this.STORAGE_KEY);
-            }
-        } catch (e) {
-            console.error('Failed to parse legacy cart:', e);
-        }
+            this.isAuthenticated = true;
 
-        // Migrate legacy localStorage items to server first
-        if (legacyItems.length > 0 && typeof API !== 'undefined') {
-            for (const item of legacyItems) {
-                try {
-                    await API.addToCart(item.id, item.quantity);
-                } catch (e) {
-                    console.error('Failed to migrate legacy item:', item.id, e);
-                }
-            }
-        }
-
-        // Call server merge endpoint to merge guest cart (httpOnly cookie) into user cart
-        if (typeof API !== 'undefined') {
+            // Handle legacy localStorage items (backward compatibility)
+            let legacyItems = [];
             try {
-                const mergeResult = await API.mergeCart();
-                if (mergeResult.success) {
-                    if (mergeResult.data?.merged_count > 0 || mergeResult.data?.added_count > 0) {
-                        if (typeof showToast === 'function') {
-                            showToast(`${mergeResult.data.total_items} items in your cart`, 'success');
-                        }
-                    }
+                const stored = localStorage.getItem(this.STORAGE_KEY);
+                if (stored) {
+                    legacyItems = JSON.parse(stored);
+                    localStorage.removeItem(this.STORAGE_KEY);
                 }
             } catch (e) {
-                console.error('Cart merge failed:', e);
+                DebugLog.error('Failed to parse legacy cart:', e);
             }
-        }
 
-        // Load the merged cart from server
-        await this.loadFromServer();
-        this.updateUI();
+            // Migrate legacy localStorage items to server first
+            if (legacyItems.length > 0 && typeof API !== 'undefined') {
+                for (const item of legacyItems) {
+                    try {
+                        await API.addToCart(item.id, item.quantity);
+                    } catch (e) {
+                        DebugLog.error('Failed to migrate legacy item:', item.id, e);
+                    }
+                }
+            }
+
+            // Call server merge endpoint to merge guest cart (httpOnly cookie) into user cart
+            if (typeof API !== 'undefined') {
+                try {
+                    const mergeResult = await API.mergeCart();
+                    if (mergeResult.ok) {
+                        if (mergeResult.data?.merged_count > 0 || mergeResult.data?.added_count > 0) {
+                            if (typeof showToast === 'function') {
+                                showToast(`${mergeResult.data.total_items} items in your cart`, 'success');
+                            }
+                        }
+                    }
+                } catch (e) {
+                    DebugLog.error('Cart merge failed:', e);
+                }
+            }
+
+            // Load the merged cart from server
+            await this.loadFromServer();
+            this.updateUI();
+        } finally {
+            this._mergeInProgress = false;
+        }
     },
 
     /**
@@ -413,19 +472,25 @@ const Cart = {
 
         try {
             const response = await API.validateCart();
-            if (response.success) {
+            if (response.ok) {
                 const data = response.data || {};
                 const errors = [];
 
                 // Parse issues array from backend response
+                // Backend returns: { cart_item_id, sku, issue, name?, available? }
                 if (data.issues && data.issues.length > 0) {
                     data.issues.forEach(issue => {
-                        if (issue.available === 0) {
-                            errors.push(`"${issue.name}" is out of stock`);
-                        } else if (issue.available !== undefined) {
-                            errors.push(`"${issue.name}" quantity adjusted to ${issue.available} (limited stock)`);
+                        const label = issue.name || issue.sku || 'Item';
+                        if (issue.available === 0 || issue.issue === 'Insufficient stock') {
+                            errors.push(`"${label}" is out of stock`);
+                        } else if (issue.available !== undefined && issue.available > 0) {
+                            errors.push(`"${label}" quantity adjusted to ${issue.available} (limited stock)`);
+                        } else if (issue.issue === 'Price has changed') {
+                            errors.push(`Price changed for "${label}" — please review before checkout`);
+                        } else if (issue.issue === 'Product is no longer available') {
+                            errors.push(`"${label}" is no longer available`);
                         } else {
-                            errors.push(`${issue.name}: ${issue.issue || 'unavailable'}`);
+                            errors.push(`${label}: ${issue.issue || 'unavailable'}`);
                         }
                     });
                 }
@@ -448,7 +513,7 @@ const Cart = {
                 return { valid: false, errors: [response.error || 'Cart validation failed'] };
             }
         } catch (error) {
-            console.error('Cart validation error:', error);
+            DebugLog.error('Cart validation error:', error);
             return { valid: false, errors: [error.message || 'Network error during validation'] };
         }
     },
@@ -459,26 +524,28 @@ const Cart = {
      * SECURITY: Blocks checkout if server pricing is unavailable
      */
     bindCheckoutButton: function() {
+        const self = this;
         document.addEventListener('click', async (e) => {
             const checkoutLink = e.target.closest('#checkout-btn, .cart-summary__checkout-btn');
             if (!checkoutLink) return;
 
             e.preventDefault();
 
-            if (this.items.length === 0) {
+            if (self.items.length === 0) {
                 if (typeof showToast === 'function') {
                     showToast('Your cart is empty', 'error');
                 }
                 return;
             }
 
+            // Core checkout flow
             // SECURITY: Block checkout if we don't have server-verified prices
-            if (!this.hasServerPricing()) {
+            if (!self.hasServerPricing()) {
                 if (typeof showToast === 'function') {
                     showToast('Unable to verify cart prices. Please refresh and try again.', 'error');
                 }
                 // Try to reload cart from server
-                await this.loadCart();
+                await self.loadCart();
                 return;
             }
 
@@ -488,15 +555,15 @@ const Cart = {
             checkoutLink.style.pointerEvents = 'none';
 
             try {
-                const result = await this.validateCart();
+                const result = await self.validateCart();
 
                 if (result.valid) {
                     // Cart is valid - proceed to checkout
-                    if (this.isAuthenticated) {
-                        window.location.href = '/html/checkout.html';
+                    if (self.isAuthenticated) {
+                        window.location.href = '/html/checkout';
                     } else {
-                        const returnUrl = '/html/checkout.html';
-                        window.location.href = `/html/account/login.html?redirect=${encodeURIComponent(returnUrl)}`;
+                        const returnUrl = '/html/checkout';
+                        window.location.href = '/html/account/login?redirect=' + encodeURIComponent(returnUrl);
                     }
                 } else {
                     // Cart has issues - show errors
@@ -504,16 +571,13 @@ const Cart = {
                     checkoutLink.style.pointerEvents = '';
 
                     if (result.errors.length > 0) {
-                        const errorMsg = result.errors.join('\n');
                         if (typeof showToast === 'function') {
-                            // Show first error as toast
                             showToast(result.errors[0], 'error', 5000);
-                            // Show remaining errors
-                            result.errors.slice(1).forEach((err, i) => {
-                                setTimeout(() => showToast(err, 'error', 5000), (i + 1) * 500);
+                            result.errors.slice(1).forEach(function(err, i) {
+                                setTimeout(function() { showToast(err, 'error', 5000); }, (i + 1) * 500);
                             });
                         } else {
-                            alert('Cart issues:\n' + errorMsg);
+                            alert('Cart issues:\n' + result.errors.join('\n'));
                         }
                     } else {
                         if (typeof showToast === 'function') {
@@ -545,7 +609,8 @@ const Cart = {
                     sku: btn.dataset.productSku,
                     name: btn.dataset.productName,
                     price: parseFloat(btn.dataset.productPrice) || 0,
-                    image: btn.dataset.productImage || ''
+                    image: btn.dataset.productImage || '',
+                    source: btn.dataset.productSource || 'core'
                 };
 
                 if (productData.id) {
@@ -566,7 +631,7 @@ const Cart = {
             if (increaseBtn) {
                 const selector = increaseBtn.closest('.quantity-selector');
                 const input = selector.querySelector('.quantity-selector__input');
-                const itemId = selector.dataset.itemId;
+                const itemId = selector.dataset.itemKey || selector.dataset.itemId;
                 const newValue = parseInt(input.value) + 1;
                 if (newValue <= 100) {
                     input.value = newValue;
@@ -579,7 +644,7 @@ const Cart = {
             if (decreaseBtn) {
                 const selector = decreaseBtn.closest('.quantity-selector');
                 const input = selector.querySelector('.quantity-selector__input');
-                const itemId = selector.dataset.itemId;
+                const itemId = selector.dataset.itemKey || selector.dataset.itemId;
                 const newValue = parseInt(input.value) - 1;
                 if (newValue >= 1) {
                     input.value = newValue;
@@ -593,7 +658,7 @@ const Cart = {
             if (removeBtn) {
                 const cartItem = removeBtn.closest('.cart-item');
                 if (cartItem) {
-                    const itemId = cartItem.dataset.itemId;
+                    const itemId = cartItem.dataset.itemKey || cartItem.dataset.itemId;
                     await this.removeItem(itemId);
                 }
             }
@@ -610,7 +675,7 @@ const Cart = {
                 const input = document.getElementById('coupon-code');
                 if (input) {
                     const result = await this.applyCoupon(input.value);
-                    if (result.success) {
+                    if (result.ok) {
                         if (typeof showToast === 'function') {
                             showToast(result.message, 'success');
                         }
@@ -637,7 +702,7 @@ const Cart = {
         document.addEventListener('change', async (e) => {
             if (e.target.matches('.quantity-selector__input')) {
                 const selector = e.target.closest('.quantity-selector');
-                const itemId = selector.dataset.itemId;
+                const itemId = selector.dataset.itemKey || selector.dataset.itemId;
                 let newValue = parseInt(e.target.value);
 
                 // Clamp to valid range
@@ -656,82 +721,234 @@ const Cart = {
     },
 
     /**
-     * Debounced quantity update to prevent rapid-fire API calls
+     * Debounced quantity update to prevent rapid-fire API calls.
+     * Uses surgical DOM updates instead of full innerHTML rebuild.
      */
     _debouncedQuantityUpdate: function(itemId, quantity) {
-        // Clear existing timer for this item
         if (this._quantityDebounceTimers[itemId]) {
             clearTimeout(this._quantityDebounceTimers[itemId]);
         }
 
-        // Update local state immediately for responsive UI
-        const item = this.items.find(i => i.id === itemId);
-        if (item) {
-            item.quantity = Math.min(quantity, 99);
-            this.serverSummary = null; // Invalidate server summary until confirmed
-            this.saveToLocalStorage();
-            this.updateUI();
+        const item = this.items.find(function(i) { return i.key === itemId || i.id === itemId; });
+        if (!item) return;
+
+        const clampedQty = Math.min(quantity, 99);
+        const oldQty = item.quantity;
+        item.quantity = clampedQty;
+        this.saveToLocalStorage();
+
+        // Apply price delta to server summary for responsive display
+        // (server will replace with correct values after API responds)
+        if (this.serverSummary && this.serverSummary.subtotal !== undefined) {
+            const priceDelta = item.price * (clampedQty - oldQty);
+            this.serverSummary.subtotal += priceDelta;
+            if (this.serverSummary.total !== undefined) {
+                this.serverSummary.total += priceDelta;
+            }
         }
 
-        // Debounce the server call
+        // Surgical DOM update — only touch the changed item + summary numbers
+        this._updateCartItemDOM(itemId);
+        this._updateCartSummaryDOM();
+
         this._quantityDebounceTimers[itemId] = setTimeout(async () => {
             delete this._quantityDebounceTimers[itemId];
-            await this._executeQuantityUpdate(itemId, quantity);
+            await this._executeQuantityUpdate(itemId, clampedQty);
         }, 400);
     },
 
     /**
-     * Execute the actual quantity update after debounce
+     * Execute the actual quantity update after debounce.
+     * Guarded per-item to prevent concurrent API calls for the same item.
+     * Queues the latest value if an API call is already in-flight.
      */
     async _executeQuantityUpdate(itemId, quantity) {
-        const item = this.items.find(i => i.id === itemId);
-        const oldQuantity = item ? item.quantity : quantity;
+        // Guard: if already in-flight for this item, queue the value
+        if (this._quantityInFlight[itemId]) {
+            this._quantityQueued[itemId] = quantity;
+            return;
+        }
 
-        if (typeof API !== 'undefined') {
-            try {
-                const response = await API.updateCartItem(itemId, quantity);
-                if (response.success) {
-                    // Refresh from server to get accurate totals
+        this._quantityInFlight[itemId] = true;
+        const oldQuantity = quantity;
+        const item = this.items.find(function(i) { return i.key === itemId || i.id === itemId; });
+        const isCore = !item || !item.source || item.source === 'core';
+
+        try {
+            if (isCore && typeof API !== 'undefined') {
+                try {
+                    const response = await API.updateCartItem(itemId, quantity);
+                    const hasPendingUpdate = this._quantityQueued[itemId] !== undefined
+                                          || this._quantityDebounceTimers[itemId];
+
+                    if (response.ok) {
+                        if (response.data?.items) {
+                            const parsed = this._parseServerCart(response.data);
+                            this.items = parsed.items;
+                            this.serverSummary = parsed.summary;
+                            this.appliedCoupon = parsed.couponCode;
+                            this.discountAmount = parsed.discountAmount;
+                        } else {
+                            await this.loadFromServer();
+                        }
+                        // Only update DOM if no pending update (queue or debounce timer)
+                        if (!hasPendingUpdate) {
+                            this._updateCartItemDOM(itemId);
+                            this._updateCartSummaryDOM();
+                        }
+                    } else if (response.available !== undefined) {
+                        // Stock limited — force to max available
+                        const freshItem = this.items.find(i => i.id === itemId);
+                        if (freshItem) {
+                            freshItem.quantity = response.available;
+                            this.saveToLocalStorage();
+                            this._updateCartItemDOM(itemId);
+                            this._updateCartSummaryDOM();
+                        }
+                        // Clear debounce timer and queued value since stock is limited
+                        if (this._quantityDebounceTimers[itemId]) {
+                            clearTimeout(this._quantityDebounceTimers[itemId]);
+                            delete this._quantityDebounceTimers[itemId];
+                        }
+                        delete this._quantityQueued[itemId];
+                        if (typeof showToast === 'function') {
+                            showToast(`Only ${response.available} available in stock`, 'error');
+                        }
+                    } else {
+                        // Generic failure — reload from server for correct state
+                        await this.loadFromServer();
+                        if (!hasPendingUpdate) {
+                            this._updateCartItemDOM(itemId);
+                            this._updateCartSummaryDOM();
+                        }
+                        if (typeof showToast === 'function') {
+                            showToast('Failed to update quantity. Please try again.', 'error');
+                        }
+                    }
+                } catch (error) {
+                    DebugLog.error('Failed to sync quantity to server:', error);
                     await this.loadFromServer();
-                    this.updateUI();
-                } else if (response.available !== undefined) {
-                    // Insufficient stock - revert to max available
-                    if (item) {
-                        item.quantity = response.available;
-                        this.saveToLocalStorage();
-                        this.updateUI();
+                    if (!this._quantityQueued[itemId] && !this._quantityDebounceTimers[itemId]) {
+                        this._updateCartItemDOM(itemId);
+                        this._updateCartSummaryDOM();
                     }
                     if (typeof showToast === 'function') {
-                        showToast(`Only ${response.available} available in stock`, 'error');
-                    }
-                } else {
-                    // Generic failure - rollback
-                    if (item) {
-                        item.quantity = oldQuantity;
-                        this.saveToLocalStorage();
-                        this.updateUI();
-                    }
-                    if (typeof showToast === 'function') {
-                        showToast('Failed to update quantity. Please try again.', 'error');
+                        showToast('Network error. Quantity may have reverted.', 'error');
                     }
                 }
-            } catch (error) {
-                console.error('Failed to sync quantity to server:', error);
-                // Rollback on network error
-                if (item) {
-                    item.quantity = oldQuantity;
-                    this.saveToLocalStorage();
-                    this.updateUI();
-                }
-                if (typeof showToast === 'function') {
-                    showToast('Network error. Quantity reverted.', 'error');
-                }
+            }
+
+            // Track analytics
+            const trackItem = this.items.find(function(i) { return i.key === itemId || i.id === itemId; });
+            if (typeof CartAnalytics !== 'undefined' && trackItem) {
+                CartAnalytics.trackUpdateQuantity(trackItem, oldQuantity, trackItem.quantity);
+            }
+        } finally {
+            delete this._quantityInFlight[itemId];
+
+            // If a new value was queued while in-flight, fire it now
+            if (this._quantityQueued[itemId] !== undefined) {
+                const queued = this._quantityQueued[itemId];
+                delete this._quantityQueued[itemId];
+                await this._executeQuantityUpdate(itemId, queued);
+            }
+        }
+    },
+
+    /**
+     * Surgically update a single cart item's DOM elements.
+     * Avoids full innerHTML rebuild to prevent destroying in-flight interactions.
+     */
+    _updateCartItemDOM: function(itemId) {
+        const item = this.items.find(function(i) { return i.key === itemId || i.id === itemId; });
+        if (!item) return;
+
+        const cartItemEl = document.querySelector('.cart-item[data-item-key="' + itemId + '"]')
+            || document.querySelector('.cart-item[data-item-id="' + itemId + '"]');
+        if (!cartItemEl) return;
+
+        // Update quantity input (only if not focused — don't fight the user)
+        const input = cartItemEl.querySelector('.quantity-selector__input');
+        if (input && document.activeElement !== input) {
+            input.value = item.quantity;
+        }
+
+        // Update line total
+        const totalEl = cartItemEl.querySelector('.cart-item__total');
+        if (totalEl) {
+            totalEl.textContent = formatPrice(item.price * item.quantity);
+        }
+
+        // Update mobile price line
+        const priceMobile = cartItemEl.querySelector('.cart-item__price-mobile');
+        if (priceMobile) {
+            priceMobile.textContent = formatPrice(item.price);
+        }
+    },
+
+    /**
+     * Surgically update cart summary DOM elements.
+     * Updates counts, subtotal, shipping, total, progress bar without rebuilding cart items.
+     */
+    _updateCartSummaryDOM: function() {
+        // Update header cart count badges
+        const itemCount = this.getItemCount();
+        document.querySelectorAll('.cart-count, .cart-badge, #cart-count').forEach(el => {
+            el.textContent = itemCount;
+            el.hidden = itemCount === 0;
+        });
+        if (typeof updateCartCount === 'function') {
+            updateCartCount(itemCount);
+        }
+
+        // Only update summary section if on cart page
+        if (!document.querySelector('.cart-page')) return;
+
+        // Price warning
+        const priceWarning = document.getElementById('cart-price-warning');
+        if (priceWarning) {
+            if (this.isUsingEstimatedPrices()) {
+                priceWarning.hidden = false;
+                priceWarning.textContent = 'Prices shown are estimates. Final prices will be confirmed at checkout.';
+            } else {
+                priceWarning.hidden = true;
             }
         }
 
-        // Track analytics
-        if (typeof CartAnalytics !== 'undefined' && item) {
-            CartAnalytics.trackUpdateQuantity(item, oldQuantity, item.quantity);
+        const subtotal = this.getSubtotal();
+        const discount = this.getDiscount();
+        // Cart page total excludes shipping — shipping is calculated at checkout
+        const cartTotal = subtotal - discount;
+
+        const itemCountEl = document.getElementById('cart-item-count');
+        const subtotalEl = document.getElementById('cart-subtotal');
+        const gstEl = document.getElementById('cart-gst');
+        const totalEl = document.getElementById('cart-total');
+        const savingsRow = document.getElementById('cart-savings-row');
+        const savingsEl = document.getElementById('cart-savings');
+
+        if (itemCountEl) itemCountEl.textContent = itemCount;
+        if (subtotalEl) subtotalEl.textContent = formatPrice(subtotal);
+        if (gstEl) gstEl.textContent = formatPrice(this.serverSummary?.gst_amount != null ? this.serverSummary.gst_amount : calculateGST(cartTotal));
+        if (totalEl) totalEl.textContent = formatPrice(cartTotal) + ' NZD';
+
+        if (savingsRow && savingsEl) {
+            if (discount > 0) {
+                savingsRow.hidden = false;
+                savingsEl.textContent = '-' + formatPrice(discount);
+            } else {
+                savingsRow.hidden = true;
+            }
+        }
+
+        // Cart summary class-based elements
+        const cartSummary = document.querySelector('.cart-summary');
+        if (cartSummary) {
+            const subtotalClassEl = cartSummary.querySelector('.cart-summary__subtotal');
+            const totalClassEl = cartSummary.querySelector('.cart-summary__total-value');
+
+            if (subtotalClassEl) subtotalClassEl.textContent = formatPrice(subtotal);
+            if (totalClassEl) totalClassEl.textContent = formatPrice(cartTotal);
         }
     },
 
@@ -744,8 +961,15 @@ const Cart = {
         // Snapshot for rollback
         const previousItems = JSON.parse(JSON.stringify(this.items));
 
+        // Determine source and compute composite key
+        const source = product.source || 'core';
+        const key = this.cartItemKey({ source: source, sku: product.sku, slug: product.slug, id: product.id });
+        const isCore = source === 'core';
+
         // Update local cart first (instant feedback)
-        const existingItem = this.items.find(item => item.id === product.id);
+        const existingItem = this.items.find(function(item) {
+            return (item.key || Cart.cartItemKey(item)) === key;
+        });
 
         if (existingItem) {
             existingItem.quantity += product.quantity || 1;
@@ -758,7 +982,10 @@ const Cart = {
                 sku: product.sku || '',
                 brand: product.brand || '',
                 color: product.color || '',
-                quantity: product.quantity || 1
+                quantity: product.quantity || 1,
+                source: source,
+                key: key,
+                slug: product.slug || ''
             });
         }
 
@@ -769,11 +996,11 @@ const Cart = {
         this.saveToLocalStorage();
         this.updateUI();
 
-        // Sync to server for both guest and authenticated users
-        if (typeof API !== 'undefined') {
+        // Sync to server only for core items
+        if (isCore && typeof API !== 'undefined') {
             try {
                 const response = await API.addToCart(product.id, product.quantity || 1);
-                if (!response.success) {
+                if (!response.ok) {
                     // Server rejected - rollback
                     this.items = previousItems;
                     this.saveToLocalStorage();
@@ -795,7 +1022,7 @@ const Cart = {
                 await this.loadFromServer();
                 this.updateUI();
             } catch (error) {
-                console.error('Failed to sync cart to server:', error);
+                DebugLog.error('Failed to sync cart to server:', error);
                 // Rollback on network error
                 this.items = previousItems;
                 this.saveToLocalStorage();
@@ -808,7 +1035,7 @@ const Cart = {
         }
 
         if (typeof showToast === 'function') {
-            showToast(`${Security.escapeHtml(product.name)} added to cart`, 'success');
+            showToast(product.name + ' added to cart', 'success');
         }
 
         // Track analytics
@@ -828,8 +1055,9 @@ const Cart = {
         }
 
         // Store old quantity for potential rollback
-        const item = this.items.find(item => item.id === itemId);
+        const item = this.items.find(function(i) { return i.key === itemId || i.id === itemId; });
         const oldQuantity = item ? item.quantity : 0;
+        const isCore = !item || !item.source || item.source === 'core';
 
         // Update locally first (instant feedback)
         if (item) {
@@ -839,11 +1067,11 @@ const Cart = {
             this.updateUI();
         }
 
-        // Sync to server for both guest and authenticated users
-        if (typeof API !== 'undefined') {
+        // Sync to server only for core items
+        if (isCore && typeof API !== 'undefined') {
             try {
                 const response = await API.updateCartItem(itemId, quantity);
-                if (response.success) {
+                if (response.ok) {
                     // Refresh from server for accurate totals
                     await this.loadFromServer();
                     this.updateUI();
@@ -869,7 +1097,7 @@ const Cart = {
                     }
                 }
             } catch (error) {
-                console.error('Failed to sync quantity to server:', error);
+                DebugLog.error('Failed to sync quantity to server:', error);
                 // Rollback on error
                 if (item) {
                     item.quantity = oldQuantity;
@@ -893,21 +1121,28 @@ const Cart = {
      * Syncs to server for both guest and authenticated users
      */
     async removeItem(itemId) {
-        // Snapshot for rollback
-        const removedItem = this.items.find(item => item.id === itemId);
+        // Find item by key (composite) or fall back to id
+        const self = this;
+        const removedItem = this.items.find(function(item) {
+            return item.key === itemId || item.id === itemId;
+        });
         const previousItems = JSON.parse(JSON.stringify(this.items));
+        const isCore = !removedItem || !removedItem.source || removedItem.source === 'core';
+        const actualId = removedItem ? removedItem.id : itemId;
 
         // Remove locally first (instant feedback)
-        this.items = this.items.filter(item => item.id !== itemId);
+        this.items = this.items.filter(function(item) {
+            return item.key !== itemId && item.id !== itemId;
+        });
         this.serverSummary = null; // Invalidate until server confirms
         this.saveToLocalStorage();
         this.updateUI();
 
-        // Sync to server for both guest and authenticated users
-        if (typeof API !== 'undefined') {
+        // Sync to server only for core items
+        if (isCore && typeof API !== 'undefined') {
             try {
-                const response = await API.removeFromCart(itemId);
-                if (response && !response.success) {
+                const response = await API.removeFromCart(actualId);
+                if (response && !response.ok) {
                     // Server rejected removal - rollback
                     this.items = previousItems;
                     this.saveToLocalStorage();
@@ -921,7 +1156,7 @@ const Cart = {
                 await this.loadFromServer();
                 this.updateUI();
             } catch (error) {
-                console.error('Failed to sync removal to server:', error);
+                DebugLog.error('Failed to sync removal to server:', error);
                 // Rollback on network error
                 this.items = previousItems;
                 this.saveToLocalStorage();
@@ -965,7 +1200,7 @@ const Cart = {
         if (typeof API !== 'undefined') {
             try {
                 const response = await API.clearCart();
-                if (response && !response.success) {
+                if (response && !response.ok) {
                     // Server rejected - rollback
                     this.items = previousItems;
                     this.appliedCoupon = previousCoupon;
@@ -977,7 +1212,7 @@ const Cart = {
                     }
                 }
             } catch (error) {
-                console.error('Failed to sync cart clear to server:', error);
+                DebugLog.error('Failed to sync cart clear to server:', error);
                 // Rollback on network error
                 this.items = previousItems;
                 this.appliedCoupon = previousCoupon;
@@ -1040,10 +1275,9 @@ const Cart = {
         if (typeof Shipping !== 'undefined') {
             return Shipping.calculate(this.items, this.getSubtotal()).fee;
         }
-        // Ultimate fallback (North Island rate)
+        // Ultimate fallback (North Island urban light rate)
         const threshold = typeof Config !== 'undefined' ? Config.getSetting('FREE_SHIPPING_THRESHOLD', 100) : 100;
-        const fee = typeof Config !== 'undefined' ? Config.getSetting('SHIPPING_FEE_NORTH_ISLAND', 9.95) : 9.95;
-        return this.getSubtotal() >= threshold ? 0 : fee;
+        return this.getSubtotal() >= threshold ? 0 : 7;
     },
 
     /**
@@ -1065,31 +1299,40 @@ const Cart = {
         const normalizedCode = (code || '').toUpperCase().trim();
 
         if (!normalizedCode) {
-            return { success: false, message: 'Please enter a coupon code' };
+            return { ok: false, message: 'Please enter a coupon code' };
         }
 
         if (!this.isAuthenticated) {
-            return { success: false, message: 'Please login to apply coupon codes' };
+            return { ok: false, message: 'Please login to apply coupon codes' };
         }
 
         if (typeof API === 'undefined') {
-            return { success: false, message: 'Unable to validate coupon' };
+            return { ok: false, message: 'Unable to validate coupon' };
         }
 
         try {
             const response = await API.applyCoupon(normalizedCode);
-            if (response.success) {
+            if (response.ok) {
                 this.appliedCoupon = response.data?.code || normalizedCode;
                 this.discountAmount = response.data?.discount_amount || 0;
                 await this.loadFromServer(); // Reload to get updated totals
                 this.updateUI();
-                return { success: true, message: response.message || 'Coupon applied!' };
+                return { ok: true, message: response.message || 'Coupon applied!' };
             } else {
-                return { success: false, message: response.error || 'Invalid coupon code' };
+                // Handle rate limiting with retry_after
+                if (response.code === 'RATE_LIMITED') {
+                    const retryAfter = response.retry_after;
+                    if (retryAfter && retryAfter > 60) {
+                        const mins = Math.ceil(retryAfter / 60);
+                        return { ok: false, message: `Too many attempts. Please try again in ${mins} minute${mins > 1 ? 's' : ''}.` };
+                    }
+                    return { ok: false, message: response.error || 'Too many attempts. Please try again later.' };
+                }
+                return { ok: false, message: response.error || 'Coupon could not be applied' };
             }
         } catch (error) {
-            console.error('Failed to apply coupon:', error);
-            return { success: false, message: error.message || 'Failed to apply coupon' };
+            DebugLog.error('Failed to apply coupon:', error);
+            return { ok: false, message: error.message || 'Failed to apply coupon' };
         }
     },
 
@@ -1105,7 +1348,7 @@ const Cart = {
                 await this.loadFromServer();
                 this.updateUI();
             } catch (error) {
-                console.error('Failed to remove coupon:', error);
+                DebugLog.error('Failed to remove coupon:', error);
             }
         } else {
             this.appliedCoupon = null;
@@ -1123,8 +1366,9 @@ const Cart = {
         if (this.serverSummary && this.serverSummary.total !== undefined) {
             return this.serverSummary.total;
         }
-        // DISPLAY ONLY estimate - backend calculates actual total at checkout
-        return this.getSubtotal() - this.getDiscount() + this.getShipping();
+        // DISPLAY ONLY estimate - includes shipping estimate
+        // SECURITY: Never use this for payment - backend calculates final total
+        return this.getSubtotal() + this.getShipping() - this.getDiscount();
     },
 
     /**
@@ -1163,13 +1407,19 @@ const Cart = {
         const cartLoading = document.getElementById('cart-loading');
         const cartSummary = document.querySelector('.cart-summary');
 
-        // Show loading skeleton only if loading AND no cached items to display
-        // This provides instant feedback if we have localStorage data
+        // Show loading skeleton only if loading AND localStorage had items
+        // If localStorage is empty, show the empty state immediately rather than
+        // blocking on a server round-trip (Render cold starts can take 10-30s)
         if (this.loading && this.items.length === 0 && cartLoading) {
-            cartLoading.hidden = false;
-            if (cartLayout) cartLayout.hidden = true;
-            if (cartEmpty) cartEmpty.hidden = true;
-            return;
+            if (this._localStorageHadItems) {
+                // localStorage had items — worth waiting for server to confirm
+                cartLoading.hidden = false;
+                if (cartLayout) cartLayout.hidden = true;
+                if (cartEmpty) cartEmpty.hidden = true;
+                return;
+            }
+            // localStorage was empty — show empty state instantly, server will
+            // update the UI if it turns out a cookie-based guest cart exists
         }
 
         // Hide loading state
@@ -1192,62 +1442,69 @@ const Cart = {
             if (cartEmpty) cartEmpty.hidden = true;
 
             if (cartItems) {
-                cartItems.innerHTML = this.items.map(item => {
+                const self = this;
+                cartItems.innerHTML = this.items.map(function(item) {
                     const escapedName = Security.escapeHtml(item.name);
-                    const escapedBrand = Security.escapeHtml(item.brand);
-                    const escapedSku = Security.escapeHtml(item.sku);
+                    const escapedBrand = Security.escapeHtml(item.brand || '');
+                    const escapedSku = Security.escapeHtml(item.sku || '');
                     const isOutOfStock = item.inStock === false;
-                    const stockWarning = isOutOfStock
-                        ? '<span class="cart-item__stock-warning">Out of Stock</span>'
-                        : (item.stockQuantity !== undefined && item.stockQuantity > 0 && item.stockQuantity <= 5
-                            ? `<span class="cart-item__stock-low">Only ${item.stockQuantity} left</span>`
-                            : '');
+                    const itemKey = item.key || self.cartItemKey(item);
 
-                    return `
-                    <article class="cart-item${isOutOfStock ? ' cart-item--out-of-stock' : ''}" data-item-id="${item.id}">
-                        <div class="cart-item__image">
-                            ${this.getItemImageHTML(item)}
-                        </div>
-                        <div class="cart-item__details">
-                            <h3 class="cart-item__name">
-                                <a href="/html/product/index.html?sku=${escapedSku}">${escapedName}</a>
-                            </h3>
-                            ${escapedBrand ? `<p class="cart-item__brand">${escapedBrand}</p>` : ''}
-                            <p class="cart-item__sku">SKU: ${escapedSku}</p>
-                            ${stockWarning}
-                            <p class="cart-item__price-mobile">${formatPrice(item.price)}</p>
-                        </div>
-                        <div class="cart-item__price">
-                            ${formatPrice(item.price)}
-                        </div>
-                        <div class="cart-item__quantity">
-                            <div class="quantity-selector" data-item-id="${item.id}">
-                                <button type="button" class="quantity-selector__btn quantity-selector__btn--decrease" aria-label="Decrease quantity"${isOutOfStock ? ' disabled' : ''}>
-                                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                        <line x1="5" y1="12" x2="19" y2="12"></line>
-                                    </svg>
-                                </button>
-                                <input type="number" class="quantity-selector__input" value="${item.quantity}" min="1" max="100" aria-label="Quantity"${isOutOfStock ? ' disabled' : ''}>
-                                <button type="button" class="quantity-selector__btn quantity-selector__btn--increase" aria-label="Increase quantity"${isOutOfStock ? ' disabled' : ''}>
-                                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                        <line x1="12" y1="5" x2="12" y2="19"></line>
-                                        <line x1="5" y1="12" x2="19" y2="12"></line>
-                                    </svg>
-                                </button>
-                            </div>
-                        </div>
-                        <div class="cart-item__total">
-                            ${formatPrice(item.price * item.quantity)}
-                        </div>
-                        <button type="button" class="cart-item__remove" aria-label="Remove ${escapedName}">
-                            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                <polyline points="3 6 5 6 21 6"></polyline>
-                                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
-                            </svg>
-                        </button>
-                    </article>
-                `;
+                    let stockWarning = '';
+                    if (isOutOfStock) {
+                        stockWarning = '<span class="cart-item__stock-warning">Out of Stock</span>';
+                    } else if (item.stockQuantity !== undefined && item.stockQuantity > 0 && item.stockQuantity <= 5) {
+                        stockWarning = '<span class="cart-item__stock-low">Only ' + item.stockQuantity + ' left</span>';
+                    }
+
+                    const productLink = '/html/product/?sku=' + encodeURIComponent(item.sku || '');
+
+                    return '\
+                    <article class="cart-item' + (isOutOfStock ? ' cart-item--out-of-stock' : '') + '" data-item-id="' + item.id + '" data-item-key="' + Security.escapeAttr(itemKey) + '">\
+                        <div class="cart-item__image">\
+                            ' + self.getItemImageHTML(item) + '\
+                        </div>\
+                        <div class="cart-item__details">\
+                            <h3 class="cart-item__name">\
+                                <a href="' + productLink + '">' + escapedName + '</a>\
+                            </h3>\
+                            ' + (escapedBrand ? '<p class="cart-item__brand">' + escapedBrand + '</p>' : '') + '\
+                            ' + (escapedSku ? '<p class="cart-item__sku">SKU: ' + escapedSku + '</p>' : '') + '\
+                            ' + stockWarning + '\
+                            <p class="cart-item__price-mobile">' + formatPrice(item.price) + '</p>\
+                        </div>\
+                        <div class="cart-item__price">\
+                            ' + formatPrice(item.price) + '\
+                        </div>\
+                        <div class="cart-item__quantity">\
+                            <div class="quantity-selector" data-item-id="' + item.id + '" data-item-key="' + Security.escapeAttr(itemKey) + '">\
+                                <button type="button" class="quantity-selector__btn quantity-selector__btn--decrease" aria-label="Decrease quantity"' + (isOutOfStock ? ' disabled' : '') + '>\
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">\
+                                        <line x1="5" y1="12" x2="19" y2="12"></line>\
+                                    </svg>\
+                                </button>\
+                                <input type="number" class="quantity-selector__input" value="' + item.quantity + '" min="1" max="100" aria-label="Quantity"' + (isOutOfStock ? ' disabled' : '') + '>\
+                                <button type="button" class="quantity-selector__btn quantity-selector__btn--increase" aria-label="Increase quantity"' + (isOutOfStock ? ' disabled' : '') + '>\
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">\
+                                        <line x1="12" y1="5" x2="12" y2="19"></line>\
+                                        <line x1="5" y1="12" x2="19" y2="12"></line>\
+                                    </svg>\
+                                </button>\
+                            </div>\
+                        </div>\
+                        <div class="cart-item__total">\
+                            ' + formatPrice(item.price * item.quantity) + '\
+                        </div>\
+                        <button type="button" class="cart-item__remove" aria-label="Remove ' + escapedName + '">\
+                            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">\
+                                <polyline points="3 6 5 6 21 6"></polyline>\
+                                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>\
+                            </svg>\
+                        </button>\
+                    </article>';
                 }).join('');
+                // Bind image error fallbacks (replaces inline onerror)
+                this.bindImageFallbacks(cartItems);
             }
 
             // Show warning if prices are estimates (not server-verified)
@@ -1263,23 +1520,21 @@ const Cart = {
 
             const subtotal = this.getSubtotal();
             const discount = this.getDiscount();
-            const shipping = this.getShipping();
-            const total = this.getTotal();
+            // Cart page total excludes shipping — shipping is calculated at checkout
+            const cartTotal = subtotal - discount;
             const itemCount = this.getItemCount();
-            const freeShippingThreshold = typeof Config !== 'undefined' ? Config.getSetting('FREE_SHIPPING_THRESHOLD', 100) : 100;
 
             const itemCountEl = document.getElementById('cart-item-count');
             const subtotalEl = document.getElementById('cart-subtotal');
-            const shippingEl = document.getElementById('cart-shipping');
+            const gstEl = document.getElementById('cart-gst');
             const totalEl = document.getElementById('cart-total');
-            const shippingMsgEl = document.getElementById('cart-shipping-message');
             const savingsRow = document.getElementById('cart-savings-row');
             const savingsEl = document.getElementById('cart-savings');
 
             if (itemCountEl) itemCountEl.textContent = itemCount;
             if (subtotalEl) subtotalEl.textContent = formatPrice(subtotal);
-            if (shippingEl) shippingEl.textContent = shipping === 0 ? 'FREE' : formatPrice(shipping);
-            if (totalEl) totalEl.textContent = formatPrice(total) + ' NZD';
+            if (gstEl) gstEl.textContent = formatPrice(this.serverSummary?.gst_amount != null ? this.serverSummary.gst_amount : calculateGST(cartTotal));
+            if (totalEl) totalEl.textContent = formatPrice(cartTotal) + ' NZD';
 
             if (savingsRow && savingsEl) {
                 if (discount > 0) {
@@ -1315,56 +1570,12 @@ const Cart = {
                 }
             }
 
-            if (shippingMsgEl) {
-                if (subtotal >= freeShippingThreshold) {
-                    shippingMsgEl.hidden = false;
-                    shippingMsgEl.classList.add('cart-summary__shipping-message--success');
-                    shippingMsgEl.querySelector('span').textContent = "You've qualified for FREE shipping!";
-                } else {
-                    const remaining = freeShippingThreshold - subtotal;
-                    shippingMsgEl.hidden = false;
-                    shippingMsgEl.classList.remove('cart-summary__shipping-message--success');
-                    shippingMsgEl.querySelector('span').textContent = `Add ${formatPrice(remaining)} more for FREE shipping`;
-                }
-            }
-
-            // Show shipping tier info (zone-based estimate)
-            const tierEl = document.getElementById('cart-shipping-tier');
-            if (tierEl && typeof Shipping !== 'undefined') {
-                const shippingResult = Shipping.calculate(this.items, subtotal);
-                if (shippingResult.tier === 'heavy') {
-                    tierEl.textContent = '(Heavy)';
-                    tierEl.hidden = false;
-                } else if (!shippingResult.freeShipping) {
-                    tierEl.textContent = '(est.)';
-                    tierEl.hidden = false;
-                } else {
-                    tierEl.hidden = true;
-                }
-            }
-
-            // Update shipping progress bar
-            const barWrap = document.getElementById('cart-shipping-bar');
-            const barFill = document.getElementById('shipping-bar-fill');
-            if (barWrap && barFill && subtotal > 0) {
-                barWrap.hidden = false;
-                const pct = Math.min((subtotal / freeShippingThreshold) * 100, 100);
-                barFill.style.width = pct + '%';
-                if (pct >= 100) {
-                    barFill.classList.add('shipping-bar__fill--complete');
-                } else {
-                    barFill.classList.remove('shipping-bar__fill--complete');
-                }
-            }
-
             if (cartSummary) {
                 const subtotalClassEl = cartSummary.querySelector('.cart-summary__subtotal');
-                const shippingClassEl = cartSummary.querySelector('.cart-summary__shipping');
                 const totalClassEl = cartSummary.querySelector('.cart-summary__total-value');
 
                 if (subtotalClassEl) subtotalClassEl.textContent = formatPrice(subtotal);
-                if (shippingClassEl) shippingClassEl.textContent = shipping === 0 ? 'FREE' : formatPrice(shipping);
-                if (totalClassEl) totalClassEl.textContent = formatPrice(total);
+                if (totalClassEl) totalClassEl.textContent = formatPrice(cartTotal);
             }
 
             // Disable checkout if cart has out-of-stock items
