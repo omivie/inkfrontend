@@ -30,23 +30,17 @@
             btn.innerHTML = 'Sending...';
             btn.disabled = true;
 
-            const sendCopy = form.querySelector('#contact-copy')?.checked || false;
-            const payload = { name, email, subject, message, send_copy: sendCopy };
+            const payload = { name, email, subject, message };
             if (phone) payload.phone = phone;
             if (orderNumber) payload.order_number = orderNumber;
 
             try {
                 await API.submitContactForm(payload);
-                if (typeof showToast === 'function') {
-                    showToast('Message sent! We\'ll get back to you shortly.', 'success');
-                }
+                showToast('Message sent! We\'ll get back to you shortly.', 'success');
                 form.reset();
             } catch (error) {
-                if (typeof showToast === 'function') {
-                    showToast(error.message || 'Could not send message. Please try again.', 'error');
-                } else {
-                    alert('Could not send message. Please try again.');
-                }
+                console.error('Contact form error:', error);
+                showToast(error.message || 'Could not send message. Please try again.', 'error');
             }
 
             btn.innerHTML = originalHTML;
