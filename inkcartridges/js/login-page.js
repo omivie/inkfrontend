@@ -100,10 +100,31 @@
 
                         // Show user-friendly error messages
                         let errorMessage = error.message || 'Login failed. Please try again.';
-                        if (error.message?.includes('Invalid login credentials')) {
-                            errorMessage = 'Invalid email or password. Please check your credentials and try again.';
-                        } else if (error.message?.includes('Email not confirmed')) {
+                        let showResend = false;
+
+                        if (error.message?.includes('Email not confirmed')) {
                             errorMessage = 'Please verify your email address before signing in. Check your inbox for the verification link.';
+                            showResend = true;
+                        } else if (error.message?.includes('Invalid login credentials')) {
+                            // Supabase returns this for BOTH wrong password AND unverified email.
+                            // Try a signUp to detect unverified: Supabase returns a fake user
+                            // with empty identities if the email is already registered.
+                            try {
+                                const { data: signUpData } = await Auth.supabase.auth.signUp({
+                                    email,
+                                    password,
+                                    options: { emailRedirectTo: `${window.location.origin}/html/account/verify-email` }
+                                });
+                                if (signUpData?.user && signUpData.user.identities?.length === 0) {
+                                    // Email exists — could be unverified (Supabase masks the real reason)
+                                    errorMessage = 'Invalid email or password. If you recently created an account, check your inbox for a verification email.';
+                                    showResend = true;
+                                }
+                            } catch (_) { /* ignore probe error */ }
+
+                            if (!showResend) {
+                                errorMessage = 'Invalid email or password. Please check your credentials and try again.';
+                            }
                         }
 
                         // Show error inline instead of alert
@@ -115,7 +136,26 @@
                             loginError.style.marginBottom = '16px';
                             loginForm.insertBefore(loginError, loginForm.firstChild);
                         }
-                        loginError.textContent = errorMessage;
+                        loginError.innerHTML = Security.escapeHtml(errorMessage);
+
+                        // Offer to resend verification email
+                        if (showResend) {
+                            const resendLink = document.createElement('button');
+                            resendLink.type = 'button';
+                            resendLink.textContent = 'Resend verification email';
+                            resendLink.style.cssText = 'background:none;border:none;color:#2563eb;cursor:pointer;text-decoration:underline;padding:0;margin-top:8px;display:block;font-size:0.9rem;';
+                            resendLink.addEventListener('click', async () => {
+                                resendLink.textContent = 'Sending...';
+                                resendLink.disabled = true;
+                                try {
+                                    const res = await API.resendVerificationEmail();
+                                    resendLink.textContent = res.ok ? 'Verification email sent! Check your inbox.' : 'Failed to send. Try again later.';
+                                } catch (_) {
+                                    resendLink.textContent = 'Failed to send. Try again later.';
+                                }
+                            });
+                            loginError.appendChild(resendLink);
+                        }
                         loginError.hidden = false;
 
                         submitBtn.disabled = false;
