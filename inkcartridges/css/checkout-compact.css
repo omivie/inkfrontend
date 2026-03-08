@@ -128,14 +128,8 @@ section.cart-page .cart-empty {
    ============================================== */
 
 .checkout-page {
-    padding: var(--spacing-xs, 4px) 0 var(--spacing-lg, 24px);
+    padding: 0 0 var(--spacing-lg, 24px);
 }
-
-.checkout-page__header {
-    margin-bottom: var(--spacing-xs, 4px);
-    align-items: flex-start;
-}
-
 
 section.checkout-page .checkout-layout {
     gap: var(--spacing-lg, 24px);
@@ -790,6 +784,14 @@ section.checkout-page .payment-authorization {
 }
 
 
+
+
+/* Sidebar wrapper gets order:-1 on mobile (replaces .checkout-summary order) */
+@media (max-width: 1024px) {
+    .checkout-sidebar {
+        order: -1;
+    }
+}
 
 
 /* ==============================================

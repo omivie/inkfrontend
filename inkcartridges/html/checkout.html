@@ -190,33 +190,6 @@
     <main id="main-content" class="site-main">
         <section class="checkout-page">
             <div class="container">
-                <!-- Header with title and progress -->
-                <div class="checkout-page__header">
-                    <!-- Progress indicator -->
-                    <div class="checkout-progress checkout-progress--compact" id="progress-top" aria-label="Checkout progress">
-                        <ol class="checkout-progress__steps">
-                            <li class="checkout-progress__step checkout-progress__step--completed" data-step="cart">
-                                <span class="checkout-progress__number">
-                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg>
-                                </span>
-                                <span class="checkout-progress__label">Cart</span>
-                            </li>
-                            <li class="checkout-progress__step checkout-progress__step--active" data-step="details">
-                                <span class="checkout-progress__number">2</span>
-                                <span class="checkout-progress__label">Details</span>
-                            </li>
-                            <li class="checkout-progress__step" data-step="payment">
-                                <span class="checkout-progress__number">3</span>
-                                <span class="checkout-progress__label">Payment</span>
-                            </li>
-                            <li class="checkout-progress__step" data-step="confirm">
-                                <span class="checkout-progress__number">4</span>
-                                <span class="checkout-progress__label">Confirm</span>
-                            </li>
-                        </ol>
-                    </div>
-                </div>
-
                 <div class="checkout-layout">
                     <!-- Checkout form -->
                     <div class="checkout-form-wrapper">
@@ -475,7 +448,33 @@
                     </div>
 
                     <!-- Order summary sidebar -->
-                    <aside class="checkout-summary">
+                    <div class="checkout-sidebar">
+                        <!-- Progress indicator -->
+                        <div class="checkout-progress-card">
+                            <div class="checkout-progress checkout-progress--compact" id="progress-top" aria-label="Checkout progress">
+                                <ol class="checkout-progress__steps">
+                                    <li class="checkout-progress__step checkout-progress__step--completed" data-step="cart">
+                                        <span class="checkout-progress__number">
+                                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg>
+                                        </span>
+                                        <span class="checkout-progress__label">Cart</span>
+                                    </li>
+                                    <li class="checkout-progress__step checkout-progress__step--active" data-step="details">
+                                        <span class="checkout-progress__number">2</span>
+                                        <span class="checkout-progress__label">Details</span>
+                                    </li>
+                                    <li class="checkout-progress__step" data-step="payment">
+                                        <span class="checkout-progress__number">3</span>
+                                        <span class="checkout-progress__label">Payment</span>
+                                    </li>
+                                    <li class="checkout-progress__step" data-step="confirm">
+                                        <span class="checkout-progress__number">4</span>
+                                        <span class="checkout-progress__label">Confirm</span>
+                                    </li>
+                                </ol>
+                            </div>
+                        </div>
+                        <aside class="checkout-summary">
                         <div class="checkout-summary__inner">
                             <h2 class="checkout-summary__heading">Order Summary</h2>
 
@@ -551,6 +550,7 @@
                             </div>
                         </div>
                     </aside>
+                    </div>
                 </div>
 
             </div>
