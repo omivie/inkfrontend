@@ -834,6 +834,37 @@ const AdminAPI = {
     }
   },
 
+  // ---- Contact Emails ----
+  async getContactEmails() {
+    try {
+      const resp = await window.API.get('/api/admin/contact-emails');
+      return resp?.data ?? null;
+    } catch (e) {
+      DebugLog.warn('[AdminAPI] getContactEmails failed:', e.message);
+      return null;
+    }
+  },
+
+  async addContactEmail(email) {
+    try {
+      const resp = await window.API.post('/api/admin/contact-emails', { email });
+      return resp?.data ?? null;
+    } catch (e) {
+      DebugLog.warn('[AdminAPI] addContactEmail failed:', e.message);
+      throw e;
+    }
+  },
+
+  async removeContactEmail(id) {
+    try {
+      const resp = await window.API.delete(`/api/admin/contact-emails/${id}`);
+      return resp?.data ?? null;
+    } catch (e) {
+      DebugLog.warn('[AdminAPI] removeContactEmail failed:', e.message);
+      throw e;
+    }
+  },
+
   // ---- CSV Export (streaming from backend) ----
   async exportCSV(type, filterParams) {
     try {

@@ -30,7 +30,8 @@
             btn.textContent = 'Sending...';
             btn.disabled = true;
 
-            const payload = { name, email, subject, message };
+            const sendCopy = form.querySelector('#contact-copy')?.checked || false;
+            const payload = { name, email, subject, message, send_copy: sendCopy };
             if (phone) payload.phone = phone;
             if (orderNumber) payload.order_number = orderNumber;
 

@@ -26,6 +26,7 @@ const I = {
   logout: '<path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9"/>',
   download: '<path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"/>',
   copy: '<rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/>',
+  mail: '<path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/>',
 };
 
 function icon(name, w = 18, h = 18) {
@@ -50,6 +51,7 @@ const NAV_ITEMS = [
   { divider: true },
   { key: 'analytics', label: 'Analytics', icon: 'analytics', ownerOnly: true },
   { key: 'settings', label: 'Settings', icon: 'settings', ownerOnly: true },
+  { key: 'contact-emails', label: 'Contact Emails', icon: 'mail', ownerOnly: true },
   { key: 'lab', label: 'Lab', icon: 'lab', ownerOnly: true },
 ];
 
@@ -246,7 +248,7 @@ async function navigate(pageName) {
   `;
 
   // Owner-only page check
-  const ownerPages = ['analytics', 'settings', 'lab'];
+  const ownerPages = ['analytics', 'settings', 'contact-emails', 'lab'];
   if (ownerPages.includes(pageName) && !AdminAuth.isOwner()) {
     content.innerHTML = `
       <div class="admin-stub">
