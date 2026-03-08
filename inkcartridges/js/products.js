@@ -27,9 +27,11 @@ const Products = {
         const colorStyle = color ? this.getColorStyle(color) : null;
         const imageUrl = typeof storageUrl === 'function' ? storageUrl(product.image_url) : product.image_url;
 
+        const isGradient = colorStyle && colorStyle.includes('gradient');
+
         if (imageUrl && imageUrl !== '/assets/images/placeholder-product.svg') {
             // Has image URL - use it with error fallback (listeners attached after DOM insertion)
-            if (colorStyle) {
+            if (colorStyle && !isGradient) {
                 return `<img src="${Security.escapeAttr(imageUrl)}"
                              alt="${Security.escapeAttr(product.name)}"
                              class="product-card__image"
@@ -43,8 +45,8 @@ const Products = {
                              loading="lazy"
                              data-fallback="placeholder">`;
             }
-        } else if (colorStyle) {
-            // No image but has color - show color block
+        } else if (colorStyle && !isGradient) {
+            // No image but has single color - show color block
             return `<div class="product-card__color-block" style="${colorStyle}"></div>`;
         } else {
             // No image, no color - show placeholder

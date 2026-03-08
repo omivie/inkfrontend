@@ -24,3 +24,4 @@ archive/
 
 # Playwright MCP debug files
 .playwright-mcp/
+.vercel

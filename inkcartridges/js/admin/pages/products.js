@@ -48,7 +48,7 @@ function buildColumns() {
     },
     {
       key: 'name', label: 'Name', sortable: true,
-      render: (r) => `<span class="cell-truncate">${esc(r.name || MISSING)}</span>`,
+      render: (r) => `<button class="copy-name-btn" data-copy="${esc(r.name || '')}" title="Copy name">${icon('copy', 15, 15)}</button><span class="cell-truncate">${esc(r.name || MISSING)}</span>`,
     },
     {
       key: 'sku', label: 'SKU',
@@ -156,7 +156,7 @@ async function loadProducts() {
 
 async function openProductDrawer(product) {
   const drawer = Drawer.open({
-    title: esc(product.name || product.sku || 'Product'),
+    title: product.name || product.sku || 'Product',
     width: '640px',
   });
   if (!drawer) return;
@@ -271,8 +271,8 @@ async function openProductDrawer(product) {
 
   // Save button
   html += `<div style="display:flex;gap:8px;justify-content:flex-end;padding-top:12px;border-top:1px solid var(--border)">`;
-  html += `<button class="admin-btn admin-btn--ghost" data-action="cancel">Cancel</button>`;
-  html += `<button class="admin-btn admin-btn--primary" data-action="save">${icon('orders', 14, 14)} Save Changes</button>`;
+  html += `<button type="button" class="admin-btn admin-btn--ghost" data-action="cancel">Cancel</button>`;
+  html += `<button type="button" class="admin-btn admin-btn--primary" data-action="save">${icon('orders', 14, 14)} Save Changes</button>`;
   html += `</div>`;
 
   drawer.setBody(html);
@@ -311,6 +311,15 @@ function toggleHtml(id, checked) {
 
 function bindProductDrawerActions(drawer, product) {
   const body = drawer.body;
+
+  // Enter key triggers save (except in textareas)
+  body.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && e.target.tagName !== 'TEXTAREA') {
+      e.preventDefault();
+      e.stopPropagation();
+      body.querySelector('[data-action="save"]')?.click();
+    }
+  });
 
   // Async-load compatible printers (non-blocking)
   if (product.sku && window.API?.getCompatiblePrinters) {
@@ -466,55 +475,38 @@ function bindProductDrawerActions(drawer, product) {
 
   // Save
   body.querySelector('[data-action="save"]')?.addEventListener('click', async () => {
-    const data = {};
-    const val = (id) => body.querySelector(`#${id}`)?.value?.trim();
-    const numVal = (id) => { const v = val(id); return v ? Number(v) : undefined; };
-    const chk = (id) => body.querySelector(`#${id}`)?.checked;
-
-    if (val('edit-sku') !== (product.sku || '')) data.sku = val('edit-sku');
-    if (val('edit-name') !== (product.name || '')) data.name = val('edit-name');
-    if (val('edit-description') !== (product.description || '')) data.description = val('edit-description');
-    const brandVal = val('edit-brand');
-    if (brandVal && brandVal !== String(product.brand_id || product.brand || '')) data.brand_id = brandVal;
-    if (val('edit-type') !== (product.product_type || '')) data.product_type = val('edit-type');
-    if (val('edit-color') !== (product.color || '')) data.color = val('edit-color');
-    if (val('edit-source') !== (product.source || '')) data.source = val('edit-source');
-
-    const rp = numVal('edit-retail-price');
-    if (rp !== undefined && rp !== product.retail_price) data.retail_price = rp;
-    const cp = numVal('edit-compare-price');
-    if (cp !== undefined) data.compare_at_price = cp;
-    if (AdminAuth.isOwner()) {
-      const cost = numVal('edit-cost-price');
-      if (cost !== undefined && cost !== product.cost_price) data.cost_price = cost;
-    }
-
-    const stock = numVal('edit-stock');
-    if (stock !== undefined && stock !== product.stock_quantity) data.stock_quantity = stock;
-    const lt = numVal('edit-low-threshold');
-    if (lt !== undefined) data.low_stock_threshold = lt;
-    data.is_active = chk('edit-active');
-    data.track_inventory = chk('edit-track-inventory');
-
-    if (val('edit-meta-title')) data.meta_title = val('edit-meta-title');
-    if (val('edit-meta-desc')) data.meta_description = val('edit-meta-desc');
-    if (val('edit-meta-keywords')) data.meta_keywords = val('edit-meta-keywords');
-    const yield_ = numVal('edit-page-yield');
-    if (yield_ !== undefined) data.page_yield = yield_;
-
-    const weight = numVal('edit-weight');
-    if (weight !== undefined && weight !== product.weight_kg) data.weight_kg = weight;
+    const val = (id) => body.querySelector(`#${id}`)?.value?.trim() ?? '';
+    const numVal = (id) => { const v = val(id); return v !== '' ? Number(v) : null; };
+    const chk = (id) => !!body.querySelector(`#${id}`)?.checked;
 
     const tagsRaw = val('edit-tags');
     const tagsArr = tagsRaw ? tagsRaw.split(',').map(t => t.trim()).filter(Boolean) : [];
-    const origTags = (product.tags || []).join(', ');
-    if (tagsRaw !== origTags) data.tags = tagsArr;
 
-    if (val('edit-admin-notes') !== (product.admin_notes || '')) data.admin_notes = val('edit-admin-notes');
+    const data = {
+      sku: val('edit-sku'),
+      name: val('edit-name'),
+      description: val('edit-description'),
+      brand_id: val('edit-brand') || null,
+      product_type: val('edit-type'),
+      color: val('edit-color'),
+      source: val('edit-source'),
+      retail_price: numVal('edit-retail-price'),
+      compare_at_price: numVal('edit-compare-price'),
+      stock_quantity: numVal('edit-stock'),
+      low_stock_threshold: numVal('edit-low-threshold'),
+      is_active: chk('edit-active'),
+      track_inventory: chk('edit-track-inventory'),
+      meta_title: val('edit-meta-title'),
+      meta_description: val('edit-meta-desc'),
+      meta_keywords: val('edit-meta-keywords'),
+      page_yield: numVal('edit-page-yield'),
+      weight_kg: numVal('edit-weight'),
+      tags: tagsArr,
+      admin_notes: val('edit-admin-notes'),
+    };
 
-    if (Object.keys(data).length === 0) {
-      Toast.info('No changes to save');
-      return;
+    if (AdminAuth.isOwner()) {
+      data.cost_price = numVal('edit-cost-price');
     }
 
     try {
@@ -1141,6 +1133,15 @@ export default {
       onPageChange: (page) => { _page = page; loadProducts(); },
       emptyMessage: 'No products found',
       emptyIcon: icon('products', 40, 40),
+    });
+
+    // Copy name buttons (event delegation)
+    tableContainer.addEventListener('click', (e) => {
+      const btn = e.target.closest('.copy-name-btn');
+      if (!btn) return;
+      e.stopPropagation();
+      const name = btn.dataset.copy;
+      navigator.clipboard.writeText(name).then(() => Toast.success('Copied to clipboard')).catch(() => Toast.error('Copy failed'));
     });
 
     // Search

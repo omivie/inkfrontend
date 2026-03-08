@@ -155,6 +155,8 @@ class DataTable {
       this.container.querySelectorAll('tr.clickable').forEach(tr => {
         tr.addEventListener('click', (e) => {
           if (e.target.closest('button, a, input')) return;
+          const sel = window.getSelection();
+          if (sel && sel.toString().length > 0) return;
           const key = tr.dataset.rowKey;
           const row = this.data.find(r => String(r[this.config.rowKey]) === key);
           if (row) this.config.onRowClick(row);

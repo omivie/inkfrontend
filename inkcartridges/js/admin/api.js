@@ -295,6 +295,9 @@ const AdminAPI = {
   async updateProduct(productId, data) {
     try {
       const resp = await window.API.put(`/api/admin/products/${productId}`, data);
+      if (resp && resp.ok === false) {
+        throw new Error(resp.error || 'Update failed');
+      }
       return resp?.data ?? null;
     } catch (e) {
       DebugLog.warn('[AdminAPI] updateProduct failed:', e.message);

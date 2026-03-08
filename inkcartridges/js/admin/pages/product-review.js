@@ -135,10 +135,10 @@ async function fetchAndRender() {
   if (_search) filters.search = _search;
   if (_brandFilter) filters.brand = _brandFilter;
 
-  const data = await AdminAPI.getUnreviewedProducts(filters, _page, 20);
+  const data = await AdminAPI.getUnreviewedProducts(filters, _page, 200);
   if (!_table) return; // destroyed during await
   const products = data?.products || (Array.isArray(data) ? data : []);
-  const pagination = data?.pagination || { total: products.length, page: _page, limit: 20 };
+  const pagination = data?.pagination || { total: products.length, page: _page, limit: 200 };
 
   _totalCount = pagination.total || 0;
   updateCountBadge(_totalCount);

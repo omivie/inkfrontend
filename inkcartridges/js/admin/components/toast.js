@@ -15,6 +15,12 @@ const Toast = {
   _getContainer() {
     if (!this._container) {
       this._container = document.getElementById('toast-root');
+      if (!this._container) {
+        this._container = document.createElement('div');
+        this._container.id = 'toast-root';
+        this._container.className = 'admin-toasts';
+        document.body.appendChild(this._container);
+      }
     }
     return this._container;
   },

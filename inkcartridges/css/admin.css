@@ -517,6 +517,13 @@
 }
 .admin-table .cell-right { text-align: right; }
 .admin-table .cell-center { text-align: center; }
+.admin-table .copy-name-btn {
+  background: none; border: none; cursor: pointer; padding: 4px 6px; margin-right: 6px;
+  color: var(--text-muted); opacity: 0; transition: opacity .15s; vertical-align: middle; border-radius: 4px;
+  flex-shrink: 0;
+}
+.admin-table .copy-name-btn:hover { color: var(--primary); background: var(--surface-hover); }
+.admin-table tr:hover .copy-name-btn { opacity: 1; }
 .admin-table .cell-muted { color: var(--text-muted); }
 .admin-table .cell-nowrap { white-space: nowrap; }
 
