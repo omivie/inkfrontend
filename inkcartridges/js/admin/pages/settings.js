@@ -1,7 +1,7 @@
 /**
  * Settings Page — Owner-only: Alert thresholds, preferences, exports
  */
-import { AdminAuth, FilterState, AdminAPI, icon, esc } from '../app.js';
+import { AdminAuth, FilterState, AdminAPI, icon, esc, exportDropdown, bindExportDropdown } from '../app.js';
 import { Toast } from '../components/toast.js';
 
 const MISSING = '\u2014';
@@ -64,10 +64,10 @@ async function loadSettings() {
   html += `<div class="admin-settings-section">`;
   html += `<h2 class="admin-settings-section__title">${icon('download', 16, 16)} Data Exports</h2>`;
   html += `<div class="admin-card"><div style="display:flex;gap:8px;flex-wrap:wrap">`;
-  html += `<button class="admin-btn admin-btn--ghost" data-export="orders">${icon('download', 14, 14)} Export Orders</button>`;
-  html += `<button class="admin-btn admin-btn--ghost" data-export="refunds">${icon('download', 14, 14)} Export Refunds</button>`;
-  html += `<button class="admin-btn admin-btn--ghost" data-export="customers">${icon('download', 14, 14)} Export Customers</button>`;
-  html += `<button class="admin-btn admin-btn--ghost" data-export="products">${icon('download', 14, 14)} Export Products</button>`;
+  html += exportDropdown('export-settings-orders', 'Orders');
+  html += exportDropdown('export-settings-refunds', 'Refunds');
+  html += exportDropdown('export-settings-customers', 'Customers');
+  html += exportDropdown('export-settings-products', 'Products');
   html += `</div></div></div>`;
 
   _container.innerHTML = html;
@@ -110,19 +110,19 @@ function bindEvents() {
     });
   });
 
-  // Export buttons
-  _container.querySelectorAll('[data-export]').forEach(btn => {
-    btn.addEventListener('click', async () => {
-      const type = btn.dataset.export;
+  // Export dropdowns
+  const exportTypes = ['orders', 'refunds', 'customers', 'products'];
+  for (const type of exportTypes) {
+    bindExportDropdown(_container, `export-settings-${type}`, async (format) => {
       try {
-        Toast.info(`Exporting ${type}\u2026`);
-        await AdminAPI.exportCSV(type, FilterState.getParams());
+        Toast.info(`Exporting ${type} as ${format.toUpperCase()}\u2026`);
+        await AdminAPI.exportData(type, format, FilterState.getParams());
         Toast.success(`${type} exported`);
       } catch (e) {
         Toast.error(`Export failed: ${e.message}`);
       }
     });
-  });
+  }
 }
 
 export default {

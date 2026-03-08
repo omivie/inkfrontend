@@ -1,7 +1,7 @@
 /**
  * Customers Page — Customer directory with detail drawer + owner intelligence
  */
-import { AdminAuth, FilterState, AdminAPI, icon, esc } from '../app.js';
+import { AdminAuth, FilterState, AdminAPI, icon, esc, exportDropdown, bindExportDropdown } from '../app.js';
 import { DataTable } from '../components/table.js';
 import { Drawer } from '../components/drawer.js';
 import { Toast } from '../components/toast.js';
@@ -133,10 +133,10 @@ function miniKpi(label, value) {
   return `<div class="admin-kpi" style="padding:12px 14px"><div class="admin-kpi__label">${esc(label)}</div><div class="admin-kpi__value" style="font-size:18px">${esc(String(value))}</div></div>`;
 }
 
-async function handleExport() {
+async function handleExport(format = 'csv') {
   try {
-    Toast.info('Preparing export\u2026');
-    await AdminAPI.exportCSV('customers', FilterState.getParams());
+    Toast.info(`Preparing ${format.toUpperCase()} export\u2026`);
+    await AdminAPI.exportData('customers', format, FilterState.getParams());
     Toast.success('Customers exported');
   } catch (e) {
     Toast.error(`Export failed: ${e.message}`);
@@ -258,9 +258,7 @@ export default {
           <input class="admin-input" type="search" placeholder="Search customers\u2026" id="customer-search" style="width:220px;padding-left:32px">
           <span style="position:absolute;left:10px;top:50%;transform:translateY(-50%);color:var(--text-muted)">${icon('search', 14, 14)}</span>
         </div>
-        <button class="admin-btn admin-btn--ghost" id="export-customers-btn">
-          ${icon('download', 14, 14)} Export CSV
-        </button>
+        ${exportDropdown('export-customers')}
       </div>
     `;
     container.appendChild(header);
@@ -293,7 +291,7 @@ export default {
     });
 
     // Export
-    header.querySelector('#export-customers-btn').addEventListener('click', handleExport);
+    bindExportDropdown(header, 'export-customers', handleExport);
 
     await loadCustomers();
 

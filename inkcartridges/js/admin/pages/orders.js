@@ -1,7 +1,7 @@
 /**
  * Orders Page — Triage queue with detail drawer
  */
-import { AdminAuth, FilterState, AdminAPI, icon, esc } from '../app.js';
+import { AdminAuth, FilterState, AdminAPI, icon, esc, exportDropdown, bindExportDropdown } from '../app.js';
 import { DataTable } from '../components/table.js';
 import { Drawer } from '../components/drawer.js';
 import { Toast } from '../components/toast.js';
@@ -512,10 +512,10 @@ function showRefundModal(order) {
   });
 }
 
-async function handleExport() {
+async function handleExport(format = 'csv') {
   try {
-    Toast.info('Preparing export\u2026');
-    await AdminAPI.exportCSV('orders', FilterState.getParams());
+    Toast.info(`Preparing ${format.toUpperCase()} export\u2026`);
+    await AdminAPI.exportData('orders', format, FilterState.getParams());
     Toast.success('Orders exported');
   } catch (e) {
     Toast.error(`Export failed: ${e.message}`);
@@ -539,9 +539,7 @@ export default {
           <input class="admin-input" type="search" placeholder="Search orders\u2026" id="order-search" style="width:220px;padding-left:32px">
           <span style="position:absolute;left:10px;top:50%;transform:translateY(-50%);color:var(--text-muted)">${icon('search', 14, 14)}</span>
         </div>
-        <button class="admin-btn admin-btn--ghost" id="export-orders-btn">
-          ${icon('download', 14, 14)} Export CSV
-        </button>
+        ${exportDropdown('export-orders')}
       </div>
     `;
     container.appendChild(header);
@@ -573,7 +571,7 @@ export default {
     });
 
     // Export
-    header.querySelector('#export-orders-btn').addEventListener('click', handleExport);
+    bindExportDropdown(header, 'export-orders', handleExport);
 
     await loadOrders();
   },

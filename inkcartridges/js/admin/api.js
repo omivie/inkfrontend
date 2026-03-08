@@ -865,31 +865,36 @@ const AdminAPI = {
     }
   },
 
-  // ---- CSV Export (streaming from backend) ----
+  // ---- Data Export (streaming from backend) ----
   async exportCSV(type, filterParams) {
+    return this.exportData(type, 'csv', filterParams);
+  },
+
+  async exportData(type, format = 'csv', filterParams) {
     try {
       const baseUrl = Config.API_URL;
       const token = window.Auth?.session?.access_token;
       if (!token) throw new Error('Not authenticated');
 
-      const url = `${baseUrl}/api/admin/export/${type}?${filterParams}`;
+      const url = `${baseUrl}/api/admin/export/${type}?format=${format}&${filterParams}`;
       const resp = await fetch(url, {
         headers: { 'Authorization': `Bearer ${token}` },
       });
       if (!resp.ok) throw new Error(`Export failed: ${resp.status}`);
 
+      const ext = { csv: 'csv', excel: 'xlsx', pdf: 'pdf' }[format] || format;
       const blob = await resp.blob();
       const blobUrl = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = blobUrl;
-      a.download = `${type}-${new Date().toISOString().slice(0, 10)}.csv`;
+      a.download = `${type}-${new Date().toISOString().slice(0, 10)}.${ext}`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(blobUrl);
       return true;
     } catch (e) {
-      DebugLog.warn(`[AdminAPI] exportCSV(${type}) failed:`, e.message);
+      DebugLog.warn(`[AdminAPI] exportData(${type}, ${format}) failed:`, e.message);
       throw e;
     }
   },

@@ -381,5 +381,61 @@ async function boot() {
 // Start when module loads (deferred by type="module")
 boot();
 
+// ---- Export dropdown helper ----
+function exportDropdown(id, label = 'Export') {
+  return `
+    <div class="admin-export-dropdown" id="${id}" style="position:relative;display:inline-block">
+      <button class="admin-btn admin-btn--ghost" data-export-toggle>
+        ${icon('download', 14, 14)} ${esc(label)}
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-left:4px"><polyline points="6 9 12 15 18 9"/></svg>
+      </button>
+      <div class="admin-export-menu" style="display:none;position:absolute;right:0;top:100%;margin-top:4px;background:var(--bg-card, #fff);border:1px solid var(--color-border-light, #e2e8f0);border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,.12);z-index:50;min-width:160px;overflow:hidden">
+        <button class="admin-export-option" data-format="csv" style="display:flex;align-items:center;gap:8px;width:100%;padding:10px 14px;border:none;background:none;cursor:pointer;font-size:13px;color:var(--text-primary, #1e293b);text-align:left;transition:background .15s">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+          CSV (.csv)
+        </button>
+        <button class="admin-export-option" data-format="excel" style="display:flex;align-items:center;gap:8px;width:100%;padding:10px 14px;border:none;background:none;cursor:pointer;font-size:13px;color:var(--text-primary, #1e293b);text-align:left;transition:background .15s">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#217346" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><path d="M8 13h2l2 4 2-4h2"/></svg>
+          Excel (.xlsx)
+        </button>
+        <button class="admin-export-option" data-format="pdf" style="display:flex;align-items:center;gap:8px;width:100%;padding:10px 14px;border:none;background:none;cursor:pointer;font-size:13px;color:var(--text-primary, #1e293b);text-align:left;transition:background .15s">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#e53e3e" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><path d="M9 15v-2h2a2 2 0 100-4H9v6"/></svg>
+          PDF (.pdf)
+        </button>
+      </div>
+    </div>
+  `;
+}
+
+function bindExportDropdown(container, id, exportFn) {
+  const wrapper = container.querySelector(`#${id}`);
+  if (!wrapper) return;
+  const toggle = wrapper.querySelector('[data-export-toggle]');
+  const menu = wrapper.querySelector('.admin-export-menu');
+
+  toggle.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const open = menu.style.display !== 'none';
+    menu.style.display = open ? 'none' : 'block';
+  });
+
+  wrapper.querySelectorAll('[data-format]').forEach(btn => {
+    btn.addEventListener('mouseenter', () => { btn.style.background = 'var(--bg-hover, #f1f5f9)'; });
+    btn.addEventListener('mouseleave', () => { btn.style.background = 'none'; });
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      menu.style.display = 'none';
+      exportFn(btn.dataset.format);
+    });
+  });
+
+  // Close on outside click
+  const closeMenu = (e) => {
+    if (!wrapper.contains(e.target)) menu.style.display = 'none';
+  };
+  document.addEventListener('click', closeMenu);
+  return () => document.removeEventListener('click', closeMenu);
+}
+
 // Export for page modules
-export { AdminAuth, FilterState, AdminAPI, icon, esc, updateReviewBadge };
+export { AdminAuth, FilterState, AdminAPI, icon, esc, updateReviewBadge, exportDropdown, bindExportDropdown };

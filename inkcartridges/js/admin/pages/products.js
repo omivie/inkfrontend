@@ -1,7 +1,7 @@
 /**
  * Products & SKUs Page — Full CRUD with image management
  */
-import { AdminAuth, FilterState, AdminAPI, icon, esc } from '../app.js';
+import { AdminAuth, FilterState, AdminAPI, icon, esc, exportDropdown, bindExportDropdown } from '../app.js';
 import { DataTable } from '../components/table.js';
 import { Drawer } from '../components/drawer.js';
 import { Toast } from '../components/toast.js';
@@ -581,10 +581,10 @@ function diagKpi(label, value) {
   return `<div class="admin-kpi" style="padding:12px 14px"><div class="admin-kpi__label">${esc(label)}</div><div class="admin-kpi__value" style="font-size:18px">${esc(String(value))}</div></div>`;
 }
 
-async function handleExport() {
+async function handleExport(format = 'csv') {
   try {
-    Toast.info('Preparing export\u2026');
-    await AdminAPI.exportCSV('products', FilterState.getParams());
+    Toast.info(`Preparing ${format.toUpperCase()} export\u2026`);
+    await AdminAPI.exportData('products', format, FilterState.getParams());
     Toast.success('Products exported');
   } catch (e) {
     Toast.error(`Export failed: ${e.message}`);
@@ -1113,9 +1113,7 @@ export default {
           <option value="no-images">No Images</option>
           <option value="has-images">Has Images</option>
         </select>
-        <button class="admin-btn admin-btn--ghost" id="export-products-btn">
-          ${icon('download', 14, 14)} Export CSV
-        </button>
+        ${exportDropdown('export-products')}
       </div>
     `;
     container.appendChild(header);
@@ -1168,7 +1166,7 @@ export default {
     });
 
     // Export
-    header.querySelector('#export-products-btn').addEventListener('click', handleExport);
+    bindExportDropdown(header, 'export-products', handleExport);
 
     // Load products + try diagnostics endpoint
     const [, diag] = await Promise.allSettled([loadProducts(), AdminAPI.getProductDiagnostics()]);
