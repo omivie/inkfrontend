@@ -1120,11 +1120,23 @@ async function bulkSetActive(activate) {
       let done = 0;
       let failed = 0;
       Toast.info(`${activate ? 'Activating' : 'Deactivating'} ${count} products\u2026`);
+      // Build update payloads — backend requires retail_price & stock_quantity
+      const payloads = ids.map(id => {
+        const row = _table.data.find(r => String(r.id) === id);
+        return {
+          id,
+          data: {
+            is_active: activate,
+            retail_price: row?.retail_price ?? 0,
+            stock_quantity: row?.stock_quantity ?? 0,
+          },
+        };
+      });
       // Process in batches of 5
-      for (let i = 0; i < ids.length; i += 5) {
-        const batch = ids.slice(i, i + 5);
+      for (let i = 0; i < payloads.length; i += 5) {
+        const batch = payloads.slice(i, i + 5);
         const results = await Promise.allSettled(
-          batch.map(id => AdminAPI.updateProduct(id, { is_active: activate }))
+          batch.map(p => AdminAPI.updateProduct(p.id, p.data))
         );
         for (const r of results) {
           if (r.status === 'fulfilled') done++;
