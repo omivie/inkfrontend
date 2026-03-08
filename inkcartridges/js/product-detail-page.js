@@ -328,7 +328,7 @@
             const isCompatible = name.toLowerCase().startsWith('compatible ');
             const displayName = isCompatible ? name.substring(11).trim() : name;
             const brandName = p.brand?.name || (typeof p.brand === 'string' ? p.brand : null) || this.extractBrand(name) || 'Unknown';
-            const category = p.category || this.detectCategory(name);
+            const category = this.normalizeCategory(p.category) || this.detectCategory(name);
             const pageYield = p.page_yield || p.yield || null;
 
             return {
@@ -349,6 +349,16 @@
                     return brand;
                 }
             }
+            return null;
+        },
+
+        normalizeCategory(raw) {
+            if (!raw) return null;
+            const lower = raw.toLowerCase();
+            if (lower.includes('ink')) return 'ink';
+            if (lower.includes('toner')) return 'toner';
+            if (lower.includes('drum')) return 'drum';
+            if (lower.includes('ribbon')) return 'ribbon';
             return null;
         },
 
@@ -440,10 +450,10 @@
             const brandSlug = info.brandName.toLowerCase().replace(/\s+/g, '-');
             if (isRibbon) {
                 document.getElementById('breadcrumb-category').innerHTML = `<a href="/html/ribbons.html">${Security.escapeHtml(categoryName)}</a>`;
-                document.getElementById('breadcrumb-brand').innerHTML = `<a href="/html/ribbons.html?brand=${Security.escapeAttr(info.brandName)}">${Security.escapeHtml(info.brandName)}</a>`;
+                document.getElementById('breadcrumb-brand').innerHTML = `<a href="/html/ribbons?brand=${Security.escapeAttr(info.brandName)}">${Security.escapeHtml(info.brandName)}</a>`;
             } else {
-                document.getElementById('breadcrumb-category').innerHTML = `<a href="/html/shop.html?brand=${Security.escapeAttr(brandSlug)}&category=${Security.escapeAttr(info.category)}">${Security.escapeHtml(categoryName)}</a>`;
-                document.getElementById('breadcrumb-brand').innerHTML = `<a href="/html/shop.html?brand=${Security.escapeAttr(brandSlug)}">${Security.escapeHtml(info.brandName)}</a>`;
+                document.getElementById('breadcrumb-category').innerHTML = `<a href="/html/shop?brand=${Security.escapeAttr(brandSlug)}&category=${Security.escapeAttr(info.category)}">${Security.escapeHtml(categoryName)}</a>`;
+                document.getElementById('breadcrumb-brand').innerHTML = `<a href="/html/shop?brand=${Security.escapeAttr(brandSlug)}">${Security.escapeHtml(info.brandName)}</a>`;
             }
 
             // Add product code breadcrumb (e.g., LC37) — skip for ribbons
@@ -451,7 +461,7 @@
                 const productCode = this.extractProductCode(info);
                 const breadcrumbCode = document.getElementById('breadcrumb-code');
                 if (productCode && breadcrumbCode) {
-                    breadcrumbCode.innerHTML = `<a href="/html/shop.html?brand=${Security.escapeAttr(brandSlug)}&category=${Security.escapeAttr(info.category)}&code=${Security.escapeAttr(productCode)}">${Security.escapeHtml(productCode)}</a>`;
+                    breadcrumbCode.innerHTML = `<a href="/html/shop?brand=${Security.escapeAttr(brandSlug)}&category=${Security.escapeAttr(info.category)}&code=${Security.escapeAttr(productCode)}">${Security.escapeHtml(productCode)}</a>`;
                     breadcrumbCode.hidden = false;
                 }
             }
@@ -615,7 +625,7 @@
                 const printerLinks = printers.map(p => {
                     const params = new URLSearchParams({ printer_model: p.name });
                     if (p.brand) params.set('printer_brand', p.brand);
-                    return `<a href="/html/shop.html?${params}" class="printer-link">${Security.escapeHtml(p.name)}</a>`;
+                    return `<a href="/html/shop?${params}" class="printer-link">${Security.escapeHtml(p.name)}</a>`;
                 }).join(', ');
 
                 const html = `

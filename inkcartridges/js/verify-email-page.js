@@ -23,7 +23,7 @@
 
                 try {
                     const response = await API.resendVerificationEmail();
-                    if (response.success) {
+                    if (response.ok) {
                         resendStatus.textContent = 'Verification email sent! Please check your inbox.';
                         resendStatus.style.display = '';
                         resendBtn.textContent = 'Email Sent';

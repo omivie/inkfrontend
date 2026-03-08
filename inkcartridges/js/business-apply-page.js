@@ -41,7 +41,7 @@
                 // Submit to backend API
                 const response = await API.submitBusinessApplication(applicationData);
 
-                if (response.success) {
+                if (response.ok) {
                     // Show success message
                     alert(response.data?.message || 'Your business account application has been submitted. We will review it within 1-2 business days.');
                     window.location.href = '/html/business.html';

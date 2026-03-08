@@ -86,7 +86,7 @@
                 // First, validate cart exists with backend
                 const validateResponse = await API.validateCart();
 
-                if (!validateResponse.success) {
+                if (!validateResponse.ok) {
                     // Cart validation failed (items out of stock, prices changed, etc.)
                     DebugLog.error('Cart validation failed:', validateResponse.error);
                     alert('Some items in your cart have changed. Please review your cart.');
@@ -101,7 +101,7 @@
                 } else {
                     // Fallback: load from server directly
                     const cartResponse = await API.getCart();
-                    if (cartResponse.success && cartResponse.data) {
+                    if (cartResponse.ok && cartResponse.data) {
                         this.cartItems = cartResponse.data.items || [];
                     }
                 }
@@ -166,7 +166,7 @@
                 // Get cart with validated totals from backend
                 const response = await API.getCart();
 
-                if (!response.success || !response.data) {
+                if (!response.ok || !response.data) {
                     throw new Error(response.error || 'Failed to load cart');
                 }
 
@@ -365,16 +365,44 @@
                     // Handle payment method event
                     paymentRequest.on('paymentmethod', async (ev) => {
                         try {
-                            // Create order and get client secret
-                            const orderResult = await this.createOrder();
-                            if (!orderResult || !orderResult.clientSecret) {
+                            // Build items array from cart
+                            const items = this.cartItems.map(item => ({
+                                product_id: item.id,
+                                quantity: item.quantity
+                            }));
+
+                            // Create order on backend (mirrors card payment flow)
+                            const orderResponse = await API.createOrder({
+                                items: items,
+                                shipping_address: {
+                                    recipient_name: `${this.checkoutData.firstName} ${this.checkoutData.lastName}`,
+                                    phone: this.checkoutData.phone || '',
+                                    address_line1: this.checkoutData.address1,
+                                    address_line2: this.checkoutData.address2 || '',
+                                    city: this.checkoutData.city,
+                                    region: this.checkoutData.region,
+                                    postal_code: this.checkoutData.postcode,
+                                    country: 'NZ'
+                                },
+                                shipping_tier: this.checkoutData.shippingTier || 'standard',
+                                shipping_zone: this.checkoutData.shippingZone || '',
+                                delivery_type: this.checkoutData.deliveryType || 'urban',
+                                save_address: true,
+                                customer_notes: this.checkoutData.orderNotes || '',
+                                idempotency_key: crypto.randomUUID().replace(/-/g, '')
+                            });
+
+                            if (!orderResponse.ok) {
                                 ev.complete('fail');
+                                this.showError(orderResponse.error || 'Failed to create order');
                                 return;
                             }
 
-                            // Confirm the payment
+                            const { client_secret, order_number, total_amount } = orderResponse.data;
+
+                            // Confirm the payment with the express payment method
                             const { paymentIntent, error: confirmError } = await this.stripe.confirmCardPayment(
-                                orderResult.clientSecret,
+                                client_secret,
                                 { payment_method: ev.paymentMethod.id },
                                 { handleActions: false }
                             );
@@ -385,15 +413,15 @@
                             } else if (paymentIntent.status === 'requires_action') {
                                 ev.complete('success');
                                 // Handle 3D Secure if needed
-                                const { error } = await this.stripe.confirmCardPayment(orderResult.clientSecret);
+                                const { error } = await this.stripe.confirmCardPayment(client_secret);
                                 if (error) {
                                     this.showError(error.message);
                                 } else {
-                                    this.handleSuccessfulPayment(paymentIntent, orderResult.orderNumber);
+                                    await this.completeExpressOrder(order_number, total_amount);
                                 }
                             } else {
                                 ev.complete('success');
-                                this.handleSuccessfulPayment(paymentIntent, orderResult.orderNumber);
+                                await this.completeExpressOrder(order_number, total_amount);
                             }
                         } catch (error) {
                             ev.complete('fail');
@@ -406,6 +434,37 @@
             } catch (error) {
                 DebugLog.log('Payment Request Button error:', error.message);
             }
+        },
+
+        /**
+         * Complete order after successful express checkout payment
+         */
+        async completeExpressOrder(order_number, total_amount) {
+            try {
+                await API.clearCart();
+            } catch (e) {
+                DebugLog.warn('Could not clear cart via API:', e);
+            }
+
+            if (typeof Cart !== 'undefined') {
+                Cart.items = [];
+                document.querySelectorAll('.cart-count, .cart-badge, #cart-count').forEach(el => {
+                    el.textContent = '0';
+                });
+            }
+            localStorage.removeItem('inkcartridges_cart');
+
+            sessionStorage.setItem('lastOrder', JSON.stringify({
+                order_number: order_number,
+                email: this.checkoutData.email
+            }));
+            sessionStorage.removeItem('checkoutData');
+
+            if (typeof CartAnalytics !== 'undefined') {
+                CartAnalytics.trackOrderCompleted({ order_number, total_amount });
+            }
+
+            window.location.href = `/html/order-confirmation.html?order=${encodeURIComponent(order_number)}`;
         },
 
         /**
@@ -487,7 +546,7 @@
                 btnText.innerHTML = this.getLoadingHTML('Validating cart...');
 
                 const validateResponse = await API.validateCart();
-                if (!validateResponse.success || (validateResponse.data && !validateResponse.data.is_valid)) {
+                if (!validateResponse.ok || (validateResponse.data && !validateResponse.data.is_valid)) {
                     const issues = validateResponse.data?.issues || [];
                     const issueMsg = issues.length > 0
                         ? issues.map(i => i.issue).join(', ')
@@ -519,12 +578,13 @@
                     },
                     shipping_tier: this.checkoutData.shippingTier || 'standard',
                     shipping_zone: this.checkoutData.shippingZone || '',
+                    delivery_type: this.checkoutData.deliveryType || 'urban',
                     save_address: true,
                     customer_notes: this.checkoutData.orderNotes || '',
                     idempotency_key: crypto.randomUUID().replace(/-/g, '')
                 });
 
-                if (!orderResponse.success) {
+                if (!orderResponse.ok) {
                     throw new Error(orderResponse.error || 'Failed to create order');
                 }
 

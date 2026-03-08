@@ -29,7 +29,7 @@
         async loadOrderFromAPI(orderNumber) {
             try {
                 const response = await API.getOrder(orderNumber);
-                if (response.success && response.data) {
+                if (response.ok && response.data) {
                     this.orderData = this.transformAPIOrder(response.data);
                     this.renderOrderDetails();
                 }

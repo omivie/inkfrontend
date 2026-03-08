@@ -59,7 +59,7 @@
             try {
                 // Load orders for revenue calculations
                 const ordersResponse = await API.getOrders({ limit: 500 });
-                const orders = ordersResponse.success ? (ordersResponse.data?.orders || []) : [];
+                const orders = ordersResponse.ok ? (ordersResponse.data?.orders || []) : [];
 
                 // Calculate financial metrics from orders
                 this.calculateMetrics(orders);

@@ -126,7 +126,7 @@
                         try {
                             DebugLog.log('🛒 Merging guest cart...');
                             const mergeResult = await API.mergeCart();
-                            if (mergeResult.success && mergeResult.data) {
+                            if (mergeResult.ok && mergeResult.data) {
                                 DebugLog.log('🛒 Cart merge result:', mergeResult.data);
                                 if (mergeResult.data.merged_count > 0 || mergeResult.data.added_count > 0) {
                                     DebugLog.log(`🛒 Merged ${mergeResult.data.added_count} new items, ${mergeResult.data.merged_count} quantities updated`);

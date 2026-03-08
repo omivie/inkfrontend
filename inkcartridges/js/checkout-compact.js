@@ -262,7 +262,8 @@ var CheckoutCompact = (function () {
 
     var SECTIONS = [
         { key: 'contact',  label: 'Contact Information', requiredIds: ['email', 'phone'] },
-        { key: 'shipping', label: 'Shipping Address',    requiredIds: ['first-name', 'last-name', 'address1', 'city', 'region', 'postcode'] }
+        { key: 'shipping', label: 'Shipping Address',    requiredIds: ['first-name', 'last-name', 'address1', 'city', 'region', 'postcode'] },
+        { key: 'billing',  label: 'Billing Address',     requiredIds: ['billing-first-name', 'billing-last-name', 'billing-address1', 'billing-city', 'billing-region', 'billing-postcode'] }
     ];
 
     var accFieldsets = [];  // populated in initAccordion
@@ -291,8 +292,54 @@ var CheckoutCompact = (function () {
             setupAccordionSection(accFieldsets[j], j);
         }
 
-        // Open first section
-        openSection('contact');
+        // Open first incomplete section (pre-filled sections stay collapsed)
+        var firstIncomplete = findFirstIncompleteSection();
+        var initialKey = firstIncomplete ? firstIncomplete.key : accFieldsets[accFieldsets.length - 1].key;
+        openSection(initialKey);
+
+        // After auto-fill settles, advance if current section got completed
+        setTimeout(function () {
+            if (accCurrentKey && isSectionComplete(getSecByKey(accCurrentKey))) {
+                var next = findFirstIncompleteSection();
+                if (next) {
+                    openSection(next.key);
+                }
+            } else {
+                // Re-render summaries for collapsed sections that may have received data
+                for (var s = 0; s < accFieldsets.length; s++) {
+                    if (accFieldsets[s].key !== accCurrentKey) {
+                        updateCollapsedSummary(accFieldsets[s]);
+                    }
+                    updateCompletion(accFieldsets[s]);
+                }
+            }
+        }, 500);
+
+        // Listen for "same as shipping" toggle to update billing accordion state
+        var sameAsShipping = document.getElementById('same-as-shipping');
+        if (sameAsShipping) {
+            sameAsShipping.addEventListener('change', function () {
+                var billingSec = null;
+                for (var b = 0; b < accFieldsets.length; b++) {
+                    if (accFieldsets[b].key === 'billing') { billingSec = accFieldsets[b]; break; }
+                }
+                if (!billingSec) return;
+                updateCompletion(billingSec);
+                // If checked and billing is currently open, auto-advance or collapse
+                if (sameAsShipping.checked && accCurrentKey === 'billing') {
+                    var nextAfterBilling = getNextSection('billing');
+                    if (nextAfterBilling) {
+                        openSection(nextAfterBilling.key);
+                    } else {
+                        closeSection('billing');
+                    }
+                }
+                // If unchecked, expand billing so user can fill fields
+                if (!sameAsShipping.checked && accCurrentKey !== 'billing') {
+                    openSection('billing');
+                }
+            });
+        }
 
         // Listen for continue-to-payment click
         var payBtn = document.getElementById('continue-to-payment-btn');
@@ -444,15 +491,14 @@ var CheckoutCompact = (function () {
             } else {
                 if (header) header.setAttribute('aria-expanded', 'false');
                 if (panel) panel.setAttribute('hidden', '');
-                // Show summary if section is complete
+                // Show summary if section has any required data filled
                 if (summaryEl) {
                     var hasCustomContent = summaryEl.querySelector('.saved-address-picker__buttons');
                     if (hasCustomContent) {
-                        // Custom picker already in summary — just show/hide based on completion
-                        summaryEl.style.display = isSectionComplete(sec) ? '' : 'none';
+                        summaryEl.style.display = hasAnyRequiredData(sec) ? '' : 'none';
                     } else {
                         var text = getSummaryText(sec);
-                        if (text && isSectionComplete(sec)) {
+                        if (text && hasAnyRequiredData(sec)) {
                             summaryEl.textContent = text;
                             summaryEl.style.display = '';
                         } else {
@@ -474,15 +520,15 @@ var CheckoutCompact = (function () {
                 if (header) header.setAttribute('aria-expanded', 'false');
                 if (panel) panel.setAttribute('hidden', '');
                 accCurrentKey = null;
-                // Show summary if complete
+                // Show summary if section has any required data filled
                 var summaryEl = fs.querySelector('.acc-summary');
                 if (summaryEl) {
                     var hasCustomContent = summaryEl.querySelector('.saved-address-picker__buttons');
                     if (hasCustomContent) {
-                        summaryEl.style.display = isSectionComplete(accFieldsets[i]) ? '' : 'none';
+                        summaryEl.style.display = hasAnyRequiredData(accFieldsets[i]) ? '' : 'none';
                     } else {
                         var text = getSummaryText(accFieldsets[i]);
-                        if (text && isSectionComplete(accFieldsets[i])) {
+                        if (text && hasAnyRequiredData(accFieldsets[i])) {
                             summaryEl.textContent = text;
                             summaryEl.style.display = '';
                         } else {
@@ -496,10 +542,18 @@ var CheckoutCompact = (function () {
     }
 
     function getEffectiveRequiredIds(sec) {
+        if (sec.key === 'billing') {
+            var sameAs = document.getElementById('same-as-shipping');
+            if (sameAs && sameAs.checked) return [];
+        }
         return sec.requiredIds;
     }
 
     function isSectionComplete(sec) {
+        if (sec.key === 'billing') {
+            var sameAs = document.getElementById('same-as-shipping');
+            if (sameAs && sameAs.checked) return true;
+        }
         var ids = getEffectiveRequiredIds(sec);
         for (var i = 0; i < ids.length; i++) {
             var input = document.getElementById(ids[i]);
@@ -527,11 +581,48 @@ var CheckoutCompact = (function () {
         return null;
     }
 
+    function hasAnyRequiredData(sec) {
+        if (sec.key === 'billing') {
+            var sameAs = document.getElementById('same-as-shipping');
+            if (sameAs && sameAs.checked) return true;
+        }
+        var ids = getEffectiveRequiredIds(sec);
+        for (var i = 0; i < ids.length; i++) {
+            var input = document.getElementById(ids[i]);
+            if (input && input.value) return true;
+        }
+        return false;
+    }
+
     function findFirstIncompleteSection() {
         for (var i = 0; i < accFieldsets.length; i++) {
             if (!isSectionComplete(accFieldsets[i])) return accFieldsets[i];
         }
         return null;
+    }
+
+    function getSecByKey(key) {
+        for (var i = 0; i < accFieldsets.length; i++) {
+            if (accFieldsets[i].key === key) return accFieldsets[i];
+        }
+        return null;
+    }
+
+    function updateCollapsedSummary(sec) {
+        var summaryEl = sec.el.querySelector('.acc-summary');
+        if (!summaryEl) return;
+        var hasCustomContent = summaryEl.querySelector('.saved-address-picker__buttons');
+        if (hasCustomContent) {
+            summaryEl.style.display = hasAnyRequiredData(sec) ? '' : 'none';
+        } else {
+            var text = getSummaryText(sec);
+            if (text && hasAnyRequiredData(sec)) {
+                summaryEl.textContent = text;
+                summaryEl.style.display = '';
+            } else {
+                summaryEl.style.display = 'none';
+            }
+        }
     }
 
     function getNextSection(key) {
@@ -559,22 +650,48 @@ var CheckoutCompact = (function () {
         if (sec.key === 'shipping') {
             var firstName = document.getElementById('first-name');
             var lastName = document.getElementById('last-name');
+            var companyEl = document.getElementById('company');
             var address = document.getElementById('address1');
+            var address2El = document.getElementById('address2');
             var city = document.getElementById('city');
             var region = document.getElementById('region');
+            var postcodeEl = document.getElementById('postcode');
             var parts2 = [];
             if (firstName && firstName.value && lastName && lastName.value) {
                 parts2.push(firstName.value + ' ' + lastName.value);
             }
-            if (address && address.value) parts2.push(address.value);
+            if (companyEl && companyEl.value) parts2.push(companyEl.value);
+            var addrParts = [];
+            if (address && address.value) addrParts.push(address.value);
+            if (address2El && address2El.value) addrParts.push(address2El.value);
+            if (addrParts.length) parts2.push(addrParts.join(', '));
             var cityRegion = [];
             if (city && city.value) cityRegion.push(city.value);
             if (region && region.value) {
                 var selectedOption = region.options[region.selectedIndex];
-                if (selectedOption) cityRegion.push(selectedOption.textContent);
+                if (selectedOption) cityRegion.push(selectedOption.textContent.trim());
             }
+            if (postcodeEl && postcodeEl.value) cityRegion.push(postcodeEl.value);
             if (cityRegion.length) parts2.push(cityRegion.join(', '));
+            // Delivery type
+            var deliveryRadio = document.querySelector('input[name="delivery_type"]:checked');
+            if (deliveryRadio) {
+                parts2.push(deliveryRadio.value === 'rural' ? 'Rural delivery' : 'Urban delivery');
+            }
             return parts2.join(', ');
+        }
+        if (sec.key === 'billing') {
+            var sameAs = document.getElementById('same-as-shipping');
+            if (sameAs && sameAs.checked) return 'Same as shipping address';
+            var bFirst = document.getElementById('billing-first-name');
+            var bLast = document.getElementById('billing-last-name');
+            var bAddr = document.getElementById('billing-address1');
+            var bCity = document.getElementById('billing-city');
+            var parts3 = [];
+            if (bFirst && bFirst.value && bLast && bLast.value) parts3.push(bFirst.value + ' ' + bLast.value);
+            if (bAddr && bAddr.value) parts3.push(bAddr.value);
+            if (bCity && bCity.value) parts3.push(bCity.value);
+            return parts3.join(', ');
         }
         return '';
     }

@@ -51,7 +51,6 @@
         async init() {
             // Always setup form handlers first
             this.setupFormSubmit();
-            this.setupPasswordChange();
 
             // Wait a moment for AccountPage to initialize auth
             await new Promise(resolve => setTimeout(resolve, 500));
@@ -98,7 +97,7 @@
             // Try to get more complete data from API (non-blocking)
             try {
                 const response = await API.getProfile();
-                if (response.success && response.data) {
+                if (response.ok && response.data) {
                     const user = response.data;
                     // Update fields with API data
                     if (user.first_name) document.getElementById('first-name').value = user.first_name;
@@ -163,7 +162,7 @@
                     let backendSuccess = false;
                     try {
                         const response = await API.updateProfile(profileData);
-                        if (response.success) {
+                        if (response.ok) {
                             backendSuccess = true;
                         } else {
                             DebugLog.warn('Backend API failed:', response.error);
@@ -236,7 +235,7 @@
 
                     try {
                         const result = await Auth.updatePassword(newPassword.value);
-                        if (result.success) {
+                        if (result.ok) {
                             showNotification('Password updated successfully', 'success');
                             currentPassword.value = '';
                             newPassword.value = '';

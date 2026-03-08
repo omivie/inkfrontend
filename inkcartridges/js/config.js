@@ -15,7 +15,7 @@ const Config = {
     SUPABASE_ANON_KEY: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxtZGxnbGRqZ2Nhbmtuc2pyY3hoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njc1MTg1NjksImV4cCI6MjA4MzA5NDU2OX0.7Wk6k6avT5AUJnTkJ5VKlzJ54Tm6lbdx9WPnJsXb5Mo',
 
     // Stripe publishable key (test mode)
-    STRIPE_PUBLISHABLE_KEY: 'pk_test_51SmAli1IMIpvFmJcy0StpBZo5F83MhzeekzEzhpRP6jYcJml636Sbr0cUoMBfPZltAOENBqDKcnyipfpx7gc7sN000XINyIZw8',
+    STRIPE_PUBLISHABLE_KEY: 'pk_test_51SmAlV0gOo8rzNMQVrfwNbzDajKddyVErPdWIiyQq5v55fwF7dqMAIKWZKQZasgV8bsZvEBySGROi75iJQZBvLf3001YEfdJ8N',
 
     // Cloudflare Turnstile site key (empty = Turnstile disabled, set when backend enables it)
     TURNSTILE_SITE_KEY: '',

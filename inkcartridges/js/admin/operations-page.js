@@ -43,11 +43,11 @@
             try {
                 // Load products
                 const productsResponse = await API.getProducts({ limit: 500 });
-                this.products = productsResponse.success ? (productsResponse.data?.products || []) : [];
+                this.products = productsResponse.ok ? (productsResponse.data?.products || []) : [];
 
                 // Load orders to calculate sales velocity
                 const ordersResponse = await API.getOrders({ limit: 500 });
-                const orders = ordersResponse.success ? (ordersResponse.data?.orders || []) : [];
+                const orders = ordersResponse.ok ? (ordersResponse.data?.orders || []) : [];
 
                 // Extract order items
                 this.orderItems = [];

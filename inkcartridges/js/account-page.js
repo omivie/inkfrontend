@@ -56,7 +56,7 @@
 
             try {
                 const response = await API.getUserSavings();
-                if (response.success && response.data) {
+                if (response.ok && response.data) {
                     const savings = response.data;
                     const section = document.getElementById('savings-section');
 

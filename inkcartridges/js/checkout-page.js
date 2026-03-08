@@ -64,7 +64,7 @@
                 const response = await API.getVerificationStatus();
                 DebugLog.log('Verification status response:', response);
 
-                if (response.success && response.data) {
+                if (response.ok && response.data) {
                     this.isEmailVerified = response.data.email_verified;
                 } else {
                     // If API returns success: false but no specific "not verified" indication, assume verified
@@ -299,7 +299,8 @@
             // DISPLAY ONLY - backend has final authority on shipping cost
             const region = document.getElementById('region')?.value || '';
             if (typeof Shipping !== 'undefined') {
-                const result = Shipping.calculate(this.cartItems, this.totals.subtotal, region);
+                const deliveryType = document.querySelector('input[name="delivery_type"]:checked')?.value || 'urban';
+                const result = Shipping.calculate(this.cartItems, this.totals.subtotal, region, deliveryType);
                 this.totals.shipping = result.fee;
                 this._shippingResult = result;
             } else {
@@ -464,6 +465,13 @@
                     this.updateShippingCost();
                 });
             }
+
+            // Delivery type (urban/rural) change recalculates shipping
+            document.querySelectorAll('input[name="delivery_type"]').forEach(input => {
+                input.addEventListener('change', () => {
+                    this.updateShippingCost();
+                });
+            });
         },
 
         // Setup billing address same as shipping toggle
@@ -629,7 +637,7 @@
                 try {
                     const response = await API.applyCoupon(code);
 
-                    if (response.success && response.data) {
+                    if (response.ok && response.data) {
                         this.appliedCoupon = response.data.code;
                         this.totals.discount = response.data.discount_amount || 0;
 
@@ -753,6 +761,7 @@
                     // Shipping tier and zone (for backend)
                     shippingTier: this._shippingResult?.tier || 'standard',
                     shippingZone: this._shippingResult?.zone || '',
+                    deliveryType: document.querySelector('input[name="delivery_type"]:checked')?.value || 'urban',
                     estimatedShipping: this.totals.shipping,
                     // Terms accepted
                     termsAccepted: document.getElementById('terms')?.checked || false,
@@ -855,7 +864,7 @@
         async loadSavedAddresses() {
             try {
                 const response = await API.getAddresses();
-                if (response.success && response.data) {
+                if (response.ok && response.data) {
                     const addresses = Array.isArray(response.data) ? response.data : (response.data.addresses || []);
                     const defaultAddress = addresses.find(a => a.is_default) || addresses[0];
 
@@ -880,6 +889,14 @@
                                 }
                             }
                         });
+
+                        // Restore delivery type from saved address
+                        const savedDeliveryType = defaultAddress.delivery_type || 'urban';
+                        const deliveryRadio = document.querySelector(`input[name="delivery_type"][value="${savedDeliveryType}"]`);
+                        if (deliveryRadio) deliveryRadio.checked = true;
+
+                        // Recalculate shipping with restored address
+                        this.updateShippingCost();
                     }
                 }
             } catch (error) {

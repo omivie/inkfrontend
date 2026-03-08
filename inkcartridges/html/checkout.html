@@ -224,7 +224,7 @@
                         <form class="checkout-form" id="checkout-form" novalidate>
 
                             <!-- Contact information -->
-                            <fieldset class="checkout-section">
+                            <fieldset class="checkout-section" data-acc-section="contact">
                                 <legend class="checkout-section__heading">
                                     Contact Information
                                 </legend>
@@ -237,15 +237,12 @@
                                     Welcome back, <strong id="user-display-name"></strong>!
                                 </p>
 
-                                <div class="form-row">
+                                <div class="form-row form-row--two-col">
                                     <div class="form-group">
                                         <label for="email" class="form-label">Email Address <span class="required">*</span></label>
                                         <input type="email" id="email" name="email" class="form-input" required autocomplete="email">
                                         <span class="form-hint">We'll send your order confirmation here</span>
                                     </div>
-                                </div>
-
-                                <div class="form-row">
                                     <div class="form-group">
                                         <label for="phone" class="form-label">Phone Number <span class="required">*</span></label>
                                         <div class="phone-input-group">
@@ -272,7 +269,7 @@
                             </fieldset>
 
                             <!-- Shipping address -->
-                            <fieldset class="checkout-section">
+                            <fieldset class="checkout-section" data-acc-section="shipping">
                                 <legend class="checkout-section__heading">
                                     Shipping Address
                                 </legend>
@@ -295,14 +292,11 @@
                                     </div>
                                 </div>
 
-                                <div class="form-row">
+                                <div class="form-row form-row--two-col">
                                     <div class="form-group">
                                         <label for="address1" class="form-label">Address <span class="required">*</span></label>
                                         <input type="text" id="address1" name="address1" class="form-input" required autocomplete="address-line1" placeholder="Street address" maxlength="255">
                                     </div>
-                                </div>
-
-                                <div class="form-row">
                                     <div class="form-group">
                                         <label for="address2" class="form-label">Apartment, suite, etc. (optional)</label>
                                         <input type="text" id="address2" name="address2" class="form-input" autocomplete="address-line2">
@@ -342,6 +336,23 @@
                                     </div>
                                 </div>
 
+                                <!-- Delivery type selector -->
+                                <div class="checkout-delivery-type">
+                                    <label class="form-label">Delivery Type</label>
+                                    <div class="delivery-type-options">
+                                        <label class="delivery-type-option">
+                                            <input type="radio" name="delivery_type" value="urban" class="delivery-type-option__radio" checked>
+                                            <span class="delivery-type-option__name">Urban</span>
+                                            <span class="delivery-type-option__desc">Standard metro/city delivery</span>
+                                        </label>
+                                        <label class="delivery-type-option">
+                                            <input type="radio" name="delivery_type" value="rural" class="delivery-type-option__radio">
+                                            <span class="delivery-type-option__name">Rural</span>
+                                            <span class="delivery-type-option__desc">Rural delivery address</span>
+                                        </label>
+                                    </div>
+                                </div>
+
                                 <!-- Save address option - only shown for authenticated users -->
                                 <div class="form-row" id="save-address-row" style="display: none;">
                                     <div class="form-group form-group--checkbox">
@@ -354,7 +365,7 @@
                             </fieldset>
 
                             <!-- Billing address -->
-                            <fieldset class="checkout-section">
+                            <fieldset class="checkout-section" data-acc-section="billing">
                                 <legend class="checkout-section__heading">
                                     Billing Address
                                 </legend>

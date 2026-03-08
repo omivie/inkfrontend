@@ -157,7 +157,7 @@ const RibbonsPage = {
             ribbons = ribbons.map(r => this.normalizeRibbon(r));
 
             this.renderProducts(ribbons);
-            this.renderPagination(pagination);
+            this.renderPagination(pagination, ribbons.length);
             this.elements.levelProducts.hidden = false;
             this.updateBreadcrumb();
             this.updateTitle();
@@ -183,7 +183,15 @@ const RibbonsPage = {
             img.addEventListener('error', function() {
                 if (this.dataset.fallback === 'placeholder') {
                     this.removeAttribute('data-fallback');
-                    this.src = '/assets/images/placeholder-product.svg';
+                    // For compatible ribbons, show the black box placeholder
+                    if (this.closest('.product-card')?.dataset.source === 'compatible') {
+                        const placeholder = document.createElement('div');
+                        placeholder.className = 'product-card__compatible-placeholder';
+                        placeholder.innerHTML = '<span>COMPATIBLE</span>';
+                        this.replaceWith(placeholder);
+                    } else {
+                        this.src = '/assets/images/placeholder-product.svg';
+                    }
                 }
             }, { once: true });
         });
@@ -192,6 +200,7 @@ const RibbonsPage = {
     createRibbonCard(ribbon) {
         const card = document.createElement('article');
         card.className = 'product-card';
+        if (ribbon.source) card.dataset.source = ribbon.source;
 
         const price = ribbon.sale_price || ribbon.retail_price || 0;
         const inStock = ribbon.in_stock !== false;
@@ -202,17 +211,23 @@ const RibbonsPage = {
         const imageUrl = ribbon.image_url || '';
         const ribbonId = ribbon.id;
 
-        const imageContent = imageUrl
-            ? `<img src="${Security.escapeAttr(imageUrl)}" alt="${Security.escapeAttr(displayName)}" loading="lazy" data-fallback="placeholder">`
-            : `<svg width="60" height="60" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1">
+        const isCompatible = (ribbon.source === 'compatible');
+        let imageContent;
+        if (isCompatible && !imageUrl) {
+            imageContent = `<div class="product-card__compatible-placeholder"><span>COMPATIBLE</span></div>`;
+        } else if (imageUrl) {
+            imageContent = `<img src="${Security.escapeAttr(imageUrl)}" alt="${Security.escapeAttr(displayName)}" loading="lazy" data-fallback="placeholder">`;
+        } else {
+            imageContent = `<svg width="60" height="60" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1">
                 <circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="3"/>
             </svg>`;
+        }
 
         const isFav = typeof Favourites !== 'undefined' && Favourites.isFavourite && Favourites.isFavourite(ribbonId);
 
         card.innerHTML = `
-            <a href="/html/product/index.html?sku=${Security.escapeAttr(sku)}&type=ribbon" class="product-card__link">
-                <div class="product-card__image">
+            <a href="/html/product/?sku=${Security.escapeAttr(sku)}&type=ribbon" class="product-card__link">
+                <div class="product-card__image-wrapper">
                     ${imageContent}
                 </div>
                 <div class="product-card__content">
@@ -304,19 +319,31 @@ const RibbonsPage = {
     // =========================================
     // PAGINATION
     // =========================================
-    renderPagination(pagination) {
+    renderPagination(pagination, ribbonCount) {
         const container = this.elements.pagination;
         if (!container) return;
 
+        // Always show item count, even on single page
+        const totalItems = pagination ? (pagination.total || pagination.total_items || 0) : ribbonCount || 0;
+        const current = pagination ? pagination.page : 1;
+        const limit = this.pageLimit;
+        const start = (current - 1) * limit + 1;
+        const end = Math.min(current * limit, totalItems);
+        const countHtml = totalItems > 0
+            ? `<span class="pagination__count">Showing ${start}–${end} of ${totalItems} items</span>`
+            : '';
+
         if (!pagination || pagination.total_pages <= 1) {
-            container.innerHTML = '';
+            container.innerHTML = totalItems > 0
+                ? `<div class="pagination__bar">${countHtml}</div>`
+                : '';
             return;
         }
 
+        let paginationHtml = '';
         if (typeof Products !== 'undefined' && Products.renderPagination) {
-            container.innerHTML = Products.renderPagination(pagination);
+            paginationHtml = Products.renderPagination(pagination);
         } else {
-            const current = pagination.page;
             const total = pagination.total_pages;
             let items = '';
 
@@ -339,8 +366,10 @@ const RibbonsPage = {
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 6 15 12 9 18"></polyline></svg>
             </button></li>`;
 
-            container.innerHTML = `<ul class="pagination__list">${items}</ul>`;
+            paginationHtml = `<ul class="pagination__list">${items}</ul>`;
         }
+
+        container.innerHTML = `<div class="pagination__bar">${paginationHtml}${countHtml}</div>`;
 
         container.querySelectorAll('.pagination__link[data-page]').forEach(btn => {
             btn.addEventListener('click', () => {

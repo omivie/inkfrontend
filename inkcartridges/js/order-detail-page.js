@@ -20,7 +20,7 @@
             // Try API first
             try {
                 const response = await API.getOrder(orderNumber);
-                if (response.success && response.data) {
+                if (response.ok && response.data) {
                     order = response.data;
                     DebugLog.log('Order loaded from API');
                 }

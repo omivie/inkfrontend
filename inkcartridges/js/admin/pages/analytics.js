@@ -74,29 +74,39 @@ async function loadTab() {
 async function loadFinancial(el) {
   const { from, to } = FilterState.getDateRange();
   const days = FilterState.periodToDays();
+  const params = FilterState.getParams();
+  const signal = FilterState.getAbortSignal();
 
-  const [burnRes, dailyRes, forecastRes, expenseRes] = await Promise.allSettled([
+  const [kpiRes, revSeriesRes, burnRes, forecastRes, expenseRes] = await Promise.allSettled([
+    AdminAPI.getDashboardKPIs(params, signal),
+    AdminAPI.getRevenueSeries(params, signal),
     AdminAPI.getBurnRunway(),
-    AdminAPI.getDailyRevenue(days),
     AdminAPI.getForecasts(),
     AdminAPI.getExpenses(from, to),
   ]);
 
+  const kpis = kpiRes.value;
+  const revSeries = revSeriesRes.value;
   const burn = burnRes.value;
-  const daily = dailyRes.value;
   const forecast = forecastRes.value;
   const expenses = expenseRes.value;
 
+  // Log warnings for REST endpoints that returned null/empty
+  if (!forecast) console.warn('[Analytics] Forecast data unavailable — /api/admin/analytics/forecasts returned null');
+  if (!expenses) console.warn('[Analytics] Expenses data unavailable — /api/admin/analytics/expenses returned null');
+  if (!burn) console.warn('[Analytics] Burn/runway data unavailable — /api/admin/analytics/burn-runway returned null');
+
   let html = '';
 
-  // KPIs
-  const totalRev = daily?.total_revenue ?? daily?.summary?.total_revenue;
-  const netProfit = burn?.net_profit ?? burn?.profit;
+  // KPIs — use RPC data (same source as dashboard)
+  const cur = kpis?.current ?? {};
+  const totalRev = cur.revenue;
+  const marginProxy = cur.margin_proxy;
   const burnRate = burn?.burn_rate ?? burn?.monthly_burn;
   const runway = burn?.runway_months ?? burn?.months_remaining;
   html += `<div class="admin-kpi-grid">`;
   html += kpi('Revenue', totalRev != null ? formatPrice(totalRev) : null, `Last ${days}d`);
-  html += kpi('Net Profit', netProfit != null ? formatPrice(netProfit) : null);
+  html += kpi('Margin Proxy', marginProxy != null ? `${Number(marginProxy).toFixed(1)}%` : null, 'Based on cost snapshots');
   html += kpi('Burn Rate', burnRate != null ? `${formatPrice(burnRate)}/mo` : null);
   html += kpi('Runway', runway != null ? `${Number(runway).toFixed(1)} months` : null);
   html += `</div>`;
@@ -130,13 +140,23 @@ async function loadFinancial(el) {
   // Add Expense button
   el.querySelector('#add-expense-btn')?.addEventListener('click', () => showExpenseModal());
 
-  // Daily Revenue chart
-  const series = daily?.series || daily?.data || (Array.isArray(daily) ? daily : []);
+  // Daily Revenue chart — uses RPC revenue series (same data source as dashboard)
+  const series = revSeries?.series || [];
   if (series.length) {
     const colors = Charts.getThemeColors();
     Charts.line('chart-daily-revenue', {
       labels: series.map(d => (d.date || '').slice(5)),
-      datasets: [{ label: 'Revenue', data: series.map(d => d.revenue || d.amount || 0), borderColor: colors.cyan, backgroundColor: colors.cyan + '18', fill: true, tension: 0.3, borderWidth: 2, pointRadius: 1 }],
+      datasets: [{
+        label: 'Revenue',
+        data: series.map(d => d.revenue || 0),
+        borderColor: colors.cyan,
+        backgroundColor: colors.cyan + '18',
+        fill: true,
+        tension: 0.3,
+        borderWidth: 2,
+        pointRadius: series.map(d => d.is_anomaly ? 6 : 1),
+        pointBackgroundColor: series.map(d => d.is_anomaly ? colors.danger : colors.cyan),
+      }],
       options: { plugins: { tooltip: { callbacks: { label: ctx => formatPrice(ctx.raw) } } } },
     });
   }
@@ -213,6 +233,13 @@ async function loadCustomerIntel(el) {
   const health = healthRes.value;
   const nps = npsRes.value;
   const repeat = repeatRes.value;
+
+  // Debug warnings for REST endpoints
+  if (!ltv) console.warn('[Analytics] Customer LTV data unavailable');
+  if (!cac) console.warn('[Analytics] CAC data unavailable');
+  if (!cohorts) console.warn('[Analytics] Cohort data unavailable');
+  if (!churn) console.warn('[Analytics] Churn data unavailable');
+  if (!nps) console.warn('[Analytics] NPS data unavailable');
 
   let html = '';
 
@@ -332,6 +359,10 @@ async function loadMarketing(el) {
   const campaigns = campRes.value;
   const channels = channelRes.value;
   const funnel = funnelRes.value;
+
+  if (!campaigns) console.warn('[Analytics] Campaign data unavailable');
+  if (!channels) console.warn('[Analytics] Channel efficiency data unavailable');
+  if (!funnel) console.warn('[Analytics] Conversion funnel data unavailable');
 
   let html = '';
 
@@ -465,6 +496,11 @@ async function loadOperations(el) {
   const lockup = lockupRes.value;
   const perf = perfRes.value;
 
+  if (!turnover) console.warn('[Analytics] Inventory turnover data unavailable');
+  if (!dead) console.warn('[Analytics] Dead stock data unavailable');
+  if (!velocity) console.warn('[Analytics] Stock velocity data unavailable');
+  if (!perf) console.warn('[Analytics] Product performance data unavailable');
+
   let html = '';
 
   // KPIs
@@ -555,6 +591,9 @@ async function loadAlerts(el) {
 
   const alerts = alertsRes.value;
   const thresholds = thresholdsRes.value;
+
+  if (!alerts) console.warn('[Analytics] Alerts data unavailable');
+  if (!thresholds) console.warn('[Analytics] Alert thresholds data unavailable');
 
   let html = '';
 

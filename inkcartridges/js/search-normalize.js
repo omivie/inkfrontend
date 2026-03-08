@@ -28,8 +28,10 @@ const SearchNormalize = (() => {
     const CODE_PATTERNS = [
         // Brother toner/drum: TN-2450, DR-2425 (use dashes)
         [/\b(TN|DR)(\d{3,5})(XL|XXL)?\b/gi, '$1-$2$3'],
-        // Brother ink: LC231, LC233, LC3317 (NO dash — product codes don't use them)
-        // Left as-is intentionally — no transform needed
+        // Brother ink: LC-37, LC-233, LC-3317 (insert dash)
+        [/\b(LC)(\d{2,5})(XL|XXL)?\b/gi, '$1-$2$3'],
+        // Brother label tape: TZe-231
+        [/\b(TZE?)(\d{3,4})\b/gi, '$1-$2'],
         // Canon: PGI-680, CLI-681, PG-645, CL-646, CART-335
         [/\b(PGI|CLI|PG|CL|CART)(\d{3,4})(XL|XXL)?\b/gi, '$1-$2$3'],
         // Samsung: CLT-K406S, CLT-C404S

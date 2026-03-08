@@ -304,6 +304,29 @@ function createSmartSearch() {
                 return { products: allProducts, total };
             }
 
+            // 2-word noise-stripping fallback: if one word is a generic category term
+            // (e.g. "ink LC-37"), retry with just the specific product code
+            if (!isTypeQuery) {
+                const twoWords = query.split(/\s+/).filter(Boolean);
+                if (twoWords.length === 2) {
+                    const NOISE = new Set(['ink', 'inks', 'toner', 'toners', 'cartridge', 'cartridges',
+                        'drum', 'drums', 'printer', 'printers', 'ribbon', 'ribbons', 'label', 'tape']);
+                    const specific = twoWords.filter(w => !NOISE.has(w.toLowerCase()));
+                    if (specific.length === 1) {
+                        const codeQuery = specific[0];
+                        const codeParams = { search: codeQuery, limit: searchConfig.maxResults };
+                        const codeRes = await API.getProducts(codeParams);
+                        if (codeRes.ok && codeRes.data) {
+                            const data = codeRes.data;
+                            const products = data.products || data || [];
+                            if (Array.isArray(products) && products.length > 0) {
+                                return { products, total: data.pagination?.total ?? data.total ?? products.length };
+                            }
+                        }
+                    }
+                }
+            }
+
             // Multi-word fallback: if no results and query has 3+ words,
             // retry with first 2 words then filter client-side for all words
             if (!isTypeQuery) {
@@ -662,7 +685,7 @@ function createSmartSearch() {
             const sku = product.sku || product.code || product.product_code || '';
             let url;
             if (sku) {
-                url = '/html/product/index.html?sku=' + encodeURIComponent(sku);
+                url = '/html/product/?sku=' + encodeURIComponent(sku);
                 if (product._isRibbon) url += '&type=ribbon';
             } else {
                 url = searchConfig.buildShopUrl(product, this._currentQuery);

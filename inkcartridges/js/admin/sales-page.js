@@ -39,7 +39,7 @@
         async loadData() {
             try {
                 const ordersResponse = await API.getOrders({ limit: 100 });
-                const orders = ordersResponse.success ? (ordersResponse.data?.orders || []) : [];
+                const orders = ordersResponse.ok ? (ordersResponse.data?.orders || []) : [];
 
                 const totalRevenue = orders.reduce((sum, o) => sum + (o.total || 0), 0);
                 const totalOrders = orders.length;

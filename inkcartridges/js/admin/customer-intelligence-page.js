@@ -45,7 +45,7 @@
             try {
                 // Load orders to calculate customer metrics
                 const ordersResponse = await API.getOrders({ limit: 1000 });
-                const orders = ordersResponse.success ? (ordersResponse.data?.orders || []) : [];
+                const orders = ordersResponse.ok ? (ordersResponse.data?.orders || []) : [];
 
                 // Aggregate customer data from orders
                 this.processCustomerData(orders);

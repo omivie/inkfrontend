@@ -502,7 +502,7 @@
             this.ribbonBrands.forEach((brand, i) => {
                 const box = document.createElement('a');
                 box.className = 'drilldown-box drilldown-box--ribbon';
-                box.href = `/html/ribbons.html?brand=${encodeURIComponent(brand)}`;
+                box.href = `/html/ribbons?brand=${encodeURIComponent(brand)}`;
                 box.style.animationDelay = `${60 + i * 30}ms`;
                 box.innerHTML = `<span class="drilldown-box__label">${Security.escapeHtml(brand)}</span>`;
                 grid.appendChild(box);
@@ -920,8 +920,9 @@
                     }
                 }
 
-                // Also check manufacturer_part_number
-                if (mpn) {
+                // Also check manufacturer_part_number (only if name didn't yield codes,
+                // to avoid bogus codes like LC33173 from MPN "LC33173PK" when name has LC3317)
+                if (mpn && foundCodes.size === 0) {
                     const normalizedMpn = this.normalizeCode(mpn, brand);
                     if (normalizedMpn && normalizedMpn.length >= 2) {
                         foundCodes.add(normalizedMpn);
@@ -936,6 +937,90 @@
                         const code = this.normalizeCode(match[0], brand);
                         if (code && code.length >= 2) {
                             foundCodes.add(code);
+                        }
+                    }
+                }
+
+                // For Brother: recognize IB combo codes (e.g., "IB3757" → LC37 + LC57)
+                // These are internal codes that concatenate two series numbers
+                if (foundCodes.size === 0 && brand === 'brother') {
+                    const ibComboPattern = /\bIB(\d{4,})\b/gi;
+                    const ibMatches = name.matchAll(ibComboPattern);
+                    for (const match of ibMatches) {
+                        const digits = match[1];
+                        // Split evenly into two series codes (e.g., "3757" → "37" + "57")
+                        if (digits.length % 2 === 0) {
+                            const mid = digits.length / 2;
+                            const code1 = 'LC' + digits.substring(0, mid);
+                            const code2 = 'LC' + digits.substring(mid);
+                            const norm1 = this.normalizeCode(code1, brand);
+                            const norm2 = this.normalizeCode(code2, brand);
+                            if (norm1) foundCodes.add(norm1);
+                            if (norm2) foundCodes.add(norm2);
+                        }
+                    }
+                }
+
+                // For Brother: recognize internal B-codes (e.g., "B131" → "LC131")
+                // These appear in value pack products that use internal naming
+                if (foundCodes.size === 0 && brand === 'brother') {
+                    const bCodePattern = /\bB(\d{2,5}(?:XL)?)\b/gi;
+                    const bMatches = name.matchAll(bCodePattern);
+                    const productType = (product.product_type || '').toLowerCase();
+                    const category = this.state.category || '';
+                    for (const match of bMatches) {
+                        const num = match[1].toUpperCase();
+                        let mfgCode = null;
+                        if (productType === 'ink_cartridge' || productType === 'ink_bottle' || category === 'ink') {
+                            mfgCode = 'LC' + num;
+                        } else if (productType === 'toner_cartridge' || category === 'toner') {
+                            mfgCode = 'TN' + num;
+                        } else if (productType === 'drum_unit' || category === 'consumable') {
+                            mfgCode = 'DR' + num;
+                        }
+                        if (mfgCode) {
+                            const normalized = this.normalizeCode(mfgCode, brand);
+                            if (normalized) foundCodes.add(normalized);
+                        }
+                    }
+                }
+
+                // Also extract B-codes or IB combo codes from SKUs (e.g., GEN-PACK-BRO-B131-CMY, COMP-PACK-BRO-IB3757-KCMY)
+                if (foundCodes.size === 0 && brand === 'brother' && sku) {
+                    const skuUpper = sku.toUpperCase();
+                    const productType = (product.product_type || '').toLowerCase();
+                    const category = this.state.category || '';
+
+                    // Check for IB combo codes in SKU (e.g., BRO-IB3757)
+                    const skuIBCombo = skuUpper.match(/BRO-IB(\d{4,})/);
+                    if (skuIBCombo) {
+                        const digits = skuIBCombo[1];
+                        if (digits.length % 2 === 0) {
+                            const mid = digits.length / 2;
+                            const norm1 = this.normalizeCode('LC' + digits.substring(0, mid), brand);
+                            const norm2 = this.normalizeCode('LC' + digits.substring(mid), brand);
+                            if (norm1) foundCodes.add(norm1);
+                            if (norm2) foundCodes.add(norm2);
+                        }
+                    }
+
+                    // Check for B-codes in SKU (e.g., BRO-B131)
+                    if (foundCodes.size === 0) {
+                        const skuBCode = skuUpper.match(/BRO-B(\d{2,5}(?:XL)?)/);
+                        if (skuBCode) {
+                            const num = skuBCode[1];
+                            let mfgCode = null;
+                            if (productType === 'ink_cartridge' || productType === 'ink_bottle' || category === 'ink') {
+                                mfgCode = 'LC' + num;
+                            } else if (productType === 'toner_cartridge' || category === 'toner') {
+                                mfgCode = 'TN' + num;
+                            } else if (productType === 'drum_unit' || category === 'consumable') {
+                                mfgCode = 'DR' + num;
+                            }
+                            if (mfgCode) {
+                                const normalized = this.normalizeCode(mfgCode, brand);
+                                if (normalized) foundCodes.add(normalized);
+                            }
                         }
                     }
                 }
@@ -1636,14 +1721,14 @@
                     // Search for the printer model name
                     const searchResponse = await API.getProducts({ search: printerModel, limit: 100 });
 
-                    if (searchResponse.success && searchResponse.data?.products) {
+                    if (searchResponse.ok && searchResponse.data?.products) {
                         allProducts = searchResponse.data.products;
                     }
 
                     // Also search for the brand name to get genuine products
                     if (brandName) {
                         const brandResponse = await API.getProducts({ search: brandName, limit: 100 });
-                        if (brandResponse.success && brandResponse.data?.products) {
+                        if (brandResponse.ok && brandResponse.data?.products) {
                             // Merge and deduplicate by ID
                             const existingIds = new Set(allProducts.map(p => p.id));
                             const newProducts = brandResponse.data.products.filter(p => !existingIds.has(p.id));
@@ -1821,7 +1906,7 @@
                                 try {
                                     const printerProducts = await API.getProductsByPrinter(slug);
                                     const pList = printerProducts.data?.products || printerProducts.data?.compatible_products || [];
-                                    if (printerProducts.success && pList.length > 0) {
+                                    if (printerProducts.ok && pList.length > 0) {
                                         for (const p of pList) {
                                             if (!existingIds.has(p.id)) {
                                                 existingIds.add(p.id);
@@ -1995,7 +2080,8 @@
 
             // Use retail_price from backend API
             const price = product.retail_price || 0;
-            const inStock = product.in_stock === true;
+            const stockStatus = getStockStatus(product);
+            const inStock = stockStatus.class !== 'out-of-stock';
             const brandName = product.brand?.name || '';
             const color = product.color || '';
 
@@ -2020,8 +2106,8 @@
             const isFav = typeof Favourites !== 'undefined' && Favourites.isFavourite && Favourites.isFavourite(product.id);
 
             card.innerHTML = `
-                <a href="/html/product/index.html?sku=${product.sku}" class="product-card__link">
-                    <div class="product-card__image">
+                <a href="/html/product/?sku=${product.sku}" class="product-card__link">
+                    <div class="product-card__image-wrapper">
                         ${imageContent}
                     </div>
                     <div class="product-card__content">
@@ -2030,8 +2116,8 @@
                         <div class="product-card__pricing">
                             <span class="product-card__price">${formatPrice(price)}</span>
                         </div>
-                        <span class="product-card__stock ${inStock ? 'product-card__stock--in' : 'product-card__stock--out'}">
-                            ${inStock ? 'In Stock' : 'Out of Stock'}
+                        <span class="product-card__stock product-card__stock--${stockStatus.class}">
+                            ${stockStatus.text}
                         </span>
                     </div>
                 </a>
@@ -2268,7 +2354,7 @@
                                     const params = new URLSearchParams({ printer_model: p.name });
                                     if (p.brand) params.set('printer_brand', p.brand);
                                     const escapedName = p.name.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-                                    return `<a href="/html/shop.html?${params}" class="printer-link">${escapedName}</a>`;
+                                    return `<a href="/html/shop?${params}" class="printer-link">${escapedName}</a>`;
                                 }).join(', ');
                                 this.elements.printersList.innerHTML = links;
                                 this.elements.printersBanner.hidden = false;

@@ -200,6 +200,7 @@ async function openProductDrawer(product) {
   // Basic Info
   html += `<div class="admin-detail-block">`;
   html += `<div class="admin-detail-block__title">Basic Info</div>`;
+  html += formGroup('SKU', `<input class="admin-input" id="edit-sku" value="${esc(full.sku || '')}">`);
   html += formGroup('Name', `<input class="admin-input" id="edit-name" value="${esc(full.name || '')}">`);
   html += formGroup('Description', `<textarea class="admin-textarea" id="edit-description" rows="3">${esc(full.description || '')}</textarea>`);
   html += `<div class="admin-form-row">`;
@@ -232,6 +233,10 @@ async function openProductDrawer(product) {
   html += formGroup('Low Stock Threshold', `<input class="admin-input" id="edit-low-threshold" type="number" min="0" value="${full.low_stock_threshold ?? ''}">`);
   html += `</div>`;
   html += `<div class="admin-form-row">`;
+  html += formGroup('Weight (kg)', `<input class="admin-input" id="edit-weight" type="number" step="0.01" min="0" value="${full.weight_kg ?? ''}">`);
+  html += `<div class="admin-form-group"></div>`;
+  html += `</div>`;
+  html += `<div class="admin-form-row">`;
   html += formGroup('Active', toggleHtml('edit-active', full.is_active !== false));
   html += formGroup('Track Inventory', toggleHtml('edit-track-inventory', full.track_inventory !== false));
   html += `</div>`;
@@ -249,6 +254,19 @@ async function openProductDrawer(product) {
   html += `<div class="admin-detail-block">`;
   html += `<div class="admin-detail-block__title">Compatibility</div>`;
   html += formGroup('Page Yield', `<input class="admin-input" id="edit-page-yield" type="number" min="0" value="${full.page_yield ?? ''}">`);
+  html += `<div class="admin-form-group"><label>Compatible Printers</label><div class="admin-compat-printers" id="compat-printers"><span class="admin-text-muted">Loading&hellip;</span></div></div>`;
+  html += `</div>`;
+
+  // Tags
+  html += `<div class="admin-detail-block">`;
+  html += `<div class="admin-detail-block__title">Tags</div>`;
+  html += formGroup('Tags (comma-separated)', `<input class="admin-input" id="edit-tags" value="${esc((full.tags || []).join(', '))}">`);
+  html += `</div>`;
+
+  // Admin Notes
+  html += `<div class="admin-detail-block">`;
+  html += `<div class="admin-detail-block__title">Admin Notes</div>`;
+  html += formGroup('Internal Notes', `<textarea class="admin-textarea" id="edit-admin-notes" rows="3">${esc(full.admin_notes || '')}</textarea>`);
   html += `</div>`;
 
   // Save button
@@ -293,6 +311,29 @@ function toggleHtml(id, checked) {
 
 function bindProductDrawerActions(drawer, product) {
   const body = drawer.body;
+
+  // Async-load compatible printers (non-blocking)
+  if (product.sku && window.API?.getCompatiblePrinters) {
+    const container = body.querySelector('#compat-printers');
+    window.API.getCompatiblePrinters(product.sku).then(response => {
+      const printers = response?.data?.printers || response?.data?.compatible_printers || response?.data || [];
+      if (container) {
+        if (Array.isArray(printers) && printers.length > 0) {
+          container.innerHTML = printers.map(p => {
+            const name = typeof p === 'string' ? p : (p.model || p.name || String(p));
+            return `<span class="admin-badge">${esc(name)}</span>`;
+          }).join('');
+        } else {
+          container.innerHTML = '<span class="admin-text-muted">None found</span>';
+        }
+      }
+    }).catch(() => {
+      if (container) container.innerHTML = '<span class="admin-text-muted">Could not load</span>';
+    });
+  } else {
+    const container = body.querySelector('#compat-printers');
+    if (container) container.innerHTML = '<span class="admin-text-muted">No SKU</span>';
+  }
 
   // Bind image error fallbacks
   body.querySelectorAll('img[data-fallback="broken-parent"]').forEach(img => {
@@ -430,6 +471,7 @@ function bindProductDrawerActions(drawer, product) {
     const numVal = (id) => { const v = val(id); return v ? Number(v) : undefined; };
     const chk = (id) => body.querySelector(`#${id}`)?.checked;
 
+    if (val('edit-sku') !== (product.sku || '')) data.sku = val('edit-sku');
     if (val('edit-name') !== (product.name || '')) data.name = val('edit-name');
     if (val('edit-description') !== (product.description || '')) data.description = val('edit-description');
     const brandVal = val('edit-brand');
@@ -459,6 +501,16 @@ function bindProductDrawerActions(drawer, product) {
     if (val('edit-meta-keywords')) data.meta_keywords = val('edit-meta-keywords');
     const yield_ = numVal('edit-page-yield');
     if (yield_ !== undefined) data.page_yield = yield_;
+
+    const weight = numVal('edit-weight');
+    if (weight !== undefined && weight !== product.weight_kg) data.weight_kg = weight;
+
+    const tagsRaw = val('edit-tags');
+    const tagsArr = tagsRaw ? tagsRaw.split(',').map(t => t.trim()).filter(Boolean) : [];
+    const origTags = (product.tags || []).join(', ');
+    if (tagsRaw !== origTags) data.tags = tagsArr;
+
+    if (val('edit-admin-notes') !== (product.admin_notes || '')) data.admin_notes = val('edit-admin-notes');
 
     if (Object.keys(data).length === 0) {
       Toast.info('No changes to save');

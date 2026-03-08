@@ -24,7 +24,7 @@
                 const response = await fetch(`${Config.API_URL}/api/analytics/marketing?period=${this.period}`);
                 if (response.ok) {
                     const result = await response.json();
-                    if (result.success && result.data) {
+                    if (result.ok && result.data) {
                         this.updateKPIs(result.data.kpis);
                         this.updateFunnel(result.data.funnel);
                         this.updateTopPages(result.data.topPages);
@@ -174,7 +174,7 @@
                 let purchases = 0;
                 let checkouts = 0;
 
-                if (ordersResponse.success && ordersResponse.data?.orders) {
+                if (ordersResponse.ok && ordersResponse.data?.orders) {
                     const orders = ordersResponse.data.orders;
                     const completedStatuses = ['completed', 'shipped', 'delivered'];
                     const checkoutStatuses = ['pending', 'processing', 'paid', ...completedStatuses];
@@ -252,7 +252,7 @@
 
                 if (response.ok) {
                     const data = await response.json();
-                    return data.success ? data.data : null;
+                    return data.ok ? data.data : null;
                 }
                 return null;
             } catch (error) {
