@@ -213,6 +213,16 @@ function createSmartSearch() {
                     }
                 }
 
+                // Step 5: Try printer model lookup — find compatible products
+                const printerResult = await this._fetchByPrinterModel(query);
+                if (query !== this._currentQuery) return;
+                if (printerResult && printerResult.products.length > 0) {
+                    this._setCache(query, printerResult);
+                    this._showCorrection(query, 'compatible products for ' + printerResult.printerName, 'normalize');
+                    this._renderResults(printerResult.products, query, printerResult.total);
+                    return;
+                }
+
                 // No results from any path
                 this._renderEmpty(query);
             } catch (err) {
@@ -405,6 +415,104 @@ function createSmartSearch() {
             }
 
             return { products: [], total: null };
+        },
+
+        /**
+         * Look up a printer model in the database and return compatible products.
+         * Uses Supabase to query printer_models → product_compatibility → products.
+         */
+        async _fetchByPrinterModel(query) {
+            // Need Supabase client
+            const sb = (typeof Auth !== 'undefined' && Auth.supabase)
+                ? Auth.supabase
+                : (typeof supabase !== 'undefined' && supabase.createClient && typeof Config !== 'undefined')
+                    ? supabase.createClient(Config.SUPABASE_URL, Config.SUPABASE_ANON_KEY)
+                    : null;
+            if (!sb) return null;
+
+            try {
+                let printerData = null;
+
+                // Try exact match on full_name
+                const exact = await sb.from('printer_models')
+                    .select('id, full_name, model_name')
+                    .ilike('full_name', query)
+                    .single();
+
+                if (exact.data) {
+                    printerData = exact.data;
+                } else {
+                    // Try partial match
+                    const partial = await sb.from('printer_models')
+                        .select('id, full_name, model_name')
+                        .ilike('full_name', '%' + query + '%')
+                        .limit(1);
+
+                    if (partial.data && partial.data.length > 0) {
+                        printerData = partial.data[0];
+                    } else {
+                        // Try model_name only (strip brand prefix)
+                        const modelOnly = query.replace(/^(BROTHER|CANON|EPSON|HP|SAMSUNG|LEXMARK|OKI|FUJI\s*XEROX|KYOCERA)\s+/i, '');
+                        if (modelOnly !== query) {
+                            const modelResult = await sb.from('printer_models')
+                                .select('id, full_name, model_name')
+                                .ilike('model_name', modelOnly)
+                                .limit(1);
+
+                            if (modelResult.data && modelResult.data.length > 0) {
+                                printerData = modelResult.data[0];
+                            }
+                        }
+
+                        // Also try with model_name matching the raw query
+                        if (!printerData) {
+                            const rawModel = await sb.from('printer_models')
+                                .select('id, full_name, model_name')
+                                .ilike('model_name', '%' + query + '%')
+                                .limit(1);
+
+                            if (rawModel.data && rawModel.data.length > 0) {
+                                printerData = rawModel.data[0];
+                            }
+                        }
+                    }
+                }
+
+                if (!printerData) return null;
+
+                // Get compatible product IDs
+                const { data: compatData } = await sb.from('product_compatibility')
+                    .select('product_id')
+                    .eq('printer_model_id', printerData.id);
+
+                if (!compatData || compatData.length === 0) return null;
+
+                const productIds = compatData.map(c => c.product_id);
+
+                // Fetch those products
+                const { data: productsData } = await sb.from('products')
+                    .select('*, brand:brands(name, slug)')
+                    .in('id', productIds)
+                    .eq('is_active', true);
+
+                if (!productsData || productsData.length === 0) return null;
+
+                // Normalize to match expected product schema
+                const products = productsData.map(p => ({
+                    ...p,
+                    brand: p.brand || {},
+                    retail_price: p.retail_price ?? p.price,
+                    image_url: p.image_url || ''
+                }));
+
+                return {
+                    products,
+                    total: products.length,
+                    printerName: printerData.full_name || printerData.model_name
+                };
+            } catch (err) {
+                return null;
+            }
         },
 
         // --- Rendering ---
