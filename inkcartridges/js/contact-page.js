@@ -1,4 +1,4 @@
-    document.addEventListener('DOMContentLoaded', () => {
+    function initContactForm() {
         const form = document.getElementById('contact-form');
         if (!form) return;
 
@@ -46,4 +46,10 @@
             btn.innerHTML = originalHTML;
             btn.disabled = false;
         });
-    });
+    }
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', initContactForm);
+    } else {
+        initContactForm();
+    }
