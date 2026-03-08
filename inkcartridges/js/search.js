@@ -726,8 +726,6 @@ function createSmartSearch() {
                 // Position dropdown from below the search form to the bottom of the viewport
                 const formRect = this._form.getBoundingClientRect();
                 this._dropdown.style.top = Math.round(formRect.bottom) + 'px';
-                this._dropdown.style.left = Math.round(formRect.left) + 'px';
-                this._dropdown.style.right = Math.round(window.innerWidth - formRect.right) + 'px';
 
                 this._dropdown.classList.add('is-open');
                 this._input.setAttribute('aria-expanded', 'true');
