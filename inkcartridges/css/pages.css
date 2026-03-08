@@ -8927,8 +8927,8 @@
 
 /* Brand Box Specifics */
 .drilldown-box--brand {
-    min-height: 96px;
-    padding: var(--spacing-md) var(--spacing-lg);
+    min-height: 56px;
+    padding: var(--spacing-sm) var(--spacing-lg);
 }
 
 .drilldown-box__logo {
@@ -8942,12 +8942,16 @@
     transform: scale(1.04);
 }
 
-/* Brand-specific logo sizing */
-.drilldown-box__logo--brother { height: 50px; }
-.drilldown-box__logo--canon { height: 40px; }
-.drilldown-box__logo--epson { height: 22px; }
-.drilldown-box__logo--hp { height: 35px; }
-.drilldown-box__logo--samsung { height: 22px; }
+/* Brand-specific logo sizing — matched to mega nav dropdown */
+.drilldown-box__logo--brother { height: 22px; }
+.drilldown-box__logo--canon { height: 20px; }
+.drilldown-box__logo--epson { height: 20px; }
+.drilldown-box__logo--hp { height: 29px; }
+.drilldown-box__logo--samsung { height: 19px; }
+.drilldown-box__logo--lexmark { height: 24px; }
+.drilldown-box__logo--oki { height: 24px; }
+.drilldown-box__logo--fuji-xerox { height: 29px; }
+.drilldown-box__logo--kyocera { height: 26px; }
 
 .drilldown-box__name {
     font-size: var(--font-size-md);
@@ -9378,11 +9382,7 @@
         min-height: 140px;
     }
 
-    .drilldown-box__logo--brother { height: 44px; }
-    .drilldown-box__logo--canon { height: 34px; }
-    .drilldown-box__logo--epson { height: 18px; }
-    .drilldown-box__logo--hp { height: 30px; }
-    .drilldown-box__logo--samsung { height: 18px; }
+    /* Brand logos keep same size as mega nav at all breakpoints */
 
     .drilldown-box__icon svg {
         width: 36px;
