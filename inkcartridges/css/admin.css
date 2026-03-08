@@ -1183,10 +1183,31 @@
   .admin-product-gallery { grid-template-columns: repeat(2, 1fr); }
 }
 
+/* ---- Selection & Bulk Actions ---- */
+.admin-table .cell-select { width: 40px; text-align: center; padding: 6px 8px; }
+.admin-table .cell-select input[type="checkbox"] {
+  width: 16px; height: 16px; cursor: pointer; accent-color: var(--cyan);
+}
+.admin-table tbody tr.selected { background: color-mix(in srgb, var(--cyan) 8%, transparent); }
+.admin-table tbody tr.selected:hover { background: color-mix(in srgb, var(--cyan) 14%, transparent); }
+
+.admin-bulk-bar {
+  position: fixed; bottom: 0; left: 0; right: 0; z-index: 1000;
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 12px 24px;
+  background: var(--surface-2, var(--card-bg, #1e1e2e));
+  border-top: 1px solid var(--border);
+  box-shadow: 0 -4px 20px rgba(0,0,0,0.25);
+  animation: bulkBarSlide 0.2s ease-out;
+}
+.admin-bulk-bar__count { font-weight: 600; font-size: 14px; color: var(--text); }
+.admin-bulk-bar__actions { display: flex; gap: 8px; }
+@keyframes bulkBarSlide { from { transform: translateY(100%); } to { transform: translateY(0); } }
+
 /* ---- Print ---- */
 @media print {
   .admin-sidebar, .admin-topbar, .admin-reg-strip, .admin-toasts,
-  .admin-drawer-backdrop, .admin-modal-backdrop, .admin-filters { display: none !important; }
+  .admin-drawer-backdrop, .admin-modal-backdrop, .admin-filters, .admin-bulk-bar { display: none !important; }
   .admin-shell { grid-template-columns: 1fr; }
   .admin-content-wrapper { grid-column: 1; }
   .admin { background: #fff; color: #000; }

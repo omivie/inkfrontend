@@ -15,6 +15,8 @@ class DataTable {
    * @param {string} config.emptyMessage
    * @param {string} config.emptyIcon
    * @param {string} config.rowKey - property name for unique row ID
+   * @param {boolean} config.selectable - show checkboxes for row selection
+   * @param {Function} config.onSelectionChange - callback(selectedKeys: Set)
    */
   constructor(container, config) {
     this.container = container;
@@ -23,6 +25,7 @@ class DataTable {
     this.pagination = null;
     this.sortKey = null;
     this.sortDir = 'desc';
+    this.selected = new Set();
     this._render();
   }
 
@@ -35,12 +38,14 @@ class DataTable {
   setLoading(loading) {
     if (loading) {
       let html = '<div class="admin-card"><div class="admin-table-wrap"><table class="admin-table"><thead><tr>';
+      if (this.config.selectable) html += '<th class="cell-select"></th>';
       for (const col of this.config.columns) {
         html += `<th>${esc(col.label)}</th>`;
       }
       html += '</tr></thead><tbody>';
       for (let i = 0; i < 8; i++) {
         html += '<tr>';
+        if (this.config.selectable) html += '<td class="cell-select"></td>';
         for (const col of this.config.columns) {
           html += `<td><div class="admin-skeleton admin-skeleton--text" style="width:${60 + Math.random() * 30}%"></div></td>`;
         }
@@ -57,8 +62,37 @@ class DataTable {
     this._render();
   }
 
+  getSelected() {
+    return new Set(this.selected);
+  }
+
+  clearSelection() {
+    this.selected.clear();
+    this.container.querySelectorAll('.dt-select-row').forEach(cb => { cb.checked = false; });
+    const selectAll = this.container.querySelector('.dt-select-all');
+    if (selectAll) { selectAll.checked = false; selectAll.indeterminate = false; }
+    if (this.config.onSelectionChange) this.config.onSelectionChange(this.selected);
+  }
+
+  _updateSelectAllState() {
+    const selectAll = this.container.querySelector('.dt-select-all');
+    if (!selectAll) return;
+    const visibleKeys = this.data.map(r => String(r[this.config.rowKey]));
+    const selectedVisible = visibleKeys.filter(k => this.selected.has(k));
+    if (selectedVisible.length === 0) {
+      selectAll.checked = false;
+      selectAll.indeterminate = false;
+    } else if (selectedVisible.length === visibleKeys.length) {
+      selectAll.checked = true;
+      selectAll.indeterminate = false;
+    } else {
+      selectAll.checked = false;
+      selectAll.indeterminate = true;
+    }
+  }
+
   _render() {
-    const { columns, onRowClick, emptyMessage, emptyIcon } = this.config;
+    const { columns, onRowClick, emptyMessage, emptyIcon, selectable } = this.config;
 
     if (!this.data.length) {
       this.container.innerHTML = `
@@ -74,10 +108,13 @@ class DataTable {
     }
 
     let html = '<div class="admin-card admin-mb-0"><div class="admin-table-wrap"><table class="admin-table"><thead><tr>';
+    if (selectable) {
+      html += '<th class="cell-select"><input type="checkbox" class="dt-select-all"></th>';
+    }
     for (const col of columns) {
       const sortCls = col.sortable ? ' sortable' : '';
       const activeCls = this.sortKey === col.key ? ` sort-${this.sortDir}` : '';
-      const arrow = col.sortable ? `<span class="sort-arrow">${this.sortKey === col.key ? (this.sortDir === 'asc' ? '▲' : '▼') : '▽'}</span>` : '';
+      const arrow = col.sortable ? `<span class="sort-arrow">${this.sortKey === col.key ? (this.sortDir === 'asc' ? '\u25B2' : '\u25BC') : '\u25BD'}</span>` : '';
       const alignCls = col.align === 'right' ? ' cell-right' : '';
       html += `<th class="${sortCls}${activeCls}${alignCls}" data-sort-key="${col.key || ''}">${esc(col.label)}${arrow}</th>`;
     }
@@ -85,8 +122,14 @@ class DataTable {
 
     for (const row of this.data) {
       const rowKey = this.config.rowKey ? row[this.config.rowKey] : '';
+      const rowKeyStr = String(rowKey);
       const clickable = onRowClick ? ' clickable' : '';
-      html += `<tr class="${clickable}" data-row-key="${esc(String(rowKey))}">`;
+      const selectedCls = selectable && this.selected.has(rowKeyStr) ? ' selected' : '';
+      html += `<tr class="${clickable}${selectedCls}" data-row-key="${esc(rowKeyStr)}">`;
+      if (selectable) {
+        const checked = this.selected.has(rowKeyStr) ? ' checked' : '';
+        html += `<td class="cell-select"><input type="checkbox" class="dt-select-row" data-key="${esc(rowKeyStr)}"${checked}></td>`;
+      }
       for (const col of columns) {
         const alignCls = col.align === 'right' ? ' cell-right' : '';
         const extraCls = col.className ? ` ${col.className}` : '';
@@ -105,6 +148,8 @@ class DataTable {
     html += '</div>';
     this.container.innerHTML = html;
     this._bindEvents();
+
+    if (selectable) this._updateSelectAllState();
   }
 
   _renderPagination() {
@@ -164,6 +209,44 @@ class DataTable {
       });
     }
 
+    // Selection checkboxes
+    if (this.config.selectable) {
+      // Select-all
+      const selectAll = this.container.querySelector('.dt-select-all');
+      if (selectAll) {
+        selectAll.addEventListener('change', () => {
+          const visibleKeys = this.data.map(r => String(r[this.config.rowKey]));
+          if (selectAll.checked) {
+            visibleKeys.forEach(k => this.selected.add(k));
+          } else {
+            visibleKeys.forEach(k => this.selected.delete(k));
+          }
+          this.container.querySelectorAll('.dt-select-row').forEach(cb => {
+            cb.checked = selectAll.checked;
+          });
+          this.container.querySelectorAll('tbody tr').forEach(tr => {
+            tr.classList.toggle('selected', selectAll.checked);
+          });
+          if (this.config.onSelectionChange) this.config.onSelectionChange(this.selected);
+        });
+      }
+
+      // Individual row checkboxes
+      this.container.querySelectorAll('.dt-select-row').forEach(cb => {
+        cb.addEventListener('change', () => {
+          const key = cb.dataset.key;
+          if (cb.checked) {
+            this.selected.add(key);
+          } else {
+            this.selected.delete(key);
+          }
+          cb.closest('tr')?.classList.toggle('selected', cb.checked);
+          this._updateSelectAllState();
+          if (this.config.onSelectionChange) this.config.onSelectionChange(this.selected);
+        });
+      });
+    }
+
     // Pagination
     if (this.config.onPageChange) {
       this.container.querySelectorAll('[data-page]').forEach(btn => {
@@ -178,6 +261,7 @@ class DataTable {
   destroy() {
     this.container.innerHTML = '';
     this.data = [];
+    this.selected.clear();
   }
 }
 

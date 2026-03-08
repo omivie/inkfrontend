@@ -21,6 +21,7 @@ let _activeFilter = '';
 let _imageFilter = '';
 let _brands = [];
 let _diagnostics = null;
+let _bulkBar = null;
 
 function stockBadge(product) {
   const qty = product.stock_quantity;
@@ -1075,6 +1076,73 @@ async function bulkGenerateSEO() {
   });
 }
 
+function updateBulkBar(selected) {
+  const count = selected.size;
+  if (count === 0) {
+    if (_bulkBar) { _bulkBar.remove(); _bulkBar = null; }
+    return;
+  }
+  if (!_bulkBar) {
+    _bulkBar = document.createElement('div');
+    _bulkBar.className = 'admin-bulk-bar';
+    document.body.appendChild(_bulkBar);
+  }
+  _bulkBar.innerHTML = `
+    <span class="admin-bulk-bar__count">${count} selected</span>
+    <div class="admin-bulk-bar__actions">
+      <button class="admin-btn admin-btn--sm admin-btn--danger" data-bulk="deactivate">Deactivate</button>
+      <button class="admin-btn admin-btn--sm admin-btn--primary" data-bulk="activate">Activate</button>
+      <button class="admin-btn admin-btn--sm admin-btn--ghost" data-bulk="clear">Clear</button>
+    </div>
+  `;
+  _bulkBar.querySelector('[data-bulk="deactivate"]').addEventListener('click', () => bulkSetActive(false));
+  _bulkBar.querySelector('[data-bulk="activate"]').addEventListener('click', () => bulkSetActive(true));
+  _bulkBar.querySelector('[data-bulk="clear"]').addEventListener('click', () => {
+    if (_table) _table.clearSelection();
+    updateBulkBar(new Set());
+  });
+}
+
+async function bulkSetActive(activate) {
+  if (!_table) return;
+  const selected = _table.getSelected();
+  const count = selected.size;
+  if (count === 0) return;
+
+  const action = activate ? 'activate' : 'deactivate';
+  Modal.confirm({
+    title: `Bulk ${activate ? 'Activate' : 'Deactivate'} Products`,
+    message: `This will ${action} ${count} product${count > 1 ? 's' : ''}. Proceed?`,
+    confirmLabel: `${activate ? 'Activate' : 'Deactivate'} ${count}`,
+    confirmClass: activate ? 'admin-btn--primary' : 'admin-btn--danger',
+    onConfirm: async () => {
+      const ids = [...selected];
+      let done = 0;
+      let failed = 0;
+      Toast.info(`${activate ? 'Activating' : 'Deactivating'} ${count} products\u2026`);
+      // Process in batches of 5
+      for (let i = 0; i < ids.length; i += 5) {
+        const batch = ids.slice(i, i + 5);
+        const results = await Promise.allSettled(
+          batch.map(id => AdminAPI.updateProduct(id, { is_active: activate }))
+        );
+        for (const r of results) {
+          if (r.status === 'fulfilled') done++;
+          else failed++;
+        }
+      }
+      if (_table) _table.clearSelection();
+      updateBulkBar(new Set());
+      if (failed > 0) {
+        Toast.error(`${done} ${action}d, ${failed} failed`);
+      } else {
+        Toast.success(`${done} product${done > 1 ? 's' : ''} ${action}d`);
+      }
+      loadProducts();
+    },
+  });
+}
+
 export default {
   title: 'Products & SKUs',
 
@@ -1126,6 +1194,8 @@ export default {
     _table = new DataTable(tableContainer, {
       columns: buildColumns(),
       rowKey: 'id',
+      selectable: true,
+      onSelectionChange: (sel) => updateBulkBar(sel),
       onRowClick: (row) => openProductDrawer(row),
       onSort: (key, dir) => { _sort = key; _sortDir = dir; _page = 1; loadProducts(); },
       onPageChange: (page) => { _page = page; loadProducts(); },
@@ -1205,6 +1275,7 @@ export default {
 
   destroy() {
     if (_table) _table.destroy();
+    if (_bulkBar) { _bulkBar.remove(); _bulkBar = null; }
     _table = null;
     _container = null;
     _search = '';
