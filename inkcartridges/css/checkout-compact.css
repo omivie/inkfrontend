@@ -136,9 +136,6 @@ section.cart-page .cart-empty {
     align-items: flex-start;
 }
 
-.checkout-page__title {
-    padding-top: 24px;
-}
 
 section.checkout-page .checkout-layout {
     gap: var(--spacing-lg, 24px);
