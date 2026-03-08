@@ -774,17 +774,28 @@ function createSmartSearch() {
 
         // --- Visibility ---
 
-        _show() {
-            if (!this._isVisible) {
-                // Position dropdown to match the search form width
-                const formRect = this._form.getBoundingClientRect();
-                this._dropdown.style.top = Math.round(formRect.bottom) + 'px';
-                this._dropdown.style.left = Math.round(formRect.left) + 'px';
-                this._dropdown.style.width = Math.round(formRect.width) + 'px';
+        _repositionDropdown() {
+            const formRect = this._form.getBoundingClientRect();
+            this._dropdown.style.top = Math.round(formRect.bottom) + 'px';
+            this._dropdown.style.left = Math.round(formRect.left) + 'px';
+            this._dropdown.style.width = Math.round(formRect.width) + 'px';
+        },
 
+        _show() {
+            // Always reposition to catch form expansion/resize
+            this._repositionDropdown();
+
+            if (!this._isVisible) {
                 this._dropdown.classList.add('is-open');
                 this._input.setAttribute('aria-expanded', 'true');
                 this._isVisible = true;
+
+                // Reposition after form expand transition completes
+                const expandTarget = this._form.closest('.search-wrapper') || this._form;
+                const onTransitionEnd = () => {
+                    if (this._isVisible) this._repositionDropdown();
+                };
+                expandTarget.addEventListener('transitionend', onTransitionEnd, { once: true });
 
                 // Mobile: close on scroll
                 if (window.innerWidth <= 768) {
