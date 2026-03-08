@@ -67,18 +67,19 @@
                         submitBtn.disabled = false;
                         submitBtn.textContent = 'Update Password';
                     } else {
-                        // Show success and redirect
-                        form.innerHTML = `
-                            <div class="auth-message auth-message--success" style="text-align: center;">
-                                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin: 0 auto 16px; color: #10b981;">
+                        // Show success state
+                        const wrapper = form.closest('.auth-form-wrapper');
+                        wrapper.innerHTML = `
+                            <div class="auth-success-icon auth-success-icon--check">
+                                <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                                     <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
                                     <polyline points="22 4 12 14.01 9 11.01"/>
                                 </svg>
-                                <h3 style="margin-bottom: 8px;">Password Updated!</h3>
-                                <p>Your password has been successfully changed.</p>
-                                <a href="/html/account/login.html" class="btn btn--primary btn--large" style="margin-top: 24px; display: inline-block;">
-                                    Sign In
-                                </a>
+                            </div>
+                            <h1 class="auth-form__heading">Password Updated!</h1>
+                            <p class="auth-form__subheading">Your password has been successfully changed.</p>
+                            <div class="auth-success-actions">
+                                <a href="/html/account/login.html" class="btn btn--primary btn--large btn--full-width">Sign In</a>
                             </div>
                         `;
                     }

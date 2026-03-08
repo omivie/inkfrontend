@@ -6010,6 +6010,53 @@
     color: #ef4444;
 }
 
+/* Auth Success States */
+.auth-success-icon {
+    width: 80px;
+    height: 80px;
+    margin: 0 auto var(--spacing-lg);
+    background-color: #eff6ff;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.auth-success-icon svg {
+    color: #3b82f6;
+}
+
+.auth-success-icon--check {
+    background-color: #ecfdf5;
+}
+
+.auth-success-icon--check svg {
+    color: #10b981;
+}
+
+.auth-success-note {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--spacing-sm);
+    padding: var(--spacing-md);
+    background-color: #fffbeb;
+    border: 1px solid #fcd34d;
+    border-radius: var(--radius-md);
+    font-size: var(--font-size-sm);
+    color: #92400e;
+    text-align: left;
+    margin-bottom: var(--spacing-xl);
+}
+
+.auth-success-note svg {
+    flex-shrink: 0;
+    color: #f59e0b;
+}
+
+.auth-success-actions {
+    margin-top: var(--spacing-lg);
+}
+
 /* Verify Email Page */
 .verify-email-page {
     min-height: calc(100vh - 200px);
