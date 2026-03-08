@@ -171,8 +171,9 @@
 }
 
 .logo__icon {
-    height: 50px;
+    height: 36px;
     width: auto;
+    border-radius: 4px;
 }
 
 .logo__tagline {
@@ -1143,32 +1144,48 @@
 
 
 .footer-main {
-    padding: var(--spacing-3xl) 0 var(--spacing-xl);
+    padding: var(--spacing-3xl) 0 var(--spacing-2xl);
 }
 
 .footer-grid {
     display: grid;
     grid-template-columns: 2fr repeat(3, 1fr);
-    gap: var(--spacing-2xl);
+    gap: var(--spacing-3xl);
 }
 
 .footer-brand {
-    padding-right: var(--spacing-xl);
+    padding-right: var(--spacing-2xl);
 }
 
 .footer-brand__logo {
-    margin-bottom: var(--spacing-md);
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-3);
+    text-decoration: none;
+    margin-bottom: var(--spacing-xl);
 }
 
-.footer-brand__logo .logo__text,
-.footer-brand__logo .logo__text span {
+.footer-brand__logo .logo__icon {
+    height: 44px;
+    width: auto;
+    border-radius: 6px;
+    flex-shrink: 0;
+}
+
+.footer-brand__logo .logo__text {
     color: var(--white-primary);
+    font-size: var(--font-size-2xl);
+}
+
+.footer-brand__logo .logo__text span {
+    color: rgba(255, 255, 255, 0.85);
 }
 
 .footer-brand__description {
-    color: rgba(255, 255, 255, 0.7);
+    color: rgba(255, 255, 255, 0.6);
     line-height: var(--line-height-relaxed);
     margin-bottom: var(--spacing-lg);
+    font-size: var(--font-size-sm);
 }
 
 .footer-brand__social {
@@ -1197,24 +1214,27 @@
 .footer-column__heading {
     color: var(--color-text-inverse);
     font-family: var(--font-family-heading);
-    font-size: var(--font-size-sm);
-    font-weight: var(--font-weight-semibold);
+    font-size: var(--font-size-xs);
+    font-weight: var(--font-weight-bold);
     text-transform: uppercase;
-    letter-spacing: 0.1em;
-    margin-bottom: var(--spacing-lg);
+    letter-spacing: 0.15em;
+    margin-bottom: var(--spacing-xl);
+    padding-bottom: var(--spacing-sm);
+    border-bottom: 2px solid rgba(255, 255, 255, 0.1);
 }
 
 .footer-links li {
-    margin-bottom: var(--spacing-2);
+    margin-bottom: var(--spacing-3);
 }
 
 .footer-links a {
-    color: rgba(255, 255, 255, 0.7);
+    color: rgba(255, 255, 255, 0.6);
     transition: color var(--transition-fast);
+    font-size: var(--font-size-sm);
 }
 
 .footer-links a:hover {
-    color: var(--color-primary-light);
+    color: var(--white-primary);
     text-decoration: none;
 }
 
@@ -1268,29 +1288,32 @@
     flex-wrap: wrap;
     justify-content: center;
     align-items: center;
-    gap: var(--spacing-xl);
-    padding: var(--spacing-lg) 0;
-    margin-top: var(--spacing-xl);
-    border-top: 1px solid rgba(255, 255, 255, 0.1);
+    gap: var(--spacing-2xl);
+    padding: var(--spacing-xl) 0;
+    margin-top: var(--spacing-2xl);
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 .footer-trust__item {
     display: flex;
     align-items: center;
     gap: var(--spacing-sm);
-    color: rgba(255, 255, 255, 0.7);
-    font-size: var(--font-size-sm);
+    color: rgba(255, 255, 255, 0.5);
+    font-size: var(--font-size-xs);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
 }
 
 .footer-trust__icon {
     font-size: var(--font-size-xl);
-    color: var(--color-secondary-light);
+    color: rgba(255, 255, 255, 0.4);
 }
 
 /* Footer bottom */
 .footer-bottom {
-    padding: var(--spacing-lg) 0;
-    border-top: 1px solid rgba(255, 255, 255, 0.1);
+    padding: var(--spacing-md) 0;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+    background: rgba(0, 0, 0, 0.15);
 }
 
 .footer-bottom .container {
@@ -1302,8 +1325,8 @@
 }
 
 .footer-copyright {
-    color: rgba(255, 255, 255, 0.6);
-    font-size: var(--font-size-sm);
+    color: rgba(255, 255, 255, 0.4);
+    font-size: var(--font-size-xs);
 }
 
 .footer-legal {
@@ -1313,12 +1336,12 @@
 }
 
 .footer-legal a {
-    color: rgba(255, 255, 255, 0.6);
-    font-size: var(--font-size-sm);
+    color: rgba(255, 255, 255, 0.4);
+    font-size: var(--font-size-xs);
 }
 
 .footer-legal a:hover {
-    color: var(--color-primary-light);
+    color: var(--white-primary);
     text-decoration: none;
 }
 
@@ -1329,8 +1352,8 @@
 }
 
 .footer-payment__label {
-    color: rgba(255, 255, 255, 0.6);
-    font-size: var(--font-size-sm);
+    color: rgba(255, 255, 255, 0.4);
+    font-size: var(--font-size-xs);
 }
 
 .footer-payment__icons {

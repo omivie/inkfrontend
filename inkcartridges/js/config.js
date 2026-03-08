@@ -14,8 +14,8 @@ const Config = {
     SUPABASE_URL: 'https://lmdlgldjgcanknsjrcxh.supabase.co',
     SUPABASE_ANON_KEY: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxtZGxnbGRqZ2Nhbmtuc2pyY3hoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njc1MTg1NjksImV4cCI6MjA4MzA5NDU2OX0.7Wk6k6avT5AUJnTkJ5VKlzJ54Tm6lbdx9WPnJsXb5Mo',
 
-    // Stripe publishable key (test mode)
-    STRIPE_PUBLISHABLE_KEY: 'pk_test_51SmAlV0gOo8rzNMQVrfwNbzDajKddyVErPdWIiyQq5v55fwF7dqMAIKWZKQZasgV8bsZvEBySGROi75iJQZBvLf3001YEfdJ8N',
+    // Stripe publishable key (live mode)
+    STRIPE_PUBLISHABLE_KEY: 'pk_live_51SmAlV0gOo8rzNMQBLJQotyOPNrteypuFswEwkJI1jWFje998ocCXNBRK7lPBiV0T9LSbwR2tgfn8s1PFvjgckTb00skCnpapN',
 
     // Cloudflare Turnstile site key (empty = Turnstile disabled, set when backend enables it)
     TURNSTILE_SITE_KEY: '',
