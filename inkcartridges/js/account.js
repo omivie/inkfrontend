@@ -20,7 +20,7 @@ const AccountPage = {
 
         // Check authentication - redirect to login if not authenticated
         if (!Auth.isAuthenticated()) {
-            window.location.href = '/html/account/login?redirect=' + encodeURIComponent(window.location.href);
+            window.location.href = '/html/account/login.html?redirect=' + encodeURIComponent(window.location.pathname);
             return;
         }
 

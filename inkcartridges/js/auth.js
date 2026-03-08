@@ -305,8 +305,10 @@ const Auth = {
      */
     requireAuth(redirectUrl = null) {
         if (!this.isAuthenticated()) {
-            const returnUrl = redirectUrl || window.location.href;
-            window.location.href = `/html/account/login?redirect=${encodeURIComponent(returnUrl)}`;
+            const returnUrl = redirectUrl || window.location.pathname;
+            // Ensure returnUrl is a relative path (safeRedirect rejects absolute URLs)
+            const safePath = returnUrl.startsWith('/') ? returnUrl : new URL(returnUrl, window.location.origin).pathname;
+            window.location.href = `/html/account/login.html?redirect=${encodeURIComponent(safePath)}`;
             return false;
         }
         return true;

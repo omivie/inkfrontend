@@ -33,10 +33,12 @@ const API = {
      * @returns {Promise<Response>} The fetch Response object
      */
     MAX_AUTH_RETRIES: 2,
+    MAX_RATE_LIMIT_RETRIES: 2,
 
     async _fetchWithAuth(url, fetchOptions = {}, opts = {}) {
         const timeoutMs = opts.timeoutMs || this.REQUEST_TIMEOUT_MS;
         const retryCount = opts.retryCount || 0;
+        const rateLimitRetry = opts.rateLimitRetry || 0;
 
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
@@ -49,9 +51,16 @@ const API = {
             });
             clearTimeout(timeoutId);
 
-            // Handle rate limiting — fail immediately, do not retry
+            // Handle rate limiting — retry with exponential backoff
             if (response.status === 429) {
-                DebugLog.warn(`Rate limited on ${url}`);
+                if (rateLimitRetry < this.MAX_RATE_LIMIT_RETRIES) {
+                    const retryAfter = response.headers.get('Retry-After');
+                    const delay = retryAfter ? parseInt(retryAfter, 10) * 1000 : 1000 * Math.pow(2, rateLimitRetry);
+                    DebugLog.warn(`Rate limited on ${url}, retrying in ${delay}ms (attempt ${rateLimitRetry + 1})`);
+                    await new Promise(r => setTimeout(r, delay));
+                    return this._fetchWithAuth(url, fetchOptions, { ...opts, rateLimitRetry: rateLimitRetry + 1 });
+                }
+                DebugLog.warn(`Rate limited on ${url}, max retries exceeded`);
                 throw new Error('Too many requests. Please wait a moment.');
             }
 

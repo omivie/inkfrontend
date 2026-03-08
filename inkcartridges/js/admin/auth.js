@@ -17,7 +17,7 @@ const AdminAuth = {
     }
 
     if (!window.Auth || !window.Auth.isAuthenticated()) {
-      window.location.href = '/html/account/login?redirect=' + encodeURIComponent('/html/admin/');
+      window.location.href = '/html/account/login.html?redirect=' + encodeURIComponent('/html/admin/');
       throw new Error('Not authenticated');
     }
 
@@ -86,7 +86,7 @@ const AdminAuth = {
 
   async signOut() {
     await window.Auth.signOut();
-    window.location.href = '/html/account/login';
+    window.location.href = '/html/account/login.html';
   }
 };
 
