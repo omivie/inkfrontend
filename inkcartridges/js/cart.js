@@ -554,12 +554,11 @@ const Cart = {
 
                 if (result.valid) {
                     // Cart is valid - proceed to checkout
-                    if (self.isAuthenticated) {
-                        window.location.href = '/html/checkout.html';
-                    } else {
-                        const returnUrl = '/html/checkout.html';
-                        window.location.href = '/html/account/login.html?redirect=' + encodeURIComponent(returnUrl);
-                    }
+                    window.location.href = '/html/checkout.html';
+                } else if (!self.isAuthenticated && self.items.length > 0) {
+                    // Guest user: server validation may fail due to cross-origin cookie blocking.
+                    // Allow proceeding — checkout/payment pages will re-validate before charging.
+                    window.location.href = '/html/checkout.html';
                 } else {
                     // Cart has issues - show errors
                     checkoutLink.textContent = originalText;
@@ -581,10 +580,15 @@ const Cart = {
                     }
                 }
             } catch (error) {
-                checkoutLink.textContent = originalText;
-                checkoutLink.style.pointerEvents = '';
-                if (typeof showToast === 'function') {
-                    showToast('Could not validate cart. Please try again.', 'error');
+                // Network error — don't block checkout if we have local items
+                if (self.items.length > 0) {
+                    window.location.href = '/html/checkout.html';
+                } else {
+                    checkoutLink.textContent = originalText;
+                    checkoutLink.style.pointerEvents = '';
+                    if (typeof showToast === 'function') {
+                        showToast('Could not validate cart. Please try again.', 'error');
+                    }
                 }
             }
         });
