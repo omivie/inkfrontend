@@ -26,8 +26,8 @@
             }
 
             const btn = form.querySelector('button[type="submit"]');
-            const originalText = btn.textContent;
-            btn.textContent = 'Sending...';
+            const originalHTML = btn.innerHTML;
+            btn.innerHTML = 'Sending...';
             btn.disabled = true;
 
             const sendCopy = form.querySelector('#contact-copy')?.checked || false;
@@ -49,7 +49,7 @@
                 }
             }
 
-            btn.textContent = originalText;
+            btn.innerHTML = originalHTML;
             btn.disabled = false;
         });
     });
