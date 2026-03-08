@@ -128,11 +128,11 @@ section.cart-page .cart-empty {
    ============================================== */
 
 .checkout-page {
-    padding: var(--spacing-sm, 8px) 0 var(--spacing-xl, 32px);
+    padding: var(--spacing-xs, 4px) 0 var(--spacing-lg, 24px);
 }
 
 .checkout-page__header {
-    margin-bottom: var(--spacing-sm, 8px);
+    margin-bottom: var(--spacing-xs, 4px);
 }
 
 section.checkout-page .checkout-layout {
@@ -209,17 +209,21 @@ section.checkout-page .checkout-layout {
 
 /* Tighter form sections */
 section.checkout-page .checkout-section {
-    padding: var(--spacing-md, 16px) 20px;
-    margin-bottom: var(--spacing-sm, 8px);
+    padding: 12px 20px;
+    margin-bottom: 6px;
 }
 
 section.checkout-page .checkout-section__heading {
     font-size: 0.8125rem;
-    margin-bottom: var(--spacing-sm, 8px);
+    margin-bottom: 6px;
 }
 
 section.checkout-page .form-row {
-    margin-bottom: var(--spacing-sm, 8px);
+    margin-bottom: 6px;
+}
+
+section.checkout-page .form-group {
+    margin-bottom: 6px;
 }
 
 section.checkout-page .form-label {
@@ -240,11 +244,11 @@ section.checkout-page .form-hint {
 }
 
 section.checkout-page .checkout-section__login-prompt {
-    margin-bottom: var(--spacing-md, 16px);
+    margin-bottom: 8px;
 }
 
 section.checkout-page .checkout-section__welcome {
-    margin-bottom: var(--spacing-md, 16px);
+    margin-bottom: 8px;
 }
 
 /* Compact checkout summary sidebar */
@@ -307,7 +311,7 @@ section.checkout-page .checkout-summary__shipping-info {
 
 /* Tighter submit area */
 section.checkout-page .checkout-submit {
-    padding-top: var(--spacing-lg, 24px);
+    padding-top: 12px;
     border: none;
 }
 
@@ -654,8 +658,8 @@ section.checkout-page .payment-authorization {
 
 /* Delivery type selector (always visible outside accordion) */
 .checkout-delivery-type {
-    padding: 6px 20px;
-    margin-bottom: 4px;
+    padding: 4px 20px;
+    margin-bottom: 2px;
     border: none;
 }
 
