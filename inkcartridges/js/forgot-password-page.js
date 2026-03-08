@@ -43,7 +43,12 @@
                     const { data, error } = await Auth.resetPassword(email);
 
                     if (error) {
-                        showError(error.message || 'Failed to send reset email. Please try again.');
+                        const msg = (error.message || '').toLowerCase();
+                        if (msg.includes('rate limit')) {
+                            showError('Too many requests. Please wait a minute before trying again.');
+                        } else {
+                            showError(error.message || 'Failed to send reset email. Please try again.');
+                        }
                         submitBtn.disabled = false;
                         submitBtn.textContent = 'Send Reset Link';
                     } else {
