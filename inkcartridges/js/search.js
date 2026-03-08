@@ -454,13 +454,26 @@ function createSmartSearch() {
                         // Try model_name only (strip brand prefix)
                         const modelOnly = query.replace(/^(BROTHER|CANON|EPSON|HP|SAMSUNG|LEXMARK|OKI|FUJI\s*XEROX|KYOCERA)\s+/i, '');
                         if (modelOnly !== query) {
+                            // Try partial match on model_name with just the model number
                             const modelResult = await sb.from('printer_models')
                                 .select('id, full_name, model_name')
-                                .ilike('model_name', modelOnly)
+                                .ilike('model_name', '%' + modelOnly + '%')
                                 .limit(1);
 
                             if (modelResult.data && modelResult.data.length > 0) {
                                 printerData = modelResult.data[0];
+                            }
+
+                            // Try partial match on full_name with just the model number
+                            if (!printerData) {
+                                const fullNamePartial = await sb.from('printer_models')
+                                    .select('id, full_name, model_name')
+                                    .ilike('full_name', '%' + modelOnly + '%')
+                                    .limit(1);
+
+                                if (fullNamePartial.data && fullNamePartial.data.length > 0) {
+                                    printerData = fullNamePartial.data[0];
+                                }
                             }
                         }
 
@@ -889,6 +902,29 @@ function createSmartSearch() {
             this._dropdown.style.width = Math.round(formRect.width) + 'px';
         },
 
+        _startRepositionWatch() {
+            // Poll form width until it stabilizes (handles CSS transitions)
+            if (this._repositionRaf) cancelAnimationFrame(this._repositionRaf);
+            let lastWidth = 0;
+            let stableFrames = 0;
+            const check = () => {
+                if (!this._isVisible) return;
+                const w = this._form.getBoundingClientRect().width;
+                if (Math.abs(w - lastWidth) < 1) {
+                    stableFrames++;
+                } else {
+                    stableFrames = 0;
+                    this._repositionDropdown();
+                }
+                lastWidth = w;
+                // Stop after width is stable for ~20 frames (~330ms)
+                if (stableFrames < 20) {
+                    this._repositionRaf = requestAnimationFrame(check);
+                }
+            };
+            this._repositionRaf = requestAnimationFrame(check);
+        },
+
         _show() {
             // Always reposition to catch form expansion/resize
             this._repositionDropdown();
@@ -898,12 +934,8 @@ function createSmartSearch() {
                 this._input.setAttribute('aria-expanded', 'true');
                 this._isVisible = true;
 
-                // Reposition after form expand transition completes
-                const expandTarget = this._form.closest('.search-wrapper') || this._form;
-                const onTransitionEnd = () => {
-                    if (this._isVisible) this._repositionDropdown();
-                };
-                expandTarget.addEventListener('transitionend', onTransitionEnd, { once: true });
+                // Watch for form width changes during expand transition
+                this._startRepositionWatch();
 
                 // Mobile: close on scroll
                 if (window.innerWidth <= 768) {
@@ -920,6 +952,11 @@ function createSmartSearch() {
             this._input.setAttribute('aria-activedescendant', '');
             this._selectedIndex = -1;
             this._isVisible = false;
+
+            if (this._repositionRaf) {
+                cancelAnimationFrame(this._repositionRaf);
+                this._repositionRaf = null;
+            }
 
             if (this._scrollCleanup) {
                 this._scrollCleanup();

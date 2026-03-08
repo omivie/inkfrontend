@@ -1661,11 +1661,24 @@
                                 const modelResult = await supabaseClient
                                     .from('printer_models')
                                     .select('id, full_name, model_name')
-                                    .ilike('model_name', modelNameOnly)
+                                    .ilike('model_name', `%${modelNameOnly}%`)
                                     .limit(1);
 
                                 if (modelResult.data && modelResult.data.length > 0) {
                                     printerData = modelResult.data[0];
+                                }
+
+                                // Also try partial match on full_name with just the model number
+                                if (!printerData) {
+                                    const fullNamePartial = await supabaseClient
+                                        .from('printer_models')
+                                        .select('id, full_name, model_name')
+                                        .ilike('full_name', `%${modelNameOnly}%`)
+                                        .limit(1);
+
+                                    if (fullNamePartial.data && fullNamePartial.data.length > 0) {
+                                        printerData = fullNamePartial.data[0];
+                                    }
                                 }
                             }
                         }
@@ -2140,26 +2153,24 @@
             // Keep full product name including "Compatible" prefix
             const displayName = product.name || '';
 
-            // Show product image if available, otherwise color block for compatible or placeholder for genuine
-            let imageContent;
-            if (product.image_url) {
-                imageContent = `<img src="${product.image_url}" alt="${product.name}" loading="lazy">`;
-            } else if (color) {
-                const colorStyle = this.getColorStyle(color);
-                if (colorStyle && colorStyle.includes('gradient')) {
-                    // Multi-color packs (CMY, KCMY, etc.) - show placeholder instead of stripes
-                    imageContent = `<svg width="60" height="60" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1">
+            // Show product image if available, otherwise color block for compatible only, or placeholder for genuine
+            const placeholderSvg = `<svg width="60" height="60" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1">
                         <rect x="6" y="2" width="12" height="20" rx="2"/>
                         <path d="M9 6h6M9 10h6"/>
                     </svg>`;
+            let imageContent;
+            if (product.image_url) {
+                imageContent = `<img src="${product.image_url}" alt="${product.name}" loading="lazy">`;
+            } else if (color && isCompatible) {
+                const colorStyle = this.getColorStyle(color);
+                if (colorStyle && colorStyle.includes('gradient')) {
+                    // Multi-color packs (CMY, KCMY, etc.) - show placeholder instead of stripes
+                    imageContent = placeholderSvg;
                 } else {
                     imageContent = `<div class="product-card__color-block" style="${colorStyle}"></div>`;
                 }
             } else {
-                imageContent = `<svg width="60" height="60" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1">
-                        <rect x="6" y="2" width="12" height="20" rx="2"/>
-                        <path d="M9 6h6M9 10h6"/>
-                    </svg>`;
+                imageContent = placeholderSvg;
             }
 
             // Check if product is already a favourite
