@@ -4388,7 +4388,6 @@
     border-radius: var(--radius-md);
     flex-shrink: 0;
     position: relative;
-    overflow: hidden;
 }
 
 .checkout-summary__item-image img {
@@ -4396,6 +4395,7 @@
     height: 100%;
     object-fit: contain;
     border-radius: var(--radius-md);
+    display: block;
 }
 
 .checkout-summary__item-details {
