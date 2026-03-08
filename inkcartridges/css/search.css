@@ -5,8 +5,10 @@
 .smart-search-dropdown {
     position: fixed;
     top: auto;
-    left: 0;
-    right: 0;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 100%;
+    max-width: calc(var(--container-max-width) + var(--container-padding) * 2);
     bottom: 0;
     background: var(--white-primary);
     border-radius: 0;
@@ -148,6 +150,39 @@
 .product-card--compact .in-stock { color: var(--color-success); }
 .product-card--compact .out-of-stock { color: var(--color-error); }
 .product-card--compact .low-stock { color: var(--color-accent-dark); }
+
+/* Add to Cart button */
+.smart-search__add-to-cart {
+    display: block;
+    width: 100%;
+    margin-top: 6px;
+    padding: 5px 8px;
+    font-size: 11px;
+    font-weight: var(--font-weight-semibold);
+    color: var(--white-primary);
+    background: var(--cyan-primary);
+    border: none;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    transition: background 0.15s ease, transform 0.1s ease;
+}
+
+.smart-search__add-to-cart:hover {
+    background: var(--cyan-dark);
+}
+
+.smart-search__add-to-cart:active {
+    transform: scale(0.97);
+}
+
+.smart-search__add-to-cart:disabled {
+    opacity: 0.7;
+    cursor: default;
+}
+
+.smart-search__add-to-cart.is-added {
+    background: var(--color-success);
+}
 
 /* --------------------------------------------------------------------------
    SKELETON

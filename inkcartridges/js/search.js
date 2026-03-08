@@ -450,6 +450,11 @@ function createSmartSearch() {
                 imageHtml = '<img src="' + Security.escapeAttr(imgUrl) + '" alt="' + Security.escapeAttr(name) + '" loading="lazy" data-fallback="placeholder">';
             }
 
+            const inStock = stockStatus.class === 'in-stock' || stockStatus.class === 'low-stock';
+            const addToCartBtn = inStock
+                ? '<button type="button" class="smart-search__add-to-cart" data-index="' + index + '">Add to Cart</button>'
+                : '';
+
             return '<div class="product-card product-card--compact" role="option" id="' + itemId + '" aria-selected="false" data-index="' + index + '">'
                 + '<div class="product-card__image-wrap">'
                     + imageHtml
@@ -460,6 +465,7 @@ function createSmartSearch() {
                     + '<h3 class="product-card__title">' + Security.escapeHtml(name) + '</h3>'
                     + (price != null ? '<p class="product-card__price">' + formatPrice(price) + '</p>' : '')
                     + '<p class="product-card__stock ' + stockStatus.class + '">' + Security.escapeHtml(stockStatus.text) + '</p>'
+                    + addToCartBtn
                 + '</div>'
             + '</div>';
         },
@@ -672,6 +678,15 @@ function createSmartSearch() {
         },
 
         _onCardClick(e) {
+            // If the add-to-cart button was clicked, handle that instead
+            const addBtn = e.target.closest('.smart-search__add-to-cart');
+            if (addBtn) {
+                e.preventDefault();
+                e.stopPropagation();
+                this._onAddToCart(addBtn);
+                return;
+            }
+
             const card = e.target.closest('.product-card--compact:not(.product-card--skeleton)');
             if (!card) return;
 
@@ -679,6 +694,44 @@ function createSmartSearch() {
             if (isNaN(index) || !this._results[index]) return;
 
             this._navigateToProduct(this._results[index]);
+        },
+
+        async _onAddToCart(btn) {
+            const index = parseInt(btn.dataset.index, 10);
+            const product = this._results[index];
+            if (!product || typeof Cart === 'undefined') return;
+
+            btn.disabled = true;
+            btn.textContent = 'Adding...';
+
+            try {
+                await Cart.addItem({
+                    id: product.id,
+                    name: product.name,
+                    price: product.retail_price ?? product.price,
+                    image: product.image_url || '',
+                    sku: product.sku || '',
+                    brand: product.brand?.name ?? product.brand ?? '',
+                    color: product.color || '',
+                    quantity: 1,
+                    source: product._isRibbon ? 'ribbon' : (product.source || 'core'),
+                    slug: product.slug || ''
+                });
+
+                btn.textContent = 'Added!';
+                btn.classList.add('is-added');
+                setTimeout(() => {
+                    btn.textContent = 'Add to Cart';
+                    btn.classList.remove('is-added');
+                    btn.disabled = false;
+                }, 1500);
+            } catch (err) {
+                btn.textContent = 'Add to Cart';
+                btn.disabled = false;
+                if (typeof showToast === 'function') {
+                    showToast('Failed to add to cart', 'error');
+                }
+            }
         },
 
         _navigateToProduct(product) {
