@@ -128,7 +128,7 @@ const RibbonsPage = {
 
             if (this.state.brand) {
                 // Backend does not filter by brand, so fetch all and filter client-side
-                const res = await API.getRibbons({ limit: 999 });
+                const res = await API.getProducts({ type: 'ribbon', limit: 999 });
 
                 if (this.navigationVersion !== navVersion) return;
                 this.showLoading(false);
@@ -138,7 +138,7 @@ const RibbonsPage = {
                     return;
                 }
 
-                let allRibbons = res.data.ribbons || res.data || [];
+                let allRibbons = res.data.products || res.data.ribbons || res.data || [];
                 if (!Array.isArray(allRibbons)) allRibbons = [];
 
                 allRibbons = allRibbons.map(r => this.normalizeRibbon(r));
@@ -166,7 +166,8 @@ const RibbonsPage = {
                 };
             } else {
                 // No brand filter — use server pagination as normal
-                const res = await API.getRibbons({
+                const res = await API.getProducts({
+                    type: 'ribbon',
                     page: this.state.page,
                     limit: this.pageLimit
                 });
@@ -179,7 +180,7 @@ const RibbonsPage = {
                     return;
                 }
 
-                ribbons = res.data.ribbons || res.data || [];
+                ribbons = res.data.products || res.data.ribbons || res.data || [];
                 pagination = res.meta || res.data.pagination || null;
 
                 if (!Array.isArray(ribbons)) ribbons = [];
