@@ -128,7 +128,7 @@ const RibbonsPage = {
 
             if (this.state.brand) {
                 // Backend does not filter by brand, so fetch all and filter client-side
-                const res = await API.getProducts({ type: 'ribbon', limit: 999 });
+                const res = await API.getProducts({ type: 'ribbon', limit: 200 });
 
                 if (this.navigationVersion !== navVersion) return;
                 this.showLoading(false);
