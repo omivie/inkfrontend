@@ -12,27 +12,27 @@
             const isSuccess = type === 'success';
             const bg = isSuccess ? '#16a34a' : '#dc2626';
             const icon = isSuccess
-                ? '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>'
-                : '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>';
+                ? '<svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>'
+                : '<svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>';
 
             popup.innerHTML = `
-                <div style="display:flex;align-items:center;gap:12px">
-                    <div style="width:36px;height:36px;border-radius:50%;background:${bg};display:flex;align-items:center;justify-content:center;flex-shrink:0">${icon}</div>
-                    <span style="color:#1e293b;font-size:14px;font-weight:500;line-height:1.4">${Security.escapeHtml(message)}</span>
+                <div style="display:flex;align-items:center;gap:16px">
+                    <div style="width:54px;height:54px;border-radius:50%;background:${bg};display:flex;align-items:center;justify-content:center;flex-shrink:0">${icon}</div>
+                    <span style="color:#1e293b;font-size:21px;font-weight:500;line-height:1.4">${Security.escapeHtml(message)}</span>
                 </div>
-                <button onclick="this.parentElement.remove()" style="position:absolute;top:8px;right:10px;background:none;border:none;font-size:18px;color:#94a3b8;cursor:pointer;line-height:1">&times;</button>
+                <button onclick="this.parentElement.remove()" style="position:absolute;top:12px;right:14px;background:none;border:none;font-size:27px;color:#94a3b8;cursor:pointer;line-height:1">&times;</button>
             `;
             popup.setAttribute('style', `
                 position: fixed;
-                bottom: 24px;
-                right: 24px;
+                bottom: 32px;
+                right: 32px;
                 z-index: 10000;
                 background: #fff;
                 border: 1px solid #e2e8f0;
-                border-radius: 12px;
-                padding: 16px 44px 16px 16px;
-                box-shadow: 0 8px 30px rgba(0,0,0,0.12);
-                max-width: 400px;
+                border-radius: 16px;
+                padding: 24px 60px 24px 24px;
+                box-shadow: 0 12px 40px rgba(0,0,0,0.15);
+                max-width: 560px;
                 opacity: 0;
                 transform: translateY(20px);
                 transition: opacity 0.3s ease, transform 0.3s ease;
