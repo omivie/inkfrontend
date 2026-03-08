@@ -16,12 +16,13 @@
             const phone = phoneNumber ? `${phoneCountry}${phoneNumber}` : '';
             const orderNumber = form.querySelector('#contact-order')?.value.trim() || '';
 
-            if (!name || !email || !subject || subject === 'Please select...' || !message) {
-                if (typeof showToast === 'function') {
-                    showToast('Please fill in all required fields.', 'error');
-                } else {
-                    alert('Please fill in all required fields.');
-                }
+            if (!name || !email || !subject || !message) {
+                showToast('Please fill in all required fields.', 'error');
+                return;
+            }
+
+            if (message.length < 10) {
+                showToast('Message must be at least 10 characters.', 'error');
                 return;
             }
 
@@ -37,19 +38,21 @@
             try {
                 const result = await API.submitContactForm(payload);
                 if (result && result.ok === false) {
-                    showToast(result.error || 'Could not send message. Please try again.', 'error');
+                    // Extract validation detail messages if available
+                    let msg = 'Could not send message. Please try again.';
+                    if (result.details && Array.isArray(result.details)) {
+                        msg = result.details.map(d => d.message || d).join(', ');
+                    } else if (typeof result.error === 'string') {
+                        msg = result.error;
+                    }
+                    showToast(msg, 'error');
                 } else {
                     showToast('Message sent! We\'ll get back to you shortly.', 'success');
                     form.reset();
                 }
             } catch (error) {
                 console.error('Contact form error:', error);
-                const msg = error.message || 'Could not send message. Please try again.';
-                if (typeof showToast === 'function') {
-                    showToast(msg, 'error');
-                } else {
-                    alert(msg);
-                }
+                showToast(error.message || 'Could not send message. Please try again.', 'error');
             }
 
             btn.innerHTML = originalHTML;

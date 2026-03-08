@@ -2161,14 +2161,10 @@
             let imageContent;
             if (product.image_url) {
                 imageContent = `<img src="${product.image_url}" alt="${product.name}" loading="lazy">`;
-            } else if (color && isCompatible) {
-                const colorStyle = this.getColorStyle(color);
-                if (colorStyle && colorStyle.includes('gradient')) {
-                    // Multi-color packs (CMY, KCMY, etc.) - show placeholder instead of stripes
-                    imageContent = placeholderSvg;
-                } else {
-                    imageContent = `<div class="product-card__color-block" style="${colorStyle}"></div>`;
-                }
+            } else if (isCompatible) {
+                const detectedColor = color || ProductColors.detectFromName(product.name);
+                const colorStyle = detectedColor ? this.getColorStyle(detectedColor) : 'background-color: #1a1a1a;';
+                imageContent = `<div class="product-card__color-block" style="${colorStyle}"></div>`;
             } else {
                 imageContent = placeholderSvg;
             }

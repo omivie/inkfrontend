@@ -250,16 +250,11 @@ const RibbonsPage = {
         const imageUrl = ribbon.image_url || '';
         const ribbonId = ribbon.id;
 
-        const isCompatible = (ribbon.source === 'compatible');
         let imageContent;
-        if (isCompatible && !imageUrl) {
-            imageContent = `<div class="product-card__compatible-placeholder"><span>COMPATIBLE</span></div>`;
-        } else if (imageUrl) {
+        if (imageUrl) {
             imageContent = `<img src="${Security.escapeAttr(imageUrl)}" alt="${Security.escapeAttr(displayName)}" loading="lazy" data-fallback="placeholder">`;
         } else {
-            imageContent = `<svg width="60" height="60" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1">
-                <circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="3"/>
-            </svg>`;
+            imageContent = `<div class="product-card__color-block" style="background-color: #1a1a1a;"></div>`;
         }
 
         const isFav = typeof Favourites !== 'undefined' && Favourites.isFavourite && Favourites.isFavourite(ribbonId);
