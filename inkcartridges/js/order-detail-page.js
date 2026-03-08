@@ -68,6 +68,8 @@
             // Render items
             const itemsContainer = document.querySelector('.order-items');
             if (itemsContainer) {
+                const esc = typeof Security !== 'undefined' ? Security.escapeHtml : (s) => s;
+                const escAttr = typeof Security !== 'undefined' ? Security.escapeAttr : (s) => s;
                 const items = order.order_items || [];
                 itemsContainer.innerHTML = `
                     <h2>Items Ordered</h2>
@@ -78,13 +80,13 @@
                             <div class="order-item">
                                 <div class="order-item__image">
                                     ${imageUrl
-                                        ? `<img src="${imageUrl}" alt="${item.product_name}">`
+                                        ? `<img src="${escAttr(imageUrl)}" alt="${escAttr(item.product_name)}">`
                                         : this.getColorPlaceholder(item.product_name)
                                     }
                                 </div>
                                 <div class="order-item__details">
-                                    <h3>${item.product_name}</h3>
-                                    <p class="order-item__sku">SKU: ${item.product_sku || 'N/A'}</p>
+                                    <h3>${esc(item.product_name)}</h3>
+                                    <p class="order-item__sku">SKU: ${esc(item.product_sku || 'N/A')}</p>
                                     <p class="order-item__qty">Qty: ${item.quantity} × ${formatPrice(item.unit_price)}</p>
                                 </div>
                                 <div class="order-item__price">${formatPrice(item.line_total || (item.unit_price * item.quantity))}</div>
@@ -98,7 +100,7 @@
             const summaryContainer = document.querySelector('.order-summary');
             if (summaryContainer) {
                 const subtotal = order.subtotal || order.total;
-                const shipping = order.shipping_cost || 0;
+                const shipping = order.shipping_fee || order.shipping_cost || 0;
                 const total = order.total;
 
                 summaryContainer.innerHTML = `
@@ -115,15 +117,16 @@
             // Render shipping address
             const shippingContainer = document.querySelector('.order-shipping');
             if (shippingContainer) {
+                const esc2 = typeof Security !== 'undefined' ? Security.escapeHtml : (s) => s;
                 const name = order.shipping_recipient_name || '';
 
                 const parts = [
-                    name ? `<strong>${name}</strong>` : '',
-                    order.shipping_address_line1,
-                    order.shipping_address_line2,
-                    order.shipping_city,
-                    `${order.shipping_region || ''} ${order.shipping_postal_code || ''}`.trim(),
-                    order.shipping_country || 'New Zealand'
+                    name ? `<strong>${esc2(name)}</strong>` : '',
+                    esc2(order.shipping_address_line1 || ''),
+                    esc2(order.shipping_address_line2 || ''),
+                    esc2(order.shipping_city || ''),
+                    `${esc2(order.shipping_region || '')} ${esc2(order.shipping_postal_code || '')}`.trim(),
+                    esc2(order.shipping_country || 'New Zealand')
                 ].filter(Boolean);
 
                 shippingContainer.innerHTML = `

@@ -538,15 +538,10 @@ const Cart = {
                 return;
             }
 
-            // Core checkout flow
-            // SECURITY: Block checkout if we don't have server-verified prices
+            // If server pricing isn't available, try to refresh but don't block checkout
+            // The checkout/payment pages will validate before charging
             if (!self.hasServerPricing()) {
-                if (typeof showToast === 'function') {
-                    showToast('Unable to verify cart prices. Please refresh and try again.', 'error');
-                }
-                // Try to reload cart from server
-                await self.loadCart();
-                return;
+                try { await self.loadCart(); } catch (e) { /* continue */ }
             }
 
             // Show validating state
@@ -560,10 +555,10 @@ const Cart = {
                 if (result.valid) {
                     // Cart is valid - proceed to checkout
                     if (self.isAuthenticated) {
-                        window.location.href = '/html/checkout';
+                        window.location.href = '/html/checkout.html';
                     } else {
-                        const returnUrl = '/html/checkout';
-                        window.location.href = '/html/account/login?redirect=' + encodeURIComponent(returnUrl);
+                        const returnUrl = '/html/checkout.html';
+                        window.location.href = '/html/account/login.html?redirect=' + encodeURIComponent(returnUrl);
                     }
                 } else {
                     // Cart has issues - show errors

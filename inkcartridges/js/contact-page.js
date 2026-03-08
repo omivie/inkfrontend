@@ -9,7 +9,7 @@
             const name = form.querySelector('#contact-name')?.value.trim();
             const email = form.querySelector('#contact-email')?.value.trim();
             const subjectEl = form.querySelector('#contact-subject');
-            const subject = subjectEl?.options[subjectEl.selectedIndex]?.text || '';
+            const subject = subjectEl?.value || '';
             const message = form.querySelector('#contact-message')?.value.trim();
             const phoneCountry = form.querySelector('#contact-phone-country')?.value || '+64';
             const phoneNumber = form.querySelector('#contact-phone')?.value.trim() || '';

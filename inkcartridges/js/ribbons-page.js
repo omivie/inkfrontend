@@ -129,7 +129,7 @@ const RibbonsPage = {
                 limit: this.pageLimit
             };
             if (this.state.brand) {
-                params.search = this.state.brand;
+                params.brand = this.state.brand;
             }
             const res = await API.getRibbons(params);
 

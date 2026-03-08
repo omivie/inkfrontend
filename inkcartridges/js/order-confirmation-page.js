@@ -63,7 +63,7 @@
                 subtotal: apiOrder.subtotal,
                 gstAmount: apiOrder.gst_amount || 0,
                 shipping: apiOrder.shipping_method || 'Standard Shipping',
-                shippingCost: apiOrder.shipping_cost || 0,
+                shippingCost: apiOrder.shipping_fee || apiOrder.shipping_cost || 0,
                 items: (apiOrder.order_items || apiOrder.items || []).map(item => ({
                     name: item.product?.name || item.product_name || item.name,
                     sku: item.product?.sku || item.product_sku || item.sku,

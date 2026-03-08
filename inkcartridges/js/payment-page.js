@@ -10,6 +10,15 @@
         isSubmitting: false,
         paymentAuthorized: false,
 
+        // Idempotency key — generated once per checkout session, reused on retry
+        _idempotencyKey: null,
+        getIdempotencyKey() {
+            if (!this._idempotencyKey) {
+                this._idempotencyKey = crypto.randomUUID().replace(/-/g, '');
+            }
+            return this._idempotencyKey;
+        },
+
         // Stripe
         stripe: null,
         cardElement: null,
@@ -371,6 +380,14 @@
                                 quantity: item.quantity
                             }));
 
+                            // Validate cart before creating order
+                            const validateResponse = await API.validateCart();
+                            if (!validateResponse.ok || (validateResponse.data && !validateResponse.data.is_valid)) {
+                                ev.complete('fail');
+                                this.showError('Cart has changed. Please review your cart.');
+                                return;
+                            }
+
                             // Create order on backend (mirrors card payment flow)
                             const orderResponse = await API.createOrder({
                                 items: items,
@@ -384,17 +401,25 @@
                                     postal_code: this.checkoutData.postcode,
                                     country: 'NZ'
                                 },
-                                shipping_tier: this.checkoutData.shippingTier || 'standard',
-                                shipping_zone: this.checkoutData.shippingZone || '',
+                                shipping_tier: '',
+                                shipping_zone: '',
                                 delivery_type: this.checkoutData.deliveryType || 'urban',
-                                save_address: true,
+                                save_address: this.checkoutData.saveAddress !== false,
                                 customer_notes: this.checkoutData.orderNotes || '',
-                                idempotency_key: crypto.randomUUID().replace(/-/g, '')
+                                idempotency_key: this.getIdempotencyKey()
                             });
+
+                            // Handle duplicate/idempotent replay
+                            if (orderResponse.ok && orderResponse.data?.is_duplicate) {
+                                ev.complete('success');
+                                await this.completeExpressOrder(orderResponse.data.order_number, orderResponse.data.total_amount);
+                                return;
+                            }
 
                             if (!orderResponse.ok) {
                                 ev.complete('fail');
-                                this.showError(orderResponse.error || 'Failed to create order');
+                                const errorMsg = orderResponse.error?.message || orderResponse.error || 'Failed to create order';
+                                this.showError(errorMsg);
                                 return;
                             }
 
@@ -576,16 +601,53 @@
                         postal_code: this.checkoutData.postcode,
                         country: 'NZ'
                     },
-                    shipping_tier: this.checkoutData.shippingTier || 'standard',
-                    shipping_zone: this.checkoutData.shippingZone || '',
+                    shipping_tier: '',
+                    shipping_zone: '',
                     delivery_type: this.checkoutData.deliveryType || 'urban',
-                    save_address: true,
+                    save_address: this.checkoutData.saveAddress !== false,
                     customer_notes: this.checkoutData.orderNotes || '',
-                    idempotency_key: crypto.randomUUID().replace(/-/g, '')
+                    idempotency_key: this.getIdempotencyKey()
                 });
 
+                // Handle duplicate/idempotent replay
+                if (orderResponse.ok && orderResponse.data?.is_duplicate) {
+                    const dupOrderNumber = orderResponse.data.order_number;
+                    sessionStorage.setItem('lastOrder', JSON.stringify({
+                        order_number: dupOrderNumber,
+                        email: this.checkoutData.email
+                    }));
+                    sessionStorage.removeItem('checkoutData');
+                    window.location.href = `/html/order-confirmation.html?order=${encodeURIComponent(dupOrderNumber)}`;
+                    return;
+                }
+
                 if (!orderResponse.ok) {
-                    throw new Error(orderResponse.error || 'Failed to create order');
+                    const errorCode = orderResponse.error?.code || '';
+                    const errorMsg = orderResponse.error?.message || orderResponse.error || 'Failed to create order';
+
+                    if (errorCode === 'DUPLICATE_ORDER') {
+                        // Order already exists — redirect to confirmation
+                        const existingOrder = orderResponse.error?.details?.order_number;
+                        if (existingOrder) {
+                            window.location.href = `/html/order-confirmation.html?order=${encodeURIComponent(existingOrder)}`;
+                            return;
+                        }
+                    } else if (errorCode === 'DUPLICATE_REQUEST') {
+                        // Concurrent request — wait and check
+                        await new Promise(r => setTimeout(r, 2000));
+                        try {
+                            const pending = await API.checkPendingOrder(this.getIdempotencyKey());
+                            if (pending.ok && pending.data?.order_number) {
+                                window.location.href = `/html/order-confirmation.html?order=${encodeURIComponent(pending.data.order_number)}`;
+                                return;
+                            }
+                        } catch (_) { /* fall through to error */ }
+                    } else if (errorCode === 'PROMO_COUPON_LIMIT_REACHED') {
+                        throw new Error('This coupon has reached its usage limit. Please remove it and try again.');
+                    } else if (errorCode === 'ORDER_TOTAL_TOO_LOW') {
+                        throw new Error('Your order total is below the minimum. Please add more items.');
+                    }
+                    throw new Error(errorMsg);
                 }
 
                 const { client_secret, order_id, order_number, total_amount } = orderResponse.data;
@@ -688,9 +750,10 @@
         showError(message) {
             const errorEl = document.getElementById('card-errors');
             if (errorEl) {
+                const esc = typeof Security !== 'undefined' ? Security.escapeHtml : (s) => s;
                 errorEl.innerHTML = `
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
-                    ${message}
+                    ${esc(message)}
                 `;
             }
         },

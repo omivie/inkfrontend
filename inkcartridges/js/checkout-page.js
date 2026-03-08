@@ -418,8 +418,8 @@
                         <span class="checkout-summary__item-qty">${item.quantity}</span>
                     </div>
                     <div class="checkout-summary__item-details">
-                        <h3 class="checkout-summary__item-title">${item.name}</h3>
-                        <p class="checkout-summary__item-variant">${item.brand || item.sku || ''}</p>
+                        <h3 class="checkout-summary__item-title">${Security.escapeHtml(item.name || '')}</h3>
+                        <p class="checkout-summary__item-variant">${Security.escapeHtml(item.brand || item.sku || '')}</p>
                     </div>
                     <span class="checkout-summary__item-price">$${(item.price * item.quantity).toFixed(2)}</span>
                 </li>
