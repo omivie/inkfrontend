@@ -133,6 +133,7 @@ section.cart-page .cart-empty {
 
 .checkout-page__header {
     margin-bottom: var(--spacing-xs, 4px);
+    align-items: center;
 }
 
 section.checkout-page .checkout-layout {
