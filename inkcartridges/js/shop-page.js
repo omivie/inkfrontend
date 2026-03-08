@@ -2390,14 +2390,6 @@
                 }
             });
 
-            // Display yield if found
-            if (yieldValue) {
-                const yieldText = typeof yieldValue === 'number'
-                    ? `Approx. ${yieldValue.toLocaleString()} pages`
-                    : yieldValue;
-                this.elements.yieldValue.textContent = yieldText;
-                this.elements.yieldBanner.hidden = false;
-            }
 
             // Fetch compatible printers from API using first product's SKU
             const firstProduct = products.find(p => p.sku);
@@ -2447,7 +2439,7 @@
                 if (this.state.level === 'printer-model-products') {
                     productType = 'Compatible Products';
                 } else if (this.state.level === 'search-results') {
-                    productType = 'Search Results';
+                    productType = `Search Results for "${this.state.search}"`;
                 }
                 this.elements.productTypeLabel.textContent = productType;
                 this.elements.productTypeLabel.hidden = false;

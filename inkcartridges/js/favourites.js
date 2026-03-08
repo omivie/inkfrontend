@@ -358,6 +358,7 @@ const Favourites = {
                         ${this.getItemImageHTML(item)}
                     </div>
                     <div class="favourite-item__info">
+                        <span class="source-badge source-badge--${(item.name || '').toLowerCase().startsWith('compatible ') ? 'compatible' : 'genuine'}">${(item.name || '').toLowerCase().startsWith('compatible ') ? 'COMPATIBLE' : 'GENUINE'}</span>
                         <h3 class="favourite-item__name">${Security.escapeHtml(item.name)}</h3>
                         ${item.brand ? `<p class="favourite-item__brand">${Security.escapeHtml(item.brand)}</p>` : ''}
                         <p class="favourite-item__price">${typeof formatPrice === 'function' ? formatPrice(item.price) : '$' + item.price.toFixed(2)}</p>

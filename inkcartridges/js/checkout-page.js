@@ -419,6 +419,7 @@
                         <span class="checkout-summary__item-qty">${item.quantity}</span>
                     </div>
                     <div class="checkout-summary__item-details">
+                        <span class="source-badge source-badge--${(item.name || '').toLowerCase().startsWith('compatible ') ? 'compatible' : 'genuine'}">${(item.name || '').toLowerCase().startsWith('compatible ') ? 'COMPATIBLE' : 'GENUINE'}</span>
                         <h3 class="checkout-summary__item-title">${Security.escapeHtml(item.name || '')}</h3>
                         <p class="checkout-summary__item-variant">${Security.escapeHtml(item.brand || item.sku || '')}</p>
                     </div>

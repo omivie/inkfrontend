@@ -1470,6 +1470,7 @@ const Cart = {
                             ' + self.getItemImageHTML(item) + '\
                         </div>\
                         <div class="cart-item__details">\
+                            <span class="source-badge source-badge--' + ((item.name || '').toLowerCase().startsWith('compatible ') ? 'compatible' : 'genuine') + '">' + ((item.name || '').toLowerCase().startsWith('compatible ') ? 'COMPATIBLE' : 'GENUINE') + '</span>\
                             <h3 class="cart-item__name">\
                                 <a href="' + productLink + '">' + escapedName + '</a>\
                             </h3>\

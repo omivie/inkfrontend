@@ -85,6 +85,7 @@
                                     }
                                 </div>
                                 <div class="order-item__details">
+                                    <span class="source-badge source-badge--${(item.product_name || '').toLowerCase().startsWith('compatible ') ? 'compatible' : 'genuine'}">${(item.product_name || '').toLowerCase().startsWith('compatible ') ? 'COMPATIBLE' : 'GENUINE'}</span>
                                     <h3>${esc(item.product_name)}</h3>
                                     <p class="order-item__sku">SKU: ${esc(item.product_sku || 'N/A')}</p>
                                     <p class="order-item__qty">Qty: ${item.quantity} × ${formatPrice(item.unit_price)}</p>

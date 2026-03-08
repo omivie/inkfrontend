@@ -162,12 +162,10 @@ const AccountPage = {
         const isOpen = trigger.getAttribute('aria-expanded') === 'true';
         if (isOpen) {
             trigger.setAttribute('aria-expanded', 'false');
-            dropdown.hidden = true;
             trigger.parentElement.classList.remove('custom-select--open');
         } else {
             this.closeAllDropdowns();
             trigger.setAttribute('aria-expanded', 'true');
-            dropdown.hidden = false;
             trigger.parentElement.classList.add('custom-select--open');
         }
     },
@@ -177,18 +175,14 @@ const AccountPage = {
      */
     closeAllDropdowns() {
         const seriesTrigger = document.getElementById('printer-series-trigger');
-        const seriesDropdown = document.getElementById('printer-series-dropdown');
         const modelTrigger = document.getElementById('printer-model-trigger');
-        const modelDropdown = document.getElementById('printer-model-dropdown');
 
-        if (seriesTrigger && seriesDropdown) {
+        if (seriesTrigger) {
             seriesTrigger.setAttribute('aria-expanded', 'false');
-            seriesDropdown.hidden = true;
             seriesTrigger.parentElement?.classList.remove('custom-select--open');
         }
-        if (modelTrigger && modelDropdown) {
+        if (modelTrigger) {
             modelTrigger.setAttribute('aria-expanded', 'false');
-            modelDropdown.hidden = true;
             modelTrigger.parentElement?.classList.remove('custom-select--open');
         }
     },
@@ -534,17 +528,36 @@ const AccountPage = {
             return;
         }
 
-        options.forEach(option => {
+        const cols = 3;
+        const rowsPerPage = 6;
+        const itemsPerPage = cols * rowsPerPage;
+
+        options.forEach((option, i) => {
             const li = document.createElement('li');
             li.className = 'custom-select__option';
             li.setAttribute('data-value', option.id);
+            li.setAttribute('data-full-name', option.fullName || option.name || '');
 
-            if (isSeries) {
-                li.textContent = `${option.name} (${option.models.length})`;
+            const isOtherModels = option.id === 'other' || (option.name && option.name.toLowerCase().includes('other'));
+
+            if (isOtherModels) {
+                li.style.order = 99999;
+            } else {
+                const page = Math.floor(i / itemsPerPage);
+                const indexInPage = i % itemsPerPage;
+                const visualCol = Math.floor(indexInPage / rowsPerPage);
+                const visualRow = indexInPage % rowsPerPage;
+                const order = (page * rowsPerPage + visualRow) * cols + visualCol;
+                li.style.order = order;
+            }
+
+            if (isSeries && option.models) {
+                li.textContent = `${option.name} (${option.models.length} models)`;
             } else {
                 li.textContent = option.name;
-                li.setAttribute('data-full-name', option.fullName || option.name);
-                li.setAttribute('data-slug', option.slug || option.id);
+                if (!isSeries) {
+                    li.setAttribute('data-slug', option.slug || option.id);
+                }
             }
 
             dropdown.appendChild(li);

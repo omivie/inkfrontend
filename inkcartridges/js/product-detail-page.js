@@ -473,6 +473,9 @@
             if (info.isCompatible) {
                 badge.textContent = 'COMPATIBLE';
                 badge.hidden = false;
+            } else {
+                badge.textContent = 'GENUINE';
+                badge.hidden = false;
             }
 
             // Title and SKU

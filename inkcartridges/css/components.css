@@ -859,6 +859,17 @@
     color: var(--color-error);
 }
 
+/* Source badges (COMPATIBLE / GENUINE) - used across cart, checkout, favourites, orders */
+.source-badge {
+    display: inline-block;
+    font-size: 0.7rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+.source-badge--compatible { color: var(--color-primary); }
+.source-badge--genuine { color: var(--cyan-dark, #0e7490); }
+
 /* ==========================================================================
    ACTIVE FILTERS (Filter Chips)
    ========================================================================== */
