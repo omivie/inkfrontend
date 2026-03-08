@@ -688,14 +688,14 @@
 
 /* Per-brand tuning — compensates for different internal whitespace/cropping */
 .brands-mega__brand-logo--brother { height: 22px; }
-.brands-mega__brand-logo--canon { height: 22px; }
-.brands-mega__brand-logo--epson { height: 17px; }
+.brands-mega__brand-logo--canon { height: 20px; }
+.brands-mega__brand-logo--epson { height: 20px; }
 .brands-mega__brand-logo--hp { height: 29px; }
 .brands-mega__brand-logo--samsung { height: 19px; }
 .brands-mega__brand-logo--lexmark { height: 24px; }
 .brands-mega__brand-logo--oki { height: 24px; }
-.brands-mega__brand-logo--fuji-xerox { height: 24px; }
-.brands-mega__brand-logo--kyocera { height: 22px; }
+.brands-mega__brand-logo--fuji-xerox { height: 29px; }
+.brands-mega__brand-logo--kyocera { height: 26px; }
 
 .brands-mega__brand-text {
     font-size: var(--font-size-sm);
