@@ -3,24 +3,37 @@
         orderData: null,
 
         async init() {
-            // Try to load order data from sessionStorage first
-            const storedOrder = sessionStorage.getItem('lastOrder');
-            if (storedOrder) {
-                try {
-                    this.orderData = JSON.parse(storedOrder);
-                    this.renderOrderDetails();
-                    // Clear after loading (one-time use)
-                    sessionStorage.removeItem('lastOrder');
-                    return;
-                } catch (e) {
-                    DebugLog.error('Failed to parse stored order:', e);
-                }
-            }
-
-            // Try to load from URL params and API
+            // Get order number from URL or sessionStorage
             const urlParams = new URLSearchParams(window.location.search);
             const orderNumber = urlParams.get('order');
 
+            // Pre-fill email from sessionStorage (set by payment page)
+            const storedOrder = sessionStorage.getItem('lastOrder');
+            if (storedOrder) {
+                try {
+                    const stored = JSON.parse(storedOrder);
+                    // Show email immediately while API loads
+                    if (stored.email) {
+                        const emailEl = document.getElementById('confirmation-email');
+                        if (emailEl) emailEl.textContent = stored.email;
+                    }
+                    // Show order number immediately
+                    if (stored.order_number) {
+                        const orderNumEl = document.getElementById('order-number');
+                        if (orderNumEl) orderNumEl.textContent = `#${stored.order_number}`;
+                    }
+                } catch (e) {
+                    DebugLog.error('Failed to parse stored order:', e);
+                }
+                sessionStorage.removeItem('lastOrder');
+            }
+
+            // Wait for Auth so API calls include the auth token
+            if (typeof Auth !== 'undefined' && Auth.readyPromise) {
+                await Auth.readyPromise;
+            }
+
+            // Load full order details from API
             if (orderNumber) {
                 await this.loadOrderFromAPI(orderNumber);
             }
@@ -32,15 +45,32 @@
                 if (response.ok && response.data) {
                     this.orderData = this.transformAPIOrder(response.data);
                     this.renderOrderDetails();
+                } else {
+                    this.showFallback(orderNumber);
                 }
             } catch (error) {
                 DebugLog.error('Failed to load order from API:', error);
-                // Show order number at minimum
-                const orderNumEl = document.getElementById('order-number');
-                if (orderNumEl) {
-                    orderNumEl.textContent = `#${orderNumber}`;
-                }
+                this.showFallback(orderNumber);
             }
+        },
+
+        showFallback(orderNumber) {
+            const orderNumEl = document.getElementById('order-number');
+            if (orderNumEl) orderNumEl.textContent = `#${orderNumber}`;
+
+            // Clear loading states so they don't mislead
+            const paymentEl = document.getElementById('payment-method');
+            if (paymentEl) paymentEl.textContent = '--';
+            const totalEl = document.getElementById('order-total');
+            if (totalEl) totalEl.textContent = '--';
+            const shippingMethodEl = document.getElementById('shipping-method');
+            if (shippingMethodEl) shippingMethodEl.textContent = '--';
+            const dateEl = document.getElementById('order-date');
+            if (dateEl) dateEl.textContent = new Date().toLocaleDateString('en-NZ', { day: 'numeric', month: 'long', year: 'numeric' });
+            const addressEl = document.getElementById('shipping-address');
+            if (addressEl) addressEl.innerHTML = '<span style="color: var(--color-text-muted);">Details will be in your confirmation email</span>';
+            const itemsList = document.getElementById('order-items');
+            if (itemsList) itemsList.innerHTML = '<li class="confirmation-item" style="justify-content: center; padding: 2rem;"><p style="color: var(--color-text-muted);">Order details will be in your confirmation email.</p></li>';
         },
 
         transformAPIOrder(apiOrder) {
@@ -347,14 +377,11 @@
 
         // Show account creation prompt for guest users
         if (typeof Auth !== 'undefined') {
-            Auth.getUser().then(user => {
-                if (!user) {
+            Auth.readyPromise.then(() => {
+                if (!Auth.isAuthenticated()) {
                     const prompt = document.getElementById('create-account-prompt');
                     if (prompt) prompt.hidden = false;
                 }
-            }).catch(() => {
-                const prompt = document.getElementById('create-account-prompt');
-                if (prompt) prompt.hidden = false;
             });
         }
     });
