@@ -10,6 +10,11 @@ const Modal = {
 
   _getRoot() {
     if (!this._root) this._root = document.getElementById('modal-root');
+    if (!this._root) {
+      this._root = document.createElement('div');
+      this._root.id = 'modal-root';
+      document.body.appendChild(this._root);
+    }
     return this._root;
   },
 
