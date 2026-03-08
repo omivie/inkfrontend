@@ -570,25 +570,16 @@
                 try {
                     categoryCounts = {};
 
-                    // Fetch ink products and count
-                    const inkProducts = await fetchAllProducts({
-                        brand: this.state.brand,
-                        category: 'ink'
-                    });
+                    // Fetch ink and toner products in parallel
+                    const [inkProducts, tonerProducts] = await Promise.all([
+                        fetchAllProducts({ brand: this.state.brand, category: 'ink' }),
+                        fetchAllProducts({ brand: this.state.brand, category: 'toner' })
+                    ]);
                     // Check if navigation changed or fetch was aborted
-                    if (inkProducts === null) return;
-                    categoryCounts['ink'] = countByProductType(inkProducts, 'ink');
+                    if (inkProducts === null || tonerProducts === null) return;
 
-                    // Fetch toner products (includes both toner cartridges and drums/supplies)
-                    const tonerProducts = await fetchAllProducts({
-                        brand: this.state.brand,
-                        category: 'toner'
-                    });
-                    // Check if navigation changed or fetch was aborted
-                    if (tonerProducts === null) return;
-                    // Count toner cartridges
+                    categoryCounts['ink'] = countByProductType(inkProducts, 'ink');
                     categoryCounts['toner'] = countByProductType(tonerProducts, 'toner');
-                    // Count drums & supplies
                     categoryCounts['consumable'] = countByProductType(tonerProducts, 'consumable');
 
                     this.cache.products[cacheKey] = categoryCounts;
@@ -727,44 +718,48 @@
                         apiParams.source = this.state.type;
                     }
 
-                    try {
-                        let rawBrandProducts = await fetchAllProducts(apiParams);
+                    // Fetch brand-filtered products and search results in parallel
+                    const brandFetchPromise = fetchAllProducts(apiParams)
+                        .then(async (results) => {
+                            // If no results with slug, retry with brand name
+                            if (results.length === 0) {
+                                apiParams.brand = brandName;
+                                return fetchAllProducts(apiParams);
+                            }
+                            return results;
+                        })
+                        .catch(() => []);
 
-                        // If no results with slug, try with brand name
-                        if (rawBrandProducts.length === 0) {
-                            apiParams.brand = brandName;
-                            rawBrandProducts = await fetchAllProducts(apiParams);
-                        }
+                    // Build search promises array
+                    const searchPromises = [
+                        fetchAllProducts({ search: brandName }).catch(() => [])
+                    ];
 
-                        // Trust the API's brand filter - don't filter again client-side
-                        // This ensures all products returned by the API are included
-                        brandProducts = rawBrandProducts;
-                    } catch (brandError) {
-                        // Brand filter not supported for this brand - will rely on search
-                    }
-
-                    // Fetch products by searching brand name (primary method for new brands)
-                    try {
-                        searchProducts = await fetchAllProducts({ search: brandName });
-
-                        // If no results, try searching with category added
-                        if (searchProducts.length === 0) {
-                            searchProducts = await fetchAllProducts({ search: `${brandName} ${apiCategory}` });
-                        }
-                    } catch (searchError) {
-                        // Search failed - continue with any results we have
-                    }
-
-                    // For Fuji Xerox, also search variations
+                    // For Fuji Xerox, also search variations in parallel
                     if (this.state.brand === 'fuji-xerox') {
                         const variations = ['Fuji-Xerox', 'FujiXerox', 'Xerox'];
                         for (const variant of variations) {
-                            try {
-                                const variantProducts = await fetchAllProducts({ search: variant });
-                                searchProducts = [...searchProducts, ...variantProducts];
-                            } catch (e) {
-                                // Ignore variant search errors
-                            }
+                            searchPromises.push(
+                                fetchAllProducts({ search: variant }).catch(() => [])
+                            );
+                        }
+                    }
+
+                    // Run brand fetch and all searches in parallel
+                    const [brandResult, ...searchResults] = await Promise.all([
+                        brandFetchPromise,
+                        ...searchPromises
+                    ]);
+
+                    brandProducts = brandResult;
+                    searchProducts = searchResults.flat();
+
+                    // If primary search returned nothing, try with category added
+                    if (searchProducts.length === 0) {
+                        try {
+                            searchProducts = await fetchAllProducts({ search: `${brandName} ${apiCategory}` });
+                        } catch (searchError) {
+                            // Search failed - continue with any results we have
                         }
                     }
 
