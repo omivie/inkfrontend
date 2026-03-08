@@ -5,10 +5,6 @@
 .smart-search-dropdown {
     position: fixed;
     top: auto;
-    left: 50%;
-    transform: translateX(-50%);
-    width: 100%;
-    max-width: calc(var(--container-max-width) + var(--container-padding) * 2);
     bottom: 0;
     background: var(--white-primary);
     border-radius: 0;
@@ -155,9 +151,9 @@
 .smart-search__add-to-cart {
     display: block;
     width: 100%;
-    margin-top: 6px;
-    padding: 5px 8px;
-    font-size: 11px;
+    margin-top: 8px;
+    padding: 7px 10px;
+    font-size: 13px;
     font-weight: var(--font-weight-semibold);
     color: var(--white-primary);
     background: var(--cyan-primary);
