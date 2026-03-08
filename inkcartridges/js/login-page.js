@@ -295,14 +295,26 @@
 
                     if (error) {
                         DebugLog.error('❌ Signup error:', error);
-                        alert(error.message || 'Registration failed. Please try again.');
+                        let errorMessage = error.message || 'Registration failed. Please try again.';
+                        if (error.message?.toLowerCase().includes('already registered') || error.message?.toLowerCase().includes('already been registered')) {
+                            errorMessage = 'An account with this email already exists. Please sign in instead.';
+                        }
+                        if (emailError) {
+                            emailError.textContent = errorMessage;
+                            emailError.hidden = false;
+                        }
+                        submitBtn.disabled = false;
+                        submitBtn.textContent = 'Create Account';
+                    } else if (data.user && data.user.identities?.length === 0) {
+                        // Supabase returns a fake success with empty identities when email is taken
+                        if (emailError) {
+                            emailError.textContent = 'An account with this email already exists. Please sign in instead.';
+                            emailError.hidden = false;
+                        }
                         submitBtn.disabled = false;
                         submitBtn.textContent = 'Create Account';
                     } else {
                         DebugLog.log('✅ Signup successful!');
-                        DebugLog.log('👤 User:', data.user);
-                        DebugLog.log('🔐 Session:', data.session);
-                        DebugLog.log('📩 Identities:', data.user?.identities);
 
                         // Try to create profile in backend (may require email verification first)
                         if (data.user && data.session) {
