@@ -736,11 +736,13 @@
          */
         getLoadingHTML(text) {
             return `
-                <svg class="animate-spin" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <circle cx="12" cy="12" r="10" stroke-opacity="0.25"/>
-                    <path d="M12 2a10 10 0 0 1 10 10" stroke-opacity="1"/>
-                </svg>
-                ${text}
+                <span style="display:inline-flex;align-items:center;gap:8px">
+                    <svg class="animate-spin" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <circle cx="12" cy="12" r="10" stroke-opacity="0.25"/>
+                        <path d="M12 2a10 10 0 0 1 10 10" stroke-opacity="1"/>
+                    </svg>
+                    ${text}
+                </span>
             `;
         },
 
