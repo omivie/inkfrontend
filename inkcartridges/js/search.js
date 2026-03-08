@@ -181,6 +181,18 @@ function createSmartSearch() {
                     return;
                 }
 
+                // Step 2b: If normalization changed the query and got 0 results, retry with original
+                if (normalizeResult && normalizeResult.changed) {
+                    result = await this._fetchResults(query);
+                    if (query !== this._currentQuery) return;
+
+                    if (result && result.products && result.products.length > 0) {
+                        this._setCache(query, result);
+                        this._renderResults(result.products, query, result.total);
+                        return;
+                    }
+                }
+
                 // Step 3: No results — try spelling correction
                 if (typeof SearchNormalize !== 'undefined') {
                     const spellingResult = SearchNormalize.correctSpelling(searchQuery);

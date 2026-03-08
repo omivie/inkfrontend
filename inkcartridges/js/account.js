@@ -63,33 +63,26 @@ const AccountPage = {
     },
 
     /**
-     * Setup printer modal handlers
+     * Setup printer section handlers (inline ink-finder style)
      */
     setupPrinterModalHandlers() {
-        // Printer modal
-        const printerModal = document.getElementById('printer-modal');
-        if (printerModal) {
-            const closeBtn = printerModal.querySelector('.modal__close');
+        const section = document.getElementById('add-printer-section');
+        if (section) {
             const cancelBtn = document.getElementById('printer-cancel-btn');
             const saveBtn = document.getElementById('printer-save-btn');
-            const backdrop = printerModal.querySelector('.modal__backdrop');
-            const clearBtn = document.getElementById('clear-printer');
 
-            if (closeBtn) closeBtn.addEventListener('click', () => this.closePrinterModal());
-            if (cancelBtn) cancelBtn.addEventListener('click', () => this.closePrinterModal());
-            if (backdrop) backdrop.addEventListener('click', () => this.closePrinterModal());
+            if (cancelBtn) cancelBtn.addEventListener('click', () => this.hideAddPrinterSection());
             if (saveBtn) saveBtn.addEventListener('click', () => this.savePrinter());
-            if (clearBtn) clearBtn.addEventListener('click', () => this.clearSelectedPrinter());
 
             // Setup brand button clicks
-            const brandButtons = document.querySelectorAll('#modal-printer-brands .printer-finder__brand-btn');
+            const brandButtons = document.querySelectorAll('#printer-brands .ink-finder__brand-btn');
             brandButtons.forEach(btn => {
                 btn.addEventListener('click', () => this.selectPrinterBrand(btn.dataset.brand));
             });
 
             // Setup series dropdown
-            const seriesTrigger = document.getElementById('modal-series-trigger');
-            const seriesDropdown = document.getElementById('modal-series-dropdown');
+            const seriesTrigger = document.getElementById('printer-series-trigger');
+            const seriesDropdown = document.getElementById('printer-series-dropdown');
             if (seriesTrigger) {
                 seriesTrigger.addEventListener('click', (e) => {
                     e.stopPropagation();
@@ -108,8 +101,8 @@ const AccountPage = {
             }
 
             // Setup model dropdown
-            const modelTrigger = document.getElementById('modal-model-trigger');
-            const modelDropdown = document.getElementById('modal-model-dropdown');
+            const modelTrigger = document.getElementById('printer-model-trigger');
+            const modelDropdown = document.getElementById('printer-model-dropdown');
             if (modelTrigger) {
                 modelTrigger.addEventListener('click', (e) => {
                     e.stopPropagation();
@@ -147,10 +140,9 @@ const AccountPage = {
             if (confirmBtn) confirmBtn.addEventListener('click', () => this.deletePrinter());
         }
 
-        // Escape key to close modals
+        // Escape key to close delete modal and dropdowns
         document.addEventListener('keydown', (e) => {
             if (e.key === 'Escape') {
-                if (printerModal && !printerModal.hidden) this.closePrinterModal();
                 if (deleteModal && !deleteModal.hidden) this.closeDeletePrinterModal();
                 this.closeAllDropdowns();
             }
@@ -159,8 +151,8 @@ const AccountPage = {
         // Add printer buttons
         const addBtn = document.getElementById('add-printer-btn');
         const addEmptyBtn = document.getElementById('add-printer-empty-btn');
-        if (addBtn) addBtn.addEventListener('click', () => this.openPrinterModal());
-        if (addEmptyBtn) addEmptyBtn.addEventListener('click', () => this.openPrinterModal());
+        if (addBtn) addBtn.addEventListener('click', () => this.showAddPrinterSection());
+        if (addEmptyBtn) addEmptyBtn.addEventListener('click', () => this.showAddPrinterSection());
     },
 
     /**
@@ -184,10 +176,10 @@ const AccountPage = {
      * Close all dropdowns
      */
     closeAllDropdowns() {
-        const seriesTrigger = document.getElementById('modal-series-trigger');
-        const seriesDropdown = document.getElementById('modal-series-dropdown');
-        const modelTrigger = document.getElementById('modal-model-trigger');
-        const modelDropdown = document.getElementById('modal-model-dropdown');
+        const seriesTrigger = document.getElementById('printer-series-trigger');
+        const seriesDropdown = document.getElementById('printer-series-dropdown');
+        const modelTrigger = document.getElementById('printer-model-trigger');
+        const modelDropdown = document.getElementById('printer-model-dropdown');
 
         if (seriesTrigger && seriesDropdown) {
             seriesTrigger.setAttribute('aria-expanded', 'false');
@@ -211,21 +203,25 @@ const AccountPage = {
         state.selectedModel = null;
 
         // Update brand button states
-        document.querySelectorAll('#modal-printer-brands .printer-finder__brand-btn').forEach(btn => {
-            btn.classList.toggle('printer-finder__brand-btn--selected', btn.dataset.brand === brand);
+        document.querySelectorAll('#printer-brands .ink-finder__brand-btn').forEach(btn => {
+            btn.classList.toggle('ink-finder__brand-btn--selected', btn.dataset.brand === brand);
         });
 
         // Update step states
         this.updatePrinterFinderSteps();
 
         // Show loading state
-        const seriesTrigger = document.getElementById('modal-series-trigger');
-        const modelTrigger = document.getElementById('modal-model-trigger');
+        const seriesTrigger = document.getElementById('printer-series-trigger');
+        const modelTrigger = document.getElementById('printer-model-trigger');
         seriesTrigger.querySelector('.custom-select__value').textContent = 'Loading series...';
         seriesTrigger.disabled = true;
         modelTrigger.querySelector('.custom-select__value').textContent = '← Select series';
         modelTrigger.disabled = true;
         document.getElementById('printer-save-btn').disabled = true;
+
+        // Hide action row when changing brand
+        const actionRow = document.getElementById('printer-action-row');
+        if (actionRow) actionRow.hidden = true;
 
         // Load printers for this brand
         const series = await this.loadPrintersForBrand(brand);
@@ -237,7 +233,7 @@ const AccountPage = {
         }
 
         // Populate series dropdown
-        this.populateDropdown('modal-series-dropdown', series, true);
+        this.populateDropdown('printer-series-dropdown', series, true);
         seriesTrigger.querySelector('.custom-select__value').textContent = 'Select Series';
         seriesTrigger.disabled = false;
 
@@ -570,21 +566,25 @@ const AccountPage = {
         state.modelsData = series.models;
 
         // Update series dropdown display
-        const seriesTrigger = document.getElementById('modal-series-trigger');
+        const seriesTrigger = document.getElementById('printer-series-trigger');
         seriesTrigger.querySelector('.custom-select__value').textContent = label;
         this.closeAllDropdowns();
 
         // Mark option as selected
-        document.querySelectorAll('#modal-series-dropdown .custom-select__option').forEach(opt => {
+        document.querySelectorAll('#printer-series-dropdown .custom-select__option').forEach(opt => {
             opt.classList.toggle('custom-select__option--selected', opt.dataset.value === seriesId);
         });
 
         // Populate model dropdown
-        this.populateDropdown('modal-model-dropdown', state.modelsData, false);
-        const modelTrigger = document.getElementById('modal-model-trigger');
+        this.populateDropdown('printer-model-dropdown', state.modelsData, false);
+        const modelTrigger = document.getElementById('printer-model-trigger');
         modelTrigger.querySelector('.custom-select__value').textContent = 'Select Model';
         modelTrigger.disabled = false;
         document.getElementById('printer-save-btn').disabled = true;
+
+        // Hide action row when changing series
+        const actionRow = document.getElementById('printer-action-row');
+        if (actionRow) actionRow.hidden = true;
 
         this.updatePrinterFinderSteps();
     },
@@ -600,12 +600,12 @@ const AccountPage = {
         const model = state.modelsData.find(m => m.id === modelId);
 
         // Update model dropdown display
-        const modelTrigger = document.getElementById('modal-model-trigger');
+        const modelTrigger = document.getElementById('printer-model-trigger');
         modelTrigger.querySelector('.custom-select__value').textContent = label;
         this.closeAllDropdowns();
 
         // Mark option as selected
-        document.querySelectorAll('#modal-model-dropdown .custom-select__option').forEach(opt => {
+        document.querySelectorAll('#printer-model-dropdown .custom-select__option').forEach(opt => {
             opt.classList.toggle('custom-select__option--selected', opt.dataset.value === modelId);
         });
 
@@ -616,12 +616,12 @@ const AccountPage = {
         document.getElementById('printer-full-name').value = fullName || model?.fullName || label;
         document.getElementById('printer-printer-id').value = model?.printerId || '';
 
-        // Show selected printer and nickname field
-        document.getElementById('selected-printer-model').textContent = fullName || model?.fullName || label;
-        document.getElementById('selected-printer-brand').textContent = PrinterData.BRAND_NAMES[state.selectedBrand] || '';
-        document.getElementById('selected-printer').hidden = false;
-        document.getElementById('nickname-group').hidden = false;
-        document.getElementById('printer-finder').hidden = true;
+        // Show action row (nickname + save/cancel buttons) inline
+        const actionRow = document.getElementById('printer-action-row');
+        if (actionRow) {
+            actionRow.hidden = false;
+            actionRow.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        }
 
         // Enable save button
         document.getElementById('printer-save-btn').disabled = false;
@@ -634,28 +634,28 @@ const AccountPage = {
      */
     updatePrinterFinderSteps() {
         const state = this.printerFinderState;
-        const steps = document.querySelectorAll('.printer-finder__step');
+        const steps = document.querySelectorAll('#printer-finder-steps .ink-finder__step');
 
         steps.forEach((step, index) => {
             const stepNum = index + 1;
-            step.classList.remove('printer-finder__step--active', 'printer-finder__step--completed', 'printer-finder__step--disabled');
+            step.classList.remove('ink-finder__step--active', 'ink-finder__step--completed', 'ink-finder__step--disabled');
 
             if (stepNum === 1) {
-                step.classList.add('printer-finder__step--active');
-                if (state.selectedBrand) step.classList.add('printer-finder__step--completed');
+                step.classList.add('ink-finder__step--active');
+                if (state.selectedBrand) step.classList.add('ink-finder__step--completed');
             } else if (stepNum === 2) {
                 if (state.selectedBrand) {
-                    step.classList.add('printer-finder__step--active');
-                    if (state.selectedSeries) step.classList.add('printer-finder__step--completed');
+                    step.classList.add('ink-finder__step--active');
+                    if (state.selectedSeries) step.classList.add('ink-finder__step--completed');
                 } else {
-                    step.classList.add('printer-finder__step--disabled');
+                    step.classList.add('ink-finder__step--disabled');
                 }
             } else if (stepNum === 3) {
                 if (state.selectedSeries) {
-                    step.classList.add('printer-finder__step--active');
-                    if (state.selectedModel) step.classList.add('printer-finder__step--completed');
+                    step.classList.add('ink-finder__step--active');
+                    if (state.selectedModel) step.classList.add('ink-finder__step--completed');
                 } else {
-                    step.classList.add('printer-finder__step--disabled');
+                    step.classList.add('ink-finder__step--disabled');
                 }
             }
         });
@@ -1776,7 +1776,7 @@ const AccountPage = {
                 const id = btn.dataset.id;
 
                 if (action === 'edit') {
-                    this.openPrinterModal(id);
+                    this.showAddPrinterSection(id);
                 } else if (action === 'delete') {
                     this.confirmDeletePrinter(id);
                 }
@@ -1849,9 +1849,9 @@ const AccountPage = {
     },
 
     /**
-     * Clear selected printer and show finder again
+     * Reset the printer finder to its initial state
      */
-    clearSelectedPrinter() {
+    resetPrinterFinder() {
         // Reset state
         this.printerFinderState.selectedBrand = null;
         this.printerFinderState.selectedSeries = null;
@@ -1864,55 +1864,53 @@ const AccountPage = {
         document.getElementById('printer-full-name').value = '';
         document.getElementById('printer-nickname').value = '';
 
-        // Hide selected printer, show finder
-        document.getElementById('selected-printer').hidden = true;
-        document.getElementById('nickname-group').hidden = true;
-        document.getElementById('printer-finder').hidden = false;
-
         // Reset brand buttons
-        document.querySelectorAll('#modal-printer-brands .printer-finder__brand-btn').forEach(btn => {
-            btn.classList.remove('printer-finder__brand-btn--selected');
+        document.querySelectorAll('#printer-brands .ink-finder__brand-btn').forEach(btn => {
+            btn.classList.remove('ink-finder__brand-btn--selected');
         });
 
         // Reset dropdowns
-        const seriesTrigger = document.getElementById('modal-series-trigger');
-        const modelTrigger = document.getElementById('modal-model-trigger');
-        seriesTrigger.querySelector('.custom-select__value').textContent = '← Select brand';
+        const seriesTrigger = document.getElementById('printer-series-trigger');
+        const modelTrigger = document.getElementById('printer-model-trigger');
+        seriesTrigger.querySelector('.custom-select__value').textContent = 'Choose a series...';
         seriesTrigger.disabled = true;
-        modelTrigger.querySelector('.custom-select__value').textContent = '← Select series';
+        modelTrigger.querySelector('.custom-select__value').textContent = 'Choose a model...';
         modelTrigger.disabled = true;
 
-        // Disable save button
+        // Hide action row, disable save
+        const actionRow = document.getElementById('printer-action-row');
+        if (actionRow) actionRow.hidden = true;
         document.getElementById('printer-save-btn').disabled = true;
+
+        // Show steps
+        const steps = document.getElementById('printer-finder-steps');
+        if (steps) steps.hidden = false;
 
         this.updatePrinterFinderSteps();
     },
 
     /**
-     * Open printer modal
+     * Show the inline add-printer section
      */
-    openPrinterModal(printerId = null) {
-        const modal = document.getElementById('printer-modal');
-        if (!modal) return;
+    showAddPrinterSection(printerId = null) {
+        const section = document.getElementById('add-printer-section');
+        if (!section) return;
 
-        const title = document.getElementById('printer-modal-title');
+        const title = document.getElementById('printer-section-title');
         const form = document.getElementById('printer-form');
         const saveBtn = document.getElementById('printer-save-btn');
 
-        // Reset state
-        this.printerFinderState.selectedBrand = null;
-        this.printerFinderState.selectedSeries = null;
-        this.printerFinderState.selectedModel = null;
+        this.resetPrinterFinder();
 
         if (printerId) {
-            // Edit mode
+            // Edit mode — only show nickname field
             const printer = this.printers?.find(p => p.id === printerId);
             if (printer) {
                 title.textContent = 'Edit Printer';
                 saveBtn.textContent = 'Update Printer';
                 this.editingPrinterId = printerId;
 
-                // Set values (API uses snake_case)
+                // Pre-fill hidden fields
                 const fullName = printer.full_name || printer.fullName || `${printer.brand || ''} ${printer.model || printer.name || ''}`.trim();
                 document.getElementById('printer-model').value = printer.model || printer.name || '';
                 document.getElementById('printer-brand').value = printer.brand || '';
@@ -1920,62 +1918,38 @@ const AccountPage = {
                 document.getElementById('printer-full-name').value = fullName;
                 document.getElementById('printer-nickname').value = printer.nickname || printer.location || '';
 
-                // Show selected printer, hide finder
-                document.getElementById('selected-printer-model').textContent = fullName;
-                document.getElementById('selected-printer-brand').textContent = printer.brand || '';
-                document.getElementById('selected-printer').hidden = false;
-                document.getElementById('nickname-group').hidden = false;
-                document.getElementById('printer-finder').hidden = true;
+                // Hide steps, show action row with nickname pre-filled
+                const steps = document.getElementById('printer-finder-steps');
+                if (steps) steps.hidden = true;
+
+                const actionRow = document.getElementById('printer-action-row');
+                if (actionRow) actionRow.hidden = false;
+
                 saveBtn.disabled = false;
             }
         } else {
             // Add mode
-            title.textContent = 'Add Printer';
+            title.textContent = 'Save a Printer';
             saveBtn.textContent = 'Save Printer';
             this.editingPrinterId = null;
             form.reset();
-
-            // Clear form values
-            document.getElementById('printer-model').value = '';
-            document.getElementById('printer-brand').value = '';
-            document.getElementById('printer-slug').value = '';
-            document.getElementById('printer-full-name').value = '';
-
-            // Hide selected printer, show finder
-            document.getElementById('selected-printer').hidden = true;
-            document.getElementById('nickname-group').hidden = true;
-            document.getElementById('printer-finder').hidden = false;
-            saveBtn.disabled = true;
-
-            // Reset brand buttons
-            document.querySelectorAll('#modal-printer-brands .printer-finder__brand-btn').forEach(btn => {
-                btn.classList.remove('printer-finder__brand-btn--selected');
-            });
-
-            // Reset dropdowns
-            const seriesTrigger = document.getElementById('modal-series-trigger');
-            const modelTrigger = document.getElementById('modal-model-trigger');
-            seriesTrigger.querySelector('.custom-select__value').textContent = '← Select brand';
-            seriesTrigger.disabled = true;
-            modelTrigger.querySelector('.custom-select__value').textContent = '← Select series';
-            modelTrigger.disabled = true;
         }
 
         this.updatePrinterFinderSteps();
-        modal.hidden = false;
-        document.body.style.overflow = 'hidden';
+        section.hidden = false;
+        section.scrollIntoView({ behavior: 'smooth', block: 'start' });
     },
 
     /**
-     * Close printer modal
+     * Hide the inline add-printer section
      */
-    closePrinterModal() {
-        const modal = document.getElementById('printer-modal');
-        if (modal) {
-            modal.hidden = true;
-            document.body.style.overflow = '';
+    hideAddPrinterSection() {
+        const section = document.getElementById('add-printer-section');
+        if (section) {
+            section.hidden = true;
             this.editingPrinterId = null;
             this.closeAllDropdowns();
+            this.resetPrinterFinder();
         }
     },
 
@@ -2019,7 +1993,7 @@ const AccountPage = {
                 await API.addUserPrinter({ printer_id: printerId });
             }
 
-            this.closePrinterModal();
+            this.hideAddPrinterSection();
             await this.loadPrinters();
             this.showToast(this.editingPrinterId ? 'Printer updated' : 'Printer added', 'success');
         } catch (error) {

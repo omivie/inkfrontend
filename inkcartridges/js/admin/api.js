@@ -296,7 +296,15 @@ const AdminAPI = {
     try {
       const resp = await window.API.put(`/api/admin/products/${productId}`, data);
       if (resp && resp.ok === false) {
-        throw new Error(resp.error || 'Update failed');
+        let msg = resp.error || 'Update failed';
+        if (resp.details) {
+          if (Array.isArray(resp.details)) {
+            msg += ': ' + resp.details.map(d => d.message || d).join(', ');
+          } else if (typeof resp.details === 'string') {
+            msg += ': ' + resp.details;
+          }
+        }
+        throw new Error(msg);
       }
       return resp?.data ?? null;
     } catch (e) {

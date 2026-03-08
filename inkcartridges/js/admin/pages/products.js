@@ -802,14 +802,11 @@ function generateSEO(product) {
   const sourcePart = sourceLabel ? `${sourceLabel.toLowerCase()} ` : '';
   let metaDesc;
   if (type === 'ribbon') {
-    metaDesc = `Buy ${sourcePart}${brand} ${code || name}${colorPart} printer ribbon online at InkCartridges.co.nz. Fast NZ-wide delivery. Free shipping over $100. Order by 2PM for same-day dispatch.`;
+    metaDesc = `Buy ${sourcePart}${brand} ${code || name}${colorPart} printer ribbon online at InkCartridges.co.nz. Fast NZ-wide delivery. Free shipping over $100.`;
   } else if (type === 'drum') {
-    metaDesc = `Buy ${sourcePart}${brand} ${code || name} drum unit online at InkCartridges.co.nz. Fast NZ-wide delivery. Free shipping over $100. Order by 2PM for same-day dispatch.`;
+    metaDesc = `Buy ${sourcePart}${brand} ${code || name} drum unit online at InkCartridges.co.nz. Fast NZ-wide delivery. Free shipping over $100.`;
   } else {
-    metaDesc = `Buy ${sourcePart}${brand} ${code || name}${colorPart} ${typeLabel.toLowerCase()} online at InkCartridges.co.nz. Fast NZ-wide delivery. Free shipping over $100. Order by 2PM for same-day dispatch.`;
-  }
-  if (metaDesc.length > 160) {
-    metaDesc = metaDesc.replace('. Order by 2PM for same-day dispatch.', '.');
+    metaDesc = `Buy ${sourcePart}${brand} ${code || name}${colorPart} ${typeLabel.toLowerCase()} online at InkCartridges.co.nz. Fast NZ-wide delivery. Free shipping over $100.`;
   }
   if (metaDesc.length > 160) {
     metaDesc = metaDesc.substring(0, 157) + '...';

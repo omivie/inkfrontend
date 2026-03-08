@@ -235,7 +235,7 @@
 /* Search form */
 .search-form {
     flex: 1;
-    max-width: 500px;
+    max-width: 400px;
     display: flex;
     position: relative;
 }
@@ -440,6 +440,7 @@
 .nav-menu__arrow {
     font-size: var(--font-size-xs);
     transition: transform var(--transition-fast);
+    flex-shrink: 0;
 }
 
 .nav-menu__item:hover .nav-menu__arrow {
