@@ -61,7 +61,10 @@
                         password: password
                     });
 
-                    if (error) {
+                    // Treat "same password" error as success — the password is already what the user wants
+                    const isSamePassword = error && error.message && error.message.toLowerCase().includes('different from the old password');
+
+                    if (error && !isSamePassword) {
                         passwordError.textContent = error.message || 'Failed to update password.';
                         passwordError.hidden = false;
                         submitBtn.disabled = false;
