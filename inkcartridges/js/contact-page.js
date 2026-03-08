@@ -35,12 +35,21 @@
             if (orderNumber) payload.order_number = orderNumber;
 
             try {
-                await API.submitContactForm(payload);
-                showToast('Message sent! We\'ll get back to you shortly.', 'success');
-                form.reset();
+                const result = await API.submitContactForm(payload);
+                if (result && result.ok === false) {
+                    showToast(result.error || 'Could not send message. Please try again.', 'error');
+                } else {
+                    showToast('Message sent! We\'ll get back to you shortly.', 'success');
+                    form.reset();
+                }
             } catch (error) {
                 console.error('Contact form error:', error);
-                showToast(error.message || 'Could not send message. Please try again.', 'error');
+                const msg = error.message || 'Could not send message. Please try again.';
+                if (typeof showToast === 'function') {
+                    showToast(msg, 'error');
+                } else {
+                    alert(msg);
+                }
             }
 
             btn.innerHTML = originalHTML;

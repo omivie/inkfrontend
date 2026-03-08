@@ -124,37 +124,75 @@ const RibbonsPage = {
         this.elements.empty.hidden = true;
 
         try {
-            const params = {
-                page: this.state.page,
-                limit: this.pageLimit
-            };
+            let ribbons, pagination;
+
             if (this.state.brand) {
-                params.brand = this.state.brand;
+                // Backend does not filter by brand, so fetch all and filter client-side
+                const res = await API.getRibbons({ limit: 999 });
+
+                if (this.navigationVersion !== navVersion) return;
+                this.showLoading(false);
+
+                if (!res.ok || !res.data) {
+                    this.showEmpty('Failed to load ribbons. Please try again.');
+                    return;
+                }
+
+                let allRibbons = res.data.ribbons || res.data || [];
+                if (!Array.isArray(allRibbons)) allRibbons = [];
+
+                allRibbons = allRibbons.map(r => this.normalizeRibbon(r));
+
+                // Filter by brand name (case-insensitive)
+                const brandLower = this.state.brand.toLowerCase();
+                const filtered = allRibbons.filter(r => {
+                    const rBrand = r._brandName || r.brand || '';
+                    return rBrand.toLowerCase() === brandLower;
+                });
+
+                // Client-side pagination
+                const total = filtered.length;
+                const start = (this.state.page - 1) * this.pageLimit;
+                ribbons = filtered.slice(start, start + this.pageLimit);
+
+                const totalPages = Math.ceil(total / this.pageLimit);
+                pagination = {
+                    page: this.state.page,
+                    limit: this.pageLimit,
+                    total: total,
+                    total_pages: totalPages,
+                    has_next: this.state.page < totalPages,
+                    has_prev: this.state.page > 1
+                };
+            } else {
+                // No brand filter — use server pagination as normal
+                const res = await API.getRibbons({
+                    page: this.state.page,
+                    limit: this.pageLimit
+                });
+
+                if (this.navigationVersion !== navVersion) return;
+                this.showLoading(false);
+
+                if (!res.ok || !res.data) {
+                    this.showEmpty('Failed to load ribbons. Please try again.');
+                    return;
+                }
+
+                ribbons = res.data.ribbons || res.data || [];
+                pagination = res.meta || res.data.pagination || null;
+
+                if (!Array.isArray(ribbons)) ribbons = [];
+                ribbons = ribbons.map(r => this.normalizeRibbon(r));
             }
-            const res = await API.getRibbons(params);
 
-            // Check for stale navigation
-            if (this.navigationVersion !== navVersion) return;
-
-            this.showLoading(false);
-
-            if (!res.ok || !res.data) {
-                this.showEmpty('Failed to load ribbons. Please try again.');
-                return;
-            }
-
-            let ribbons = res.data.ribbons || res.data || [];
-            const pagination = res.meta || res.data.pagination || null;
-
-            if (!Array.isArray(ribbons) || ribbons.length === 0) {
+            if (ribbons.length === 0) {
                 const msg = this.state.brand
                     ? `No ribbons found for ${Security.escapeHtml(this.state.brand)}.`
                     : 'No ribbons found.';
                 this.showEmpty(msg);
                 return;
             }
-
-            ribbons = ribbons.map(r => this.normalizeRibbon(r));
 
             this.renderProducts(ribbons);
             this.renderPagination(pagination, ribbons.length);
