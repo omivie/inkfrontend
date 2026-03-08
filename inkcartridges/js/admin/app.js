@@ -42,7 +42,6 @@ const NAV_ITEMS = [
   { section: 'Catalog' },
   { key: 'products', label: 'Products & SKUs', icon: 'products' },
   { key: 'product-review', label: 'Product Review', icon: 'orders' },
-  { key: 'ribbons', label: 'Ribbons', icon: 'products' },
   { key: 'suppliers', label: 'Suppliers', icon: 'suppliers' },
   { section: 'Operations' },
   { key: 'refunds', label: 'Refunds & Chargebacks', icon: 'refunds' },
