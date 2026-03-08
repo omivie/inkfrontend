@@ -165,6 +165,10 @@
                     return false;
                 }
             }
+            // Check delivery type is selected
+            if (!document.querySelector('input[name="delivery_type"]:checked')) {
+                return false;
+            }
             return true;
         },
 
@@ -615,6 +619,32 @@
                 });
             }
 
+            // Clear validation errors on input/change
+            form.addEventListener('input', (e) => {
+                const field = e.target;
+                if (field.classList.contains('is-error')) {
+                    field.classList.remove('is-error');
+                    const errorMsg = field.closest('.form-group')?.querySelector('.form-error');
+                    if (errorMsg) errorMsg.remove();
+                }
+            });
+            form.addEventListener('change', (e) => {
+                const field = e.target;
+                if (field.type === 'radio') {
+                    const container = field.closest('.delivery-type-options');
+                    if (container) {
+                        container.classList.remove('is-error');
+                        const errorMsg = container.parentElement.querySelector('.form-error');
+                        if (errorMsg) errorMsg.remove();
+                    }
+                }
+                if (field.classList.contains('is-error')) {
+                    field.classList.remove('is-error');
+                    const errorMsg = field.closest('.form-group')?.querySelector('.form-error');
+                    if (errorMsg) errorMsg.remove();
+                }
+            });
+
             // Coupon code handler
             this.setupCouponHandler();
         },
@@ -682,6 +712,68 @@
             });
         },
 
+        // Clear all validation errors from the form
+        clearValidationErrors(form) {
+            form.querySelectorAll('.is-error').forEach(el => el.classList.remove('is-error'));
+            form.querySelectorAll('.form-error').forEach(el => el.remove());
+            form.querySelectorAll('.delivery-type-options.is-error').forEach(el => el.classList.remove('is-error'));
+        },
+
+        // Validate all required fields, show red error styling, scroll to first error
+        validateFormFields(form) {
+            this.clearValidationErrors(form);
+
+            let firstInvalid = null;
+
+            // Validate all required inputs/selects
+            const requiredFields = form.querySelectorAll('input[required], select[required], textarea[required]');
+            const checkedRadioGroups = new Set();
+
+            requiredFields.forEach(field => {
+                // For radio buttons, validate once per group
+                if (field.type === 'radio') {
+                    if (checkedRadioGroups.has(field.name)) return;
+                    checkedRadioGroups.add(field.name);
+
+                    const groupChecked = form.querySelector(`input[name="${field.name}"]:checked`);
+                    if (!groupChecked) {
+                        const container = field.closest('.delivery-type-options') || field.closest('.form-group');
+                        if (container) {
+                            container.classList.add('is-error');
+                            if (!container.querySelector('.form-error')) {
+                                const errorMsg = document.createElement('div');
+                                errorMsg.className = 'form-error';
+                                errorMsg.textContent = 'Please select an option';
+                                container.parentElement.appendChild(errorMsg);
+                            }
+                        }
+                        if (!firstInvalid) firstInvalid = container || field;
+                    }
+                    return;
+                }
+
+                if (!field.value.trim() || !field.checkValidity()) {
+                    field.classList.add('is-error');
+                    const group = field.closest('.form-group');
+                    if (group && !group.querySelector('.form-error')) {
+                        const errorMsg = document.createElement('div');
+                        errorMsg.className = 'form-error';
+                        errorMsg.textContent = field.validationMessage || 'This field is required';
+                        group.appendChild(errorMsg);
+                    }
+                    if (!firstInvalid) firstInvalid = field;
+                }
+            });
+
+            if (firstInvalid) {
+                firstInvalid.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                if (firstInvalid.focus) firstInvalid.focus({ preventScroll: true });
+                return false;
+            }
+
+            return true;
+        },
+
         // Handle "Continue to Payment" - validates form, saves data, redirects to payment page
         async handleContinueToPayment(form) {
             if (this.isSubmitting) return;
@@ -695,9 +787,8 @@
             const continueBtn = document.getElementById('continue-to-payment-btn');
             const originalBtnText = continueBtn.innerHTML;
 
-            // Validate form
-            if (!form.checkValidity()) {
-                form.reportValidity();
+            // Validate form with custom error display
+            if (!this.validateFormFields(form)) {
                 return;
             }
 
@@ -706,8 +797,19 @@
             if (!sameAsShipping) {
                 const billingValidation = this.validateBillingAddress();
                 if (!billingValidation.valid) {
-                    alert(billingValidation.message);
-                    document.getElementById(billingValidation.focusField)?.focus();
+                    const field = document.getElementById(billingValidation.focusField);
+                    if (field) {
+                        field.classList.add('is-error');
+                        const group = field.closest('.form-group');
+                        if (group && !group.querySelector('.form-error')) {
+                            const errorMsg = document.createElement('div');
+                            errorMsg.className = 'form-error';
+                            errorMsg.textContent = billingValidation.message;
+                            group.appendChild(errorMsg);
+                        }
+                        field.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        field.focus({ preventScroll: true });
+                    }
                     return;
                 }
             }
@@ -715,8 +817,14 @@
             // Check terms acceptance
             const termsCheckbox = document.getElementById('terms');
             if (!termsCheckbox.checked) {
-                alert('Please accept the Terms & Conditions to continue.');
-                termsCheckbox.focus();
+                const group = termsCheckbox.closest('.form-group') || termsCheckbox.parentElement;
+                if (group && !group.querySelector('.form-error')) {
+                    const errorMsg = document.createElement('div');
+                    errorMsg.className = 'form-error';
+                    errorMsg.textContent = 'Please accept the Terms & Conditions to continue.';
+                    group.appendChild(errorMsg);
+                }
+                termsCheckbox.scrollIntoView({ behavior: 'smooth', block: 'center' });
                 return;
             }
 

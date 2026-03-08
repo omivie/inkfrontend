@@ -715,6 +715,11 @@ section.checkout-page .payment-authorization {
     margin-left: auto;
 }
 
+/* Error state for delivery type */
+.delivery-type-options.is-error .delivery-type-option {
+    border-color: var(--color-error, #dc2626);
+}
+
 /* Hide stray lines from hidden billing fieldset */
 .checkout-billing-fields[style*="display: none"],
 .checkout-billing-fields[style*="display:none"] {
