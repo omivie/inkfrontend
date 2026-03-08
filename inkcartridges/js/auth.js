@@ -240,7 +240,10 @@ const Auth = {
         const { data, error } = await this.supabase.auth.signInWithOAuth({
             provider: 'google',
             options: {
-                redirectTo: `${window.location.origin}/html/account/`
+                redirectTo: `${window.location.origin}/html/account/`,
+                queryParams: {
+                    prompt: 'select_account'
+                }
             }
         });
 
