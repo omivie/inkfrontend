@@ -52,43 +52,44 @@
             }
         },
 
-        // Check email verification status
+        // Check email verification status (fail closed)
         async checkEmailVerification() {
             if (typeof Auth === 'undefined' || !Auth.isAuthenticated()) {
-                // Not logged in - assume verified for guest checkout
+                // Not logged in — guest checkout is fine
                 this.isEmailVerified = true;
                 return;
             }
 
+            // OAuth users (e.g. Google) have inherently verified emails
+            const provider = Auth.user?.app_metadata?.provider;
+            if (provider && provider !== 'email') {
+                this.isEmailVerified = true;
+                return;
+            }
+
+            // Fast path: check Supabase session field
+            if (Auth.user?.email_confirmed_at) {
+                this.isEmailVerified = true;
+                return;
+            }
+
+            // Fallback: check via backend API
             try {
                 const response = await API.getVerificationStatus();
-                DebugLog.log('Verification status response:', response);
-
                 if (response.ok && response.data) {
                     this.isEmailVerified = response.data.email_verified;
                 } else {
-                    // If API returns success: false but no specific "not verified" indication, assume verified
-                    this.isEmailVerified = true;
+                    // Fail closed — treat as unverified
+                    this.isEmailVerified = false;
                 }
             } catch (error) {
-                DebugLog.log('Verification check error:', error.message);
-                // If error message contains "already verified" or "verified", they ARE verified
-                // Also if we get any error, assume verified to not block checkout
-                if (error.message) {
-                    const msg = error.message.toLowerCase();
-                    if (msg.includes('verified') || msg.includes('not found')) {
-                        this.isEmailVerified = true;
-                    }
-                }
-                // Default to verified to not block users
-                this.isEmailVerified = true;
+                // Fail closed — treat errors as unverified
+                this.isEmailVerified = false;
             }
 
-            // Only show verification required if explicitly NOT verified
-            if (this.isEmailVerified === false) {
+            if (!this.isEmailVerified) {
                 this.showVerificationRequired();
             } else {
-                // Remove any existing verification message
                 const existingMsg = document.getElementById('verification-required');
                 if (existingMsg) existingMsg.remove();
             }
@@ -683,6 +684,12 @@
         // Handle "Continue to Payment" - validates form, saves data, redirects to payment page
         async handleContinueToPayment(form) {
             if (this.isSubmitting) return;
+
+            // Block unverified authenticated users from proceeding to payment
+            if (!this.isEmailVerified && typeof Auth !== 'undefined' && Auth.isAuthenticated()) {
+                this.showVerificationRequired();
+                return;
+            }
 
             const continueBtn = document.getElementById('continue-to-payment-btn');
             const originalBtnText = continueBtn.innerHTML;

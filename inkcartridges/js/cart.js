@@ -1014,7 +1014,13 @@ const Cart = {
                 }
 
                 // Server confirmed - refresh to get accurate server totals
+                const itemsAfterAdd = JSON.parse(JSON.stringify(this.items));
                 await this.loadFromServer();
+                // Guard: if server returned empty (e.g. cross-origin cookie blocked), keep local state
+                if (this.items.length === 0 && itemsAfterAdd.length > 0) {
+                    this.items = itemsAfterAdd;
+                    this.saveToLocalStorage();
+                }
                 this.updateUI();
             } catch (error) {
                 DebugLog.error('Failed to sync cart to server:', error);

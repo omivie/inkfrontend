@@ -318,6 +318,36 @@ const Auth = {
     },
 
     /**
+     * Require verified email — redirects unverified users to verify-email page.
+     * Returns true if verified (or not applicable), false if redirecting.
+     */
+    async requireVerifiedEmail() {
+        // Guest browsing is fine
+        if (!this.isAuthenticated()) return true;
+
+        // OAuth users (e.g. Google) have inherently verified emails
+        const provider = this.user?.app_metadata?.provider;
+        if (provider && provider !== 'email') return true;
+
+        // Fast path: check Supabase session field
+        if (this.user?.email_confirmed_at) return true;
+
+        // Fallback: check via backend API
+        try {
+            const response = await API.getVerificationStatus();
+            if (response.ok && response.data && response.data.email_verified) {
+                return true;
+            }
+        } catch (error) {
+            // Fail closed — treat errors as unverified
+        }
+
+        // Unverified — redirect
+        window.location.href = '/html/account/verify-email.html';
+        return false;
+    },
+
+    /**
      * Check if email is verified and show banner if not
      */
     async checkEmailVerification() {

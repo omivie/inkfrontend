@@ -24,10 +24,9 @@ const AccountPage = {
             return;
         }
 
-        // Check email verification status (shows banner if not verified)
-        if (typeof Auth !== 'undefined') {
-            Auth.checkEmailVerification();
-        }
+        // Hard-block unverified email users — redirects to verify-email page
+        const verified = await Auth.requireVerifiedEmail();
+        if (!verified) return;
 
         // Load user info into sidebar (for all account pages)
         this.loadUserInfo();

@@ -154,6 +154,13 @@
                             }
                         }
 
+                        // Check email verification before redirecting
+                        const isOAuth = data.user?.app_metadata?.provider && data.user.app_metadata.provider !== 'email';
+                        if (!isOAuth && !data.user?.email_confirmed_at) {
+                            window.location.href = '/html/account/verify-email.html';
+                            return;
+                        }
+
                         // Redirect to account or original page
                         const params = new URLSearchParams(window.location.search);
                         const redirect = Security.safeRedirect(params.get('redirect'));
