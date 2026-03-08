@@ -706,10 +706,6 @@ var CheckoutCompact = (function () {
         initSupportForms();
         initCollapsibleSections();
 
-        // Accordion runs after a tick so CheckoutPage inline script initializes first
-        if (document.getElementById('checkout-form')) {
-            setTimeout(initAccordion, 0);
-        }
     }
 
     // Initialize when DOM is ready
