@@ -141,6 +141,8 @@ const Cart = {
             // Listen for auth state changes
             Auth.onAuthStateChange(async (event, session) => {
                 if (event === 'SIGNED_IN') {
+                    // Skip merge if already authenticated (session restore, not a real sign-in)
+                    if (this.isAuthenticated) return;
                     // User just logged in - merge guest cart to server and load server cart
                     await this.mergeGuestCartAndLoad();
                 } else if (event === 'TOKEN_REFRESHED') {
@@ -435,6 +437,8 @@ const Cart = {
                 const stored = localStorage.getItem(this.STORAGE_KEY);
                 if (stored) {
                     legacyItems = JSON.parse(stored);
+                    // Clear immediately so re-runs don't re-add the same items
+                    localStorage.removeItem(this.STORAGE_KEY);
                 }
             } catch (e) {
                 DebugLog.error('Failed to parse legacy cart:', e);

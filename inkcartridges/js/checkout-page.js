@@ -864,23 +864,21 @@
             }, 600);
 
             // Auto-collapse sections when autofill completes them
-            // Track which section the user actually clicked in (not where autofill moves focus)
-            let userClickedSection = null;
-            form.addEventListener('mousedown', (e) => {
-                userClickedSection = e.target.closest('fieldset.checkout-section');
-            }, true);
-            form.addEventListener('keydown', (e) => {
-                userClickedSection = e.target.closest('fieldset.checkout-section');
-            }, true);
-
             let autocollapseTimer = null;
-            const checkAutocollapse = () => {
+            let changedFields = new Set();
+
+            const checkAutocollapse = (e) => {
+                if (e.target?.id) changedFields.add(e.target.id);
                 clearTimeout(autocollapseTimer);
                 autocollapseTimer = setTimeout(() => {
-                    this._collapsibleSections.forEach((data, idx) => {
+                    const fieldCount = changedFields.size;
+                    changedFields = new Set();
+
+                    // 3+ fields changed at once = autofill; fewer = manual typing (use Continue button)
+                    if (fieldCount < 3) return;
+
+                    this._collapsibleSections.forEach((data) => {
                         if (!data.collapsed && this.isSectionComplete(data)) {
-                            // Only protect the section the user physically interacted with
-                            if (data.section === userClickedSection) return;
                             this.collapseSection(data);
                         }
                     });
@@ -891,12 +889,9 @@
                     }
                     // If all complete, scroll to payment button
                     if (this._collapsibleSections.every(d => this.isSectionComplete(d))) {
-                        const allCollapsed = this._collapsibleSections.every(d => d.collapsed);
-                        if (!allCollapsed) {
-                            this._collapsibleSections.forEach(d => {
-                                if (!d.collapsed) this.collapseSection(d);
-                            });
-                        }
+                        this._collapsibleSections.forEach(d => {
+                            if (!d.collapsed) this.collapseSection(d);
+                        });
                         const payBtn = document.getElementById('continue-to-payment-btn');
                         if (payBtn) payBtn.scrollIntoView({ behavior: 'smooth', block: 'center' });
                     }
