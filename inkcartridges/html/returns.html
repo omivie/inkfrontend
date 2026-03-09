@@ -2,7 +2,6 @@
 <html lang="en-NZ">
 <head>
     <meta charset="UTF-8">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.jsdelivr.net https://js.stripe.com https://www.googletagmanager.com https://challenges.cloudflare.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://fonts.gstatic.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' https: data:; connect-src 'self' https://ink-backend-zaeq.onrender.com https://*.supabase.co https://*.stripe.com https://*.google-analytics.com https://cdn.jsdelivr.net https://challenges.cloudflare.com; frame-ancestors 'self'; frame-src https://js.stripe.com https://challenges.cloudflare.com;">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="description" content="Returns and refunds policy for InkCartridges.co.nz. Easy returns on unused products. Hassle-free process and fast refunds.">
     <meta name="robots" content="index, follow">
@@ -10,7 +9,6 @@
     <link rel="icon" type="image/svg+xml" href="/assets/icons/favicon.svg">
     <title>Returns & Refunds | InkCartridges.co.nz</title>
 
-    <!-- Google Analytics 4 (with consent mode) -->
     <script async src="https://www.googletagmanager.com/gtag/js?id=G-SDQELG0FGD"></script>
     <script src="/js/gtag.js"></script>
 
@@ -28,10 +26,8 @@
     <a href="#main-content" class="skip-link">Skip to main content</a>
 
     <header class="site-header">
-        <!-- Main header -->
         <div class="header-main">
             <div class="container">
-                <!-- Contact info -->
                 <div class="header-contact">
                     <a href="tel:0274740115" class="header-contact__item">
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
@@ -50,7 +46,6 @@
                     <a href="/html/index.html" class="logo__tagline">Get the full picture on image quality</a>
                 </div>
 
-                <!-- Header actions -->
                 <div class="header-actions">
                     <a href="/html/account/index.html" class="header-actions__item">
                         <span class="header-actions__icon">
@@ -75,7 +70,6 @@
             </div>
         </div>
 
-        <!-- Primary navigation -->
         <nav class="primary-nav" aria-label="Main navigation">
             <div class="container">
                 <button class="nav-toggle" aria-expanded="false" aria-controls="nav-menu">
@@ -109,7 +103,6 @@
                     </li>
                 </ul>
 
-                <!-- Search bar -->
                 <form class="search-form search-form--nav" action="/html/shop.html" method="GET" role="search">
                     <label for="search-input" class="visually-hidden">Search for products</label>
                     <input
@@ -128,7 +121,6 @@
             </div>
         </nav>
 
-        <!-- Brands Mega Dropdown -->
         <div class="brands-mega" id="brands-mega" hidden role="region" aria-label="Browse brands">
             <div class="container">
                 <div class="brands-mega__cards"></div>
@@ -139,7 +131,6 @@
             </div>
         </div>
 
-        <!-- Ribbons Mega Dropdown -->
         <div class="ribbons-mega" id="ribbons-mega" hidden role="region" aria-label="Browse ribbon brands">
             <div class="container">
                 <div class="ribbons-mega__grid"></div>
@@ -151,12 +142,8 @@
         </div>
     </header>
 
-    <!-- ============================================
-         MAIN CONTENT - RETURNS PAGE
-         ============================================ -->
     <main id="main-content" class="site-main">
 
-        <!-- Breadcrumb -->
         <nav class="breadcrumb" aria-label="Breadcrumb">
             <div class="container">
                 <ol class="breadcrumb__list">
@@ -166,7 +153,6 @@
             </div>
         </nav>
 
-        <!-- Page header -->
         <section class="page-header">
             <div class="container">
                 <h1 class="page-header__title">Returns & Refunds</h1>
@@ -176,11 +162,9 @@
             </div>
         </section>
 
-        <!-- Returns content -->
         <section class="policy-content">
             <div class="container container--content">
 
-                <!-- Return policy overview highlight -->
                 <div class="policy-highlight">
                     <h2>Our Return Guarantee</h2>
                     <p>We want you to be completely satisfied with your purchase. If you're not happy for any reason, you can return most unused products for a full refund or exchange. No questions asked.</p>
@@ -191,7 +175,6 @@
                     </ul>
                 </div>
 
-                <!-- What can be returned -->
                 <section class="policy-section" aria-labelledby="eligible-heading">
                     <h2 id="eligible-heading">What Can Be Returned</h2>
 
@@ -215,7 +198,6 @@
                     </ul>
                 </section>
 
-                <!-- How to return - Step by step -->
                 <section class="policy-section" aria-labelledby="process-heading">
                     <h2 id="process-heading">How to Return an Item</h2>
                     <p>Follow these simple steps to return a product:</p>
@@ -246,7 +228,6 @@
                     <p class="policy-note"><strong>Important:</strong> Please do not send returns without first obtaining an RA number. Returns received without authorisation may be delayed or refused.</p>
                 </section>
 
-                <!-- Refund information -->
                 <section class="policy-section" aria-labelledby="refund-heading">
                     <h2 id="refund-heading">Refund Processing Times</h2>
                     <p>Refunds are processed within 3-5 business days of receiving your return. The refund will be credited to your original payment method. Processing times vary depending on your payment method:</p>
@@ -277,7 +258,6 @@
                     <p>Please note that the time for the refund to appear in your account depends on your bank or payment provider. If you haven't received your refund after the expected timeframe, please contact your bank first, then reach out to us if the issue persists.</p>
                 </section>
 
-                <!-- Faulty or damaged items -->
                 <section class="policy-section" aria-labelledby="faulty-heading">
                     <h2 id="faulty-heading">Faulty or Damaged Items</h2>
                     <p>If you receive a faulty, damaged, or incorrect item, please contact us immediately. We take quality very seriously and will prioritise resolving your issue.</p>
@@ -300,7 +280,6 @@
                     <p>Retain all original packaging until your replacement arrives or refund is processed, as we may request return of the faulty item for quality analysis.</p>
                 </section>
 
-                <!-- Exchanges -->
                 <section class="policy-section" aria-labelledby="exchange-heading">
                     <h2 id="exchange-heading">Exchanges</h2>
                     <p>Need to swap for a different product? We're happy to help with exchanges:</p>
@@ -314,7 +293,6 @@
                     <p>For exchanges, the same return conditions apply - items must be unused and in original sealed packaging. If there's a price difference between products, we'll either refund or charge the difference accordingly.</p>
                 </section>
 
-                <!-- Return shipping -->
                 <section class="policy-section" aria-labelledby="shipping-heading">
                     <h2 id="shipping-heading">Return Shipping Costs</h2>
 
@@ -356,7 +334,6 @@
                     <p>For change-of-mind returns, we recommend using a tracked shipping service. We cannot be held responsible for items lost in transit during return shipping. Keep your shipping receipt as proof of postage.</p>
                 </section>
 
-                <!-- Consumer rights -->
                 <section class="policy-section" aria-labelledby="rights-heading">
                     <h2 id="rights-heading">Your Consumer Rights</h2>
                     <p>This return policy is in addition to your statutory rights under the <strong>New Zealand Consumer Guarantees Act 1993</strong>. Under this Act, products must:</p>
@@ -373,7 +350,6 @@
                     <p>For more information about your consumer rights, visit the <a href="https://www.consumerprotection.govt.nz" target="_blank" rel="noopener">Consumer Protection website</a>.</p>
                 </section>
 
-                <!-- Questions CTA -->
                 <section class="policy-section policy-section--cta">
                     <h2>Need Help With a Return?</h2>
                     <p>Our friendly team is here to assist you with any returns or refund queries. We aim to make the process as smooth as possible.</p>
@@ -394,14 +370,10 @@
 
     </main>
 
-    <!-- ============================================
-         FOOTER
-         ============================================ -->
     <footer class="site-footer">
         <div class="footer-main">
             <div class="container">
                 <div class="footer-grid">
-                    <!-- Brand column -->
                     <div class="footer-brand">
                         <a href="/html/index.html" class="footer-brand__logo">
                             <img class="logo__icon" src="https://lmdlgldjgcanknsjrcxh.supabase.co/storage/v1/object/public/public-assets/images/site/inklogo.png" alt="" aria-hidden="true">
@@ -414,7 +386,6 @@
                         </p>
                         </div>
 
-                    <!-- Support column -->
                     <div class="footer-column">
                         <h3 class="footer-column__heading">Support</h3>
                         <ul class="footer-links">
@@ -426,7 +397,6 @@
                         </ul>
                     </div>
 
-                    <!-- Contact column -->
                     <div class="footer-column">
                         <h3 class="footer-column__heading">Contact</h3>
                         <ul class="footer-links">
@@ -446,7 +416,6 @@
                     </div>
                 </div>
 
-                <!-- Trust badges -->
                 <div class="footer-trust">
                     <div class="footer-trust__item">
                         <svg class="footer-trust__icon" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>

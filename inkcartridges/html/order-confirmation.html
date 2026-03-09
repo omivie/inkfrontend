@@ -2,7 +2,6 @@
 <html lang="en-NZ">
 <head>
     <meta charset="UTF-8">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.jsdelivr.net https://js.stripe.com https://www.googletagmanager.com https://challenges.cloudflare.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://fonts.gstatic.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' https: data:; connect-src 'self' https://ink-backend-zaeq.onrender.com https://*.supabase.co https://*.stripe.com https://*.google-analytics.com https://cdn.jsdelivr.net https://challenges.cloudflare.com; frame-ancestors 'self'; frame-src https://js.stripe.com https://challenges.cloudflare.com;">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="description" content="Order Confirmation - InkCartridges.co.nz">
     <meta name="robots" content="noindex, nofollow">
@@ -10,7 +9,6 @@
     <link rel="icon" type="image/svg+xml" href="/assets/icons/favicon.svg">
     <title>Order Confirmed | InkCartridges.co.nz</title>
 
-    <!-- Google Analytics 4 (with consent mode) -->
     <script async src="https://www.googletagmanager.com/gtag/js?id=G-SDQELG0FGD"></script>
     <script src="/js/gtag.js"></script>
 
@@ -46,7 +44,6 @@
 <body>
     <a href="#main-content" class="skip-link">Skip to main content</a>
 
-    <!-- SIMPLIFIED HEADER (Checkout style) -->
     <header class="site-header site-header--checkout">
         <div class="header-main">
             <div class="container">
@@ -67,16 +64,13 @@
         </div>
     </header>
 
-    <!-- MAIN CONTENT - ORDER CONFIRMATION PAGE -->
     <main id="main-content" class="site-main">
         <section class="confirmation-page">
             <div class="container">
 
-                <!-- Confirmation content -->
                 <div class="confirmation-content">
                     <div class="confirmation-header">
                         <div class="confirmation-header__icon">
-                            <!-- Green checkmark circle SVG -->
                             <svg width="80" height="80" viewBox="0 0 80 80" fill="none" aria-hidden="true">
                                 <circle cx="40" cy="40" r="38" stroke="#10B981" stroke-width="4" fill="#ECFDF5"/>
                                 <path d="M24 40L35 51L56 30" stroke="#10B981" stroke-width="5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
@@ -88,7 +82,6 @@
                         </p>
                     </div>
 
-                    <!-- Order details -->
                     <div class="confirmation-details">
                         <div class="confirmation-card">
                             <h2 class="confirmation-card__heading">Order Details</h2>
@@ -128,11 +121,9 @@
                         </div>
                     </div>
 
-                    <!-- Order items -->
                     <div class="confirmation-items">
                         <h2 class="confirmation-items__heading">Items Ordered</h2>
                         <ul class="confirmation-items__list" id="order-items">
-                            <!-- Items loaded dynamically from API -->
                             <li class="confirmation-item" style="justify-content: center; padding: 2rem;">
                                 <p style="color: var(--color-text-muted);">Loading order items...</p>
                             </li>
@@ -158,7 +149,6 @@
                         </dl>
                     </div>
 
-                    <!-- What happens next -->
                     <div class="confirmation-next">
                         <h2 class="confirmation-next__heading">What Happens Next?</h2>
                         <ol class="confirmation-next__steps">
@@ -216,16 +206,13 @@
                         </ol>
                     </div>
 
-                    <!-- Post-Purchase Relationship Hooks -->
                     <div class="confirmation-relationship" id="post-purchase-hooks" style="display: grid; gap: 1rem; margin-bottom: 2rem;">
-                        <!-- Account creation prompt (shown only for guest checkout) -->
                         <div class="confirmation-card" id="create-account-prompt" hidden style="background: var(--cyan-light, #D4E8F5); border: 1px solid var(--cyan-primary, #267FB5); border-radius: 8px; padding: 1.25rem; text-align: center;">
                             <h3 style="margin: 0 0 0.5rem; font-size: 1.1rem;">Save Your Details for Next Time</h3>
                             <p style="margin: 0 0 1rem; color: var(--steel-600, #475569); font-size: 0.9375rem;">Create an account to track orders, reorder easily, and get exclusive deals.</p>
                             <a href="/html/account/login.html" class="btn btn--primary" data-track="cta_click" data-track-cta="Create Account" data-track-location="post_purchase">Create Account</a>
                         </div>
 
-                        <!-- Reorder reminder -->
                         <div class="confirmation-card" style="background: var(--steel-50, #F8FAFC); border: 1px solid var(--steel-200, #E2E8F0); border-radius: 8px; padding: 1.25rem; text-align: center;">
                             <h3 style="margin: 0 0 0.5rem; font-size: 1.1rem;">Running Low? Set a Reminder</h3>
                             <p style="margin: 0 0 1rem; color: var(--steel-600, #475569); font-size: 0.9375rem;">Most customers reorder every 2-3 months. Save your printer to your account and we'll remind you when it's time.</p>
@@ -233,7 +220,6 @@
                         </div>
                     </div>
 
-                    <!-- Actions -->
                     <div class="confirmation-actions">
                         <a href="/html/account/index.html" class="btn btn--primary btn--large" data-track="cta_click" data-track-cta="Track Order" data-track-location="post_purchase">
                             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -252,7 +238,6 @@
                         </a>
                     </div>
 
-                    <!-- Help section -->
                     <div class="confirmation-help">
                         <h3>Need Help?</h3>
                         <p>
@@ -288,14 +273,10 @@
         </section>
     </main>
 
-    <!-- ============================================
-         FOOTER
-         ============================================ -->
     <footer class="site-footer">
         <div class="footer-main">
             <div class="container">
                 <div class="footer-grid">
-                    <!-- Brand column -->
                     <div class="footer-brand">
                         <a href="/html/index.html" class="footer-brand__logo">
                             <span class="logo__text">Ink<span>Cartridges</span>.co.nz</span>
@@ -307,7 +288,6 @@
                         </p>
                         </div>
 
-                    <!-- Support column -->
                     <div class="footer-column">
                         <h3 class="footer-column__heading">Support</h3>
                         <ul class="footer-links">
@@ -319,7 +299,6 @@
                         </ul>
                     </div>
 
-                    <!-- Contact column -->
                     <div class="footer-column">
                         <h3 class="footer-column__heading">Contact</h3>
                         <ul class="footer-links">
@@ -339,7 +318,6 @@
                     </div>
                 </div>
 
-                <!-- Trust badges -->
                 <div class="footer-trust">
                     <div class="footer-trust__item">
                         <svg class="footer-trust__icon" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>

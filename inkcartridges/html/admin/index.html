@@ -2,12 +2,10 @@
 <html lang="en-NZ">
 <head>
     <meta charset="UTF-8">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://fonts.gstatic.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' https: data:; connect-src 'self' https://ink-backend-zaeq.onrender.com https://*.supabase.co; frame-ancestors 'self';">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="robots" content="noindex, nofollow">
     <link rel="icon" type="image/svg+xml" href="/assets/icons/favicon.svg">
     <title>Admin Dashboard | InkCartridges.co.nz</title>
-    <!-- Google Analytics 4 (with consent mode) -->
     <script async src="https://www.googletagmanager.com/gtag/js?id=G-SDQELG0FGD"></script>
     <script src="/js/gtag.js"></script>
     <link rel="stylesheet" href="/css/base.css">
@@ -19,13 +17,11 @@
 <body class="admin admin-body">
     <script src="/js/admin-theme-init.js"></script>
 
-    <!-- Loading screen -->
     <div id="app-loading" class="admin-loading">
         <div class="admin-loading__spinner"></div>
         <p>Loading admin&hellip;</p>
     </div>
 
-    <!-- SPA Shell (hidden until boot) -->
     <div id="app-shell" class="admin-shell" hidden>
         <div id="sidebar-backdrop" class="admin-sidebar-backdrop"></div>
         <aside id="sidebar" class="admin-sidebar"></aside>
@@ -39,7 +35,6 @@
     <div id="drawer-root"></div>
     <div id="modal-root"></div>
 
-    <!-- Scripts -->
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.98.0" integrity="sha384-Sm2s7OXxsAMTyJ4iIyRBgVpeGUvMPk2lRQnnZhE78Wej7oggIoolKt+SCt0XJbUB" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js" integrity="sha384-9nhczxUqK87bcKHh20fSQcTGD4qq5GhayNYSYWqwBkINBhOfQLg/P5HG5lF1urn4" crossorigin="anonymous"></script>
     <script src="/js/security.js"></script>

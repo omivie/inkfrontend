@@ -2,7 +2,6 @@
 <html lang="en-NZ">
 <head>
     <meta charset="UTF-8">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://fonts.gstatic.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' https: data:; connect-src 'self' https://ink-backend-zaeq.onrender.com https://*.supabase.co; frame-ancestors 'self';">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="description" content="Financial Health - InkCartridges.co.nz Admin">
     <meta name="robots" content="noindex, nofollow">
@@ -157,7 +156,6 @@
         </header>
 
         <div class="admin-page-content">
-            <!-- Alert Banner -->
             <div class="alert-banner alert-banner--warning" id="runway-alert" style="display: none;">
                 <div class="alert-banner__icon">
                     <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
@@ -169,7 +167,6 @@
                 <button class="btn btn--sm" id="alert-action">Review Expenses</button>
             </div>
 
-            <!-- KPI Cards -->
             <div class="kpi-grid">
                 <div class="kpi-card kpi-card--highlight">
                     <div class="kpi-card__header">
@@ -225,7 +222,6 @@
                 </div>
             </div>
 
-            <!-- Cash Flow & P&L Charts -->
             <div class="chart-grid">
                 <div class="chart-card">
                     <div class="chart-card__header">
@@ -279,7 +275,6 @@
                 </div>
             </div>
 
-            <!-- P&L Statement -->
             <div class="chart-card" style="margin-bottom: var(--spacing-6);">
                 <div class="chart-card__header">
                     <h2 class="chart-card__title">Profit & Loss Statement</h2>
@@ -381,7 +376,6 @@
                 </div>
             </div>
 
-            <!-- Expense Entry Form (hidden by default) -->
             <div class="chart-card" id="expense-form-card" style="display: none; margin-bottom: var(--spacing-6);">
                 <div class="chart-card__header">
                     <h2 class="chart-card__title">Add Expense</h2>
@@ -428,7 +422,6 @@
                 </div>
             </div>
 
-            <!-- Recent Expenses -->
             <div class="chart-card">
                 <div class="chart-card__header">
                     <h2 class="chart-card__title">Recent Expenses</h2>

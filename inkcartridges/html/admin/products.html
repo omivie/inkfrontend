@@ -2,7 +2,6 @@
 <html lang="en-NZ">
 <head>
     <meta charset="UTF-8">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://fonts.gstatic.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' https: data:; connect-src 'self' https://ink-backend-zaeq.onrender.com https://*.supabase.co; frame-ancestors 'self';">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="description" content="Products - InkCartridges.co.nz Admin">
     <meta name="robots" content="noindex, nofollow">
@@ -13,7 +12,6 @@
     <link rel="stylesheet" href="/css/components.css">
     <link rel="stylesheet" href="/css/modern-effects.css">
     <link rel="stylesheet" href="/css/admin.css">
-    <!-- jsPDF for PDF export -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.1/jspdf.plugin.autotable.min.js"></script>
     <style>
@@ -301,7 +299,6 @@
 <body class="admin-body">
     <script src="/js/admin-theme-init.js"></script>
 <script src="/js/admin-stub-redirect.js"></script>
-    <!-- Admin Sidebar -->
     <aside class="admin-sidebar">
         <div class="admin-sidebar__logo">
             <a href="/html/admin/index.html">
@@ -327,7 +324,6 @@
         </div>
     </aside>
 
-    <!-- Main Content -->
     <main class="admin-main">
         <header class="admin-header" style="background: var(--color-background); border-bottom: 1px solid var(--color-border); padding: var(--spacing-4) var(--spacing-6); display: flex; justify-content: space-between; align-items: center;">
             <div>
@@ -337,10 +333,8 @@
         </header>
 
         <div class="admin-page-content">
-            <!-- Modern Filter Bar -->
             <div class="filter-bar">
                 <div class="filter-bar__row">
-                    <!-- Search -->
                     <div class="filter-bar__search">
                         <svg class="filter-bar__search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
                         <input type="search" class="filter-bar__search-input" placeholder="Search by name, SKU, brand..." id="product-search">
@@ -348,7 +342,6 @@
 
                     <div class="filter-bar__divider"></div>
 
-                    <!-- Quick Stock Chips -->
                     <div class="filter-bar__chips">
                         <button class="filter-chip filter-chip--active" data-stock="">All</button>
                         <button class="filter-chip" data-stock="in-stock">In Stock</button>
@@ -358,12 +351,10 @@
 
                     <div class="filter-bar__divider"></div>
 
-                    <!-- Brand Filter -->
                     <select class="admin-select admin-select--pill" id="brand-filter">
                         <option value="">All Brands</option>
                     </select>
 
-                    <!-- Category Filter -->
                     <select class="admin-select admin-select--pill" id="category-filter">
                         <option value="">All Categories</option>
                         <option value="ink">Ink Cartridges</option>
@@ -371,7 +362,6 @@
                         <option value="drum">Drum Units</option>
                     </select>
 
-                    <!-- Sort -->
                     <select class="admin-select admin-select--pill" id="sort-filter">
                         <option value="stock-low" selected>Stock: Low to High</option>
                         <option value="stock-high">Stock: High to Low</option>
@@ -381,7 +371,6 @@
                         <option value="price-high">Price: High to Low</option>
                     </select>
 
-                    <!-- Actions -->
                     <div class="filter-bar__actions">
                         <span class="filter-bar__results" id="results-count"><strong>0</strong> products</span>
                         <select class="admin-select admin-select--pill" id="export-format">
@@ -431,7 +420,6 @@
         </div>
     </main>
 
-    <!-- Scripts -->
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.98.0" integrity="sha384-Sm2s7OXxsAMTyJ4iIyRBgVpeGUvMPk2lRQnnZhE78Wej7oggIoolKt+SCt0XJbUB" crossorigin="anonymous"></script>
     <script src="/js/config.js"></script>
     <script src="/js/security.js"></script>

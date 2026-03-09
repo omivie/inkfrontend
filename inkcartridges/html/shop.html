@@ -2,12 +2,10 @@
 <html lang="en-NZ">
 <head>
     <meta charset="UTF-8">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.jsdelivr.net https://js.stripe.com https://www.googletagmanager.com https://challenges.cloudflare.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://fonts.gstatic.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' https: data:; connect-src 'self' https://ink-backend-zaeq.onrender.com https://*.supabase.co https://*.stripe.com https://*.google-analytics.com https://cdn.jsdelivr.net https://challenges.cloudflare.com; frame-ancestors 'self'; frame-src https://js.stripe.com https://challenges.cloudflare.com;">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="description" content="Browse all printing supplies - ink cartridges, toner, printers, drums and accessories. Filter by brand, type, and compatibility.">
     <meta name="robots" content="index, follow">
 
-    <!-- Open Graph -->
     <meta property="og:title" content="Shop Ink Cartridges & Toner | InkCartridges.co.nz">
     <meta property="og:description" content="Browse genuine and compatible ink cartridges, toner, and printing supplies. Free NZ shipping over $100.">
     <meta property="og:type" content="website">
@@ -17,7 +15,6 @@
     <link rel="icon" type="image/svg+xml" href="/assets/icons/favicon.svg">
     <title>Shop Ink Cartridges & Toner NZ | InkCartridges.co.nz</title>
 
-    <!-- Google Analytics 4 (with consent mode) -->
     <script async src="https://www.googletagmanager.com/gtag/js?id=G-SDQELG0FGD"></script>
     <script src="/js/gtag.js"></script>
 
@@ -34,14 +31,9 @@
 <body>
     <a href="#main-content" class="skip-link">Skip to main content</a>
 
-    <!-- ============================================
-         HEADER
-         ============================================ -->
     <header class="site-header">
-        <!-- Main header -->
         <div class="header-main">
             <div class="container">
-                <!-- Contact info -->
                 <div class="header-contact">
                     <a href="tel:0274740115" class="header-contact__item">
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
@@ -60,7 +52,6 @@
                     <a href="/html/index.html" class="logo__tagline">Get the full picture on image quality</a>
                 </div>
 
-                <!-- Header actions -->
                 <div class="header-actions">
                     <a href="/html/account/index.html" class="header-actions__item">
                         <span class="header-actions__icon">
@@ -85,7 +76,6 @@
             </div>
         </div>
 
-        <!-- Primary navigation -->
         <nav class="primary-nav" aria-label="Main navigation">
             <div class="container">
                 <button class="nav-toggle" aria-expanded="false" aria-controls="nav-menu">
@@ -119,7 +109,6 @@
                     </li>
                 </ul>
 
-                <!-- Search bar -->
                 <div class="search-wrapper">
                     <form class="search-form search-form--nav" id="shop-search-form" action="/html/shop.html" method="GET" role="search">
                         <label for="search-input" class="visually-hidden">Search for products</label>
@@ -132,7 +121,6 @@
                             autocomplete="off"
                             maxlength="200"
                         >
-                        <!-- Hidden fields to preserve existing filters during search -->
                         <input type="hidden" id="search-preserve-brand" name="brand" value="" disabled>
                         <input type="hidden" id="search-preserve-type" name="type" value="" disabled>
                         <button type="submit" class="search-form__button" aria-label="Search">
@@ -146,7 +134,6 @@
             </div>
         </nav>
 
-        <!-- Brands Mega Dropdown -->
         <div class="brands-mega" id="brands-mega" hidden role="region" aria-label="Browse brands">
             <div class="container">
                 <div class="brands-mega__cards"></div>
@@ -157,7 +144,6 @@
             </div>
         </div>
 
-        <!-- Ribbons Mega Dropdown -->
         <div class="ribbons-mega" id="ribbons-mega" hidden role="region" aria-label="Browse ribbon brands">
             <div class="container">
                 <div class="ribbons-mega__grid"></div>
@@ -169,13 +155,9 @@
         </div>
     </header>
 
-    <!-- ============================================
-         MAIN CONTENT - SHOP PAGE (Drill-Down Navigation)
-         ============================================ -->
     <main id="main-content" class="site-main">
         <div class="shop-page shop-page--drilldown">
             <div class="container">
-                <!-- Breadcrumb Navigation with inline title for products level -->
                 <div class="drilldown-header">
                     <div class="drilldown-header__left">
                         <nav class="drilldown-breadcrumb" aria-label="Shop navigation">
@@ -194,14 +176,10 @@
                 </div>
 
 
-                <!-- Level Title (hidden on brands level, shown on deeper levels) -->
                 <h1 class="drilldown-title" id="drilldown-title" hidden></h1>
 
-                <!-- Drill-down Content Area -->
                 <section class="drilldown-content">
-                    <!-- Level 1: Brands -->
                     <div class="drilldown-level" id="level-brands">
-                        <!-- Ink Cartridge Brands Card -->
                         <div class="shop-section-card">
                             <div class="shop-section-card__header">
                                 <div class="shop-section-card__icon shop-section-card__icon--ink">
@@ -210,11 +188,9 @@
                                 <h2 class="shop-section-card__title">Ink Cartridge Brands</h2>
                             </div>
                             <div class="drilldown-grid drilldown-grid--brands" id="brands-grid">
-                                <!-- Brand boxes loaded dynamically -->
                             </div>
                         </div>
 
-                        <!-- Typewriter & Printer Ribbons Card -->
                         <div class="shop-section-card" id="ribbons-section">
                             <div class="shop-section-card__header">
                                 <div class="shop-section-card__icon shop-section-card__icon--ribbon">
@@ -223,7 +199,6 @@
                                 <h2 class="shop-section-card__title">Typewriter &amp; Printer Ribbons</h2>
                             </div>
                             <div class="drilldown-grid drilldown-grid--ribbons" id="ribbons-brands-grid">
-                                <!-- Ribbon brand boxes loaded dynamically -->
                             </div>
                             <a href="/html/ribbons.html" class="shop-section-card__link" id="ribbons-view-all">
                                 View All Ribbons
@@ -232,54 +207,42 @@
                         </div>
                     </div>
 
-                    <!-- Level 2: Categories -->
                     <div class="drilldown-level" id="level-categories" hidden>
                         <div class="drilldown-grid drilldown-grid--categories" id="categories-grid">
-                            <!-- Category boxes rendered here -->
                         </div>
                     </div>
 
-                    <!-- Level 3: Product Codes -->
                     <div class="drilldown-level" id="level-codes" hidden>
                         <div class="drilldown-grid drilldown-grid--codes" id="codes-grid">
-                            <!-- Product code boxes rendered here -->
                         </div>
                     </div>
 
-                    <!-- Level 4: Products -->
                     <div class="drilldown-level" id="level-products" hidden>
-                        <!-- For Use In Section -->
                         <div class="product-printers-banner" id="printers-banner" hidden>
                             <strong>For Use In:</strong>
                             <span id="printers-list"></span>
                         </div>
 
-                        <!-- Compatible Products Row (shown first) -->
                         <div class="products-section" id="compatible-section">
                             <h2 class="products-section__title" id="compatible-title">
                                 <span class="products-section__badge products-section__badge--compatible">Compatible</span>
                                 <span id="compatible-title-text">Compatible Inkjet Cartridges</span>
                             </h2>
                             <div class="products-row" id="compatible-products">
-                                <!-- Product cards loaded here -->
                             </div>
                         </div>
 
-                        <!-- Genuine Products Row -->
                         <div class="products-section" id="genuine-section">
                             <h2 class="products-section__title" id="genuine-title">
                                 <span class="products-section__badge products-section__badge--genuine">Genuine</span>
                                 <span id="genuine-title-text">Original Inkjet Cartridges</span>
                             </h2>
                             <div class="products-row" id="genuine-products">
-                                <!-- Product cards loaded here -->
                             </div>
                         </div>
                     </div>
 
-                    <!-- Loading State - Skeleton Loaders -->
                     <div class="drilldown-loading" id="drilldown-loading" hidden>
-                        <!-- Brands Skeleton -->
                         <div class="drilldown-skeleton drilldown-skeleton--brands" id="skeleton-brands" hidden>
                             <div class="drilldown-grid drilldown-grid--brands">
                                 <div class="skeleton skeleton--brand-box"></div>
@@ -293,7 +256,6 @@
                                 <div class="skeleton skeleton--brand-box"></div>
                             </div>
                         </div>
-                        <!-- Categories Skeleton -->
                         <div class="drilldown-skeleton drilldown-skeleton--categories" id="skeleton-categories" hidden>
                             <div class="drilldown-grid drilldown-grid--categories">
                                 <div class="skeleton skeleton--category-box"></div>
@@ -301,7 +263,6 @@
                                 <div class="skeleton skeleton--category-box"></div>
                             </div>
                         </div>
-                        <!-- Product Codes Skeleton -->
                         <div class="drilldown-skeleton drilldown-skeleton--codes" id="skeleton-codes" hidden>
                             <div class="drilldown-grid drilldown-grid--codes">
                                 <div class="skeleton skeleton--code-box"></div>
@@ -314,7 +275,6 @@
                                 <div class="skeleton skeleton--code-box"></div>
                             </div>
                         </div>
-                        <!-- Products Skeleton -->
                         <div class="drilldown-skeleton drilldown-skeleton--products" id="skeleton-products" hidden>
                             <div class="products-section">
                                 <div class="skeleton skeleton--section-title"></div>
@@ -337,7 +297,6 @@
                         </div>
                     </div>
 
-                    <!-- Empty State -->
                     <div class="drilldown-empty" id="drilldown-empty" hidden>
                         <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
                             <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
@@ -349,7 +308,6 @@
             </div>
         </div>
 
-        <!-- Need Help Banner -->
         <section class="container">
             <div class="need-help" data-track="support_impression" data-track-location="shop_page">
                 <svg class="need-help__icon" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
@@ -364,14 +322,10 @@
 
     <script src="/js/shop-page.js"></script>
 
-    <!-- ============================================
-         FOOTER
-         ============================================ -->
     <footer class="site-footer">
         <div class="footer-main">
             <div class="container">
                 <div class="footer-grid">
-                    <!-- Brand column -->
                     <div class="footer-brand">
                         <a href="/html/index.html" class="footer-brand__logo">
                             <img class="logo__icon" src="https://lmdlgldjgcanknsjrcxh.supabase.co/storage/v1/object/public/public-assets/images/site/inklogo.png" alt="" aria-hidden="true">
@@ -384,7 +338,6 @@
                         </p>
                         </div>
 
-                    <!-- Support column -->
                     <div class="footer-column">
                         <h3 class="footer-column__heading">Support</h3>
                         <ul class="footer-links">
@@ -396,7 +349,6 @@
                         </ul>
                     </div>
 
-                    <!-- Contact column -->
                     <div class="footer-column">
                         <h3 class="footer-column__heading">Contact</h3>
                         <ul class="footer-links">
@@ -416,7 +368,6 @@
                     </div>
                 </div>
 
-                <!-- Trust badges -->
                 <div class="footer-trust">
                     <div class="footer-trust__item">
                         <svg class="footer-trust__icon" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>

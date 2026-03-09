@@ -2,12 +2,10 @@
 <html lang="en-NZ">
 <head>
     <meta charset="UTF-8">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.jsdelivr.net https://js.stripe.com https://www.googletagmanager.com https://challenges.cloudflare.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://fonts.gstatic.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' https: data:; connect-src 'self' https://ink-backend-zaeq.onrender.com https://*.supabase.co https://*.stripe.com https://*.google-analytics.com https://cdn.jsdelivr.net https://challenges.cloudflare.com; frame-ancestors 'self'; frame-src https://js.stripe.com https://challenges.cloudflare.com;">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="description" id="meta-description" content="Quality printing supplies from InkCartridges.co.nz">
     <meta name="robots" content="index, follow">
 
-    <!-- Open Graph / Facebook -->
     <meta property="og:type" content="product">
     <meta property="og:site_name" content="InkCartridges.co.nz">
     <meta property="og:title" id="og-title" content="Product | InkCartridges.co.nz">
@@ -18,13 +16,11 @@
     <meta property="product:price:amount" id="og-price" content="">
     <meta property="product:price:currency" content="NZD">
 
-    <!-- Twitter -->
     <meta name="twitter:card" content="summary_large_image">
     <meta name="twitter:title" id="twitter-title" content="Product | InkCartridges.co.nz">
     <meta name="twitter:description" id="twitter-description" content="Quality printing supplies from InkCartridges.co.nz">
     <meta name="twitter:image" id="twitter-image" content="/assets/images/logo.png">
 
-    <!-- Additional SEO -->
     <meta name="author" content="InkCartridges.co.nz">
     <meta name="geo.region" content="NZ">
     <meta name="geo.country" content="New Zealand">
@@ -33,7 +29,6 @@
     <link rel="icon" type="image/svg+xml" href="/assets/icons/favicon.svg">
     <title id="page-title">Product | InkCartridges.co.nz</title>
 
-    <!-- Schema.org BreadcrumbList -->
     <script type="application/ld+json" id="breadcrumb-schema">
     {
         "@context": "https://schema.org",
@@ -46,7 +41,6 @@
     }
     </script>
 
-    <!-- Schema.org Product Structured Data -->
     <script type="application/ld+json" id="product-schema">
     {
         "@context": "https://schema.org",
@@ -72,7 +66,6 @@
     }
     </script>
 
-    <!-- Google Analytics 4 (with consent mode) -->
     <script async src="https://www.googletagmanager.com/gtag/js?id=G-SDQELG0FGD"></script>
     <script src="/js/gtag.js"></script>
 
@@ -164,7 +157,6 @@
             </div>
         </nav>
 
-        <!-- Brands Mega Dropdown -->
         <div class="brands-mega" id="brands-mega" hidden role="region" aria-label="Browse brands">
             <div class="container">
                 <div class="brands-mega__cards"></div>
@@ -175,7 +167,6 @@
             </div>
         </div>
 
-        <!-- Ribbons Mega Dropdown -->
         <div class="ribbons-mega" id="ribbons-mega" hidden role="region" aria-label="Browse ribbon brands">
             <div class="container">
                 <div class="ribbons-mega__grid"></div>
@@ -188,7 +179,6 @@
     </header>
 
     <main id="main-content" class="site-main">
-        <!-- Breadcrumb -->
         <nav class="breadcrumb" aria-label="Breadcrumb">
             <div class="container">
                 <ol class="breadcrumb__list" id="breadcrumb-list">
@@ -202,11 +192,9 @@
             </div>
         </nav>
 
-        <!-- Product detail section -->
         <section class="product-detail">
             <div class="container">
                 <div class="product-detail__layout">
-                    <!-- Product gallery -->
                     <div class="product-gallery">
                         <div class="product-gallery__main" id="product-image">
                             <div class="product-gallery__image-placeholder">
@@ -218,7 +206,6 @@
                         </div>
                     </div>
 
-                    <!-- Product info -->
                     <div class="product-info">
                         <div class="product-info__header">
                             <span class="product-info__badge" id="product-badge" hidden>COMPATIBLE</span>
@@ -254,7 +241,6 @@
                                 Add to Cart
                             </button>
 
-                            <!-- Favourite button -->
                             <button type="button" class="favourite-btn" id="favourite-btn" aria-pressed="false" title="Add to favourites">
                                 <svg class="favourite-btn__icon favourite-btn__icon--outline" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                     <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/>
@@ -284,7 +270,6 @@
                         <div class="product-info__features">
                             <h2 class="product-info__features-heading">Key Features</h2>
                             <ul class="feature-list" id="product-features">
-                                <!-- Populated dynamically -->
                             </ul>
                         </div>
                     </div>
@@ -292,7 +277,6 @@
             </div>
         </section>
 
-        <!-- Need Help Banner -->
         <div class="container">
             <div class="need-help" data-track="support_impression" data-track-location="product_page">
                 <svg class="need-help__icon" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
@@ -304,7 +288,6 @@
             </div>
         </div>
 
-        <!-- Product tabs -->
         <section class="product-tabs">
             <div class="container">
                 <div class="tabs" role="tablist">
@@ -316,19 +299,16 @@
                 <div class="tabs__panels">
                     <div role="tabpanel" id="tab-description" aria-labelledby="tab-btn-description" class="tabs__panel tabs__panel--active">
                         <div class="product-description" id="product-description">
-                            <!-- Populated dynamically -->
                         </div>
                     </div>
 
                     <div role="tabpanel" id="tab-specs" aria-labelledby="tab-btn-specs" class="tabs__panel" hidden>
                         <table class="specs-table" id="product-specs">
-                            <!-- Populated dynamically -->
                         </table>
                     </div>
 
                     <div role="tabpanel" id="tab-faqs" aria-labelledby="tab-btn-faqs" class="tabs__panel" hidden>
                         <div class="product-faqs" id="product-faqs">
-                            <!-- Populated dynamically -->
                         </div>
                     </div>
                 </div>
@@ -337,7 +317,6 @@
 
     </main>
 
-    <!-- Sticky Mobile Add-to-Cart Bar -->
     <div class="sticky-atc" id="sticky-atc" aria-hidden="true">
         <div class="sticky-atc__inner">
             <span class="sticky-atc__price" id="sticky-atc-price"></span>
@@ -351,7 +330,6 @@
         <div class="footer-main">
             <div class="container">
                 <div class="footer-grid">
-                    <!-- Brand column -->
                     <div class="footer-brand">
                         <a href="/html/index.html" class="footer-brand__logo">
                             <img class="logo__icon" src="https://lmdlgldjgcanknsjrcxh.supabase.co/storage/v1/object/public/public-assets/images/site/inklogo.png" alt="" aria-hidden="true">
@@ -364,7 +342,6 @@
                         </p>
                         </div>
 
-                    <!-- Support column -->
                     <div class="footer-column">
                         <h3 class="footer-column__heading">Support</h3>
                         <ul class="footer-links">
@@ -376,7 +353,6 @@
                         </ul>
                     </div>
 
-                    <!-- Contact column -->
                     <div class="footer-column">
                         <h3 class="footer-column__heading">Contact</h3>
                         <ul class="footer-links">
@@ -396,7 +372,6 @@
                     </div>
                 </div>
 
-                <!-- Trust badges -->
                 <div class="footer-trust">
                     <div class="footer-trust__item">
                         <svg class="footer-trust__icon" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>

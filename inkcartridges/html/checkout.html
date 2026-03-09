@@ -2,7 +2,6 @@
 <html lang="en-NZ">
 <head>
     <meta charset="UTF-8">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.jsdelivr.net https://js.stripe.com https://www.googletagmanager.com https://challenges.cloudflare.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://fonts.gstatic.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' https: data:; connect-src 'self' https://ink-backend-zaeq.onrender.com https://*.supabase.co https://*.stripe.com https://*.google-analytics.com https://cdn.jsdelivr.net https://challenges.cloudflare.com; frame-ancestors 'self'; frame-src https://js.stripe.com https://challenges.cloudflare.com;">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="description" content="Secure checkout - InkCartridges.co.nz">
     <meta name="robots" content="noindex, nofollow">
@@ -10,7 +9,6 @@
     <link rel="icon" type="image/svg+xml" href="/assets/icons/favicon.svg">
     <title>Checkout | InkCartridges.co.nz</title>
 
-    <!-- Google Analytics 4 (with consent mode) -->
     <script async src="https://www.googletagmanager.com/gtag/js?id=G-SDQELG0FGD"></script>
     <script src="/js/gtag.js"></script>
 
@@ -163,7 +161,6 @@
 <body>
     <a href="#main-content" class="skip-link">Skip to main content</a>
 
-    <!-- SIMPLIFIED CHECKOUT HEADER -->
     <header class="site-header site-header--checkout">
         <div class="header-main">
             <div class="container">
@@ -184,17 +181,12 @@
         </div>
     </header>
 
-    <!-- ============================================
-         MAIN CONTENT - CHECKOUT PAGE
-         ============================================ -->
     <main id="main-content" class="site-main">
         <section class="checkout-page">
             <div class="container">
-                <!-- Header with title and progress (matches cart page layout) -->
                 <div class="cart-page__header">
                     <h1 class="cart-page__title">Checkout</h1>
 
-                    <!-- Progress indicator -->
                     <div class="checkout-progress checkout-progress--compact" id="progress-top" aria-label="Checkout progress">
                         <ol class="checkout-progress__steps">
                             <li class="checkout-progress__step checkout-progress__step--completed" data-step="cart">
@@ -220,11 +212,9 @@
                 </div>
 
                 <div class="checkout-layout">
-                    <!-- Checkout form -->
                     <div class="checkout-form-wrapper">
                         <form class="checkout-form" id="checkout-form" novalidate>
 
-                            <!-- Contact information -->
                             <fieldset class="checkout-section">
                                 <legend class="checkout-section__heading">
                                     Contact Information
@@ -261,7 +251,6 @@
 
                             </fieldset>
 
-                            <!-- Shipping address -->
                             <fieldset class="checkout-section">
                                 <legend class="checkout-section__heading">
                                     Shipping Address
@@ -329,7 +318,6 @@
                                     </div>
                                 </div>
 
-                                <!-- Delivery type selector -->
                                 <div class="checkout-delivery-type">
                                     <label class="form-label">Please Select Your Delivery Type <span class="required">*</span></label>
                                     <div class="delivery-type-options">
@@ -346,7 +334,6 @@
                                     </div>
                                 </div>
 
-                                <!-- Save address option - only shown for authenticated users -->
                                 <div class="form-row" id="save-address-row" style="display: none;">
                                     <div class="form-group form-group--checkbox">
                                         <input type="checkbox" id="save-address" name="saveAddress" class="form-checkbox">
@@ -357,7 +344,6 @@
                                 </div>
                             </fieldset>
 
-                            <!-- Billing address -->
                             <fieldset class="checkout-section">
                                 <legend class="checkout-section__heading">
                                     Billing Address
@@ -372,7 +358,6 @@
                                     </div>
                                 </div>
 
-                                <!-- Billing address fields (shown when "Same as shipping" is unchecked) -->
                                 <div id="billing-address-fields" style="display: none;">
                                     <div class="form-row form-row--two-col">
                                         <div class="form-group">
@@ -434,7 +419,6 @@
                                 </div>
                             </fieldset>
 
-                            <!-- Order notes -->
                             <fieldset class="checkout-section checkout-section--notes">
                                 <legend class="checkout-section__heading">Order Notes (optional)</legend>
                                 <div class="form-row">
@@ -445,7 +429,6 @@
                                 </div>
                             </fieldset>
 
-                            <!-- Terms and submit -->
                             <div class="checkout-submit">
                                 <div class="form-group form-group--checkbox">
                                     <input type="checkbox" id="terms" name="terms" class="form-checkbox" required>
@@ -461,7 +444,6 @@
                                     </label>
                                 </div>
 
-                                <!-- Continue to Payment - saves data and redirects to payment page -->
                                 <button type="button" id="continue-to-payment-btn" class="btn btn--primary btn--lg btn--full-width checkout-submit__button">
                                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
                                     Continue to Payment
@@ -476,20 +458,16 @@
                         </form>
                     </div>
 
-                    <!-- Order summary sidebar -->
                     <div class="checkout-sidebar">
                         <aside class="checkout-summary">
                         <div class="checkout-summary__inner">
                             <h2 class="checkout-summary__heading">Order Summary</h2>
 
-                            <!-- Cart items preview (dynamically populated) -->
                             <ul class="checkout-summary__items" id="checkout-items">
-                                <!-- Items loaded from cart -->
                             </ul>
 
                             <a href="/html/cart.html" class="checkout-summary__edit">Edit cart</a>
 
-                            <!-- Totals (estimates - final amount calculated at payment) -->
                             <div class="checkout-summary__totals">
                                 <div class="checkout-summary__row">
                                     <span>Subtotal</span>
@@ -513,7 +491,6 @@
                                 </div>
                             </div>
 
-                            <!-- Shipping info block -->
                             <div class="checkout-summary__shipping-info" id="checkout-shipping-info">
                                 <p class="checkout-summary__spend-more" id="checkout-spend-more" hidden>
                                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="1" y="3" width="15" height="13"/><polygon points="16 8 20 8 23 11 23 16 16 16 16 8"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/></svg>
@@ -529,7 +506,6 @@
                                 </p>
                             </div>
 
-                            <!-- Trust signals -->
                             <div class="checkout-summary__trust">
                                 <div class="checkout-summary__trust-item">
                                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="1" y="3" width="15" height="13"/><polygon points="16 8 20 8 23 11 23 16 16 16 16 8"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/></svg>
@@ -553,14 +529,10 @@
         </section>
     </main>
 
-    <!-- ============================================
-         FOOTER
-         ============================================ -->
     <footer class="site-footer">
         <div class="footer-main">
             <div class="container">
                 <div class="footer-grid">
-                    <!-- Brand column -->
                     <div class="footer-brand">
                         <a href="/html/index.html" class="footer-brand__logo">
                             <img class="logo__icon" src="https://lmdlgldjgcanknsjrcxh.supabase.co/storage/v1/object/public/public-assets/images/site/inklogo.png" alt="" aria-hidden="true">
@@ -573,7 +545,6 @@
                         </p>
                         </div>
 
-                    <!-- Support column -->
                     <div class="footer-column">
                         <h3 class="footer-column__heading">Support</h3>
                         <ul class="footer-links">
@@ -585,7 +556,6 @@
                         </ul>
                     </div>
 
-                    <!-- Contact column -->
                     <div class="footer-column">
                         <h3 class="footer-column__heading">Contact</h3>
                         <ul class="footer-links">
@@ -605,7 +575,6 @@
                     </div>
                 </div>
 
-                <!-- Trust badges -->
                 <div class="footer-trust">
                     <div class="footer-trust__item">
                         <svg class="footer-trust__icon" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
