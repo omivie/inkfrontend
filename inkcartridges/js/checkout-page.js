@@ -864,15 +864,23 @@
             }, 600);
 
             // Auto-collapse sections when autofill completes them
+            // Track which section the user actually clicked in (not where autofill moves focus)
+            let userClickedSection = null;
+            form.addEventListener('mousedown', (e) => {
+                userClickedSection = e.target.closest('fieldset.checkout-section');
+            }, true);
+            form.addEventListener('keydown', (e) => {
+                userClickedSection = e.target.closest('fieldset.checkout-section');
+            }, true);
+
             let autocollapseTimer = null;
-            form.addEventListener('input', () => {
+            const checkAutocollapse = () => {
                 clearTimeout(autocollapseTimer);
                 autocollapseTimer = setTimeout(() => {
                     this._collapsibleSections.forEach((data, idx) => {
                         if (!data.collapsed && this.isSectionComplete(data)) {
-                            // Don't collapse if user is actively focused inside this section
-                            const activeSection = document.activeElement?.closest('fieldset.checkout-section');
-                            if (data.section === activeSection) return;
+                            // Only protect the section the user physically interacted with
+                            if (data.section === userClickedSection) return;
                             this.collapseSection(data);
                         }
                     });
@@ -893,7 +901,9 @@
                         if (payBtn) payBtn.scrollIntoView({ behavior: 'smooth', block: 'center' });
                     }
                 }, 300);
-            }, true);
+            };
+            form.addEventListener('input', checkAutocollapse, true);
+            form.addEventListener('change', checkAutocollapse, true);
         },
 
         // Check if all required fields in a section are filled
