@@ -254,84 +254,91 @@ const AccountPage = {
         }
 
         const brandName = PrinterData.BRAND_NAMES[brand] || brand;
+        let printers = [];
 
-        try {
-            const response = await API.getPrintersByBrand(brandName);
+        // Try Supabase direct query first (gets ALL printer models)
+        const supabaseClient = (typeof Auth !== 'undefined' && Auth.supabase)
+            ? Auth.supabase
+            : (typeof supabase !== 'undefined' && supabase.createClient && typeof Config !== 'undefined')
+                ? supabase.createClient(Config.SUPABASE_URL, Config.SUPABASE_ANON_KEY)
+                : null;
 
-            if (response.ok && response.data) {
-                const printers = Array.isArray(response.data) ? response.data : (response.data.printers || []);
+        if (supabaseClient) {
+            try {
+                const { data: brandData, error: brandError } = await supabaseClient
+                    .from('brands')
+                    .select('id')
+                    .ilike('name', brandName)
+                    .single();
 
-                if (printers.length > 0) {
-                    const formattedPrinters = printers.map(p => {
-                        const modelName = p.model_name || p.model || p.name || '';
-                        const fullName = p.full_name || `${brandName} ${modelName}`;
+                if (!brandError && brandData) {
+                    const { data: modelsData, error: modelsError } = await supabaseClient
+                        .from('printer_models')
+                        .select('id, model_name, full_name, slug')
+                        .eq('brand_id', brandData.id)
+                        .order('model_name', { ascending: true });
 
-                        let seriesId = 'other';
-                        let seriesName = 'Other Models';
-                        const brandPatterns = PrinterData.SERIES_PATTERNS[brand] || [];
-
-                        for (const pattern of brandPatterns) {
-                            if (modelName.toUpperCase().startsWith(pattern.prefix.toUpperCase())) {
-                                seriesId = pattern.prefix.toLowerCase();
-                                seriesName = pattern.name;
-                                break;
-                            }
-                        }
-
-                        return {
-                            id: (p.slug || modelName).toLowerCase().replace(/\s+/g, '-'),
-                            printerId: p.id || null,
-                            name: modelName,
-                            fullName: fullName,
-                            slug: p.slug || '',
-                            seriesId: seriesId,
-                            seriesName: seriesName
-                        };
-                    });
-
-                    const series = this.groupPrintersBySeries(formattedPrinters);
-                    state.printerCache[brand] = series;
-                    return series;
+                    if (!modelsError && modelsData && modelsData.length > 0) {
+                        printers = modelsData;
+                    }
                 }
+            } catch (error) {
+                // Supabase direct query failed, try API fallback
             }
-        } catch (error) {
-            // Printers API not available, using static data
         }
 
-        // Fallback to static data
+        // Fall back to API if Supabase query didn't work
+        if (printers.length === 0) {
+            try {
+                const response = await API.getPrintersByBrand(brandName);
+                if (response.ok && response.data) {
+                    printers = Array.isArray(response.data) ? response.data : (response.data.printers || []);
+                }
+            } catch (error) {
+                // API fallback also failed, will use static data
+            }
+        }
+
+        // Transform and filter printers
+        if (printers.length > 0) {
+            const formattedPrinters = printers.map(p => {
+                const modelName = p.model_name || p.model || p.name || '';
+                const fullName = p.full_name || `${brandName} ${modelName}`;
+
+                const series = PrinterData.getSeriesForModel(modelName, brand);
+
+                return {
+                    id: (p.slug || modelName).toLowerCase().replace(/\s+/g, '-'),
+                    printerId: p.id || null,
+                    name: modelName,
+                    fullName: fullName,
+                    slug: p.slug || '',
+                    seriesId: series.id,
+                    seriesName: series.name
+                };
+            }).filter(p => {
+                const name = p.name.trim();
+                if (!name || name.length < 2) return false;
+                if (/\bprinters?\b/i.test(name)) return false;
+                if (/^(inkjet|laser|colour|color|toner|cartridges?|ink|ribbon|ribbons|drums?|fax)$/i.test(name)) return false;
+                if (/^\d+mm$/i.test(name)) return false;
+                if (!PrinterData.isInkToner(p.seriesName, p.name, brand)) return false;
+                if (p.seriesId === 'other') return false;
+                return true;
+            });
+
+            const series = PrinterData.groupPrintersBySeries(formattedPrinters);
+            state.printerCache[brand] = series;
+            return series;
+        }
+
+        // Final fallback: use static printer data
         const staticPrinters = this.getStaticPrintersForBrand(brand);
-        const series = this.groupPrintersBySeries(staticPrinters);
+        const series = PrinterData.groupPrintersBySeries(staticPrinters);
         state.printerCache[brand] = series;
         return series;
     },
 
-    /**
-     * Group printers by series
-     */
-    groupPrintersBySeries(printers) {
-        const seriesMap = new Map();
-
-        printers.forEach(printer => {
-            if (!seriesMap.has(printer.seriesId)) {
-                seriesMap.set(printer.seriesId, {
-                    id: printer.seriesId,
-                    name: printer.seriesName,
-                    models: []
-                });
-            }
-            seriesMap.get(printer.seriesId).models.push(printer);
-        });
-
-        seriesMap.forEach(series => {
-            series.models.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
-        });
-
-        return Array.from(seriesMap.values()).sort((a, b) => {
-            if (a.id === 'other') return 1;
-            if (b.id === 'other') return -1;
-            return a.name.localeCompare(b.name);
-        });
-    },
 
     /**
      * Static printer data fallback
