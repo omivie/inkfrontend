@@ -5978,6 +5978,88 @@
     }
 }
 
+/* --- Dashboard Navigation Grid --- */
+.dash-nav-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: var(--spacing-md);
+}
+
+.dash-nav-card {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    gap: var(--spacing-sm);
+    padding: var(--spacing-xl) var(--spacing-md);
+    background: var(--color-background);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-lg);
+    text-decoration: none;
+    color: var(--color-text);
+    transition: all var(--transition-fast);
+}
+
+.dash-nav-card:hover {
+    border-color: var(--color-primary);
+    box-shadow: var(--shadow-sm);
+    text-decoration: none;
+    transform: translateY(-2px);
+}
+
+.dash-nav-card__icon {
+    width: 52px;
+    height: 52px;
+    background: var(--color-primary-bg);
+    border-radius: var(--radius-md);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--color-primary);
+    transition: background var(--transition-fast);
+}
+
+.dash-nav-card:hover .dash-nav-card__icon {
+    background: var(--color-primary);
+    color: #fff;
+}
+
+.dash-nav-card__title {
+    font-size: var(--font-size-sm);
+    font-weight: var(--font-weight-semibold);
+    color: var(--color-text-heading);
+    margin: 0;
+}
+
+.dash-nav-card__desc {
+    font-size: var(--font-size-xs);
+    color: var(--color-text-muted);
+    margin: 0;
+    line-height: 1.4;
+}
+
+@media (max-width: 1024px) {
+    .dash-nav-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+}
+
+@media (max-width: 480px) {
+    .dash-nav-grid {
+        grid-template-columns: repeat(2, 1fr);
+        gap: var(--spacing-sm);
+    }
+
+    .dash-nav-card {
+        padding: var(--spacing-md) var(--spacing-sm);
+    }
+
+    .dash-nav-card__icon {
+        width: 44px;
+        height: 44px;
+    }
+}
+
 
 /* ==========================================================================
    AUTH PAGES (Login/Register)

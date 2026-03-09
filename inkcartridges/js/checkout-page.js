@@ -49,6 +49,9 @@
             // Check email verification status
             await this.checkEmailVerification();
 
+            // Inject admin-free shipping option for super admins
+            this.injectAdminFreeShipping();
+
             // Track checkout started for analytics
             if (typeof CartAnalytics !== 'undefined') {
                 CartAnalytics.trackCheckoutStarted();
@@ -303,9 +306,32 @@
          * SECURITY: These values are NEVER used for payment.
          * Backend recalculates actual shipping in API.createOrder().
          */
+        injectAdminFreeShipping() {
+            if (typeof isCachedSuperAdmin !== 'function' || !isCachedSuperAdmin()) return;
+            const container = document.querySelector('.delivery-type-options');
+            if (!container || container.querySelector('input[value="admin-free"]')) return;
+
+            const label = document.createElement('label');
+            label.className = 'delivery-type-option';
+            label.innerHTML = `
+                <input type="radio" name="delivery_type" value="admin-free" required>
+                <span class="delivery-type-option__name">Admin Test (Free)</span>
+                <span class="delivery-type-option__desc">$0 shipping — admin testing only</span>
+            `;
+            container.appendChild(label);
+            label.querySelector('input').addEventListener('change', () => { this.updateShippingCost(); });
+        },
+
         async fetchShippingFromAPI() {
             const region = document.getElementById('region')?.value || '';
             const deliveryType = document.querySelector('input[name="delivery_type"]:checked')?.value || 'urban';
+
+            // Admin-free shipping short-circuit
+            if (deliveryType === 'admin-free') {
+                this.totals.shipping = 0;
+                this._shippingResult = { fee: 0, tier: 'admin-free', zone: '', zoneLabel: '', freeShipping: true, deliveryType: 'admin-free', reason: 'Admin test — free shipping' };
+                return;
+            }
 
             // Try backend API for accurate weight-based rates
             if (typeof API !== 'undefined' && this.cartItems.length > 0) {

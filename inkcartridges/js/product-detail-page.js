@@ -315,6 +315,13 @@
                 }
 
                 this.product = response.data;
+
+                // Gate test products — super admins only
+                if (this._isTestProduct(this.product) && typeof isCachedSuperAdmin === 'function' && !isCachedSuperAdmin()) {
+                    this.showError('Product not found');
+                    return;
+                }
+
                 this.renderProduct();
             } catch (error) {
                 DebugLog.error('Error loading product:', error);
@@ -867,6 +874,11 @@
             if (schemaEl) {
                 schemaEl.textContent = JSON.stringify(schema, null, 2);
             }
+        },
+
+        _isTestProduct(product) {
+            const sku = (product.sku || '').toUpperCase();
+            return sku.startsWith('TEST-') || product.admin_only === true;
         },
 
         showError(message) {

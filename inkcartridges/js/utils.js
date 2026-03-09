@@ -258,6 +258,16 @@ const DebugLog = {
 window.DebugLog = DebugLog;
 
 
+/**
+ * Check if current user is a cached super admin (UI-only; backend re-verifies)
+ * @returns {boolean}
+ */
+function isCachedSuperAdmin() {
+    try { return sessionStorage.getItem('adminRole') === 'superadmin'; }
+    catch (e) { return false; }
+}
+
+
 // Export for module use (if needed in future)
 if (typeof module !== 'undefined' && module.exports) {
     module.exports = {
