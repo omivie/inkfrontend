@@ -753,7 +753,6 @@
                 continueBtn.type = 'button';
                 continueBtn.className = 'btn btn--primary checkout-section__continue-btn';
                 continueBtn.textContent = 'Continue';
-                continueBtn.style.cssText = 'margin-top: 1rem; margin-left: auto; display: block;';
                 content.appendChild(continueBtn);
 
                 const sectionData = { section, heading, summary, editBtn, content, continueBtn, collapsed: false };
@@ -774,36 +773,36 @@
                         this.collapseSection(sectionData);
                         const idx = this._collapsibleSections.indexOf(sectionData);
                         const next = this._collapsibleSections[idx + 1];
-                        if (next && next.collapsed) this.expandSection(next);
+                        if (next) {
+                            if (next.collapsed) this.expandSection(next);
+                        } else {
+                            // Last section — scroll to the payment button
+                            const payBtn = document.getElementById('continue-to-payment-btn');
+                            if (payBtn) payBtn.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        }
+                    } else {
+                        // Highlight first empty required field
+                        for (const field of sectionData.content.querySelectorAll('input[required], select[required], textarea[required]')) {
+                            if (field.offsetParent !== null && !field.value.trim()) {
+                                field.focus();
+                                field.classList.add('input-error');
+                                setTimeout(() => field.classList.remove('input-error'), 2000);
+                                break;
+                            }
+                        }
                     }
                 });
             });
 
-            // Only auto-collapse on select/checkbox/radio changes (not text input)
-            form.addEventListener('change', (e) => {
-                const field = e.target;
-                if (field.tagName === 'SELECT' || field.type === 'checkbox' || field.type === 'radio') {
-                    const section = field.closest('fieldset.checkout-section');
-                    if (!section) return;
-                    const data = this._collapsibleSections.find(s => s.section === section);
-                    if (data && !data.collapsed && this.isSectionComplete(data)) {
-                        setTimeout(() => {
-                            if (this.isSectionComplete(data)) {
-                                this.collapseSection(data);
-                            }
-                        }, 400);
-                    }
-                }
-            });
-
-            // Check if any sections are already complete (e.g. prefilled from auth)
+            // Auto-collapse prefilled sections on load, but only if user isn't already interacting
             setTimeout(() => {
+                const activeSection = document.activeElement?.closest('fieldset.checkout-section');
                 this._collapsibleSections.forEach(data => {
-                    if (this.isSectionComplete(data)) {
+                    if (data.section !== activeSection && this.isSectionComplete(data)) {
                         this.collapseSection(data);
                     }
                 });
-            }, 300);
+            }, 600);
         },
 
         // Check if all required fields in a section are filled

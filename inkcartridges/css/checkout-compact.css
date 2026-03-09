@@ -240,6 +240,21 @@ section.checkout-page .checkout-section__heading {
     text-decoration: underline;
 }
 
+.checkout-section__continue-btn {
+    display: block;
+    margin: 1rem 0 0 auto;
+    padding: 10px 32px;
+    font-size: 0.9375rem;
+    font-weight: 600;
+    border-radius: 8px;
+    cursor: pointer;
+}
+
+.input-error {
+    outline: 2px solid #ef4444 !important;
+    border-color: #ef4444 !important;
+}
+
 section.checkout-page .form-row {
     margin-bottom: 6px;
 }

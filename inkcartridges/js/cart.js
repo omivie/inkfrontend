@@ -335,7 +335,23 @@ const Cart = {
                     return;
                 }
 
+                // Merge back any local core items the server doesn't know about yet
+                // (e.g. add-to-cart API call was in-flight during navigation)
+                const serverKeys = new Set(parsed.items.map(i => i.key || this.cartItemKey(i)));
+                const localOnly = this.items.filter(i => {
+                    const k = i.key || this.cartItemKey(i);
+                    return i.source === 'core' && !serverKeys.has(k);
+                });
                 this.items = parsed.items;
+                if (localOnly.length > 0) {
+                    for (const item of localOnly) {
+                        this.items.push(item);
+                        if (typeof API !== 'undefined') {
+                            API.addToCart(item.id, item.quantity).catch(() => {});
+                        }
+                    }
+                    this.saveToLocalStorage();
+                }
                 this.serverSummary = parsed.summary;
                 this.appliedCoupon = parsed.couponCode;
                 this.discountAmount = parsed.discountAmount;
@@ -1013,11 +1029,19 @@ const Cart = {
 
                 // Server confirmed - refresh to get accurate server totals
                 const itemsAfterAdd = JSON.parse(JSON.stringify(this.items));
+                const addedKey = key;
                 await this.loadFromServer();
                 // Guard: if server returned empty (e.g. cross-origin cookie blocked), keep local state
                 if (this.items.length === 0 && itemsAfterAdd.length > 0) {
                     this.items = itemsAfterAdd;
                     this.saveToLocalStorage();
+                } else if (!this.items.find(i => (i.key || this.cartItemKey(i)) === addedKey)) {
+                    // Server confirmed add but GET didn't return it yet — merge back
+                    const localAdded = itemsAfterAdd.find(i => (i.key || this.cartItemKey(i)) === addedKey);
+                    if (localAdded) {
+                        this.items.push(localAdded);
+                        this.saveToLocalStorage();
+                    }
                 }
                 this.updateUI();
             } catch (error) {
