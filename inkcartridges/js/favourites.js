@@ -331,7 +331,7 @@ const Favourites = {
         // Show loading state
         if (this.isLoading) {
             if (grid) {
-                grid.innerHTML = '<div class="loading-spinner">Loading favourites...</div>';
+                grid.innerHTML = '<div style="text-align:center; padding: 3rem 1rem;"><div class="loading-spinner"></div><p style="color: var(--color-text-muted); margin-top: 1rem; font-size: 0.875rem;">Loading favourites...</p></div>';
                 grid.style.display = '';
             }
             if (emptyState) emptyState.hidden = true;
