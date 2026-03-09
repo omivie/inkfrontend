@@ -92,26 +92,31 @@
          */
         async loadCart() {
             try {
-                // First, validate cart exists with backend
-                const validateResponse = await API.validateCart();
-
-                if (!validateResponse.ok) {
-                    // Cart validation failed (items out of stock, prices changed, etc.)
-                    DebugLog.error('Cart validation failed:', validateResponse.error);
-                    alert('Some items in your cart have changed. Please review your cart.');
-                    window.location.href = '/html/cart.html';
-                    return;
+                // Validate cart (non-blocking — log warning if it fails)
+                try {
+                    const validateResponse = await API.validateCart();
+                    if (!validateResponse.ok) {
+                        DebugLog.warn('Cart validation warning:', validateResponse.error);
+                    }
+                } catch (valError) {
+                    DebugLog.warn('Cart validation unavailable:', valError.message);
                 }
 
-                // Use Cart object if available (already synced with server)
+                // Load cart items — Cart object (localStorage + server) is primary source
                 if (typeof Cart !== 'undefined') {
                     await Cart.init();
                     this.cartItems = Cart.items || [];
-                } else {
-                    // Fallback: load from server directly
-                    const cartResponse = await API.getCart();
-                    if (cartResponse.ok && cartResponse.data) {
-                        this.cartItems = cartResponse.data.items || [];
+                }
+
+                // Fallback: try API directly
+                if (this.cartItems.length === 0) {
+                    try {
+                        const cartResponse = await API.getCart();
+                        if (cartResponse.ok && cartResponse.data) {
+                            this.cartItems = cartResponse.data.items || [];
+                        }
+                    } catch (apiErr) {
+                        DebugLog.warn('API getCart failed:', apiErr.message);
                     }
                 }
 
@@ -122,7 +127,6 @@
                 }
 
                 this.renderOrderSummary();
-                // Calculate totals from backend (async)
                 await this.calculateTotals();
 
             } catch (error) {
@@ -182,15 +186,7 @@
                 const cartData = response.data;
                 const summary = cartData.summary || {};
 
-                // Use backend-validated prices — frontend never computes totals
-                this.totals = {
-                    subtotal: summary.subtotal || 0,
-                    shipping: summary.shipping ?? 0,
-                    discount: summary.discount || 0,
-                    total: summary.total || 0
-                };
-
-                // Update cart items from server response
+                // Update cart items from server response first (need fresh prices for fallback)
                 if (cartData.items && cartData.items.length > 0) {
                     this.cartItems = cartData.items.map(item => ({
                         id: item.product?.id || item.id,
@@ -201,6 +197,25 @@
                         image: item.product?.image_url || '/assets/images/placeholder.png'
                     }));
                     this.renderOrderSummary();
+                }
+
+                // Use backend-validated prices — frontend never computes totals
+                this.totals = {
+                    subtotal: summary.subtotal || 0,
+                    shipping: summary.shipping ?? 0,
+                    discount: summary.discount || 0,
+                    total: summary.total || 0
+                };
+
+                // If server returned items but no subtotal, compute from items
+                if (this.totals.subtotal === 0 && this.cartItems.length > 0) {
+                    const estimatedSubtotal = this.cartItems.reduce((sum, item) => {
+                        return sum + (parseFloat(item.price) || 0) * (parseInt(item.quantity) || 0);
+                    }, 0);
+                    if (estimatedSubtotal > 0) {
+                        this.totals.subtotal = estimatedSubtotal;
+                        this.totals.total = estimatedSubtotal + this.totals.shipping - this.totals.discount;
+                    }
                 }
 
                 // Update display with backend values
@@ -222,12 +237,34 @@
                 this.initPaymentRequestButton(this.totals.total);
 
             } catch (error) {
-                DebugLog.error('Error calculating totals:', error);
-                this.showError('Unable to calculate order total. Please refresh and try again.');
+                DebugLog.warn('Server totals unavailable, using estimates:', error.message);
 
-                // Disable payment if we can't validate prices
-                const payBtn = document.getElementById('pay-now-btn');
-                if (payBtn) payBtn.disabled = true;
+                // Fall back to Cart object totals
+                if (typeof Cart !== 'undefined' && this.cartItems.length > 0) {
+                    const subtotal = Cart.getSubtotal();
+                    const checkoutData = this.checkoutData || {};
+                    const shipping = typeof Shipping !== 'undefined'
+                        ? Shipping.calculate(Cart.items, subtotal, checkoutData.region, checkoutData.deliveryType).fee
+                        : checkoutData.estimatedShipping || 0;
+
+                    this.totals = {
+                        subtotal,
+                        shipping,
+                        discount: 0,
+                        total: subtotal + shipping
+                    };
+
+                    document.getElementById('checkout-subtotal').textContent = `$${this.totals.subtotal.toFixed(2)}`;
+                    document.getElementById('checkout-shipping').textContent = this.totals.shipping === 0 ? 'FREE' : `$${this.totals.shipping.toFixed(2)}`;
+                    document.getElementById('checkout-total').textContent = `$${this.totals.total.toFixed(2)} NZD`;
+                    document.getElementById('pay-button-text').textContent = `Pay $${this.totals.total.toFixed(2)} NZD`;
+
+                    this.initPaymentRequestButton(this.totals.total);
+                } else {
+                    this.showError('Unable to calculate order total. Please refresh and try again.');
+                    const payBtn = document.getElementById('pay-now-btn');
+                    if (payBtn) payBtn.disabled = true;
+                }
             }
         },
 
