@@ -5376,27 +5376,41 @@
     margin-bottom: 0.5rem;
 }
 
-/* Brand buttons in a compact horizontal row */
+/* Brand buttons in a uniform grid row */
 .printer-modal__container .ink-finder__brands {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.4rem;
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 0.5rem;
     max-width: none;
 }
 
 .printer-modal__container .ink-finder__brand-btn {
-    padding: 0.35rem 0.5rem;
-    height: 38px;
-    width: auto;
-    min-width: 0;
-    flex: 0 0 auto;
+    width: 100%;
+    height: 44px;
+    padding: 0.4rem 0.5rem;
+    border-radius: 8px;
+    background: #f8fafc;
+    border: 1.5px solid #e2e8f0;
+}
+
+.printer-modal__container .ink-finder__brand-btn:hover {
+    border-color: #267FB5;
+    background: #f0f9ff;
+}
+
+.printer-modal__container .ink-finder__brand-btn--selected {
+    border-color: #267FB5;
+    background: #eff8ff;
+    box-shadow: 0 0 0 3px rgba(38, 127, 181, 0.12);
 }
 
 .printer-modal__container .ink-finder__brand-img,
 .printer-modal__container .ink-finder__brand-img[class*="--"] {
-    max-height: 20px;
+    max-height: 18px;
     height: auto !important;
     width: auto;
+    max-width: 100%;
+    object-fit: contain;
 }
 
 /* Custom select takes full width in modal */
@@ -5429,6 +5443,7 @@
         grid-template-columns: 1fr !important;
     }
     .printer-modal__container .ink-finder__brands {
+        grid-template-columns: repeat(3, 1fr);
         gap: 0.375rem;
     }
 }
