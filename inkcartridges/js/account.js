@@ -177,6 +177,13 @@ const AccountPage = {
             this.closeAllDropdowns();
             trigger.setAttribute('aria-expanded', 'true');
             trigger.parentElement.classList.add('custom-select--open');
+
+            // Scroll the parent step into center of modal
+            const step = trigger.closest('.ink-finder__step');
+            if (step) {
+                const stepIndex = [...step.parentElement.children].indexOf(step);
+                this.scrollPrinterStepIntoView(stepIndex + 1);
+            }
         }
     },
 
@@ -242,6 +249,7 @@ const AccountPage = {
         seriesTrigger.disabled = false;
 
         this.updatePrinterFinderSteps();
+        this.scrollPrinterStepIntoView(2);
     },
 
     /**
@@ -617,6 +625,7 @@ const AccountPage = {
         if (actionRow) actionRow.hidden = true;
 
         this.updatePrinterFinderSteps();
+        this.scrollPrinterStepIntoView(3);
     },
 
     /**
@@ -688,6 +697,31 @@ const AccountPage = {
                     step.classList.add('ink-finder__step--disabled');
                 }
             }
+        });
+    },
+
+    /**
+     * Scroll a printer modal step into the center of the modal viewport
+     */
+    scrollPrinterStepIntoView(stepNumber) {
+        const steps = document.querySelectorAll('#printer-finder-steps .ink-finder__step');
+        const step = steps[stepNumber - 1];
+        if (!step) return;
+
+        const container = document.querySelector('.printer-modal__container');
+        if (!container) return;
+
+        // Small delay to let DOM update (e.g. dropdown rendering)
+        requestAnimationFrame(() => {
+            const containerRect = container.getBoundingClientRect();
+            const stepRect = step.getBoundingClientRect();
+            const stepTopInContainer = stepRect.top - containerRect.top + container.scrollTop;
+            const centeredScroll = stepTopInContainer - (container.clientHeight / 2) + (stepRect.height / 2);
+
+            container.scrollTo({
+                top: Math.max(0, centeredScroll),
+                behavior: 'smooth'
+            });
         });
     },
 
