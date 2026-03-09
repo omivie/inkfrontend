@@ -74,9 +74,13 @@ const AccountPage = {
         if (section) {
             const cancelBtn = document.getElementById('printer-cancel-btn');
             const saveBtn = document.getElementById('printer-save-btn');
+            const closeBtn = document.getElementById('printer-modal-close-btn');
+            const backdrop = section.querySelector('.printer-modal__backdrop');
 
             if (cancelBtn) cancelBtn.addEventListener('click', () => this.hideAddPrinterSection());
             if (saveBtn) saveBtn.addEventListener('click', () => this.savePrinter());
+            if (closeBtn) closeBtn.addEventListener('click', () => this.hideAddPrinterSection());
+            if (backdrop) backdrop.addEventListener('click', () => this.hideAddPrinterSection());
 
             // Setup brand button clicks
             const brandButtons = document.querySelectorAll('#printer-brands .ink-finder__brand-btn');
@@ -144,9 +148,11 @@ const AccountPage = {
             if (confirmBtn) confirmBtn.addEventListener('click', () => this.deletePrinter());
         }
 
-        // Escape key to close delete modal and dropdowns
+        // Escape key to close modals and dropdowns
         document.addEventListener('keydown', (e) => {
             if (e.key === 'Escape') {
+                const addSection = document.getElementById('add-printer-section');
+                if (addSection && !addSection.hidden) this.hideAddPrinterSection();
                 if (deleteModal && !deleteModal.hidden) this.closeDeletePrinterModal();
                 this.closeAllDropdowns();
             }
@@ -1699,7 +1705,7 @@ const AccountPage = {
 
         this.updatePrinterFinderSteps();
         section.hidden = false;
-        section.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        document.body.style.overflow = 'hidden';
     },
 
     /**
@@ -1709,6 +1715,7 @@ const AccountPage = {
         const section = document.getElementById('add-printer-section');
         if (section) {
             section.hidden = true;
+            document.body.style.overflow = '';
             this.editingPrinterId = null;
             this.closeAllDropdowns();
             this.resetPrinterFinder();

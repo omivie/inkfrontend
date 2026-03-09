@@ -5249,6 +5249,84 @@
     color: var(--color-text-muted);
 }
 
+/* Printer modal overlay */
+.printer-modal {
+    position: fixed;
+    inset: 0;
+    z-index: 1000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: var(--spacing-lg);
+}
+
+.printer-modal[hidden] {
+    display: none;
+}
+
+.printer-modal__backdrop {
+    position: absolute;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.5);
+    backdrop-filter: blur(4px);
+}
+
+.printer-modal__container {
+    position: relative;
+    width: 100%;
+    max-width: 720px;
+    max-height: 90vh;
+    overflow-y: auto;
+    border-radius: var(--radius-xl, 16px);
+    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+    background: var(--color-background);
+    animation: printerModalIn 0.2s ease-out;
+}
+
+@keyframes printerModalIn {
+    from { opacity: 0; transform: scale(0.95) translateY(10px); }
+    to { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+.printer-modal__close {
+    position: absolute;
+    top: var(--spacing-md);
+    right: var(--spacing-md);
+    z-index: 1;
+    width: 36px;
+    height: 36px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: none;
+    border-radius: var(--radius-md);
+    background: var(--color-background);
+    color: var(--color-text-muted);
+    cursor: pointer;
+    transition: all var(--transition-fast);
+}
+
+.printer-modal__close:hover {
+    background: var(--steel-100, #f1f5f9);
+    color: var(--color-text);
+}
+
+.printer-modal__container .ink-finder--account {
+    margin-bottom: 0;
+}
+
+@media (max-width: 768px) {
+    .printer-modal {
+        padding: var(--spacing-sm);
+        align-items: flex-end;
+    }
+
+    .printer-modal__container {
+        max-height: 85vh;
+        border-radius: var(--radius-xl, 16px) var(--radius-xl, 16px) 0 0;
+    }
+}
+
 /* Ink-finder inside account content area */
 .ink-finder--account {
     margin-bottom: var(--spacing-xl);

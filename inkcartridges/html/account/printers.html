@@ -255,13 +255,19 @@
                         </div>
                         <p class="account-content__intro">Save your printers for quick ink and toner reorders.</p>
 
-                        <!-- Inline Add Printer Section (ink-finder style) -->
-                        <div class="ink-finder ink-finder--account" id="add-printer-section" hidden>
-                            <div class="ink-finder__wrapper">
-                                <div class="ink-finder__header">
-                                    <h2 class="ink-finder__title" id="printer-section-title">Save a Printer</h2>
-                                    <p class="ink-finder__subtitle">Select your printer brand, then choose the series and model</p>
-                                </div>
+                        <!-- Add Printer Modal -->
+                        <div class="printer-modal" id="add-printer-section" hidden>
+                            <div class="printer-modal__backdrop"></div>
+                            <div class="printer-modal__container">
+                                <button type="button" class="printer-modal__close" id="printer-modal-close-btn" aria-label="Close">
+                                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                                </button>
+                                <div class="ink-finder ink-finder--account">
+                                    <div class="ink-finder__wrapper">
+                                        <div class="ink-finder__header">
+                                            <h2 class="ink-finder__title" id="printer-section-title">Save a Printer</h2>
+                                            <p class="ink-finder__subtitle">Select your printer brand, then choose the series and model</p>
+                                        </div>
 
                                 <form id="printer-form">
                                     <div class="form-alert form-alert--error" id="printer-form-error" hidden></div>
@@ -355,6 +361,8 @@
                                         </div>
                                     </div>
                                 </form>
+                                    </div>
+                                </div>
                             </div>
                         </div>
 
