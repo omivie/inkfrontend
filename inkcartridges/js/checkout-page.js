@@ -748,7 +748,15 @@
                 children.forEach(child => content.appendChild(child));
                 section.appendChild(content);
 
-                const sectionData = { section, heading, summary, editBtn, content, collapsed: false };
+                // Create Continue button
+                const continueBtn = document.createElement('button');
+                continueBtn.type = 'button';
+                continueBtn.className = 'btn btn--primary checkout-section__continue-btn';
+                continueBtn.textContent = 'Continue';
+                continueBtn.style.cssText = 'margin-top: 1rem; margin-left: auto; display: block;';
+                content.appendChild(continueBtn);
+
+                const sectionData = { section, heading, summary, editBtn, content, continueBtn, collapsed: false };
                 this._collapsibleSections.push(sectionData);
 
                 // Click heading or edit button to expand
@@ -759,26 +767,34 @@
                 };
                 heading.addEventListener('click', expand);
                 editBtn.addEventListener('click', (e) => { e.stopPropagation(); expand(); });
+
+                // Continue button collapses current section and expands next
+                continueBtn.addEventListener('click', () => {
+                    if (this.isSectionComplete(sectionData)) {
+                        this.collapseSection(sectionData);
+                        const idx = this._collapsibleSections.indexOf(sectionData);
+                        const next = this._collapsibleSections[idx + 1];
+                        if (next && next.collapsed) this.expandSection(next);
+                    }
+                });
             });
 
-            // Listen for input/change to check completeness
-            const checkCollapse = (e) => {
+            // Only auto-collapse on select/checkbox/radio changes (not text input)
+            form.addEventListener('change', (e) => {
                 const field = e.target;
-                const section = field.closest('fieldset.checkout-section');
-                if (!section) return;
-                const data = this._collapsibleSections.find(s => s.section === section);
-                if (data && !data.collapsed && this.isSectionComplete(data)) {
-                    // Small delay so user sees their last keystroke
-                    setTimeout(() => {
-                        if (this.isSectionComplete(data)) {
-                            this.collapseSection(data);
-                        }
-                    }, 400);
+                if (field.tagName === 'SELECT' || field.type === 'checkbox' || field.type === 'radio') {
+                    const section = field.closest('fieldset.checkout-section');
+                    if (!section) return;
+                    const data = this._collapsibleSections.find(s => s.section === section);
+                    if (data && !data.collapsed && this.isSectionComplete(data)) {
+                        setTimeout(() => {
+                            if (this.isSectionComplete(data)) {
+                                this.collapseSection(data);
+                            }
+                        }, 400);
+                    }
                 }
-            };
-
-            form.addEventListener('input', checkCollapse);
-            form.addEventListener('change', checkCollapse);
+            });
 
             // Check if any sections are already complete (e.g. prefilled from auth)
             setTimeout(() => {
@@ -873,6 +889,7 @@
             data.collapsed = true;
             data.section.classList.add('is-collapsed');
             data.content.hidden = true;
+            if (data.continueBtn) data.continueBtn.hidden = true;
             data.summary.hidden = false;
             data.summary.textContent = this.getSectionSummary(data);
             data.editBtn.hidden = false;
@@ -883,6 +900,7 @@
             data.collapsed = false;
             data.section.classList.remove('is-collapsed');
             data.content.hidden = false;
+            if (data.continueBtn) data.continueBtn.hidden = false;
             data.summary.hidden = true;
             data.editBtn.hidden = true;
             data.heading.style.cursor = '';

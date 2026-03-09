@@ -847,7 +847,7 @@ function createSmartSearch() {
                     brand: product.brand?.name ?? product.brand ?? '',
                     color: product.color || '',
                     quantity: 1,
-                    source: product._isRibbon ? 'ribbon' : (product.source || 'core'),
+                    source: product._isRibbon ? 'ribbon' : 'core',
                     slug: product.slug || ''
                 });
 
