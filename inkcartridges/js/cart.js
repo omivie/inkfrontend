@@ -756,11 +756,12 @@ const Cart = {
         const oldQuantity = quantity;
         const item = this.items.find(function(i) { return i.key === itemId || i.id === itemId; });
         const isCore = !item || !item.source || item.source === 'core';
+        const actualId = item ? item.id : itemId;
 
         try {
             if (isCore && typeof API !== 'undefined') {
                 try {
-                    const response = await API.updateCartItem(itemId, quantity);
+                    const response = await API.updateCartItem(actualId, quantity);
                     const hasPendingUpdate = this._quantityQueued[itemId] !== undefined
                                           || this._quantityDebounceTimers[itemId];
 
@@ -1058,6 +1059,7 @@ const Cart = {
         const item = this.items.find(function(i) { return i.key === itemId || i.id === itemId; });
         const oldQuantity = item ? item.quantity : 0;
         const isCore = !item || !item.source || item.source === 'core';
+        const actualId = item ? item.id : itemId;
 
         // Update locally first (instant feedback)
         if (item) {
@@ -1070,7 +1072,7 @@ const Cart = {
         // Sync to server only for core items
         if (isCore && typeof API !== 'undefined') {
             try {
-                const response = await API.updateCartItem(itemId, quantity);
+                const response = await API.updateCartItem(actualId, quantity);
                 if (response.ok) {
                     // Refresh from server for accurate totals
                     await this.loadFromServer();

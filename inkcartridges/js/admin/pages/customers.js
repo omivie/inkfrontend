@@ -75,7 +75,7 @@ async function openCustomerDrawer(customer) {
   drawer.setLoading(true);
 
   // Fetch recent orders for this customer
-  const ordersData = await AdminAPI.getOrders({ search: customer.email }, 1, 5);
+  const ordersData = await AdminAPI.getOrders({ user_id: customer.id }, 1, 5);
   const orders = ordersData ? (Array.isArray(ordersData) ? ordersData : (ordersData.orders || ordersData.data || [])) : [];
 
   let html = '';

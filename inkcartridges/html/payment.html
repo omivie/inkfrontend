@@ -176,115 +176,9 @@
             padding: 1.5rem;
         }
 
-        /* Express Checkout (Apple Pay / Google Pay) */
-        .express-checkout {
+        /* Stripe PaymentElement wrapper */
+        .payment-element-wrapper {
             margin-bottom: 1.5rem;
-        }
-
-        .express-checkout__label {
-            font-size: 0.8125rem;
-            font-weight: 600;
-            color: var(--gray-700);
-            margin-bottom: 0.75rem;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-        }
-
-        .payment-request-button {
-            margin-bottom: 1rem;
-        }
-
-        .express-checkout__divider {
-            display: flex;
-            align-items: center;
-            gap: 1rem;
-            color: var(--gray-400);
-            font-size: 0.8125rem;
-            margin-top: 1.25rem;
-        }
-
-        .express-checkout__divider::before,
-        .express-checkout__divider::after {
-            content: '';
-            flex: 1;
-            height: 1px;
-            background: var(--gray-200);
-        }
-
-        /* Card brands display */
-        .card-brands {
-            display: flex;
-            align-items: center;
-            gap: 0.5rem;
-            margin-bottom: 1.5rem;
-            padding-bottom: 1rem;
-            border-bottom: 1px solid var(--gray-200);
-        }
-
-        .card-brands__label {
-            font-size: 0.8125rem;
-            color: var(--gray-500);
-            margin-right: auto;
-        }
-
-        .card-brand {
-            width: 40px;
-            height: 26px;
-            background: var(--gray-100);
-            border-radius: 4px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 0.625rem;
-            font-weight: 700;
-            color: var(--gray-600);
-            border: 1px solid var(--gray-200);
-        }
-
-        .card-brand--visa { background: linear-gradient(135deg, #1a1f71 0%, #2d3494 100%); color: white; }
-        .card-brand--mc { background: linear-gradient(135deg, #eb001b 0%, #f79e1b 100%); color: white; }
-        .card-brand--amex { background: linear-gradient(135deg, #006fcf 0%, #1d8acf 100%); color: white; }
-
-        /* Stripe card input styling */
-        .card-input-wrapper {
-            margin-bottom: 1.5rem;
-        }
-
-        .card-input-label {
-            display: block;
-            font-size: 0.8125rem;
-            font-weight: 600;
-            color: var(--gray-700);
-            margin-bottom: 0.5rem;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-        }
-
-        .card-input-container {
-            background: white;
-            border: 2px solid var(--gray-200);
-            border-radius: var(--radius-sm);
-            padding: 1rem 1rem;
-            transition: all 0.2s ease;
-            min-height: 52px;
-        }
-
-        .card-input-container:hover {
-            border-color: var(--gray-300);
-        }
-
-        .card-input-container--focus {
-            border-color: var(--cyan);
-            box-shadow: 0 0 0 4px rgba(38, 127, 181, 0.1);
-        }
-
-        .card-input-container--error {
-            border-color: var(--error);
-            box-shadow: 0 0 0 4px rgba(239, 68, 68, 0.1);
-        }
-
-        .card-input-container--complete {
-            border-color: var(--success);
         }
 
         #card-errors {
@@ -661,34 +555,16 @@
                                         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="1" y="4" width="22" height="16" rx="2" ry="2"/><line x1="1" y1="10" x2="23" y2="10"/></svg>
                                     </div>
                                     <div>
-                                        <h2 class="payment-section__title">Card Payment</h2>
-                                        <p class="payment-section__subtitle">Enter your card details below</p>
+                                        <h2 class="payment-section__title">Payment</h2>
+                                        <p class="payment-section__subtitle">Choose your payment method below</p>
                                     </div>
                                 </div>
 
                                 <div class="payment-section__body">
-                                    <!-- Express Checkout (Apple Pay / Google Pay) -->
-                                    <div id="express-checkout-section" class="express-checkout" hidden>
-                                        <div class="express-checkout__label">Express checkout</div>
-                                        <div id="payment-request-button" class="payment-request-button">
-                                            <!-- Stripe Payment Request Button mounted here -->
-                                        </div>
-                                        <div class="express-checkout__divider">
-                                            <span>or pay with card</span>
-                                        </div>
-                                    </div>
-
-                                    <!-- Card brands -->
-                                    <div class="card-brands">
-                                        <span class="card-brands__label">We accept:</span>
-                                        <span class="card-brand card-brand--visa">VISA</span>
-                                    </div>
-
-                                    <!-- Card input -->
-                                    <div class="card-input-wrapper">
-                                        <label class="card-input-label" for="card-element">Card Details</label>
-                                        <div id="card-element" class="card-input-container">
-                                            <!-- Stripe Card Element mounted here -->
+                                    <!-- Stripe PaymentElement (handles cards, wallets, etc.) -->
+                                    <div class="payment-element-wrapper">
+                                        <div id="payment-element">
+                                            <!-- Stripe PaymentElement mounted here -->
                                         </div>
                                         <div id="card-errors" role="alert"></div>
                                     </div>

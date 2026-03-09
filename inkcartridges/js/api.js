@@ -518,6 +518,14 @@ const API = {
     },
 
     /**
+     * Validate an email address before signup (blocks disposable emails)
+     * @param {string} email - Email to validate
+     */
+    async validateEmail(email) {
+        return this.post('/api/account/validate-email', { email });
+    },
+
+    /**
      * Apply a coupon code to the cart
      * @param {string} code - Coupon code
      */
@@ -579,6 +587,14 @@ const API = {
      */
     async checkPendingOrder() {
         return this.get('/api/orders/check-pending');
+    },
+
+    /**
+     * Cancel a pending order (e.g. after payment failure)
+     * @param {string} orderNumber - Order number to cancel
+     */
+    async cancelOrder(orderNumber) {
+        return this.post(`/api/orders/${orderNumber}/cancel`);
     },
 
     // =========================================================================

@@ -45,6 +45,7 @@ const AdminAPI = {
       if (filters.from) params.set('date_from', filters.from);
       if (filters.to) params.set('date_to', filters.to);
       if (filters.statuses?.length) params.set('status', filters.statuses.join(','));
+      if (filters.user_id) params.set('user_id', filters.user_id);
       if (filters.search) {
         // Send as customer_email if it looks like an email, otherwise as generic search
         if (filters.search.includes('@')) {

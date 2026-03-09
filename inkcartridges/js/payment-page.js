@@ -21,8 +21,8 @@
 
         // Stripe
         stripe: null,
-        cardElement: null,
-        cardComplete: false,
+        elements: null,
+        paymentElementReady: false,
 
         /**
          * Initialize the payment page
@@ -233,8 +233,10 @@
                 document.getElementById('checkout-total').textContent = `$${this.totals.total.toFixed(2)} NZD`;
                 document.getElementById('pay-button-text').textContent = `Pay $${this.totals.total.toFixed(2)} NZD`;
 
-                // Initialize Apple Pay / Google Pay if available
-                this.initPaymentRequestButton(this.totals.total);
+                // Update Elements amount if already initialized
+                if (this.elements) {
+                    this.elements.update({ amount: Math.round(this.totals.total * 100) });
+                }
 
             } catch (error) {
                 DebugLog.warn('Server totals unavailable, using estimates:', error.message);
@@ -259,7 +261,9 @@
                     document.getElementById('checkout-total').textContent = `$${this.totals.total.toFixed(2)} NZD`;
                     document.getElementById('pay-button-text').textContent = `Pay $${this.totals.total.toFixed(2)} NZD`;
 
-                    this.initPaymentRequestButton(this.totals.total);
+                    if (this.elements) {
+                        this.elements.update({ amount: Math.round(this.totals.total * 100) });
+                    }
                 } else {
                     this.showError('Unable to calculate order total. Please refresh and try again.');
                     const payBtn = document.getElementById('pay-now-btn');
@@ -288,253 +292,75 @@
             // Initialize Stripe
             this.stripe = Stripe(stripeKey);
 
-            // Create Elements with custom styling
-            const elements = this.stripe.elements({
+            // Create Elements with deferred intent (no client_secret needed yet)
+            const totalCents = Math.round(this.totals.total * 100) || 100; // minimum 1 NZD
+            this.elements = this.stripe.elements({
+                mode: 'payment',
+                amount: totalCents,
+                currency: 'nzd',
                 fonts: [
                     { cssSrc: 'https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap' }
-                ]
-            });
-
-            // Create Card Element
-            this.cardElement = elements.create('card', {
-                style: {
-                    base: {
-                        fontSize: '16px',
+                ],
+                appearance: {
+                    theme: 'stripe',
+                    variables: {
+                        colorPrimary: '#267FB5',
+                        colorBackground: '#ffffff',
+                        colorText: '#1e293b',
+                        colorDanger: '#ef4444',
                         fontFamily: '"Inter", system-ui, -apple-system, sans-serif',
-                        fontSmoothing: 'antialiased',
-                        color: '#1e293b',
-                        '::placeholder': {
-                            color: '#94a3b8'
-                        },
-                        iconColor: '#267FB5'
+                        fontSizeBase: '16px',
+                        spacingUnit: '4px',
+                        borderRadius: '8px'
                     },
-                    invalid: {
-                        color: '#ef4444',
-                        iconColor: '#ef4444'
+                    rules: {
+                        '.Input': {
+                            border: '2px solid #e2e8f0',
+                            boxShadow: 'none',
+                            padding: '12px'
+                        },
+                        '.Input:focus': {
+                            border: '2px solid #267FB5',
+                            boxShadow: '0 0 0 4px rgba(38, 127, 181, 0.1)'
+                        },
+                        '.Input--invalid': {
+                            border: '2px solid #ef4444',
+                            boxShadow: '0 0 0 4px rgba(239, 68, 68, 0.1)'
+                        }
                     }
-                },
-                hidePostalCode: true,
-                disableLink: true
+                }
             });
 
-            // Mount to container
-            this.cardElement.mount('#card-element');
+            // Create and mount PaymentElement
+            const paymentElement = this.elements.create('payment', {
+                layout: 'tabs'
+            });
+            paymentElement.mount('#payment-element');
 
-            // Handle card element events
-            this.cardElement.on('change', (event) => {
-                const container = document.getElementById('card-element');
+            // Handle PaymentElement events
+            paymentElement.on('change', (event) => {
                 const errorEl = document.getElementById('card-errors');
 
-                // Update container styling
-                container.classList.remove('card-input-container--focus', 'card-input-container--error', 'card-input-container--complete');
-
-                if (event.error) {
-                    container.classList.add('card-input-container--error');
-                    errorEl.innerHTML = `
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
-                        ${event.error.message}
-                    `;
-                } else {
-                    errorEl.textContent = '';
-                }
-
                 if (event.complete) {
-                    container.classList.add('card-input-container--complete');
-                    this.cardComplete = true;
+                    this.paymentElementReady = true;
+                    errorEl.textContent = '';
                     this.showAuthorizationBox();
                 } else {
-                    this.cardComplete = false;
+                    this.paymentElementReady = false;
                     this.hideAuthorizationBox();
+                }
+
+                if (event.value?.type) {
+                    DebugLog.log('Payment method selected:', event.value.type);
                 }
 
                 this.updatePayButton();
             });
 
-            this.cardElement.on('focus', () => {
-                document.getElementById('card-element').classList.add('card-input-container--focus');
-            });
-
-            this.cardElement.on('blur', () => {
-                document.getElementById('card-element').classList.remove('card-input-container--focus');
-            });
-
-            DebugLog.log('Stripe initialized successfully');
+            DebugLog.log('Stripe PaymentElement initialized successfully');
         },
 
-        /**
-         * Initialize Payment Request Button for Apple Pay / Google Pay
-         * Call this after order total is known
-         */
-        async initPaymentRequestButton(totalAmount, currency = 'nzd') {
-            if (!this.stripe) {
-                DebugLog.log('Stripe not initialized, skipping Payment Request Button');
-                return;
-            }
-
-            try {
-                // Create payment request
-                const paymentRequest = this.stripe.paymentRequest({
-                    country: 'NZ',
-                    currency: currency,
-                    total: {
-                        label: 'InkCartridges.co.nz',
-                        amount: Math.round(totalAmount * 100) // Convert to cents
-                    },
-                    requestPayerName: true,
-                    requestPayerEmail: true
-                });
-
-                // Check if Apple Pay / Google Pay is available
-                const result = await paymentRequest.canMakePayment();
-
-                if (result) {
-                    DebugLog.log('Express checkout available:', result.applePay ? 'Apple Pay' : 'Google Pay');
-
-                    // Create and mount the button
-                    const elements = this.stripe.elements();
-                    const prButton = elements.create('paymentRequestButton', {
-                        paymentRequest: paymentRequest,
-                        style: {
-                            paymentRequestButton: {
-                                type: 'default',
-                                theme: 'dark',
-                                height: '48px'
-                            }
-                        }
-                    });
-
-                    prButton.mount('#payment-request-button');
-
-                    // Show the express checkout section
-                    document.getElementById('express-checkout-section').hidden = false;
-
-                    // Handle payment method event
-                    paymentRequest.on('paymentmethod', async (ev) => {
-                        try {
-                            // Build items array from cart
-                            const items = this.cartItems.map(item => ({
-                                product_id: item.id,
-                                quantity: item.quantity
-                            }));
-
-                            // Validate cart before creating order
-                            const validateResponse = await API.validateCart();
-                            if (!validateResponse.ok || (validateResponse.data && !validateResponse.data.is_valid)) {
-                                ev.complete('fail');
-                                this.showError('Cart has changed. Please review your cart.');
-                                return;
-                            }
-
-                            // Create order on backend (mirrors card payment flow)
-                            const orderResponse = await API.createOrder({
-                                items: items,
-                                shipping_address: {
-                                    recipient_name: `${this.checkoutData.firstName} ${this.checkoutData.lastName}`,
-                                    phone: this.checkoutData.phone || '',
-                                    address_line1: this.checkoutData.address1,
-                                    address_line2: this.checkoutData.address2 || '',
-                                    city: this.checkoutData.city,
-                                    region: this.checkoutData.region,
-                                    postal_code: this.checkoutData.postcode,
-                                    country: 'NZ'
-                                },
-                                shipping_tier: '',
-                                shipping_zone: '',
-                                delivery_type: this.checkoutData.deliveryType || 'urban',
-                                save_address: this.checkoutData.saveAddress !== false,
-                                customer_notes: this.checkoutData.orderNotes || '',
-                                idempotency_key: this.getIdempotencyKey()
-                            });
-
-                            // Handle duplicate/idempotent replay
-                            if (orderResponse.ok && orderResponse.data?.is_duplicate) {
-                                ev.complete('success');
-                                await this.completeExpressOrder(orderResponse.data.order_number, orderResponse.data.total_amount);
-                                return;
-                            }
-
-                            if (!orderResponse.ok) {
-                                ev.complete('fail');
-                                const errorCode = orderResponse.error?.code || orderResponse.code || '';
-                                if (errorCode === 'ACCOUNT_FLAGGED') {
-                                    if (typeof showToast === 'function') {
-                                        showToast('Your account has been flagged for review. Please contact support.', 'error', 0);
-                                    }
-                                    return;
-                                }
-                                const errorMsg = orderResponse.error?.message || orderResponse.error || 'Failed to create order';
-                                this.showError(errorMsg);
-                                return;
-                            }
-
-                            const { client_secret, order_number, total_amount } = orderResponse.data;
-
-                            // Confirm the payment with the express payment method
-                            const { paymentIntent, error: confirmError } = await this.stripe.confirmCardPayment(
-                                client_secret,
-                                { payment_method: ev.paymentMethod.id },
-                                { handleActions: false }
-                            );
-
-                            if (confirmError) {
-                                ev.complete('fail');
-                                this.showError(confirmError.message);
-                            } else if (paymentIntent.status === 'requires_action') {
-                                ev.complete('success');
-                                // Handle 3D Secure if needed
-                                const { error } = await this.stripe.confirmCardPayment(client_secret);
-                                if (error) {
-                                    this.showError(error.message);
-                                } else {
-                                    await this.completeExpressOrder(order_number, total_amount);
-                                }
-                            } else {
-                                ev.complete('success');
-                                await this.completeExpressOrder(order_number, total_amount);
-                            }
-                        } catch (error) {
-                            ev.complete('fail');
-                            this.showError(error.message);
-                        }
-                    });
-                } else {
-                    DebugLog.log('Express checkout not available on this device/browser');
-                }
-            } catch (error) {
-                DebugLog.log('Payment Request Button error:', error.message);
-            }
-        },
-
-        /**
-         * Complete order after successful express checkout payment
-         */
-        async completeExpressOrder(order_number, total_amount) {
-            try {
-                await API.clearCart();
-            } catch (e) {
-                DebugLog.warn('Could not clear cart via API:', e);
-            }
-
-            if (typeof Cart !== 'undefined') {
-                Cart.items = [];
-                document.querySelectorAll('.cart-count, .cart-badge, #cart-count').forEach(el => {
-                    el.textContent = '0';
-                });
-            }
-            localStorage.removeItem('inkcartridges_cart');
-
-            sessionStorage.setItem('lastOrder', JSON.stringify({
-                order_number: order_number,
-                email: this.checkoutData.email
-            }));
-            sessionStorage.removeItem('checkoutData');
-
-            if (typeof CartAnalytics !== 'undefined') {
-                CartAnalytics.trackOrderCompleted({ order_number, total_amount });
-            }
-
-            window.location.href = `/html/order-confirmation.html?order=${encodeURIComponent(order_number)}`;
-        },
+        // Note: Apple Pay / Google Pay are handled natively by PaymentElement
 
         /**
          * Setup event handlers
@@ -579,7 +405,7 @@
             const payBtn = document.getElementById('pay-now-btn');
             if (!payBtn) return;
 
-            const canPay = this.cardComplete && this.paymentAuthorized;
+            const canPay = this.paymentElementReady && this.paymentAuthorized;
             payBtn.disabled = !canPay;
         },
 
@@ -598,8 +424,8 @@
                 return;
             }
 
-            if (!this.cardComplete) {
-                alert('Please complete your card details.');
+            if (!this.paymentElementReady) {
+                alert('Please complete your payment details.');
                 return;
             }
 
@@ -611,6 +437,13 @@
             payBtn.disabled = true;
 
             try {
+                // STEP 0: Validate PaymentElement form
+                btnText.innerHTML = this.getLoadingHTML('Validating payment...');
+                const { error: submitError } = await this.elements.submit();
+                if (submitError) {
+                    throw new Error(submitError.message);
+                }
+
                 // STEP 1: Validate cart is still valid
                 btnText.innerHTML = this.getLoadingHTML('Validating cart...');
 
@@ -701,14 +534,14 @@
 
                 const { client_secret, order_id, order_number, total_amount } = orderResponse.data;
 
-                // STEP 3: Confirm payment with Stripe
+                // STEP 3: Confirm payment with Stripe PaymentElement
                 btnText.innerHTML = this.getLoadingHTML('Processing payment...');
 
-                const { error: stripeError, paymentIntent } = await this.stripe.confirmCardPayment(
-                    client_secret,
-                    {
-                        payment_method: {
-                            card: this.cardElement,
+                const { error: stripeError, paymentIntent } = await this.stripe.confirmPayment({
+                    elements: this.elements,
+                    clientSecret: client_secret,
+                    confirmParams: {
+                        payment_method_data: {
                             billing_details: {
                                 name: `${this.checkoutData.firstName} ${this.checkoutData.lastName}`,
                                 email: this.checkoutData.email,
@@ -723,15 +556,33 @@
                                 }
                             }
                         }
-                    }
-                );
+                    },
+                    redirect: 'if_required'
+                });
 
                 if (stripeError) {
                     DebugLog.error('Stripe error:', stripeError);
+                    // Cancel the pending order to restore stock
+                    try {
+                        await API.cancelOrder(order_number);
+                        DebugLog.log('Pending order cancelled:', order_number);
+                    } catch (cancelErr) {
+                        DebugLog.warn('Could not cancel pending order:', cancelErr.message);
+                    }
+                    // Reset idempotency key so the user can retry with a new order
+                    this._idempotencyKey = null;
                     throw new Error(stripeError.message);
                 }
 
                 if (paymentIntent.status !== 'succeeded') {
+                    // Cancel the pending order to restore stock
+                    try {
+                        await API.cancelOrder(order_number);
+                        DebugLog.log('Pending order cancelled:', order_number);
+                    } catch (cancelErr) {
+                        DebugLog.warn('Could not cancel pending order:', cancelErr.message);
+                    }
+                    this._idempotencyKey = null;
                     throw new Error('Payment was not completed. Please try again.');
                 }
 

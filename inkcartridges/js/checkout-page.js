@@ -1203,25 +1203,34 @@
                     }
                 }
 
-                // Pre-fill phone if available (handles "+64 21 123 4567" format)
+                // Pre-fill phone if available (handles E.164 "+6402040437370" and spaced "+64 021234567" formats)
                 const phone = user?.user_metadata?.phone;
                 if (phone) {
                     const phoneInput = document.getElementById('phone');
                     const phoneCountrySelect = document.getElementById('phone-country');
 
-                    // Try to parse country code from phone
-                    const phoneMatch = phone.match(/^(\+\d{1,3})\s*(.*)$/);
-                    if (phoneMatch && phoneCountrySelect && phoneInput) {
-                        const countryCode = phoneMatch[1];
-                        const phoneNumber = phoneMatch[2];
-                        // Set country code if it exists in the dropdown
-                        const option = phoneCountrySelect.querySelector(`option[value="${countryCode}"]`);
-                        if (option) {
-                            phoneCountrySelect.value = countryCode;
+                    if (phoneCountrySelect && phoneInput) {
+                        // Check each dropdown country code option (longest first to match correctly)
+                        const countryCodes = Array.from(phoneCountrySelect.options)
+                            .map(o => o.value)
+                            .filter(v => v.startsWith('+'))
+                            .sort((a, b) => b.length - a.length);
+
+                        let matched = false;
+                        for (const code of countryCodes) {
+                            if (phone.startsWith(code)) {
+                                phoneCountrySelect.value = code;
+                                const remainder = phone.slice(code.length).replace(/^\s+/, '');
+                                // Convert to local format with leading 0
+                                phoneInput.value = '0' + remainder;
+                                matched = true;
+                                break;
+                            }
                         }
-                        phoneInput.value = phoneNumber;
+                        if (!matched) {
+                            phoneInput.value = phone;
+                        }
                     } else if (phoneInput) {
-                        // Fallback: put whole number in phone field
                         phoneInput.value = phone;
                     }
                 }

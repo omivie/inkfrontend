@@ -312,6 +312,24 @@
                     submitBtn.disabled = true;
                     submitBtn.textContent = 'Creating account...';
 
+                    // Validate email before sending confirmation (blocks disposable addresses)
+                    try {
+                        const emailCheck = await API.validateEmail(email);
+                        if (!emailCheck.ok) {
+                            const msg = emailCheck.error?.message || emailCheck.error || 'This email address is not allowed.';
+                            if (emailError) {
+                                emailError.textContent = msg;
+                                emailError.hidden = false;
+                            }
+                            submitBtn.disabled = false;
+                            submitBtn.textContent = 'Create Account';
+                            return;
+                        }
+                    } catch (valErr) {
+                        // If validation endpoint is unavailable, allow signup to proceed
+                        DebugLog.warn('Email validation unavailable:', valErr.message);
+                    }
+
                     DebugLog.log('📧 Starting signup for:', email);
                     DebugLog.log('🔗 Redirect URL:', `${window.location.origin}/html/account/login.html?verified=true`);
 
