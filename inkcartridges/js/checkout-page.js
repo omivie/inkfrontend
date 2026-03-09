@@ -781,14 +781,57 @@
                             if (payBtn) payBtn.scrollIntoView({ behavior: 'smooth', block: 'center' });
                         }
                     } else {
-                        // Highlight first empty required field
-                        for (const field of sectionData.content.querySelectorAll('input[required], select[required], textarea[required]')) {
-                            if (field.offsetParent !== null && !field.value.trim()) {
-                                field.focus();
-                                field.classList.add('input-error');
-                                setTimeout(() => field.classList.remove('input-error'), 2000);
-                                break;
+                        // Show red error boxes on all empty required fields in this section
+                        const content = sectionData.content;
+                        // Clear previous section errors
+                        content.querySelectorAll('.is-error').forEach(el => el.classList.remove('is-error'));
+                        content.querySelectorAll('.form-error').forEach(el => el.remove());
+                        content.querySelectorAll('.delivery-type-options.is-error').forEach(el => el.classList.remove('is-error'));
+
+                        let firstInvalid = null;
+                        const checkedRadioGroups = new Set();
+
+                        for (const field of content.querySelectorAll('input[required], select[required], textarea[required]')) {
+                            if (field.offsetParent === null) continue;
+
+                            // Radio buttons — validate once per group
+                            if (field.type === 'radio') {
+                                if (checkedRadioGroups.has(field.name)) continue;
+                                checkedRadioGroups.add(field.name);
+                                const groupChecked = content.querySelector(`input[name="${field.name}"]:checked`);
+                                if (!groupChecked) {
+                                    const container = field.closest('.delivery-type-options') || field.closest('.form-group');
+                                    if (container) {
+                                        container.classList.add('is-error');
+                                        if (!container.parentElement.querySelector('.form-error')) {
+                                            const errorMsg = document.createElement('div');
+                                            errorMsg.className = 'form-error';
+                                            errorMsg.textContent = 'Please select an option';
+                                            container.parentElement.appendChild(errorMsg);
+                                        }
+                                    }
+                                    if (!firstInvalid) firstInvalid = container || field;
+                                }
+                                continue;
                             }
+
+                            // Text / select / textarea
+                            if (!field.value.trim()) {
+                                field.classList.add('is-error');
+                                const group = field.closest('.form-group');
+                                if (group && !group.querySelector('.form-error')) {
+                                    const errorMsg = document.createElement('div');
+                                    errorMsg.className = 'form-error';
+                                    errorMsg.textContent = 'This field is required';
+                                    group.appendChild(errorMsg);
+                                }
+                                if (!firstInvalid) firstInvalid = field;
+                            }
+                        }
+
+                        if (firstInvalid) {
+                            firstInvalid.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                            if (firstInvalid.focus) firstInvalid.focus({ preventScroll: true });
                         }
                     }
                 });
