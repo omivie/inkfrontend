@@ -794,14 +794,30 @@
                 });
             });
 
-            // Auto-collapse prefilled sections on load, but only if user isn't already interacting
+            // Start with only the first section expanded
+            this._collapsibleSections.forEach((data, idx) => {
+                if (idx > 0) {
+                    data.content.hidden = true;
+                    if (data.continueBtn) data.continueBtn.hidden = true;
+                    data.collapsed = true;
+                    data.section.classList.add('is-collapsed');
+                }
+            });
+
+            // Auto-collapse prefilled sections on load, then expand first incomplete
             setTimeout(() => {
                 const activeSection = document.activeElement?.closest('fieldset.checkout-section');
+                // Auto-collapse prefilled sections
                 this._collapsibleSections.forEach(data => {
                     if (data.section !== activeSection && this.isSectionComplete(data)) {
                         this.collapseSection(data);
                     }
                 });
+                // Expand first non-collapsed incomplete section (so user sees where to go next)
+                const firstIncomplete = this._collapsibleSections.find(d => !this.isSectionComplete(d));
+                if (firstIncomplete && firstIncomplete.collapsed) {
+                    this.expandSection(firstIncomplete);
+                }
             }, 600);
         },
 
