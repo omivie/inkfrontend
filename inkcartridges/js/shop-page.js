@@ -1895,28 +1895,8 @@
             try {
                 const searchQuery = this.state.search;
 
-                // Fetch products matching the search query, combined with any active filters
-                const apiParams = {
-                    search: searchQuery,
-                    limit: 100
-                };
-
-                // Preserve brand filter if set
-                if (this.state.brand) {
-                    apiParams.brand = this.state.brand;
-                }
-
-                // Preserve category filter if set
-                if (this.state.category) {
-                    const categoryConfig = this.categories.find(c => c.id === this.state.category);
-                    apiParams.category = categoryConfig?.apiCategory || this.state.category;
-                }
-
-                // Map URL 'type' parameter to API 'source' parameter for server-side filtering
-                if (this.state.type === 'genuine' || this.state.type === 'compatible') {
-                    apiParams.source = this.state.type;
-                }
-                const response = await API.getProducts(apiParams);
+                // Use the dedicated smart search endpoint which supports full-text search
+                const response = await API.smartSearch(searchQuery, 100);
 
                 // Check if navigation changed during fetch
                 if (navVersion !== undefined && this.navigationVersion !== navVersion) return;
