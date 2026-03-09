@@ -5376,18 +5376,26 @@
     margin-bottom: 0.5rem;
 }
 
-/* Brand buttons in a single horizontal row */
+/* Brand buttons in a compact horizontal row */
 .printer-modal__container .ink-finder__brands {
     display: flex;
     flex-wrap: wrap;
-    gap: 0.5rem;
+    gap: 0.4rem;
 }
 
 .printer-modal__container .ink-finder__brand-btn {
-    padding: 0.5rem 0.75rem;
-    height: 44px;
+    padding: 0.35rem 0.5rem;
+    height: 38px;
+    width: auto;
     min-width: 0;
     flex: 0 0 auto;
+}
+
+.printer-modal__container .ink-finder__brand-img,
+.printer-modal__container .ink-finder__brand-img[class*="--"] {
+    max-height: 20px;
+    height: auto !important;
+    width: auto;
 }
 
 /* Custom select takes full width in modal */
