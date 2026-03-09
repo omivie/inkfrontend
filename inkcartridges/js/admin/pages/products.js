@@ -115,7 +115,13 @@ function productHasImage(p) {
 async function loadProducts() {
   _table.setLoading(true);
   const filters = { search: _search, sort: _sort, order: _sortDir };
-  if (_brandFilter) filters.brand = _brandFilter;
+  // Prefer page-level filter; fall back to global FilterState brands
+  const globalBrands = FilterState.get('brands') || [];
+  if (_brandFilter) {
+    filters.brand = _brandFilter;
+  } else if (globalBrands.length) {
+    filters.brand = globalBrands.join(',');
+  }
   if (_activeFilter !== '') filters.active = _activeFilter;
 
   // When image filter is active, we need to paginate client-side since
@@ -1297,6 +1303,15 @@ export default {
   },
 
   async onFilterChange() {
+    // Sync page-level brand dropdown with global filter
+    const globalBrands = FilterState.get('brands') || [];
+    const brandSelect = document.getElementById('brand-filter');
+    if (brandSelect && globalBrands.length === 1) {
+      brandSelect.value = globalBrands[0];
+      _brandFilter = globalBrands[0];
+    } else if (brandSelect && globalBrands.length === 0 && !_brandFilter) {
+      brandSelect.value = '';
+    }
     _page = 1;
     if (_table) await loadProducts();
   },

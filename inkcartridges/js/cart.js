@@ -239,13 +239,7 @@ const Cart = {
         if (typeof API !== 'undefined') {
             try {
                 if (this.isAuthenticated) {
-                    // Check for localStorage items to migrate
-                    const localItems = this.getGuestCartItems();
-                    if (localItems.length > 0) {
-                        await this.mergeGuestCartAndLoad();
-                    } else {
-                        await this.syncWithServer();
-                    }
+                    await this.syncWithServer();
                 } else {
                     // Guest users: Server-first with localStorage fallback
                     try {
@@ -332,6 +326,14 @@ const Cart = {
             const response = await API.getCart();
             if (response.ok && response.data) {
                 const parsed = this._parseServerCart(response.data);
+
+                // Guard: don't clear local items if server unexpectedly returns empty
+                if (parsed.items.length === 0 && this.items.length > 0) {
+                    DebugLog.warn('Server returned empty cart — keeping local items as fallback');
+                    this.serverSummary = null;
+                    this.updateUI();
+                    return;
+                }
 
                 this.items = parsed.items;
                 this.serverSummary = parsed.summary;

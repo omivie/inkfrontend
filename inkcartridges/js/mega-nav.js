@@ -40,11 +40,13 @@
         { slug: 'canon', name: 'Canon', logo: '/assets/brands/canon.png',
           categories: [
               { label: 'Ink Cartridges', param: 'ink' },
-              { label: 'Toner Cartridges', param: 'toner' }
+              { label: 'Toner Cartridges', param: 'toner' },
+              { label: 'Drums & Supplies', param: 'consumable' }
           ]},
         { slug: 'epson', name: 'Epson', logo: '/assets/brands/epson.png',
           categories: [
-              { label: 'Ink Cartridges', param: 'ink' }
+              { label: 'Ink Cartridges', param: 'ink' },
+              { label: 'Drums & Supplies', param: 'consumable' }
           ]},
         { slug: 'hp', name: 'HP', logo: '/assets/brands/hp.png',
           categories: [
