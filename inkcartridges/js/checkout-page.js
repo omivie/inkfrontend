@@ -874,8 +874,8 @@
                     const fieldCount = changedFields.size;
                     changedFields = new Set();
 
-                    // 3+ fields changed at once = autofill; fewer = manual typing (use Continue button)
-                    if (fieldCount < 3) return;
+                    // 2+ fields changed at once = autofill; 1 field = manual typing (use Continue button)
+                    if (fieldCount < 2) return;
 
                     this._collapsibleSections.forEach((data) => {
                         if (!data.collapsed && this.isSectionComplete(data)) {
