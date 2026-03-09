@@ -862,6 +862,38 @@
                     this.expandSection(firstIncomplete);
                 }
             }, 600);
+
+            // Auto-collapse sections when autofill completes them
+            let autocollapseTimer = null;
+            form.addEventListener('input', () => {
+                clearTimeout(autocollapseTimer);
+                autocollapseTimer = setTimeout(() => {
+                    this._collapsibleSections.forEach((data, idx) => {
+                        if (!data.collapsed && this.isSectionComplete(data)) {
+                            // Don't collapse if user is actively focused inside this section
+                            const activeSection = document.activeElement?.closest('fieldset.checkout-section');
+                            if (data.section === activeSection) return;
+                            this.collapseSection(data);
+                        }
+                    });
+                    // Expand first incomplete section
+                    const firstIncomplete = this._collapsibleSections.find(d => !this.isSectionComplete(d));
+                    if (firstIncomplete && firstIncomplete.collapsed) {
+                        this.expandSection(firstIncomplete);
+                    }
+                    // If all complete, scroll to payment button
+                    if (this._collapsibleSections.every(d => this.isSectionComplete(d))) {
+                        const allCollapsed = this._collapsibleSections.every(d => d.collapsed);
+                        if (!allCollapsed) {
+                            this._collapsibleSections.forEach(d => {
+                                if (!d.collapsed) this.collapseSection(d);
+                            });
+                        }
+                        const payBtn = document.getElementById('continue-to-payment-btn');
+                        if (payBtn) payBtn.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    }
+                }, 300);
+            }, true);
         },
 
         // Check if all required fields in a section are filled
