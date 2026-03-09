@@ -250,21 +250,6 @@
                     <aside class="cart-summary">
                         <h2 class="cart-summary__heading">Order Summary</h2>
 
-                        <!-- Coupon code -->
-                        <div class="cart-summary__coupon">
-                            <label for="coupon-code" class="cart-summary__coupon-label">Have a coupon?</label>
-                            <div class="coupon-form">
-                                <input type="text" id="coupon-code" name="coupon" placeholder="Enter code" class="coupon-form__input">
-                                <button type="button" class="btn btn--secondary coupon-form__btn">Apply</button>
-                            </div>
-                        </div>
-
-                        <!-- Price warning (shown when server prices unavailable) -->
-                        <div class="cart-summary__warning" id="cart-price-warning" hidden>
-                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
-                            <span></span>
-                        </div>
-
                         <!-- Totals -->
                         <div class="cart-summary__totals">
                             <div class="cart-summary__row">
@@ -305,13 +290,6 @@
                             <a href="/html/checkout.html" id="checkout-btn" class="btn btn--primary btn--lg btn--full-width" data-track="cta_click" data-track-cta="Proceed to Checkout" data-track-location="cart_summary" data-testid="cart-checkout-btn">
                                 Proceed to Checkout
                             </a>
-                            <div class="cart-summary__express">
-                                <span class="cart-summary__express-label">Express checkout: <span class="coming-soon-badge">Coming Soon</span></span>
-                                <div class="cart-summary__express-buttons">
-                                    <button type="button" class="btn btn--express btn--disabled" disabled title="PayPal coming soon">PayPal</button>
-                                    <button type="button" class="btn btn--express btn--disabled" disabled title="Afterpay coming soon">Afterpay</button>
-                                </div>
-                            </div>
                         </div>
 
                         <!-- Trust signals -->
@@ -322,9 +300,7 @@
                             </div>
                             <div class="cart-summary__payment-icons">
                                 <span>Visa</span>
-                                <span>MC</span>
                                 <span>PayPal</span>
-                                <span>Afterpay</span>
                             </div>
                         </div>
                     </aside>
@@ -441,10 +417,7 @@
                     <span class="footer-payment__label">We accept:</span>
                     <div class="footer-payment__icons">
                         <span title="Visa">Visa</span>
-                        <span title="Mastercard">MC</span>
                         <span title="PayPal">PayPal</span>
-                        <span title="Afterpay">Afterpay</span>
-                        <span title="POLi">POLi</span>
                     </div>
                 </div>
             </div>

@@ -28,6 +28,10 @@ const AccountPage = {
         const verified = await Auth.requireVerifiedEmail();
         if (!verified) return;
 
+        // Reveal account page content (hidden by CSS until auth confirmed)
+        const accountEl = document.querySelector('.account-page');
+        if (accountEl) accountEl.classList.add('auth-ready');
+
         // Load user info into sidebar (for all account pages)
         this.loadUserInfo();
 
@@ -780,13 +784,14 @@ const AccountPage = {
         // Sync profile to backend (fire-and-forget, non-blocking)
         this.syncProfileToBackend();
 
-        // Fetch orders and printers in parallel
+        // Fetch orders, printers, and favourites in parallel
         const [ordersResult] = await Promise.allSettled([
             API.getOrders({ limit: 5 }).catch(err => {
                 DebugLog.error('Failed to load dashboard orders:', err);
                 return { ok: false, data: [] };
             }),
-            this.loadDashboardPrinters()
+            this.loadDashboardPrinters(),
+            this.loadDashboardFavourites()
         ]);
 
         let orders = [];
@@ -823,7 +828,8 @@ const AccountPage = {
 
         try {
             // Use accountSync (creates profile if missing, fills empty fields from OAuth metadata)
-            await API.accountSync();
+            const turnstileToken = typeof Auth !== 'undefined' ? await Auth.getTurnstileToken() : null;
+            await API.accountSync(turnstileToken);
         } catch (error) {
             // Non-critical - auth.js onAuthStateChange also calls accountSync
         }
@@ -1029,6 +1035,141 @@ const AccountPage = {
             skeleton.hidden = true;
             if (empty) empty.hidden = false;
         }
+    },
+
+    /**
+     * Populate My Favourites grid on dashboard
+     */
+    async loadDashboardFavourites() {
+        const skeleton = document.getElementById('favourites-skeleton');
+        const grid = document.getElementById('dash-favourites-grid');
+        const empty = document.getElementById('dash-favourites-empty');
+
+        if (!skeleton) return;
+
+        try {
+            // Wait for Favourites to finish loading if it's initialized
+            if (typeof Favourites !== 'undefined') {
+                if (Favourites.isLoading) {
+                    await new Promise(resolve => {
+                        const check = setInterval(() => {
+                            if (!Favourites.isLoading) { clearInterval(check); resolve(); }
+                        }, 50);
+                        setTimeout(() => { clearInterval(check); resolve(); }, 3000);
+                    });
+                }
+
+                const items = Favourites.items || [];
+
+                if (items.length > 0) {
+                    if (grid) {
+                        grid.innerHTML = items.slice(0, 4).map(item => this.renderDashFavouriteCard(item)).join('');
+                        grid.hidden = false;
+
+                        // Bind image error fallbacks
+                        grid.querySelectorAll('img[data-fallback]').forEach(img => {
+                            img.addEventListener('error', function() {
+                                if (this.dataset.fallback === 'color-block') {
+                                    this.style.display = 'none';
+                                    const sibling = this.nextElementSibling;
+                                    if (sibling) sibling.style.display = 'flex';
+                                } else if (this.dataset.fallback === 'placeholder') {
+                                    this.removeAttribute('data-fallback');
+                                    this.src = '/assets/images/placeholder-product.svg';
+                                }
+                            }, { once: true });
+                        });
+
+                        // Bind add-to-cart buttons
+                        grid.querySelectorAll('.dash-fav-card__cart-btn').forEach(btn => {
+                            btn.addEventListener('click', async (e) => {
+                                e.preventDefault();
+                                if (btn.disabled || typeof Cart === 'undefined') return;
+
+                                await Cart.addItem({
+                                    id: btn.dataset.productId,
+                                    sku: btn.dataset.productSku,
+                                    name: btn.dataset.productName,
+                                    price: parseFloat(btn.dataset.productPrice),
+                                    image: btn.dataset.productImage,
+                                    brand: btn.dataset.productBrand
+                                });
+
+                                btn.textContent = 'Added!';
+                                btn.classList.add('btn--success');
+                                setTimeout(() => {
+                                    btn.textContent = 'Add to Cart';
+                                    btn.classList.remove('btn--success');
+                                }, 1500);
+                            });
+                        });
+                    }
+                    skeleton.hidden = true;
+                } else {
+                    skeleton.hidden = true;
+                    if (empty) empty.hidden = false;
+                }
+            } else {
+                skeleton.hidden = true;
+                if (empty) empty.hidden = false;
+            }
+        } catch (error) {
+            DebugLog.error('Failed to load favourites:', error);
+            skeleton.hidden = true;
+            if (empty) empty.hidden = false;
+        }
+    },
+
+    /**
+     * Render a favourite card for the dashboard grid
+     */
+    renderDashFavouriteCard(item) {
+        const escapedName = Security.escapeHtml(item.name || '');
+        const escapedBrand = Security.escapeHtml(item.brand || '');
+        const price = typeof formatPrice === 'function' ? formatPrice(item.price) : '$' + (item.price || 0).toFixed(2);
+        const productLink = '/html/product/?sku=' + encodeURIComponent(item.sku || '');
+        const isCompatible = (item.name || '').toLowerCase().startsWith('compatible ');
+
+        // Image HTML
+        const color = item.color || (typeof ProductColors !== 'undefined' ? ProductColors.detectFromName(item.name) : null);
+        const colorStyle = color && typeof ProductColors !== 'undefined' ? ProductColors.getStyle(color) : null;
+        let imageHTML;
+        if (item.image) {
+            if (colorStyle) {
+                imageHTML = `<img src="${Security.escapeAttr(item.image)}" alt="${Security.escapeAttr(item.name)}" data-fallback="color-block">
+                    <div style="${colorStyle} width:100%; height:100%; border-radius:4px; display:none;"></div>`;
+            } else {
+                imageHTML = `<img src="${Security.escapeAttr(item.image)}" alt="${Security.escapeAttr(item.name)}" data-fallback="placeholder">`;
+            }
+        } else if (colorStyle) {
+            imageHTML = `<div style="${colorStyle} width:100%; height:100%; border-radius:4px;"></div>`;
+        } else {
+            imageHTML = `<img src="/assets/images/placeholder-product.svg" alt="${Security.escapeAttr(item.name)}">`;
+        }
+
+        return `
+            <div class="dash-fav-card">
+                <a href="${Security.escapeAttr(productLink)}" class="dash-fav-card__link">
+                    <div class="dash-fav-card__image">${imageHTML}</div>
+                    <div class="dash-fav-card__info">
+                        <span class="source-badge source-badge--${isCompatible ? 'compatible' : 'genuine'}">${isCompatible ? 'COMPATIBLE' : 'GENUINE'}</span>
+                        <span class="dash-fav-card__name">${escapedName}</span>
+                        ${escapedBrand ? `<span class="dash-fav-card__brand">${escapedBrand}</span>` : ''}
+                        <span class="dash-fav-card__price">${price}</span>
+                    </div>
+                </a>
+                <button type="button" class="btn btn--primary btn--sm dash-fav-card__cart-btn"
+                    data-product-id="${Security.escapeAttr(item.id)}"
+                    data-product-sku="${Security.escapeAttr(item.sku || '')}"
+                    data-product-name="${Security.escapeAttr(item.name || '')}"
+                    data-product-price="${Security.escapeAttr(item.price || 0)}"
+                    data-product-image="${Security.escapeAttr(item.image || '')}"
+                    data-product-brand="${Security.escapeAttr(item.brand || '')}"
+                    ${item.in_stock === false ? 'disabled' : ''}>
+                    ${item.in_stock === false ? 'Out of Stock' : 'Add to Cart'}
+                </button>
+            </div>
+        `;
     },
 
     /**

@@ -302,10 +302,12 @@ const Cart = {
             } finally {
                 // IMPORTANT: Only set loading to false AFTER all server operations complete
                 this.loading = false;
+                this.updateUI();
             }
         } else {
             this.serverSummary = null;
             this.loading = false;
+            this.updateUI();
         }
     },
 
@@ -631,8 +633,10 @@ const Cart = {
                 const selector = increaseBtn.closest('.quantity-selector');
                 const input = selector.querySelector('.quantity-selector__input');
                 const itemId = selector.dataset.itemKey || selector.dataset.itemId;
+                const item = this.items.find(i => i.key === itemId || i.id === itemId);
+                const maxQty = (item && item.stockQuantity > 0) ? item.stockQuantity : 100;
                 const newValue = parseInt(input.value) + 1;
-                if (newValue <= 100) {
+                if (newValue <= maxQty) {
                     input.value = newValue;
                     this._debouncedQuantityUpdate(itemId, newValue);
                 }
@@ -669,32 +673,6 @@ const Cart = {
                 }
             }
 
-            // Apply coupon button
-            if (e.target.matches('.coupon-form__btn')) {
-                const input = document.getElementById('coupon-code');
-                if (input) {
-                    const result = await this.applyCoupon(input.value);
-                    if (result.ok) {
-                        if (typeof showToast === 'function') {
-                            showToast(result.message, 'success');
-                        }
-                    } else {
-                        if (typeof showToast === 'function') {
-                            showToast(result.message, 'error');
-                        } else {
-                            alert(result.message);
-                        }
-                    }
-                }
-            }
-
-            // Remove coupon button
-            if (e.target.matches('.coupon-remove-btn')) {
-                await this.removeCoupon();
-                if (typeof showToast === 'function') {
-                    showToast('Coupon removed', 'info');
-                }
-            }
         });
 
         // Quantity input change (manual typing)
@@ -702,6 +680,8 @@ const Cart = {
             if (e.target.matches('.quantity-selector__input')) {
                 const selector = e.target.closest('.quantity-selector');
                 const itemId = selector.dataset.itemKey || selector.dataset.itemId;
+                const item = this.items.find(i => i.key === itemId || i.id === itemId);
+                const maxQty = (item && item.stockQuantity > 0) ? item.stockQuantity : 100;
                 let newValue = parseInt(e.target.value);
 
                 // Clamp to valid range
@@ -709,9 +689,12 @@ const Cart = {
                     newValue = 1;
                     e.target.value = 1;
                 }
-                if (newValue > 100) {
-                    newValue = 100;
-                    e.target.value = 100;
+                if (newValue > maxQty) {
+                    newValue = maxQty;
+                    e.target.value = maxQty;
+                    if (typeof showToast === 'function') {
+                        showToast(`Only ${maxQty} in stock`, 'error');
+                    }
                 }
 
                 this._debouncedQuantityUpdate(itemId, newValue);
@@ -731,7 +714,8 @@ const Cart = {
         const item = this.items.find(function(i) { return i.key === itemId || i.id === itemId; });
         if (!item) return;
 
-        const clampedQty = Math.min(quantity, 99);
+        const stockMax = (item.stockQuantity > 0) ? item.stockQuantity : 99;
+        const clampedQty = Math.min(quantity, stockMax);
         const oldQty = item.quantity;
         item.quantity = clampedQty;
         this.saveToLocalStorage();
@@ -796,10 +780,11 @@ const Cart = {
                             this._updateCartSummaryDOM();
                         }
                     } else if (response.available !== undefined) {
-                        // Stock limited — force to max available
-                        const freshItem = this.items.find(i => i.id === itemId);
+                        // Stock limited — snap to max available
+                        const freshItem = this.items.find(i => i.key === itemId || i.id === itemId);
                         if (freshItem) {
                             freshItem.quantity = response.available;
+                            freshItem.stockQuantity = response.available;
                             this.saveToLocalStorage();
                             this._updateCartItemDOM(itemId);
                             this._updateCartSummaryDOM();
@@ -811,7 +796,7 @@ const Cart = {
                         }
                         delete this._quantityQueued[itemId];
                         if (typeof showToast === 'function') {
-                            showToast(`Only ${response.available} available in stock`, 'error');
+                            showToast(`Only ${response.available} in stock`, 'error');
                         }
                     } else {
                         // Generic failure — reload from server for correct state
@@ -872,6 +857,14 @@ const Cart = {
             input.value = item.quantity;
         }
 
+        // Update input max and + button disabled state based on stock
+        const stockMax = (item.stockQuantity > 0) ? item.stockQuantity : 100;
+        if (input) input.max = stockMax;
+        const increaseBtn = cartItemEl.querySelector('.quantity-selector__btn--increase');
+        if (increaseBtn) {
+            increaseBtn.disabled = item.inStock === false || item.quantity >= stockMax;
+        }
+
         // Update line total
         const totalEl = cartItemEl.querySelector('.cart-item__total');
         if (totalEl) {
@@ -902,17 +895,6 @@ const Cart = {
 
         // Only update summary section if on cart page
         if (!document.querySelector('.cart-page')) return;
-
-        // Price warning
-        const priceWarning = document.getElementById('cart-price-warning');
-        if (priceWarning) {
-            if (this.isUsingEstimatedPrices()) {
-                priceWarning.hidden = false;
-                priceWarning.textContent = 'Prices shown are estimates. Final prices will be confirmed at checkout.';
-            } else {
-                priceWarning.hidden = true;
-            }
-        }
 
         const subtotal = this.getSubtotal();
         const discount = this.getDiscount();
@@ -1000,16 +982,29 @@ const Cart = {
             try {
                 const response = await API.addToCart(product.id, product.quantity || 1);
                 if (!response.ok) {
-                    // Server rejected - rollback
-                    this.items = previousItems;
-                    this.saveToLocalStorage();
-                    this.updateUI();
-
                     if (response.available !== undefined) {
+                        // Stock limited — snap to max available instead of full rollback
+                        const maxAdd = response.available - (response.current_in_cart || 0);
+                        if (maxAdd > 0) {
+                            // Partially add what's available
+                            const snappedItem = this.items.find(i => (i.key || Cart.cartItemKey(i)) === key);
+                            if (snappedItem) snappedItem.quantity = response.available;
+                            this.saveToLocalStorage();
+                            this.updateUI();
+                        } else {
+                            // Already at max — rollback
+                            this.items = previousItems;
+                            this.saveToLocalStorage();
+                            this.updateUI();
+                        }
                         if (typeof showToast === 'function') {
-                            showToast(`Only ${response.available} available in stock`, 'error');
+                            showToast(`Only ${response.available} in stock`, 'error');
                         }
                     } else {
+                        // Server rejected - rollback
+                        this.items = previousItems;
+                        this.saveToLocalStorage();
+                        this.updateUI();
                         if (typeof showToast === 'function') {
                             showToast(response.error || 'Failed to add item to cart', 'error');
                         }
@@ -1081,14 +1076,15 @@ const Cart = {
                     await this.loadFromServer();
                     this.updateUI();
                 } else if (response.available !== undefined) {
-                    // Insufficient stock - revert to max available
+                    // Insufficient stock - snap to max available
                     if (item) {
                         item.quantity = response.available;
+                        item.stockQuantity = response.available;
                         this.saveToLocalStorage();
                         this.updateUI();
                     }
                     if (typeof showToast === 'function') {
-                        showToast(`Only ${response.available} available in stock`, 'error');
+                        showToast(`Only ${response.available} in stock`, 'error');
                     }
                 } else {
                     // Generic failure - rollback
@@ -1298,71 +1294,6 @@ const Cart = {
     },
 
     /**
-     * Apply a coupon code - SERVER VALIDATION
-     */
-    async applyCoupon(code) {
-        const normalizedCode = (code || '').toUpperCase().trim();
-
-        if (!normalizedCode) {
-            return { ok: false, message: 'Please enter a coupon code' };
-        }
-
-        if (!this.isAuthenticated) {
-            return { ok: false, message: 'Please login to apply coupon codes' };
-        }
-
-        if (typeof API === 'undefined') {
-            return { ok: false, message: 'Unable to validate coupon' };
-        }
-
-        try {
-            const response = await API.applyCoupon(normalizedCode);
-            if (response.ok) {
-                this.appliedCoupon = response.data?.code || normalizedCode;
-                this.discountAmount = response.data?.discount_amount || 0;
-                await this.loadFromServer(); // Reload to get updated totals
-                this.updateUI();
-                return { ok: true, message: response.message || 'Coupon applied!' };
-            } else {
-                // Handle rate limiting with retry_after
-                if (response.code === 'RATE_LIMITED') {
-                    const retryAfter = response.retry_after;
-                    if (retryAfter && retryAfter > 60) {
-                        const mins = Math.ceil(retryAfter / 60);
-                        return { ok: false, message: `Too many attempts. Please try again in ${mins} minute${mins > 1 ? 's' : ''}.` };
-                    }
-                    return { ok: false, message: response.error || 'Too many attempts. Please try again later.' };
-                }
-                return { ok: false, message: response.error || 'Coupon could not be applied' };
-            }
-        } catch (error) {
-            DebugLog.error('Failed to apply coupon:', error);
-            return { ok: false, message: error.message || 'Failed to apply coupon' };
-        }
-    },
-
-    /**
-     * Remove applied coupon - SERVER
-     */
-    async removeCoupon() {
-        if (this.isAuthenticated && typeof API !== 'undefined') {
-            try {
-                await API.removeCoupon();
-                this.appliedCoupon = null;
-                this.discountAmount = 0;
-                await this.loadFromServer();
-                this.updateUI();
-            } catch (error) {
-                DebugLog.error('Failed to remove coupon:', error);
-            }
-        } else {
-            this.appliedCoupon = null;
-            this.discountAmount = 0;
-            this.updateUI();
-        }
-    },
-
-    /**
      * Get cart total - uses server summary when available
      * Returns estimate for display only when server unavailable
      * SECURITY: Never use this for payment - backend calculates final total
@@ -1464,6 +1395,9 @@ const Cart = {
 
                     const productLink = '/html/product/?sku=' + encodeURIComponent(item.sku || '');
 
+                    var stockMax = (item.stockQuantity > 0) ? item.stockQuantity : 100;
+                    var atStockLimit = item.quantity >= stockMax;
+
                     return '\
                     <article class="cart-item' + (isOutOfStock ? ' cart-item--out-of-stock' : '') + '" data-item-id="' + item.id + '" data-item-key="' + Security.escapeAttr(itemKey) + '">\
                         <div class="cart-item__image">\
@@ -1489,8 +1423,8 @@ const Cart = {
                                         <line x1="5" y1="12" x2="19" y2="12"></line>\
                                     </svg>\
                                 </button>\
-                                <input type="number" class="quantity-selector__input" value="' + item.quantity + '" min="1" max="100" aria-label="Quantity"' + (isOutOfStock ? ' disabled' : '') + '>\
-                                <button type="button" class="quantity-selector__btn quantity-selector__btn--increase" aria-label="Increase quantity"' + (isOutOfStock ? ' disabled' : '') + '>\
+                                <input type="number" class="quantity-selector__input" value="' + item.quantity + '" min="1" max="' + stockMax + '" aria-label="Quantity"' + (isOutOfStock ? ' disabled' : '') + '>\
+                                <button type="button" class="quantity-selector__btn quantity-selector__btn--increase" aria-label="Increase quantity"' + (isOutOfStock || atStockLimit ? ' disabled' : '') + '>\
                                     <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">\
                                         <line x1="12" y1="5" x2="12" y2="19"></line>\
                                         <line x1="5" y1="12" x2="19" y2="12"></line>\
@@ -1511,17 +1445,6 @@ const Cart = {
                 }).join('');
                 // Bind image error fallbacks (replaces inline onerror)
                 this.bindImageFallbacks(cartItems);
-            }
-
-            // Show warning if prices are estimates (not server-verified)
-            const priceWarning = document.getElementById('cart-price-warning');
-            if (priceWarning) {
-                if (this.isUsingEstimatedPrices()) {
-                    priceWarning.hidden = false;
-                    priceWarning.textContent = 'Prices shown are estimates. Final prices will be confirmed at checkout.';
-                } else {
-                    priceWarning.hidden = true;
-                }
             }
 
             const subtotal = this.getSubtotal();
@@ -1548,31 +1471,6 @@ const Cart = {
                     savingsEl.textContent = '-' + formatPrice(discount);
                 } else {
                     savingsRow.hidden = true;
-                }
-            }
-
-            // Coupon form - only show for authenticated users
-            const couponForm = document.querySelector('.coupon-form');
-            if (couponForm) {
-                if (this.appliedCoupon) {
-                    couponForm.innerHTML = `
-                        <div class="coupon-applied">
-                            <span class="coupon-applied__code">${Security.escapeHtml(this.appliedCoupon)}</span>
-                            <button type="button" class="coupon-remove-btn" aria-label="Remove coupon">&times;</button>
-                        </div>
-                    `;
-                } else if (!this.isAuthenticated) {
-                    couponForm.innerHTML = `
-                        <p class="coupon-login-message">Login to apply coupon codes</p>
-                    `;
-                } else {
-                    const couponInput = document.getElementById('coupon-code');
-                    if (!couponInput) {
-                        couponForm.innerHTML = `
-                            <input type="text" id="coupon-code" name="coupon" placeholder="Enter code" class="coupon-form__input">
-                            <button type="button" class="btn btn--secondary coupon-form__btn">Apply</button>
-                        `;
-                    }
                 }
             }
 

@@ -30,7 +30,7 @@
    ============================================== */
 
 .cart-page {
-    padding: var(--spacing-xs, 4px) 0 var(--spacing-lg, 24px);
+    padding: 0 0 var(--spacing-lg, 24px);
 }
 
 .cart-page__header {
@@ -87,11 +87,6 @@ section.cart-page .cart-summary__row--total {
     padding-top: var(--spacing-sm, 8px);
 }
 
-section.cart-page .cart-summary__coupon {
-    margin-bottom: var(--spacing-sm, 8px);
-    padding-bottom: var(--spacing-sm, 8px);
-}
-
 section.cart-page .cart-summary__shipping-message {
     padding: var(--spacing-xs, 4px) 0;
     font-size: var(--font-size-xs, 0.8125rem);
@@ -105,9 +100,6 @@ section.cart-page .cart-summary__actions {
     margin-top: var(--spacing-md, 16px);
 }
 
-section.cart-page .cart-summary__express {
-    margin-top: var(--spacing-md, 16px);
-}
 
 section.cart-page .cart-summary__trust {
     padding-top: var(--spacing-sm, 8px);
@@ -214,6 +206,40 @@ section.checkout-page .checkout-section__heading {
     margin-bottom: 6px;
 }
 
+/* Collapsed section styling */
+.checkout-section.is-collapsed {
+    padding-bottom: 8px;
+}
+
+.checkout-section.is-collapsed .checkout-section__heading {
+    margin-bottom: 2px;
+    cursor: pointer;
+}
+
+.checkout-section__summary {
+    font-size: var(--font-size-sm, 0.875rem);
+    color: var(--steel-500, #64748b);
+    line-height: 1.4;
+    padding: 0 2px;
+}
+
+.checkout-section__edit-btn {
+    float: right;
+    background: none;
+    border: none;
+    color: var(--cyan-primary, #267FB5);
+    font-size: var(--font-size-sm, 0.875rem);
+    font-weight: 500;
+    cursor: pointer;
+    font-family: inherit;
+    padding: 0 4px;
+    margin-left: auto;
+}
+
+.checkout-section__edit-btn:hover {
+    text-decoration: underline;
+}
+
 section.checkout-page .form-row {
     margin-bottom: 6px;
 }
@@ -297,12 +323,28 @@ section.checkout-page .checkout-summary__edit {
 
 /* Trust signals removed from checkout summary */
 
-section.checkout-page .checkout-summary__coupon {
-    padding: var(--spacing-sm, 8px) 0;
-}
-
 section.checkout-page .checkout-summary__shipping-info {
     padding: var(--spacing-xs, 4px) 0;
+}
+
+/* Free shipping upsell — make it pop */
+.checkout-summary__spend-more {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: linear-gradient(135deg, #e0f4ff 0%, #f0f9ff 100%);
+    border: 1px solid var(--cyan-primary, #267FB5);
+    border-radius: var(--radius-md, 8px);
+    padding: 10px 14px;
+    margin-bottom: var(--spacing-sm, 8px);
+    font-size: var(--font-size-sm, 0.875rem);
+    font-weight: 600;
+    color: #1a5a8a;
+}
+
+.checkout-summary__spend-more svg {
+    flex-shrink: 0;
+    color: var(--cyan-primary, #267FB5);
 }
 
 /* Tighter submit area */

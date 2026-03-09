@@ -154,6 +154,12 @@ const API = {
                 if (errorCode === 'EMAIL_NOT_VERIFIED') {
                     return { ok: false, error: errorMsg, code: 'EMAIL_NOT_VERIFIED' };
                 }
+                if (errorCode === 'DISPOSABLE_EMAIL') {
+                    return { ok: false, error: errorMsg, code: 'DISPOSABLE_EMAIL' };
+                }
+                if (errorCode === 'ACCOUNT_FLAGGED') {
+                    return { ok: false, error: errorMsg, code: 'ACCOUNT_FLAGGED' };
+                }
 
                 // Return 409 conflicts with code so callers can handle them
                 if (response.status === 409 && errorCode) {
@@ -168,6 +174,11 @@ const API = {
                 // Return validation errors with details so callers can show per-field messages
                 if (errorCode === 'VALIDATION_FAILED') {
                     return { ok: false, error: errorMsg, code: errorCode, details: errorDetails };
+                }
+
+                // Return stock-limit errors so cart can snap quantity to available
+                if (response.status === 400 && data.available !== undefined) {
+                    return { ok: false, error: errorMsg, available: data.available, current_in_cart: data.current_in_cart };
                 }
 
                 // Return rate limit errors with retry_after so callers can handle them
@@ -723,8 +734,8 @@ const API = {
     },
 
     /**
-     * Get personalized shipping options for cart
-     * @param {object} data - Cart data (cart_total, item_count, postal_code)
+     * Get shipping options for cart (weight-based rates from backend)
+     * @param {object} data - { cart_total, items: [{product_id, quantity}], region, delivery_type }
      */
     async getShippingOptions(data) {
         return this.post('/api/shipping/options', data);
@@ -1093,8 +1104,10 @@ const API = {
      * Sync account after login — creates/updates user profile.
      * CRITICAL: Must be called immediately after every successful login.
      */
-    async accountSync() {
-        return this.post('/api/account/sync');
+    async accountSync(turnstileToken) {
+        const body = {};
+        if (turnstileToken) body.turnstile_token = turnstileToken;
+        return this.post('/api/account/sync', body);
     },
 
     /**

@@ -52,7 +52,14 @@ const Auth = {
                     // CRITICAL: Sync account profile first (creates profile if first login)
                     if (typeof API !== 'undefined') {
                         try {
-                            await API.accountSync();
+                            const turnstileToken = await this.getTurnstileToken();
+                            const syncResult = await API.accountSync(turnstileToken);
+                            if (syncResult && !syncResult.ok && syncResult.code === 'DISPOSABLE_EMAIL') {
+                                if (typeof showToast === 'function') {
+                                    showToast('This email provider is not supported. Please use a permanent email address.', 'error', 0);
+                                }
+                                return; // Stop post-login flow
+                            }
                         } catch (e) {
                             DebugLog.warn('accountSync failed:', e.message);
                             if (typeof showToast === 'function') {
@@ -115,6 +122,39 @@ const Auth = {
             if (this._resolveReady) this._resolveReady();
             return false;
         }
+    },
+
+    /**
+     * Get a Turnstile token for bot verification.
+     * Dynamically loads the Turnstile script to avoid editing all HTML files.
+     * Returns null if Turnstile is not configured or fails (non-blocking).
+     */
+    async getTurnstileToken() {
+        const siteKey = typeof Config !== 'undefined' && Config.TURNSTILE_SITE_KEY;
+        if (!siteKey) return null;
+
+        // Dynamically load Turnstile script if not already present
+        if (typeof turnstile === 'undefined') {
+            await new Promise((resolve) => {
+                const existing = document.querySelector('script[src*="challenges.cloudflare.com/turnstile"]');
+                if (existing) { existing.addEventListener('load', resolve); return; }
+                const s = document.createElement('script');
+                s.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit';
+                s.onload = resolve;
+                s.onerror = () => resolve(); // Don't block login if script fails
+                document.head.appendChild(s);
+            });
+        }
+
+        if (typeof turnstile === 'undefined') return null;
+
+        return new Promise((resolve) => {
+            turnstile.execute(siteKey, {
+                action: 'account-sync',
+                callback: (token) => resolve(token),
+                'error-callback': () => resolve(null)
+            });
+        });
     },
 
     /**

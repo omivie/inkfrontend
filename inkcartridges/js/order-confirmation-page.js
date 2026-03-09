@@ -162,9 +162,7 @@
             if (paymentEl && paymentMethod) {
                 const paymentLabels = {
                     'card': 'Credit/Debit Card',
-                    'paypal': 'PayPal',
-                    'afterpay': 'Afterpay',
-                    'poli': 'POLi Bank Transfer'
+                    'paypal': 'PayPal'
                 };
                 paymentEl.textContent = paymentLabels[paymentMethod] || paymentMethod;
             }

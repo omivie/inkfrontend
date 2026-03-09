@@ -43,6 +43,9 @@
             // Restore any saved checkout state (after auth prefill, so auth data takes priority)
             this.restoreCheckoutState();
 
+            // Setup auto-collapse for completed sections
+            this.setupAutoCollapse();
+
             // Check email verification status
             await this.checkEmailVerification();
 
@@ -286,8 +289,8 @@
         // NOTE: Final shipping cost is validated server-side during checkout
         // These are estimates only - backend has final authority
         async updateShippingCost() {
-            // Calculate shipping via Shipping module
-            this.setFallbackShipping();
+            // Fetch shipping from backend API with full item weights
+            await this.fetchShippingFromAPI();
 
             this.totals.total = this.totals.subtotal - this.totals.discount + this.totals.shipping;
             this.updateTotalsDisplay();
@@ -295,16 +298,51 @@
         },
 
         /**
-         * DISPLAY ONLY - Shipping estimate for UI
+         * Fetch shipping rates from backend API using full items array.
+         * Falls back to client-side Shipping.calculate() if the API call fails.
          * SECURITY: These values are NEVER used for payment.
-         * Backend calculates actual shipping in API.createOrder()
-         * The PaymentIntent amount is set server-side.
+         * Backend recalculates actual shipping in API.createOrder().
          */
-        setFallbackShipping() {
-            // DISPLAY ONLY - backend has final authority on shipping cost
+        async fetchShippingFromAPI() {
             const region = document.getElementById('region')?.value || '';
+            const deliveryType = document.querySelector('input[name="delivery_type"]:checked')?.value || 'urban';
+
+            // Try backend API for accurate weight-based rates
+            if (typeof API !== 'undefined' && this.cartItems.length > 0) {
+                try {
+                    const payload = {
+                        cart_total: this.totals.subtotal,
+                        items: this.cartItems.map(item => ({
+                            product_id: item.id,
+                            quantity: item.quantity
+                        })),
+                        region: region,
+                        delivery_type: deliveryType
+                    };
+                    const response = await API.getShippingOptions(payload);
+                    if (response.ok && response.data) {
+                        const option = response.data.selected || response.data.options?.[0];
+                        if (option && option.fee != null) {
+                            this.totals.shipping = option.fee;
+                            this._shippingResult = {
+                                fee: option.fee,
+                                tier: option.tier || 'standard',
+                                zone: option.zone || '',
+                                zoneLabel: option.zone_label || '',
+                                freeShipping: option.fee === 0,
+                                deliveryType: deliveryType,
+                                reason: option.reason || ''
+                            };
+                            return;
+                        }
+                    }
+                } catch (e) {
+                    DebugLog.warn('Shipping API failed, using client-side fallback:', e.message);
+                }
+            }
+
+            // Fallback: client-side estimate (uses light weight tier)
             if (typeof Shipping !== 'undefined') {
-                const deliveryType = document.querySelector('input[name="delivery_type"]:checked')?.value || 'urban';
                 const result = Shipping.calculate(this.cartItems, this.totals.subtotal, region, deliveryType);
                 this.totals.shipping = result.fee;
                 this._shippingResult = result;
@@ -649,6 +687,192 @@
             this.setupCouponHandler();
         },
 
+        // Auto-collapse sections once all required fields are filled
+        setupAutoCollapse() {
+            const form = document.getElementById('checkout-form');
+            if (!form) return;
+
+            const sections = form.querySelectorAll('fieldset.checkout-section:not(.checkout-section--notes)');
+            this._collapsibleSections = [];
+
+            sections.forEach(section => {
+                const heading = section.querySelector('.checkout-section__heading');
+                if (!heading) return;
+
+                // Create summary element (shown when collapsed)
+                const summary = document.createElement('div');
+                summary.className = 'checkout-section__summary';
+                summary.hidden = true;
+                heading.after(summary);
+
+                // Create edit button
+                const editBtn = document.createElement('button');
+                editBtn.type = 'button';
+                editBtn.className = 'checkout-section__edit-btn';
+                editBtn.textContent = 'Edit';
+                editBtn.hidden = true;
+                heading.appendChild(editBtn);
+
+                // Wrap all content after heading+summary for collapse
+                const content = document.createElement('div');
+                content.className = 'checkout-section__body';
+                const children = Array.from(section.children).filter(
+                    el => el !== heading && el !== summary
+                );
+                children.forEach(child => content.appendChild(child));
+                section.appendChild(content);
+
+                const sectionData = { section, heading, summary, editBtn, content, collapsed: false };
+                this._collapsibleSections.push(sectionData);
+
+                // Click heading or edit button to expand
+                const expand = () => {
+                    if (sectionData.collapsed) {
+                        this.expandSection(sectionData);
+                    }
+                };
+                heading.addEventListener('click', expand);
+                editBtn.addEventListener('click', (e) => { e.stopPropagation(); expand(); });
+            });
+
+            // Listen for input/change to check completeness
+            const checkCollapse = (e) => {
+                const field = e.target;
+                const section = field.closest('fieldset.checkout-section');
+                if (!section) return;
+                const data = this._collapsibleSections.find(s => s.section === section);
+                if (data && !data.collapsed && this.isSectionComplete(data)) {
+                    // Small delay so user sees their last keystroke
+                    setTimeout(() => {
+                        if (this.isSectionComplete(data)) {
+                            this.collapseSection(data);
+                        }
+                    }, 400);
+                }
+            };
+
+            form.addEventListener('input', checkCollapse);
+            form.addEventListener('change', checkCollapse);
+
+            // Check if any sections are already complete (e.g. prefilled from auth)
+            setTimeout(() => {
+                this._collapsibleSections.forEach(data => {
+                    if (this.isSectionComplete(data)) {
+                        this.collapseSection(data);
+                    }
+                });
+            }, 300);
+        },
+
+        // Check if all required fields in a section are filled
+        isSectionComplete(data) {
+            const { section, content } = data;
+
+            // Billing: complete if "same as shipping" is checked
+            const sameAs = section.querySelector('#same-as-shipping');
+            if (sameAs && sameAs.checked) return true;
+
+            const requiredInputs = content.querySelectorAll('input[required], select[required], textarea[required]');
+
+            for (const field of requiredInputs) {
+                // Skip hidden fields (e.g. billing when same-as-shipping)
+                if (field.offsetParent === null) continue;
+
+                if (field.type === 'radio') {
+                    const name = field.name;
+                    const checked = content.querySelector(`input[name="${name}"]:checked`);
+                    if (!checked) return false;
+                } else if (!field.value.trim()) {
+                    return false;
+                }
+            }
+
+            // Must have at least one required field to be collapsible
+            const visibleRequired = Array.from(requiredInputs).filter(f => f.offsetParent !== null);
+            return visibleRequired.length > 0;
+        },
+
+        // Get summary text for a collapsed section
+        getSectionSummary(data) {
+            const { section } = data;
+            const esc = typeof Security !== 'undefined' ? Security.escapeHtml : (s) => s;
+
+            // Contact Information
+            const email = section.querySelector('#email');
+            if (email) {
+                const phone = section.querySelector('#phone');
+                const parts = [];
+                if (email.value) parts.push(esc(email.value));
+                if (phone && phone.value) parts.push(esc(phone.value));
+                return parts.join(' · ');
+            }
+
+            // Shipping Address
+            const firstName = section.querySelector('#first-name');
+            if (firstName) {
+                const lastName = section.querySelector('#last-name')?.value || '';
+                const addr = section.querySelector('#address1')?.value || '';
+                const city = section.querySelector('#city')?.value || '';
+                const region = section.querySelector('#region');
+                const regionText = region ? region.options[region.selectedIndex]?.text || '' : '';
+                const postcode = section.querySelector('#postcode')?.value || '';
+                const deliveryType = section.querySelector('input[name="delivery_type"]:checked');
+                const deliveryLabel = deliveryType ? (deliveryType.value === 'rural' ? 'Rural' : 'Urban') : '';
+                const addressLine = `${firstName.value} ${lastName}, ${addr}, ${city} ${regionText} ${postcode}`.replace(/\s+/g, ' ').trim();
+                return esc(deliveryLabel ? `${addressLine} · ${deliveryLabel}` : addressLine);
+            }
+
+            // Billing Address
+            const sameAs = section.querySelector('#same-as-shipping');
+            if (sameAs) {
+                if (sameAs.checked) return 'Same as shipping address';
+                const bAddr = section.querySelector('#billing-address1')?.value || '';
+                const bCity = section.querySelector('#billing-city')?.value || '';
+                return esc(`${bAddr}, ${bCity}`.trim());
+            }
+
+            // Order Notes
+            const notes = section.querySelector('#order-notes');
+            if (notes) {
+                if (!notes.value.trim()) return 'None';
+                const text = notes.value.trim();
+                return esc(text.length > 60 ? text.substring(0, 60) + '…' : text);
+            }
+
+            return '';
+        },
+
+        collapseSection(data) {
+            if (data.collapsed) return;
+            data.collapsed = true;
+            data.section.classList.add('is-collapsed');
+            data.content.hidden = true;
+            data.summary.hidden = false;
+            data.summary.textContent = this.getSectionSummary(data);
+            data.editBtn.hidden = false;
+            data.heading.style.cursor = 'pointer';
+        },
+
+        expandSection(data) {
+            data.collapsed = false;
+            data.section.classList.remove('is-collapsed');
+            data.content.hidden = false;
+            data.summary.hidden = true;
+            data.editBtn.hidden = true;
+            data.heading.style.cursor = '';
+
+            // Billing: uncheck "same as shipping" and show billing fields
+            const sameAs = data.section.querySelector('#same-as-shipping');
+            if (sameAs && sameAs.checked) {
+                sameAs.checked = false;
+                sameAs.dispatchEvent(new Event('change', { bubbles: true }));
+            }
+
+            // Focus first input
+            const firstInput = data.content.querySelector('input:not([type="hidden"]):not([type="checkbox"]):not([type="radio"]), select, textarea');
+            if (firstInput) firstInput.focus({ preventScroll: true });
+        },
+
         // Setup coupon code handler
         setupCouponHandler() {
             const couponInput = document.querySelector('.coupon-form__input');
@@ -692,6 +916,11 @@
                         couponBtn.style.background = '#10b981';
 
                         alert(response.message || `Coupon applied! You saved $${this.totals.discount.toFixed(2)}`);
+                    } else if (response.code === 'EMAIL_NOT_VERIFIED') {
+                        alert('Please verify your email address before applying coupons. Check your inbox for a verification link.');
+                        couponBtn.textContent = 'Apply';
+                        couponBtn.disabled = false;
+                        return;
                     } else {
                         throw new Error(response.error || 'Invalid coupon code');
                     }

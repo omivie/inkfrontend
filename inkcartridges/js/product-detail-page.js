@@ -667,13 +667,28 @@
         },
 
         setupEventListeners(info) {
-            // Quantity controls
+            // Quantity controls — cap at stock_quantity if available
             const qtyInput = document.getElementById('qty-input');
+            const maxQty = (info.stock_quantity > 0) ? info.stock_quantity : 99;
+            qtyInput.max = maxQty;
+            const qtyIncreaseBtn = document.getElementById('qty-increase');
             document.getElementById('qty-decrease').addEventListener('click', () => {
                 if (qtyInput.value > 1) qtyInput.value = parseInt(qtyInput.value) - 1;
+                qtyIncreaseBtn.disabled = false;
             });
-            document.getElementById('qty-increase').addEventListener('click', () => {
-                if (qtyInput.value < 99) qtyInput.value = parseInt(qtyInput.value) + 1;
+            qtyIncreaseBtn.addEventListener('click', () => {
+                const next = parseInt(qtyInput.value) + 1;
+                if (next <= maxQty) {
+                    qtyInput.value = next;
+                    if (next >= maxQty) qtyIncreaseBtn.disabled = true;
+                }
+            });
+            qtyInput.addEventListener('change', () => {
+                let val = parseInt(qtyInput.value);
+                if (isNaN(val) || val < 1) val = 1;
+                if (val > maxQty) val = maxQty;
+                qtyInput.value = val;
+                qtyIncreaseBtn.disabled = val >= maxQty;
             });
 
             // Add to cart using Cart.addItem (server-first for authenticated users)

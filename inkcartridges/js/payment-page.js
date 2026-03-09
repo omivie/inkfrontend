@@ -455,6 +455,13 @@
 
                             if (!orderResponse.ok) {
                                 ev.complete('fail');
+                                const errorCode = orderResponse.error?.code || orderResponse.code || '';
+                                if (errorCode === 'ACCOUNT_FLAGGED') {
+                                    if (typeof showToast === 'function') {
+                                        showToast('Your account has been flagged for review. Please contact support.', 'error', 0);
+                                    }
+                                    return;
+                                }
                                 const errorMsg = orderResponse.error?.message || orderResponse.error || 'Failed to create order';
                                 this.showError(errorMsg);
                                 return;
@@ -683,6 +690,11 @@
                         throw new Error('This coupon has reached its usage limit. Please remove it and try again.');
                     } else if (errorCode === 'ORDER_TOTAL_TOO_LOW') {
                         throw new Error('Your order total is below the minimum. Please add more items.');
+                    } else if (errorCode === 'ACCOUNT_FLAGGED') {
+                        if (typeof showToast === 'function') {
+                            showToast('Your account has been flagged for review. Please contact support.', 'error', 0);
+                        }
+                        return; // Don't throw — just show toast
                     }
                     throw new Error(errorMsg);
                 }
