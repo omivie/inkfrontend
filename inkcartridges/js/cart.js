@@ -147,7 +147,7 @@ const Cart = {
                     // Just update auth flag, don't re-merge
                     this.isAuthenticated = true;
                 } else if (event === 'SIGNED_OUT') {
-                    // User logged out - clear cart state
+                    // User logged out - clear cart state and localStorage cache
                     this.items = [];
                     this.appliedCoupon = null;
                     this.discountAmount = 0;
@@ -155,6 +155,7 @@ const Cart = {
                     this.isAuthenticated = false;
                     this.validationState = 'unknown';
                     this.validationErrors = [];
+                    localStorage.removeItem(this.STORAGE_KEY);
                     this.updateUI();
                 }
             });
@@ -349,18 +350,13 @@ const Cart = {
     },
 
     /**
-     * Save cart to localStorage (only for guest users)
-     * Authenticated users use server as source of truth
+     * Save cart to localStorage as a cache for ALL users.
+     * Server remains source of truth for authenticated users,
+     * but localStorage acts as a fallback for slow/failed server calls.
      */
     saveToLocalStorage() {
-        // For authenticated users, server is source of truth (don't save to localStorage)
-        // For guest users, save everything
         try {
-            if (this.isAuthenticated) {
-                localStorage.removeItem(this.STORAGE_KEY);
-            } else {
-                localStorage.setItem(this.STORAGE_KEY, JSON.stringify(this.items));
-            }
+            localStorage.setItem(this.STORAGE_KEY, JSON.stringify(this.items));
         } catch (e) {
             DebugLog.error('Failed to save cart:', e);
         }
@@ -421,7 +417,6 @@ const Cart = {
                 const stored = localStorage.getItem(this.STORAGE_KEY);
                 if (stored) {
                     legacyItems = JSON.parse(stored);
-                    localStorage.removeItem(this.STORAGE_KEY);
                 }
             } catch (e) {
                 DebugLog.error('Failed to parse legacy cart:', e);
@@ -454,8 +449,9 @@ const Cart = {
                 }
             }
 
-            // Load the merged cart from server
+            // Load the merged cart from server and cache locally
             await this.loadFromServer();
+            this.saveToLocalStorage();
             this.updateUI();
         } finally {
             this._mergeInProgress = false;
@@ -1024,12 +1020,10 @@ const Cart = {
                 this.updateUI();
             } catch (error) {
                 DebugLog.error('Failed to sync cart to server:', error);
-                // Rollback on network error
-                this.items = previousItems;
-                this.saveToLocalStorage();
-                this.updateUI();
+                // Keep item locally — it's saved in localStorage for resilience.
+                // Don't rollback; the server will get the item on next successful sync.
                 if (typeof showToast === 'function') {
-                    showToast('Network error. Could not add item.', 'error');
+                    showToast('Item saved locally. It will sync when connection is restored.', 'info');
                 }
                 return;
             }
