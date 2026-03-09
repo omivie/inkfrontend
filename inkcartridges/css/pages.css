@@ -5376,14 +5376,18 @@
     margin-bottom: 0.5rem;
 }
 
-/* Brand grid: 3 columns in the modal */
+/* Brand buttons in a single horizontal row */
 .printer-modal__container .ink-finder__brands {
-    grid-template-columns: repeat(3, 1fr);
-    gap: 0.75rem;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
 }
 
 .printer-modal__container .ink-finder__brand-btn {
-    padding: 0.875rem 1rem;
+    padding: 0.5rem 0.75rem;
+    height: 44px;
+    min-width: 0;
+    flex: 0 0 auto;
 }
 
 /* Custom select takes full width in modal */
@@ -5416,7 +5420,7 @@
         grid-template-columns: 1fr !important;
     }
     .printer-modal__container .ink-finder__brands {
-        grid-template-columns: repeat(2, 1fr);
+        gap: 0.375rem;
     }
 }
 
