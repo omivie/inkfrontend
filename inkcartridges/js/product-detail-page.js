@@ -306,6 +306,11 @@
                 return;
             }
 
+            // Wait for auth so the Bearer token is available for admin-gated products
+            if (typeof Auth !== 'undefined' && Auth.readyPromise) {
+                await Auth.readyPromise;
+            }
+
             try {
                 // Always use getProduct — it handles ribbons too (type=ribbon products)
                 const response = await API.getProduct(sku);

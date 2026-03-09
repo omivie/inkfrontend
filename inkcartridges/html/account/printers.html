@@ -255,117 +255,6 @@
                         </div>
                         <p class="account-content__intro">Save your printers for quick ink and toner reorders.</p>
 
-                        <!-- Add Printer Modal -->
-                        <div class="printer-modal" id="add-printer-section" hidden>
-                            <div class="printer-modal__backdrop"></div>
-                            <div class="printer-modal__container">
-                                <button type="button" class="printer-modal__close" id="printer-modal-close-btn" aria-label="Close">
-                                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-                                </button>
-                                <div class="ink-finder ink-finder--account">
-                                    <div class="ink-finder__wrapper">
-                                        <div class="ink-finder__header">
-                                            <h2 class="ink-finder__title" id="printer-section-title">Save a Printer</h2>
-                                            <p class="ink-finder__subtitle">Select your printer brand, then choose the series and model</p>
-                                        </div>
-
-                                <form id="printer-form">
-                                    <div class="form-alert form-alert--error" id="printer-form-error" hidden></div>
-
-                                    <!-- Hidden fields -->
-                                    <input type="hidden" id="printer-printer-id" name="printer_id">
-                                    <input type="hidden" id="printer-model" name="printer_model">
-                                    <input type="hidden" id="printer-brand" name="printer_brand">
-                                    <input type="hidden" id="printer-slug" name="printer_slug">
-                                    <input type="hidden" id="printer-full-name" name="printer_full_name">
-
-                                    <div class="ink-finder__steps" id="printer-finder-steps">
-                                        <!-- Step 1: Brand -->
-                                        <div class="ink-finder__step ink-finder__step--active" data-step="1">
-                                            <div class="ink-finder__step-header">
-                                                <span class="ink-finder__step-number">1</span>
-                                                <span class="ink-finder__step-label">Select Brand</span>
-                                            </div>
-                                            <div class="ink-finder__brands" id="printer-brands">
-                                                <button class="ink-finder__brand-btn" data-brand="brother" aria-label="Brother" type="button">
-                                                    <img src="/assets/brands/brother.png" alt="Brother" class="ink-finder__brand-img ink-finder__brand-img--brother">
-                                                </button>
-                                                <button class="ink-finder__brand-btn" data-brand="canon" aria-label="Canon" type="button">
-                                                    <img src="/assets/brands/canon.png" alt="Canon" class="ink-finder__brand-img ink-finder__brand-img--canon">
-                                                </button>
-                                                <button class="ink-finder__brand-btn" data-brand="epson" aria-label="Epson" type="button">
-                                                    <img src="/assets/brands/epson.png" alt="Epson" class="ink-finder__brand-img ink-finder__brand-img--epson">
-                                                </button>
-                                                <button class="ink-finder__brand-btn" data-brand="hp" aria-label="HP" type="button">
-                                                    <img src="/assets/brands/hp.png" alt="HP" class="ink-finder__brand-img ink-finder__brand-img--hp">
-                                                </button>
-                                                <button class="ink-finder__brand-btn" data-brand="samsung" aria-label="Samsung" type="button">
-                                                    <img src="/assets/brands/samsung.svg" alt="Samsung" class="ink-finder__brand-img ink-finder__brand-img--samsung">
-                                                </button>
-                                                <button class="ink-finder__brand-btn" data-brand="lexmark" aria-label="Lexmark" type="button">
-                                                    <img src="/assets/brands/lexmark.png" alt="Lexmark" class="ink-finder__brand-img ink-finder__brand-img--lexmark">
-                                                </button>
-                                                <button class="ink-finder__brand-btn" data-brand="oki" aria-label="OKI" type="button">
-                                                    <img src="/assets/brands/oki.svg" alt="OKI" class="ink-finder__brand-img ink-finder__brand-img--oki">
-                                                </button>
-                                                <button class="ink-finder__brand-btn" data-brand="fuji-xerox" aria-label="Fuji Xerox" type="button">
-                                                    <img src="/assets/brands/fuji-xerox.png" alt="Fuji Xerox" class="ink-finder__brand-img ink-finder__brand-img--fuji-xerox">
-                                                </button>
-                                                <button class="ink-finder__brand-btn" data-brand="kyocera" aria-label="Kyocera" type="button">
-                                                    <img src="/assets/brands/kyocera.svg" alt="Kyocera" class="ink-finder__brand-img ink-finder__brand-img--kyocera">
-                                                </button>
-                                            </div>
-                                        </div>
-
-                                        <!-- Step 2: Series -->
-                                        <div class="ink-finder__step ink-finder__step--disabled" data-step="2">
-                                            <div class="ink-finder__step-header">
-                                                <span class="ink-finder__step-number">2</span>
-                                                <span class="ink-finder__step-label">Select Series</span>
-                                            </div>
-                                            <div class="custom-select">
-                                                <button class="custom-select__trigger" id="printer-series-trigger" disabled type="button">
-                                                    <span class="custom-select__value">Choose a series...</span>
-                                                    <svg class="custom-select__arrow" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
-                                                </button>
-                                                <div class="custom-select__dropdown" id="printer-series-dropdown"></div>
-                                            </div>
-                                        </div>
-
-                                        <!-- Step 3: Model -->
-                                        <div class="ink-finder__step ink-finder__step--disabled" data-step="3">
-                                            <div class="ink-finder__step-header">
-                                                <span class="ink-finder__step-number">3</span>
-                                                <span class="ink-finder__step-label">Select Model</span>
-                                            </div>
-                                            <div class="custom-select">
-                                                <button class="custom-select__trigger" id="printer-model-trigger" disabled type="button">
-                                                    <span class="custom-select__value">Choose a model...</span>
-                                                    <svg class="custom-select__arrow" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
-                                                </button>
-                                                <div class="custom-select__dropdown" id="printer-model-dropdown"></div>
-                                            </div>
-                                        </div>
-                                    </div>
-
-                                    <!-- Nickname + action buttons (shown after model selected) -->
-                                    <div class="ink-finder__action-row" id="printer-action-row" hidden>
-                                        <div class="form-group" id="nickname-group">
-                                            <label for="printer-nickname" class="form-label">Nickname (optional)</label>
-                                            <input type="text" id="printer-nickname" class="form-input" placeholder="e.g., Office Printer, Home Printer">
-                                            <p class="form-hint">Give your printer a name to easily identify it</p>
-                                        </div>
-                                        <div class="ink-finder__action-buttons">
-                                            <button type="button" class="btn btn--primary" id="printer-save-btn" disabled>Save Printer</button>
-                                            <button type="button" class="btn btn--secondary" id="printer-cancel-btn">Cancel</button>
-                                        </div>
-                                    </div>
-                                </form>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-
                         <div class="printers-grid" id="printers-grid" hidden>
                             <!-- Printers loaded from API -->
                         </div>
@@ -393,6 +282,106 @@
             <div class="modal__footer">
                 <button type="button" class="btn btn--secondary" id="delete-printer-cancel-btn">Cancel</button>
                 <button type="button" class="btn btn--danger" id="delete-printer-confirm-btn">Remove</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Add Printer Modal -->
+    <div class="printer-modal" id="add-printer-section" hidden>
+        <div class="printer-modal__backdrop"></div>
+        <div class="printer-modal__container">
+            <button type="button" class="printer-modal__close" id="printer-modal-close-btn" aria-label="Close">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            </button>
+            <div class="ink-finder ink-finder--account">
+                <div class="ink-finder__wrapper">
+                    <div class="ink-finder__header">
+                        <h2 class="ink-finder__title" id="printer-section-title">Save a Printer</h2>
+                        <p class="ink-finder__subtitle">Select your printer brand, then choose the series and model</p>
+                    </div>
+                    <form id="printer-form">
+                        <div class="form-alert form-alert--error" id="printer-form-error" hidden></div>
+                        <input type="hidden" id="printer-printer-id" name="printer_id">
+                        <input type="hidden" id="printer-model" name="printer_model">
+                        <input type="hidden" id="printer-brand" name="printer_brand">
+                        <input type="hidden" id="printer-slug" name="printer_slug">
+                        <input type="hidden" id="printer-full-name" name="printer_full_name">
+                        <div class="ink-finder__steps" id="printer-finder-steps">
+                            <div class="ink-finder__step ink-finder__step--active" data-step="1">
+                                <div class="ink-finder__step-header">
+                                    <span class="ink-finder__step-number">1</span>
+                                    <span class="ink-finder__step-label">Select Brand</span>
+                                </div>
+                                <div class="ink-finder__brands" id="printer-brands">
+                                    <button class="ink-finder__brand-btn" data-brand="brother" aria-label="Brother" type="button">
+                                        <img src="/assets/brands/brother.png" alt="Brother" class="ink-finder__brand-img ink-finder__brand-img--brother">
+                                    </button>
+                                    <button class="ink-finder__brand-btn" data-brand="canon" aria-label="Canon" type="button">
+                                        <img src="/assets/brands/canon.png" alt="Canon" class="ink-finder__brand-img ink-finder__brand-img--canon">
+                                    </button>
+                                    <button class="ink-finder__brand-btn" data-brand="epson" aria-label="Epson" type="button">
+                                        <img src="/assets/brands/epson.png" alt="Epson" class="ink-finder__brand-img ink-finder__brand-img--epson">
+                                    </button>
+                                    <button class="ink-finder__brand-btn" data-brand="hp" aria-label="HP" type="button">
+                                        <img src="/assets/brands/hp.png" alt="HP" class="ink-finder__brand-img ink-finder__brand-img--hp">
+                                    </button>
+                                    <button class="ink-finder__brand-btn" data-brand="samsung" aria-label="Samsung" type="button">
+                                        <img src="/assets/brands/samsung.svg" alt="Samsung" class="ink-finder__brand-img ink-finder__brand-img--samsung">
+                                    </button>
+                                    <button class="ink-finder__brand-btn" data-brand="lexmark" aria-label="Lexmark" type="button">
+                                        <img src="/assets/brands/lexmark.png" alt="Lexmark" class="ink-finder__brand-img ink-finder__brand-img--lexmark">
+                                    </button>
+                                    <button class="ink-finder__brand-btn" data-brand="oki" aria-label="OKI" type="button">
+                                        <img src="/assets/brands/oki.svg" alt="OKI" class="ink-finder__brand-img ink-finder__brand-img--oki">
+                                    </button>
+                                    <button class="ink-finder__brand-btn" data-brand="fuji-xerox" aria-label="Fuji Xerox" type="button">
+                                        <img src="/assets/brands/fuji-xerox.png" alt="Fuji Xerox" class="ink-finder__brand-img ink-finder__brand-img--fuji-xerox">
+                                    </button>
+                                    <button class="ink-finder__brand-btn" data-brand="kyocera" aria-label="Kyocera" type="button">
+                                        <img src="/assets/brands/kyocera.svg" alt="Kyocera" class="ink-finder__brand-img ink-finder__brand-img--kyocera">
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="ink-finder__step ink-finder__step--disabled" data-step="2">
+                                <div class="ink-finder__step-header">
+                                    <span class="ink-finder__step-number">2</span>
+                                    <span class="ink-finder__step-label">Select Series</span>
+                                </div>
+                                <div class="custom-select">
+                                    <button class="custom-select__trigger" id="printer-series-trigger" disabled type="button">
+                                        <span class="custom-select__value">Choose a series...</span>
+                                        <svg class="custom-select__arrow" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+                                    </button>
+                                    <div class="custom-select__dropdown" id="printer-series-dropdown"></div>
+                                </div>
+                            </div>
+                            <div class="ink-finder__step ink-finder__step--disabled" data-step="3">
+                                <div class="ink-finder__step-header">
+                                    <span class="ink-finder__step-number">3</span>
+                                    <span class="ink-finder__step-label">Select Model</span>
+                                </div>
+                                <div class="custom-select">
+                                    <button class="custom-select__trigger" id="printer-model-trigger" disabled type="button">
+                                        <span class="custom-select__value">Choose a model...</span>
+                                        <svg class="custom-select__arrow" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+                                    </button>
+                                    <div class="custom-select__dropdown" id="printer-model-dropdown"></div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="ink-finder__action-row" id="printer-action-row" hidden>
+                            <div class="form-group" id="nickname-group">
+                                <label for="printer-nickname" class="form-label">Nickname (optional)</label>
+                                <input type="text" id="printer-nickname" class="form-input" placeholder="e.g., Office Printer, Home Printer">
+                                <p class="form-hint">Give your printer a name to easily identify it</p>
+                            </div>
+                            <div class="ink-finder__action-buttons">
+                                <button type="button" class="btn btn--primary" id="printer-save-btn" disabled>Save Printer</button>
+                                <button type="button" class="btn btn--secondary" id="printer-cancel-btn">Cancel</button>
+                            </div>
+                        </div>
+                    </form>
+                </div>
             </div>
         </div>
     </div>
