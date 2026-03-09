@@ -5275,7 +5275,7 @@
 .printer-modal__container {
     position: relative;
     width: 100%;
-    max-width: 860px;
+    max-width: 920px;
     max-height: 88vh;
     overflow-y: auto;
     border-radius: 20px;
@@ -5361,16 +5361,63 @@
     color: var(--color-text-muted, #64748b);
 }
 
+/* Vertical step layout so dropdowns get full modal width */
 .printer-modal__container .ink-finder__steps {
-    gap: 1.5rem;
+    flex-direction: column;
+    gap: 1.25rem;
 }
 
+.printer-modal__container .ink-finder__step {
+    width: 100%;
+}
+
+/* Step headers inline with trigger */
+.printer-modal__container .ink-finder__step .ink-finder__step-header {
+    margin-bottom: 0.5rem;
+}
+
+/* Brand grid: 3 columns in the modal */
 .printer-modal__container .ink-finder__brands {
+    grid-template-columns: repeat(3, 1fr);
     gap: 0.75rem;
 }
 
 .printer-modal__container .ink-finder__brand-btn {
     padding: 0.875rem 1rem;
+}
+
+/* Custom select takes full width in modal */
+.printer-modal__container .custom-select {
+    width: 100%;
+}
+
+/* Dropdowns render inline (not absolute) so they don't get clipped */
+.printer-modal__container .custom-select__trigger[aria-expanded="true"] + .custom-select__dropdown,
+.printer-modal__container .custom-select__dropdown {
+    position: static;
+    width: 100% !important;
+    left: auto !important;
+    max-height: 360px;
+    border-top: none;
+    border-top-left-radius: 0;
+    border-top-right-radius: 0;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+/* Responsive: 3 cols on smaller modals, 2 on mobile */
+@media (max-width: 768px) {
+    .printer-modal__container .custom-select__dropdown {
+        grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    }
+}
+
+@media (max-width: 480px) {
+    .printer-modal__container .custom-select__dropdown {
+        grid-template-columns: 1fr !important;
+    }
+    .printer-modal__container .ink-finder__brands {
+        grid-template-columns: repeat(2, 1fr);
+    }
 }
 
 @media (max-width: 768px) {
