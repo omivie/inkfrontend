@@ -43,14 +43,14 @@
             // Restore any saved checkout state (after auth prefill, so auth data takes priority)
             this.restoreCheckoutState();
 
-            // Setup auto-collapse for completed sections
-            this.setupAutoCollapse();
+            // Setup accordion for checkout sections
+            this.setupAccordion();
 
             // Check email verification status
             await this.checkEmailVerification();
 
             // Inject admin-free shipping option for super admins
-            this.injectAdminFreeShipping();
+            await this.injectAdminFreeShipping();
 
             // Track checkout started for analytics
             if (typeof CartAnalytics !== 'undefined') {
@@ -306,8 +306,31 @@
          * SECURITY: These values are NEVER used for payment.
          * Backend recalculates actual shipping in API.createOrder().
          */
-        injectAdminFreeShipping() {
-            if (typeof isCachedSuperAdmin !== 'function' || !isCachedSuperAdmin()) return;
+        async injectAdminFreeShipping() {
+            // Fast path: already cached
+            if (typeof isCachedSuperAdmin === 'function' && isCachedSuperAdmin()) {
+                this._addAdminFreeShippingOption();
+                return;
+            }
+
+            // Not cached — check with backend if user is logged in
+            if (typeof Auth !== 'undefined' && Auth.isAuthenticated()) {
+                try {
+                    const response = await API.verifyAdmin();
+                    if (response.ok && response.data?.is_admin) {
+                        const role = (response.data.role || '').toLowerCase();
+                        if (role === 'superadmin' || role === 'owner') {
+                            try { sessionStorage.setItem('adminRole', 'superadmin'); } catch (e) {}
+                            this._addAdminFreeShippingOption();
+                        }
+                    }
+                } catch (e) {
+                    // Not admin or backend unavailable — no option shown
+                }
+            }
+        },
+
+        _addAdminFreeShippingOption() {
             const container = document.querySelector('.delivery-type-options');
             if (!container || container.querySelector('input[value="admin-free"]')) return;
 
@@ -544,25 +567,25 @@
             });
         },
 
-        // Setup billing address same as shipping toggle
+        // Setup billing address toggle (different billing checkbox)
         setupBillingAddressToggle() {
-            const sameAsShippingCheckbox = document.getElementById('same-as-shipping');
+            const differentBillingCheckbox = document.getElementById('different-billing');
             const billingFields = document.getElementById('billing-address-fields');
 
-            if (!sameAsShippingCheckbox || !billingFields) return;
+            if (!differentBillingCheckbox || !billingFields) return;
 
             const toggleBillingFields = () => {
-                const isSameAsShipping = sameAsShippingCheckbox.checked;
-                billingFields.style.display = isSameAsShipping ? 'none' : 'block';
+                const showBilling = differentBillingCheckbox.checked;
+                billingFields.style.display = showBilling ? 'block' : 'none';
 
                 // Toggle required on billing fields
                 const requiredFields = billingFields.querySelectorAll('input:not([name="billingAddress2"]), select');
                 requiredFields.forEach(field => {
-                    field.required = !isSameAsShipping;
+                    field.required = showBilling;
                 });
             };
 
-            sameAsShippingCheckbox.addEventListener('change', toggleBillingFields);
+            differentBillingCheckbox.addEventListener('change', toggleBillingFields);
             // Initial state
             toggleBillingFields();
         },
@@ -639,10 +662,10 @@
                     }
                 });
 
-                // Restore billing same as shipping
-                const sameAsShipping = document.getElementById('same-as-shipping');
-                if (sameAsShipping && state.sameAsShipping !== undefined) {
-                    sameAsShipping.checked = state.sameAsShipping;
+                // Restore billing toggle (invert sameAsShipping → differentBilling)
+                const differentBillingCb = document.getElementById('different-billing');
+                if (differentBillingCb && state.sameAsShipping !== undefined) {
+                    differentBillingCb.checked = !state.sameAsShipping;
                     // Trigger toggle
                     const billingFields = document.getElementById('billing-address-fields');
                     if (billingFields) {
@@ -713,25 +736,21 @@
             this.setupCouponHandler();
         },
 
-        // Auto-collapse sections once all required fields are filled
-        setupAutoCollapse() {
+        // Accordion: 2 steps (Contact, Shipping). Sections only change on explicit clicks.
+        setupAccordion() {
             const form = document.getElementById('checkout-form');
             if (!form) return;
 
-            const sections = form.querySelectorAll('fieldset.checkout-section:not(.checkout-section--notes)');
-            this._collapsibleSections = [];
+            const sections = form.querySelectorAll('fieldset.checkout-section');
+            if (sections.length === 0) return;
 
-            sections.forEach(section => {
+            this._accordionSections = [];
+
+            sections.forEach((section, idx) => {
                 const heading = section.querySelector('.checkout-section__heading');
                 if (!heading) return;
 
-                // Create summary element (shown when collapsed)
-                const summary = document.createElement('div');
-                summary.className = 'checkout-section__summary';
-                summary.hidden = true;
-                heading.after(summary);
-
-                // Create edit button
+                // Create edit button (hidden initially)
                 const editBtn = document.createElement('button');
                 editBtn.type = 'button';
                 editBtn.className = 'checkout-section__edit-btn';
@@ -739,146 +758,129 @@
                 editBtn.hidden = true;
                 heading.appendChild(editBtn);
 
-                // Wrap all content after heading+summary for collapse
-                const content = document.createElement('div');
-                content.className = 'checkout-section__body';
+                // Create summary div (hidden initially)
+                const summary = document.createElement('div');
+                summary.className = 'checkout-section__summary';
+                summary.hidden = true;
+                heading.after(summary);
+
+                // Wrap body content in a collapsible div
+                const body = document.createElement('div');
+                body.className = 'checkout-section__body';
                 const children = Array.from(section.children).filter(
                     el => el !== heading && el !== summary
                 );
-                children.forEach(child => content.appendChild(child));
-                section.appendChild(content);
+                children.forEach(child => body.appendChild(child));
+                section.appendChild(body);
 
-                // Create Continue button
+                // Continue button at bottom of body
                 const continueBtn = document.createElement('button');
                 continueBtn.type = 'button';
                 continueBtn.className = 'btn btn--primary checkout-section__continue-btn';
                 continueBtn.textContent = 'Continue';
-                content.appendChild(continueBtn);
+                body.appendChild(continueBtn);
 
-                const sectionData = { section, heading, summary, editBtn, content, continueBtn, collapsed: false };
-                this._collapsibleSections.push(sectionData);
+                const data = { section, heading, summary, editBtn, body, continueBtn, collapsed: false, index: idx };
+                this._accordionSections.push(data);
 
-                // Click heading or edit button to expand
-                const expand = () => {
-                    if (sectionData.collapsed) {
-                        this.expandSection(sectionData);
-                    }
-                };
-                heading.addEventListener('click', expand);
-                editBtn.addEventListener('click', (e) => { e.stopPropagation(); expand(); });
-
-                // Continue button collapses current section and expands next
+                // Continue button handler
                 continueBtn.addEventListener('click', () => {
-                    if (this.isSectionComplete(sectionData)) {
-                        this.collapseSection(sectionData);
-                        const idx = this._collapsibleSections.indexOf(sectionData);
-                        const next = this._collapsibleSections[idx + 1];
+                    if (this._validateAccordionSection(data)) {
+                        this._collapseAccordionSection(data);
+                        const nextIdx = this._accordionSections.indexOf(data) + 1;
+                        const next = this._accordionSections[nextIdx];
                         if (next) {
-                            if (next.collapsed) this.expandSection(next);
+                            this._expandAccordionSection(next);
                         } else {
-                            // Last section — scroll to the payment button
+                            // Last section — scroll to Continue to Payment
                             const payBtn = document.getElementById('continue-to-payment-btn');
                             if (payBtn) payBtn.scrollIntoView({ behavior: 'smooth', block: 'center' });
                         }
-                    } else {
-                        // Show red error boxes on all empty required fields in this section
-                        const content = sectionData.content;
-                        // Clear previous section errors
-                        content.querySelectorAll('.is-error').forEach(el => el.classList.remove('is-error'));
-                        content.querySelectorAll('.form-error').forEach(el => el.remove());
-                        content.querySelectorAll('.delivery-type-options.is-error').forEach(el => el.classList.remove('is-error'));
-
-                        let firstInvalid = null;
-                        const checkedRadioGroups = new Set();
-
-                        for (const field of content.querySelectorAll('input[required], select[required], textarea[required]')) {
-                            if (field.offsetParent === null) continue;
-
-                            // Radio buttons — validate once per group
-                            if (field.type === 'radio') {
-                                if (checkedRadioGroups.has(field.name)) continue;
-                                checkedRadioGroups.add(field.name);
-                                const groupChecked = content.querySelector(`input[name="${field.name}"]:checked`);
-                                if (!groupChecked) {
-                                    const container = field.closest('.delivery-type-options') || field.closest('.form-group');
-                                    if (container) {
-                                        container.classList.add('is-error');
-                                        if (!container.parentElement.querySelector('.form-error')) {
-                                            const errorMsg = document.createElement('div');
-                                            errorMsg.className = 'form-error';
-                                            errorMsg.textContent = 'Please select an option';
-                                            container.parentElement.appendChild(errorMsg);
-                                        }
-                                    }
-                                    if (!firstInvalid) firstInvalid = container || field;
-                                }
-                                continue;
-                            }
-
-                            // Text / select / textarea
-                            if (!field.value.trim()) {
-                                field.classList.add('is-error');
-                                const group = field.closest('.form-group');
-                                if (group && !group.querySelector('.form-error')) {
-                                    const errorMsg = document.createElement('div');
-                                    errorMsg.className = 'form-error';
-                                    errorMsg.textContent = 'This field is required';
-                                    group.appendChild(errorMsg);
-                                }
-                                if (!firstInvalid) firstInvalid = field;
-                            }
-                        }
-
-                        if (firstInvalid) {
-                            firstInvalid.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                            if (firstInvalid.focus) firstInvalid.focus({ preventScroll: true });
-                        }
                     }
+                });
+
+                // Heading click to expand collapsed section
+                heading.addEventListener('click', () => {
+                    if (data.collapsed) this._expandAccordionSection(data);
+                });
+
+                // Edit button click
+                editBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    if (data.collapsed) this._expandAccordionSection(data);
                 });
             });
 
-            // Start with only the first section expanded
-            this._collapsibleSections.forEach((data, idx) => {
+            // Initial state: first section open, rest collapsed
+            this._accordionSections.forEach((data, idx) => {
                 if (idx > 0) {
-                    data.content.hidden = true;
-                    if (data.continueBtn) data.continueBtn.hidden = true;
+                    data.body.hidden = true;
+                    data.continueBtn.hidden = true;
                     data.collapsed = true;
                     data.section.classList.add('is-collapsed');
                 }
             });
-
         },
 
-        // Check if all required fields in a section are filled
-        isSectionComplete(data) {
-            const { section, content } = data;
+        // Validate required fields in a section, show errors if invalid
+        _validateAccordionSection(data) {
+            const { body } = data;
 
-            // Billing: complete if "same as shipping" is checked
-            const sameAs = section.querySelector('#same-as-shipping');
-            if (sameAs && sameAs.checked) return true;
+            // Clear previous errors
+            body.querySelectorAll('.is-error').forEach(el => el.classList.remove('is-error'));
+            body.querySelectorAll('.form-error').forEach(el => el.remove());
 
-            const requiredInputs = content.querySelectorAll('input[required], select[required], textarea[required]');
+            let firstInvalid = null;
+            const checkedRadioGroups = new Set();
 
-            for (const field of requiredInputs) {
-                // Skip hidden fields (e.g. billing when same-as-shipping)
+            for (const field of body.querySelectorAll('input[required], select[required], textarea[required]')) {
                 if (field.offsetParent === null) continue;
 
+                // Radio buttons — validate once per group
                 if (field.type === 'radio') {
-                    const name = field.name;
-                    const checked = content.querySelector(`input[name="${name}"]:checked`);
-                    if (!checked) return false;
-                } else if (!field.value.trim()) {
-                    return false;
+                    if (checkedRadioGroups.has(field.name)) continue;
+                    checkedRadioGroups.add(field.name);
+                    const groupChecked = body.querySelector(`input[name="${field.name}"]:checked`);
+                    if (!groupChecked) {
+                        const container = field.closest('.delivery-type-options') || field.closest('.form-group');
+                        if (container) {
+                            container.classList.add('is-error');
+                            if (!container.parentElement.querySelector('.form-error')) {
+                                const errorMsg = document.createElement('div');
+                                errorMsg.className = 'form-error';
+                                errorMsg.textContent = 'Please select an option';
+                                container.parentElement.appendChild(errorMsg);
+                            }
+                        }
+                        if (!firstInvalid) firstInvalid = container || field;
+                    }
+                    continue;
+                }
+
+                // Text / select / textarea
+                if (!field.value.trim()) {
+                    field.classList.add('is-error');
+                    const group = field.closest('.form-group');
+                    if (group && !group.querySelector('.form-error')) {
+                        const errorMsg = document.createElement('div');
+                        errorMsg.className = 'form-error';
+                        errorMsg.textContent = 'This field is required';
+                        group.appendChild(errorMsg);
+                    }
+                    if (!firstInvalid) firstInvalid = field;
                 }
             }
 
-            // Must have at least one required field to be collapsible
-            const visibleRequired = Array.from(requiredInputs).filter(f => f.offsetParent !== null);
-            return visibleRequired.length > 0;
+            if (firstInvalid) {
+                firstInvalid.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                if (firstInvalid.focus) firstInvalid.focus({ preventScroll: true });
+                return false;
+            }
+            return true;
         },
 
         // Get summary text for a collapsed section
-        getSectionSummary(data) {
+        _getAccordionSummary(data) {
             const { section } = data;
             const esc = typeof Security !== 'undefined' ? Security.escapeHtml : (s) => s;
 
@@ -907,63 +909,39 @@
                 return esc(deliveryLabel ? `${addressLine} · ${deliveryLabel}` : addressLine);
             }
 
-            // Billing Address
-            const sameAs = section.querySelector('#same-as-shipping');
-            if (sameAs) {
-                if (sameAs.checked) return 'Same as shipping address';
-                const bAddr = section.querySelector('#billing-address1')?.value || '';
-                const bCity = section.querySelector('#billing-city')?.value || '';
-                return esc(`${bAddr}, ${bCity}`.trim());
-            }
-
-            // Order Notes
-            const notes = section.querySelector('#order-notes');
-            if (notes) {
-                if (!notes.value.trim()) return 'None';
-                const text = notes.value.trim();
-                return esc(text.length > 60 ? text.substring(0, 60) + '…' : text);
-            }
-
             return '';
         },
 
-        collapseSection(data) {
+        _collapseAccordionSection(data) {
             if (data.collapsed) return;
             data.collapsed = true;
             data.section.classList.add('is-collapsed');
-            data.content.hidden = true;
-            if (data.continueBtn) data.continueBtn.hidden = true;
+            data.body.hidden = true;
+            data.continueBtn.hidden = true;
             data.summary.hidden = false;
-            data.summary.textContent = this.getSectionSummary(data);
+            data.summary.textContent = this._getAccordionSummary(data);
             data.editBtn.hidden = false;
             data.heading.style.cursor = 'pointer';
         },
 
-        expandSection(data) {
-            // Collapse all other sections first so only one is open at a time
-            this._collapsibleSections.forEach(other => {
+        _expandAccordionSection(data) {
+            // Collapse all other sections first
+            this._accordionSections.forEach(other => {
                 if (other !== data && !other.collapsed) {
-                    this.collapseSection(other);
+                    this._collapseAccordionSection(other);
                 }
             });
 
             data.collapsed = false;
             data.section.classList.remove('is-collapsed');
-            data.content.hidden = false;
-            if (data.continueBtn) data.continueBtn.hidden = false;
+            data.body.hidden = false;
+            data.continueBtn.hidden = false;
             data.summary.hidden = true;
             data.editBtn.hidden = true;
             data.heading.style.cursor = '';
 
-            // Billing: uncheck "same as shipping" and show billing fields
-            const sameAs = data.section.querySelector('#same-as-shipping');
-            if (sameAs && sameAs.checked) {
-                sameAs.checked = false;
-                sameAs.dispatchEvent(new Event('change', { bubbles: true }));
-            }
-
-            // Focus first input
-            const firstInput = data.content.querySelector('input:not([type="hidden"]):not([type="checkbox"]):not([type="radio"]), select, textarea');
+            // Focus first input (never touch billing checkbox state)
+            const firstInput = data.body.querySelector('input:not([type="hidden"]):not([type="checkbox"]):not([type="radio"]), select, textarea');
             if (firstInput) firstInput.focus({ preventScroll: true });
         },
 
@@ -1115,9 +1093,9 @@
                 return;
             }
 
-            // Validate billing address if not same as shipping
-            const sameAsShipping = document.getElementById('same-as-shipping')?.checked;
-            if (!sameAsShipping) {
+            // Validate billing address if different billing is checked
+            const differentBilling = document.getElementById('different-billing')?.checked;
+            if (differentBilling) {
                 const billingValidation = this.validateBillingAddress();
                 if (!billingValidation.valid) {
                     const field = document.getElementById(billingValidation.focusField);
@@ -1185,7 +1163,7 @@
                     region: formData.get('region'),
                     postcode: formData.get('postcode'),
                     // Billing
-                    sameAsShipping: sameAsShipping,
+                    sameAsShipping: !differentBilling,
                     billingFirstName: formData.get('billingFirstName'),
                     billingLastName: formData.get('billingLastName'),
                     billingAddress1: formData.get('billingAddress1'),

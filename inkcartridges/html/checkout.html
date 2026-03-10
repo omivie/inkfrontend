@@ -342,18 +342,14 @@
                                         </label>
                                     </div>
                                 </div>
-                            </fieldset>
 
-                            <fieldset class="checkout-section">
-                                <legend class="checkout-section__heading">
-                                    Billing Address
-                                </legend>
+                                <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 1.25rem 0;">
 
                                 <div class="form-row">
                                     <div class="form-group form-group--checkbox">
-                                        <input type="checkbox" id="same-as-shipping" name="sameAsShipping" class="form-checkbox" checked>
-                                        <label for="same-as-shipping" class="form-label form-label--checkbox">
-                                            Same as shipping address
+                                        <input type="checkbox" id="different-billing" name="differentBilling" class="form-checkbox">
+                                        <label for="different-billing" class="form-label form-label--checkbox">
+                                            Use a different billing address
                                         </label>
                                     </div>
                                 </div>
@@ -419,15 +415,15 @@
                                 </div>
                             </fieldset>
 
-                            <fieldset class="checkout-section checkout-section--notes">
-                                <legend class="checkout-section__heading">Order Notes (optional)</legend>
+                            <div class="checkout-order-notes">
+                                <h3 class="checkout-order-notes__heading">Order Notes (optional)</h3>
                                 <div class="form-row">
                                     <div class="form-group">
                                         <label for="order-notes" class="form-label visually-hidden">Order notes</label>
                                         <textarea id="order-notes" name="orderNotes" class="form-textarea" rows="3" placeholder="Special instructions for delivery (e.g., leave at door, call on arrival)" maxlength="500"></textarea>
                                     </div>
                                 </div>
-                            </fieldset>
+                            </div>
 
                             <div class="checkout-submit">
                                 <div class="form-group form-group--checkbox">
