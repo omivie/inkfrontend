@@ -587,16 +587,15 @@
                             }).length;
                         };
 
-                        const [inkProducts, tonerProducts] = await Promise.all([
-                            fetchAllProducts({ brand: this.state.brand, category: 'ink' }),
-                            fetchAllProducts({ brand: this.state.brand, category: 'toner' })
-                        ]);
-                        if (inkProducts === null || tonerProducts === null) return;
+                        // Fetch all products for brand (no category filter — /api/products doesn't support it)
+                        // Client-side countByProductType() already separates ink/toner/consumable
+                        const allProducts = await fetchAllProducts({ brand: this.state.brand });
+                        if (allProducts === null) return;
 
                         categoryCounts = {};
-                        categoryCounts['ink'] = countByProductType(inkProducts, 'ink');
-                        categoryCounts['toner'] = countByProductType(tonerProducts, 'toner');
-                        categoryCounts['consumable'] = countByProductType(tonerProducts, 'consumable');
+                        categoryCounts['ink'] = countByProductType(allProducts, 'ink');
+                        categoryCounts['toner'] = countByProductType(allProducts, 'toner');
+                        categoryCounts['consumable'] = countByProductType(allProducts, 'consumable');
                     }
 
                     this.cache.products[cacheKey] = categoryCounts;
@@ -735,7 +734,7 @@
                             });
                         };
 
-                        const apiParams = { brand: this.state.brand, category: legacyApiCategory };
+                        const apiParams = { brand: this.state.brand };
                         if (this.state.type === 'genuine' || this.state.type === 'compatible') {
                             apiParams.source = this.state.type;
                         }
@@ -764,7 +763,7 @@
 
                         if (searchProducts.length === 0) {
                             try {
-                                searchProducts = await fetchAllProducts({ search: `${brandName} ${legacyApiCategory}` });
+                                searchProducts = await fetchAllProducts({ search: brandName });
                             } catch (searchError) { /* continue */ }
                         }
 
