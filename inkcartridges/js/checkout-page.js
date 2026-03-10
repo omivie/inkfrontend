@@ -298,11 +298,12 @@
         },
 
         /**
-         * Check if cart contains ONLY test products (SKU starts with TEST-)
+         * Check if cart contains ONLY test products (SKU starts with TEST- or name contains "admin test")
          */
         _isTestProductCart() {
             return this.cartItems.length > 0 && this.cartItems.every(item =>
-                (item.sku || '').toUpperCase().startsWith('TEST-')
+                (item.sku || '').toUpperCase().startsWith('TEST-') ||
+                (item.name || '').toLowerCase().includes('admin test')
             );
         },
 
