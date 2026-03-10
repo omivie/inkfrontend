@@ -656,14 +656,14 @@ async function exportProductsPDF() {
     if (!window.jspdf) {
       await new Promise((resolve, reject) => {
         const s = document.createElement('script');
-        s.src = 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.2/jspdf.umd.min.js';
+        s.src = 'https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js';
         s.onload = resolve;
         s.onerror = () => reject(new Error('Failed to load jsPDF library'));
         document.head.appendChild(s);
       });
       await new Promise((resolve, reject) => {
         const s = document.createElement('script');
-        s.src = 'https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.4/jspdf.plugin.autotable.min.js';
+        s.src = 'https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.4/dist/jspdf.plugin.autotable.min.js';
         s.onload = resolve;
         s.onerror = () => reject(new Error('Failed to load jsPDF AutoTable plugin'));
         document.head.appendChild(s);
