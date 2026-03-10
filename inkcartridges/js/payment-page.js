@@ -200,11 +200,16 @@
                 }
 
                 // Use backend-validated prices — frontend never computes totals
+                // Prefer the shipping fee from checkout (from /api/shipping/options with real address)
+                // over the cart summary's generic shipping estimate
+                const checkoutShipping = this.checkoutData?.estimatedShipping;
+                const shipping = checkoutShipping != null ? checkoutShipping : (summary.shipping ?? 0);
+
                 this.totals = {
                     subtotal: summary.subtotal || 0,
-                    shipping: summary.shipping ?? 0,
+                    shipping: shipping,
                     discount: summary.discount || 0,
-                    total: summary.total || 0
+                    total: (summary.subtotal || 0) + shipping - (summary.discount || 0)
                 };
 
                 // If server returned items but no subtotal, compute from items
@@ -245,9 +250,12 @@
                 if (typeof Cart !== 'undefined' && this.cartItems.length > 0) {
                     const subtotal = Cart.getSubtotal();
                     const checkoutData = this.checkoutData || {};
-                    const shipping = typeof Shipping !== 'undefined'
-                        ? Shipping.calculate(Cart.items, subtotal, checkoutData.region, checkoutData.deliveryType).fee
-                        : checkoutData.estimatedShipping || 0;
+                    // Prefer the shipping fee persisted from checkout over recalculating
+                    const shipping = checkoutData.estimatedShipping != null
+                        ? checkoutData.estimatedShipping
+                        : (typeof Shipping !== 'undefined'
+                            ? Shipping.calculate(Cart.items, subtotal, checkoutData.region, checkoutData.deliveryType).fee
+                            : 0);
 
                     this.totals = {
                         subtotal,
@@ -488,7 +496,68 @@
 
                 // Handle duplicate/idempotent replay
                 if (orderResponse.ok && orderResponse.data?.is_duplicate) {
-                    const dupOrderNumber = orderResponse.data.order_number;
+                    const dupData = orderResponse.data;
+                    const dupOrderNumber = dupData.order_number;
+
+                    if (dupData.client_secret) {
+                        // Payment wasn't completed — retry with the existing PaymentIntent
+                        btnText.innerHTML = this.getLoadingHTML('Retrying payment...');
+
+                        const { error: stripeError, paymentIntent } = await this.stripe.confirmPayment({
+                            elements: this.elements,
+                            clientSecret: dupData.client_secret,
+                            confirmParams: {
+                                return_url: `${window.location.origin}/html/order-confirmation.html?order=${encodeURIComponent(dupOrderNumber)}`,
+                                payment_method_data: {
+                                    billing_details: {
+                                        name: `${this.checkoutData.firstName} ${this.checkoutData.lastName}`,
+                                        email: this.checkoutData.email,
+                                        phone: this.checkoutData.phone || undefined,
+                                        address: {
+                                            line1: this.checkoutData.address1,
+                                            line2: this.checkoutData.address2 || undefined,
+                                            city: this.checkoutData.city,
+                                            state: this.checkoutData.region,
+                                            postal_code: this.checkoutData.postcode,
+                                            country: 'NZ'
+                                        }
+                                    }
+                                }
+                            },
+                            redirect: 'if_required'
+                        });
+
+                        if (stripeError) {
+                            DebugLog.error('Stripe retry error:', stripeError);
+                            try {
+                                await API.cancelOrder(dupOrderNumber);
+                            } catch (cancelErr) {
+                                DebugLog.warn('Could not cancel pending order:', cancelErr.message);
+                            }
+                            this._idempotencyKey = null;
+                            throw new Error(stripeError.message);
+                        }
+
+                        if (paymentIntent.status !== 'succeeded') {
+                            try {
+                                await API.cancelOrder(dupOrderNumber);
+                            } catch (cancelErr) {
+                                DebugLog.warn('Could not cancel pending order:', cancelErr.message);
+                            }
+                            this._idempotencyKey = null;
+                            throw new Error('Payment was not completed. Please try again.');
+                        }
+
+                        // Payment succeeded — clear cart and redirect
+                        try { await API.clearCart(); } catch (e) { DebugLog.warn('Could not clear cart:', e); }
+                        if (typeof Cart !== 'undefined') {
+                            Cart.items = [];
+                            document.querySelectorAll('.cart-count, .cart-badge, #cart-count').forEach(el => { el.textContent = '0'; });
+                        }
+                        localStorage.removeItem('inkcartridges_cart');
+                    }
+
+                    // No client_secret means payment already succeeded — safe to redirect
                     sessionStorage.setItem('lastOrder', JSON.stringify({
                         order_number: dupOrderNumber,
                         email: this.checkoutData.email
@@ -503,11 +572,15 @@
                     const errorMsg = orderResponse.error?.message || orderResponse.error || 'Failed to create order';
 
                     if (errorCode === 'DUPLICATE_ORDER') {
-                        // Order already exists — redirect to confirmation
+                        // Order already exists — only redirect if it has no pending payment
                         const existingOrder = orderResponse.error?.details?.order_number;
-                        if (existingOrder) {
+                        const existingClientSecret = orderResponse.error?.details?.client_secret;
+                        if (existingOrder && !existingClientSecret) {
                             window.location.href = `/html/order-confirmation.html?order=${encodeURIComponent(existingOrder)}`;
                             return;
+                        } else if (existingOrder && existingClientSecret) {
+                            // Payment wasn't completed — show error so user retries
+                            throw new Error('Your previous payment was not completed. Please try again.');
                         }
                     } else if (errorCode === 'DUPLICATE_REQUEST') {
                         // Concurrent request — wait and check
@@ -515,10 +588,19 @@
                         try {
                             const pending = await API.checkPendingOrder(this.getIdempotencyKey());
                             if (pending.ok && pending.data?.order_number) {
-                                window.location.href = `/html/order-confirmation.html?order=${encodeURIComponent(pending.data.order_number)}`;
-                                return;
+                                // Only redirect if payment was completed (no client_secret means paid)
+                                if (!pending.data.client_secret) {
+                                    window.location.href = `/html/order-confirmation.html?order=${encodeURIComponent(pending.data.order_number)}`;
+                                    return;
+                                }
+                                // Has client_secret — payment still pending, let user retry
+                                this._idempotencyKey = null;
+                                throw new Error('Your previous payment was not completed. Please try again.');
                             }
-                        } catch (_) { /* fall through to error */ }
+                        } catch (e) {
+                            if (e.message?.includes('not completed')) throw e;
+                            /* fall through to error */
+                        }
                     } else if (errorCode === 'PROMO_COUPON_LIMIT_REACHED') {
                         throw new Error('This coupon has reached its usage limit. Please remove it and try again.');
                     } else if (errorCode === 'ORDER_TOTAL_TOO_LOW') {
@@ -541,6 +623,7 @@
                     elements: this.elements,
                     clientSecret: client_secret,
                     confirmParams: {
+                        return_url: `${window.location.origin}/html/order-confirmation.html?order=${encodeURIComponent(order_number)}`,
                         payment_method_data: {
                             billing_details: {
                                 name: `${this.checkoutData.firstName} ${this.checkoutData.lastName}`,

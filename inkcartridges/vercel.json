@@ -15,5 +15,9 @@
         }
       ]
     }
+  ],
+  "rewrites": [
+    { "source": "/sitemap.xml", "destination": "https://ink-backend-zaeq.onrender.com/sitemap.xml" },
+    { "source": "/robots.txt", "destination": "https://ink-backend-zaeq.onrender.com/robots.txt" }
   ]
 }

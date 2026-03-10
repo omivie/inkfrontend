@@ -17,6 +17,9 @@
         // Incremented on each navigation, checked before rendering
         navigationVersion: 0,
 
+        // Whether the /api/shop endpoint is available (set to false on first 404/error)
+        _shopEndpointAvailable: true,
+
         // Cached data
         cache: {
             brands: null,
@@ -522,72 +525,84 @@
             };
 
             // Check cache for category counts
-            const cacheKey = `${this.state.brand}-category-counts-v2`;
+            const cacheKey = `${this.state.brand}-category-counts-v3`;
             let categoryCounts = this.cache.products[cacheKey];
 
             if (!categoryCounts) {
-                // Helper to fetch ALL pages of products
-                const fetchAllProducts = async (params) => {
-                    let allProducts = [];
-                    let page = 1;
-                    let hasMore = true;
-                    while (hasMore) {
-                        const response = await API.getProducts({ ...params, page, limit: 100 });
+                try {
+                    if (this._shopEndpointAvailable) {
+                        // Use /api/shop endpoint for category counts in a single call
+                        const response = await API.getShopData({ brand: this.state.brand });
                         // Check if navigation changed during fetch
-                        if (navVersion !== undefined && this.navigationVersion !== navVersion) return null;
+                        if (navVersion !== undefined && this.navigationVersion !== navVersion) return;
 
-                        if (response.ok && response.data?.products) {
-                            allProducts = allProducts.concat(response.data.products);
-                            const pagination = response.data.pagination;
-                            hasMore = pagination && page < pagination.total_pages;
-                            page++;
+                        if (response.ok && response.data?.counts) {
+                            categoryCounts = {
+                                ink: response.data.counts.ink || 0,
+                                toner: response.data.counts.toner || 0,
+                                consumable: response.data.counts.drums || 0
+                            };
                         } else {
-                            hasMore = false;
+                            // Endpoint returned error — fall back to legacy
+                            this._shopEndpointAvailable = false;
                         }
                     }
-                    return allProducts;
-                };
 
-                // Helper to count products by product_type
-                const countByProductType = (products, categoryId) => {
-                    return products.filter(p => {
-                        const productType = (p.product_type || '').toLowerCase();
-                        if (categoryId === 'ink') {
-                            return productType === 'ink_cartridge' || productType === 'ink_bottle';
-                        } else if (categoryId === 'toner') {
-                            return productType === 'toner_cartridge';
-                        } else if (categoryId === 'consumable') {
-                            return productType === 'drum_unit' ||
-                                   productType === 'waste_toner' ||
-                                   productType === 'belt_unit' ||
-                                   productType === 'fuser_kit' ||
-                                   productType === 'maintenance_kit';
-                        }
-                        return true;
-                    }).length;
-                };
+                    // Legacy fallback: fetch all products and count client-side
+                    if (!categoryCounts) {
+                        const fetchAllProducts = async (params) => {
+                            let allProducts = [];
+                            let page = 1;
+                            let hasMore = true;
+                            while (hasMore) {
+                                const response = await API.getProducts({ ...params, page, limit: 100 });
+                                if (navVersion !== undefined && this.navigationVersion !== navVersion) return null;
+                                if (response.ok && response.data?.products) {
+                                    allProducts = allProducts.concat(response.data.products);
+                                    const pagination = response.data.pagination;
+                                    hasMore = pagination && page < pagination.total_pages;
+                                    page++;
+                                } else {
+                                    hasMore = false;
+                                }
+                            }
+                            return allProducts;
+                        };
 
-                try {
-                    categoryCounts = {};
+                        const countByProductType = (products, categoryId) => {
+                            return products.filter(p => {
+                                const productType = (p.product_type || '').toLowerCase();
+                                if (categoryId === 'ink') {
+                                    return productType === 'ink_cartridge' || productType === 'ink_bottle';
+                                } else if (categoryId === 'toner') {
+                                    return productType === 'toner_cartridge';
+                                } else if (categoryId === 'consumable') {
+                                    return productType === 'drum_unit' ||
+                                           productType === 'waste_toner' ||
+                                           productType === 'belt_unit' ||
+                                           productType === 'fuser_kit' ||
+                                           productType === 'maintenance_kit';
+                                }
+                                return true;
+                            }).length;
+                        };
 
-                    // Fetch ink and toner products in parallel
-                    const [inkProducts, tonerProducts] = await Promise.all([
-                        fetchAllProducts({ brand: this.state.brand, category: 'ink' }),
-                        fetchAllProducts({ brand: this.state.brand, category: 'toner' })
-                    ]);
-                    // Check if navigation changed or fetch was aborted
-                    if (inkProducts === null || tonerProducts === null) return;
+                        const [inkProducts, tonerProducts] = await Promise.all([
+                            fetchAllProducts({ brand: this.state.brand, category: 'ink' }),
+                            fetchAllProducts({ brand: this.state.brand, category: 'toner' })
+                        ]);
+                        if (inkProducts === null || tonerProducts === null) return;
 
-                    categoryCounts['ink'] = countByProductType(inkProducts, 'ink');
-                    categoryCounts['toner'] = countByProductType(tonerProducts, 'toner');
-                    categoryCounts['consumable'] = countByProductType(tonerProducts, 'consumable');
+                        categoryCounts = {};
+                        categoryCounts['ink'] = countByProductType(inkProducts, 'ink');
+                        categoryCounts['toner'] = countByProductType(tonerProducts, 'toner');
+                        categoryCounts['consumable'] = countByProductType(tonerProducts, 'consumable');
+                    }
 
                     this.cache.products[cacheKey] = categoryCounts;
                 } catch (error) {
                     DebugLog.error('Error fetching category counts:', error);
-                    // Check if navigation changed
                     if (navVersion !== undefined && this.navigationVersion !== navVersion) return;
-                    // Fallback: show all categories
                     categoryCounts = {};
                     this.categories.forEach(cat => categoryCounts[cat.id] = 1);
                 }
@@ -633,11 +648,10 @@
                 const brandName = this.brandInfo[this.state.brand]?.name || this.state.brand;
 
                 // Include type filter in cache key to prevent stale results when switching genuine/compatible
-                // Use category ID (not apiCategory) since toner and consumable both use 'toner' API category
-                // v4: Fixed strict brand filtering to prevent cross-brand products
+                // v5: Uses /api/shop endpoint for server-side series extraction
                 const typeKey = this.state.type || 'all';
                 const categoryId = this.state.category;
-                const cacheKey = `${this.state.brand}-${categoryId}-${typeKey}-codes-v4`;
+                const cacheKey = `${this.state.brand}-${categoryId}-${typeKey}-codes-v5`;
                 const codesCacheKey = `${cacheKey}-final`;
 
                 // Check if we have cached codes with counts already
@@ -653,185 +667,136 @@
                     return;
                 }
 
-                if (!this.cache.products[cacheKey]) {
-                    let brandProducts = [];
-                    let searchProducts = [];
+                let codes = null;
 
-                    // Helper function to filter products by brand - STRICT matching
-                    const brandNameLower = brandName.toLowerCase();
-                    const brandNameNoSpace = brandNameLower.replace(/[\s-]/g, '');
-                    const brandSlug = this.state.brand.toLowerCase();
-                    const filterByBrand = (products) => {
-                        return products.filter(p => {
-                            // Primary check: product's brand field must match
-                            const productBrandName = (p.brand?.name || '').toLowerCase();
-                            const productBrandSlug = (p.brand?.slug || '').toLowerCase();
-
-                            // Exact match on brand field (most reliable)
-                            if (productBrandName === brandNameLower ||
-                                productBrandSlug === brandSlug ||
-                                productBrandName.replace(/[\s-]/g, '') === brandNameNoSpace) {
-                                return true;
-                            }
-
-                            // Fallback: check if product name STARTS with brand name
-                            // This catches "Epson T123" but not "Compatible for Epson"
-                            const name = (p.name || '').toLowerCase();
-                            const nameWithoutPrefix = name.replace(/^(compatible|genuine)\s+/i, '');
-                            if (nameWithoutPrefix.startsWith(brandNameLower) ||
-                                nameWithoutPrefix.startsWith(brandNameNoSpace)) {
-                                return true;
-                            }
-
-                            return false;
-                        });
-                    };
-
-                    // Helper to fetch ALL pages of products
-                    const fetchAllProducts = async (params) => {
-                        let allProducts = [];
-                        let page = 1;
-                        let hasMore = true;
-
-                        while (hasMore) {
-                            const response = await API.getProducts({ ...params, page, limit: 100 });
-                            if (response.ok && response.data?.products) {
-                                allProducts = allProducts.concat(response.data.products);
-                                const pagination = response.data.pagination;
-                                hasMore = pagination && page < pagination.total_pages;
-                                page++;
-                            } else {
-                                hasMore = false;
-                            }
-                        }
-                        return allProducts;
-                    };
-
-                    // Try to fetch products with brand filter (may fail for new brands not in API)
-                    // Also apply source filter if type is specified (genuine/compatible)
-                    const apiParams = {
-                        brand: this.state.brand,
-                        category: apiCategory
-                    };
-                    // Map URL 'type' parameter to API 'source' parameter
+                if (this._shopEndpointAvailable) {
+                    // Use /api/shop endpoint for server-side series extraction
+                    const apiParams = { brand: this.state.brand, category: this.state.category };
                     if (this.state.type === 'genuine' || this.state.type === 'compatible') {
                         apiParams.source = this.state.type;
                     }
 
-                    // Fetch brand-filtered products and search results in parallel
-                    const brandFetchPromise = fetchAllProducts(apiParams)
-                        .then(async (results) => {
-                            // If no results with slug, retry with brand name
-                            if (results.length === 0) {
-                                apiParams.brand = brandName;
-                                return fetchAllProducts(apiParams);
+                    const response = await API.getShopData(apiParams);
+                    if (navVersion !== undefined && this.navigationVersion !== navVersion) return;
+
+                    if (response.ok && response.data?.series) {
+                        codes = response.data.series;
+                    } else {
+                        // Endpoint failed — fall back to legacy for the rest of the session
+                        this._shopEndpointAvailable = false;
+                    }
+                }
+
+                // Legacy fallback: fetch all products and extract codes client-side
+                if (codes === null) {
+                    const legacyCacheKey = `${this.state.brand}-${categoryId}-${typeKey}-codes-v4`;
+
+                    if (!this.cache.products[legacyCacheKey]) {
+                        const categoryConfig = this.categories.find(c => c.id === this.state.category);
+                        const legacyApiCategory = categoryConfig?.apiCategory || this.state.category;
+
+                        const fetchAllProducts = async (params) => {
+                            let allProducts = [];
+                            let page = 1;
+                            let hasMore = true;
+                            while (hasMore) {
+                                const response = await API.getProducts({ ...params, page, limit: 100 });
+                                if (response.ok && response.data?.products) {
+                                    allProducts = allProducts.concat(response.data.products);
+                                    const pagination = response.data.pagination;
+                                    hasMore = pagination && page < pagination.total_pages;
+                                    page++;
+                                } else {
+                                    hasMore = false;
+                                }
                             }
-                            return results;
-                        })
-                        .catch(() => []);
+                            return allProducts;
+                        };
 
-                    // Build search promises array
-                    const searchPromises = [
-                        fetchAllProducts({ search: brandName }).catch(() => [])
-                    ];
+                        const brandNameLower = brandName.toLowerCase();
+                        const brandNameNoSpace = brandNameLower.replace(/[\s-]/g, '');
+                        const brandSlug = this.state.brand.toLowerCase();
+                        const filterByBrand = (products) => {
+                            return products.filter(p => {
+                                const productBrandName = (p.brand?.name || '').toLowerCase();
+                                const productBrandSlug = (p.brand?.slug || '').toLowerCase();
+                                if (productBrandName === brandNameLower ||
+                                    productBrandSlug === brandSlug ||
+                                    productBrandName.replace(/[\s-]/g, '') === brandNameNoSpace) {
+                                    return true;
+                                }
+                                const name = (p.name || '').toLowerCase();
+                                const nameWithoutPrefix = name.replace(/^(compatible|genuine)\s+/i, '');
+                                if (nameWithoutPrefix.startsWith(brandNameLower) ||
+                                    nameWithoutPrefix.startsWith(brandNameNoSpace)) {
+                                    return true;
+                                }
+                                return false;
+                            });
+                        };
 
-                    // For Fuji Xerox, also search variations in parallel
-                    if (this.state.brand === 'fuji-xerox') {
-                        const variations = ['Fuji-Xerox', 'FujiXerox', 'Xerox'];
-                        for (const variant of variations) {
-                            searchPromises.push(
-                                fetchAllProducts({ search: variant }).catch(() => [])
-                            );
+                        const apiParams = { brand: this.state.brand, category: legacyApiCategory };
+                        if (this.state.type === 'genuine' || this.state.type === 'compatible') {
+                            apiParams.source = this.state.type;
                         }
+
+                        const brandFetchPromise = fetchAllProducts(apiParams)
+                            .then(async (results) => {
+                                if (results.length === 0) {
+                                    apiParams.brand = brandName;
+                                    return fetchAllProducts(apiParams);
+                                }
+                                return results;
+                            })
+                            .catch(() => []);
+
+                        const searchPromises = [
+                            fetchAllProducts({ search: brandName }).catch(() => [])
+                        ];
+                        if (this.state.brand === 'fuji-xerox') {
+                            for (const variant of ['Fuji-Xerox', 'FujiXerox', 'Xerox']) {
+                                searchPromises.push(fetchAllProducts({ search: variant }).catch(() => []));
+                            }
+                        }
+
+                        const [brandResult, ...searchResults] = await Promise.all([brandFetchPromise, ...searchPromises]);
+                        let searchProducts = searchResults.flat();
+
+                        if (searchProducts.length === 0) {
+                            try {
+                                searchProducts = await fetchAllProducts({ search: `${brandName} ${legacyApiCategory}` });
+                            } catch (searchError) { /* continue */ }
+                        }
+
+                        let compatibleProducts = searchProducts.filter(p => {
+                            const productType = (p.product_type || '').toLowerCase();
+                            if (categoryId === 'ink') return productType === 'ink_cartridge' || productType === 'ink_bottle';
+                            if (categoryId === 'toner') return productType === 'toner_cartridge';
+                            if (categoryId === 'consumable') return productType === 'drum_unit' || productType === 'waste_toner' || productType === 'belt_unit' || productType === 'fuser_kit' || productType === 'maintenance_kit';
+                            return true;
+                        });
+                        compatibleProducts = filterByBrand(compatibleProducts);
+
+                        const seenIds = new Set();
+                        const allProducts = [];
+                        for (const p of [...brandResult, ...compatibleProducts]) {
+                            if (!seenIds.has(p.id)) { seenIds.add(p.id); allProducts.push(p); }
+                        }
+                        this.cache.products[legacyCacheKey] = allProducts;
                     }
 
-                    // Run brand fetch and all searches in parallel
-                    const [brandResult, ...searchResults] = await Promise.all([
-                        brandFetchPromise,
-                        ...searchPromises
-                    ]);
-
-                    brandProducts = brandResult;
-                    searchProducts = searchResults.flat();
-
-                    // If primary search returned nothing, try with category added
-                    if (searchProducts.length === 0) {
-                        try {
-                            searchProducts = await fetchAllProducts({ search: `${brandName} ${apiCategory}` });
-                        } catch (searchError) {
-                            // Search failed - continue with any results we have
-                        }
-                    }
-
-                    // Filter search results by category using category ID and product_type
-                    // categoryId is already declared above
-                    let compatibleProducts = searchProducts.filter(p => {
+                    let allProducts = this.cache.products[legacyCacheKey];
+                    allProducts = allProducts.filter(p => {
                         const productType = (p.product_type || '').toLowerCase();
-                        if (categoryId === 'ink') {
-                            return productType === 'ink_cartridge' || productType === 'ink_bottle';
-                        } else if (categoryId === 'toner') {
-                            return productType === 'toner_cartridge';
-                        } else if (categoryId === 'consumable') {
-                            return productType === 'drum_unit' ||
-                                   productType === 'waste_toner' ||
-                                   productType === 'belt_unit' ||
-                                   productType === 'fuser_kit' ||
-                                   productType === 'maintenance_kit';
-                        }
+                        if (categoryId === 'ink') return productType === 'ink_cartridge' || productType === 'ink_bottle';
+                        if (categoryId === 'toner') return productType === 'toner_cartridge';
+                        if (categoryId === 'consumable') return productType === 'drum_unit' || productType === 'waste_toner' || productType === 'belt_unit' || productType === 'fuser_kit' || productType === 'maintenance_kit';
                         return true;
                     });
 
-                    // Filter to only include products from this brand
-                    compatibleProducts = filterByBrand(compatibleProducts);
-
-                    // Merge and dedupe by product id
-                    const seenIds = new Set();
-                    const allProducts = [];
-                    for (const p of [...brandProducts, ...compatibleProducts]) {
-                        if (!seenIds.has(p.id)) {
-                            seenIds.add(p.id);
-                            allProducts.push(p);
-                        }
-                    }
-
-                    this.cache.products[cacheKey] = allProducts;
+                    if (navVersion !== undefined && this.navigationVersion !== navVersion) return;
+                    codes = this.extractProductCodes(allProducts);
                 }
-
-                let allProducts = this.cache.products[cacheKey];
-
-                // Brand filtering is already done:
-                // - API brand filter applied when fetching
-                // - filterByBrand applied to search results
-                // No need to filter again here - trust the cached products
-
-                // Apply category filter to cached products using category ID (not apiCategory)
-                // This is important because 'consumable' (drums) uses 'toner' API category
-                // categoryId is already declared above
-                allProducts = allProducts.filter(p => {
-                    const productType = (p.product_type || '').toLowerCase();
-
-                    if (categoryId === 'ink') {
-                        // Only ink cartridges and ink bottles
-                        return productType === 'ink_cartridge' || productType === 'ink_bottle';
-                    } else if (categoryId === 'toner') {
-                        // Only toner cartridges (not drums, waste toner, etc.)
-                        return productType === 'toner_cartridge';
-                    } else if (categoryId === 'consumable') {
-                        // Drums and supplies: drum units, waste toner, belts, fusers (NOT toner cartridges)
-                        return productType === 'drum_unit' ||
-                               productType === 'waste_toner' ||
-                               productType === 'belt_unit' ||
-                               productType === 'fuser_kit' ||
-                               productType === 'maintenance_kit';
-                    }
-                    return true;
-                });
-
-                // Check if navigation changed before rendering
-                if (navVersion !== undefined && this.navigationVersion !== navVersion) return;
-
-                // Extract codes from filtered products - this gives us counts directly
-                const codes = this.extractProductCodes(allProducts);
 
                 // Cache the final codes with counts
                 this.cache.products[codesCacheKey] = codes;
@@ -1403,39 +1368,65 @@
                 const categoryId = this.state.category;
                 const typeKey = this.state.type || 'all';
 
-                // Use the same cache key format as loadProductCodes (must match exactly!)
-                const codesCacheKey = `${this.state.brand}-${categoryId}-${typeKey}-codes-v4-final`;
+                // Per-code product cache key
+                const productCacheKey = `${this.state.brand}-${categoryId}-${typeKey}-products-${code}`;
 
-                // Get products from the cached codes (already filtered by category)
-                let mergedProducts = [];
-                if (this.cache.products[codesCacheKey]) {
-                    // Find the code entry that matches our selected code
-                    const cachedCodes = this.cache.products[codesCacheKey];
-                    const codeEntry = cachedCodes.find(c => c.code === code);
-                    if (codeEntry && codeEntry.products) {
-                        mergedProducts = codeEntry.products;
+                let mergedProducts = this.cache.products[productCacheKey] || [];
+
+                if (mergedProducts.length === 0) {
+                    // Try the old codes cache (v5 from /api/shop, or v4 from legacy)
+                    const codesCacheKey5 = `${this.state.brand}-${categoryId}-${typeKey}-codes-v5-final`;
+                    const codesCacheKey4 = `${this.state.brand}-${categoryId}-${typeKey}-codes-v4-final`;
+
+                    for (const cacheKey of [codesCacheKey5, codesCacheKey4]) {
+                        if (this.cache.products[cacheKey]) {
+                            const codeEntry = this.cache.products[cacheKey].find(c => c.code === code);
+                            if (codeEntry?.products) {
+                                mergedProducts = codeEntry.products;
+                                break;
+                            }
+                        }
                     }
                 }
 
-                // If no cached products, try to load them
+                // If still no products, fetch via /api/shop or legacy
                 if (mergedProducts.length === 0) {
-                    // Trigger loadProductCodes to populate cache, then get products
-                    await this.loadProductCodes(navVersion);
+                    if (this._shopEndpointAvailable) {
+                        const response = await API.getShopData({
+                            brand: this.state.brand,
+                            category: this.state.category,
+                            search: code,
+                            limit: 200
+                        });
+                        if (navVersion !== undefined && this.navigationVersion !== navVersion) return;
 
-                    // loadProductCodes shows the codes level as a side effect — hide it
-                    // since we're on the products level, not codes
-                    this.elements.levelCodes.hidden = true;
-
-                    // Check if navigation changed
-                    if (navVersion !== undefined && this.navigationVersion !== navVersion) return;
-
-                    // Now try to get from cache again
-                    if (this.cache.products[codesCacheKey]) {
-                        const cachedCodes = this.cache.products[codesCacheKey];
-                        const codeEntry = cachedCodes.find(c => c.code === code);
-                        if (codeEntry && codeEntry.products) {
-                            mergedProducts = codeEntry.products;
+                        if (response.ok && response.data?.products) {
+                            mergedProducts = response.data.products;
                         }
+                    }
+
+                    // Legacy fallback: trigger loadProductCodes to populate cache
+                    if (mergedProducts.length === 0) {
+                        await this.loadProductCodes(navVersion);
+                        this.elements.levelCodes.hidden = true;
+                        if (navVersion !== undefined && this.navigationVersion !== navVersion) return;
+
+                        const codesCacheKey5 = `${this.state.brand}-${categoryId}-${typeKey}-codes-v5-final`;
+                        const codesCacheKey4 = `${this.state.brand}-${categoryId}-${typeKey}-codes-v4-final`;
+                        for (const cacheKey of [codesCacheKey5, codesCacheKey4]) {
+                            if (this.cache.products[cacheKey]) {
+                                const codeEntry = this.cache.products[cacheKey].find(c => c.code === code);
+                                if (codeEntry?.products) {
+                                    mergedProducts = codeEntry.products;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+
+                    // Cache the fetched products for this code
+                    if (mergedProducts.length > 0) {
+                        this.cache.products[productCacheKey] = mergedProducts;
                     }
                 }
 

@@ -940,6 +940,13 @@
         },
 
         expandSection(data) {
+            // Collapse all other sections first so only one is open at a time
+            this._collapsibleSections.forEach(other => {
+                if (other !== data && !other.collapsed) {
+                    this.collapseSection(other);
+                }
+            });
+
             data.collapsed = false;
             data.section.classList.remove('is-collapsed');
             data.content.hidden = false;

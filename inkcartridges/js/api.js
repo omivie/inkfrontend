@@ -269,6 +269,23 @@ const API = {
     },
 
     /**
+     * Get shop data (products, series codes, category counts) in a single call
+     * @param {Object} params - Query parameters
+     */
+    async getShopData(params = {}) {
+        const qs = new URLSearchParams();
+        if (params.brand) qs.append('brand', params.brand);
+        if (params.category) qs.append('category', params.category);
+        if (params.source) qs.append('source', params.source);
+        if (params.page) qs.append('page', params.page);
+        if (params.limit) qs.append('limit', params.limit);
+        if (params.search) qs.append('search', params.search);
+        if (params.color) qs.append('color', params.color);
+        if (params.sort) qs.append('sort', params.sort);
+        return this.get(`/api/shop?${qs.toString()}`);
+    },
+
+    /**
      * Get single product by SKU
      * @param {string} sku - Product SKU
      */

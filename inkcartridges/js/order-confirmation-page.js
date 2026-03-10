@@ -7,6 +7,27 @@
             const urlParams = new URLSearchParams(window.location.search);
             const orderNumber = urlParams.get('order');
 
+            // Handle Stripe redirect params (payment_intent, redirect_status)
+            const redirectStatus = urlParams.get('redirect_status');
+            const paymentIntentId = urlParams.get('payment_intent');
+
+            if (redirectStatus && redirectStatus !== 'succeeded') {
+                // Payment failed or is pending after Stripe redirect
+                this.showPaymentPendingBanner(redirectStatus === 'failed' ? 'failed' : 'pending');
+            }
+
+            // If redirected from Stripe with a successful payment, clear cart
+            if (redirectStatus === 'succeeded') {
+                try {
+                    if (typeof API !== 'undefined') await API.clearCart();
+                } catch (e) { /* ignore */ }
+                if (typeof Cart !== 'undefined') {
+                    Cart.items = [];
+                    document.querySelectorAll('.cart-count, .cart-badge, #cart-count').forEach(el => { el.textContent = '0'; });
+                }
+                localStorage.removeItem('inkcartridges_cart');
+            }
+
             // Pre-fill email from sessionStorage (set by payment page)
             const storedOrder = sessionStorage.getItem('lastOrder');
             if (storedOrder) {
@@ -104,6 +125,7 @@
                     source: item.product?.source || item.source || null
                 })),
                 shippingAddress: shippingAddress,
+                status: apiOrder.status,
                 paymentMethod: apiOrder.payment_method,
                 createdAt: apiOrder.created_at,
                 customerNotes: apiOrder.customer_notes || null,
@@ -121,6 +143,11 @@
             // Show test mode banner if applicable (support both formats)
             if (order.testMode || order.is_test_order) {
                 this.showTestModeBanner();
+            }
+
+            // Show payment pending/failed banner if order is not paid
+            if (order.status && order.status !== 'paid' && order.status !== 'processing' && order.status !== 'shipped' && order.status !== 'delivered') {
+                this.showPaymentPendingBanner(order.status);
             }
 
             // Order number (support both formats)
@@ -329,6 +356,50 @@
             if (totalEl) {
                 totalEl.textContent = `$${parseFloat(total).toFixed(2)} NZD`;
             }
+        },
+
+        showPaymentPendingBanner(status) {
+            // Update header to reflect payment status
+            const titleEl = document.querySelector('.confirmation-header__title');
+            const messageEl = document.querySelector('.confirmation-header__message');
+            const iconEl = document.querySelector('.confirmation-header__icon');
+            const headerSecure = document.querySelector('.checkout-header__secure span');
+
+            if (status === 'pending') {
+                if (titleEl) titleEl.textContent = 'Payment Pending';
+                if (messageEl) messageEl.innerHTML = 'Your order was created but <strong>payment has not been completed</strong>. Please return to checkout to complete your payment, or contact us if you need assistance.';
+                if (headerSecure) headerSecure.textContent = 'Payment Pending';
+            } else if (status === 'cancelled' || status === 'failed') {
+                if (titleEl) titleEl.textContent = 'Payment Failed';
+                if (messageEl) messageEl.innerHTML = 'Your payment could not be processed. Please <a href="/html/cart.html">return to your cart</a> and try again, or contact us for assistance.';
+                if (headerSecure) headerSecure.textContent = 'Payment Failed';
+            }
+
+            // Swap the green checkmark icon for a warning icon
+            if (iconEl && (status === 'pending' || status === 'cancelled' || status === 'failed')) {
+                const color = status === 'pending' ? '#F59E0B' : '#EF4444';
+                const bgColor = status === 'pending' ? '#FFFBEB' : '#FEF2F2';
+                iconEl.innerHTML = `<svg width="80" height="80" viewBox="0 0 80 80" fill="none" aria-hidden="true">
+                    <circle cx="40" cy="40" r="38" stroke="${color}" stroke-width="4" fill="${bgColor}"/>
+                    <path d="M40 24V46" stroke="${color}" stroke-width="5" stroke-linecap="round"/>
+                    <circle cx="40" cy="54" r="3" fill="${color}"/>
+                </svg>`;
+            }
+
+            // Add a warning banner
+            const banner = document.createElement('div');
+            banner.className = 'payment-pending-banner';
+            const isPending = status === 'pending';
+            banner.innerHTML = `
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+                    <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+                </svg>
+                <span><strong>${isPending ? 'Payment Pending' : 'Payment Failed'}</strong> — ${isPending
+                    ? 'This order has not been paid yet. Please complete your payment to process the order.'
+                    : 'Payment was not successful. Please try placing your order again.'}</span>
+            `;
+            document.querySelector('.confirmation-content')?.prepend(banner);
         },
 
         showTestModeBanner() {
