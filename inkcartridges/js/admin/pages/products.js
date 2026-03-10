@@ -652,22 +652,24 @@ async function exportProductsPDF() {
 
     const isOwner = AdminAuth.isOwner();
 
-    // Dynamically load jsPDF if not already available
-    if (!window.jspdf) {
-      await new Promise((resolve, reject) => {
+    // Load jsPDF dynamically — always attempt if window.jspdf is missing
+    if (!window.jspdf || !window.jspdf.jsPDF) {
+      const loadScript = (url) => new Promise((resolve, reject) => {
+        // Remove any previously failed script with same src
+        const existing = document.querySelector(`script[src="${url}"]`);
+        if (existing) existing.remove();
         const s = document.createElement('script');
-        s.src = 'https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js';
+        s.src = url;
         s.onload = resolve;
-        s.onerror = () => reject(new Error('Failed to load jsPDF library'));
+        s.onerror = () => reject(new Error(`Failed to load: ${url}`));
         document.head.appendChild(s);
       });
-      await new Promise((resolve, reject) => {
-        const s = document.createElement('script');
-        s.src = 'https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.4/dist/jspdf.plugin.autotable.min.js';
-        s.onload = resolve;
-        s.onerror = () => reject(new Error('Failed to load jsPDF AutoTable plugin'));
-        document.head.appendChild(s);
-      });
+      await loadScript('https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js');
+      await loadScript('https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.4/dist/jspdf.plugin.autotable.min.js');
+    }
+
+    if (!window.jspdf || !window.jspdf.jsPDF) {
+      throw new Error('jsPDF library failed to initialize. Please hard-refresh the page (Ctrl+Shift+R) and try again.');
     }
 
     const { jsPDF } = window.jspdf;
