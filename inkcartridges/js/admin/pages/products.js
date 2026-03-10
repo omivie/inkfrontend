@@ -694,7 +694,8 @@ async function exportProductsPDF() {
     // Table columns
     const head = ['Name', 'SKU', 'Brand', 'Price', ...(isOwner ? ['Cost'] : []), 'Stock', 'Active'];
     const body = all.map(p => {
-      const brand = p.brand_name || (typeof p.brand === 'object' ? (p.brand?.name || '') : p.brand) || MISSING;
+      const rawBrand = p.brand_name || p.brand || '';
+      const brand = (typeof rawBrand === 'object' ? (rawBrand.name || rawBrand.brand || '') : rawBrand) || MISSING;
       return [
         p.name || MISSING,
         p.sku || MISSING,
