@@ -588,13 +588,123 @@ function diagKpi(label, value) {
   return `<div class="admin-kpi" style="padding:12px 14px"><div class="admin-kpi__label">${esc(label)}</div><div class="admin-kpi__value" style="font-size:18px">${esc(String(value))}</div></div>`;
 }
 
+function getProductExportParams() {
+  const p = new URLSearchParams(FilterState.getParams());
+  if (_search) p.set('search', _search);
+  if (_brandFilter) p.set('brand', _brandFilter);
+  if (_activeFilter !== '') p.set('active', _activeFilter);
+  if (_sort) p.set('sort', _sort);
+  if (_sortDir) p.set('order', _sortDir);
+  return p.toString();
+}
+
 async function handleExport(format = 'csv') {
   try {
+    if (format === 'pdf') {
+      await exportProductsPDF();
+      return;
+    }
     Toast.info(`Preparing ${format.toUpperCase()} export\u2026`);
-    await AdminAPI.exportData('products', format, FilterState.getParams());
+    await AdminAPI.exportData('products', format, getProductExportParams());
     Toast.success('Products exported');
   } catch (e) {
     Toast.error(`Export failed: ${e.message}`);
+  }
+}
+
+async function exportProductsPDF() {
+  Toast.info('Preparing PDF export\u2026');
+  try {
+    // Fetch all products matching current filters (same logic as loadProducts)
+    const filters = { search: _search, sort: _sort, order: _sortDir };
+    const globalBrands = FilterState.get('brands') || [];
+    if (_brandFilter) {
+      filters.brand = _brandFilter;
+    } else if (globalBrands.length) {
+      filters.brand = globalBrands.join(',');
+    }
+    if (_activeFilter !== '') filters.active = _activeFilter;
+
+    let all = [];
+    let page = 1;
+    while (true) {
+      const data = await AdminAPI.getProducts(filters, page, 200);
+      const rows = Array.isArray(data) ? data : (data?.products || data?.data || []);
+      if (!rows.length) break;
+      all = all.concat(rows);
+      const total = data?.pagination?.total || data?.total;
+      if (total && all.length >= total) break;
+      if (rows.length < 200) break;
+      page++;
+    }
+
+    // Apply client-side image filter if active
+    if (_imageFilter) {
+      all = all.filter(p =>
+        _imageFilter === 'no-images' ? !productHasImage(p) : productHasImage(p)
+      );
+    }
+
+    if (!all.length) {
+      Toast.error('No products to export');
+      return;
+    }
+
+    const isOwner = AdminAuth.isOwner();
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+
+    // Title and metadata
+    doc.setFontSize(16);
+    doc.text('Products Export', 14, 15);
+    doc.setFontSize(9);
+    doc.setTextColor(100);
+
+    // Filter summary
+    const filterParts = [];
+    if (_search) filterParts.push(`Search: "${_search}"`);
+    if (_brandFilter) filterParts.push(`Brand: ${_brandFilter}`);
+    if (_activeFilter !== '') filterParts.push(`Status: ${_activeFilter === 'true' ? 'Active' : 'Inactive'}`);
+    if (_imageFilter) filterParts.push(`Images: ${_imageFilter === 'no-images' ? 'Missing' : 'Has images'}`);
+    const summary = filterParts.length ? filterParts.join(' | ') : 'All products';
+    doc.text(`${summary}  \u2022  ${all.length} products  \u2022  ${new Date().toLocaleDateString('en-NZ')}`, 14, 21);
+    doc.setTextColor(0);
+
+    // Table columns
+    const head = ['Name', 'SKU', 'Brand', 'Price', ...(isOwner ? ['Cost'] : []), 'Stock', 'Active'];
+    const body = all.map(p => [
+      p.name || MISSING,
+      p.sku || MISSING,
+      p.brand || MISSING,
+      p.price != null ? formatPrice(p.price) : MISSING,
+      ...(isOwner ? [p.cost_price != null ? formatPrice(p.cost_price) : MISSING] : []),
+      p.stock_quantity != null ? String(p.stock_quantity) : 'Unknown',
+      p.is_active !== false ? 'Yes' : 'No',
+    ]);
+
+    doc.autoTable({
+      head: [head],
+      body,
+      startY: 26,
+      styles: { fontSize: 8, cellPadding: 2 },
+      headStyles: { fillColor: [41, 98, 255], textColor: 255, fontStyle: 'bold' },
+      alternateRowStyles: { fillColor: [245, 247, 250] },
+      didDrawPage: (data) => {
+        const pageCount = doc.internal.getNumberOfPages();
+        doc.setFontSize(8);
+        doc.setTextColor(150);
+        doc.text(
+          `Page ${data.pageNumber} of ${pageCount}`,
+          doc.internal.pageSize.getWidth() / 2, doc.internal.pageSize.getHeight() - 8,
+          { align: 'center' }
+        );
+      },
+    });
+
+    doc.save(`products-${new Date().toISOString().slice(0, 10)}.pdf`);
+    Toast.success('Products exported as PDF');
+  } catch (e) {
+    Toast.error(`PDF export failed: ${e.message}`);
   }
 }
 
