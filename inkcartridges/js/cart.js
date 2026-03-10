@@ -138,6 +138,9 @@ const Cart = {
                 await this.waitForAuth();
             }
 
+            // Pre-set auth flag so session-restore SIGNED_IN events are correctly guarded
+            this.isAuthenticated = Auth.isAuthenticated();
+
             // Listen for auth state changes
             Auth.onAuthStateChange(async (event, session) => {
                 if (event === 'SIGNED_IN') {
@@ -339,10 +342,9 @@ const Cart = {
 
                 // Merge back any local core items the server doesn't know about yet
                 // (e.g. add-to-cart API call was in-flight during navigation)
-                const serverKeys = new Set(parsed.items.map(i => i.key || this.cartItemKey(i)));
+                const serverIds = new Set(parsed.items.map(i => i.id));
                 const localOnly = this.items.filter(i => {
-                    const k = i.key || this.cartItemKey(i);
-                    return i.source === 'core' && !serverKeys.has(k);
+                    return i.source === 'core' && !serverIds.has(i.id);
                 });
                 this.items = parsed.items;
                 if (localOnly.length > 0) {
