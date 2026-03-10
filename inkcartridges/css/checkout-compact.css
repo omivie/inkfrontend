@@ -898,13 +898,3 @@ section.checkout-page .payment-authorization {
         flex-direction: column;
     }
 }
-
-
-/* Admin-free shipping option styling */
-.delivery-type-option:has(input[value="admin-free"]) .delivery-type-option__name {
-    color: #9333ea;
-}
-.delivery-type-option:has(input[value="admin-free"]) .delivery-type-option__desc {
-    color: #7c3aed;
-    font-style: italic;
-}

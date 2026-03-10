@@ -49,9 +49,6 @@
             // Check email verification status
             await this.checkEmailVerification();
 
-            // Inject admin-free shipping option for super admins
-            await this.injectAdminFreeShipping();
-
             // Track checkout started for analytics
             if (typeof CartAnalytics !== 'undefined') {
                 CartAnalytics.trackCheckoutStarted();
@@ -301,58 +298,22 @@
         },
 
         /**
-         * Fetch shipping rates from backend API using full items array.
-         * Falls back to client-side Shipping.calculate() if the API call fails.
-         * SECURITY: These values are NEVER used for payment.
-         * Backend recalculates actual shipping in API.createOrder().
+         * Check if cart contains ONLY test products (SKU starts with TEST-)
          */
-        async injectAdminFreeShipping() {
-            // Fast path: already cached
-            if (typeof isCachedSuperAdmin === 'function' && isCachedSuperAdmin()) {
-                this._addAdminFreeShippingOption();
-                return;
-            }
-
-            // Not cached — check with backend if user is logged in
-            if (typeof Auth !== 'undefined' && Auth.isAuthenticated()) {
-                try {
-                    const response = await API.verifyAdmin();
-                    if (response.ok && response.data) {
-                        const role = (response.data.role || '').toLowerCase().replace(/[^a-z]/g, '');
-                        if (role === 'superadmin' || role === 'owner') {
-                            try { sessionStorage.setItem('adminRole', 'superadmin'); } catch (e) {}
-                            this._addAdminFreeShippingOption();
-                        }
-                    }
-                } catch (e) {
-                    DebugLog.warn('[Checkout] Admin verify failed:', e.message);
-                }
-            }
-        },
-
-        _addAdminFreeShippingOption() {
-            const container = document.querySelector('.delivery-type-options');
-            if (!container || container.querySelector('input[value="admin-free"]')) return;
-
-            const label = document.createElement('label');
-            label.className = 'delivery-type-option';
-            label.innerHTML = `
-                <input type="radio" name="delivery_type" value="admin-free" required>
-                <span class="delivery-type-option__name">Admin Test (Free)</span>
-                <span class="delivery-type-option__desc">$0 shipping — admin testing only</span>
-            `;
-            container.appendChild(label);
-            label.querySelector('input').addEventListener('change', () => { this.updateShippingCost(); });
+        _isTestProductCart() {
+            return this.cartItems.length > 0 && this.cartItems.every(item =>
+                (item.sku || '').toUpperCase().startsWith('TEST-')
+            );
         },
 
         async fetchShippingFromAPI() {
             const region = document.getElementById('region')?.value || '';
             const deliveryType = document.querySelector('input[name="delivery_type"]:checked')?.value || 'urban';
 
-            // Admin-free shipping short-circuit
-            if (deliveryType === 'admin-free') {
+            // Test products get free shipping automatically
+            if (this._isTestProductCart()) {
                 this.totals.shipping = 0;
-                this._shippingResult = { fee: 0, tier: 'admin-free', zone: '', zoneLabel: '', freeShipping: true, deliveryType: 'admin-free', reason: 'Admin test — free shipping' };
+                this._shippingResult = { fee: 0, tier: 'test-free', zone: '', zoneLabel: '', freeShipping: true, deliveryType: deliveryType, reason: 'Test product — free shipping' };
                 return;
             }
 
