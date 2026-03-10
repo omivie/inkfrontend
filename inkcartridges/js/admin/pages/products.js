@@ -10,6 +10,15 @@ import { Modal } from '../components/modal.js';
 const formatPrice = (v) => window.formatPrice ? window.formatPrice(v) : `$${Number(v).toFixed(2)}`;
 const MISSING = '\u2014';
 
+/** Extract a brand name string from a product object, handling all API shapes */
+function extractBrandName(p) {
+  const raw = p.brand_name || p.brand || '';
+  if (!raw) return '';
+  if (typeof raw === 'string') return raw;
+  if (typeof raw === 'object') return raw.name || raw.brand || raw.brand_name || '';
+  return String(raw);
+}
+
 let _container = null;
 let _table = null;
 let _page = 1;
@@ -58,14 +67,16 @@ function buildColumns() {
     {
       key: 'brand', label: 'Brand', sortable: true,
       render: (r) => {
-        const raw = r.brand_name || r.brand || '';
-        const brand = typeof raw === 'object' ? (raw.name || raw.brand || '') : raw;
+        const brand = extractBrandName(r);
         return brand ? `<span class="admin-badge admin-badge--processing">${esc(brand)}</span>` : MISSING;
       },
     },
     {
       key: 'retail_price', label: 'Price', sortable: true,
-      render: (r) => `<span class="cell-mono cell-right">${r.retail_price != null ? formatPrice(r.retail_price) : MISSING}</span>`,
+      render: (r) => {
+        const price = r.retail_price ?? r.cost_price;
+        return `<span class="cell-mono cell-right">${price != null ? formatPrice(price) : MISSING}</span>`;
+      },
       align: 'right',
     },
   ];
@@ -694,13 +705,13 @@ async function exportProductsPDF() {
     // Table columns
     const head = ['Name', 'SKU', 'Brand', 'Price', ...(isOwner ? ['Cost'] : []), 'Stock', 'Active'];
     const body = all.map(p => {
-      const rawBrand = p.brand_name || p.brand || '';
-      const brand = (typeof rawBrand === 'object' ? (rawBrand.name || rawBrand.brand || '') : rawBrand) || MISSING;
+      const brand = extractBrandName(p) || MISSING;
+      const price = p.retail_price ?? p.cost_price;
       return [
         p.name || MISSING,
         p.sku || MISSING,
         brand,
-        p.retail_price != null ? formatPrice(p.retail_price) : MISSING,
+        price != null ? formatPrice(price) : MISSING,
         ...(isOwner ? [p.cost_price != null ? formatPrice(p.cost_price) : MISSING] : []),
         p.stock_quantity != null ? String(p.stock_quantity) : 'Unknown',
         p.is_active !== false ? 'Yes' : 'No',
