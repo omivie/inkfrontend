@@ -849,10 +849,9 @@
 
             // Auto-collapse prefilled sections on load, then expand first incomplete
             setTimeout(() => {
-                const activeSection = document.activeElement?.closest('fieldset.checkout-section');
                 // Auto-collapse prefilled sections
                 this._collapsibleSections.forEach(data => {
-                    if (data.section !== activeSection && this.isSectionComplete(data)) {
+                    if (this.isSectionComplete(data)) {
                         this.collapseSection(data);
                     }
                 });

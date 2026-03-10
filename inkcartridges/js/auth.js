@@ -73,12 +73,6 @@ const Auth = {
 
                     if (typeof API !== 'undefined') {
                         postLoginTasks.push(
-                            API.mergeCart().catch(e => {
-                                DebugLog.warn('mergeCart failed:', e.message);
-                                if (typeof showToast === 'function') {
-                                    showToast('Could not merge your guest cart.', 'error');
-                                }
-                            }),
                             API.getAccountMe().catch(e => {
                                 DebugLog.warn('getAccountMe failed:', e.message);
                             })

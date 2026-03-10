@@ -142,7 +142,7 @@ const Cart = {
             Auth.onAuthStateChange(async (event, session) => {
                 if (event === 'SIGNED_IN') {
                     // Skip merge if already authenticated (session restore, not a real sign-in)
-                    if (this.isAuthenticated) return;
+                    if (this.isAuthenticated || this._mergeInProgress) return;
                     // User just logged in - merge guest cart to server and load server cart
                     await this.mergeGuestCartAndLoad();
                 } else if (event === 'TOKEN_REFRESHED') {
@@ -347,11 +347,16 @@ const Cart = {
                 this.items = parsed.items;
                 if (localOnly.length > 0) {
                     for (const item of localOnly) {
-                        this.items.push(item);
                         if (typeof API !== 'undefined') {
-                            API.addToCart(item.id, item.quantity).catch(() => {});
+                            try {
+                                await API.addToCart(item.id, item.quantity);
+                            } catch (e) {
+                                DebugLog.error('Failed to sync local item:', item.id, e);
+                            }
                         }
                     }
+                    // Reload to get accurate server state after adding items
+                    await this.loadFromServer();
                     this.saveToLocalStorage();
                 }
                 this.serverSummary = parsed.summary;
@@ -431,31 +436,19 @@ const Cart = {
         try {
             this.isAuthenticated = true;
 
-            // Handle legacy localStorage items (backward compatibility)
+            // Read and clear legacy localStorage items BEFORE any server calls
             let legacyItems = [];
             try {
                 const stored = localStorage.getItem(this.STORAGE_KEY);
                 if (stored) {
                     legacyItems = JSON.parse(stored);
-                    // Clear immediately so re-runs don't re-add the same items
                     localStorage.removeItem(this.STORAGE_KEY);
                 }
             } catch (e) {
                 DebugLog.error('Failed to parse legacy cart:', e);
             }
 
-            // Migrate legacy localStorage items to server first
-            if (legacyItems.length > 0 && typeof API !== 'undefined') {
-                for (const item of legacyItems) {
-                    try {
-                        await API.addToCart(item.id, item.quantity);
-                    } catch (e) {
-                        DebugLog.error('Failed to migrate legacy item:', item.id, e);
-                    }
-                }
-            }
-
-            // Call server merge endpoint to merge guest cart (httpOnly cookie) into user cart
+            // Step 1: Merge guest cookie cart into user cart FIRST
             if (typeof API !== 'undefined') {
                 try {
                     const mergeResult = await API.mergeCart();
@@ -471,8 +464,26 @@ const Cart = {
                 }
             }
 
-            // Load the merged cart from server and cache locally
+            // Step 2: Load server cart to see what's already there
             await this.loadFromServer();
+            const serverKeys = new Set(this.items.map(i => i.key || this.cartItemKey(i)));
+
+            // Step 3: Only add localStorage items NOT already on server
+            if (legacyItems.length > 0 && typeof API !== 'undefined') {
+                for (const item of legacyItems) {
+                    const k = item.key || this.cartItemKey(item);
+                    if (!serverKeys.has(k)) {
+                        try {
+                            await API.addToCart(item.id, item.quantity);
+                        } catch (e) {
+                            DebugLog.error('Failed to migrate legacy item:', item.id, e);
+                        }
+                    }
+                }
+                // Reload to get accurate totals after adding new items
+                await this.loadFromServer();
+            }
+
             this.saveToLocalStorage();
             this.updateUI();
         } finally {
