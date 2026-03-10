@@ -847,57 +847,6 @@
                 }
             });
 
-            // Auto-collapse prefilled sections on load, then expand first incomplete
-            setTimeout(() => {
-                // Auto-collapse prefilled sections
-                this._collapsibleSections.forEach(data => {
-                    if (this.isSectionComplete(data)) {
-                        this.collapseSection(data);
-                    }
-                });
-                // Expand first non-collapsed incomplete section (so user sees where to go next)
-                const firstIncomplete = this._collapsibleSections.find(d => !this.isSectionComplete(d));
-                if (firstIncomplete && firstIncomplete.collapsed) {
-                    this.expandSection(firstIncomplete);
-                }
-            }, 600);
-
-            // Auto-collapse sections when autofill completes them
-            let autocollapseTimer = null;
-            let changedFields = new Set();
-
-            const checkAutocollapse = (e) => {
-                if (e.target?.id) changedFields.add(e.target.id);
-                clearTimeout(autocollapseTimer);
-                autocollapseTimer = setTimeout(() => {
-                    const fieldCount = changedFields.size;
-                    changedFields = new Set();
-
-                    // 2+ fields changed at once = autofill; 1 field = manual typing (use Continue button)
-                    if (fieldCount < 2) return;
-
-                    this._collapsibleSections.forEach((data) => {
-                        if (!data.collapsed && this.isSectionComplete(data)) {
-                            this.collapseSection(data);
-                        }
-                    });
-                    // Expand first incomplete section
-                    const firstIncomplete = this._collapsibleSections.find(d => !this.isSectionComplete(d));
-                    if (firstIncomplete && firstIncomplete.collapsed) {
-                        this.expandSection(firstIncomplete);
-                    }
-                    // If all complete, scroll to payment button
-                    if (this._collapsibleSections.every(d => this.isSectionComplete(d))) {
-                        this._collapsibleSections.forEach(d => {
-                            if (!d.collapsed) this.collapseSection(d);
-                        });
-                        const payBtn = document.getElementById('continue-to-payment-btn');
-                        if (payBtn) payBtn.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                    }
-                }, 300);
-            };
-            form.addEventListener('input', checkAutocollapse, true);
-            form.addEventListener('change', checkAutocollapse, true);
         },
 
         // Check if all required fields in a section are filled
