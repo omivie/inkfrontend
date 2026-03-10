@@ -23,6 +23,7 @@
     <link rel="stylesheet" href="/css/search.css">
 
     <script src="https://js.stripe.com/v3/"></script>
+    <script src="https://www.paypal.com/sdk/js?client-id=ASCSnoeTrj2EkqTuWH_JBnuCzYzGVcGk05BpeeTu46up60pJIBsbVN0Z6Prvj9Bjq6YXsGYNOOfKwHAG&currency=NZD"></script>
 
     <style>
         :root {
@@ -460,6 +461,30 @@
             height: 20px;
             width: auto;
         }
+
+        /* OR divider between Stripe and PayPal */
+        .payment-divider {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            margin: 1.5rem 0;
+            color: #94a3b8;
+            font-size: 0.85rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+        .payment-divider::before,
+        .payment-divider::after {
+            content: '';
+            flex: 1;
+            height: 1px;
+            background: #e2e8f0;
+        }
+
+        /* PayPal button container */
+        #paypal-button-container {
+            margin-bottom: 0.5rem;
+        }
     </style>
 </head>
 <body>
@@ -555,6 +580,14 @@
                                         </div>
                                         <div id="card-errors" role="alert"></div>
                                     </div>
+
+                                    <!-- OR divider -->
+                                    <div class="payment-divider">
+                                        <span>OR</span>
+                                    </div>
+
+                                    <!-- PayPal button -->
+                                    <div id="paypal-button-container"></div>
 
                                     <div id="payment-authorization" class="payment-authorization">
                                         <label class="authorize-box" for="authorize-payment">

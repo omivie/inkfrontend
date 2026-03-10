@@ -47,6 +47,9 @@
             // Initialize Stripe
             this.initStripe();
 
+            // Initialize PayPal
+            this.initPayPal();
+
             // Setup event handlers
             this.setupEventHandlers();
 
@@ -366,6 +369,141 @@
             });
 
             DebugLog.log('Stripe PaymentElement initialized successfully');
+        },
+
+        /**
+         * Initialize PayPal button
+         */
+        initPayPal() {
+            if (typeof paypal === 'undefined') {
+                DebugLog.warn('PayPal SDK not loaded');
+                const container = document.getElementById('paypal-button-container');
+                const divider = document.querySelector('.payment-divider');
+                if (container) container.style.display = 'none';
+                if (divider) divider.style.display = 'none';
+                return;
+            }
+
+            let orderNumber = null;
+
+            paypal.Buttons({
+                style: {
+                    layout: 'vertical',
+                    color: 'blue',
+                    shape: 'rect',
+                    label: 'pay',
+                    height: 45
+                },
+
+                createOrder: async () => {
+                    // Disable Stripe pay button to prevent double-submission
+                    const payBtn = document.getElementById('pay-now-btn');
+                    if (payBtn) payBtn.disabled = true;
+
+                    // Build items array from cart
+                    const items = this.cartItems.map(item => ({
+                        product_id: item.id,
+                        quantity: item.quantity
+                    }));
+
+                    const orderResponse = await API.createOrder({
+                        items: items,
+                        shipping_address: {
+                            recipient_name: `${this.checkoutData.firstName} ${this.checkoutData.lastName}`,
+                            phone: this.checkoutData.phone || '',
+                            address_line1: this.checkoutData.address1,
+                            address_line2: this.checkoutData.address2 || '',
+                            city: this.checkoutData.city,
+                            region: this.checkoutData.region,
+                            postal_code: this.checkoutData.postcode,
+                            country: 'NZ'
+                        },
+                        shipping_tier: '',
+                        shipping_zone: '',
+                        delivery_type: this.checkoutData.deliveryType || 'urban',
+                        save_address: this.checkoutData.saveAddress !== false,
+                        customer_notes: this.checkoutData.orderNotes || '',
+                        payment_method: 'paypal',
+                        idempotency_key: this.getIdempotencyKey()
+                    });
+
+                    if (!orderResponse.ok) {
+                        const errorMsg = orderResponse.error?.message || orderResponse.error || 'Failed to create order';
+                        throw new Error(errorMsg);
+                    }
+
+                    orderNumber = orderResponse.data.order_number;
+                    const paypalOrderId = orderResponse.data.paypal_order_id;
+
+                    if (!paypalOrderId) {
+                        throw new Error('PayPal order ID not returned from server');
+                    }
+
+                    return paypalOrderId;
+                },
+
+                onApprove: async (data) => {
+                    try {
+                        // Capture the PayPal payment
+                        const captureResponse = await API.post(`/api/orders/${orderNumber}/capture-paypal`, {
+                            paypal_order_id: data.orderID
+                        });
+
+                        if (!captureResponse.ok) {
+                            throw new Error(captureResponse.error?.message || captureResponse.error || 'Payment capture failed');
+                        }
+
+                        // Clear cart
+                        try { await API.clearCart(); } catch (e) { DebugLog.warn('Could not clear cart:', e); }
+                        if (typeof Cart !== 'undefined') {
+                            Cart.items = [];
+                            document.querySelectorAll('.cart-count, .cart-badge, #cart-count').forEach(el => { el.textContent = '0'; });
+                        }
+                        localStorage.removeItem('inkcartridges_cart');
+
+                        // Store order data for confirmation page
+                        sessionStorage.setItem('lastOrder', JSON.stringify({
+                            order_number: orderNumber,
+                            email: this.checkoutData.email
+                        }));
+                        sessionStorage.removeItem('checkoutData');
+
+                        // Track analytics
+                        if (typeof CartAnalytics !== 'undefined') {
+                            CartAnalytics.trackOrderCompleted({ order_number: orderNumber, total_amount: this.totals.total });
+                        }
+
+                        // Redirect to confirmation
+                        window.location.href = `/html/order-confirmation.html?order=${encodeURIComponent(orderNumber)}`;
+
+                    } catch (error) {
+                        DebugLog.error('PayPal capture error:', error);
+                        this.showError(error.message || 'Payment failed. Please try again.');
+                    }
+                },
+
+                onCancel: () => {
+                    DebugLog.log('PayPal payment cancelled');
+                    if (typeof showToast === 'function') {
+                        showToast('Payment cancelled', 'info');
+                    }
+                    // Re-enable Stripe pay button
+                    this._idempotencyKey = null;
+                    this.updatePayButton();
+                },
+
+                onError: (err) => {
+                    DebugLog.error('PayPal error:', err);
+                    if (typeof showToast === 'function') {
+                        showToast('Payment error. Please try again.', 'error');
+                    }
+                    // Re-enable Stripe pay button
+                    this._idempotencyKey = null;
+                    this.updatePayButton();
+                }
+            }).render('#paypal-button-container');
+
+            DebugLog.log('PayPal button initialized');
         },
 
         // Note: Apple Pay / Google Pay are handled natively by PaymentElement
