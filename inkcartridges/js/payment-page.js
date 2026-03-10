@@ -501,9 +501,15 @@
                     this._idempotencyKey = null;
                     this.updatePayButton();
                 }
-            }).render('#paypal-button-container');
-
-            DebugLog.log('PayPal button initialized');
+            }).render('#paypal-button-container').then(() => {
+                DebugLog.log('PayPal button rendered successfully');
+            }).catch(err => {
+                DebugLog.error('PayPal button render failed:', err);
+                const container = document.getElementById('paypal-button-container');
+                const divider = document.querySelector('.payment-divider');
+                if (container) container.style.display = 'none';
+                if (divider) divider.style.display = 'none';
+            });
         },
 
         // Note: Apple Pay / Google Pay are handled natively by PaymentElement
