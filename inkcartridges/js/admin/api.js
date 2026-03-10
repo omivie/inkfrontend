@@ -253,6 +253,8 @@ const AdminAPI = {
       if (filters.brand) params.set('brand', filters.brand);
       if (filters.search) params.set('search', filters.search);
       if (filters.active !== undefined) params.set('is_active', filters.active);
+      if (filters.sort) params.set('sort', filters.sort);
+      if (filters.order) params.set('order', filters.order);
       const resp = await window.API.get(`/api/admin/products?${params}`);
       return resp?.data ?? null;
     } catch (e) {
