@@ -693,15 +693,18 @@ async function exportProductsPDF() {
 
     // Table columns
     const head = ['Name', 'SKU', 'Brand', 'Price', ...(isOwner ? ['Cost'] : []), 'Stock', 'Active'];
-    const body = all.map(p => [
-      p.name || MISSING,
-      p.sku || MISSING,
-      p.brand || MISSING,
-      p.price != null ? formatPrice(p.price) : MISSING,
-      ...(isOwner ? [p.cost_price != null ? formatPrice(p.cost_price) : MISSING] : []),
-      p.stock_quantity != null ? String(p.stock_quantity) : 'Unknown',
-      p.is_active !== false ? 'Yes' : 'No',
-    ]);
+    const body = all.map(p => {
+      const brand = p.brand_name || (typeof p.brand === 'object' ? (p.brand?.name || '') : p.brand) || MISSING;
+      return [
+        p.name || MISSING,
+        p.sku || MISSING,
+        brand,
+        p.retail_price != null ? formatPrice(p.retail_price) : MISSING,
+        ...(isOwner ? [p.cost_price != null ? formatPrice(p.cost_price) : MISSING] : []),
+        p.stock_quantity != null ? String(p.stock_quantity) : 'Unknown',
+        p.is_active !== false ? 'Yes' : 'No',
+      ];
+    });
 
     doc.autoTable({
       head: [head],
