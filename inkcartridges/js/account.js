@@ -882,7 +882,7 @@ const AccountPage = {
 
         try {
             const response = await API.verifyAdmin();
-            if (response.ok && response.data?.is_admin) {
+            if (response.ok && response.data) {
                 adminNavItem.hidden = false;
 
                 // Cache admin role for UI gating on non-admin pages

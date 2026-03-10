@@ -317,15 +317,15 @@
             if (typeof Auth !== 'undefined' && Auth.isAuthenticated()) {
                 try {
                     const response = await API.verifyAdmin();
-                    if (response.ok && response.data?.is_admin) {
-                        const role = (response.data.role || '').toLowerCase();
+                    if (response.ok && response.data) {
+                        const role = (response.data.role || '').toLowerCase().replace(/[^a-z]/g, '');
                         if (role === 'superadmin' || role === 'owner') {
                             try { sessionStorage.setItem('adminRole', 'superadmin'); } catch (e) {}
                             this._addAdminFreeShippingOption();
                         }
                     }
                 } catch (e) {
-                    // Not admin or backend unavailable — no option shown
+                    DebugLog.warn('[Checkout] Admin verify failed:', e.message);
                 }
             }
         },
