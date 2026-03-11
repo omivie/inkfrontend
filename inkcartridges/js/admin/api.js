@@ -325,6 +325,15 @@ const AdminAPI = {
     }
   },
 
+  async deleteProduct(productId) {
+    try {
+      return await window.API.deleteProduct(productId);
+    } catch (e) {
+      DebugLog.warn('[AdminAPI] deleteProduct failed:', e.message);
+      throw e;
+    }
+  },
+
   async deleteProductImage(productId, imageId) {
     try {
       return await window.API.deleteProductImage(productId, imageId);

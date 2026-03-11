@@ -1241,11 +1241,13 @@ function updateBulkBar(selected) {
     <div class="admin-bulk-bar__actions">
       <button class="admin-btn admin-btn--sm admin-btn--danger" data-bulk="deactivate">Deactivate</button>
       <button class="admin-btn admin-btn--sm admin-btn--primary" data-bulk="activate">Activate</button>
+      <button class="admin-btn admin-btn--sm admin-btn--danger" data-bulk="delete" style="margin-left:auto">Delete</button>
       <button class="admin-btn admin-btn--sm admin-btn--ghost" data-bulk="clear">Clear</button>
     </div>
   `;
   _bulkBar.querySelector('[data-bulk="deactivate"]').addEventListener('click', () => bulkSetActive(false));
   _bulkBar.querySelector('[data-bulk="activate"]').addEventListener('click', () => bulkSetActive(true));
+  _bulkBar.querySelector('[data-bulk="delete"]').addEventListener('click', () => bulkDelete());
   _bulkBar.querySelector('[data-bulk="clear"]').addEventListener('click', () => {
     if (_table) _table.clearSelection();
     updateBulkBar(new Set());
@@ -1298,6 +1300,45 @@ async function bulkSetActive(activate) {
         Toast.error(`${done} ${action}d, ${failed} failed`);
       } else {
         Toast.success(`${done} product${done > 1 ? 's' : ''} ${action}d`);
+      }
+      loadProducts();
+    },
+  });
+}
+
+async function bulkDelete() {
+  if (!_table) return;
+  const selected = _table.getSelected();
+  const count = selected.size;
+  if (count === 0) return;
+
+  Modal.confirm({
+    title: 'Delete Products',
+    message: `This will permanently delete ${count} product${count > 1 ? 's' : ''}. This action cannot be undone. Proceed?`,
+    confirmLabel: `Delete ${count}`,
+    confirmClass: 'admin-btn--danger',
+    onConfirm: async () => {
+      const ids = [...selected];
+      let done = 0;
+      let failed = 0;
+      Toast.info(`Deleting ${count} product${count > 1 ? 's' : ''}\u2026`);
+      // Process in batches of 5
+      for (let i = 0; i < ids.length; i += 5) {
+        const batch = ids.slice(i, i + 5);
+        const results = await Promise.allSettled(
+          batch.map(id => AdminAPI.deleteProduct(id))
+        );
+        for (const r of results) {
+          if (r.status === 'fulfilled') done++;
+          else failed++;
+        }
+      }
+      if (_table) _table.clearSelection();
+      updateBulkBar(new Set());
+      if (failed > 0) {
+        Toast.error(`${done} deleted, ${failed} failed`);
+      } else {
+        Toast.success(`${done} product${done > 1 ? 's' : ''} deleted`);
       }
       loadProducts();
     },

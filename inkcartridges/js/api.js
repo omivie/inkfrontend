@@ -1073,6 +1073,14 @@ const API = {
     },
 
     /**
+     * Delete product (admin)
+     * @param {string} productId - Product UUID
+     */
+    async deleteProduct(productId) {
+        return this.delete(`/api/admin/products/${productId}`);
+    },
+
+    /**
      * Delete product image (admin)
      * @param {string} productId - Product UUID
      * @param {string} imageId - Image UUID
