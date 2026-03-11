@@ -361,6 +361,7 @@ const Favourites = {
                         <span class="source-badge source-badge--${(item.name || '').toLowerCase().startsWith('compatible ') ? 'compatible' : 'genuine'}">${(item.name || '').toLowerCase().startsWith('compatible ') ? 'COMPATIBLE' : 'GENUINE'}</span>
                         <h3 class="favourite-item__name">${Security.escapeHtml(item.name)}</h3>
                         ${item.brand ? `<p class="favourite-item__brand">${Security.escapeHtml(item.brand)}</p>` : ''}
+                        ${(item.color || (typeof ProductColors !== 'undefined' ? ProductColors.detectFromName(item.name) : '')) ? `<p class="favourite-item__color">${Security.escapeHtml(item.color || ProductColors.detectFromName(item.name))}</p>` : ''}
                         <p class="favourite-item__price">${typeof formatPrice === 'function' ? formatPrice(item.price) : '$' + item.price.toFixed(2)}</p>
                         ${item.in_stock === false ? '<p class="favourite-item__stock favourite-item__stock--out">Out of Stock</p>' : ''}
                     </div>

@@ -2868,6 +2868,13 @@
     margin: 0 0 var(--spacing-2);
 }
 
+.favourite-item__color {
+    display: inline-block;
+    font-size: 11px;
+    color: var(--color-text-muted);
+    margin: 0;
+}
+
 .favourite-item__price {
     font-size: var(--font-size-base);
     font-weight: var(--font-weight-bold);
