@@ -451,8 +451,9 @@
 
                         orderNumber = orderResponse.data.order_number;
 
-                        // Handle duplicate order from a different payment method (e.g. stale Stripe order)
-                        if (orderResponse.data.is_duplicate && orderResponse.data.payment_method && orderResponse.data.payment_method !== 'paypal') {
+                        // If backend returned a non-PayPal order (e.g. stale Stripe order),
+                        // cancel it and ask user to retry so a fresh PayPal order is created
+                        if (orderResponse.data.payment_method && orderResponse.data.payment_method !== 'paypal') {
                             try {
                                 await API.cancelOrder(orderNumber);
                                 DebugLog.log('Cancelled stale', orderResponse.data.payment_method, 'order:', orderNumber);
