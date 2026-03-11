@@ -142,12 +142,28 @@ const Auth = {
 
         if (typeof turnstile === 'undefined') return null;
 
+        // Create a hidden container for the invisible widget
+        let container = document.getElementById('auth-turnstile');
+        if (!container) {
+            container = document.createElement('div');
+            container.id = 'auth-turnstile';
+            container.style.display = 'none';
+            document.body.appendChild(container);
+        }
+
         return new Promise((resolve) => {
-            turnstile.execute(siteKey, {
+            // Remove any previous widget in this container
+            turnstile.remove('#auth-turnstile');
+            turnstile.render('#auth-turnstile', {
+                sitekey: siteKey,
                 action: 'account-sync',
+                execution: 'execute',
+                appearance: 'interaction-only',
                 callback: (token) => resolve(token),
-                'error-callback': () => resolve(null)
+                'error-callback': () => resolve(null),
+                'expired-callback': () => resolve(null)
             });
+            turnstile.execute('#auth-turnstile');
         });
     },
 

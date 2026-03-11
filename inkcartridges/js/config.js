@@ -21,7 +21,7 @@ const Config = {
     PAYPAL_CLIENT_ID: 'ASCSnoeTrj2EkqTuWH_JBnuCzYzGVcGk05BpeeTu46up60pJIBsbVN0Z6Prvj9Bjq6YXsGYNOOfKwHAG',
 
     // Cloudflare Turnstile site key (empty = Turnstile disabled, set when backend enables it)
-    TURNSTILE_SITE_KEY: '',
+    TURNSTILE_SITE_KEY: '0x4AAAAAACoGsire3IW5cBB9',
 
     // App settings
     ITEMS_PER_PAGE: 20,
