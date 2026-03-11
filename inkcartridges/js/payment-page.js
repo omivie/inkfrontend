@@ -444,6 +444,9 @@
                             idempotency_key: await this.getIdempotencyKey()
                         });
 
+                        // Debug: log full backend response for PayPal order creation
+                        DebugLog.log('PayPal createOrder response:', JSON.stringify(orderResponse, null, 2));
+
                         if (!orderResponse.ok) {
                             const errorMsg = orderResponse.error?.message || orderResponse.error || 'Failed to create order';
                             throw new Error(errorMsg);
@@ -660,6 +663,7 @@
                     delivery_type: this.checkoutData.deliveryType || 'urban',
                     save_address: this.checkoutData.saveAddress !== false,
                     customer_notes: this.checkoutData.orderNotes || '',
+                    payment_method: 'stripe',
                     idempotency_key: await this.getIdempotencyKey()
                 });
 
