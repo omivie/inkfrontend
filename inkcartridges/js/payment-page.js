@@ -9,6 +9,7 @@
         checkoutData: null,
         isSubmitting: false,
         paymentAuthorized: false,
+        paypalAttempt: 0,
 
         // Idempotency key — deterministic SHA-256 hash including payment method
         async getIdempotencyKey(paymentMethod) {
@@ -21,7 +22,7 @@
                 .join(',');
             const addr = this.checkoutData || {};
             const addressStr = [addr.address1, addr.address2, addr.city, addr.region, addr.postcode].join('|');
-            const raw = userId + sortedItemIds + addressStr + (paymentMethod || '');
+            const raw = userId + sortedItemIds + addressStr + (paymentMethod || '') + (this.paypalAttempt || 0);
 
             const encoded = new TextEncoder().encode(raw);
             const hashBuffer = await crypto.subtle.digest('SHA-256', encoded);
@@ -465,12 +466,11 @@
                                         DebugLog.warn('Could not cancel duplicate order:', cancelErr.message);
                                     }
                                 }
+                                this.paypalAttempt++;
                                 throw new Error('A previous payment attempt was cleared. Please click Pay with PayPal again.');
                             } else if (errorCode === 'DUPLICATE_REQUEST') {
                                 await new Promise(r => setTimeout(r, 2000));
                                 throw new Error('Request already in progress. Please click Pay with PayPal again.');
-                            } else if (errorCode === 'PROMO_COUPON_LIMIT_REACHED') {
-                                throw new Error('This coupon has reached its usage limit. Please remove it and try again.');
                             } else if (errorCode === 'ORDER_TOTAL_TOO_LOW') {
                                 throw new Error('Your order total is below the minimum. Please add more items.');
                             } else if (errorCode === 'ACCOUNT_FLAGGED') {
@@ -494,6 +494,7 @@
                             } catch (cancelErr) {
                                 DebugLog.warn('Could not cancel duplicate order:', cancelErr.message);
                             }
+                            this.paypalAttempt++;
                             throw new Error('A previous payment attempt was cleared. Please click Pay with PayPal again.');
                         }
 
@@ -509,6 +510,7 @@
                             } catch (cancelErr) {
                                 DebugLog.warn('Could not cancel stale order:', cancelErr.message);
                             }
+                            this.paypalAttempt++;
                             throw new Error('A previous payment attempt was cleared. Please click Pay with PayPal again.');
                         }
 
@@ -522,6 +524,7 @@
                             } catch (cancelErr) {
                                 DebugLog.warn('Could not cancel incomplete PayPal order:', cancelErr.message);
                             }
+                            this.paypalAttempt++;
                             throw new Error('PayPal setup did not complete. Please click Pay with PayPal again.');
                         }
 
@@ -543,7 +546,7 @@
                         });
 
                         if (!captureResponse.ok) {
-                            throw new Error(captureResponse.error?.message || captureResponse.error || 'Payment capture failed');
+                            throw new Error(captureResponse.error || 'Payment capture failed');
                         }
 
                         // Clear cart
@@ -587,6 +590,7 @@
                         }
                         orderNumber = null;
                     }
+                    this.paypalAttempt++;
                     if (typeof showToast === 'function') {
                         showToast('Payment cancelled', 'info');
                     }
@@ -606,8 +610,9 @@
                         }
                         orderNumber = null;
                     }
+                    this.paypalAttempt++;
                     if (typeof showToast === 'function') {
-                        showToast('Payment error. Please try again.', 'error');
+                        showToast('Something went wrong with PayPal. Please try again.', 'error');
                     }
                     // Re-enable Stripe pay button
                     this.updatePayButton();

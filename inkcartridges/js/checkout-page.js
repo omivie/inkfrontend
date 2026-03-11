@@ -1245,6 +1245,58 @@
                     }
                 }
 
+                // Load profile from backend to fill any remaining gaps
+                try {
+                    const profileRes = await API.getProfile();
+                    if (profileRes.ok && profileRes.data) {
+                        const profile = profileRes.data;
+
+                        const emailInput = document.getElementById('email');
+                        if (emailInput && !emailInput.value && profile.email) {
+                            emailInput.value = profile.email;
+                        }
+
+                        const firstNameInput = document.getElementById('first-name');
+                        const lastNameInput = document.getElementById('last-name');
+                        if (firstNameInput && !firstNameInput.value && profile.first_name) {
+                            firstNameInput.value = profile.first_name;
+                        }
+                        if (lastNameInput && !lastNameInput.value && profile.last_name) {
+                            lastNameInput.value = profile.last_name;
+                        }
+
+                        // Fill phone from profile if not already filled from Supabase metadata
+                        const phoneInput = document.getElementById('phone');
+                        if (phoneInput && !phoneInput.value && profile.phone) {
+                            const phoneCountrySelect = document.getElementById('phone-country');
+                            if (phoneCountrySelect) {
+                                const countryCodes = Array.from(phoneCountrySelect.options)
+                                    .map(o => o.value)
+                                    .filter(v => v.startsWith('+'))
+                                    .sort((a, b) => b.length - a.length);
+
+                                let matched = false;
+                                for (const code of countryCodes) {
+                                    if (profile.phone.startsWith(code)) {
+                                        phoneCountrySelect.value = code;
+                                        const remainder = profile.phone.slice(code.length).replace(/^\s+/, '');
+                                        phoneInput.value = '0' + remainder;
+                                        matched = true;
+                                        break;
+                                    }
+                                }
+                                if (!matched) {
+                                    phoneInput.value = profile.phone;
+                                }
+                            } else {
+                                phoneInput.value = profile.phone;
+                            }
+                        }
+                    }
+                } catch (e) {
+                    DebugLog.log('Could not load profile for prefill:', e.message);
+                }
+
                 // Try to load saved addresses
                 this.loadSavedAddresses();
             }
@@ -1256,41 +1308,98 @@
                 const response = await API.getAddresses();
                 if (response.ok && response.data) {
                     const addresses = Array.isArray(response.data) ? response.data : (response.data.addresses || []);
+                    this.savedAddresses = addresses;
                     const defaultAddress = addresses.find(a => a.is_default) || addresses[0];
 
                     if (defaultAddress) {
-                        // Pre-fill shipping address from saved address
-                        const fields = {
-                            'first-name': defaultAddress.first_name || defaultAddress.recipient_name?.split(' ')[0],
-                            'last-name': defaultAddress.last_name || defaultAddress.recipient_name?.split(' ').slice(1).join(' '),
-                            'company': defaultAddress.company,
-                            'address1': defaultAddress.address_line1,
-                            'address2': defaultAddress.address_line2,
-                            'city': defaultAddress.city,
-                            'region': defaultAddress.region?.toLowerCase().replace(/\s+/g, '-'),
-                            'postcode': defaultAddress.postal_code
-                        };
+                        this.fillAddressFields(defaultAddress);
+                    }
 
-                        Object.entries(fields).forEach(([id, value]) => {
-                            if (value) {
-                                const input = document.getElementById(id);
-                                if (input && !input.value) {
-                                    input.value = value;
-                                }
-                            }
-                        });
-
-                        // Restore delivery type from saved address
-                        const savedDeliveryType = defaultAddress.delivery_type || 'urban';
-                        const deliveryRadio = document.querySelector(`input[name="delivery_type"][value="${savedDeliveryType}"]`);
-                        if (deliveryRadio) deliveryRadio.checked = true;
-
-                        // Recalculate shipping with restored address
-                        this.updateShippingCost();
+                    // Render address picker if multiple addresses
+                    if (addresses.length > 1) {
+                        this.renderAddressPicker(addresses, defaultAddress);
                     }
                 }
             } catch (error) {
                 DebugLog.log('Could not load saved addresses:', error.message);
+            }
+        },
+
+        // Fill shipping form fields from an address object
+        fillAddressFields(address) {
+            const fields = {
+                'first-name': address.first_name || address.recipient_name?.split(' ')[0],
+                'last-name': address.last_name || address.recipient_name?.split(' ').slice(1).join(' '),
+                'company': address.company || '',
+                'address1': address.address_line1 || '',
+                'address2': address.address_line2 || '',
+                'city': address.city || '',
+                'region': address.region?.toLowerCase().replace(/\s+/g, '-') || '',
+                'postcode': address.postal_code || ''
+            };
+
+            Object.entries(fields).forEach(([id, value]) => {
+                const input = document.getElementById(id);
+                if (input) {
+                    input.value = value;
+                }
+            });
+
+            // Do NOT auto-select delivery type — user must choose urban/rural manually
+
+            this.updateShippingCost();
+        },
+
+        // Render address picker UI
+        renderAddressPicker(addresses, selectedAddress) {
+            const picker = document.getElementById('saved-addresses-picker');
+            if (!picker) return;
+
+            const selectedId = selectedAddress?.id || '';
+            const cards = addresses.map(addr => {
+                const id = addr.id;
+                const isSelected = id === selectedId;
+                const name = Security.escapeHtml(
+                    addr.recipient_name ||
+                    [addr.first_name, addr.last_name].filter(Boolean).join(' ') ||
+                    ''
+                );
+                const line1 = Security.escapeHtml(addr.address_line1 || '');
+                const city = Security.escapeHtml(addr.city || '');
+                const region = Security.escapeHtml(addr.region || '');
+                const postcode = Security.escapeHtml(addr.postal_code || '');
+                const defaultBadge = addr.is_default ? ' <span class="address-card__badge">Default</span>' : '';
+
+                return `<label class="address-card${isSelected ? ' address-card--selected' : ''}">
+                    <input type="radio" name="saved_address" value="${Security.escapeAttr(id)}"${isSelected ? ' checked' : ''} class="address-card__radio">
+                    <div class="address-card__content">
+                        <div class="address-card__name">${name}${defaultBadge}</div>
+                        <div class="address-card__detail">${line1}</div>
+                        <div class="address-card__detail">${city}${region ? ', ' + region : ''} ${postcode}</div>
+                    </div>
+                </label>`;
+            }).join('');
+
+            picker.innerHTML = '<div class="address-picker__label">Saved addresses</div>' + cards;
+            picker.style.display = '';
+
+            // Bind radio change events
+            picker.querySelectorAll('input[name="saved_address"]').forEach(radio => {
+                radio.addEventListener('change', (e) => {
+                    this.selectSavedAddress(e.target.value);
+                    // Update visual selection
+                    picker.querySelectorAll('.address-card').forEach(c => c.classList.remove('address-card--selected'));
+                    e.target.closest('.address-card').classList.add('address-card--selected');
+                });
+            });
+        },
+
+        // Select a saved address by ID and fill the form
+        selectSavedAddress(addressId) {
+            if (!this.savedAddresses) return;
+            const address = this.savedAddresses.find(a => String(a.id) === String(addressId));
+            if (address) {
+                this.fillAddressFields(address);
             }
         }
     };
