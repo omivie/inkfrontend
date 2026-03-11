@@ -450,6 +450,18 @@
                         }
 
                         orderNumber = orderResponse.data.order_number;
+
+                        // Handle duplicate order from a different payment method (e.g. stale Stripe order)
+                        if (orderResponse.data.is_duplicate && orderResponse.data.payment_method && orderResponse.data.payment_method !== 'paypal') {
+                            try {
+                                await API.cancelOrder(orderNumber);
+                                DebugLog.log('Cancelled stale', orderResponse.data.payment_method, 'order:', orderNumber);
+                            } catch (cancelErr) {
+                                DebugLog.warn('Could not cancel stale order:', cancelErr.message);
+                            }
+                            throw new Error('A previous payment attempt was cleared. Please click Pay with PayPal again.');
+                        }
+
                         const paypalOrderId = orderResponse.data.paypal_order_id;
 
                         if (!paypalOrderId) {
