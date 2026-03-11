@@ -449,12 +449,13 @@
                         DebugLog.log('PayPal createOrder response:', JSON.stringify(orderResponse, null, 2));
 
                         if (!orderResponse.ok) {
-                            const errorCode = orderResponse.error?.code || '';
-                            const errorMsg = orderResponse.error?.message || orderResponse.error || 'Failed to create order';
+                            const errorCode = orderResponse.code || '';
+                            const errorMsg = orderResponse.error || 'Failed to create order';
 
                             if (errorCode === 'DUPLICATE_ORDER') {
-                                const existingOrder = orderResponse.error?.details?.order_number;
-                                const existingPaymentMethod = orderResponse.error?.details?.payment_method;
+                                const details = orderResponse.data?.error?.details || orderResponse.data?.details || {};
+                                const existingOrder = details.order_number;
+                                const existingPaymentMethod = details.payment_method;
 
                                 if (existingOrder) {
                                     try {
@@ -865,13 +866,14 @@
                 }
 
                 if (!orderResponse.ok) {
-                    const errorCode = orderResponse.error?.code || '';
-                    const errorMsg = orderResponse.error?.message || orderResponse.error || 'Failed to create order';
+                    const errorCode = orderResponse.code || '';
+                    const errorMsg = orderResponse.error || 'Failed to create order';
 
                     if (errorCode === 'DUPLICATE_ORDER') {
-                        const existingOrder = orderResponse.error?.details?.order_number;
-                        const existingClientSecret = orderResponse.error?.details?.client_secret;
-                        const existingPaymentMethod = orderResponse.error?.details?.payment_method;
+                        const details = orderResponse.data?.error?.details || orderResponse.data?.details || {};
+                        const existingOrder = details.order_number;
+                        const existingClientSecret = details.client_secret;
+                        const existingPaymentMethod = details.payment_method;
 
                         // Stale order from different payment method (e.g. cancelled PayPal) — cancel and retry
                         if (existingOrder && existingPaymentMethod && existingPaymentMethod !== 'stripe') {
