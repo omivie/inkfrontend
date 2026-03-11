@@ -2,6 +2,25 @@
         const form = document.getElementById('contact-form');
         if (!form) return;
 
+        // Init Turnstile CAPTCHA if configured
+        let turnstileToken = null;
+        const siteKey = typeof Config !== 'undefined' && Config.TURNSTILE_SITE_KEY;
+        function renderTurnstile() {
+            if (siteKey && typeof turnstile !== 'undefined') {
+                turnstile.render('#contact-turnstile', {
+                    sitekey: siteKey,
+                    callback: (token) => { turnstileToken = token; },
+                    'expired-callback': () => { turnstileToken = null; }
+                });
+            }
+        }
+        if (typeof turnstile !== 'undefined') {
+            renderTurnstile();
+        } else if (siteKey) {
+            // Turnstile script loads async — wait for it
+            window.addEventListener('load', renderTurnstile);
+        }
+
         // Self-contained popup notification
         function showPopup(message, type) {
             const existing = document.querySelector('.contact-popup');
@@ -85,6 +104,7 @@
             const payload = { name, email, subject, message };
             if (phone) payload.phone = phone;
             if (orderNumber) payload.order_number = orderNumber;
+            if (turnstileToken) payload.turnstile_token = turnstileToken;
 
             try {
                 const result = await API.submitContactForm(payload);
@@ -99,10 +119,14 @@
                 } else {
                     showPopup('Message sent! We\'ll get back to you shortly.', 'success');
                     form.reset();
+                    turnstileToken = null;
+                    if (siteKey && typeof turnstile !== 'undefined') turnstile.reset('#contact-turnstile');
                 }
             } catch (error) {
                 console.error('Contact form error:', error);
                 showPopup(error.message || 'Could not send message. Please try again.', 'error');
+                turnstileToken = null;
+                if (siteKey && typeof turnstile !== 'undefined') turnstile.reset('#contact-turnstile');
             }
 
             btn.innerHTML = originalHTML;

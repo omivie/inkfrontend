@@ -10,11 +10,25 @@
         isSubmitting: false,
         paymentAuthorized: false,
 
-        // Idempotency key — generated once per checkout session, reused on retry
+        // Idempotency key — deterministic SHA-256 hash, reused on retry
         _idempotencyKey: null,
-        getIdempotencyKey() {
+        async getIdempotencyKey() {
             if (!this._idempotencyKey) {
-                this._idempotencyKey = crypto.randomUUID().replace(/-/g, '');
+                // Build deterministic string from user ID + sorted item IDs + address
+                const user = typeof Auth !== 'undefined' ? Auth.getUser() : null;
+                const userId = user?.id || 'guest';
+                const sortedItemIds = this.cartItems
+                    .map(item => `${item.id}:${item.quantity}`)
+                    .sort()
+                    .join(',');
+                const addr = this.checkoutData || {};
+                const addressStr = [addr.address1, addr.address2, addr.city, addr.region, addr.postcode].join('|');
+                const raw = userId + sortedItemIds + addressStr;
+
+                const encoded = new TextEncoder().encode(raw);
+                const hashBuffer = await crypto.subtle.digest('SHA-256', encoded);
+                const hashArray = Array.from(new Uint8Array(hashBuffer));
+                this._idempotencyKey = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
             }
             return this._idempotencyKey;
         },
@@ -409,22 +423,23 @@
                     const orderResponse = await API.createOrder({
                         items: items,
                         shipping_address: {
-                            recipient_name: `${this.checkoutData.firstName} ${this.checkoutData.lastName}`,
+                            first_name: this.checkoutData.firstName,
+                            last_name: this.checkoutData.lastName,
                             phone: this.checkoutData.phone || '',
-                            address_line1: this.checkoutData.address1,
-                            address_line2: this.checkoutData.address2 || '',
+                            address_line_1: this.checkoutData.address1,
+                            address_line_2: this.checkoutData.address2 || '',
                             city: this.checkoutData.city,
                             region: this.checkoutData.region,
                             postal_code: this.checkoutData.postcode,
                             country: 'NZ'
                         },
-                        shipping_tier: '',
-                        shipping_zone: '',
+                        shipping_tier: this.checkoutData.shippingTier || '',
+                        shipping_zone: this.checkoutData.shippingZone || '',
                         delivery_type: this.checkoutData.deliveryType || 'urban',
                         save_address: this.checkoutData.saveAddress !== false,
                         customer_notes: this.checkoutData.orderNotes || '',
                         payment_method: 'paypal',
-                        idempotency_key: this.getIdempotencyKey()
+                        idempotency_key: await this.getIdempotencyKey()
                     });
 
                     if (!orderResponse.ok) {
@@ -621,21 +636,22 @@
                 const orderResponse = await API.createOrder({
                     items: items,
                     shipping_address: {
-                        recipient_name: `${this.checkoutData.firstName} ${this.checkoutData.lastName}`,
+                        first_name: this.checkoutData.firstName,
+                        last_name: this.checkoutData.lastName,
                         phone: this.checkoutData.phone || '',
-                        address_line1: this.checkoutData.address1,
-                        address_line2: this.checkoutData.address2 || '',
+                        address_line_1: this.checkoutData.address1,
+                        address_line_2: this.checkoutData.address2 || '',
                         city: this.checkoutData.city,
                         region: this.checkoutData.region,
                         postal_code: this.checkoutData.postcode,
                         country: 'NZ'
                     },
-                    shipping_tier: '',
-                    shipping_zone: '',
+                    shipping_tier: this.checkoutData.shippingTier || '',
+                    shipping_zone: this.checkoutData.shippingZone || '',
                     delivery_type: this.checkoutData.deliveryType || 'urban',
                     save_address: this.checkoutData.saveAddress !== false,
                     customer_notes: this.checkoutData.orderNotes || '',
-                    idempotency_key: this.getIdempotencyKey()
+                    idempotency_key: await this.getIdempotencyKey()
                 });
 
                 // Handle duplicate/idempotent replay
@@ -730,7 +746,7 @@
                         // Concurrent request — wait and check
                         await new Promise(r => setTimeout(r, 2000));
                         try {
-                            const pending = await API.checkPendingOrder(this.getIdempotencyKey());
+                            const pending = await API.checkPendingOrder(await this.getIdempotencyKey());
                             if (pending.ok && pending.data?.order_number) {
                                 // Only redirect if payment was completed (no client_secret means paid)
                                 if (!pending.data.client_secret) {
