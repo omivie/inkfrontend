@@ -485,6 +485,19 @@
         #paypal-button-container {
             margin-bottom: 0.5rem;
         }
+
+        #paypal-errors {
+            color: var(--error);
+            font-size: 0.8125rem;
+            margin-top: 0.5rem;
+            display: flex;
+            align-items: center;
+            gap: 0.375rem;
+        }
+
+        #paypal-errors:empty {
+            display: none;
+        }
     </style>
 </head>
 <body>
@@ -588,6 +601,7 @@
 
                                     <!-- PayPal button -->
                                     <div id="paypal-button-container"></div>
+                                    <div id="paypal-errors" class="payment-errors" role="alert"></div>
 
                                     <div id="payment-authorization" class="payment-authorization">
                                         <label class="authorize-box" for="authorize-payment">

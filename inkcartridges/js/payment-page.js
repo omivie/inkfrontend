@@ -408,6 +408,10 @@
 
                 createOrder: async () => {
                     try {
+                        // Clear previous PayPal errors
+                        const paypalErrorEl = document.getElementById('paypal-errors');
+                        if (paypalErrorEl) paypalErrorEl.textContent = '';
+
                         // Disable Stripe pay button to prevent double-submission
                         const payBtn = document.getElementById('pay-now-btn');
                         if (payBtn) payBtn.disabled = true;
@@ -466,13 +470,20 @@
                         const paypalOrderId = orderResponse.data.paypal_order_id;
 
                         if (!paypalOrderId) {
-                            throw new Error('PayPal order ID not returned from server');
+                            // Backend created order but PayPal integration failed — cancel so retry gets a fresh order
+                            try {
+                                await API.cancelOrder(orderNumber);
+                                DebugLog.log('Cancelled PayPal order missing paypal_order_id:', orderNumber);
+                            } catch (cancelErr) {
+                                DebugLog.warn('Could not cancel incomplete PayPal order:', cancelErr.message);
+                            }
+                            throw new Error('PayPal setup did not complete. Please click Pay with PayPal again.');
                         }
 
                         return paypalOrderId;
                     } catch (error) {
                         DebugLog.error('PayPal createOrder error:', error);
-                        this.showError(error.message || 'Failed to start PayPal payment. Please try again.');
+                        this.showPayPalError(error.message || 'Failed to start PayPal payment. Please try again.');
 
                         this.updatePayButton();
                         throw error;
@@ -1006,6 +1017,20 @@
          */
         showError(message) {
             const errorEl = document.getElementById('card-errors');
+            if (errorEl) {
+                const esc = typeof Security !== 'undefined' ? Security.escapeHtml : (s) => s;
+                errorEl.innerHTML = `
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                    ${esc(message)}
+                `;
+            }
+        },
+
+        /**
+         * Show error message near PayPal button
+         */
+        showPayPalError(message) {
+            const errorEl = document.getElementById('paypal-errors');
             if (errorEl) {
                 const esc = typeof Security !== 'undefined' ? Security.escapeHtml : (s) => s;
                 errorEl.innerHTML = `
