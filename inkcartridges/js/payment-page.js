@@ -455,12 +455,13 @@
 
                         orderNumber = orderResponse.data.order_number;
 
-                        // If backend returned a non-PayPal order (e.g. stale Stripe order),
-                        // cancel it and ask user to retry so a fresh PayPal order is created
-                        if (orderResponse.data.payment_method && orderResponse.data.payment_method !== 'paypal') {
+                        // Only proceed if backend confirms this is a PayPal order
+                        if (orderResponse.data.payment_method !== 'paypal') {
+                            // Backend returned a non-PayPal order (e.g. stale Stripe duplicate,
+                            // or response missing payment_method entirely) — cancel and retry
                             try {
                                 await API.cancelOrder(orderNumber);
-                                DebugLog.log('Cancelled stale', orderResponse.data.payment_method, 'order:', orderNumber);
+                                DebugLog.log('Cancelled non-PayPal order:', orderNumber, '(payment_method:', orderResponse.data.payment_method, ')');
                             } catch (cancelErr) {
                                 DebugLog.warn('Could not cancel stale order:', cancelErr.message);
                             }
@@ -470,7 +471,7 @@
                         const paypalOrderId = orderResponse.data.paypal_order_id;
 
                         if (!paypalOrderId) {
-                            // Backend created order but PayPal integration failed — cancel so retry gets a fresh order
+                            // Backend confirmed PayPal but didn't return the ID — cancel so retry gets a fresh order
                             try {
                                 await API.cancelOrder(orderNumber);
                                 DebugLog.log('Cancelled PayPal order missing paypal_order_id:', orderNumber);
