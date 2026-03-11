@@ -1,0 +1,11 @@
+node_modules/
+assets/images/
+*.png
+*.jpg
+*.jpeg
+*.svg
+*.pdf
+*.ico
+.git/
+archive/
+package-lock.json

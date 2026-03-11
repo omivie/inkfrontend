@@ -1,6 +1,8 @@
 /**
  * Admin SPA — Entry point, router, shell
  */
+const APP_VERSION = '2026.03.11';
+
 import { AdminAuth } from './auth.js';
 import { FilterState } from './filters.js';
 import { AdminAPI } from './api.js';
@@ -59,7 +61,7 @@ const _pages = {};
 async function loadPage(name) {
   if (_pages[name]) return _pages[name];
   try {
-    const mod = await import(`./pages/${name}.js`);
+    const mod = await import(`./pages/${name}.js?v=${APP_VERSION}`);
     _pages[name] = mod.default;
     return mod.default;
   } catch (e) {

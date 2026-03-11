@@ -21,48 +21,90 @@ E-commerce frontend for InkCartridges.co.nz - a NZ-based printer ink/toner retai
 ## File Structure
 ```
 inkcartridges/
-  index.html          # Auth redirect handler
-  html/               # All page HTML files
-    index.html         # Homepage
-    shop.html          # Shop page with DrilldownNav
-    cart.html          # Shopping cart
-    checkout.html      # Checkout flow
-    payment.html       # Stripe payment
-    account/           # User account pages (12 files)
-    admin/             # Admin dashboard pages (12 files)
-    product/           # Product detail page
-    business/          # Business account application
-  js/                  # All JavaScript (24 files)
-    config.js          # API URLs, Supabase/Stripe keys
-    utils.js           # $, $$, on, getStorage, setStorage, ProductColors, debounce
-    security.js        # escapeHtml, escapeAttr, sanitizeUrl, safeRedirect
-    main.js            # Nav, search, dropdowns, toasts, smooth scroll
-    api.js             # API wrapper + formatPrice, getStockStatus, getSourceBadge
-    auth.js            # Supabase Auth wrapper
-    cart.js            # Shopping cart (hybrid server + localStorage)
-    products.js        # Product card rendering
-    filters.js         # Product filtering (sidebar layout pages)
-    account.js         # Account pages logic
-    admin.js           # Admin dashboard
-    admin-auth.js      # Admin role verification
-    admin-product-edit.js # Admin product editor
-    ink-finder.js      # Printer-to-ink finder tool
-    printer-data.js    # Printer series/model data
-    favourites.js      # Wishlist
-    cart-analytics.js  # Cart event tracking
-    modern-effects.js  # Scroll animations, ripple, image loading
-    products-page.js   # Admin products list + export
-    orders-page.js     # Admin orders list
-    customers-page.js  # Admin customers list
-    analytics-api.js   # Admin analytics API calls
-  css/                 # Stylesheets (6 files)
-    base.css           # Reset, variables, typography
-    layout.css         # Grid, header, footer
-    components.css     # Reusable UI components
-    pages.css          # Page-specific styles (very large)
-    admin.css          # Admin dashboard styles
-    modern-effects.css # Animations and effects
-  assets/              # Images, brand logos, icons
+  index.html              # Auth redirect handler
+  html/                   # All page HTML files (42 files)
+    index.html            # Homepage
+    shop.html             # Shop page with DrilldownNav
+    cart.html             # Shopping cart
+    checkout.html         # Checkout flow
+    payment.html          # Stripe payment
+    ribbons.html          # Thermal ribbons landing
+    contact.html          # Contact form
+    order-confirmation.html
+    about.html, faq.html, privacy.html, terms.html, returns.html, 404.html
+    business.html, business/apply.html
+    account/              # User account pages (13 files)
+      index.html, login.html, forgot-password.html, reset-password.html,
+      verify-email.html, orders.html, order-detail.html, track-order.html,
+      favourites.html, addresses.html, settings.html, personal-details.html,
+      printers.html
+    admin/                # Admin dashboard pages (12 files)
+      index.html, products.html, product-edit.html, orders.html,
+      customers.html, customer-intelligence.html, settings.html,
+      reports.html, sales.html, financial-health.html, operations.html,
+      marketing.html
+    product/              # Product detail page
+      index.html
+  js/                     # JavaScript (83 files)
+    config.js             # API URLs, Supabase/Stripe keys
+    utils.js              # $, $$, on, getStorage, setStorage, ProductColors, debounce
+    security.js           # escapeHtml, escapeAttr, sanitizeUrl, safeRedirect
+    main.js               # Nav, search, dropdowns, toasts, smooth scroll
+    api.js                # API wrapper + formatPrice, getStockStatus, getSourceBadge
+    auth.js               # Supabase Auth wrapper
+    cart.js               # Shopping cart (hybrid server + localStorage)
+    products.js           # Product card rendering
+    filters.js            # Product filtering (sidebar layout pages)
+    account.js            # Account pages logic (legacy)
+    favourites.js         # Wishlist
+    cart-analytics.js     # Cart event tracking
+    modern-effects.js     # Scroll animations, ripple, image loading
+    search.js             # Search overlay
+    search-normalize.js   # Search query normalization
+    mega-nav.js           # Mega navigation menu
+    landing.js            # Homepage landing logic
+    gtag.js               # Google Analytics
+    shipping.js           # Shipping calculator
+    auth-redirect.js      # Auth callback handler
+    # Page controllers (one per HTML page)
+    shop-page.js, cart-page.js, checkout-page.js, checkout-compact.js,
+    payment-page.js, product-detail-page.js, ribbons-page.js,
+    contact-page.js, order-confirmation-page.js, login-page.js,
+    account-page.js, account-settings-page.js, favourites-page.js,
+    order-detail-page.js, track-order-page.js, forgot-password-page.js,
+    reset-password-page.js, verify-email-page.js, business-apply-page.js
+    # Admin (legacy top-level)
+    admin.js, admin-auth.js, admin-dashboard.js, admin-nav.js,
+    admin-product-edit.js, admin-theme-init.js, admin-stub-redirect.js,
+    admin-command-palette.js, dashboard-filters.js, analytics.js,
+    analytics-api.js, products-page.js, orders-page.js, customers-page.js
+    admin/                # Admin v2 modules
+      app.js              # Admin app shell
+      api.js              # Admin API client
+      auth.js             # Admin auth module
+      filters.js          # Admin filters
+      settings-page.js    # Admin settings
+      customer-intelligence-page.js, marketing-page.js,
+      operations-page.js, sales-page.js, financial-health-page.js
+      components/         # Reusable admin components
+        charts.js, drawer.js, modal.js, table.js, toast.js
+      pages/              # Admin page modules
+        analytics.js, contact-emails.js, customers.js, dashboard.js,
+        fulfillment.js, lab.js, orders.js, product-review.js,
+        products.js, refunds.js, ribbons.js, settings.js,
+        shipping.js, suppliers.js
+    ink-finder.js         # Printer-to-ink finder tool
+    printer-data.js       # Printer series/model data
+  css/                    # Stylesheets (8 files)
+    base.css              # Reset, variables, typography
+    layout.css            # Grid, header, footer
+    components.css        # Reusable UI components
+    pages.css             # Page-specific styles (very large)
+    admin.css             # Admin dashboard styles
+    modern-effects.css    # Animations and effects
+    search.css            # Search overlay styles
+    checkout-compact.css  # Compact checkout styles
+  assets/                 # Images, brand logos, icons
 ```
 
 ## Script Load Order (per HTML pages)
@@ -75,16 +117,16 @@ inkcartridges/
 7. main.js
 8. Page-specific scripts
 
-## Known Issues (see .claude/memory/errors.md for details)
-- admin-auth.js has wrong login redirect paths
-- cart.js duplicates colorMap and escapeHtml from utils.js/security.js
-- 128 console.log statements across 20 JS files
-- Unused npm dependencies (react, react-dom, @stripe/react-stripe-js)
-- Empty backdoc/ directory
-- Duplicate kyocera brand assets (PNG + SVG)
+## Known Issues
+- Newsletter subscribe endpoint (`POST /api/newsletter/subscribe`) returns 500 — backend issue, frontend handles gracefully
+- Backend returns `product.brand` as object `{ id, name }` not string — use `getBrandName()` helper
+- Some admin analytics endpoints not yet implemented on backend
 
 ## Rules
 - Never compute prices on frontend - backend is source of truth
 - Always escape dynamic HTML content with Security.escapeHtml/escapeAttr
 - All API calls go through the API object (api.js)
 - Admin pages must verify access via AdminAuth.init()
+
+## Hooks
+- **PostToolUse (Write|Edit)**: Auto-runs `node --check` on any `.js` file after edit to catch syntax errors
