@@ -411,51 +411,59 @@
                 },
 
                 createOrder: async () => {
-                    // Disable Stripe pay button to prevent double-submission
-                    const payBtn = document.getElementById('pay-now-btn');
-                    if (payBtn) payBtn.disabled = true;
+                    try {
+                        // Disable Stripe pay button to prevent double-submission
+                        const payBtn = document.getElementById('pay-now-btn');
+                        if (payBtn) payBtn.disabled = true;
 
-                    // Build items array from cart
-                    const items = this.cartItems.map(item => ({
-                        product_id: item.id,
-                        quantity: item.quantity
-                    }));
+                        // Build items array from cart
+                        const items = this.cartItems.map(item => ({
+                            product_id: item.id,
+                            quantity: item.quantity
+                        }));
 
-                    const orderResponse = await API.createOrder({
-                        items: items,
-                        shipping_address: {
-                            first_name: this.checkoutData.firstName,
-                            last_name: this.checkoutData.lastName,
-                            phone: this.checkoutData.phone || '',
-                            address_line_1: this.checkoutData.address1,
-                            address_line_2: this.checkoutData.address2 || '',
-                            city: this.checkoutData.city,
-                            region: this.checkoutData.region,
-                            postal_code: this.checkoutData.postcode,
-                            country: 'NZ'
-                        },
-                        shipping_tier: this.checkoutData.shippingTier || '',
-                        shipping_zone: this.checkoutData.shippingZone || '',
-                        delivery_type: this.checkoutData.deliveryType || 'urban',
-                        save_address: this.checkoutData.saveAddress !== false,
-                        customer_notes: this.checkoutData.orderNotes || '',
-                        payment_method: 'paypal',
-                        idempotency_key: await this.getIdempotencyKey()
-                    });
+                        const orderResponse = await API.createOrder({
+                            items: items,
+                            shipping_address: {
+                                first_name: this.checkoutData.firstName,
+                                last_name: this.checkoutData.lastName,
+                                phone: this.checkoutData.phone || '',
+                                address_line_1: this.checkoutData.address1,
+                                address_line_2: this.checkoutData.address2 || '',
+                                city: this.checkoutData.city,
+                                region: this.checkoutData.region,
+                                postal_code: this.checkoutData.postcode,
+                                country: 'NZ'
+                            },
+                            shipping_tier: this.checkoutData.shippingTier || '',
+                            shipping_zone: this.checkoutData.shippingZone || '',
+                            delivery_type: this.checkoutData.deliveryType || 'urban',
+                            save_address: this.checkoutData.saveAddress !== false,
+                            customer_notes: this.checkoutData.orderNotes || '',
+                            payment_method: 'paypal',
+                            idempotency_key: await this.getIdempotencyKey()
+                        });
 
-                    if (!orderResponse.ok) {
-                        const errorMsg = orderResponse.error?.message || orderResponse.error || 'Failed to create order';
-                        throw new Error(errorMsg);
+                        if (!orderResponse.ok) {
+                            const errorMsg = orderResponse.error?.message || orderResponse.error || 'Failed to create order';
+                            throw new Error(errorMsg);
+                        }
+
+                        orderNumber = orderResponse.data.order_number;
+                        const paypalOrderId = orderResponse.data.paypal_order_id;
+
+                        if (!paypalOrderId) {
+                            throw new Error('PayPal order ID not returned from server');
+                        }
+
+                        return paypalOrderId;
+                    } catch (error) {
+                        DebugLog.error('PayPal createOrder error:', error);
+                        this.showError(error.message || 'Failed to start PayPal payment. Please try again.');
+                        this._idempotencyKey = null;
+                        this.updatePayButton();
+                        throw error;
                     }
-
-                    orderNumber = orderResponse.data.order_number;
-                    const paypalOrderId = orderResponse.data.paypal_order_id;
-
-                    if (!paypalOrderId) {
-                        throw new Error('PayPal order ID not returned from server');
-                    }
-
-                    return paypalOrderId;
                 },
 
                 onApprove: async (data) => {
