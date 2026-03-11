@@ -449,8 +449,51 @@
                         DebugLog.log('PayPal createOrder response:', JSON.stringify(orderResponse, null, 2));
 
                         if (!orderResponse.ok) {
+                            const errorCode = orderResponse.error?.code || '';
                             const errorMsg = orderResponse.error?.message || orderResponse.error || 'Failed to create order';
+
+                            if (errorCode === 'DUPLICATE_ORDER') {
+                                const existingOrder = orderResponse.error?.details?.order_number;
+                                const existingPaymentMethod = orderResponse.error?.details?.payment_method;
+
+                                if (existingOrder) {
+                                    try {
+                                        await API.cancelOrder(existingOrder);
+                                        DebugLog.log('Cancelled duplicate order:', existingOrder, '(method:', existingPaymentMethod, ')');
+                                    } catch (cancelErr) {
+                                        DebugLog.warn('Could not cancel duplicate order:', cancelErr.message);
+                                    }
+                                }
+                                throw new Error('A previous payment attempt was cleared. Please click Pay with PayPal again.');
+                            } else if (errorCode === 'DUPLICATE_REQUEST') {
+                                await new Promise(r => setTimeout(r, 2000));
+                                throw new Error('Request already in progress. Please click Pay with PayPal again.');
+                            } else if (errorCode === 'PROMO_COUPON_LIMIT_REACHED') {
+                                throw new Error('This coupon has reached its usage limit. Please remove it and try again.');
+                            } else if (errorCode === 'ORDER_TOTAL_TOO_LOW') {
+                                throw new Error('Your order total is below the minimum. Please add more items.');
+                            } else if (errorCode === 'ACCOUNT_FLAGGED') {
+                                if (typeof showToast === 'function') {
+                                    showToast('Your account has been flagged for review. Please contact support.', 'error', 0);
+                                }
+                                throw new Error('Account flagged for review. Please contact support.');
+                            }
+
                             throw new Error(errorMsg);
+                        }
+
+                        // Handle duplicate/idempotent replay
+                        if (orderResponse.data?.is_duplicate) {
+                            const dupOrderNumber = orderResponse.data.order_number;
+                            // For PayPal duplicates, we can't reuse a potentially expired PayPal order ID.
+                            // Cancel the stale order and let the user click PayPal again for a fresh one.
+                            try {
+                                await API.cancelOrder(dupOrderNumber);
+                                DebugLog.log('Cancelled duplicate PayPal order:', dupOrderNumber);
+                            } catch (cancelErr) {
+                                DebugLog.warn('Could not cancel duplicate order:', cancelErr.message);
+                            }
+                            throw new Error('A previous payment attempt was cleared. Please click Pay with PayPal again.');
                         }
 
                         orderNumber = orderResponse.data.order_number;
@@ -527,7 +570,7 @@
 
                     } catch (error) {
                         DebugLog.error('PayPal capture error:', error);
-                        this.showError(error.message || 'Payment failed. Please try again.');
+                        this.showPayPalError(error.message || 'Payment failed. Please try again.');
                     }
                 },
 
