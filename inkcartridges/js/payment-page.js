@@ -434,6 +434,7 @@
                             shipping_tier: this.checkoutData.shippingTier || '',
                             shipping_zone: this.checkoutData.shippingZone || '',
                             delivery_type: this.checkoutData.deliveryType || 'urban',
+                            estimated_shipping: this.checkoutData.estimatedShipping ?? null,
                             save_address: this.checkoutData.saveAddress !== false,
                             customer_notes: this.checkoutData.orderNotes || '',
                             payment_method: 'paypal',
@@ -505,8 +506,18 @@
                     }
                 },
 
-                onCancel: () => {
+                onCancel: async () => {
                     DebugLog.log('PayPal payment cancelled');
+                    // Cancel the pending order on the backend so it doesn't block future attempts
+                    if (orderNumber) {
+                        try {
+                            await API.cancelOrder(orderNumber);
+                            DebugLog.log('Cancelled pending PayPal order:', orderNumber);
+                        } catch (cancelErr) {
+                            DebugLog.warn('Could not cancel PayPal order:', cancelErr.message);
+                        }
+                        orderNumber = null;
+                    }
                     if (typeof showToast === 'function') {
                         showToast('Payment cancelled', 'info');
                     }
@@ -514,8 +525,18 @@
                     this.updatePayButton();
                 },
 
-                onError: (err) => {
+                onError: async (err) => {
                     DebugLog.error('PayPal error:', err);
+                    // Cancel the pending order on the backend
+                    if (orderNumber) {
+                        try {
+                            await API.cancelOrder(orderNumber);
+                            DebugLog.log('Cancelled pending PayPal order after error:', orderNumber);
+                        } catch (cancelErr) {
+                            DebugLog.warn('Could not cancel PayPal order:', cancelErr.message);
+                        }
+                        orderNumber = null;
+                    }
                     if (typeof showToast === 'function') {
                         showToast('Payment error. Please try again.', 'error');
                     }
@@ -655,6 +676,7 @@
                     shipping_tier: this.checkoutData.shippingTier || '',
                     shipping_zone: this.checkoutData.shippingZone || '',
                     delivery_type: this.checkoutData.deliveryType || 'urban',
+                    estimated_shipping: this.checkoutData.estimatedShipping ?? null,
                     save_address: this.checkoutData.saveAddress !== false,
                     customer_notes: this.checkoutData.orderNotes || '',
                     payment_method: 'stripe',
