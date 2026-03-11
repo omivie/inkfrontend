@@ -327,7 +327,9 @@ function createSmartSearch() {
             }
 
             if (allProducts.length > 0) {
-                const total = isTypeQuery ? allProducts.length : productTotal + ribbonTotal;
+                const total = isTypeQuery
+                    ? Math.max(allProducts.length, productTotal, ribbonTotal)
+                    : productTotal + ribbonTotal;
                 return { products: allProducts, total };
             }
 

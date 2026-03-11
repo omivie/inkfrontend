@@ -1885,108 +1885,163 @@
             try {
                 const searchQuery = this.state.search;
 
-                // Use the dedicated smart search endpoint which supports full-text search
-                const response = await API.smartSearch(searchQuery, 100);
+                // Detect if this is a product-type keyword (e.g. "ribbon", "toner")
+                const typeDetect = typeof SearchNormalize !== 'undefined'
+                    ? SearchNormalize.detectProductType(searchQuery)
+                    : null;
 
-                // Check if navigation changed during fetch
-                if (navVersion !== undefined && this.navigationVersion !== navVersion) return;
+                let products = [];
+                let isTypeQuery = false;
 
-                let products = (response.ok && response.data?.products) ? response.data.products : [];
+                if (typeDetect) {
+                    // Type-aware fetch: use getProducts + getRibbons in parallel
+                    // (same pattern as search dropdown in search.js)
+                    isTypeQuery = true;
+                    const promises = [API.getProducts({ ...typeDetect.productParams, limit: 200 })];
+                    if (typeDetect.fetchRibbons) {
+                        promises.push(API.getRibbons({ limit: 200 }));
+                    }
+                    const results = await Promise.allSettled(promises);
 
-                // Filter out irrelevant results where the search term only matches
-                // as a substring of an unrelated word (e.g. "T10" in "Pla-t10-um")
-                if (products.length > 0 && searchQuery.length <= 6) {
-                    // Build a word-boundary regex for the search term
-                    const escaped = searchQuery.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-                    const wordBoundary = new RegExp(`(?:^|[\\s\\-\\/])${escaped}(?:[\\s\\-\\/BCMYK,.]|$)`, 'i');
-                    const relevant = products.filter(p => {
-                        const name = p.name || '';
-                        const sku = p.sku || '';
-                        const mpn = p.manufacturer_part_number || '';
-                        return wordBoundary.test(name) || wordBoundary.test(sku) || wordBoundary.test(mpn)
-                            || name.toLowerCase().includes(searchQuery.toLowerCase() + ' ')
-                            || sku.toLowerCase().startsWith(searchQuery.toLowerCase());
-                    });
-                    // Only apply filter if it keeps some results
-                    if (relevant.length > 0) products = relevant;
-                }
+                    if (navVersion !== undefined && this.navigationVersion !== navVersion) return;
 
-                // If no product results, try searching for printer models
-                // so queries like "dcp", "mfc 230", "pixma" find compatible products
-                if (products.length === 0) {
-                    try {
-                        const printerResponse = await API.searchPrinters(searchQuery);
-                        if (navVersion !== undefined && this.navigationVersion !== navVersion) return;
+                    // Collect product results
+                    if (results[0].status === 'fulfilled' && results[0].value.ok && results[0].value.data) {
+                        const data = results[0].value.data;
+                        const prods = data.products || data || [];
+                        if (Array.isArray(prods)) products = prods;
+                    }
 
-                        const printers = Array.isArray(printerResponse.data) ? printerResponse.data : [];
-                        if (printers.length > 0) {
-                            // If exactly one printer matched, redirect to printer model view
-                            if (printers.length === 1) {
-                                const printer = printers[0];
-                                const modelName = printer.full_name || printer.model_name || '';
-                                const brand = printer.brand?.name || printer.brand || '';
-                                this.state.printerModel = modelName;
-                                this.state.printerBrand = brand;
-                                this.state.level = 'printer-model-products';
-                                this.showLoading(false);
-                                await this.loadPrinterModelProducts(navVersion);
-                                return;
+                    // Merge ribbon results (deduplicate by SKU)
+                    if (typeDetect.fetchRibbons && results[1] && results[1].status === 'fulfilled'
+                        && results[1].value.ok && results[1].value.data) {
+                        const data = results[1].value.data;
+                        let ribbons = data.ribbons || data.products || (Array.isArray(data) ? data : []);
+                        if (!Array.isArray(ribbons)) ribbons = [];
+
+                        // Normalize ribbon fields to match product schema
+                        for (const ribbon of ribbons) {
+                            ribbon._isRibbon = true;
+                            if (!ribbon.image_url && ribbon.image_path) {
+                                ribbon.image_url = ribbon.image_path;
                             }
-
-                            // Multiple printers matched — fetch products for each
-                            const existingIds = new Set();
-                            for (const printer of printers.slice(0, 5)) {
-                                const slug = printer.slug;
-                                if (!slug) continue;
-                                try {
-                                    const printerProducts = await API.getProductsByPrinter(slug);
-                                    const pList = printerProducts.data?.products || printerProducts.data?.compatible_products || [];
-                                    if (printerProducts.ok && pList.length > 0) {
-                                        for (const p of pList) {
-                                            if (!existingIds.has(p.id)) {
-                                                existingIds.add(p.id);
-                                                products.push(p);
-                                            }
-                                        }
-                                    }
-                                } catch (e) { /* skip this printer */ }
+                            if (ribbon.retail_price == null && ribbon.sale_price != null) {
+                                ribbon.retail_price = ribbon.sale_price;
+                            }
+                            if (ribbon.in_stock == null && ribbon.stock_quantity != null) {
+                                ribbon.in_stock = ribbon.stock_quantity > 0;
+                            }
+                            if (typeof ribbon.brand === 'string') {
+                                ribbon.brand = { name: ribbon.brand };
                             }
                         }
-                    } catch (e) {
-                        // Printer search failed — continue with empty results
+
+                        const existingSkus = new Set(products.map(p => p.sku));
+                        for (const ribbon of ribbons) {
+                            if (ribbon.sku && !existingSkus.has(ribbon.sku)) {
+                                existingSkus.add(ribbon.sku);
+                                products.push(ribbon);
+                            }
+                        }
+                    }
+                } else {
+                    // Standard text search path
+                    const response = await API.smartSearch(searchQuery, 100);
+
+                    if (navVersion !== undefined && this.navigationVersion !== navVersion) return;
+
+                    products = (response.ok && response.data?.products) ? response.data.products : [];
+
+                    // Filter out irrelevant results where the search term only matches
+                    // as a substring of an unrelated word (e.g. "T10" in "Pla-t10-um")
+                    if (products.length > 0 && searchQuery.length <= 6) {
+                        const escaped = searchQuery.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                        const wordBoundary = new RegExp(`(?:^|[\\s\\-\\/])${escaped}(?:[\\s\\-\\/BCMYK,.]|$)`, 'i');
+                        const relevant = products.filter(p => {
+                            const name = p.name || '';
+                            const sku = p.sku || '';
+                            const mpn = p.manufacturer_part_number || '';
+                            return wordBoundary.test(name) || wordBoundary.test(sku) || wordBoundary.test(mpn)
+                                || name.toLowerCase().includes(searchQuery.toLowerCase() + ' ')
+                                || sku.toLowerCase().startsWith(searchQuery.toLowerCase());
+                        });
+                        if (relevant.length > 0) products = relevant;
+                    }
+
+                    // If no product results, try searching for printer models
+                    if (products.length === 0) {
+                        try {
+                            const printerResponse = await API.searchPrinters(searchQuery);
+                            if (navVersion !== undefined && this.navigationVersion !== navVersion) return;
+
+                            const printers = Array.isArray(printerResponse.data) ? printerResponse.data : [];
+                            if (printers.length > 0) {
+                                if (printers.length === 1) {
+                                    const printer = printers[0];
+                                    const modelName = printer.full_name || printer.model_name || '';
+                                    const brand = printer.brand?.name || printer.brand || '';
+                                    this.state.printerModel = modelName;
+                                    this.state.printerBrand = brand;
+                                    this.state.level = 'printer-model-products';
+                                    this.showLoading(false);
+                                    await this.loadPrinterModelProducts(navVersion);
+                                    return;
+                                }
+
+                                const existingIds = new Set();
+                                for (const printer of printers.slice(0, 5)) {
+                                    const slug = printer.slug;
+                                    if (!slug) continue;
+                                    try {
+                                        const printerProducts = await API.getProductsByPrinter(slug);
+                                        const pList = printerProducts.data?.products || printerProducts.data?.compatible_products || [];
+                                        if (printerProducts.ok && pList.length > 0) {
+                                            for (const p of pList) {
+                                                if (!existingIds.has(p.id)) {
+                                                    existingIds.add(p.id);
+                                                    products.push(p);
+                                                }
+                                            }
+                                        }
+                                    } catch (e) { /* skip this printer */ }
+                                }
+                            }
+                        } catch (e) {
+                            // Printer search failed — continue with empty results
+                        }
                     }
                 }
 
                 if (products.length > 0) {
-                    // Try to detect the brand from search results
-                    let detectedBrand = null;
-
-                    for (const product of products) {
-                        const productName = (product.name || '').toLowerCase();
-                        const productNameNoSpace = productName.replace(/[\s-]/g, '');
-                        for (const [brandKey, brandData] of Object.entries(this.brandInfo)) {
-                            const brandNameLower = brandData.name.toLowerCase();
-                            const brandNameNoSpace = brandNameLower.replace(/[\s-]/g, '');
-                            if (productName.includes(brandNameLower) || productNameNoSpace.includes(brandNameNoSpace)) {
-                                detectedBrand = brandKey;
-                                break;
-                            }
-                        }
-                        if (detectedBrand) break;
-                    }
-
-                    // Filter products by detected brand if found (to keep results consistent)
                     let filteredProducts = products;
-                    if (detectedBrand) {
-                        const brandNameLower = this.brandInfo[detectedBrand].name.toLowerCase();
-                        const brandNameNoSpace = brandNameLower.replace(/[\s-]/g, '');
-                        filteredProducts = products.filter(p => {
-                            const name = (p.name || '').toLowerCase();
-                            const nameNoSpace = name.replace(/[\s-]/g, '');
-                            return name.includes(brandNameLower) || nameNoSpace.includes(brandNameNoSpace);
-                        });
-                        // If brand filtering removed all, keep original
-                        if (filteredProducts.length === 0) filteredProducts = products;
+
+                    // Skip brand detection for type queries (results span multiple brands)
+                    let detectedBrand = null;
+                    if (!isTypeQuery) {
+                        for (const product of products) {
+                            const productName = (product.name || '').toLowerCase();
+                            const productNameNoSpace = productName.replace(/[\s-]/g, '');
+                            for (const [brandKey, brandData] of Object.entries(this.brandInfo)) {
+                                const brandNameLower = brandData.name.toLowerCase();
+                                const brandNameNoSpace = brandNameLower.replace(/[\s-]/g, '');
+                                if (productName.includes(brandNameLower) || productNameNoSpace.includes(brandNameNoSpace)) {
+                                    detectedBrand = brandKey;
+                                    break;
+                                }
+                            }
+                            if (detectedBrand) break;
+                        }
+
+                        if (detectedBrand) {
+                            const brandNameLower = this.brandInfo[detectedBrand].name.toLowerCase();
+                            const brandNameNoSpace = brandNameLower.replace(/[\s-]/g, '');
+                            filteredProducts = products.filter(p => {
+                                const name = (p.name || '').toLowerCase();
+                                const nameNoSpace = name.replace(/[\s-]/g, '');
+                                return name.includes(brandNameLower) || nameNoSpace.includes(brandNameNoSpace);
+                            });
+                            if (filteredProducts.length === 0) filteredProducts = products;
+                        }
                     }
 
                     // Separate genuine and compatible
@@ -2008,8 +2063,13 @@
 
                     // Update section titles
                     const brandDisplay = detectedBrand ? this.brandInfo[detectedBrand].name + ' ' : '';
-                    this.elements.compatibleTitleText.textContent = `${brandDisplay}Compatible Products for "${searchQuery}"`;
-                    this.elements.genuineTitleText.textContent = `${brandDisplay}Original Products for "${searchQuery}"`;
+                    const typeDisplay = isTypeQuery ? searchQuery.charAt(0).toUpperCase() + searchQuery.slice(1).toLowerCase() + ' ' : '';
+                    this.elements.compatibleTitleText.textContent = isTypeQuery
+                        ? `Compatible ${typeDisplay}Products`
+                        : `${brandDisplay}Compatible Products for "${searchQuery}"`;
+                    this.elements.genuineTitleText.textContent = isTypeQuery
+                        ? `Original ${typeDisplay}Products`
+                        : `${brandDisplay}Original Products for "${searchQuery}"`;
 
                     await this.displayProductInfo(filteredProducts);
 
