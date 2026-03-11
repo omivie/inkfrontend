@@ -936,8 +936,10 @@
     // Initialize when ready
     document.addEventListener('DOMContentLoaded', () => {
         if (typeof Auth !== 'undefined') {
+            let initialized = false;
             const checkAuth = setInterval(() => {
-                if (Auth.initialized) {
+                if (Auth.initialized && !initialized) {
+                    initialized = true;
                     clearInterval(checkAuth);
                     PaymentPage.init();
                 }
@@ -945,7 +947,10 @@
 
             setTimeout(() => {
                 clearInterval(checkAuth);
-                PaymentPage.init();
+                if (!initialized) {
+                    initialized = true;
+                    PaymentPage.init();
+                }
             }, 3000);
         } else {
             PaymentPage.init();
