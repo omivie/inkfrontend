@@ -1241,7 +1241,8 @@ function updateBulkBar(selected) {
     <div class="admin-bulk-bar__actions">
       <button class="admin-btn admin-btn--sm admin-btn--danger" data-bulk="deactivate">Deactivate</button>
       <button class="admin-btn admin-btn--sm admin-btn--primary" data-bulk="activate">Activate</button>
-      <button class="admin-btn admin-btn--sm admin-btn--danger" data-bulk="delete" style="margin-left:auto">Delete</button>
+      <span style="width:1px;height:20px;background:var(--border);margin:0 4px"></span>
+      <button class="admin-btn admin-btn--sm admin-btn--danger" data-bulk="delete">Delete</button>
       <button class="admin-btn admin-btn--sm admin-btn--ghost" data-bulk="clear">Clear</button>
     </div>
   `;
