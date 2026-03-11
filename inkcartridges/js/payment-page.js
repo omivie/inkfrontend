@@ -687,6 +687,19 @@
                 if (orderResponse.ok && orderResponse.data?.is_duplicate) {
                     const dupData = orderResponse.data;
                     const dupOrderNumber = dupData.order_number;
+                    const dupPaymentMethod = dupData.payment_method;
+
+                    // If duplicate is from a different payment method (e.g. cancelled PayPal),
+                    // cancel it and create a fresh Stripe order
+                    if (dupPaymentMethod && dupPaymentMethod !== 'stripe') {
+                        try {
+                            await API.cancelOrder(dupOrderNumber);
+                            DebugLog.log('Cancelled stale', dupPaymentMethod, 'order:', dupOrderNumber);
+                        } catch (cancelErr) {
+                            DebugLog.warn('Could not cancel stale order:', cancelErr.message);
+                        }
+                        throw new Error('A previous payment attempt was cleared. Please click Pay again.');
+                    }
 
                     if (dupData.client_secret) {
                         // Payment wasn't completed — retry with the existing PaymentIntent
@@ -746,7 +759,34 @@
                         localStorage.removeItem('inkcartridges_cart');
                     }
 
-                    // No client_secret means payment already succeeded — safe to redirect
+                    // No client_secret — verify payment method before assuming paid
+                    if (!dupPaymentMethod) {
+                        // Unknown state: no client_secret AND no payment_method info
+                        // Fetch order status to verify it's actually paid before redirecting
+                        try {
+                            const orderCheck = await API.getOrder(dupOrderNumber);
+                            if (orderCheck.ok && orderCheck.data?.status === 'paid') {
+                                sessionStorage.setItem('lastOrder', JSON.stringify({
+                                    order_number: dupOrderNumber,
+                                    email: this.checkoutData.email
+                                }));
+                                sessionStorage.removeItem('checkoutData');
+                                window.location.href = `/html/order-confirmation.html?order=${encodeURIComponent(dupOrderNumber)}`;
+                                return;
+                            }
+                        } catch (e) {
+                            DebugLog.warn('Could not verify duplicate order status:', e.message);
+                        }
+                        // Not confirmed paid — cancel and let user retry
+                        try {
+                            await API.cancelOrder(dupOrderNumber);
+                        } catch (cancelErr) {
+                            DebugLog.warn('Could not cancel ambiguous order:', cancelErr.message);
+                        }
+                        throw new Error('A previous payment attempt was cleared. Please click Pay again.');
+                    }
+
+                    // Same payment method (stripe), no client_secret = already paid — redirect
                     sessionStorage.setItem('lastOrder', JSON.stringify({
                         order_number: dupOrderNumber,
                         email: this.checkoutData.email
@@ -761,10 +801,43 @@
                     const errorMsg = orderResponse.error?.message || orderResponse.error || 'Failed to create order';
 
                     if (errorCode === 'DUPLICATE_ORDER') {
-                        // Order already exists — only redirect if it has no pending payment
                         const existingOrder = orderResponse.error?.details?.order_number;
                         const existingClientSecret = orderResponse.error?.details?.client_secret;
+                        const existingPaymentMethod = orderResponse.error?.details?.payment_method;
+
+                        // Stale order from different payment method (e.g. cancelled PayPal) — cancel and retry
+                        if (existingOrder && existingPaymentMethod && existingPaymentMethod !== 'stripe') {
+                            try {
+                                await API.cancelOrder(existingOrder);
+                                DebugLog.log('Cancelled stale', existingPaymentMethod, 'order:', existingOrder);
+                            } catch (cancelErr) {
+                                DebugLog.warn('Could not cancel stale order:', cancelErr.message);
+                            }
+                            throw new Error('A previous payment attempt was cleared. Please click Pay again.');
+                        }
+
                         if (existingOrder && !existingClientSecret) {
+                            // Same payment method or unknown, no client_secret
+                            if (!existingPaymentMethod) {
+                                // Unknown state — verify order is actually paid before redirecting
+                                try {
+                                    const orderCheck = await API.getOrder(existingOrder);
+                                    if (orderCheck.ok && orderCheck.data?.status === 'paid') {
+                                        window.location.href = `/html/order-confirmation.html?order=${encodeURIComponent(existingOrder)}`;
+                                        return;
+                                    }
+                                } catch (e) {
+                                    DebugLog.warn('Could not verify duplicate order status:', e.message);
+                                }
+                                // Not confirmed paid — cancel and let user retry
+                                try {
+                                    await API.cancelOrder(existingOrder);
+                                } catch (cancelErr) {
+                                    DebugLog.warn('Could not cancel ambiguous order:', cancelErr.message);
+                                }
+                                throw new Error('A previous payment attempt was cleared. Please click Pay again.');
+                            }
+                            // payment_method is 'stripe' and no client_secret = already paid
                             window.location.href = `/html/order-confirmation.html?order=${encodeURIComponent(existingOrder)}`;
                             return;
                         } else if (existingOrder && existingClientSecret) {
