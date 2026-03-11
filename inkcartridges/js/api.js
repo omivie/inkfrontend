@@ -776,25 +776,6 @@ const API = {
     },
 
     // =========================================================================
-    // BUSINESS ACCOUNTS
-    // =========================================================================
-
-    /**
-     * Submit business account application
-     * @param {object} data - Application data
-     */
-    async submitBusinessApplication(data) {
-        return this.post('/api/business/apply', data);
-    },
-
-    /**
-     * Get current business account status
-     */
-    async getBusinessStatus() {
-        return this.get('/api/business/status');
-    },
-
-    // =========================================================================
     // NEWSLETTER
     // =========================================================================
 
@@ -1266,48 +1247,6 @@ const API = {
      */
     async moderateReview(reviewId, data) {
         return this.put(`/api/admin/reviews/${reviewId}`, data);
-    },
-
-    // =========================================================================
-    // ADMIN BUSINESS APPLICATIONS
-    // =========================================================================
-
-    /**
-     * Get business applications list (admin)
-     * @param {object} options - { page, limit, status }
-     */
-    async getAdminBusinessApplications(options = {}) {
-        const params = new URLSearchParams();
-        if (options.page) params.append('page', options.page);
-        if (options.limit) params.append('limit', options.limit);
-        if (options.status) params.append('status', options.status);
-
-        const queryString = params.toString();
-        return this.get(`/api/admin/business-applications${queryString ? '?' + queryString : ''}`);
-    },
-
-    /**
-     * Get single business application (admin)
-     * @param {string} applicationId - Application UUID
-     */
-    async getAdminBusinessApplication(applicationId) {
-        return this.get(`/api/admin/business-applications/${applicationId}`);
-    },
-
-    /**
-     * Update business application status (admin)
-     * @param {string} applicationId - Application UUID
-     * @param {object} data - { status: 'approved'|'rejected', notes }
-     */
-    async updateAdminBusinessApplication(applicationId, data) {
-        return this.put(`/api/admin/business-applications/${applicationId}`, data);
-    },
-
-    /**
-     * Get business application statistics (admin)
-     */
-    async getAdminBusinessApplicationStats() {
-        return this.get('/api/admin/business-applications-stats');
     },
 
     // =========================================================================
