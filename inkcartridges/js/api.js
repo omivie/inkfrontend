@@ -280,6 +280,7 @@ const API = {
         if (params.page) qs.append('page', params.page);
         if (params.limit) qs.append('limit', params.limit);
         if (params.search) qs.append('search', params.search);
+        if (params.code) qs.append('code', params.code);
         if (params.color) qs.append('color', params.color);
         if (params.sort) qs.append('sort', params.sort);
         return this.get(`/api/shop?${qs.toString()}`);

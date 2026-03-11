@@ -1394,7 +1394,7 @@
                         const response = await API.getShopData({
                             brand: this.state.brand,
                             category: this.state.category,
-                            search: code,
+                            code: code,
                             limit: 200
                         });
                         if (navVersion !== undefined && this.navigationVersion !== navVersion) return;
