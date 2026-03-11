@@ -12,7 +12,7 @@ const searchConfig = {
     apiUrl: '/api/search/smart',
     minChars: 1,
     debounceMs: 200,
-    maxResults: 200,
+    maxResults: 100,
     cacheMaxAge: 5 * 60 * 1000,
     cacheMaxSize: 50,
     skeletonCount: 6,
