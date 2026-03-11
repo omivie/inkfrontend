@@ -263,7 +263,12 @@ function createSmartSearch() {
                 ? (isTypeQuery ? { limit: searchConfig.maxResults } : { search: query, limit: searchConfig.maxResults })
                 : null;
 
-            const fetchPromises = [API.getProducts(productParams)];
+            // Use smart search for normal text queries (better full-text matching),
+            // fall back to getProducts for type-specific queries (category/type filters)
+            const useSmartSearch = !isTypeQuery && typeof API.smartSearch === 'function';
+            const fetchPromises = useSmartSearch
+                ? [API.smartSearch(query, searchConfig.maxResults)]
+                : [API.getProducts(productParams)];
             if (ribbonParams) fetchPromises.push(API.getRibbons(ribbonParams));
 
             const [productRes, ribbonRes] = await Promise.allSettled(fetchPromises);
@@ -272,7 +277,7 @@ function createSmartSearch() {
             if (productRes.status === 'fulfilled' && productRes.value.ok && productRes.value.data) {
                 const data = productRes.value.data;
                 const products = data.products || data || [];
-                productTotal = data.pagination?.total ?? data.total ?? 0;
+                productTotal = data.pagination?.total ?? data.total ?? products.length;
                 if (Array.isArray(products)) allProducts = products;
             }
 
