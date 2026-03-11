@@ -1346,12 +1346,15 @@
             const grid = this.elements.codesGrid;
             grid.innerHTML = '';
 
-            codes.forEach(({ code, count }) => {
+            codes.forEach(({ code, count, products }) => {
                 const box = document.createElement('button');
                 box.className = 'drilldown-box drilldown-box--code';
                 box.dataset.code = code;
+                const firstProduct = (products && products.length > 0) ? products[0] : null;
+                const productName = firstProduct ? Security.escapeHtml(firstProduct.name || '') : '';
                 box.innerHTML = `
                     <span class="drilldown-box__code">${code}</span>
+                    ${productName ? `<span class="drilldown-box__name">${productName}</span>` : ''}
                     <span class="drilldown-box__count">${count} product${count > 1 ? 's' : ''}</span>
                 `;
                 box.addEventListener('click', () => this.navigateTo('products', { code }));
@@ -1770,7 +1773,19 @@
                     }
                 }
 
-                // Strategy 3: Fallback - search by printer model name via API
+                // Strategy 3: Fallback - search by printer model via dedicated endpoint
+                if (allProducts.length === 0) {
+                    try {
+                        const printerResponse = await API.searchByPrinter(printerModel, { limit: 100 });
+                        if (printerResponse.ok && printerResponse.data?.products) {
+                            allProducts = printerResponse.data.products;
+                        }
+                    } catch (e) {
+                        // searchByPrinter failed - continue to generic search
+                    }
+                }
+
+                // Strategy 4: Fallback - search by printer model name via generic API
                 if (allProducts.length === 0) {
 
                     // Search for the printer model name
@@ -1855,7 +1870,7 @@
 
                     // Update section titles with printer model
                     this.elements.compatibleTitleText.textContent = `Compatible Products for ${printerModel}`;
-                    this.elements.genuineTitleText.textContent = `Genuine/Original Products for ${printerModel}`;
+                    this.elements.genuineTitleText.textContent = `Original Products for ${printerModel}`;
 
                     // Render compatible first, then genuine
                     this.renderProducts(compatible, this.elements.compatibleProducts, this.elements.compatibleSection, true);
@@ -2480,7 +2495,7 @@
                 // Show product type inline with breadcrumb
                 let productType = this.getProductTypeLabel();
                 if (this.state.level === 'printer-model-products') {
-                    productType = 'Compatible Products';
+                    productType = this.state.printerModelDisplay || this.state.printerModel || 'Products';
                 } else if (this.state.level === 'search-results') {
                     productType = `Search Results for "${this.state.search}"`;
                 }

@@ -127,4 +127,47 @@
         });
     }
 
+    // ============================================
+    // FEATURED PRODUCTS
+    // ============================================
+
+    async function loadFeaturedProducts() {
+        if (typeof API === 'undefined' || !API.smartSearch) return;
+
+        const grid = document.getElementById('featured-products-grid');
+        const section = document.getElementById('featured-products');
+        if (!grid || !section) return;
+
+        try {
+            const response = await API.smartSearch('ink cartridge', 8);
+            if (!response.ok || !response.data?.products || response.data.products.length === 0) return;
+
+            const products = response.data.products;
+
+            grid.innerHTML = products.map(p => {
+                const name = p.name || '';
+                const price = parseFloat(p.retail_price || 0);
+                const brandName = p.brand?.name || (typeof p.brand === 'string' ? p.brand : '') || '';
+                const imageHtml = typeof Products !== 'undefined' && Products.getProductImageHTML
+                    ? Products.getProductImageHTML(p)
+                    : `<img src="${Security.escapeAttr(p.image_url || '/assets/images/placeholder-product.svg')}" alt="${Security.escapeAttr(name)}">`;
+                return `
+                    <a href="/html/product/?sku=${Security.escapeAttr(p.sku)}" class="product-card">
+                        <div class="product-card__image">${imageHtml}</div>
+                        <div class="product-card__info">
+                            <span class="product-card__brand">${Security.escapeHtml(brandName)}</span>
+                            <h3 class="product-card__name">${Security.escapeHtml(name)}</h3>
+                            <span class="product-card__price">${formatPrice(price)}</span>
+                        </div>
+                    </a>`;
+            }).join('');
+
+            section.hidden = false;
+        } catch (e) {
+            // Featured products are optional
+        }
+    }
+
+    loadFeaturedProducts();
+
 })();

@@ -319,8 +319,8 @@
                 return;
             }
 
-            // Try backend API for accurate weight-based rates
-            if (typeof API !== 'undefined' && this.cartItems.length > 0) {
+            // Try backend API for accurate weight-based rates (skip if no region selected)
+            if (region && typeof API !== 'undefined' && this.cartItems.length > 0) {
                 try {
                     const payload = {
                         cart_total: this.totals.subtotal,

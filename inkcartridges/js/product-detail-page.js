@@ -13,6 +13,11 @@
             return ProductColors.detectFromName(name);
         },
 
+        formatPageYield(value) {
+            if (value == null) return null;
+            return String(value).replace(/\s*pages\b/gi, '').trim();
+        },
+
         // Product type templates for descriptions
         templates: {
             toner: {
@@ -32,7 +37,7 @@
 
                     <h3 class="product-details-heading">Features & Benefits</h3>
                     <ul class="product-features-list">
-                        ${p.pageYield ? `<li><strong>Page Yield:</strong> ${p.pageYield.toLocaleString()} pages</li>` : ''}
+                        ${p.pageYield ? `<li><strong>Page Yield:</strong> ${ProductPage.formatPageYield(p.pageYield).toLocaleString()} pages</li>` : ''}
                         <li>Page yield based on 5% coverage of an A4 page</li>
                         ${p.color ? `<li><strong>Colour:</strong> ${Security.escapeHtml(p.color)} toner</li>` : ''}
                         <li>${p.isCompatible ? 'Compatible with' : 'Designed for'} ${Security.escapeHtml(p.brandName)} laser printers</li>
@@ -48,7 +53,7 @@
                     </ul>
                 `,
                 features: (p) => [
-                    p.pageYield ? `Page yield: ~${p.pageYield.toLocaleString()} pages (5% coverage)` : 'High-quality output',
+                    p.pageYield ? `Page yield: ~${ProductPage.formatPageYield(p.pageYield).toLocaleString()} pages (5% coverage)` : 'High-quality output',
                     `${p.isCompatible ? 'Compatible' : 'Genuine OEM'} ${Security.escapeHtml(p.brandName)} toner`,
                     'Sharp, professional text and graphics',
                     'Easy snap-in installation',
@@ -98,7 +103,7 @@
 
                     <h3 class="product-details-heading">Features & Benefits</h3>
                     <ul class="product-features-list">
-                        ${p.pageYield ? `<li><strong>Page Yield:</strong> ${p.pageYield.toLocaleString()} pages</li>` : ''}
+                        ${p.pageYield ? `<li><strong>Page Yield:</strong> ${ProductPage.formatPageYield(p.pageYield).toLocaleString()} pages</li>` : ''}
                         <li>Page yield based on 5% coverage of an A4 page</li>
                         ${p.color ? `<li><strong>Colour:</strong> ${Security.escapeHtml(p.color)} ink cartridge</li>` : ''}
                         <li>${p.isCompatible ? 'Compatible with' : 'Designed for'} ${Security.escapeHtml(p.brandName)} inkjet printers</li>
@@ -115,7 +120,7 @@
                     </ul>
                 `,
                 features: (p) => [
-                    p.pageYield ? `Page yield: ~${p.pageYield.toLocaleString()} pages (5% coverage)` : 'Reliable print quality',
+                    p.pageYield ? `Page yield: ~${ProductPage.formatPageYield(p.pageYield).toLocaleString()} pages (5% coverage)` : 'Reliable print quality',
                     `${p.isCompatible ? 'Compatible' : 'Genuine OEM'} ${Security.escapeHtml(p.brandName)} ink`,
                     'Vibrant colours and sharp text',
                     'Easy snap-in installation',
@@ -164,7 +169,7 @@
 
                     <h3 class="product-details-heading">Features & Benefits</h3>
                     <ul class="product-features-list">
-                        ${p.pageYield ? `<li><strong>Drum Yield:</strong> ${p.pageYield.toLocaleString()} pages</li>` : '<li>Long-lasting drum life</li>'}
+                        ${p.pageYield ? `<li><strong>Drum Yield:</strong> ${ProductPage.formatPageYield(p.pageYield).toLocaleString()} pages</li>` : '<li>Long-lasting drum life</li>'}
                         <li>Drum yield based on 1 page per job</li>
                         <li>${p.isCompatible ? 'Compatible with' : 'Designed for'} ${Security.escapeHtml(p.brandName)} laser printers</li>
                         <li>Consistent, high-quality print output</li>
@@ -183,7 +188,7 @@
                     </ul>
                 `,
                 features: (p) => [
-                    p.pageYield ? `Drum yield: ~${p.pageYield.toLocaleString()} pages` : 'Long-lasting performance',
+                    p.pageYield ? `Drum yield: ~${ProductPage.formatPageYield(p.pageYield).toLocaleString()} pages` : 'Long-lasting performance',
                     `${p.isCompatible ? 'Compatible' : 'Genuine OEM'} ${Security.escapeHtml(p.brandName)} drum`,
                     'Consistent print quality',
                     'Easy installation',
@@ -269,7 +274,7 @@
 
                     <h3 class="product-details-heading">Features & Benefits</h3>
                     <ul class="product-features-list">
-                        ${p.pageYield ? `<li><strong>Page Yield:</strong> ${p.pageYield.toLocaleString()} pages</li>` : ''}
+                        ${p.pageYield ? `<li><strong>Page Yield:</strong> ${ProductPage.formatPageYield(p.pageYield).toLocaleString()} pages</li>` : ''}
                         <li>${p.isCompatible ? 'Compatible' : 'Genuine'} ${Security.escapeHtml(p.brandName)} product</li>
                         <li>High quality printing results</li>
                         <li>Easy installation</li>
@@ -285,7 +290,7 @@
                     `${p.isCompatible ? 'Compatible' : 'Genuine'} ${Security.escapeHtml(p.brandName)} product`,
                     'Quality assured',
                     'Easy installation',
-                    p.pageYield ? `Page yield: ~${p.pageYield.toLocaleString()} pages` : null
+                    p.pageYield ? `Page yield: ~${ProductPage.formatPageYield(p.pageYield).toLocaleString()} pages` : null
                 ].filter(Boolean),
                 faqs: (p) => [
                     {
@@ -580,7 +585,7 @@
                     <tr><th scope="row">SKU</th><td>${Security.escapeHtml(info.sku)}</td></tr>
                     ${info.manufacturer_part_number ? `<tr><th scope="row">Model Number</th><td>${Security.escapeHtml(info.manufacturer_part_number)}</td></tr>` : ''}
                     ${info.color ? `<tr><th scope="row">Colour</th><td>${Security.escapeHtml(info.color)}</td></tr>` : ''}
-                    ${info.pageYield ? `<tr><th scope="row">Page Yield</th><td>Approx. ${info.pageYield.toLocaleString()} pages</td></tr>` : ''}
+                    ${info.pageYield ? `<tr><th scope="row">Page Yield</th><td>Approx. ${ProductPage.formatPageYield(info.pageYield).toLocaleString()} pages</td></tr>` : ''}
                     <tr><th scope="row">Product Type</th><td>${info.isCompatible ? 'Compatible' : 'Genuine OEM'}</td></tr>
                     <tr><th scope="row">Category</th><td>${Security.escapeHtml(categoryName)}</td></tr>
                 </tbody>
@@ -600,6 +605,8 @@
             // Compatible Printers (skip for ribbons)
             if (info.category !== 'ribbon') {
                 this.renderCompatiblePrinters(info);
+                this.renderCompatibilityTab(info);
+                this.renderRelatedProducts(info);
             }
 
             // Set up event listeners
@@ -675,6 +682,70 @@
                 }).filter(p => p.name).sort((a, b) => a.name.localeCompare(b.name));
             } catch (e) {
                 return [];
+            }
+        },
+
+        async renderCompatibilityTab(info) {
+            try {
+                const printers = await this._fetchPrinters(info.sku);
+                if (printers.length === 0) return;
+
+                const list = document.getElementById('compatible-printers-list');
+                const tabBtn = document.getElementById('tab-btn-compatibility');
+                if (!list || !tabBtn) return;
+
+                list.innerHTML = printers.map(p => {
+                    const params = new URLSearchParams({ printer_model: p.name });
+                    if (p.brand) params.set('printer_brand', p.brand);
+                    return `<li><a href="/html/shop?${params}">${Security.escapeHtml(p.name)}</a></li>`;
+                }).join('');
+
+                tabBtn.hidden = false;
+            } catch (e) {
+                // Compatibility tab is optional
+            }
+        },
+
+        async renderRelatedProducts(info) {
+            try {
+                const printers = await this._fetchPrinters(info.sku);
+                if (printers.length === 0) return;
+
+                const firstPrinter = printers[0].name;
+                const response = await API.searchByPrinter(firstPrinter, { limit: 8 });
+                if (!response.ok || !response.data?.products) return;
+
+                const related = response.data.products
+                    .filter(p => p.sku !== info.sku)
+                    .slice(0, 4);
+
+                if (related.length === 0) return;
+
+                const grid = document.getElementById('related-products-grid');
+                const section = document.getElementById('related-products');
+                if (!grid || !section) return;
+
+                grid.innerHTML = related.map(p => {
+                    const name = p.name || '';
+                    const price = parseFloat(p.retail_price || 0);
+                    const brandName = p.brand?.name || (typeof p.brand === 'string' ? p.brand : '') || '';
+                    const imageHtml = typeof Products !== 'undefined' && Products.getProductImageHTML
+                        ? Products.getProductImageHTML(p)
+                        : `<img src="${Security.escapeAttr(p.image_url || '/assets/images/placeholder-product.svg')}" alt="${Security.escapeAttr(name)}">`;
+                    return `
+                        <a href="/html/product/?sku=${Security.escapeAttr(p.sku)}" class="product-card">
+                            <div class="product-card__image">${imageHtml}</div>
+                            <div class="product-card__info">
+                                <span class="product-card__brand">${Security.escapeHtml(brandName)}</span>
+                                <h3 class="product-card__name">${Security.escapeHtml(name)}</h3>
+                                <span class="product-card__price">${formatPrice(price)}</span>
+                            </div>
+                        </a>`;
+                }).join('');
+
+                section.hidden = false;
+            } catch (e) {
+                // Related products are optional
             }
         },
 

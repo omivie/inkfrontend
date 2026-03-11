@@ -214,6 +214,7 @@ const Auth = {
         if (typeof Cart !== 'undefined') {
             Cart.clear();
         }
+        try { localStorage.removeItem('cart_count'); } catch (e) { /* ignore */ }
 
         // Clear favourites in memory on sign out
         if (typeof Favourites !== 'undefined') {

@@ -184,8 +184,8 @@
                 <ol class="breadcrumb__list" id="breadcrumb-list">
                     <li class="breadcrumb__item"><a href="/html/index.html">Home</a></li>
                     <li class="breadcrumb__item"><a href="/html/shop.html">Shop</a></li>
-                    <li class="breadcrumb__item" id="breadcrumb-category"><a href="/html/shop.html">Products</a></li>
                     <li class="breadcrumb__item" id="breadcrumb-brand"><a href="/html/shop.html">Brand</a></li>
+                    <li class="breadcrumb__item" id="breadcrumb-category"><a href="/html/shop.html">Products</a></li>
                     <li class="breadcrumb__item" id="breadcrumb-code" hidden></li>
                     <li class="breadcrumb__item breadcrumb__item--current" id="breadcrumb-product" aria-current="page"><span class="skeleton" style="display:inline-block;width:120px;height:1em;"></span></li>
                 </ol>
@@ -294,6 +294,7 @@
                     <button role="tab" aria-selected="true" aria-controls="tab-description" id="tab-btn-description" class="tabs__button tabs__button--active">Description</button>
                     <button role="tab" aria-selected="false" aria-controls="tab-specs" id="tab-btn-specs" class="tabs__button">Specifications</button>
                     <button role="tab" aria-selected="false" aria-controls="tab-faqs" id="tab-btn-faqs" class="tabs__button">FAQs</button>
+                    <button role="tab" aria-selected="false" aria-controls="tab-compatibility" id="tab-btn-compatibility" class="tabs__button" hidden>Compatibility</button>
                 </div>
 
                 <div class="tabs__panels">
@@ -311,7 +312,19 @@
                         <div class="product-faqs" id="product-faqs">
                         </div>
                     </div>
+
+                    <div role="tabpanel" id="tab-compatibility" aria-labelledby="tab-btn-compatibility" class="tabs__panel" hidden>
+                        <h3>Compatible Printers</h3>
+                        <ul id="compatible-printers-list" class="compatible-printers-list"></ul>
+                    </div>
                 </div>
+            </div>
+        </section>
+
+        <section class="related-products" id="related-products" hidden>
+            <div class="container">
+                <h2 class="related-products__title">You May Also Need</h2>
+                <div class="related-products__grid product-grid" id="related-products-grid"></div>
             </div>
         </section>
 
@@ -406,6 +419,7 @@
                     <span class="footer-payment__label">We accept:</span>
                     <div class="footer-payment__icons">
                         <span title="Visa">Visa</span>
+                        <span title="Mastercard">Mastercard</span>
                         <span title="PayPal">PayPal</span>
                     </div>
                 </div>

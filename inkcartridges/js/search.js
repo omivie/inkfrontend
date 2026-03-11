@@ -568,6 +568,12 @@ function createSmartSearch() {
                     }
                 }, { once: true });
             });
+            // Fallback for images without data-fallback (e.g. from Products.getProductImageHTML)
+            this._grid.querySelectorAll('img:not([data-fallback])').forEach(img => {
+                img.addEventListener('error', function() {
+                    this.src = '/assets/images/placeholder-product.svg';
+                }, { once: true });
+            });
             this._updateFooter(query, total);
             this._show();
         },

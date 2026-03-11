@@ -453,7 +453,8 @@
 
             // Add model count for series
             if (option.models) {
-                li.textContent = `${option[labelKey]} (${option.models.length} models)`;
+                const count = option.models.length;
+                li.textContent = `${option[labelKey]} (${count} ${count === 1 ? 'model' : 'models'})`;
             } else {
                 li.textContent = option[labelKey];
             }
@@ -559,7 +560,16 @@
         const series = currentSeriesData.find(s => s.id === seriesId);
         if (!series) return;
 
-        currentModelsData = series.models;
+        // Deduplicate models by base name (before any "/" variant suffix)
+        const modelMap = new Map();
+        (series.models || []).forEach(m => {
+            const baseName = (m.name || '').split('/')[0].trim();
+            const existing = modelMap.get(baseName);
+            if (!existing || (m.name || '').length > (existing.name || '').length) {
+                modelMap.set(baseName, m);
+            }
+        });
+        currentModelsData = Array.from(modelMap.values());
 
         // Populate models dropdown
         populateDropdown(modelDropdown, currentModelsData);

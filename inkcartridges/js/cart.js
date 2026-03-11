@@ -926,6 +926,7 @@ const Cart = {
         if (typeof updateCartCount === 'function') {
             updateCartCount(itemCount);
         }
+        try { localStorage.setItem('cart_count', itemCount); } catch (e) { /* ignore */ }
 
         // Only update summary section if on cart page
         if (!document.querySelector('.cart-page')) return;

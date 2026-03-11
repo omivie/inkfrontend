@@ -35,6 +35,16 @@ document.addEventListener('DOMContentLoaded', function() {
  */
 function initCartBadgeFromStorage() {
     try {
+        // Fast path: read simple integer count (no JSON parsing)
+        const cachedCount = localStorage.getItem('cart_count');
+        if (cachedCount) {
+            const count = parseInt(cachedCount, 10);
+            if (count > 0) {
+                updateCartCount(count);
+                return;
+            }
+        }
+        // Fallback: parse full cart data
         const stored = localStorage.getItem('inkcartridges_cart');
         if (stored) {
             const data = JSON.parse(stored);
@@ -443,10 +453,19 @@ function updateCartCount(count) {
         // Show/hide badge based on count
         if (count > 0) {
             el.classList.add('has-items');
+            el.hidden = false;
         } else {
             el.classList.remove('has-items');
+            el.hidden = true;
         }
     });
+
+    // Persist count for fast-path on next page load
+    try {
+        localStorage.setItem('cart_count', count);
+    } catch (e) {
+        // Storage full or unavailable
+    }
 }
 
 
