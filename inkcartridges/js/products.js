@@ -78,7 +78,7 @@ const Products = {
                     </div>
                     <div class="product-card__content">
                         <p class="product-card__brand">${Security.escapeHtml(product.brand?.name || '')}</p>
-                        <h3 class="product-card__title">${Security.escapeHtml(product.name)}</h3>
+                        <h3 class="product-card__title" title="${Security.escapeAttr(product.name)}">${Security.escapeHtml(product.name)}</h3>
                         ${product.color ? `<p class="product-card__color">${Security.escapeHtml(product.color)}</p>` : ''}
                         <p class="product-card__price">${product.retail_price == null ? 'Price unavailable' : formatPrice(product.retail_price)}</p>
                         <p class="product-card__stock ${stockStatus.class}">${stockStatus.text}</p>

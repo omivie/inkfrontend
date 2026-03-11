@@ -35,7 +35,7 @@ const ModernEffects = {
 
         const observerOptions = {
             root: null,
-            rootMargin: '0px 0px -50px 0px',
+            rootMargin: '0px 0px -20px 0px',
             threshold: 0.1
         };
 
@@ -64,15 +64,22 @@ const ModernEffects = {
             });
         });
 
-        // Mark sections that are already in view immediately
+        // Mark elements that are already in view immediately
         requestAnimationFrame(() => {
-            document.querySelectorAll('section.will-animate').forEach(section => {
-                const rect = section.getBoundingClientRect();
+            document.querySelectorAll('.will-animate').forEach(el => {
+                const rect = el.getBoundingClientRect();
                 if (rect.top < window.innerHeight && rect.bottom > 0) {
-                    section.classList.add('in-view', 'visible');
+                    el.classList.add('in-view', 'visible');
                 }
             });
         });
+
+        // Safety net: force all will-animate elements visible after 2s
+        setTimeout(() => {
+            document.querySelectorAll('.will-animate:not(.in-view)').forEach(el => {
+                el.classList.add('in-view', 'visible');
+            });
+        }, 2000);
     },
 
     // =========================================

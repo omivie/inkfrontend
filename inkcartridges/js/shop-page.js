@@ -2167,6 +2167,11 @@
                 const card = this.createProductCard(product, isCompatible);
                 container.appendChild(card);
             });
+
+            // Bind image error fallback handlers
+            if (typeof Products !== 'undefined' && Products.bindImageFallbacks) {
+                Products.bindImageFallbacks(container);
+            }
         },
 
         createProductCard(product, isCompatible) {
@@ -2189,27 +2194,35 @@
                         <path d="M9 6h6M9 10h6"/>
                     </svg>`;
             let imageContent;
-            if (product.image_url) {
-                imageContent = `<img src="${product.image_url}" alt="${product.name}" loading="lazy">`;
+            const resolvedImageUrl = typeof storageUrl === 'function' ? storageUrl(product.image_url) : product.image_url;
+            if (resolvedImageUrl && resolvedImageUrl !== '/assets/images/placeholder-product.svg') {
+                const detectedColor = color || ProductColors.detectFromName(product.name);
+                const colorStyle = detectedColor ? this.getColorStyle(detectedColor) : null;
+                if (colorStyle) {
+                    imageContent = `<img src="${Security.escapeAttr(resolvedImageUrl)}" alt="${Security.escapeAttr(product.name)}" loading="lazy" data-fallback="color-block">
+                        <div class="product-card__color-block" style="${colorStyle}; display: none;"></div>`;
+                } else {
+                    imageContent = `<img src="${Security.escapeAttr(resolvedImageUrl)}" alt="${Security.escapeAttr(product.name)}" loading="lazy" data-fallback="placeholder">`;
+                }
             } else if (isCompatible) {
                 const detectedColor = color || ProductColors.detectFromName(product.name);
                 const colorStyle = detectedColor ? this.getColorStyle(detectedColor) : 'background-color: #1a1a1a;';
                 imageContent = `<div class="product-card__color-block" style="${colorStyle}"></div>`;
             } else {
-                imageContent = placeholderSvg;
+                imageContent = `<img src="/assets/images/placeholder-product.svg" alt="${Security.escapeAttr(product.name)}" loading="lazy">`;
             }
 
             // Check if product is already a favourite
             const isFav = typeof Favourites !== 'undefined' && Favourites.isFavourite && Favourites.isFavourite(product.id);
 
             card.innerHTML = `
-                <a href="/html/product/?sku=${product.sku}" class="product-card__link">
+                <a href="/html/product/?sku=${Security.escapeAttr(product.sku)}" class="product-card__link">
                     <div class="product-card__image-wrapper">
                         ${imageContent}
                     </div>
                     <div class="product-card__content">
-                        <h3 class="product-card__title">${displayName}</h3>
-                        ${color ? `<span class="product-card__color">${color}</span>` : ''}
+                        <h3 class="product-card__title" title="${Security.escapeAttr(displayName)}">${Security.escapeHtml(displayName)}</h3>
+                        ${color ? `<span class="product-card__color">${Security.escapeHtml(color)}</span>` : ''}
                         <div class="product-card__pricing">
                             <span class="product-card__price">${formatPrice(price)}</span>
                         </div>
@@ -2219,13 +2232,13 @@
                     </div>
                 </a>
                 <button type="button" class="favourite-btn product-card__fav-btn ${isFav ? 'favourite-btn--active' : ''}"
-                        data-product-id="${product.id}"
-                        data-product-sku="${product.sku || ''}"
-                        data-product-name="${displayName}"
-                        data-product-price="${price}"
-                        data-product-image="${product.image_url || ''}"
-                        data-product-brand="${brandName}"
-                        data-product-color="${color}"
+                        data-product-id="${Security.escapeAttr(product.id)}"
+                        data-product-sku="${Security.escapeAttr(product.sku || '')}"
+                        data-product-name="${Security.escapeAttr(displayName)}"
+                        data-product-price="${Security.escapeAttr(price)}"
+                        data-product-image="${Security.escapeAttr(resolvedImageUrl || '')}"
+                        data-product-brand="${Security.escapeAttr(brandName)}"
+                        data-product-color="${Security.escapeAttr(color)}"
                         aria-pressed="${isFav}"
                         title="${isFav ? 'Remove from favourites' : 'Add to favourites'}">
                     <svg class="favourite-btn__icon favourite-btn__icon--outline" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">

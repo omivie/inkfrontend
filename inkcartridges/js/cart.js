@@ -547,7 +547,9 @@ const Cart = {
             }
         } catch (error) {
             DebugLog.error('Cart validation error:', error);
-            return { valid: false, errors: [error.message || 'Network error during validation'] };
+            // Re-throw server/network errors so the checkout handler's catch
+            // can allow proceeding — checkout page will re-validate before charging
+            throw error;
         }
     },
 

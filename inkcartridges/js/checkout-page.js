@@ -309,6 +309,7 @@
 
         async fetchShippingFromAPI() {
             const region = document.getElementById('region')?.value || '';
+            const postalCode = document.getElementById('postcode')?.value || '';
             const deliveryType = document.querySelector('input[name="delivery_type"]:checked')?.value || 'urban';
 
             // Test products get free shipping automatically
@@ -328,6 +329,7 @@
                             quantity: item.quantity
                         })),
                         region: region,
+                        postal_code: postalCode,
                         delivery_type: deliveryType
                     };
                     const response = await API.getShippingOptions(payload);

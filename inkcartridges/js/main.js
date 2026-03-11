@@ -26,7 +26,28 @@ document.addEventListener('DOMContentLoaded', function() {
     initCurrentYear();
     initDropdowns();
     initMegaPanels();
+    initCartBadgeFromStorage();
 });
+
+/**
+ * Read localStorage cart count immediately to prevent badge showing "0"
+ * before Cart.init() completes (which may involve async server calls).
+ */
+function initCartBadgeFromStorage() {
+    try {
+        const stored = localStorage.getItem('inkcartridges_cart');
+        if (stored) {
+            const data = JSON.parse(stored);
+            const items = data.items || data;
+            if (Array.isArray(items) && items.length > 0) {
+                const count = items.reduce((sum, item) => sum + (item.quantity || 1), 0);
+                updateCartCount(count);
+            }
+        }
+    } catch (e) {
+        // Silently fail - Cart.init() will set the correct count
+    }
+}
 
 
 /**
@@ -153,6 +174,15 @@ function initSearch() {
                 if (!expandTarget.contains(e.target)) {
                     expandTarget.classList.remove('is-expanded');
                     primaryNav.classList.remove('search-active');
+                }
+            });
+
+            // Close search overlay on Escape key
+            document.addEventListener('keydown', function(e) {
+                if (e.key === 'Escape' && primaryNav.classList.contains('search-active')) {
+                    expandTarget.classList.remove('is-expanded');
+                    primaryNav.classList.remove('search-active');
+                    searchInput.blur();
                 }
             });
         }

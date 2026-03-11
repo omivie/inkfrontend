@@ -676,15 +676,15 @@ img.loaded {
    Sections are visible by default - animation is opt-in
    ============================================= */
 
-/* Sections that JavaScript marks for animation */
-section.will-animate {
+/* Elements that JavaScript marks for animation */
+.will-animate {
     opacity: 0;
     transform: translateY(30px);
     transition: opacity 0.6s ease-out, transform 0.6s ease-out;
 }
 
-section.will-animate.in-view,
-section.in-view {
+.will-animate.in-view,
+.in-view {
     opacity: 1;
     transform: translateY(0);
 }
