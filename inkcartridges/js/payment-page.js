@@ -10,27 +10,23 @@
         isSubmitting: false,
         paymentAuthorized: false,
 
-        // Idempotency key — deterministic SHA-256 hash, reused on retry
-        _idempotencyKey: null,
-        async getIdempotencyKey() {
-            if (!this._idempotencyKey) {
-                // Build deterministic string from user ID + sorted item IDs + address
-                const user = typeof Auth !== 'undefined' ? Auth.getUser() : null;
-                const userId = user?.id || 'guest';
-                const sortedItemIds = this.cartItems
-                    .map(item => `${item.id}:${item.quantity}`)
-                    .sort()
-                    .join(',');
-                const addr = this.checkoutData || {};
-                const addressStr = [addr.address1, addr.address2, addr.city, addr.region, addr.postcode].join('|');
-                const raw = userId + sortedItemIds + addressStr;
+        // Idempotency key — deterministic SHA-256 hash including payment method
+        async getIdempotencyKey(paymentMethod) {
+            // Build deterministic string from user ID + sorted item IDs + address + payment method
+            const user = typeof Auth !== 'undefined' ? Auth.getUser() : null;
+            const userId = user?.id || 'guest';
+            const sortedItemIds = this.cartItems
+                .map(item => `${item.id}:${item.quantity}`)
+                .sort()
+                .join(',');
+            const addr = this.checkoutData || {};
+            const addressStr = [addr.address1, addr.address2, addr.city, addr.region, addr.postcode].join('|');
+            const raw = userId + sortedItemIds + addressStr + (paymentMethod || '');
 
-                const encoded = new TextEncoder().encode(raw);
-                const hashBuffer = await crypto.subtle.digest('SHA-256', encoded);
-                const hashArray = Array.from(new Uint8Array(hashBuffer));
-                this._idempotencyKey = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-            }
-            return this._idempotencyKey;
+            const encoded = new TextEncoder().encode(raw);
+            const hashBuffer = await crypto.subtle.digest('SHA-256', encoded);
+            const hashArray = Array.from(new Uint8Array(hashBuffer));
+            return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
         },
 
         // Stripe
@@ -441,7 +437,7 @@
                             save_address: this.checkoutData.saveAddress !== false,
                             customer_notes: this.checkoutData.orderNotes || '',
                             payment_method: 'paypal',
-                            idempotency_key: await this.getIdempotencyKey()
+                            idempotency_key: await this.getIdempotencyKey('paypal')
                         });
 
                         // Debug: log full backend response for PayPal order creation
@@ -463,7 +459,7 @@
                     } catch (error) {
                         DebugLog.error('PayPal createOrder error:', error);
                         this.showError(error.message || 'Failed to start PayPal payment. Please try again.');
-                        this._idempotencyKey = null;
+
                         this.updatePayButton();
                         throw error;
                     }
@@ -515,7 +511,6 @@
                         showToast('Payment cancelled', 'info');
                     }
                     // Re-enable Stripe pay button
-                    this._idempotencyKey = null;
                     this.updatePayButton();
                 },
 
@@ -525,7 +520,6 @@
                         showToast('Payment error. Please try again.', 'error');
                     }
                     // Re-enable Stripe pay button
-                    this._idempotencyKey = null;
                     this.updatePayButton();
                 }
             }).render('#paypal-button-container').then(() => {
@@ -664,7 +658,7 @@
                     save_address: this.checkoutData.saveAddress !== false,
                     customer_notes: this.checkoutData.orderNotes || '',
                     payment_method: 'stripe',
-                    idempotency_key: await this.getIdempotencyKey()
+                    idempotency_key: await this.getIdempotencyKey('stripe')
                 });
 
                 // Handle duplicate/idempotent replay
@@ -707,7 +701,7 @@
                             } catch (cancelErr) {
                                 DebugLog.warn('Could not cancel pending order:', cancelErr.message);
                             }
-                            this._idempotencyKey = null;
+    
                             throw new Error(stripeError.message);
                         }
 
@@ -717,7 +711,7 @@
                             } catch (cancelErr) {
                                 DebugLog.warn('Could not cancel pending order:', cancelErr.message);
                             }
-                            this._idempotencyKey = null;
+    
                             throw new Error('Payment was not completed. Please try again.');
                         }
 
@@ -759,7 +753,7 @@
                         // Concurrent request — wait and check
                         await new Promise(r => setTimeout(r, 2000));
                         try {
-                            const pending = await API.checkPendingOrder(await this.getIdempotencyKey());
+                            const pending = await API.checkPendingOrder(await this.getIdempotencyKey('stripe'));
                             if (pending.ok && pending.data?.order_number) {
                                 // Only redirect if payment was completed (no client_secret means paid)
                                 if (!pending.data.client_secret) {
@@ -767,7 +761,7 @@
                                     return;
                                 }
                                 // Has client_secret — payment still pending, let user retry
-                                this._idempotencyKey = null;
+        
                                 throw new Error('Your previous payment was not completed. Please try again.');
                             }
                         } catch (e) {
@@ -825,8 +819,6 @@
                     } catch (cancelErr) {
                         DebugLog.warn('Could not cancel pending order:', cancelErr.message);
                     }
-                    // Reset idempotency key so the user can retry with a new order
-                    this._idempotencyKey = null;
                     throw new Error(stripeError.message);
                 }
 
@@ -838,7 +830,6 @@
                     } catch (cancelErr) {
                         DebugLog.warn('Could not cancel pending order:', cancelErr.message);
                     }
-                    this._idempotencyKey = null;
                     throw new Error('Payment was not completed. Please try again.');
                 }
 
