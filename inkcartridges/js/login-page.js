@@ -148,11 +148,20 @@
                                 resendLink.textContent = 'Sending...';
                                 resendLink.disabled = true;
                                 try {
-                                    const res = await API.resendVerificationEmail();
-                                    resendLink.textContent = res.ok ? 'Verification email sent! Check your inbox.' : 'Failed to send. Try again later.';
+                                    // Use Supabase resend directly — user is not authenticated on login page,
+                                    // so the backend API (which requires auth) would return 401.
+                                    const { error: resendError } = await Auth.supabase.auth.resend({
+                                        type: 'signup',
+                                        email: email,
+                                        options: {
+                                            emailRedirectTo: `${window.location.origin}/html/account/login.html?verified=true`
+                                        }
+                                    });
+                                    resendLink.textContent = resendError ? 'Failed to send. Try again later.' : 'Verification email sent! Check your inbox.';
                                 } catch (_) {
                                     resendLink.textContent = 'Failed to send. Try again later.';
                                 }
+                                resendLink.disabled = false;
                             });
                             loginError.appendChild(resendLink);
                         }
