@@ -908,6 +908,32 @@
                         return data.paypal_order_id;
                     }
 
+                    // Stale duplicate (cancelled or missing paypal_order_id) — cancel and retry
+                    if (data.is_duplicate && !data.paypal_order_id) {
+                        console.log('[PayPal] Stale duplicate order (status:', data.status, ') — cancelling and retrying...');
+                        try {
+                            await API.cancelOrder(data.order_number);
+                            console.log('[PayPal] Cancelled stale order:', data.order_number);
+                        } catch (cancelErr) {
+                            console.warn('[PayPal] Could not cancel stale order:', cancelErr.message);
+                        }
+                        // Retry with a fresh idempotency key
+                        orderPayload.idempotency_key = await self.getIdempotencyKey('paypal-retry-' + Date.now());
+                        const retryResponse = await API.createOrder(orderPayload);
+                        console.log('[PayPal] Retry API response:', JSON.stringify(retryResponse, null, 2));
+
+                        if (!retryResponse.ok) {
+                            throw new Error(retryResponse.error || 'Failed to create PayPal order on retry');
+                        }
+                        const retryData = retryResponse.data;
+                        if (!retryData.paypal_order_id) {
+                            throw new Error('Server did not return a PayPal order on retry. Please contact support.');
+                        }
+                        self._pendingPayPalOrderNumber = retryData.order_number;
+                        console.log('[PayPal] Retry succeeded. order_number:', retryData.order_number, 'paypal_order_id:', retryData.paypal_order_id);
+                        return retryData.paypal_order_id;
+                    }
+
                     if (data.payment_method !== 'paypal' || !data.paypal_order_id) {
                         console.error('[PayPal] Missing paypal_order_id in response. payment_method:', data.payment_method, 'paypal_order_id:', data.paypal_order_id);
                         throw new Error('Server did not return a PayPal order. Please try again.');
