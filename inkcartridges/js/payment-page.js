@@ -496,7 +496,14 @@
                             // Backend now returns a fresh paypal_order_id even on duplicates,
                             // so treat it as a normal order and proceed with the PayPal flow.
                             if (orderResponse.data?.is_duplicate) {
-                                DebugLog.log('Duplicate order detected, proceeding with fresh PayPal order ID:', orderResponse.data.paypal_order_id);
+                                const dupPaypalId = orderResponse.data.paypal_order_id;
+                                if (dupPaypalId) {
+                                    DebugLog.log('Duplicate order detected, proceeding with fresh PayPal order ID:', dupPaypalId);
+                                    orderNumber = orderResponse.data.order_number;
+                                    return dupPaypalId;
+                                }
+                                // No paypal_order_id on duplicate — fall through to normal checks
+                                DebugLog.warn('Duplicate order detected but no paypal_order_id, falling through to retry logic');
                             }
 
                             if (orderResponse.data.payment_method !== 'paypal') {
@@ -507,7 +514,10 @@
                                     DebugLog.warn('Could not cancel stale order:', cancelErr.message);
                                 }
                                 this.paypalAttempt++;
-                                if (attempt < MAX_RETRIES) continue; // auto-retry
+                                if (attempt < MAX_RETRIES) {
+                                    await new Promise(r => setTimeout(r, 1000));
+                                    continue;
+                                }
                                 throw new Error('Could not clear previous payment attempts. Please refresh and try again.');
                             }
 
@@ -521,7 +531,10 @@
                                     DebugLog.warn('Could not cancel incomplete PayPal order:', cancelErr.message);
                                 }
                                 this.paypalAttempt++;
-                                if (attempt < MAX_RETRIES) continue; // auto-retry
+                                if (attempt < MAX_RETRIES) {
+                                    await new Promise(r => setTimeout(r, 1000));
+                                    continue;
+                                }
                                 throw new Error('PayPal setup did not complete. Please refresh and try again.');
                             }
 
