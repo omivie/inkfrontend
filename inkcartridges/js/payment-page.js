@@ -492,18 +492,11 @@
                                 throw new Error(errorMsg);
                             }
 
-                            // --- Handle success but stale/duplicate response ---
+                            // --- Handle success but duplicate response ---
+                            // Backend now returns a fresh paypal_order_id even on duplicates,
+                            // so treat it as a normal order and proceed with the PayPal flow.
                             if (orderResponse.data?.is_duplicate) {
-                                const dupOrderNumber = orderResponse.data.order_number;
-                                try {
-                                    await API.cancelOrder(dupOrderNumber);
-                                    DebugLog.log('Cancelled duplicate PayPal order:', dupOrderNumber);
-                                } catch (cancelErr) {
-                                    DebugLog.warn('Could not cancel duplicate order:', cancelErr.message);
-                                }
-                                this.paypalAttempt++;
-                                if (attempt < MAX_RETRIES) continue; // auto-retry
-                                throw new Error('Could not clear previous payment attempts. Please refresh and try again.');
+                                DebugLog.log('Duplicate order detected, proceeding with fresh PayPal order ID:', orderResponse.data.paypal_order_id);
                             }
 
                             if (orderResponse.data.payment_method !== 'paypal') {
