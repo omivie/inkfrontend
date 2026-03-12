@@ -883,6 +883,7 @@
             if (data.collapsed) return;
             data.collapsed = true;
             data.section.classList.add('is-collapsed');
+            data.section.classList.add('is-complete');
             data.body.hidden = true;
             data.continueBtn.hidden = true;
             data.summary.hidden = false;
@@ -910,6 +911,33 @@
             // Focus first input (never touch billing checkbox state)
             const firstInput = data.body.querySelector('input:not([type="hidden"]):not([type="checkbox"]):not([type="radio"]), select, textarea');
             if (firstInput) firstInput.focus({ preventScroll: true });
+        },
+
+        // Auto-advance: collapse Contact and open Shipping when returning user data is prefilled
+        _autoAdvanceContactIfPrefilled() {
+            if (!this._accordionSections || this._accordionSections.length < 2) return;
+            const contactData = this._accordionSections[0];
+            const shippingData = this._accordionSections[1];
+
+            // Only act if Contact is currently open
+            if (contactData.collapsed) return;
+
+            // Require email and phone to be filled
+            const email = document.getElementById('email');
+            const phone = document.getElementById('phone');
+            if (!email?.value || !phone?.value) return;
+
+            // Collapse contact (marks is-complete)
+            this._collapseAccordionSection(contactData);
+
+            // Expand shipping without stealing focus (avoids jarring scroll on load)
+            shippingData.collapsed = false;
+            shippingData.section.classList.remove('is-collapsed');
+            shippingData.body.hidden = false;
+            shippingData.continueBtn.hidden = false;
+            shippingData.summary.hidden = true;
+            shippingData.editBtn.hidden = true;
+            shippingData.heading.style.cursor = '';
         },
 
         // Setup coupon code handler
@@ -1054,6 +1082,25 @@
 
             const continueBtn = document.getElementById('continue-to-payment-btn');
             const originalBtnText = continueBtn.innerHTML;
+
+            // If Shipping section is still collapsed, expand it and prompt delivery type selection
+            const shippingAccordionData = this._accordionSections?.[1];
+            if (shippingAccordionData && shippingAccordionData.collapsed) {
+                this._expandAccordionSection(shippingAccordionData);
+                const deliverySection = document.getElementById('delivery-type-section');
+                if (deliverySection) {
+                    if (!deliverySection.querySelector('.delivery-type-prompt')) {
+                        const prompt = document.createElement('p');
+                        prompt.className = 'delivery-type-prompt';
+                        prompt.textContent = 'Please select your delivery area to continue';
+                        deliverySection.insertBefore(prompt, deliverySection.querySelector('.delivery-type-options'));
+                    }
+                    setTimeout(() => {
+                        deliverySection.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    }, 300);
+                }
+                return;
+            }
 
             // Validate form with custom error display
             if (!this.validateFormFields(form)) {
@@ -1316,6 +1363,8 @@
 
                     if (defaultAddress) {
                         this.fillAddressFields(defaultAddress);
+                        // Auto-advance accordion: collapse Contact, open Shipping for returning users
+                        this._autoAdvanceContactIfPrefilled();
                     }
 
                     // Render address picker if multiple addresses

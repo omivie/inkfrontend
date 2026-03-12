@@ -28,6 +28,23 @@
       ]
     }
   ],
+  "redirects": [
+    { "source": "/panasonic-kxr190-191-193-194-195-196-200-210-250-300-typewriter-ribbon-lift-off-tape", "destination": "/html/ribbons", "permanent": true },
+    { "source": "/brother-typewriter-model-listing-for-ribbons", "destination": "/html/ribbons", "permanent": true },
+    { "source": "/typewriter-ribbons-and-cassettes", "destination": "/html/ribbons", "permanent": true },
+    { "source": "/typewriter-ribbon-and-lift-off-tape-for-your-olivetti-lettera--series-typewriter", "destination": "/html/ribbons", "permanent": true },
+    { "source": "/sharp-pa3000-series-correctable-typewriter-ribbon", "destination": "/html/ribbons", "permanent": true },
+    { "source": "/group-4-olivetti-typewriter-double-spool-ribbon-black-red", "destination": "/html/ribbons", "permanent": true },
+    { "source": "/81001.02-typewriter-ribbon-red-black-universal", "destination": "/html/ribbons", "permanent": true },
+    { "source": "/brother-ax-typewriter-ribbons-and-lift-off-tapes", "destination": "/html/ribbons", "permanent": true },
+    { "source": "/Panasonic-Printer-Ribbon-Compatible-for-KX-P1124-670.01", "destination": "/html/ribbons", "permanent": true },
+    { "source": "/brother-mfc-j430w-printer", "destination": "/html/shop?search=Brother+MFC-J430W", "permanent": true },
+    { "source": "/HL-1210W-Brother-laser-printer-uses-TN1070-Toner-cartridge-DR1070-drum", "destination": "/html/shop?search=Brother+HL-1210W", "permanent": true },
+    { "source": "/brother-h12140-laser-printer", "destination": "/html/shop?search=Brother+HL-2140", "permanent": true },
+    { "source": "/Brother-MFC-9340-cdw-Printer-Toner-Cartridges-TN251-TN255", "destination": "/html/shop?search=Brother+MFC-9340CDW", "permanent": true },
+    { "source": "/hl2130-brother-laser-printer-uses-tn2030-toner-cartridge-and-dr2225-drum", "destination": "/html/shop?search=Brother+HL-2130", "permanent": true },
+    { "source": "/hp-no.564-oem-inkjet-cartridges", "destination": "/html/shop?search=HP+564", "permanent": true }
+  ],
   "rewrites": [
     { "source": "/sitemap.xml", "destination": "https://ink-backend-zaeq.onrender.com/sitemap.xml" },
     { "source": "/robots.txt", "destination": "https://ink-backend-zaeq.onrender.com/robots.txt" }
