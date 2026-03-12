@@ -855,6 +855,7 @@
                 },
 
                 createOrder: async () => {
+                    console.log('[PayPal] createOrder called — building payload...');
                     // Build order payload with payment_method: 'paypal'
                     const items = self.cartItems.map(item => ({
                         product_id: item.id,
@@ -884,10 +885,14 @@
                         idempotency_key: await self.getIdempotencyKey('paypal')
                     };
 
+                    console.log('[PayPal] Sending order payload:', JSON.stringify(orderPayload, null, 2));
+
                     const response = await API.createOrder(orderPayload);
+                    console.log('[PayPal] API response:', JSON.stringify(response, null, 2));
 
                     if (!response.ok) {
                         const errorCode = response.code || '';
+                        console.error('[PayPal] API returned error:', errorCode, response.error);
                         if (errorCode === 'ORDER_TOTAL_TOO_LOW') {
                             throw new Error('Your order total is below the minimum. Please add more items.');
                         }
@@ -898,21 +903,24 @@
 
                     // Handle duplicate order replay
                     if (data.is_duplicate && data.paypal_order_id) {
-                        // Reuse the existing PayPal order
+                        console.log('[PayPal] Duplicate order — reusing paypal_order_id:', data.paypal_order_id);
                         self._pendingPayPalOrderNumber = data.order_number;
                         return data.paypal_order_id;
                     }
 
                     if (data.payment_method !== 'paypal' || !data.paypal_order_id) {
+                        console.error('[PayPal] Missing paypal_order_id in response. payment_method:', data.payment_method, 'paypal_order_id:', data.paypal_order_id);
                         throw new Error('Server did not return a PayPal order. Please try again.');
                     }
 
                     // Store order number for capture step
                     self._pendingPayPalOrderNumber = data.order_number;
+                    console.log('[PayPal] Order created. order_number:', data.order_number, 'paypal_order_id:', data.paypal_order_id);
                     return data.paypal_order_id;
                 },
 
                 onApprove: async (data) => {
+                    console.log('[PayPal] onApprove — user approved. orderID:', data.orderID);
                     // User approved payment in PayPal popup — capture it
                     try {
                         const orderNumber = self._pendingPayPalOrderNumber;
@@ -920,7 +928,9 @@
                             throw new Error('Order number not found. Please try again.');
                         }
 
+                        console.log('[PayPal] Capturing payment for order:', orderNumber);
                         const captureResponse = await API.capturePaypal(orderNumber, data.orderID);
+                        console.log('[PayPal] Capture response:', JSON.stringify(captureResponse, null, 2));
 
                         if (captureResponse.ok && captureResponse.data?.status === 'paid') {
                             // Payment successful — clear cart and redirect
@@ -947,12 +957,13 @@
                 },
 
                 onCancel: () => {
-                    DebugLog.log('PayPal payment cancelled by user');
+                    console.log('[PayPal] Payment cancelled by user');
                     self.showError('PayPal payment was cancelled. You can try again or use a different payment method.');
                 },
 
                 onError: (err) => {
-                    DebugLog.error('PayPal SDK error:', err);
+                    console.error('[PayPal] SDK onError fired:', err);
+                    console.error('[PayPal] Error message:', err?.message || String(err));
                     self.showError('Something went wrong with PayPal. Please try again or use a different payment method.');
                 }
             }).render('#paypal-button-container');
