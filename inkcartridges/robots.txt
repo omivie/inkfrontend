@@ -1,0 +1,24 @@
+User-agent: *
+Allow: /
+
+# Block admin pages
+Disallow: /html/admin/
+
+# Block checkout/payment flow
+Disallow: /html/checkout.html
+Disallow: /html/payment.html
+Disallow: /html/order-confirmation.html
+
+# Block authenticated account pages
+Disallow: /html/account/index.html
+Disallow: /html/account/addresses.html
+Disallow: /html/account/favourites.html
+Disallow: /html/account/orders.html
+Disallow: /html/account/order-detail.html
+Disallow: /html/account/personal-details.html
+Disallow: /html/account/printers.html
+Disallow: /html/account/settings.html
+Disallow: /html/account/reset-password.html
+Disallow: /html/account/verify-email.html
+
+Sitemap: https://www.inkcartridges.co.nz/sitemap.xml

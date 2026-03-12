@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <!-- Homepage -->
+  <url>
+    <loc>https://www.inkcartridges.co.nz/html/index.html</loc>
+    <lastmod>2026-03-12</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>1.0</priority>
+  </url>
+
+  <!-- Shop -->
+  <url>
+    <loc>https://www.inkcartridges.co.nz/html/shop.html</loc>
+    <lastmod>2026-03-12</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.9</priority>
+  </url>
+
+  <!-- Product Page -->
+  <url>
+    <loc>https://www.inkcartridges.co.nz/html/product/index.html</loc>
+    <lastmod>2026-03-12</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.9</priority>
+  </url>
+
+  <!-- Ribbons -->
+  <url>
+    <loc>https://www.inkcartridges.co.nz/html/ribbons.html</loc>
+    <lastmod>2026-03-12</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.7</priority>
+  </url>
+
+  <!-- Cart -->
+  <url>
+    <loc>https://www.inkcartridges.co.nz/html/cart.html</loc>
+    <lastmod>2026-03-12</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.5</priority>
+  </url>
+
+  <!-- Contact -->
+  <url>
+    <loc>https://www.inkcartridges.co.nz/html/contact.html</loc>
+    <lastmod>2026-03-12</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.7</priority>
+  </url>
+
+  <!-- Privacy Policy -->
+  <url>
+    <loc>https://www.inkcartridges.co.nz/html/privacy.html</loc>
+    <lastmod>2026-03-12</lastmod>
+    <changefreq>yearly</changefreq>
+    <priority>0.3</priority>
+  </url>
+
+  <!-- Terms & Conditions -->
+  <url>
+    <loc>https://www.inkcartridges.co.nz/html/terms.html</loc>
+    <lastmod>2026-03-12</lastmod>
+    <changefreq>yearly</changefreq>
+    <priority>0.3</priority>
+  </url>
+
+  <!-- Account - Login -->
+  <url>
+    <loc>https://www.inkcartridges.co.nz/html/account/login.html</loc>
+    <lastmod>2026-03-12</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.5</priority>
+  </url>
+
+  <!-- Account - Forgot Password -->
+  <url>
+    <loc>https://www.inkcartridges.co.nz/html/account/forgot-password.html</loc>
+    <lastmod>2026-03-12</lastmod>
+    <changefreq>yearly</changefreq>
+    <priority>0.3</priority>
+  </url>
+
+  <!-- Account - Track Order -->
+  <url>
+    <loc>https://www.inkcartridges.co.nz/html/account/track-order.html</loc>
+    <lastmod>2026-03-12</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.5</priority>
+  </url>
+</urlset>
