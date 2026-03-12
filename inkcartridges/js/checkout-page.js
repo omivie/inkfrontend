@@ -30,6 +30,9 @@
 
         // Initialize checkout page
         async init() {
+            // Clear any browser-autocompleted delivery type — user must select manually
+            document.querySelectorAll('input[name="delivery_type"]').forEach(r => r.checked = false);
+
             await this.loadCart();
             this.renderCart();
             this.setupFormHandlers();
