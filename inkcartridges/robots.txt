@@ -4,13 +4,17 @@ Allow: /
 # Block admin pages
 Disallow: /html/admin/
 
-# Block checkout/payment flow
+# Block checkout/payment/cart flow
+Disallow: /html/cart.html
 Disallow: /html/checkout.html
 Disallow: /html/payment.html
 Disallow: /html/order-confirmation.html
 
-# Block authenticated account pages
+# Block account pages
 Disallow: /html/account/index.html
+Disallow: /html/account/login.html
+Disallow: /html/account/forgot-password.html
+Disallow: /html/account/track-order.html
 Disallow: /html/account/addresses.html
 Disallow: /html/account/favourites.html
 Disallow: /html/account/orders.html
