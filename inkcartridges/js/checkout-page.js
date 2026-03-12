@@ -690,6 +690,8 @@
                         container.classList.remove('is-error');
                         const errorMsg = container.parentElement.querySelector('.form-error');
                         if (errorMsg) errorMsg.remove();
+                        const prompt = container.parentElement.querySelector('.delivery-type-prompt');
+                        if (prompt) prompt.remove();
                     }
                 }
                 if (field.classList.contains('is-error')) {
@@ -1013,6 +1015,7 @@
             form.querySelectorAll('.is-error').forEach(el => el.classList.remove('is-error'));
             form.querySelectorAll('.form-error').forEach(el => el.remove());
             form.querySelectorAll('.delivery-type-options.is-error').forEach(el => el.classList.remove('is-error'));
+            form.querySelectorAll('.delivery-type-prompt').forEach(el => el.remove());
         },
 
         // Validate all required fields, show red error styling, scroll to first error
@@ -1089,7 +1092,8 @@
                 this._expandAccordionSection(shippingAccordionData);
                 const deliverySection = document.getElementById('delivery-type-section');
                 if (deliverySection) {
-                    if (!deliverySection.querySelector('.delivery-type-prompt')) {
+                    const alreadySelected = deliverySection.querySelector('input[name="delivery_type"]:checked');
+                    if (!alreadySelected && !deliverySection.querySelector('.delivery-type-prompt')) {
                         const prompt = document.createElement('p');
                         prompt.className = 'delivery-type-prompt';
                         prompt.textContent = 'Please select your delivery area to continue';

@@ -531,8 +531,10 @@ const API = {
     /**
      * Validate cart before checkout
      */
-    async validateCart() {
-        return this.post('/api/cart/validate');
+    async validateCart(turnstileToken) {
+        const body = {};
+        if (turnstileToken) body.turnstile_token = turnstileToken;
+        return this.post('/api/cart/validate', body);
     },
 
     /**

@@ -503,8 +503,11 @@ const Cart = {
             return { valid: false, errors: ['Unable to validate cart. Please try again.'] };
         }
 
+        // Get Turnstile token for bot verification (non-blocking — returns null if unavailable)
+        const turnstileToken = typeof Auth !== 'undefined' ? await Auth.getTurnstileToken() : null;
+
         try {
-            const response = await API.validateCart();
+            const response = await API.validateCart(turnstileToken);
             if (response.ok) {
                 const data = response.data || {};
                 const errors = [];
@@ -543,7 +546,13 @@ const Cart = {
 
                 return { valid, errors };
             } else {
-                return { valid: false, errors: [response.error || 'Cart validation failed'] };
+                const errMsg = response.error || 'Cart validation failed';
+                // Bot/Turnstile errors are infrastructure failures, not stock issues.
+                // Re-throw so the checkout handler's catch block allows proceeding.
+                if (errMsg.toLowerCase().includes('bot verification') || errMsg.toLowerCase().includes('turnstile')) {
+                    throw new Error(errMsg);
+                }
+                return { valid: false, errors: [errMsg] };
             }
         } catch (error) {
             DebugLog.error('Cart validation error:', error);
@@ -590,9 +599,12 @@ const Cart = {
                 if (result.valid) {
                     // Cart is valid - proceed to checkout
                     window.location.href = '/html/checkout.html';
-                } else if (!self.isAuthenticated && self.items.length > 0) {
-                    // Guest user: server validation may fail due to cross-origin cookie blocking.
-                    // Allow proceeding — checkout/payment pages will re-validate before charging.
+                } else if (self.items.length > 0 && (!self.isAuthenticated || result.errors.length === 0)) {
+                    // Allow proceeding when:
+                    // - Guest user: server validation may fail due to cross-origin cookie blocking.
+                    // - Any user: validation failed with no specific stock errors (infrastructure
+                    //   issue — e.g. bot-verification required, server cart empty).
+                    // Checkout/payment pages will re-validate before charging.
                     window.location.href = '/html/checkout.html';
                 } else {
                     // Cart has issues - show errors
