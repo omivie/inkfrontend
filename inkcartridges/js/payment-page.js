@@ -423,112 +423,118 @@
                             quantity: item.quantity
                         }));
 
-                        const orderResponse = await API.createOrder({
-                            items: items,
-                            shipping_address: {
-                                first_name: this.checkoutData.firstName,
-                                last_name: this.checkoutData.lastName,
-                                phone: this.checkoutData.phone || '',
-                                address_line_1: this.checkoutData.address1,
-                                address_line_2: this.checkoutData.address2 || '',
-                                city: this.checkoutData.city,
-                                region: this.checkoutData.region,
-                                postal_code: this.checkoutData.postcode,
-                                country: 'NZ'
-                            },
-                            shipping_tier: this.checkoutData.shippingTier || '',
-                            shipping_zone: this.checkoutData.shippingZone || '',
-                            delivery_type: this.checkoutData.deliveryType || 'urban',
-                            estimated_shipping: this.checkoutData.estimatedShipping ?? null,
-                            save_address: this.checkoutData.saveAddress !== false,
-                            customer_notes: this.checkoutData.orderNotes || '',
-                            payment_method: 'paypal',
-                            idempotency_key: await this.getIdempotencyKey('paypal')
-                        });
+                        // Auto-retry loop: cancel stale duplicates and retry up to 3 times
+                        const MAX_RETRIES = 3;
+                        for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+                            const orderResponse = await API.createOrder({
+                                items: items,
+                                shipping_address: {
+                                    first_name: this.checkoutData.firstName,
+                                    last_name: this.checkoutData.lastName,
+                                    phone: this.checkoutData.phone || '',
+                                    address_line_1: this.checkoutData.address1,
+                                    address_line_2: this.checkoutData.address2 || '',
+                                    city: this.checkoutData.city,
+                                    region: this.checkoutData.region,
+                                    postal_code: this.checkoutData.postcode,
+                                    country: 'NZ'
+                                },
+                                shipping_tier: this.checkoutData.shippingTier || '',
+                                shipping_zone: this.checkoutData.shippingZone || '',
+                                delivery_type: this.checkoutData.deliveryType || 'urban',
+                                estimated_shipping: this.checkoutData.estimatedShipping ?? null,
+                                save_address: this.checkoutData.saveAddress !== false,
+                                customer_notes: this.checkoutData.orderNotes || '',
+                                payment_method: 'paypal',
+                                idempotency_key: await this.getIdempotencyKey('paypal')
+                            });
 
-                        // Debug: log full backend response for PayPal order creation
-                        DebugLog.log('PayPal createOrder response:', JSON.stringify(orderResponse, null, 2));
+                            // Debug: log full backend response for PayPal order creation
+                            DebugLog.log('PayPal createOrder response (attempt', attempt + 1, '):', JSON.stringify(orderResponse, null, 2));
 
-                        if (!orderResponse.ok) {
-                            const errorCode = orderResponse.code || '';
-                            const errorMsg = orderResponse.error || 'Failed to create order';
+                            // --- Handle error responses ---
+                            if (!orderResponse.ok) {
+                                const errorCode = orderResponse.code || '';
+                                const errorMsg = orderResponse.error || 'Failed to create order';
 
-                            if (errorCode === 'DUPLICATE_ORDER') {
-                                const details = orderResponse.data?.error?.details || orderResponse.data?.details || {};
-                                const existingOrder = details.order_number;
-                                const existingPaymentMethod = details.payment_method;
+                                if (errorCode === 'DUPLICATE_ORDER') {
+                                    const details = orderResponse.data?.error?.details || orderResponse.data?.details || {};
+                                    const existingOrder = details.order_number;
+                                    const existingPaymentMethod = details.payment_method;
 
-                                if (existingOrder) {
-                                    try {
-                                        await API.cancelOrder(existingOrder);
-                                        DebugLog.log('Cancelled duplicate order:', existingOrder, '(method:', existingPaymentMethod, ')');
-                                    } catch (cancelErr) {
-                                        DebugLog.warn('Could not cancel duplicate order:', cancelErr.message);
+                                    if (existingOrder) {
+                                        try {
+                                            await API.cancelOrder(existingOrder);
+                                            DebugLog.log('Cancelled duplicate order:', existingOrder, '(method:', existingPaymentMethod, ')');
+                                        } catch (cancelErr) {
+                                            DebugLog.warn('Could not cancel duplicate order:', cancelErr.message);
+                                        }
                                     }
+                                    this.paypalAttempt++;
+                                    if (attempt < MAX_RETRIES) continue; // auto-retry
+                                    throw new Error('Could not clear previous payment attempts. Please refresh and try again.');
+                                } else if (errorCode === 'DUPLICATE_REQUEST') {
+                                    this.paypalAttempt++;
+                                    if (attempt < MAX_RETRIES) {
+                                        await new Promise(r => setTimeout(r, 2000));
+                                        continue; // auto-retry
+                                    }
+                                    throw new Error('Request already in progress. Please refresh and try again.');
+                                } else if (errorCode === 'ORDER_TOTAL_TOO_LOW') {
+                                    throw new Error('Your order total is below the minimum. Please add more items.');
+                                } else if (errorCode === 'ACCOUNT_FLAGGED') {
+                                    if (typeof showToast === 'function') {
+                                        showToast('Your account has been flagged for review. Please contact support.', 'error', 0);
+                                    }
+                                    throw new Error('Account flagged for review. Please contact support.');
+                                }
+
+                                throw new Error(errorMsg);
+                            }
+
+                            // --- Handle success but stale/duplicate response ---
+                            if (orderResponse.data?.is_duplicate) {
+                                const dupOrderNumber = orderResponse.data.order_number;
+                                try {
+                                    await API.cancelOrder(dupOrderNumber);
+                                    DebugLog.log('Cancelled duplicate PayPal order:', dupOrderNumber);
+                                } catch (cancelErr) {
+                                    DebugLog.warn('Could not cancel duplicate order:', cancelErr.message);
                                 }
                                 this.paypalAttempt++;
-                                throw new Error('A previous payment attempt was cleared. Please click Pay with PayPal again.');
-                            } else if (errorCode === 'DUPLICATE_REQUEST') {
-                                await new Promise(r => setTimeout(r, 2000));
-                                throw new Error('Request already in progress. Please click Pay with PayPal again.');
-                            } else if (errorCode === 'ORDER_TOTAL_TOO_LOW') {
-                                throw new Error('Your order total is below the minimum. Please add more items.');
-                            } else if (errorCode === 'ACCOUNT_FLAGGED') {
-                                if (typeof showToast === 'function') {
-                                    showToast('Your account has been flagged for review. Please contact support.', 'error', 0);
+                                if (attempt < MAX_RETRIES) continue; // auto-retry
+                                throw new Error('Could not clear previous payment attempts. Please refresh and try again.');
+                            }
+
+                            if (orderResponse.data.payment_method !== 'paypal') {
+                                try {
+                                    await API.cancelOrder(orderResponse.data.order_number);
+                                    DebugLog.log('Cancelled non-PayPal order:', orderResponse.data.order_number, '(payment_method:', orderResponse.data.payment_method, ')');
+                                } catch (cancelErr) {
+                                    DebugLog.warn('Could not cancel stale order:', cancelErr.message);
                                 }
-                                throw new Error('Account flagged for review. Please contact support.');
+                                this.paypalAttempt++;
+                                if (attempt < MAX_RETRIES) continue; // auto-retry
+                                throw new Error('Could not clear previous payment attempts. Please refresh and try again.');
                             }
 
-                            throw new Error(errorMsg);
-                        }
+                            const paypalOrderId = orderResponse.data.paypal_order_id;
 
-                        // Handle duplicate/idempotent replay
-                        if (orderResponse.data?.is_duplicate) {
-                            const dupOrderNumber = orderResponse.data.order_number;
-                            // For PayPal duplicates, we can't reuse a potentially expired PayPal order ID.
-                            // Cancel the stale order and let the user click PayPal again for a fresh one.
-                            try {
-                                await API.cancelOrder(dupOrderNumber);
-                                DebugLog.log('Cancelled duplicate PayPal order:', dupOrderNumber);
-                            } catch (cancelErr) {
-                                DebugLog.warn('Could not cancel duplicate order:', cancelErr.message);
+                            if (!paypalOrderId) {
+                                try {
+                                    await API.cancelOrder(orderResponse.data.order_number);
+                                    DebugLog.log('Cancelled PayPal order missing paypal_order_id:', orderResponse.data.order_number);
+                                } catch (cancelErr) {
+                                    DebugLog.warn('Could not cancel incomplete PayPal order:', cancelErr.message);
+                                }
+                                this.paypalAttempt++;
+                                if (attempt < MAX_RETRIES) continue; // auto-retry
+                                throw new Error('PayPal setup did not complete. Please refresh and try again.');
                             }
-                            this.paypalAttempt++;
-                            throw new Error('A previous payment attempt was cleared. Please click Pay with PayPal again.');
+
+                            orderNumber = orderResponse.data.order_number;
+                            return paypalOrderId;
                         }
-
-                        orderNumber = orderResponse.data.order_number;
-
-                        // Only proceed if backend confirms this is a PayPal order
-                        if (orderResponse.data.payment_method !== 'paypal') {
-                            // Backend returned a non-PayPal order (e.g. stale Stripe duplicate,
-                            // or response missing payment_method entirely) — cancel and retry
-                            try {
-                                await API.cancelOrder(orderNumber);
-                                DebugLog.log('Cancelled non-PayPal order:', orderNumber, '(payment_method:', orderResponse.data.payment_method, ')');
-                            } catch (cancelErr) {
-                                DebugLog.warn('Could not cancel stale order:', cancelErr.message);
-                            }
-                            this.paypalAttempt++;
-                            throw new Error('A previous payment attempt was cleared. Please click Pay with PayPal again.');
-                        }
-
-                        const paypalOrderId = orderResponse.data.paypal_order_id;
-
-                        if (!paypalOrderId) {
-                            // Backend confirmed PayPal but didn't return the ID — cancel so retry gets a fresh order
-                            try {
-                                await API.cancelOrder(orderNumber);
-                                DebugLog.log('Cancelled PayPal order missing paypal_order_id:', orderNumber);
-                            } catch (cancelErr) {
-                                DebugLog.warn('Could not cancel incomplete PayPal order:', cancelErr.message);
-                            }
-                            this.paypalAttempt++;
-                            throw new Error('PayPal setup did not complete. Please click Pay with PayPal again.');
-                        }
-
-                        return paypalOrderId;
                     } catch (error) {
                         DebugLog.error('PayPal createOrder error:', error);
                         this.showPayPalError(error.message || 'Failed to start PayPal payment. Please try again.');
