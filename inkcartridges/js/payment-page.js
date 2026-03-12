@@ -9,7 +9,7 @@
         checkoutData: null,
         isSubmitting: false,
         paymentAuthorized: false,
-        paypalAttempt: 0,
+
 
         // Idempotency key — deterministic SHA-256 hash including payment method
         async getIdempotencyKey(paymentMethod) {
@@ -22,7 +22,7 @@
                 .join(',');
             const addr = this.checkoutData || {};
             const addressStr = [addr.address1, addr.address2, addr.city, addr.region, addr.postcode].join('|');
-            const raw = userId + sortedItemIds + addressStr + (paymentMethod || '') + (this.paypalAttempt || 0);
+            const raw = userId + sortedItemIds + addressStr + (paymentMethod || '');
 
             const encoded = new TextEncoder().encode(raw);
             const hashBuffer = await crypto.subtle.digest('SHA-256', encoded);
@@ -58,8 +58,8 @@
             // Initialize Stripe
             this.initStripe();
 
-            // Initialize PayPal
-            this.initPayPal();
+            // Initialize PayPal button (custom integration, not via Stripe)
+            this.initPayPalButton();
 
             // Setup event handlers
             this.setupEventHandlers();
@@ -383,264 +383,8 @@
             DebugLog.log('Stripe PaymentElement initialized successfully');
         },
 
-        /**
-         * Initialize PayPal button
-         */
-        initPayPal() {
-            if (typeof paypal === 'undefined') {
-                DebugLog.warn('PayPal SDK not loaded');
-                const container = document.getElementById('paypal-button-container');
-                const divider = document.querySelector('.payment-divider');
-                if (container) container.style.display = 'none';
-                if (divider) divider.style.display = 'none';
-                return;
-            }
-
-            let orderNumber = null;
-
-            paypal.Buttons({
-                style: {
-                    layout: 'vertical',
-                    color: 'blue',
-                    shape: 'rect',
-                    label: 'pay',
-                    height: 45
-                },
-
-                createOrder: async () => {
-                    try {
-                        // Clear previous PayPal errors
-                        const paypalErrorEl = document.getElementById('paypal-errors');
-                        if (paypalErrorEl) paypalErrorEl.textContent = '';
-
-                        // Disable Stripe pay button to prevent double-submission
-                        const payBtn = document.getElementById('pay-now-btn');
-                        if (payBtn) payBtn.disabled = true;
-
-                        // Build items array from cart
-                        const items = this.cartItems.map(item => ({
-                            product_id: item.id,
-                            quantity: item.quantity
-                        }));
-
-                        // Auto-retry loop: cancel stale duplicates and retry up to 3 times
-                        const MAX_RETRIES = 3;
-                        for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
-                            const orderResponse = await API.createOrder({
-                                items: items,
-                                shipping_address: {
-                                    first_name: this.checkoutData.firstName,
-                                    last_name: this.checkoutData.lastName,
-                                    phone: this.checkoutData.phone || '',
-                                    address_line_1: this.checkoutData.address1,
-                                    address_line_2: this.checkoutData.address2 || '',
-                                    city: this.checkoutData.city,
-                                    region: this.checkoutData.region,
-                                    postal_code: this.checkoutData.postcode,
-                                    country: 'NZ'
-                                },
-                                shipping_tier: this.checkoutData.shippingTier || '',
-                                shipping_zone: this.checkoutData.shippingZone || '',
-                                delivery_type: this.checkoutData.deliveryType || 'urban',
-                                estimated_shipping: this.checkoutData.estimatedShipping ?? null,
-                                save_address: this.checkoutData.saveAddress !== false,
-                                customer_notes: this.checkoutData.orderNotes || '',
-                                payment_method: 'paypal',
-                                idempotency_key: await this.getIdempotencyKey('paypal')
-                            });
-
-                            // Debug: log full backend response for PayPal order creation
-                            DebugLog.log('PayPal createOrder response (attempt', attempt + 1, '):', JSON.stringify(orderResponse, null, 2));
-
-                            // --- Handle error responses ---
-                            if (!orderResponse.ok) {
-                                const errorCode = orderResponse.code || '';
-                                const errorMsg = orderResponse.error || 'Failed to create order';
-
-                                if (errorCode === 'DUPLICATE_ORDER') {
-                                    const details = orderResponse.data?.error?.details || orderResponse.data?.details || {};
-                                    const existingOrder = details.order_number;
-                                    const existingPaymentMethod = details.payment_method;
-
-                                    if (existingOrder) {
-                                        try {
-                                            await API.cancelOrder(existingOrder);
-                                            DebugLog.log('Cancelled duplicate order:', existingOrder, '(method:', existingPaymentMethod, ')');
-                                        } catch (cancelErr) {
-                                            DebugLog.warn('Could not cancel duplicate order:', cancelErr.message);
-                                        }
-                                    }
-                                    this.paypalAttempt++;
-                                    if (attempt < MAX_RETRIES) continue; // auto-retry
-                                    throw new Error('Could not clear previous payment attempts. Please refresh and try again.');
-                                } else if (errorCode === 'DUPLICATE_REQUEST') {
-                                    this.paypalAttempt++;
-                                    if (attempt < MAX_RETRIES) {
-                                        await new Promise(r => setTimeout(r, 2000));
-                                        continue; // auto-retry
-                                    }
-                                    throw new Error('Request already in progress. Please refresh and try again.');
-                                } else if (errorCode === 'ORDER_TOTAL_TOO_LOW') {
-                                    throw new Error('Your order total is below the minimum. Please add more items.');
-                                } else if (errorCode === 'ACCOUNT_FLAGGED') {
-                                    if (typeof showToast === 'function') {
-                                        showToast('Your account has been flagged for review. Please contact support.', 'error', 0);
-                                    }
-                                    throw new Error('Account flagged for review. Please contact support.');
-                                }
-
-                                throw new Error(errorMsg);
-                            }
-
-                            // --- Handle success but duplicate response ---
-                            // Backend now returns a fresh paypal_order_id even on duplicates,
-                            // so treat it as a normal order and proceed with the PayPal flow.
-                            if (orderResponse.data?.is_duplicate) {
-                                const dupPaypalId = orderResponse.data.paypal_order_id;
-                                if (dupPaypalId) {
-                                    DebugLog.log('Duplicate order detected, proceeding with fresh PayPal order ID:', dupPaypalId);
-                                    orderNumber = orderResponse.data.order_number;
-                                    return dupPaypalId;
-                                }
-                                // No paypal_order_id on duplicate — fall through to normal checks
-                                DebugLog.warn('Duplicate order detected but no paypal_order_id, falling through to retry logic');
-                            }
-
-                            if (orderResponse.data.payment_method !== 'paypal') {
-                                try {
-                                    await API.cancelOrder(orderResponse.data.order_number);
-                                    DebugLog.log('Cancelled non-PayPal order:', orderResponse.data.order_number, '(payment_method:', orderResponse.data.payment_method, ')');
-                                } catch (cancelErr) {
-                                    DebugLog.warn('Could not cancel stale order:', cancelErr.message);
-                                }
-                                this.paypalAttempt++;
-                                if (attempt < MAX_RETRIES) {
-                                    await new Promise(r => setTimeout(r, 1000));
-                                    continue;
-                                }
-                                throw new Error('Could not clear previous payment attempts. Please refresh and try again.');
-                            }
-
-                            const paypalOrderId = orderResponse.data.paypal_order_id;
-
-                            if (!paypalOrderId) {
-                                try {
-                                    await API.cancelOrder(orderResponse.data.order_number);
-                                    DebugLog.log('Cancelled PayPal order missing paypal_order_id:', orderResponse.data.order_number);
-                                } catch (cancelErr) {
-                                    DebugLog.warn('Could not cancel incomplete PayPal order:', cancelErr.message);
-                                }
-                                this.paypalAttempt++;
-                                if (attempt < MAX_RETRIES) {
-                                    await new Promise(r => setTimeout(r, 1000));
-                                    continue;
-                                }
-                                throw new Error('PayPal setup did not complete. Please refresh and try again.');
-                            }
-
-                            orderNumber = orderResponse.data.order_number;
-                            return paypalOrderId;
-                        }
-                    } catch (error) {
-                        DebugLog.error('PayPal createOrder error:', error);
-                        this.showPayPalError(error.message || 'Failed to start PayPal payment. Please try again.');
-
-                        this.updatePayButton();
-                        throw error;
-                    }
-                },
-
-                onApprove: async (data) => {
-                    try {
-                        // Capture the PayPal payment
-                        const captureResponse = await API.post(`/api/orders/${orderNumber}/capture-paypal`, {
-                            paypal_order_id: data.orderID
-                        });
-
-                        if (!captureResponse.ok) {
-                            throw new Error(captureResponse.error || 'Payment capture failed');
-                        }
-
-                        // Clear cart
-                        try { await API.clearCart(); } catch (e) { DebugLog.warn('Could not clear cart:', e); }
-                        if (typeof Cart !== 'undefined') {
-                            Cart.items = [];
-                            document.querySelectorAll('.cart-count, .cart-badge, #cart-count').forEach(el => { el.textContent = '0'; });
-                        }
-                        localStorage.removeItem('inkcartridges_cart');
-
-                        // Store order data for confirmation page
-                        sessionStorage.setItem('lastOrder', JSON.stringify({
-                            order_number: orderNumber,
-                            email: this.checkoutData.email
-                        }));
-                        sessionStorage.removeItem('checkoutData');
-
-                        // Track analytics
-                        if (typeof CartAnalytics !== 'undefined') {
-                            CartAnalytics.trackOrderCompleted({ order_number: orderNumber, total_amount: this.totals.total });
-                        }
-
-                        // Redirect to confirmation
-                        window.location.href = `/html/order-confirmation.html?order=${encodeURIComponent(orderNumber)}`;
-
-                    } catch (error) {
-                        DebugLog.error('PayPal capture error:', error);
-                        this.showPayPalError(error.message || 'Payment failed. Please try again.');
-                    }
-                },
-
-                onCancel: async () => {
-                    DebugLog.log('PayPal payment cancelled');
-                    // Cancel the pending order on the backend so it doesn't block future attempts
-                    if (orderNumber) {
-                        try {
-                            await API.cancelOrder(orderNumber);
-                            DebugLog.log('Cancelled pending PayPal order:', orderNumber);
-                        } catch (cancelErr) {
-                            DebugLog.warn('Could not cancel PayPal order:', cancelErr.message);
-                        }
-                        orderNumber = null;
-                    }
-                    this.paypalAttempt++;
-                    if (typeof showToast === 'function') {
-                        showToast('Payment cancelled', 'info');
-                    }
-                    // Re-enable Stripe pay button
-                    this.updatePayButton();
-                },
-
-                onError: async (err) => {
-                    DebugLog.error('PayPal error:', err);
-                    // Cancel the pending order on the backend
-                    if (orderNumber) {
-                        try {
-                            await API.cancelOrder(orderNumber);
-                            DebugLog.log('Cancelled pending PayPal order after error:', orderNumber);
-                        } catch (cancelErr) {
-                            DebugLog.warn('Could not cancel PayPal order:', cancelErr.message);
-                        }
-                        orderNumber = null;
-                    }
-                    this.paypalAttempt++;
-                    if (typeof showToast === 'function') {
-                        showToast('Something went wrong with PayPal. Please try again.', 'error');
-                    }
-                    // Re-enable Stripe pay button
-                    this.updatePayButton();
-                }
-            }).render('#paypal-button-container').then(() => {
-                DebugLog.log('PayPal button rendered successfully');
-            }).catch(err => {
-                DebugLog.error('PayPal button render failed:', err);
-                const container = document.getElementById('paypal-button-container');
-                const divider = document.querySelector('.payment-divider');
-                if (container) container.style.display = 'none';
-                if (divider) divider.style.display = 'none';
-            });
-        },
-
         // Note: Apple Pay / Google Pay are handled natively by PaymentElement
+        // PayPal uses a separate custom integration (PayPal JS SDK), see initPayPalButton()
 
         /**
          * Setup event handlers
@@ -791,7 +535,13 @@
                         // Payment wasn't completed — retry with the existing PaymentIntent
                         btnText.innerHTML = this.getLoadingHTML('Retrying payment...');
 
-                        const { error: stripeError, paymentIntent } = await this.stripe.confirmPayment({
+                        // Store order data before confirmPayment (redirect may happen)
+                        sessionStorage.setItem('lastOrder', JSON.stringify({
+                            order_number: dupOrderNumber,
+                            email: this.checkoutData.email
+                        }));
+
+                        const { error: stripeError } = await this.stripe.confirmPayment({
                             elements: this.elements,
                             clientSecret: dupData.client_secret,
                             confirmParams: {
@@ -811,12 +561,14 @@
                                         }
                                     }
                                 }
-                            },
-                            redirect: 'if_required'
+                            }
                         });
 
+                        // If confirmPayment succeeds without redirect (card), it returns here.
+                        // If it redirects (PayPal), this code won't execute — confirmation page handles it.
                         if (stripeError) {
                             DebugLog.error('Stripe retry error:', stripeError);
+                            sessionStorage.removeItem('lastOrder');
                             try {
                                 await API.cancelOrder(dupOrderNumber);
                             } catch (cancelErr) {
@@ -826,17 +578,7 @@
                             throw new Error(stripeError.message);
                         }
 
-                        if (paymentIntent.status !== 'succeeded') {
-                            try {
-                                await API.cancelOrder(dupOrderNumber);
-                            } catch (cancelErr) {
-                                DebugLog.warn('Could not cancel pending order:', cancelErr.message);
-                            }
-    
-                            throw new Error('Payment was not completed. Please try again.');
-                        }
-
-                        // Payment succeeded — clear cart and redirect
+                        // If we reach here, payment succeeded without redirect — clear cart and redirect
                         try { await API.clearCart(); } catch (e) { DebugLog.warn('Could not clear cart:', e); }
                         if (typeof Cart !== 'undefined') {
                             Cart.items = [];
@@ -965,10 +707,17 @@
 
                 const { client_secret, order_id, order_number, total_amount } = orderResponse.data;
 
-                // STEP 3: Confirm payment with Stripe PaymentElement
+                // STEP 3: Store order data before confirmPayment
+                // confirmPayment may redirect (PayPal, 3DS) before post-payment code runs
+                sessionStorage.setItem('lastOrder', JSON.stringify({
+                    order_number: order_number,
+                    email: this.checkoutData.email
+                }));
+
+                // STEP 4: Confirm payment with Stripe PaymentElement
                 btnText.innerHTML = this.getLoadingHTML('Processing payment...');
 
-                const { error: stripeError, paymentIntent } = await this.stripe.confirmPayment({
+                const { error: stripeError } = await this.stripe.confirmPayment({
                     elements: this.elements,
                     clientSecret: client_secret,
                     confirmParams: {
@@ -988,12 +737,14 @@
                                 }
                             }
                         }
-                    },
-                    redirect: 'if_required'
+                    }
                 });
 
+                // If we reach here, confirmPayment returned without redirecting (e.g. error)
+                // Successful payments redirect to return_url — confirmation page handles the rest
                 if (stripeError) {
                     DebugLog.error('Stripe error:', stripeError);
+                    sessionStorage.removeItem('lastOrder');
                     // Cancel the pending order to restore stock
                     try {
                         await API.cancelOrder(order_number);
@@ -1003,52 +754,6 @@
                     }
                     throw new Error(stripeError.message);
                 }
-
-                if (paymentIntent.status !== 'succeeded') {
-                    // Cancel the pending order to restore stock
-                    try {
-                        await API.cancelOrder(order_number);
-                        DebugLog.log('Pending order cancelled:', order_number);
-                    } catch (cancelErr) {
-                        DebugLog.warn('Could not cancel pending order:', cancelErr.message);
-                    }
-                    throw new Error('Payment was not completed. Please try again.');
-                }
-
-                // STEP 4: Clear cart and redirect
-                // Backend webhook will update order status when payment succeeds
-                btnText.innerHTML = this.getLoadingHTML('Completing order...');
-
-                // Clear cart via API
-                try {
-                    await API.clearCart();
-                } catch (e) {
-                    DebugLog.warn('Could not clear cart via API:', e);
-                }
-
-                // Also clear local storage and update cart badge
-                if (typeof Cart !== 'undefined') {
-                    Cart.items = [];
-                    document.querySelectorAll('.cart-count, .cart-badge, #cart-count').forEach(el => {
-                        el.textContent = '0';
-                    });
-                }
-                localStorage.removeItem('inkcartridges_cart');
-
-                // Store minimal order data for confirmation page
-                sessionStorage.setItem('lastOrder', JSON.stringify({
-                    order_number: order_number,
-                    email: this.checkoutData.email
-                }));
-                sessionStorage.removeItem('checkoutData');
-
-                // Track order completed for analytics
-                if (typeof CartAnalytics !== 'undefined') {
-                    CartAnalytics.trackOrderCompleted({ order_number, total_amount });
-                }
-
-                // Redirect to confirmation
-                window.location.href = `/html/order-confirmation.html?order=${encodeURIComponent(order_number)}`;
 
             } catch (error) {
                 DebugLog.error('Payment error:', error);
@@ -1089,19 +794,7 @@
             }
         },
 
-        /**
-         * Show error message near PayPal button
-         */
-        showPayPalError(message) {
-            const errorEl = document.getElementById('paypal-errors');
-            if (errorEl) {
-                const esc = typeof Security !== 'undefined' ? Security.escapeHtml : (s) => s;
-                errorEl.innerHTML = `
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
-                    ${esc(message)}
-                `;
-            }
-        },
+
 
         /**
          * Show authorization box when card is complete
@@ -1130,6 +823,141 @@
                 authorizeCheckbox.checked = false;
             }
             this.paymentAuthorized = false;
+        },
+
+        /**
+         * Initialize PayPal button using PayPal JS SDK (popup approach)
+         * Separate from Stripe — backend has its own PayPal integration
+         */
+        initPayPalButton() {
+            const container = document.getElementById('paypal-button-container');
+            if (!container) {
+                DebugLog.warn('PayPal button container not found');
+                return;
+            }
+
+            // Wait for PayPal SDK to load
+            if (typeof paypal === 'undefined') {
+                DebugLog.warn('PayPal SDK not loaded');
+                container.innerHTML = '<p style="color: var(--gray-500); font-size: 0.8125rem; text-align: center;">PayPal unavailable. Please use card payment.</p>';
+                return;
+            }
+
+            const self = this;
+
+            paypal.Buttons({
+                style: {
+                    layout: 'vertical',
+                    color: 'gold',
+                    shape: 'rect',
+                    label: 'paypal',
+                    height: 48
+                },
+
+                createOrder: async () => {
+                    // Build order payload with payment_method: 'paypal'
+                    const items = self.cartItems.map(item => ({
+                        product_id: item.id,
+                        quantity: item.quantity
+                    }));
+
+                    const orderPayload = {
+                        items: items,
+                        shipping_address: {
+                            first_name: self.checkoutData.firstName,
+                            last_name: self.checkoutData.lastName,
+                            phone: self.checkoutData.phone || '',
+                            address_line_1: self.checkoutData.address1,
+                            address_line_2: self.checkoutData.address2 || '',
+                            city: self.checkoutData.city,
+                            region: self.checkoutData.region,
+                            postal_code: self.checkoutData.postcode,
+                            country: 'NZ'
+                        },
+                        shipping_tier: self.checkoutData.shippingTier || '',
+                        shipping_zone: self.checkoutData.shippingZone || '',
+                        delivery_type: self.checkoutData.deliveryType || 'urban',
+                        estimated_shipping: self.checkoutData.estimatedShipping ?? null,
+                        save_address: self.checkoutData.saveAddress !== false,
+                        customer_notes: self.checkoutData.orderNotes || '',
+                        payment_method: 'paypal',
+                        idempotency_key: await self.getIdempotencyKey('paypal')
+                    };
+
+                    const response = await API.createOrder(orderPayload);
+
+                    if (!response.ok) {
+                        const errorCode = response.code || '';
+                        if (errorCode === 'ORDER_TOTAL_TOO_LOW') {
+                            throw new Error('Your order total is below the minimum. Please add more items.');
+                        }
+                        throw new Error(response.error || 'Failed to create PayPal order');
+                    }
+
+                    const data = response.data;
+
+                    // Handle duplicate order replay
+                    if (data.is_duplicate && data.paypal_order_id) {
+                        // Reuse the existing PayPal order
+                        self._pendingPayPalOrderNumber = data.order_number;
+                        return data.paypal_order_id;
+                    }
+
+                    if (data.payment_method !== 'paypal' || !data.paypal_order_id) {
+                        throw new Error('Server did not return a PayPal order. Please try again.');
+                    }
+
+                    // Store order number for capture step
+                    self._pendingPayPalOrderNumber = data.order_number;
+                    return data.paypal_order_id;
+                },
+
+                onApprove: async (data) => {
+                    // User approved payment in PayPal popup — capture it
+                    try {
+                        const orderNumber = self._pendingPayPalOrderNumber;
+                        if (!orderNumber) {
+                            throw new Error('Order number not found. Please try again.');
+                        }
+
+                        const captureResponse = await API.capturePaypal(orderNumber, data.orderID);
+
+                        if (captureResponse.ok && captureResponse.data?.status === 'paid') {
+                            // Payment successful — clear cart and redirect
+                            try { await API.clearCart(); } catch (e) { DebugLog.warn('Could not clear cart:', e); }
+                            if (typeof Cart !== 'undefined') {
+                                Cart.items = [];
+                                document.querySelectorAll('.cart-count, .cart-badge, #cart-count').forEach(el => { el.textContent = '0'; });
+                            }
+                            localStorage.removeItem('inkcartridges_cart');
+
+                            sessionStorage.setItem('lastOrder', JSON.stringify({
+                                order_number: orderNumber,
+                                email: self.checkoutData.email
+                            }));
+                            sessionStorage.removeItem('checkoutData');
+                            window.location.href = `/html/order-confirmation.html?order=${encodeURIComponent(orderNumber)}`;
+                        } else {
+                            self.showError(captureResponse.error?.message || 'Payment capture failed. Please contact support.');
+                        }
+                    } catch (error) {
+                        DebugLog.error('PayPal capture error:', error);
+                        self.showError(error.message || 'Something went wrong capturing your PayPal payment.');
+                    }
+                },
+
+                onCancel: () => {
+                    DebugLog.log('PayPal payment cancelled by user');
+                    self.showError('PayPal payment was cancelled. You can try again or use a different payment method.');
+                },
+
+                onError: (err) => {
+                    DebugLog.error('PayPal SDK error:', err);
+                    self.showError('Something went wrong with PayPal. Please try again or use a different payment method.');
+                }
+            }).render('#paypal-button-container');
+
+            DebugLog.log('PayPal button initialized successfully');
         }
     };
 

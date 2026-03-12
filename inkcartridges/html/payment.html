@@ -23,7 +23,8 @@
     <link rel="stylesheet" href="/css/search.css">
 
     <script src="https://js.stripe.com/v3/"></script>
-    <script src="https://www.paypal.com/sdk/js?client-id=ASCSnoeTrj2EkqTuWH_JBnuCzYzGVcGk05BpeeTu46up60pJIBsbVN0Z6Prvj9Bjq6YXsGYNOOfKwHAG&currency=NZD&disable-funding=card,credit"></script>
+    <script src="https://www.paypal.com/sdk/js?client-id=ASCSnoeTrj2EkqTuWH_JBnuCzYzGVcGk05BpeeTu46up60pJIBsbVN0Z6Prvj9Bjq6YXsGYNOOfKwHAG&currency=NZD"></script>
+
 
     <style>
         :root {
@@ -462,42 +463,37 @@
             width: auto;
         }
 
-        /* OR divider between Stripe and PayPal */
-        .payment-divider {
+        /* PayPal section */
+        .paypal-divider {
             display: flex;
             align-items: center;
             gap: 1rem;
             margin: 1.5rem 0;
-            color: #94a3b8;
-            font-size: 0.85rem;
-            text-transform: uppercase;
-            letter-spacing: 0.05em;
         }
-        .payment-divider::before,
-        .payment-divider::after {
+        .paypal-divider::before,
+        .paypal-divider::after {
             content: '';
             flex: 1;
             height: 1px;
-            background: #e2e8f0;
+            background: var(--gray-200);
         }
-
-        /* PayPal button container */
-        #paypal-button-container {
+        .paypal-divider__text {
+            font-size: 0.8125rem;
+            font-weight: 600;
+            color: var(--gray-400);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        .paypal-section {
             margin-bottom: 0.5rem;
         }
-
-        #paypal-errors {
-            color: var(--error);
+        .paypal-section__label {
             font-size: 0.8125rem;
-            margin-top: 0.5rem;
-            display: flex;
-            align-items: center;
-            gap: 0.375rem;
+            color: var(--gray-500);
+            text-align: center;
+            margin-top: 0.75rem;
         }
 
-        #paypal-errors:empty {
-            display: none;
-        }
     </style>
 </head>
 <body>
@@ -594,14 +590,16 @@
                                         <div id="card-errors" role="alert"></div>
                                     </div>
 
-                                    <!-- OR divider -->
-                                    <div class="payment-divider">
-                                        <span>OR</span>
+                                    <div class="paypal-divider">
+                                        <span class="paypal-divider__text">or</span>
                                     </div>
 
-                                    <!-- PayPal button -->
-                                    <div id="paypal-button-container"></div>
-                                    <div id="paypal-errors" class="payment-errors" role="alert"></div>
+                                    <div class="paypal-section">
+                                        <div id="paypal-button-container"></div>
+                                        <p class="paypal-section__label">Pay securely with your PayPal account</p>
+                                    </div>
+
+
 
                                     <div id="payment-authorization" class="payment-authorization">
                                         <label class="authorize-box" for="authorize-payment">

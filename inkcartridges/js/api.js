@@ -615,6 +615,17 @@ const API = {
         return this.post(`/api/orders/${orderNumber}/cancel`);
     },
 
+    /**
+     * Capture a PayPal payment after user approval
+     * @param {string} orderNumber - Order number (e.g., "ORD-ABC123-XYZ")
+     * @param {string} paypalOrderId - PayPal order ID from createOrder response
+     */
+    async capturePaypal(orderNumber, paypalOrderId) {
+        return this.post(`/api/orders/${orderNumber}/capture-paypal`, {
+            paypal_order_id: paypalOrderId
+        });
+    },
+
     // =========================================================================
     // USER (requires authentication)
     // =========================================================================
