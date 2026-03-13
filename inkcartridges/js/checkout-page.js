@@ -548,6 +548,7 @@
             // Delivery type (urban/rural) change recalculates shipping
             document.querySelectorAll('input[name="delivery_type"]').forEach(input => {
                 input.addEventListener('change', () => {
+                    document.getElementById('delivery-type-section')?.classList.remove('needs-attention');
                     this.updateShippingCost();
                 });
             });
@@ -1047,6 +1048,7 @@
             form.querySelectorAll('.form-error').forEach(el => el.remove());
             form.querySelectorAll('.delivery-type-options.is-error').forEach(el => el.classList.remove('is-error'));
             form.querySelectorAll('.delivery-type-prompt').forEach(el => el.remove());
+            document.getElementById('delivery-type-section')?.classList.remove('needs-attention');
         },
 
         // Validate all required fields, show red error styling, scroll to first error
@@ -1076,6 +1078,10 @@
                                 errorMsg.textContent = 'Please select an option';
                                 container.parentElement.appendChild(errorMsg);
                             }
+                        }
+                        // Also add attention state to the delivery section
+                        if (field.name === 'delivery_type') {
+                            document.getElementById('delivery-type-section')?.classList.add('needs-attention');
                         }
                         if (!firstInvalid) firstInvalid = container || field;
                     }
@@ -1117,19 +1123,16 @@
             const continueBtn = document.getElementById('continue-to-payment-btn');
             const originalBtnText = continueBtn.innerHTML;
 
-            // If Shipping section is still collapsed, expand it and prompt delivery type selection
+            // If delivery type hasn't been selected yet, expand shipping section and prompt
             const shippingAccordionData = this._accordionSections?.[1];
-            if (shippingAccordionData && shippingAccordionData.collapsed) {
-                this._expandAccordionSection(shippingAccordionData);
-                const deliverySection = document.getElementById('delivery-type-section');
+            const deliverySection = document.getElementById('delivery-type-section');
+            const deliveryAlreadySelected = deliverySection?.querySelector('input[name="delivery_type"]:checked');
+            if (!deliveryAlreadySelected) {
+                if (shippingAccordionData && shippingAccordionData.collapsed) {
+                    this._expandAccordionSection(shippingAccordionData);
+                }
                 if (deliverySection) {
-                    const alreadySelected = deliverySection.querySelector('input[name="delivery_type"]:checked');
-                    if (!alreadySelected && !deliverySection.querySelector('.delivery-type-prompt')) {
-                        const prompt = document.createElement('p');
-                        prompt.className = 'delivery-type-prompt';
-                        prompt.textContent = 'Please select your delivery area to continue';
-                        deliverySection.insertBefore(prompt, deliverySection.querySelector('.delivery-type-options'));
-                    }
+                    deliverySection.classList.add('needs-attention');
                     setTimeout(() => {
                         deliverySection.scrollIntoView({ behavior: 'smooth', block: 'center' });
                     }, 300);
