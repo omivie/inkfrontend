@@ -2379,6 +2379,41 @@
                 const searchItem = this.createBreadcrumbItem(`Search: "${this.state.search}"`, true);
                 list.appendChild(searchItem);
             }
+
+            this.updateSchemaLD();
+        },
+
+        updateSchemaLD() {
+            const el = document.getElementById('shop-schema');
+            if (!el) return;
+            const base = 'https://inkcartridges.co.nz';
+            const shopUrl = base + '/html/shop';
+            const items = [
+                { "@type": "ListItem", "position": 1, "name": "Home", "item": base + '/' },
+                { "@type": "ListItem", "position": 2, "name": "Shop", "item": shopUrl }
+            ];
+            let pageUrl = shopUrl;
+            let pageName = 'Shop Ink Cartridges & Toner NZ';
+            if (this.state.brand) {
+                const brandName = this.brandInfo?.[this.state.brand]?.name || this.state.brand;
+                pageUrl = shopUrl + '?brand=' + encodeURIComponent(this.state.brand);
+                pageName = brandName + ' Ink Cartridges';
+                items.push({ "@type": "ListItem", "position": 3, "name": brandName, "item": pageUrl });
+            }
+            if (this.state.category) {
+                const cat = this.categories?.find(c => c.id === this.state.category);
+                const catName = cat?.name || this.state.category;
+                pageUrl += (pageUrl.includes('?') ? '&' : '?') + 'category=' + encodeURIComponent(this.state.category);
+                pageName = pageName + ' \u2014 ' + catName;
+                items.push({ "@type": "ListItem", "position": items.length + 1, "name": catName, "item": pageUrl });
+            }
+            el.textContent = JSON.stringify({
+                "@context": "https://schema.org",
+                "@type": "CollectionPage",
+                "name": pageName,
+                "url": pageUrl,
+                "breadcrumb": { "@type": "BreadcrumbList", "itemListElement": items }
+            });
         },
 
         createBreadcrumbItem(text, isCurrent, onClick = null) {
@@ -2516,7 +2551,9 @@
                     this.elements.title.textContent = titleText;
                     this.elements.title.hidden = false;
                 } else {
-                    this.elements.title.hidden = true;
+                    // Brands level — show default H1 for SEO
+                    this.elements.title.textContent = 'Shop Ink Cartridges & Toner NZ';
+                    this.elements.title.hidden = false;
                 }
             }
         }

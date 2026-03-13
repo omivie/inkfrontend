@@ -33,6 +33,7 @@ const Products = {
                 return `<img src="${Security.escapeAttr(imageUrl)}"
                              alt="${Security.escapeAttr(product.name)}"
                              class="product-card__image"
+                             width="200" height="200"
                              loading="lazy"
                              data-fallback="color-block">
                         <div class="product-card__color-block" style="${colorStyle}; display: none;"></div>`;
@@ -40,6 +41,7 @@ const Products = {
                 return `<img src="${Security.escapeAttr(imageUrl)}"
                              alt="${Security.escapeAttr(product.name)}"
                              class="product-card__image"
+                             width="200" height="200"
                              loading="lazy"
                              data-fallback="placeholder">`;
             }
@@ -54,6 +56,7 @@ const Products = {
             return `<img src="/assets/images/placeholder-product.svg"
                          alt="${Security.escapeAttr(product.name)}"
                          class="product-card__image"
+                         width="200" height="200"
                          loading="lazy">`;
         }
     },

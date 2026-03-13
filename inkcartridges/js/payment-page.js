@@ -490,6 +490,7 @@
                     quantity: item.quantity
                 }));
 
+                const isGuest = typeof Auth === 'undefined' || !Auth.isAuthenticated();
                 const orderResponse = await API.createOrder({
                     items: items,
                     shipping_address: {
@@ -510,7 +511,9 @@
                     save_address: this.checkoutData.saveAddress !== false,
                     customer_notes: this.checkoutData.orderNotes || '',
                     payment_method: 'stripe',
-                    idempotency_key: await this.getIdempotencyKey('stripe')
+                    idempotency_key: await this.getIdempotencyKey('stripe'),
+                    ...(isGuest && { guest_email: this.checkoutData.email }),
+                    ...(isGuest && this.checkoutData.phone && { guest_phone: this.checkoutData.phone })
                 });
 
                 // Handle duplicate/idempotent replay
@@ -862,6 +865,7 @@
                         quantity: item.quantity
                     }));
 
+                    const isGuest = typeof Auth === 'undefined' || !Auth.isAuthenticated();
                     const orderPayload = {
                         items: items,
                         shipping_address: {
@@ -882,7 +886,9 @@
                         save_address: self.checkoutData.saveAddress !== false,
                         customer_notes: self.checkoutData.orderNotes || '',
                         payment_method: 'paypal',
-                        idempotency_key: await self.getIdempotencyKey('paypal')
+                        idempotency_key: await self.getIdempotencyKey('paypal'),
+                        ...(isGuest && { guest_email: self.checkoutData.email }),
+                        ...(isGuest && self.checkoutData.phone && { guest_phone: self.checkoutData.phone })
                     };
 
                     console.log('[PayPal] Sending order payload:', JSON.stringify(orderPayload, null, 2));

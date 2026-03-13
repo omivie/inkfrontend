@@ -5,6 +5,7 @@
         appliedCoupon: null,
         isSubmitting: false,
         isEmailVerified: false,
+        guestCheckoutEnabled: true,
 
         // Get image HTML for an item (uses ProductColors from utils.js)
         getItemImageHTML(item) {
@@ -34,10 +35,12 @@
             document.querySelectorAll('input[name="delivery_type"]').forEach(r => r.checked = false);
 
             await this.loadCart();
+            await this.checkGuestCheckoutFlag();
             this.renderCart();
             this.setupFormHandlers();
             this.setupShippingHandlers();
             this.setupBillingAddressToggle();
+            this.initAddressAutocomplete();
             this.setupProgressValidation();
 
             // Wait for Auth to initialize, then check auth status
@@ -55,6 +58,22 @@
             // Track checkout started for analytics
             if (typeof CartAnalytics !== 'undefined') {
                 CartAnalytics.trackCheckoutStarted();
+            }
+        },
+
+        // Check guest checkout feature flag; redirect guests if disabled
+        async checkGuestCheckoutFlag() {
+            try {
+                const response = await API.getSettings();
+                if (response.ok && response.data?.FEATURES) {
+                    this.guestCheckoutEnabled = response.data.FEATURES.guest_checkout_enabled !== false;
+                }
+            } catch (e) {
+                // Fail open — allow guests if endpoint unavailable
+            }
+
+            if (!this.guestCheckoutEnabled && typeof Auth !== 'undefined' && !Auth.isAuthenticated()) {
+                window.location.href = '/html/account/login.html?redirect=/html/checkout.html';
             }
         },
 
@@ -949,6 +968,18 @@
 
             if (!couponInput || !couponBtn) return;
 
+            // Guests cannot use coupons
+            if (typeof Auth !== 'undefined' && !Auth.isAuthenticated()) {
+                couponInput.disabled = true;
+                couponBtn.disabled = true;
+                const hint = couponInput.closest('.coupon-form') || couponInput.parentElement;
+                const msg = document.createElement('p');
+                msg.className = 'form-hint';
+                msg.textContent = 'Sign in to use coupon codes.';
+                hint.appendChild(msg);
+                return;
+            }
+
             couponBtn.addEventListener('click', async () => {
                 const code = couponInput.value.trim();
                 if (!code) {
@@ -1457,6 +1488,195 @@
             if (address) {
                 this.fillAddressFields(address);
             }
+        },
+
+        // Initialize address autocomplete for shipping and billing address fields
+        initAddressAutocomplete() {
+            this._setupAutocompleteFor('address1', {
+                address1Id: 'address1',
+                address2Id: 'address2',
+                cityId: 'city',
+                regionId: 'region',
+                postcodeId: 'postcode'
+            });
+            this._setupAutocompleteFor('billing-address1', {
+                address1Id: 'billing-address1',
+                address2Id: 'billing-address2',
+                cityId: 'billing-city',
+                regionId: 'billing-region',
+                postcodeId: 'billing-postcode'
+            });
+        },
+
+        // Wire up autocomplete dropdown for a single address input
+        _setupAutocompleteFor(inputId, fieldMap) {
+            const input = document.getElementById(inputId);
+            if (!input) return;
+
+            // Create dropdown
+            const dropdown = document.createElement('ul');
+            dropdown.className = 'address-autocomplete__dropdown';
+            dropdown.setAttribute('role', 'listbox');
+            dropdown.setAttribute('aria-label', 'Address suggestions');
+            dropdown.hidden = true;
+
+            // Wrap input in positioned container
+            const wrapper = document.createElement('div');
+            wrapper.className = 'address-autocomplete__wrapper';
+            input.parentNode.insertBefore(wrapper, input);
+            wrapper.appendChild(input);
+            wrapper.appendChild(dropdown);
+
+            let debounceTimer = null;
+            let currentSuggestions = [];
+
+            const hideSuggestions = () => {
+                dropdown.hidden = true;
+                dropdown.innerHTML = '';
+                currentSuggestions = [];
+            };
+
+            const fillFromDetails = async (placeId) => {
+                try {
+                    const res = await fetch(`${Config.API_URL}/api/address/details?place_id=${encodeURIComponent(placeId)}`);
+                    const json = await res.json();
+                    if (!json.ok) return;
+                    const d = json.data;
+
+                    const setField = (id, value) => {
+                        const el = document.getElementById(id);
+                        if (!el) return;
+                        el.value = value || '';
+                        el.dispatchEvent(new Event('input', { bubbles: true }));
+                        el.dispatchEvent(new Event('change', { bubbles: true }));
+                    };
+
+                    setField(fieldMap.address1Id, d.address_line1);
+                    setField(fieldMap.address2Id, d.address_line2);
+                    setField(fieldMap.cityId, d.city);
+                    setField(fieldMap.postcodeId, d.postal_code);
+
+                    if (fieldMap.regionId && d.region) {
+                        const regionEl = document.getElementById(fieldMap.regionId);
+                        if (regionEl) {
+                            regionEl.value = this._normalizeRegion(d.region);
+                            regionEl.dispatchEvent(new Event('change', { bubbles: true }));
+                        }
+                    }
+
+                    this.updateShippingCost?.();
+                } catch (e) {
+                    // Silently fail — user can still type manually
+                }
+            };
+
+            input.addEventListener('input', () => {
+                clearTimeout(debounceTimer);
+                const q = input.value.trim();
+                if (q.length < 2) {
+                    hideSuggestions();
+                    return;
+                }
+                debounceTimer = setTimeout(async () => {
+                    try {
+                        const res = await fetch(`${Config.API_URL}/api/address/autocomplete?q=${encodeURIComponent(q)}`);
+                        const json = await res.json();
+                        if (!json.ok || !json.data?.length) {
+                            hideSuggestions();
+                            return;
+                        }
+                        currentSuggestions = json.data;
+                        dropdown.innerHTML = '';
+                        json.data.forEach((suggestion) => {
+                            const li = document.createElement('li');
+                            li.className = 'address-autocomplete__option';
+                            li.setAttribute('role', 'option');
+                            li.setAttribute('tabindex', '-1');
+                            li.textContent = suggestion.description;
+                            li.addEventListener('mousedown', (e) => {
+                                e.preventDefault(); // prevent input blur before click registers
+                                input.value = suggestion.description;
+                                hideSuggestions();
+                                fillFromDetails(suggestion.place_id);
+                            });
+                            dropdown.appendChild(li);
+                        });
+                        dropdown.hidden = false;
+                    } catch (e) {
+                        hideSuggestions();
+                    }
+                }, 300);
+            });
+
+            // Keyboard navigation
+            input.addEventListener('keydown', (e) => {
+                if (dropdown.hidden) return;
+                const items = dropdown.querySelectorAll('.address-autocomplete__option');
+                const focused = dropdown.querySelector('.address-autocomplete__option--focused');
+                let idx = focused ? Array.from(items).indexOf(focused) : -1;
+
+                if (e.key === 'ArrowDown') {
+                    e.preventDefault();
+                    focused?.classList.remove('address-autocomplete__option--focused');
+                    idx = (idx + 1) % items.length;
+                    items[idx]?.classList.add('address-autocomplete__option--focused');
+                    items[idx]?.scrollIntoView({ block: 'nearest' });
+                } else if (e.key === 'ArrowUp') {
+                    e.preventDefault();
+                    focused?.classList.remove('address-autocomplete__option--focused');
+                    idx = (idx - 1 + items.length) % items.length;
+                    items[idx]?.classList.add('address-autocomplete__option--focused');
+                    items[idx]?.scrollIntoView({ block: 'nearest' });
+                } else if (e.key === 'Enter' && focused) {
+                    e.preventDefault();
+                    const suggestion = currentSuggestions[Array.from(items).indexOf(focused)];
+                    if (suggestion) {
+                        input.value = suggestion.description;
+                        hideSuggestions();
+                        fillFromDetails(suggestion.place_id);
+                    }
+                } else if (e.key === 'Escape') {
+                    hideSuggestions();
+                }
+            });
+
+            // Hide on outside click
+            document.addEventListener('click', (e) => {
+                if (!wrapper.contains(e.target)) hideSuggestions();
+            });
+
+            // Hide on blur (delay allows mousedown on option to fire first)
+            input.addEventListener('blur', () => {
+                setTimeout(hideSuggestions, 150);
+            });
+        },
+
+        // Map a Google Places region name to NZ region select option value
+        _normalizeRegion(region) {
+            if (!region) return '';
+            const map = {
+                'northland': 'northland',
+                'auckland': 'auckland',
+                'waikato': 'waikato',
+                'bay of plenty': 'bay-of-plenty',
+                'gisborne': 'gisborne',
+                "hawke's bay": 'hawkes-bay',
+                'hawkes bay': 'hawkes-bay',
+                'taranaki': 'taranaki',
+                'manawatu-whanganui': 'manawatu-wanganui',
+                'manawatu whanganui': 'manawatu-wanganui',
+                'manawatu-wanganui': 'manawatu-wanganui',
+                'wellington': 'wellington',
+                'tasman': 'tasman',
+                'nelson': 'nelson',
+                'marlborough': 'marlborough',
+                'west coast': 'west-coast',
+                'canterbury': 'canterbury',
+                'otago': 'otago',
+                'southland': 'southland'
+            };
+            const r = region.toLowerCase().trim();
+            return map[r] || r.replace(/\s+/g, '-');
         }
     };
 

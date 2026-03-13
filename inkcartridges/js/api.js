@@ -820,6 +820,10 @@ const API = {
         return this.post('/api/auth/resend-verification');
     },
 
+    async getSettings() {
+        return this.request('/api/settings', { method: 'GET' });
+    },
+
     // =========================================================================
     // CART ANALYTICS
     // =========================================================================

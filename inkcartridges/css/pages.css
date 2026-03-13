@@ -161,7 +161,7 @@
     font-size: var(--font-size-lg);
     color: rgba(255, 255, 255, 0.9);
     margin-bottom: var(--spacing-lg);
-    max-width: 600px;
+    max-width: 720px;
     margin-left: auto;
     margin-right: auto;
     line-height: 1.6;
@@ -7614,7 +7614,7 @@
 
 @media (max-width: 768px) {
     .hero__title {
-        font-size: var(--font-size-2xl);
+        font-size: var(--font-size-xl);
     }
 
     .newsletter__form {
@@ -8698,6 +8698,15 @@
     .drilldown-skeleton--products .ribbon-products-grid {
         grid-template-columns: repeat(2, 1fr);
     }
+}
+
+/* Ribbons pagination centering */
+.pagination__center {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--spacing-3);
+    padding: var(--spacing-6) 0;
 }
 
 /* Breadcrumb Navigation */
@@ -9810,4 +9819,47 @@
     .reviews-summary__distribution {
         max-width: 100%;
     }
+}
+
+/* =============================================
+   ADDRESS AUTOCOMPLETE DROPDOWN
+   ============================================= */
+
+.address-autocomplete__wrapper {
+    position: relative;
+}
+
+.address-autocomplete__dropdown {
+    position: absolute;
+    top: calc(100% + 2px);
+    left: 0;
+    right: 0;
+    z-index: 200;
+    list-style: none;
+    margin: 0;
+    padding: 0.25rem 0;
+    background: #fff;
+    border: 1px solid #d1d5db;
+    border-radius: 0.5rem;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+    max-height: 220px;
+    overflow-y: auto;
+}
+
+.address-autocomplete__option {
+    padding: 0.6rem 0.875rem;
+    font-size: 0.9rem;
+    cursor: pointer;
+    color: #1a1a1a;
+    line-height: 1.4;
+    border: none;
+    background: none;
+    width: 100%;
+    text-align: left;
+}
+
+.address-autocomplete__option:hover,
+.address-autocomplete__option--focused {
+    background: #f0f7fc;
+    color: #267FB5;
 }

@@ -334,36 +334,31 @@ const RibbonsPage = {
             return;
         }
 
-        let paginationHtml = '';
-        if (typeof Products !== 'undefined' && Products.renderPagination) {
-            paginationHtml = Products.renderPagination(pagination);
-        } else {
-            const total = pagination.total_pages;
-            let items = '';
+        const total = pagination.total_pages;
+        let items = '';
 
-            items += `<li><button class="pagination__link ${!pagination.has_prev ? 'pagination__link--disabled' : ''}" data-page="${current - 1}" ${!pagination.has_prev ? 'disabled' : ''}>
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"></polyline></svg>
-                Prev
-            </button></li>`;
+        items += `<li><button class="pagination__link ${!pagination.has_prev ? 'pagination__link--disabled' : ''}" data-page="${current - 1}" ${!pagination.has_prev ? 'disabled' : ''}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"></polyline></svg>
+            Prev
+        </button></li>`;
 
-            for (let p = 1; p <= total; p++) {
-                if (total > 7 && p > 2 && p < total - 1 && Math.abs(p - current) > 1) {
-                    if (p === 3 && current > 4) items += `<li class="pagination__item--ellipsis">...</li>`;
-                    else if (p === total - 2 && current < total - 3) items += `<li class="pagination__item--ellipsis">...</li>`;
-                    continue;
-                }
-                items += `<li><button class="pagination__link ${p === current ? 'pagination__link--active' : ''}" data-page="${p}">${p}</button></li>`;
+        for (let p = 1; p <= total; p++) {
+            if (total > 7 && p > 2 && p < total - 1 && Math.abs(p - current) > 1) {
+                if (p === 3 && current > 4) items += `<li class="pagination__item--ellipsis">...</li>`;
+                else if (p === total - 2 && current < total - 3) items += `<li class="pagination__item--ellipsis">...</li>`;
+                continue;
             }
-
-            items += `<li><button class="pagination__link ${!pagination.has_next ? 'pagination__link--disabled' : ''}" data-page="${current + 1}" ${!pagination.has_next ? 'disabled' : ''}>
-                Next
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 6 15 12 9 18"></polyline></svg>
-            </button></li>`;
-
-            paginationHtml = `<ul class="pagination__list">${items}</ul>`;
+            items += `<li><button class="pagination__link ${p === current ? 'pagination__link--active' : ''}" data-page="${p}">${p}</button></li>`;
         }
 
-        container.innerHTML = `<div class="pagination__bar">${paginationHtml}${countHtml}</div>`;
+        items += `<li><button class="pagination__link ${!pagination.has_next ? 'pagination__link--disabled' : ''}" data-page="${current + 1}" ${!pagination.has_next ? 'disabled' : ''}>
+            Next
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 6 15 12 9 18"></polyline></svg>
+        </button></li>`;
+
+        const paginationHtml = `<ul class="pagination__list">${items}</ul>`;
+
+        container.innerHTML = `<div class="pagination__center">${countHtml}${paginationHtml}</div>`;
 
         container.querySelectorAll('.pagination__link[data-page]').forEach(btn => {
             btn.addEventListener('click', () => {
@@ -401,6 +396,33 @@ const RibbonsPage = {
             const ribbonsItem = this.createBreadcrumbItem('Ribbons', true);
             list.appendChild(ribbonsItem);
         }
+
+        this.updateSchemaLD();
+    },
+
+    updateSchemaLD() {
+        const el = document.getElementById('ribbons-schema');
+        if (!el) return;
+        const base = 'https://inkcartridges.co.nz';
+        const ribbonsUrl = base + '/html/ribbons';
+        const items = [
+            { "@type": "ListItem", "position": 1, "name": "Home", "item": base + '/' },
+            { "@type": "ListItem", "position": 2, "name": "Ribbons", "item": ribbonsUrl }
+        ];
+        let pageUrl = ribbonsUrl;
+        let pageName = 'Typewriter & Printer Ribbons NZ';
+        if (this.state.brand) {
+            pageUrl = ribbonsUrl + '?brand=' + encodeURIComponent(this.state.brand);
+            pageName = this.state.brand + ' Ribbons';
+            items.push({ "@type": "ListItem", "position": 3, "name": this.state.brand, "item": pageUrl });
+        }
+        el.textContent = JSON.stringify({
+            "@context": "https://schema.org",
+            "@type": "CollectionPage",
+            "name": pageName,
+            "url": pageUrl,
+            "breadcrumb": { "@type": "BreadcrumbList", "itemListElement": items }
+        });
     },
 
     createBreadcrumbItem(text, isCurrent, onClick) {
