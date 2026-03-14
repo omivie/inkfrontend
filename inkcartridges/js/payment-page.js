@@ -570,15 +570,14 @@
                         // If confirmPayment succeeds without redirect (card), it returns here.
                         // If it redirects (PayPal), this code won't execute — confirmation page handles it.
                         if (stripeError) {
-                            DebugLog.error('Stripe retry error:', stripeError);
+                            console.error('[Payment] Stripe confirmPayment error (retry):', stripeError.code, stripeError.decline_code, stripeError.message);
                             sessionStorage.removeItem('lastOrder');
                             try {
                                 await API.cancelOrder(dupOrderNumber);
                             } catch (cancelErr) {
                                 DebugLog.warn('Could not cancel pending order:', cancelErr.message);
                             }
-    
-                            throw new Error(stripeError.message);
+                            throw new Error(this.getStripeErrorMessage(stripeError));
                         }
 
                         // If we reach here, payment succeeded without redirect — clear cart and redirect
@@ -746,7 +745,7 @@
                 // If we reach here, confirmPayment returned without redirecting (e.g. error)
                 // Successful payments redirect to return_url — confirmation page handles the rest
                 if (stripeError) {
-                    DebugLog.error('Stripe error:', stripeError);
+                    console.error('[Payment] Stripe confirmPayment error:', stripeError.code, stripeError.decline_code, stripeError.message);
                     sessionStorage.removeItem('lastOrder');
                     // Cancel the pending order to restore stock
                     try {
@@ -755,7 +754,7 @@
                     } catch (cancelErr) {
                         DebugLog.warn('Could not cancel pending order:', cancelErr.message);
                     }
-                    throw new Error(stripeError.message);
+                    throw new Error(this.getStripeErrorMessage(stripeError));
                 }
 
             } catch (error) {
@@ -784,7 +783,35 @@
         },
 
         /**
-         * Show error message
+         * Map a Stripe error to a user-friendly message.
+         * Stripe's raw messages are sometimes too technical for customers.
+         */
+        getStripeErrorMessage(stripeError) {
+            const code = stripeError?.code;
+            const declineCode = stripeError?.decline_code;
+            const friendly = {
+                card_declined:           'Your card was declined. Please try a different card or contact your bank.',
+                insufficient_funds:      'Your card has insufficient funds. Please try a different card.',
+                expired_card:            'Your card has expired. Please use a different card.',
+                incorrect_cvc:           'Incorrect security code (CVV). Please check and try again.',
+                incorrect_number:        'Your card number is incorrect. Please check and try again.',
+                invalid_number:          'Your card number is invalid. Please check and try again.',
+                invalid_expiry_month:    'Your card expiry month is invalid.',
+                invalid_expiry_year:     'Your card expiry year is invalid.',
+                processing_error:        'An error occurred processing your card. Please try again in a moment.',
+                do_not_honor:            'Your card was declined. Please contact your bank or try a different card.',
+                lost_card:               'Your card was declined. Please try a different card.',
+                stolen_card:             'Your card was declined. Please try a different card.',
+                pickup_card:             'Your card was declined. Please try a different card.',
+                fraudulent:              'Your card was declined. Please try a different card.',
+                generic_decline:         'Your card was declined. Please contact your bank or try a different card.',
+                payment_intent_authentication_failure: 'Payment authentication failed. Please try again.',
+            };
+            return friendly[declineCode] || friendly[code] || stripeError?.message || 'Payment failed. Please try again.';
+        },
+
+        /**
+         * Show error message and scroll it into view.
          */
         showError(message) {
             const errorEl = document.getElementById('card-errors');
@@ -794,6 +821,7 @@
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
                     ${esc(message)}
                 `;
+                errorEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
             }
         },
 
