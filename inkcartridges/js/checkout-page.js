@@ -1197,7 +1197,9 @@
 
                 // Combine country code and phone number
                 const phoneCountry = formData.get('phone-country') || '+64';
-                const phoneNumber = formData.get('phone') || '';
+                const rawPhone = formData.get('phone') || '';
+                // Strip any existing country code prefix to prevent doubling on form restore after retry
+                const phoneNumber = rawPhone.replace(/^\+\d{1,3}\s?/, '');
                 const fullPhone = phoneNumber ? `${phoneCountry} ${phoneNumber}` : '';
 
                 // Build checkout data object to pass to payment page
