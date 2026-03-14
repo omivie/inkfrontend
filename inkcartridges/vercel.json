@@ -46,6 +46,9 @@
     { "source": "/hp-no.564-oem-inkjet-cartridges", "destination": "/html/shop?search=HP+564", "permanent": true }
   ],
   "rewrites": [
+    { "source": "/products/:slug/:sku", "destination": "/html/product" },
+    { "source": "/brands/:slug", "destination": "/brands/index.html" },
+    { "source": "/printers/:slug", "destination": "/printers/index.html" },
     { "source": "/sitemap.xml", "destination": "https://ink-backend-zaeq.onrender.com/sitemap.xml" },
     { "source": "/robots.txt", "destination": "https://ink-backend-zaeq.onrender.com/robots.txt" }
   ]

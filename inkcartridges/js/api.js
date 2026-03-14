@@ -303,6 +303,14 @@ const API = {
     },
 
     /**
+     * Get related products for a given SKU
+     * @param {string} sku - Product SKU
+     */
+    async getRelatedProducts(sku) {
+        return this.get(`/api/products/${encodeURIComponent(sku)}/related`);
+    },
+
+    /**
      * Get auto-generated color packs for a printer
      * @param {string} printerSlug - Printer slug
      * @param {object} [params] - Optional query params (include_unavailable, source)

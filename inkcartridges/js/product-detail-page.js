@@ -35,31 +35,8 @@
                         </p>
                     </div>
 
-                    <h3 class="product-details-heading">Features & Benefits</h3>
-                    <ul class="product-features-list">
-                        ${p.pageYield ? `<li><strong>Page Yield:</strong> ${ProductPage.formatPageYield(p.pageYield).toLocaleString()} pages</li>` : ''}
-                        <li>Page yield based on 5% coverage of an A4 page</li>
-                        ${p.color ? `<li><strong>Colour:</strong> ${Security.escapeHtml(p.color)} toner</li>` : ''}
-                        <li>${p.isCompatible ? 'Compatible with' : 'Designed for'} ${Security.escapeHtml(p.brandName)} laser printers</li>
-                        <li>Easy installation - simply remove and replace</li>
-                        <li>${p.isCompatible ? 'ISO 9001 certified manufacturing' : '12 months manufacturer warranty'}</li>
-                        ${p.isCompatible ? '<li>Tested to meet or exceed OEM specifications</li>' : '<li>Genuine OEM product for optimal reliability</li>'}
-                    </ul>
-
-                    <h3 class="product-details-heading">What's Included</h3>
-                    <ul class="product-features-list">
-                        <li>1 x ${Security.escapeHtml(p.displayName)}</li>
-                        <li>Installation guide</li>
-                    </ul>
                 `,
-                features: (p) => [
-                    p.pageYield ? `Page yield: ~${ProductPage.formatPageYield(p.pageYield).toLocaleString()} pages (5% coverage)` : 'High-quality output',
-                    `${p.isCompatible ? 'Compatible' : 'Genuine OEM'} ${Security.escapeHtml(p.brandName)} toner`,
-                    'Sharp, professional text and graphics',
-                    'Easy snap-in installation',
-                    p.color ? `Colour: ${Security.escapeHtml(p.color)}` : null,
-                    p.isCompatible ? 'ISO 9001 certified quality' : '12 month warranty'
-                ].filter(Boolean),
+                features: (p) => [],
                 faqs: (p) => [
                     {
                         q: 'How do I install this toner cartridge?',
@@ -101,32 +78,8 @@
                         </p>
                     </div>
 
-                    <h3 class="product-details-heading">Features & Benefits</h3>
-                    <ul class="product-features-list">
-                        ${p.pageYield ? `<li><strong>Page Yield:</strong> ${ProductPage.formatPageYield(p.pageYield).toLocaleString()} pages</li>` : ''}
-                        <li>Page yield based on 5% coverage of an A4 page</li>
-                        ${p.color ? `<li><strong>Colour:</strong> ${Security.escapeHtml(p.color)} ink cartridge</li>` : ''}
-                        <li>${p.isCompatible ? 'Compatible with' : 'Designed for'} ${Security.escapeHtml(p.brandName)} inkjet printers</li>
-                        <li>Vibrant colours and sharp black text</li>
-                        <li>Easy snap-in installation</li>
-                        ${p.isCompatible ? '<li>Premium ink formulation tested for quality</li>' : '<li>12 months manufacturer warranty</li>'}
-                        ${!p.isCompatible ? '<li>Smudge-resistant and water-resistant prints</li>' : '<li>Excellent value alternative to genuine</li>'}
-                    </ul>
-
-                    <h3 class="product-details-heading">What's Included</h3>
-                    <ul class="product-features-list">
-                        <li>1 x ${Security.escapeHtml(p.displayName)}</li>
-                        <li>Installation guide</li>
-                    </ul>
                 `,
-                features: (p) => [
-                    p.pageYield ? `Page yield: ~${ProductPage.formatPageYield(p.pageYield).toLocaleString()} pages (5% coverage)` : 'Reliable print quality',
-                    `${p.isCompatible ? 'Compatible' : 'Genuine OEM'} ${Security.escapeHtml(p.brandName)} ink`,
-                    'Vibrant colours and sharp text',
-                    'Easy snap-in installation',
-                    p.color ? `Colour: ${Security.escapeHtml(p.color)}` : null,
-                    p.isCompatible ? 'Premium ink quality' : '12 month warranty'
-                ].filter(Boolean),
+                features: (p) => [],
                 faqs: (p) => [
                     {
                         q: 'How do I install this ink cartridge?',
@@ -167,33 +120,8 @@
                         </p>
                     </div>
 
-                    <h3 class="product-details-heading">Features & Benefits</h3>
-                    <ul class="product-features-list">
-                        ${p.pageYield ? `<li><strong>Drum Yield:</strong> ${ProductPage.formatPageYield(p.pageYield).toLocaleString()} pages</li>` : '<li>Long-lasting drum life</li>'}
-                        <li>Drum yield based on 1 page per job</li>
-                        <li>${p.isCompatible ? 'Compatible with' : 'Designed for'} ${Security.escapeHtml(p.brandName)} laser printers</li>
-                        <li>Consistent, high-quality print output</li>
-                        <li>Easy installation process</li>
-                        <li>Separate from toner cartridge - longer lifespan</li>
-                        ${p.isCompatible ? '<li>Tested to OEM specifications</li>' : '<li>12 months manufacturer warranty</li>'}
-                    </ul>
-
-                    <h3 class="product-details-heading">When to Replace</h3>
-                    <p>Replace your drum unit when you notice persistent print quality issues such as vertical lines, spots, or grey backgrounds that don't improve after replacing the toner cartridge.</p>
-
-                    <h3 class="product-details-heading">What's Included</h3>
-                    <ul class="product-features-list">
-                        <li>1 x ${Security.escapeHtml(p.displayName)}</li>
-                        <li>Installation instructions</li>
-                    </ul>
                 `,
-                features: (p) => [
-                    p.pageYield ? `Drum yield: ~${ProductPage.formatPageYield(p.pageYield).toLocaleString()} pages` : 'Long-lasting performance',
-                    `${p.isCompatible ? 'Compatible' : 'Genuine OEM'} ${Security.escapeHtml(p.brandName)} drum`,
-                    'Consistent print quality',
-                    'Easy installation',
-                    p.isCompatible ? 'Tested to OEM specs' : '12 month warranty'
-                ],
+                features: (p) => [],
                 faqs: (p) => [
                     {
                         q: 'What is a drum unit and when should I replace it?',
@@ -217,27 +145,8 @@
                         </p>
                     </div>
 
-                    <h3 class="product-details-heading">Features & Benefits</h3>
-                    <ul class="product-features-list">
-                        ${p.color ? `<li><strong>Colour:</strong> ${Security.escapeHtml(p.color)}</li>` : ''}
-                        <li>Compatible with ${Security.escapeHtml(p.brandName)} printers and typewriters</li>
-                        <li>Consistent, high-quality print output</li>
-                        <li>Easy installation - simply remove and replace</li>
-                        <li>Long-lasting ribbon life</li>
-                    </ul>
-
-                    <h3 class="product-details-heading">What's Included</h3>
-                    <ul class="product-features-list">
-                        <li>1 x ${Security.escapeHtml(p.displayName)}</li>
-                    </ul>
                 `,
-                features: (p) => [
-                    `${Security.escapeHtml(p.brandName)} printer ribbon`,
-                    'Consistent print quality',
-                    'Easy installation',
-                    p.color ? `Colour: ${Security.escapeHtml(p.color)}` : null,
-                    'Long-lasting ribbon life'
-                ].filter(Boolean),
+                features: (p) => [],
                 faqs: (p) => [
                     {
                         q: 'How do I install this ribbon?',
@@ -272,26 +181,8 @@
                         </p>
                     </div>
 
-                    <h3 class="product-details-heading">Features & Benefits</h3>
-                    <ul class="product-features-list">
-                        ${p.pageYield ? `<li><strong>Page Yield:</strong> ${ProductPage.formatPageYield(p.pageYield).toLocaleString()} pages</li>` : ''}
-                        <li>${p.isCompatible ? 'Compatible' : 'Genuine'} ${Security.escapeHtml(p.brandName)} product</li>
-                        <li>High quality printing results</li>
-                        <li>Easy installation</li>
-                        ${p.isCompatible ? '<li>Cost-effective alternative</li>' : '<li>Manufacturer warranty included</li>'}
-                    </ul>
-
-                    <h3 class="product-details-heading">What's Included</h3>
-                    <ul class="product-features-list">
-                        <li>1 x ${Security.escapeHtml(p.displayName)}</li>
-                    </ul>
                 `,
-                features: (p) => [
-                    `${p.isCompatible ? 'Compatible' : 'Genuine'} ${Security.escapeHtml(p.brandName)} product`,
-                    'Quality assured',
-                    'Easy installation',
-                    p.pageYield ? `Page yield: ~${ProductPage.formatPageYield(p.pageYield).toLocaleString()} pages` : null
-                ].filter(Boolean),
+                features: (p) => [],
                 faqs: (p) => [
                     {
                         q: 'How do I know this product is compatible with my printer?',
@@ -430,17 +321,21 @@
         renderProduct() {
             const info = this.getProductInfo();
             const price = parseFloat(info.retail_price || 0);
-            const currentUrl = window.location.href;
+
+            // Build canonical slug URL
+            const slug = info.slug || info.sku.toLowerCase();
+            const canonicalUrl = `https://www.inkcartridges.co.nz/products/${slug}/${info.sku}`;
 
             // Page title and meta description
             const metaDescription = this.generateMetaDescription(info);
-            document.title = `${info.displayName} | Buy Online NZ | InkCartridges.co.nz`;
+            const prefix = info.isCompatible ? 'Compatible ' : 'Genuine ';
+            document.title = `${prefix}${info.displayName} NZ | InkCartridges.co.nz`;
             document.getElementById('meta-description').content = metaDescription;
 
             // Open Graph tags
             document.getElementById('og-title').content = `${info.displayName} | InkCartridges.co.nz`;
             document.getElementById('og-description').content = metaDescription;
-            document.getElementById('og-url').content = currentUrl;
+            document.getElementById('og-url').content = canonicalUrl;
             document.getElementById('og-price').content = price.toFixed(2);
             if (info.image_url) {
                 document.getElementById('og-image').content = info.image_url;
@@ -454,7 +349,7 @@
             }
 
             // Canonical URL
-            document.getElementById('canonical-url').href = currentUrl;
+            document.getElementById('canonical-url').href = canonicalUrl;
 
             // Schema.org Product structured data
             this.updateProductSchema(info, price);
@@ -485,6 +380,21 @@
 
             document.getElementById('breadcrumb-product').textContent = info.displayName;
 
+            // BreadcrumbList JSON-LD (H5)
+            const breadcrumbSchemaEl = document.getElementById('breadcrumb-schema');
+            if (breadcrumbSchemaEl) {
+                const breadcrumbSchema = {
+                    "@context": "https://schema.org",
+                    "@type": "BreadcrumbList",
+                    "itemListElement": [
+                        { "@type": "ListItem", "position": 1, "name": "Home", "item": "https://www.inkcartridges.co.nz" },
+                        { "@type": "ListItem", "position": 2, "name": `${info.brandName} Ink Cartridges`, "item": `https://www.inkcartridges.co.nz/brands/${brandSlug}` },
+                        { "@type": "ListItem", "position": 3, "name": info.displayName }
+                    ]
+                };
+                breadcrumbSchemaEl.textContent = JSON.stringify(breadcrumbSchema);
+            }
+
             // Product badge
             const badge = document.getElementById('product-badge');
             if (info.isCompatible) {
@@ -496,7 +406,8 @@
             }
 
             // Title and SKU
-            document.getElementById('product-title').textContent = info.displayName;
+            const h1Prefix = info.isCompatible ? 'Compatible ' : '';
+            document.getElementById('product-title').textContent = `${h1Prefix}${info.displayName} NZ`;
             document.getElementById('product-sku').textContent = `SKU: ${info.sku}${info.manufacturer_part_number ? ' | Model: ' + info.manufacturer_part_number : ''}`;
 
             // Price - use formatPrice() for consistent locale-aware currency display
@@ -566,15 +477,6 @@
             // Get template based on category
             const template = this.templates[info.category] || this.templates.default;
 
-            // Features
-            const features = template.features(info);
-            document.getElementById('product-features').innerHTML = features.map(f => `
-                <li>
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
-                    ${Security.escapeHtml(f)}
-                </li>
-            `).join('');
-
             // Description
             document.getElementById('product-description').innerHTML = template.description(info);
 
@@ -606,8 +508,10 @@
             if (info.category !== 'ribbon') {
                 this.renderCompatiblePrinters(info);
                 this.renderCompatibilityTab(info);
-                this.renderRelatedProducts(info);
             }
+
+            // Compatible products for ALL categories
+            this.renderRelatedProducts(info);
 
             // Set up event listeners
             this.setupEventListeners(info);
@@ -645,9 +549,8 @@
                 if (printers.length === 0) return;
 
                 const printerLinks = printers.map(p => {
-                    const params = new URLSearchParams({ printer_model: p.name });
-                    if (p.brand) params.set('printer_brand', p.brand);
-                    return `<a href="/html/shop?${params}" class="printer-link">${Security.escapeHtml(p.name)}</a>`;
+                    const printerSlug = p.slug || p.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+                    return `<a href="/printers/${Security.escapeAttr(printerSlug)}" class="printer-link">${Security.escapeHtml(p.name)}</a>`;
                 }).join(', ');
 
                 const html = `
@@ -695,9 +598,8 @@
                 if (!list || !tabBtn) return;
 
                 list.innerHTML = printers.map(p => {
-                    const params = new URLSearchParams({ printer_model: p.name });
-                    if (p.brand) params.set('printer_brand', p.brand);
-                    return `<li><a href="/html/shop?${params}">${Security.escapeHtml(p.name)}</a></li>`;
+                    const printerSlug = p.slug || p.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+                    return `<li><a href="/printers/${Security.escapeAttr(printerSlug)}">${Security.escapeHtml(p.name)}</a></li>`;
                 }).join('');
 
                 tabBtn.hidden = false;
@@ -708,45 +610,61 @@
 
         async renderRelatedProducts(info) {
             try {
-                const printers = await this._fetchPrinters(info.sku);
-                if (printers.length === 0) return;
-
-                const firstPrinter = printers[0].name;
-                const response = await API.searchByPrinter(firstPrinter, { limit: 8 });
-                if (!response.ok || !response.data?.products) return;
-
-                const related = response.data.products
-                    .filter(p => p.sku !== info.sku)
-                    .slice(0, 4);
-
-                if (related.length === 0) return;
-
                 const grid = document.getElementById('related-products-grid');
                 const section = document.getElementById('related-products');
                 if (!grid || !section) return;
 
-                grid.innerHTML = related.map(p => {
-                    const name = p.name || '';
-                    const price = parseFloat(p.retail_price || 0);
-                    const brandName = p.brand?.name || (typeof p.brand === 'string' ? p.brand : '') || '';
-                    const imageHtml = typeof Products !== 'undefined' && Products.getProductImageHTML
-                        ? Products.getProductImageHTML(p)
-                        : `<img src="${Security.escapeAttr(p.image_url || '/assets/images/placeholder-product.svg')}" alt="${Security.escapeAttr(name)}">`;
-                    return `
-                        <a href="/html/product/?sku=${Security.escapeAttr(p.sku)}" class="product-card">
-                            <div class="product-card__image">${imageHtml}</div>
-                            <div class="product-card__info">
-                                <span class="product-card__brand">${Security.escapeHtml(brandName)}</span>
-                                <h3 class="product-card__name">${Security.escapeHtml(name)}</h3>
-                                <span class="product-card__price">${formatPrice(price)}</span>
-                            </div>
-                        </a>`;
-                }).join('');
+                let related = [];
 
+                // Primary: use new related products endpoint
+                const relatedResponse = await API.getRelatedProducts(info.sku);
+                if (relatedResponse.ok && relatedResponse.data?.related?.length > 0) {
+                    related = relatedResponse.data.related.slice(0, 6);
+                }
+
+                // Fallback: search by first compatible printer
+                if (related.length === 0) {
+                    const printers = await this._fetchPrinters(info.sku);
+                    if (printers.length > 0) {
+                        const firstPrinter = printers[0].name;
+                        const response = await API.searchByPrinter(firstPrinter, { limit: 10 });
+                        if (response.ok && response.data?.products) {
+                            related = response.data.products.filter(p => p.sku !== info.sku).slice(0, 6);
+                        }
+                    }
+
+                    // Fallback: search by product code extracted from manufacturer_part_number
+                    if (related.length === 0) {
+                        const productCode = this._extractProductCode(info.manufacturer_part_number);
+                        if (productCode) {
+                            const brandName = info.brandName || '';
+                            const params = { search: productCode, limit: 10 };
+                            if (brandName) params.brand = brandName;
+                            const response = await API.getProducts(params);
+                            if (response.ok && response.data?.products) {
+                                related = response.data.products.filter(p => p.sku !== info.sku).slice(0, 6);
+                            }
+                        }
+                    }
+                }
+
+                if (related.length === 0) return;
+
+                grid.innerHTML = related.map(p => Products.renderCard(p)).join('');
+                Products.bindImageFallbacks(grid);
+                Products.bindAddToCartEvents(grid);
                 section.hidden = false;
             } catch (e) {
                 // Related products are optional
             }
+        },
+
+        _extractProductCode(modelNumber) {
+            if (!modelNumber) return null;
+            // Strip trailing color codes (BK, CL, BL, MG, YL, C, M, Y, B) then extract alphanumeric code
+            const stripped = modelNumber.replace(/(BK|CL|BL|MG|YL|[CMYB])$/i, '');
+            const match = /^([A-Z0-9]+-?[A-Z0-9]*?\d+)/i.exec(stripped);
+            return match ? match[1] : null;
         },
 
         setupEventListeners(info) {
@@ -775,6 +693,10 @@
             });
 
             // Add to cart using Cart.addItem (server-first for authenticated users)
+            let atcTotalQty = 0;
+            const atcConfirmation = document.getElementById('atc-confirmation');
+            const atcConfirmationText = document.getElementById('atc-confirmation-text');
+
             document.getElementById('add-to-cart-btn').addEventListener('click', async () => {
                 const btn = document.getElementById('add-to-cart-btn');
                 const qty = parseInt(qtyInput.value) || 1;
@@ -797,6 +719,17 @@
                         btn.textContent = 'Add to Cart';
                         btn.disabled = false;
                     }, 1500);
+
+                    // Update and show confirmation strip
+                    atcTotalQty += qty;
+                    if (atcConfirmationText) {
+                        atcConfirmationText.textContent = atcTotalQty === 1
+                            ? '1 item added to cart'
+                            : `${atcTotalQty} items in cart`;
+                    }
+                    if (atcConfirmation) {
+                        atcConfirmation.classList.add('atc-confirmation--visible');
+                    }
                 } catch (error) {
                     btn.textContent = 'Error';
                     setTimeout(() => {
@@ -886,6 +819,8 @@
 
         // Update Schema.org Product structured data
         updateProductSchema(info, price) {
+            const slug = info.slug || info.sku.toLowerCase();
+            const canonicalUrl = `https://www.inkcartridges.co.nz/products/${slug}/${info.sku}`;
             const schema = {
                 "@context": "https://schema.org",
                 "@type": "Product",
@@ -902,7 +837,7 @@
                            info.category === 'drum' ? 'Drum Units' : 'Ink Cartridges',
                 "offers": {
                     "@type": "Offer",
-                    "url": window.location.href,
+                    "url": canonicalUrl,
                     "priceCurrency": "NZD",
                     "price": price.toFixed(2),
                     "availability": info.in_stock ? "https://schema.org/InStock" : "https://schema.org/OutOfStock",
@@ -945,6 +880,17 @@
                 schema.color = info.color;
             }
 
+            // Add aggregateRating if product has reviews
+            if (info.review_count > 0) {
+                schema.aggregateRating = {
+                    "@type": "AggregateRating",
+                    "ratingValue": String(info.average_rating),
+                    "reviewCount": String(info.review_count),
+                    "bestRating": "5",
+                    "worstRating": "1"
+                };
+            }
+
             // Update the script tag
             const schemaEl = document.getElementById('product-schema');
             if (schemaEl) {
@@ -967,8 +913,6 @@
             document.querySelector('.product-info__gst').hidden = true;
             document.getElementById('product-stock').hidden = true;
             document.querySelector('.product-info__actions').hidden = true;
-            document.querySelector('.product-info__trust').hidden = true;
-            document.querySelector('.product-info__features').hidden = true;
             document.querySelector('.product-tabs').hidden = true;
 
             // Show error state in image area with retry button

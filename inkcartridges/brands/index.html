@@ -3,11 +3,27 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="description" content="Page not found - InkCartridges.co.nz">
-    <meta name="robots" content="noindex, nofollow">
+    <meta name="description" id="meta-description" content="Shop ink cartridges and toner by brand at InkCartridges.co.nz. Free NZ-wide shipping over $100.">
+    <meta name="robots" content="index, follow">
 
+    <meta property="og:type" content="website">
+    <meta property="og:site_name" content="InkCartridges.co.nz">
+    <meta property="og:title" id="og-title" content="Ink Cartridges by Brand | InkCartridges.co.nz">
+    <meta property="og:description" id="og-description" content="Shop ink cartridges and toner by brand at InkCartridges.co.nz.">
+
+    <link rel="canonical" id="canonical-url" href="">
     <link rel="icon" type="image/svg+xml" href="/assets/icons/favicon.svg">
-    <title>Page Not Found | InkCartridges.co.nz</title>
+    <title id="page-title">Ink Cartridges by Brand | InkCartridges.co.nz</title>
+
+    <script type="application/ld+json" id="page-schema">
+    {
+        "@context": "https://schema.org",
+        "@type": "CollectionPage",
+        "name": "",
+        "description": "",
+        "url": ""
+    }
+    </script>
 
     <script async src="https://www.googletagmanager.com/gtag/js?id=G-SDQELG0FGD"></script>
     <script src="/js/gtag.js"></script>
@@ -41,8 +57,8 @@
 
                 <div class="logo-block">
                     <a href="/html/index.html" class="logo" aria-label="InkCartridges.co.nz Home">
-                                <span class="logo__text">Ink<span>Cartridges</span>.co.nz</span>
-                            </a>
+                        <span class="logo__text">Ink<span>Cartridges</span>.co.nz</span>
+                    </a>
                     <a href="/html/index.html" class="logo__tagline">Get the full picture on image quality</a>
                 </div>
 
@@ -78,12 +94,8 @@
                 </button>
 
                 <ul id="nav-menu" class="nav-menu">
-                    <li class="nav-menu__item">
-                        <a href="/html/index.html" class="nav-menu__link">Home</a>
-                    </li>
-                    <li class="nav-menu__item">
-                        <a href="/html/shop.html" class="nav-menu__link">Shop</a>
-                    </li>
+                    <li class="nav-menu__item"><a href="/html/index.html" class="nav-menu__link">Home</a></li>
+                    <li class="nav-menu__item"><a href="/html/shop.html" class="nav-menu__link">Shop</a></li>
                     <li class="nav-menu__item nav-menu__item--mega">
                         <button class="nav-menu__link nav-mega-toggle" type="button"
                                 aria-haspopup="true" aria-expanded="false" aria-controls="brands-mega">
@@ -91,29 +103,12 @@
                             <svg class="nav-menu__arrow" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
                         </button>
                     </li>
-                    <li class="nav-menu__item nav-menu__item--mega">
-                        <button class="nav-menu__link nav-ribbons-toggle"
-                                type="button"
-                                aria-haspopup="true"
-                                aria-expanded="false"
-                                aria-controls="ribbons-mega">
-                            Typewriter &amp; Printer Ribbons
-                            <svg class="nav-menu__arrow" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
-                        </button>
-                    </li>
+                    <li class="nav-menu__item nav-menu__item--mega"><button class="nav-menu__link nav-ribbons-toggle" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="ribbons-mega">Typewriter &amp; Printer Ribbons <svg class="nav-menu__arrow" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg></button></li>
                 </ul>
 
                 <form class="search-form search-form--nav" action="/html/shop.html" method="GET" role="search">
                     <label for="search-input" class="visually-hidden">Search for products</label>
-                    <input
-                        type="search"
-                        id="search-input"
-                        name="q"
-                        class="search-form__input"
-                        placeholder="Search..."
-                        autocomplete="off"
-                        maxlength="200"
-                    >
+                    <input type="search" id="search-input" name="q" class="search-form__input" placeholder="Search..." autocomplete="off" maxlength="200">
                     <button type="submit" class="search-form__button" aria-label="Search">
                         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
                     </button>
@@ -143,108 +138,38 @@
     </header>
 
     <main id="main-content" class="site-main">
-        <section class="error-page">
+        <nav class="breadcrumb" aria-label="Breadcrumb">
             <div class="container">
-                <div class="error-content">
-                    <div class="error-content__icon">
-                        <span class="error-code">404</span>
-                    </div>
+                <ol class="breadcrumb__list">
+                    <li class="breadcrumb__item"><a href="/html/index.html">Home</a></li>
+                    <li class="breadcrumb__item" id="breadcrumb-brand"></li>
+                </ol>
+            </div>
+        </nav>
 
-                    <h1 class="error-content__title">Page Not Found</h1>
-
-                    <p class="error-content__message">
-                        Sorry, we couldn't find the page you're looking for. It may have been moved, deleted, or perhaps the URL was typed incorrectly.
-                    </p>
-
-                    <div class="error-content__search">
-                        <p>Try searching for what you need:</p>
-                        <form class="search-form search-form--large" action="/html/shop.html" method="GET" role="search">
-                            <label for="error-search-input" class="visually-hidden">Search for products</label>
-                            <input type="search" id="error-search-input" name="q" class="search-form__input" placeholder="Search..." autocomplete="off" maxlength="200">
-                            <button type="submit" class="search-form__button" aria-label="Search">
-                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                                    <circle cx="11" cy="11" r="8"/>
-                                    <path d="M21 21l-4.35-4.35"/>
-                                </svg>
-                                Search
-                            </button>
-                        </form>
-                    </div>
-
-                    <div class="error-content__suggestions">
-                        <h2>Here are some things you can try:</h2>
-                        <ul>
-                            <li>Double-check the URL for any typos</li>
-                            <li>Use the search bar above to find what you're looking for</li>
-                            <li>Browse our popular categories below</li>
-                            <li>Return to the homepage and start fresh</li>
-                        </ul>
-                    </div>
-
-                    <div class="error-content__actions">
-                        <a href="/html/index.html" class="btn btn--primary btn--large">
-                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                                <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
-                                <polyline points="9 22 9 12 15 12 15 22"/>
-                            </svg>
-                            Go to Homepage
-                        </a>
-                        <a href="/html/contact.html" class="btn btn--secondary btn--large">
-                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
-                            </svg>
-                            Contact Support
-                        </a>
-                    </div>
-
-                    <div class="error-content__categories">
-                        <h2>Browse Our Popular Categories</h2>
-                        <div class="category-links">
-                            <a href="/html/shop.html" class="btn btn--outline">
-                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                                    <rect x="6" y="2" width="12" height="20" rx="2"/>
-                                    <line x1="12" y1="18" x2="12" y2="18"/>
-                                </svg>
-                                Ink Cartridges
-                            </a>
-                            <a href="/html/shop.html" class="btn btn--outline">
-                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                                    <rect x="4" y="4" width="16" height="16" rx="2"/>
-                                    <rect x="9" y="9" width="6" height="6"/>
-                                </svg>
-                                Toner Cartridges
-                            </a>
-                            <a href="/html/shop.html" class="btn btn--outline">
-                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                                    <path d="M6 9V2h12v7"/>
-                                    <path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/>
-                                    <rect x="6" y="14" width="12" height="8"/>
-                                </svg>
-                                Printers
-                            </a>
-                            <a href="/html/shop.html" class="btn btn--outline">
-                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-                                    <polyline points="14 2 14 8 20 8"/>
-                                    <line x1="16" y1="13" x2="8" y2="13"/>
-                                    <line x1="16" y1="17" x2="8" y2="17"/>
-                                </svg>
-                                Accessories
-                            </a>
-                        </div>
-                    </div>
-
-                    <div class="error-content__help">
-                        <p>
-                            Need help finding something? Give us a call at
-                            <a href="tel:0274740115"><strong>027 474 0115</strong></a>
-                            or email us at
-                            <a href="mailto:inkandtoner@windowslive.com">inkandtoner@windowslive.com</a>
-                        </p>
-                    </div>
-                </div>
+        <section class="shop-header">
+            <div class="container">
+                <h1 id="page-heading" class="shop-header__title"></h1>
+                <p id="page-description" class="shop-header__description"></p>
             </div>
         </section>
+
+        <div class="container">
+            <div id="products-loading" class="loading-state">
+                <div class="spinner"></div>
+                <p>Loading products&hellip;</p>
+            </div>
+
+            <div id="products-error" class="error-state" hidden>
+                <p>Unable to load products. <a href="/html/shop.html">Browse all products</a>.</p>
+            </div>
+
+            <div id="products-grid" class="product-grid" hidden></div>
+
+            <div id="no-products" class="empty-state" hidden>
+                <p>No products found for this brand. <a href="/html/shop.html">Browse all products</a>.</p>
+            </div>
+        </div>
     </main>
 
     <footer class="site-footer">
@@ -254,14 +179,14 @@
                     <div class="footer-brand">
                         <a href="/html/index.html" class="footer-brand__logo">
                             <img class="logo__icon" src="https://lmdlgldjgcanknsjrcxh.supabase.co/storage/v1/object/public/public-assets/images/site/inklogo.png" alt="" aria-hidden="true">
-                        <span class="logo__text">Ink<span>Cartridges</span>.co.nz</span>
+                            <span class="logo__text">Ink<span>Cartridges</span>.co.nz</span>
                         </a>
                         <p class="footer-brand__description">
                             New Zealand's trusted source for quality printing supplies.
                             We help homes and businesses keep printing with genuine and
                             compatible ink and toner cartridges.
                         </p>
-                        </div>
+                    </div>
 
                     <div class="footer-column">
                         <p class="footer-column__heading">Support</p>
@@ -318,33 +243,24 @@
                 </p>
                 <div class="footer-legal">
                     <a href="/html/privacy.html">Privacy Policy</a>
-                    <a href="/html/terms.html">Terms & Conditions</a>
-                </div>
-                <div class="footer-payment">
-                    <span class="footer-payment__label">We accept:</span>
-                    <div class="footer-payment__icons">
-                        <span title="Visa">Visa</span>
-                        <span title="Mastercard">Mastercard</span>
-                        <span title="PayPal">PayPal</span>
-                    </div>
+                    <a href="/html/terms.html">Terms &amp; Conditions</a>
                 </div>
             </div>
         </div>
     </footer>
 
-    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.98.0" integrity="sha384-Sm2s7OXxsAMTyJ4iIyRBgVpeGUvMPk2lRQnnZhE78Wej7oggIoolKt+SCt0XJbUB" crossorigin="anonymous"></script>
-    <script src="/js/config.js"></script>
-    <script src="/js/security.js"></script>
-    <script src="/js/utils.js"></script>
-    <script src="/js/api.js"></script>
-    <script src="/js/auth.js"></script>
-    <script src="/js/products.js"></script>
-    <script src="/js/search-normalize.js"></script>
-    <script src="/js/search.js"></script>
-    <script src="/js/main.js"></script>
-    <script src="/js/mega-nav.js"></script>
-    <script src="/js/modern-effects.js"></script>
-    <script src="/js/cart.js"></script>
-    <script src="/js/analytics.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.98.0" integrity="sha384-Sm2s7OXxsAMTyJ4iIyRBgVpeGUvMPk2lRQnnZhE78Wej7oggIoolKt+SCt0XJbUB" crossorigin="anonymous"></script>
+    <script defer src="/js/security.js"></script>
+    <script defer src="/js/config.js"></script>
+    <script defer src="/js/utils.js"></script>
+    <script defer src="/js/api.js"></script>
+    <script defer src="/js/auth.js"></script>
+    <script defer src="/js/main.js"></script>
+    <script defer src="/js/cart.js"></script>
+    <script defer src="/js/search-normalize.js"></script>
+    <script defer src="/js/search.js"></script>
+    <script defer src="/js/mega-nav.js"></script>
+    <script defer src="/js/products.js"></script>
+    <script defer src="/js/brands-page.js"></script>
 </body>
 </html>
