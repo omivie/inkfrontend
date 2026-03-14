@@ -247,6 +247,21 @@ function createSmartSearch() {
             let allProducts = [];
             let productTotal = 0;
 
+            // Source filter shortcut: "genuine" / "compatible" → use source API param
+            const queryLower = query.toLowerCase();
+            if (queryLower === 'genuine' || queryLower === 'compatible') {
+                const response = await API.getProducts({ source: queryLower, limit: searchConfig.maxResults });
+                if (response.ok && response.data) {
+                    const data = response.data;
+                    const products = data.products || data || [];
+                    const total = data.pagination?.total ?? data.total ?? products.length;
+                    if (Array.isArray(products) && products.length > 0) {
+                        return { products, total };
+                    }
+                }
+                return null;
+            }
+
             // Detect product-type keywords (e.g. "ribbon", "toner") — fetch ALL of that type
             const typeDetection = (typeof SearchNormalize !== 'undefined' && SearchNormalize.detectProductType)
                 ? SearchNormalize.detectProductType(query) : null;
@@ -669,7 +684,10 @@ function createSmartSearch() {
                 ? 'View all ' + total + ' results'
                 : 'View all results';
 
-            const href = '/html/shop?search=' + encodeURIComponent(footerQuery);
+            const footerQueryLower = footerQuery.toLowerCase();
+            const href = (footerQueryLower === 'genuine' || footerQueryLower === 'compatible')
+                ? '/html/shop?type=' + encodeURIComponent(footerQueryLower)
+                : '/html/shop?search=' + encodeURIComponent(footerQuery);
 
             this._footer.innerHTML = '<a class="smart-search__view-all" href="' + Security.escapeAttr(href) + '">'
                 + Security.escapeHtml(label)

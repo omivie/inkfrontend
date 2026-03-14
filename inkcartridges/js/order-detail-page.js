@@ -103,10 +103,13 @@
                 const subtotal = order.subtotal || order.total;
                 const shipping = order.shipping_fee || order.shipping_cost || 0;
                 const total = order.total;
+                const email = order.customer_email || '';
+                const esc3 = typeof Security !== 'undefined' ? Security.escapeHtml : (s) => s;
 
                 summaryContainer.innerHTML = `
                     <h2>Order Summary</h2>
                     <dl class="order-summary__list">
+                        ${email ? `<dt>Email</dt><dd>${esc3(email)}</dd>` : ''}
                         <dt>Subtotal</dt><dd>${formatPrice(subtotal)}</dd>
                         <dt>Shipping</dt><dd>${shipping === 0 ? 'FREE' : formatPrice(shipping)}</dd>
                         <dt>GST (15%)</dt><dd>Included</dd>
@@ -119,15 +122,19 @@
             const shippingContainer = document.querySelector('.order-shipping');
             if (shippingContainer) {
                 const esc2 = typeof Security !== 'undefined' ? Security.escapeHtml : (s) => s;
-                const name = order.shipping_recipient_name || '';
+                const addr = order.shipping_address || {};
+                const name = addr.recipient_name || '';
+                const phone = addr.phone || '';
 
                 const parts = [
                     name ? `<strong>${esc2(name)}</strong>` : '',
-                    esc2(order.shipping_address_line1 || ''),
-                    esc2(order.shipping_address_line2 || ''),
-                    esc2(order.shipping_city || ''),
-                    `${esc2(order.shipping_region || '')} ${esc2(order.shipping_postal_code || '')}`.trim(),
-                    esc2(order.shipping_country || 'New Zealand')
+                    phone ? esc2(phone) : '',
+                    esc2(addr.address_line1 || ''),
+                    addr.address_line2 ? esc2(addr.address_line2) : '',
+                    addr.city && addr.region
+                        ? `${esc2(addr.city)}, ${esc2(addr.region)} ${esc2(addr.postal_code || '')}`.trim()
+                        : esc2(addr.city || addr.region || ''),
+                    esc2(addr.country || 'New Zealand')
                 ].filter(Boolean);
 
                 shippingContainer.innerHTML = `

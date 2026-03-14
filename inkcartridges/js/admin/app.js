@@ -102,9 +102,9 @@ function renderSidebar() {
     }
     html += `
       <div class="admin-nav-section">
-        <a href="#${item.key}" class="admin-nav-item" data-nav="${item.key}">
+        <a href="#${item.key}" class="admin-nav-item" data-nav="${item.key}" data-tooltip="${esc(item.label)}">
           ${icon(item.icon)}
-          <span>${esc(item.label)}</span>
+          <span class="admin-nav-label">${esc(item.label)}</span>
         </a>
       </div>
     `;
@@ -121,9 +121,16 @@ function renderSidebar() {
         </div>
       </div>
     </div>
+    <button class="admin-sidebar__collapse-btn" id="sidebar-collapse-btn" aria-label="Collapse sidebar">
+      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+        <polyline points="15 18 9 12 15 6"/>
+      </svg>
+    </button>
   `;
 
   sidebar.innerHTML = html;
+
+  document.getElementById('sidebar-collapse-btn').addEventListener('click', toggleCollapse);
 
   // Back to store on user card click
   document.getElementById('user-card').addEventListener('click', () => {
@@ -213,6 +220,14 @@ function toggleSidebar() {
   const backdrop = document.getElementById('sidebar-backdrop');
   sidebar.classList.toggle('open');
   backdrop.classList.toggle('open');
+}
+
+function toggleCollapse() {
+  const sidebar = document.getElementById('sidebar');
+  const shell = document.getElementById('app-shell');
+  const isNowCollapsed = sidebar.classList.toggle('admin-sidebar--collapsed');
+  shell.style.setProperty('--sidebar-w', isNowCollapsed ? '60px' : '240px');
+  localStorage.setItem('admin_sidebar_collapsed', isNowCollapsed ? '1' : '');
 }
 
 // ---- Router ----
@@ -332,6 +347,12 @@ async function boot() {
     // Render shell
     renderSidebar();
     renderTopbar();
+
+    // Restore sidebar collapse state
+    if (localStorage.getItem('admin_sidebar_collapsed') === '1') {
+      document.getElementById('sidebar').classList.add('admin-sidebar--collapsed');
+      document.getElementById('app-shell').style.setProperty('--sidebar-w', '60px');
+    }
 
     // Init filters
     const filterBar = document.getElementById('filter-bar');

@@ -112,9 +112,41 @@ function buildColumns() {
       },
       align: 'center',
     },
+    {
+      key: 'compat', label: 'Compat', sortable: false,
+      render: (r) => `<span class="admin-text-muted" data-compat-sku="${esc(r.sku || '')}" style="font-size:0.75rem;">—</span>`,
+      align: 'center',
+    },
   );
 
   return cols;
+}
+
+async function loadCompatCounts() {
+  const cells = document.querySelectorAll('[data-compat-sku]');
+  if (!cells.length) return;
+  const batch = 5;
+  const arr = Array.from(cells);
+  for (let i = 0; i < arr.length; i += batch) {
+    const slice = arr.slice(i, i + batch);
+    await Promise.all(slice.map(async (cell) => {
+      const sku = cell.dataset.compatSku;
+      if (!sku) return;
+      try {
+        const res = await window.API.getCompatiblePrinters(sku);
+        const printers = res?.data?.compatible_printers || res?.data?.printers || [];
+        const count = Array.isArray(printers) ? printers.length : 0;
+        if (count > 0) {
+          cell.outerHTML = `<span class="admin-badge admin-badge--delivered" style="font-size:0.72rem;">${count} printer${count !== 1 ? 's' : ''}</span>`;
+        } else {
+          cell.outerHTML = `<span class="admin-badge admin-badge--pending" style="font-size:0.72rem;">⚠ None</span>`;
+        }
+      } catch {
+        cell.outerHTML = `<span class="admin-text-muted" style="font-size:0.72rem;">—</span>`;
+      }
+    }));
+    if (i + batch < arr.length) await new Promise(r => setTimeout(r, 100));
+  }
 }
 
 function productHasImage(p) {
@@ -161,6 +193,7 @@ async function loadProducts() {
     const start = (_page - 1) * PAGE_SIZE;
     const pageRows = filtered.slice(start, start + PAGE_SIZE);
     _table.setData(pageRows, { total: filtered.length, page: _page, limit: PAGE_SIZE });
+    loadCompatCounts();
     return;
   }
 
@@ -170,6 +203,7 @@ async function loadProducts() {
   const rows = Array.isArray(data) ? data : (data.products || data.data || []);
   const pagination = data.pagination || { total: data.total || rows.length, page: _page, limit: 200 };
   _table.setData(rows, pagination);
+  loadCompatCounts();
 }
 
 async function openProductDrawer(product) {
@@ -223,7 +257,21 @@ async function openProductDrawer(product) {
   html += formGroup('Description', `<textarea class="admin-textarea" id="edit-description" rows="3">${esc(full.description || '')}</textarea>`);
   html += `<div class="admin-form-row">`;
   html += formGroup('Brand', buildBrandSelect(full.brand_id || full.brand));
-  html += formGroup('Product Type', buildSelect('edit-type', ['ink', 'toner', 'drum', 'ribbon', 'paper', 'other'], full.product_type));
+  html += formGroup('Product Type', buildSelect('edit-type', [
+    { value: 'ink_cartridge',   label: 'Ink Cartridge' },
+    { value: 'ink_bottle',      label: 'Ink Bottle' },
+    { value: 'toner_cartridge', label: 'Toner Cartridge' },
+    { value: 'drum_unit',       label: 'Drum Unit' },
+    { value: 'waste_toner',     label: 'Waste Toner' },
+    { value: 'belt_unit',       label: 'Belt Unit' },
+    { value: 'fuser_kit',       label: 'Fuser Kit' },
+    { value: 'fax_film',        label: 'Fax Film' },
+    { value: 'fax_film_refill', label: 'Fax Film Refill' },
+    { value: 'ribbon',          label: 'Ribbon' },
+    { value: 'label_tape',      label: 'Label Tape' },
+    { value: 'photo_paper',     label: 'Photo Paper' },
+    { value: 'printer',         label: 'Printer' },
+  ], full.product_type));
   html += `</div>`;
   html += `<div class="admin-form-row">`;
   html += formGroup('Color', `<input class="admin-input" id="edit-color" value="${esc(full.color || '')}">`);
@@ -272,7 +320,7 @@ async function openProductDrawer(product) {
   html += `<div class="admin-detail-block">`;
   html += `<div class="admin-detail-block__title">Compatibility</div>`;
   html += formGroup('Page Yield', `<input class="admin-input" id="edit-page-yield" type="number" min="0" value="${full.page_yield ?? ''}">`);
-  html += `<div class="admin-form-group"><label>Compatible Printers</label><div class="admin-compat-printers" id="compat-printers"><span class="admin-text-muted">Loading&hellip;</span></div></div>`;
+  html += `<div class="admin-form-group"><label id="compat-heading">Compatible Printers</label><div class="admin-compat-printers" id="compat-printers"><span class="admin-text-muted">Loading&hellip;</span></div></div>`;
   html += `</div>`;
 
   // Tags
@@ -304,8 +352,10 @@ function formGroup(label, inputHtml) {
 function buildSelect(id, options, selected) {
   let html = `<select class="admin-select" id="${id}">`;
   for (const opt of options) {
-    const sel = (selected || '').toLowerCase() === opt.toLowerCase() ? ' selected' : '';
-    html += `<option value="${esc(opt)}"${sel}>${esc(opt.charAt(0).toUpperCase() + opt.slice(1))}</option>`;
+    const value = typeof opt === 'object' ? opt.value : opt;
+    const label = typeof opt === 'object' ? opt.label : opt.charAt(0).toUpperCase() + opt.slice(1);
+    const sel = (selected || '').toLowerCase() === value.toLowerCase() ? ' selected' : '';
+    html += `<option value="${esc(value)}"${sel}>${esc(label)}</option>`;
   }
   html += '</select>';
   return html;
@@ -343,15 +393,22 @@ function bindProductDrawerActions(drawer, product) {
   if (product.sku && window.API?.getCompatiblePrinters) {
     const container = body.querySelector('#compat-printers');
     window.API.getCompatiblePrinters(product.sku).then(response => {
-      const printers = response?.data?.printers || response?.data?.compatible_printers || response?.data || [];
+      const printers = response?.data?.compatible_printers || response?.data?.printers || response?.data || [];
+      const count = Array.isArray(printers) ? printers.length : 0;
+      const heading = body.querySelector('#compat-heading');
+      if (heading) heading.textContent = `Compatible Printers (${count})`;
       if (container) {
-        if (Array.isArray(printers) && printers.length > 0) {
+        if (count > 0) {
           container.innerHTML = printers.map(p => {
-            const name = typeof p === 'string' ? p : (p.model || p.name || String(p));
+            const name = typeof p === 'string' ? p : (p.full_name || p.model_name || p.model || p.name || String(p));
             return `<span class="admin-badge">${esc(name)}</span>`;
           }).join('');
         } else {
-          container.innerHTML = '<span class="admin-text-muted">None found</span>';
+          container.innerHTML = `
+            <div style="background:var(--yellow-light,#fffbe6);border:1px solid var(--yellow,#f0a500);border-radius:6px;padding:10px 12px;font-size:0.85em;">
+              <strong>No compatible printers found</strong><br>
+              <span style="color:var(--text-muted);">This product has no printer associations in the database. It won't appear in printer-based searches or "You May Also Need" sections on the storefront.</span>
+            </div>`;
         }
       }
     }).catch(() => {
@@ -567,6 +624,10 @@ function renderDiagnostics(container) {
       ${diagKpi('Missing Prices', d.missing_prices ?? MISSING)}
     </div>
   `;
+  // Remove any existing diagnostics section before inserting updated one
+  container.querySelector(':scope > .admin-section.diag-section')?.remove();
+  section.classList.add('diag-section');
+
   const ref = container.querySelector(':scope > .admin-mb-lg');
   if (ref) container.insertBefore(section, ref);
   else container.appendChild(section);
@@ -931,7 +992,21 @@ function generateSEO(product) {
   const code = codeMatch ? codeMatch[1] : '';
 
   // Readable type labels
-  const typeLabel = { ink: 'Ink Cartridge', toner: 'Toner Cartridge', drum: 'Drum Unit', ribbon: 'Printer Ribbon', paper: 'Paper', other: '' }[type] || '';
+  const typeLabel = {
+    ink_cartridge: 'Ink Cartridge',
+    ink_bottle: 'Ink Bottle',
+    toner_cartridge: 'Toner Cartridge',
+    drum_unit: 'Drum Unit',
+    waste_toner: 'Waste Toner',
+    belt_unit: 'Belt Unit',
+    fuser_kit: 'Fuser Kit',
+    fax_film: 'Fax Film',
+    fax_film_refill: 'Fax Film Refill',
+    ribbon: 'Printer Ribbon',
+    label_tape: 'Label Tape',
+    photo_paper: 'Photo Paper',
+    printer: 'Printer',
+  }[type] || '';
   const sourceLabel = source === 'genuine' ? 'Genuine' : source === 'compatible' ? 'Compatible' : source === 'remanufactured' ? 'Remanufactured' : '';
 
   // ---- Meta Title (50-60 chars ideal) ----
@@ -955,7 +1030,7 @@ function generateSEO(product) {
   let metaDesc;
   if (type === 'ribbon') {
     metaDesc = `Buy ${sourcePart}${brand} ${code || name}${colorPart} printer ribbon online at InkCartridges.co.nz. Fast NZ-wide delivery. Free shipping over $100.`;
-  } else if (type === 'drum') {
+  } else if (type === 'drum_unit') {
     metaDesc = `Buy ${sourcePart}${brand} ${code || name} drum unit online at InkCartridges.co.nz. Fast NZ-wide delivery. Free shipping over $100.`;
   } else {
     metaDesc = `Buy ${sourcePart}${brand} ${code || name}${colorPart} ${typeLabel.toLowerCase()} online at InkCartridges.co.nz. Fast NZ-wide delivery. Free shipping over $100.`;
@@ -1356,6 +1431,7 @@ export default {
 
     // Load brands for filter + edit form
     const brandsData = await AdminAPI.getBrands();
+    if (_container !== container) return; // destroyed or re-routed during await
     _brands = brandsData && Array.isArray(brandsData) ? brandsData : [];
 
     // Header with filters
@@ -1472,7 +1548,7 @@ export default {
       }
     } catch { /* ignore */ }
 
-    if (!_table) return; // destroyed during await
+    if (_container !== container) return; // destroyed or re-routed during await
     renderDiagnostics(container);
   },
 

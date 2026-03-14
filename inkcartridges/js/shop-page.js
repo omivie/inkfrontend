@@ -1959,6 +1959,13 @@
                             }
                         }
                     }
+                } else if (searchQuery && (searchQuery.toLowerCase() === 'genuine' || searchQuery.toLowerCase() === 'compatible')) {
+                    // Source filter keyword — use source API param instead of text search
+                    const response = await API.getProducts({ source: searchQuery.toLowerCase(), limit: 200 });
+
+                    if (navVersion !== undefined && this.navigationVersion !== navVersion) return;
+
+                    products = (response.ok && response.data?.products) ? response.data.products : [];
                 } else {
                     // Standard text search path
                     const response = await API.smartSearch(searchQuery, 100);
@@ -1974,7 +1981,7 @@
                         const wordBoundary = new RegExp(`(?:^|[\\s\\-\\/])${escaped}(?:[\\s\\-\\/BCMYK,.]|$)`, 'i');
                         const relevant = products.filter(p => {
                             const name = p.name || '';
-                            const sku = p.sku || '';
+                            const sku = p.sku || p.code || p.product_code || '';
                             const mpn = p.manufacturer_part_number || '';
                             return wordBoundary.test(name) || wordBoundary.test(sku) || wordBoundary.test(mpn)
                                 || name.toLowerCase().includes(searchQuery.toLowerCase() + ' ')

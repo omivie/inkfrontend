@@ -911,6 +911,109 @@
   .admin-form-row { grid-template-columns: 1fr; }
 }
 
+/* ---- Collapsible Sidebar ---- */
+.admin-sidebar {
+  transition: transform 0.28s var(--ease), width 0.25s var(--ease);
+}
+.admin-nav-label,
+.admin-sidebar__title,
+.admin-sidebar__subtitle,
+.admin-nav-section__label,
+.admin-user-card__info,
+.admin-nav-badge {
+  transition: opacity 0.2s var(--ease);
+}
+.admin-sidebar--collapsed {
+  width: 60px;
+  overflow: hidden;
+}
+.admin-sidebar--collapsed .admin-sidebar__brand {
+  justify-content: center;
+  padding: 14px 0;
+}
+.admin-sidebar--collapsed .admin-sidebar__nav {
+  padding: 8px 4px;
+}
+.admin-sidebar--collapsed .admin-nav-section {
+  padding: 0;
+}
+.admin-sidebar--collapsed .admin-nav-item {
+  justify-content: center;
+  padding: 9px;
+}
+.admin-sidebar--collapsed .admin-user-card {
+  justify-content: center;
+  padding: 8px 4px;
+}
+.admin-sidebar--collapsed .admin-sidebar__footer {
+  padding: 8px 4px;
+}
+.admin-sidebar--collapsed .admin-nav-label,
+.admin-sidebar--collapsed .admin-sidebar__title,
+.admin-sidebar--collapsed .admin-sidebar__subtitle,
+.admin-sidebar--collapsed .admin-nav-section__label,
+.admin-sidebar--collapsed .admin-user-card__info,
+.admin-sidebar--collapsed .admin-nav-badge,
+.admin-sidebar--collapsed .admin-nav-divider {
+  display: none;
+}
+.admin-sidebar--collapsed .admin-nav-item.active::before {
+  display: none;
+}
+.admin-sidebar--collapsed .admin-nav-item[data-tooltip]::after {
+  left: calc(100% + 12px);
+  top: 50%;
+  bottom: auto;
+  transform: translateY(-50%);
+  white-space: nowrap;
+  z-index: 900;
+}
+.admin-sidebar--collapsed .admin-nav-item[data-tooltip]:hover::after {
+  opacity: 1;
+  pointer-events: none;
+}
+.admin-sidebar__collapse-btn {
+  position: absolute;
+  right: -12px;
+  top: 72px;
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  color: var(--text-secondary);
+  cursor: pointer;
+  z-index: 801;
+  transition: color 0.15s var(--ease), background 0.15s var(--ease), transform 0.25s var(--ease);
+  flex-shrink: 0;
+}
+.admin-sidebar__collapse-btn:hover {
+  color: var(--text);
+  background: var(--surface-hover);
+}
+.admin-sidebar--collapsed .admin-sidebar__collapse-btn {
+  transform: rotate(180deg);
+  right: -12px;
+}
+@media (max-width: 768px) {
+  .admin-sidebar__collapse-btn { display: none; }
+  .admin-sidebar--collapsed { width: 280px; }
+  .admin-sidebar--collapsed .admin-nav-label,
+  .admin-sidebar--collapsed .admin-sidebar__title,
+  .admin-sidebar--collapsed .admin-sidebar__subtitle,
+  .admin-sidebar--collapsed .admin-nav-section__label,
+  .admin-sidebar--collapsed .admin-user-card__info,
+  .admin-sidebar--collapsed .admin-nav-badge,
+  .admin-sidebar--collapsed .admin-nav-divider { display: revert; }
+  .admin-sidebar--collapsed .admin-nav-item { justify-content: flex-start; padding: 8px 12px; }
+  .admin-sidebar--collapsed .admin-user-card { justify-content: flex-start; padding: 8px; }
+  .admin-sidebar--collapsed .admin-sidebar__brand { justify-content: flex-start; padding: 20px 20px 16px; }
+  .admin-sidebar--collapsed .admin-nav-item.active::before { display: block; }
+}
+
 /* ---- Animations ---- */
 @keyframes admin-spin { to { transform: rotate(360deg); } }
 @keyframes admin-shimmer {
