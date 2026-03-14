@@ -145,6 +145,29 @@ async function openOrderDrawer(order) {
   if (o.cancelled_at) html += detailRow('Cancelled', formatDateTime(o.cancelled_at));
   html += `</div>`;
 
+  // Shipping Address
+  const addr = o.shipping_address || {};
+  const hasAddr = addr.address_line1 || o.shipping_address_line1;
+  if (hasAddr) {
+    const name = addr.recipient_name || o.shipping_recipient_name || '';
+    const phone = addr.phone || o.shipping_phone || '';
+    const line1 = addr.address_line1 || o.shipping_address_line1 || '';
+    const line2 = addr.address_line2 || o.shipping_address_line2 || '';
+    const city = addr.city || o.shipping_city || '';
+    const region = addr.region || o.shipping_region || '';
+    const postal = addr.postal_code || o.shipping_postal_code || '';
+    const country = addr.country || o.shipping_country || 'New Zealand';
+    const parts = [
+      name, phone, line1, line2,
+      city && region ? `${city}, ${region} ${postal}`.trim() : (city || region),
+      country,
+    ].filter(Boolean).map(p => esc(p)).join('<br>');
+    html += `<div class="admin-detail-block">`;
+    html += `<div class="admin-detail-block__title">Shipping Address</div>`;
+    html += `<address style="font-style:normal;line-height:1.6;font-size:0.9rem">${parts}</address>`;
+    html += `</div>`;
+  }
+
   // Items
   if (o.items?.length) {
     html += `<div class="admin-detail-block">`;
