@@ -36,6 +36,7 @@
 
             await this.loadCart();
             await this.checkGuestCheckoutFlag();
+            await this.preloadShippingRates();
             this.renderCart();
             this.setupFormHandlers();
             this.setupShippingHandlers();
@@ -329,6 +330,30 @@
             );
         },
 
+        async preloadShippingRates() {
+            if (Config.settings?.shipping?.zonesLoaded) return;
+            try {
+                const response = await API.getShippingRates();
+                if (response.ok && Array.isArray(response.data) && response.data.length > 0) {
+                    const zones = {};
+                    response.data.forEach(rate => {
+                        const z = rate.zone;
+                        if (!zones[z]) zones[z] = { tiers: [] };
+                        zones[z].tiers.push({
+                            tier: rate.tier_name,
+                            delivery_type: rate.delivery_type,
+                            fee: Number(rate.fee),
+                            min_weight_kg: rate.min_weight_kg ?? 0,
+                            max_weight_kg: rate.max_weight_kg ?? null
+                        });
+                    });
+                    Config.settings.shipping = { zones, zonesLoaded: true };
+                }
+            } catch (e) {
+                DebugLog.warn('preloadShippingRates failed, using hardcoded fallback:', e.message);
+            }
+        },
+
         async fetchShippingFromAPI() {
             const region = document.getElementById('region')?.value || '';
             const postalCode = document.getElementById('postcode')?.value || '';
@@ -351,7 +376,6 @@
                             quantity: item.quantity
                         })),
                         region: region,
-                        postal_code: postalCode,
                         delivery_type: deliveryType
                     };
                     const response = await API.getShippingOptions(payload);
@@ -369,6 +393,8 @@
                                 reason: option.reason || ''
                             };
                             return;
+                        } else {
+                            DebugLog.warn('Shipping API returned no usable option:', response.data);
                         }
                     }
                 } catch (e) {

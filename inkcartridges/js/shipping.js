@@ -155,8 +155,10 @@ const Shipping = {
                 // Auckland-style: simple urban/rural
                 fee = deliveryType === 'rural' ? zoneFees.rural : zoneFees.urban;
             } else {
-                // North/South Island: use light tier as fallback (we don't have weights client-side)
-                fee = deliveryType === 'rural' ? zoneFees.light_rural : zoneFees.light_urban;
+                // North/South Island: use standard tier as fallback to show zone differences.
+                // Light tier ($7) is the same across all zones — standard ($12) reveals the Auckland advantage.
+                // Backend API overrides this with weight-accurate pricing in normal operation.
+                fee = deliveryType === 'rural' ? zoneFees.standard_rural : zoneFees.standard_urban;
             }
         }
 
