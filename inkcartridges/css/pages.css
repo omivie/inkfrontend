@@ -1991,6 +1991,7 @@
     bottom: 0;
     aspect-ratio: unset;
     margin-bottom: 0;
+    background-color: #fff;
 }
 
 .product-detail__layout .product-gallery__main img {
