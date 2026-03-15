@@ -87,18 +87,26 @@
          * Display shipping summary
          */
         displayShippingSummary() {
-            const container = document.getElementById('shipping-details');
-            if (!container || !this.checkoutData) return;
+            const leftCol = document.getElementById('shipping-col-left');
+            const rightCol = document.getElementById('shipping-col-right');
+            if (!this.checkoutData) return;
 
             const d = this.checkoutData;
             const esc = typeof Security !== 'undefined' ? Security.escapeHtml : (s) => s;
-            container.innerHTML = `
-                <p><strong>${esc(d.firstName)} ${esc(d.lastName)}</strong></p>
-                <p>${esc(d.address1)}${d.address2 ? ', ' + esc(d.address2) : ''}</p>
-                <p>${esc(d.city)}, ${esc(d.region)} ${esc(d.postcode)}</p>
-                <p>${esc(d.email)}</p>
-                ${d.phone ? `<p>${esc(d.phone)}</p>` : ''}
-            `;
+
+            if (leftCol) {
+                leftCol.innerHTML = `
+                    <p><strong>${esc(d.firstName)} ${esc(d.lastName)}</strong></p>
+                    <p>${esc(d.address1)}${d.address2 ? ', ' + esc(d.address2) : ''}</p>
+                    <p>${esc(d.city)}, ${esc(d.region)} ${esc(d.postcode)}</p>
+                `;
+            }
+            if (rightCol) {
+                rightCol.innerHTML = `
+                    <p>${esc(d.email)}</p>
+                    ${d.phone ? `<p>${esc(d.phone)}</p>` : ''}
+                `;
+            }
         },
 
         /**

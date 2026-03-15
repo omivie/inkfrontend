@@ -63,7 +63,7 @@
             text-decoration: none;
             font-size: 0.9375rem;
             font-weight: 500;
-            margin-bottom: 1.5rem;
+            margin-bottom: 0.75rem;
             transition: all 0.2s ease;
         }
         .payment-page__back:hover {
@@ -78,15 +78,22 @@
             border-left: 4px solid var(--cyan);
             border-radius: var(--radius-sm);
             padding: 1.25rem;
-            margin-bottom: 2rem;
+            margin-bottom: 1rem;
             transition: all 0.3s ease;
         }
         .shipping-summary:hover {
             box-shadow: var(--shadow);
         }
+        .shipping-summary__inner {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            grid-template-rows: auto auto;
+            gap: 0 1rem;
+        }
         .shipping-summary__title {
+            grid-column: 1 / -1;
             font-weight: 600;
-            margin: 0 0 0.75rem;
+            margin: 0 0 0.5rem;
             font-size: 0.875rem;
             color: var(--cyan);
             text-transform: uppercase;
@@ -95,18 +102,21 @@
             align-items: center;
             gap: 0.5rem;
         }
-        .shipping-summary__details {
+        .shipping-summary__col-left,
+        .shipping-summary__col-right {
             font-size: 0.9375rem;
             color: var(--gray-700);
             line-height: 1.6;
         }
-        .shipping-summary__details p {
+        .shipping-summary__col-left p,
+        .shipping-summary__col-right p {
             margin: 0;
         }
         .shipping-summary__edit {
+            grid-column: 1 / -1;
             font-size: 0.8125rem;
             font-weight: 500;
-            margin-top: 1rem;
+            margin-top: 0.5rem;
             display: inline-flex;
             align-items: center;
             gap: 0.25rem;
@@ -172,12 +182,45 @@
         }
 
         .payment-section__body {
-            padding: 1.5rem;
+            display: grid;
+            grid-template-columns: 1fr auto;
+            gap: 1.5rem;
+            align-items: start;
+            padding: 1.25rem;
+        }
+
+        /* Main column (Stripe + pay button) */
+        .payment-col-main {
+            min-width: 0;
+        }
+
+        /* Alt column (PayPal) */
+        .payment-col-alt {
+            width: 190px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 0.75rem;
+            padding-left: 1.5rem;
+            border-left: 1px solid var(--gray-200);
+            align-self: center;
+        }
+        .payment-col-alt__label {
+            font-size: 0.75rem;
+            font-weight: 600;
+            color: var(--gray-400);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        .payment-col-alt__sublabel {
+            font-size: 0.75rem;
+            color: var(--gray-500);
+            text-align: center;
         }
 
         /* Stripe PaymentElement wrapper */
         .payment-element-wrapper {
-            margin-bottom: 1.5rem;
+            margin-bottom: 1rem;
         }
 
         #card-errors {
@@ -337,7 +380,7 @@
         /* Pay button */
         .pay-button {
             width: 100%;
-            padding: 1rem 2rem;
+            padding: 0.875rem 1.5rem;
             font-size: 1rem;
             font-weight: 600;
             color: white;
@@ -352,7 +395,7 @@
             transition: all 0.3s ease;
             position: relative;
             overflow: hidden;
-            margin-top: 1.5rem;
+            margin-top: 0.75rem;
         }
 
         .pay-button::before {
@@ -405,8 +448,8 @@
             align-items: center;
             justify-content: center;
             gap: 0.5rem;
-            margin-top: 1rem;
-            padding: 0.75rem;
+            margin-top: 0.5rem;
+            padding: 0.5rem 0.75rem;
             background: var(--gray-50);
             border-radius: var(--radius-sm);
             font-size: 0.8125rem;
@@ -451,8 +494,8 @@
             align-items: center;
             justify-content: center;
             gap: 0.5rem;
-            margin-top: 1.5rem;
-            padding-top: 1.5rem;
+            margin-top: 0.75rem;
+            padding-top: 0.75rem;
             border-top: 1px solid var(--gray-200);
             font-size: 0.75rem;
             color: var(--gray-400);
@@ -463,35 +506,48 @@
             width: auto;
         }
 
-        /* PayPal section */
-        .paypal-divider {
-            display: flex;
+        /* Compact header overrides */
+        .checkout-page {
+            padding-top: 0;
+        }
+
+        .checkout-page__header {
             align-items: center;
-            gap: 1rem;
-            margin: 1.5rem 0;
+            margin-bottom: 4px;
         }
-        .paypal-divider::before,
-        .paypal-divider::after {
-            content: '';
-            flex: 1;
-            height: 1px;
-            background: var(--gray-200);
+
+        /* Mobile: stack payment columns */
+        @media (max-width: 768px) {
+            .payment-section__body {
+                grid-template-columns: 1fr;
+            }
+            .payment-col-alt {
+                width: 100%;
+                padding-left: 0;
+                border-left: none;
+                padding-top: 1rem;
+                border-top: 1px solid var(--gray-200);
+                flex-direction: row;
+                flex-wrap: wrap;
+                justify-content: center;
+            }
+            .shipping-summary__inner {
+                grid-template-columns: 1fr;
+            }
         }
-        .paypal-divider__text {
-            font-size: 0.8125rem;
-            font-weight: 600;
-            color: var(--gray-400);
-            text-transform: uppercase;
-            letter-spacing: 1px;
+
+        .checkout-progress--compact .checkout-progress__number {
+            width: 26px;
+            height: 26px;
+            font-size: 11px;
         }
-        .paypal-section {
-            margin-bottom: 0.5rem;
+
+        .checkout-progress--compact .checkout-progress__steps::before {
+            top: 13px;
         }
-        .paypal-section__label {
-            font-size: 0.8125rem;
-            color: var(--gray-500);
-            text-align: center;
-            margin-top: 0.75rem;
+
+        .checkout-summary {
+            padding: 1rem;
         }
 
     </style>
@@ -559,16 +615,18 @@
                         </a>
 
                         <div class="shipping-summary" id="shipping-summary">
-                            <h3 class="shipping-summary__title">
-                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="1" y="3" width="15" height="13"/><polygon points="16 8 20 8 23 11 23 16 16 16 16 8"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/></svg>
-                                Shipping to
-                            </h3>
-                            <div class="shipping-summary__details" id="shipping-details">
+                            <div class="shipping-summary__inner">
+                                <h3 class="shipping-summary__title">
+                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="1" y="3" width="15" height="13"/><polygon points="16 8 20 8 23 11 23 16 16 16 16 8"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/></svg>
+                                    Shipping to
+                                </h3>
+                                <div class="shipping-summary__col-left" id="shipping-col-left"></div>
+                                <div class="shipping-summary__col-right" id="shipping-col-right"></div>
+                                <a href="/html/checkout.html" class="shipping-summary__edit">
+                                    Edit details
+                                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                                </a>
                             </div>
-                            <a href="/html/checkout.html" class="shipping-summary__edit">
-                                Edit details
-                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
-                            </a>
                         </div>
 
                         <form id="payment-form" novalidate>
@@ -584,53 +642,52 @@
                                 </div>
 
                                 <div class="payment-section__body">
-                                    <div class="payment-element-wrapper">
-                                        <div id="payment-element">
-                                        </div>
-                                        <div id="card-errors" role="alert"></div>
-                                    </div>
-
-                                    <div class="paypal-divider">
-                                        <span class="paypal-divider__text">or</span>
-                                    </div>
-
-                                    <div class="paypal-section">
-                                        <div id="paypal-button-container"></div>
-                                        <p class="paypal-section__label">Pay securely with your PayPal account</p>
-                                    </div>
-
-
-
-                                    <div id="payment-authorization" class="payment-authorization">
-                                        <label class="authorize-box" for="authorize-payment">
-                                            <input type="checkbox" id="authorize-payment" name="authorizePayment" class="authorize-checkbox" autocomplete="off">
-                                            <div class="authorize-content">
-                                                <div class="authorize-icon">
-                                                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
-                                                </div>
-                                                <div class="authorize-text">
-                                                    <p class="authorize-text__title">I authorize this payment</p>
-                                                    <p class="authorize-text__subtitle">Confirm to proceed with secure payment</p>
-                                                </div>
+                                    <!-- Main column: Stripe + pay button -->
+                                    <div class="payment-col-main">
+                                        <div class="payment-element-wrapper">
+                                            <div id="payment-element">
                                             </div>
-                                        </label>
+                                            <div id="card-errors" role="alert"></div>
+                                        </div>
+
+                                        <div id="payment-authorization" class="payment-authorization">
+                                            <label class="authorize-box" for="authorize-payment">
+                                                <input type="checkbox" id="authorize-payment" name="authorizePayment" class="authorize-checkbox" autocomplete="off">
+                                                <div class="authorize-content">
+                                                    <div class="authorize-icon">
+                                                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+                                                    </div>
+                                                    <div class="authorize-text">
+                                                        <p class="authorize-text__title">I authorize this payment</p>
+                                                        <p class="authorize-text__subtitle">Confirm to proceed with secure payment</p>
+                                                    </div>
+                                                </div>
+                                            </label>
+                                        </div>
+
+                                        <button type="submit" id="pay-now-btn" class="pay-button" disabled>
+                                            <svg class="pay-button__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+                                            <span id="pay-button-text">Pay Now</span>
+                                        </button>
+
+                                        <div class="secure-badge">
+                                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><polyline points="9 12 11 14 15 10"/></svg>
+                                            <span>Your payment is protected with 256-bit SSL encryption</span>
+                                        </div>
+
+                                        <div class="powered-by">
+                                            <span>Powered by</span>
+                                            <svg viewBox="0 0 60 25" xmlns="http://www.w3.org/2000/svg" width="60" height="25">
+                                                <path fill="#635bff" d="M59.64 14.28h-8.06c.19 1.93 1.6 2.55 3.2 2.55 1.64 0 2.96-.37 4.05-.95v3.32a8.33 8.33 0 0 1-4.56 1.1c-4.01 0-6.83-2.5-6.83-7.48 0-4.19 2.39-7.52 6.3-7.52 3.92 0 5.96 3.28 5.96 7.5 0 .4-.02 1.04-.06 1.48zm-3.67-3.14c0-1.07-.37-2.87-2.22-2.87-1.61 0-2.32 1.64-2.42 2.87h4.64zM40.95 20.3V5.57l4.09-.86v15.58h-4.09zm0-17.87l4.09-.86v3.48l-4.09.86V2.43zm-5.43 8.02c0-1.99-.56-2.87-2.01-2.87-.79 0-1.63.4-2.33.97v11.75h-4.08V9.27c0-2.09-.08-3.48-.16-4.87h3.57l.24 1.55c1.11-.99 2.56-1.8 4.35-1.8 3.52 0 4.5 2.5 4.5 5.95v10.2h-4.08v-9.85zm-15.35 2.08c-1.54-.36-2.32-1.03-2.32-2.03 0-1.15.95-1.87 2.34-1.87.96 0 2.05.28 3.28.89l1.27-3.08a9.49 9.49 0 0 0-4.47-1.15c-3.52 0-6.09 1.98-6.09 5.23 0 2.43 1.55 4.07 4.23 4.79 1.74.44 2.39 1.03 2.39 2.03 0 1.15-.95 1.87-2.71 1.87-1.43 0-3.05-.5-4.29-1.27l-1.34 3.16a10.8 10.8 0 0 0 5.55 1.48c4.01 0 6.5-2.14 6.5-5.47 0-2.63-1.7-4.15-4.34-4.58zM7.65 11.65c0-1.87.73-3.01 2.49-3.01.51 0 .95.08 1.53.24l.72-3.76a6.02 6.02 0 0 0-1.89-.32C7.3 4.8 4.2 7.38 4.2 12.52c0 2.46.56 4.46 1.53 6.06l3.25-.4c-1-.89-1.33-3.39-1.33-6.53z"/>
+                                            </svg>
+                                        </div>
                                     </div>
 
-                                    <button type="submit" id="pay-now-btn" class="pay-button" disabled>
-                                        <svg class="pay-button__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
-                                        <span id="pay-button-text">Pay Now</span>
-                                    </button>
-
-                                    <div class="secure-badge">
-                                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><polyline points="9 12 11 14 15 10"/></svg>
-                                        <span>Your payment is protected with 256-bit SSL encryption</span>
-                                    </div>
-
-                                    <div class="powered-by">
-                                        <span>Powered by</span>
-                                        <svg viewBox="0 0 60 25" xmlns="http://www.w3.org/2000/svg" width="60" height="25">
-                                            <path fill="#635bff" d="M59.64 14.28h-8.06c.19 1.93 1.6 2.55 3.2 2.55 1.64 0 2.96-.37 4.05-.95v3.32a8.33 8.33 0 0 1-4.56 1.1c-4.01 0-6.83-2.5-6.83-7.48 0-4.19 2.39-7.52 6.3-7.52 3.92 0 5.96 3.28 5.96 7.5 0 .4-.02 1.04-.06 1.48zm-3.67-3.14c0-1.07-.37-2.87-2.22-2.87-1.61 0-2.32 1.64-2.42 2.87h4.64zM40.95 20.3V5.57l4.09-.86v15.58h-4.09zm0-17.87l4.09-.86v3.48l-4.09.86V2.43zm-5.43 8.02c0-1.99-.56-2.87-2.01-2.87-.79 0-1.63.4-2.33.97v11.75h-4.08V9.27c0-2.09-.08-3.48-.16-4.87h3.57l.24 1.55c1.11-.99 2.56-1.8 4.35-1.8 3.52 0 4.5 2.5 4.5 5.95v10.2h-4.08v-9.85zm-15.35 2.08c-1.54-.36-2.32-1.03-2.32-2.03 0-1.15.95-1.87 2.34-1.87.96 0 2.05.28 3.28.89l1.27-3.08a9.49 9.49 0 0 0-4.47-1.15c-3.52 0-6.09 1.98-6.09 5.23 0 2.43 1.55 4.07 4.23 4.79 1.74.44 2.39 1.03 2.39 2.03 0 1.15-.95 1.87-2.71 1.87-1.43 0-3.05-.5-4.29-1.27l-1.34 3.16a10.8 10.8 0 0 0 5.55 1.48c4.01 0 6.5-2.14 6.5-5.47 0-2.63-1.7-4.15-4.34-4.58zM7.65 11.65c0-1.87.73-3.01 2.49-3.01.51 0 .95.08 1.53.24l.72-3.76a6.02 6.02 0 0 0-1.89-.32C7.3 4.8 4.2 7.38 4.2 12.52c0 2.46.56 4.46 1.53 6.06l3.25-.4c-1-.89-1.33-3.39-1.33-6.53z"/>
-                                        </svg>
+                                    <!-- Alt column: PayPal -->
+                                    <div class="payment-col-alt">
+                                        <span class="payment-col-alt__label">or pay with</span>
+                                        <div id="paypal-button-container"></div>
+                                        <p class="payment-col-alt__sublabel">Pay securely with your PayPal account</p>
                                     </div>
                                 </div>
                             </div>

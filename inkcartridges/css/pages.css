@@ -2981,7 +2981,7 @@
     align-items: flex-start;
     justify-content: space-between;
     gap: var(--spacing-lg);
-    margin-bottom: var(--spacing-md);
+    margin-bottom: 8px;
 }
 
 .checkout-page__title {
@@ -3548,7 +3548,7 @@
 }
 
 /* Checkout Progress */
-.checkout-progress {
+.checkout-progress:not(.checkout-progress--compact) {
     margin-bottom: var(--spacing-lg);
 }
 
@@ -3955,7 +3955,7 @@
 
 /* Checkout Page */
 .checkout-page {
-    padding: var(--spacing-md) 0 var(--spacing-3xl);
+    padding: 4px 0 var(--spacing-3xl);
 }
 
 .checkout-page__title {
@@ -3984,7 +3984,7 @@
 }
 
 /* Checkout Progress */
-.checkout-progress {
+.checkout-progress:not(.checkout-progress--compact) {
     margin-bottom: var(--spacing-2xl);
 }
 
