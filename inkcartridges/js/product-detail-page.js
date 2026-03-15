@@ -400,6 +400,7 @@
             if (info.isCompatible) {
                 badge.textContent = 'COMPATIBLE';
                 badge.hidden = false;
+                document.querySelector('.product-detail__layout').classList.add('product-detail__layout--compatible');
             } else {
                 badge.textContent = 'GENUINE';
                 badge.hidden = false;
@@ -469,6 +470,11 @@
                     productImageEl.classList.add('product-gallery__main--color-only');
                     productImageEl.closest('.product-detail__layout').classList.add('product-detail__layout--color-only');
                     productImageEl.innerHTML = `<div class="product-gallery__color-block" style="${colorStyle}"></div>`;
+                } else if (info.isCompatible) {
+                    // Compatible with no known color — default to black (matches search card behavior in products.js)
+                    productImageEl.classList.add('product-gallery__main--color-only');
+                    productImageEl.closest('.product-detail__layout').classList.add('product-detail__layout--color-only');
+                    productImageEl.innerHTML = `<div class="product-gallery__color-block" style="background-color: #1a1a1a;"></div>`;
                 } else {
                     productImageEl.innerHTML = `<img src="/assets/images/placeholder-product.svg" alt="${Security.escapeAttr(info.displayName)}" style="max-width: 100%; height: auto;">`;
                 }
@@ -554,13 +560,22 @@
                 }).join(', ');
 
                 const html = `
-                    <div class="product-printers-banner" style="margin-top: var(--spacing-xl);">
-                        <strong>For Use In:</strong>
-                        <span>${printerLinks}</span>
+                    <div class="product-printers-wrap">
+                        <div class="container">
+                            <div class="product-printers-banner">
+                                <strong>For Use In:</strong>
+                                <span>${printerLinks}</span>
+                            </div>
+                        </div>
                     </div>
                 `;
 
-                descriptionEl.insertAdjacentHTML('beforeend', html);
+                const insertTarget = document.querySelector('.related-products') || document.querySelector('.product-tabs');
+                if (insertTarget) {
+                    insertTarget.insertAdjacentHTML('beforebegin', html);
+                } else {
+                    descriptionEl.insertAdjacentHTML('beforeend', html);
+                }
             } catch (error) {
                 // Silently fail — compatible printers are optional
             }
@@ -653,6 +668,13 @@
                 grid.innerHTML = related.map(p => Products.renderCard(p)).join('');
                 Products.bindImageFallbacks(grid);
                 Products.bindAddToCartEvents(grid);
+
+                const titleEl = section.querySelector('.related-products__title');
+                if (titleEl) {
+                    const code = info.manufacturer_part_number || info.sku;
+                    titleEl.textContent = `Products related to ${code}`;
+                }
+
                 section.hidden = false;
             } catch (e) {
                 // Related products are optional
