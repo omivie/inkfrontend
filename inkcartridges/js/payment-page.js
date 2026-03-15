@@ -355,10 +355,38 @@
             });
 
             // Create and mount PaymentElement
+            // disabledPaymentMethods: ['link'] suppresses the Stripe Link "Save my info" section
             const paymentElement = this.elements.create('payment', {
-                layout: 'tabs'
+                layout: 'tabs',
+                disabledPaymentMethods: ['link'],
+                defaultValues: {
+                    billingDetails: {
+                        name: `${this.checkoutData.firstName || ''} ${this.checkoutData.lastName || ''}`.trim(),
+                        email: this.checkoutData.email || '',
+                        phone: this.checkoutData.phone || ''
+                    }
+                }
             });
             paymentElement.mount('#payment-element');
+
+            // Inject custom "Save for faster checkout" toggle below card errors
+            const cardErrors = document.getElementById('card-errors');
+            if (cardErrors) {
+                const toggleHTML = `<div id="save-info-toggle" class="save-info-toggle">
+  <label class="save-info-toggle__label">
+    <input type="checkbox" id="save-info-checkbox" class="save-info-toggle__checkbox">
+    <span class="save-info-toggle__icon">&#9889;</span>
+    <span class="save-info-toggle__text">Save my details for faster checkout next time</span>
+  </label>
+</div>`;
+                cardErrors.insertAdjacentHTML('afterend', toggleHTML);
+                const saveCheckbox = document.getElementById('save-info-checkbox');
+                if (saveCheckbox) {
+                    saveCheckbox.addEventListener('change', (e) => {
+                        this.saveDetailsForFutureCheckout(e.target.checked);
+                    });
+                }
+            }
 
             // Handle PaymentElement events
             paymentElement.on('change', (event) => {
@@ -381,6 +409,31 @@
             });
 
             DebugLog.log('Stripe PaymentElement initialized successfully');
+        },
+
+        /**
+         * Save or clear checkout details in localStorage for future auto-fill
+         */
+        saveDetailsForFutureCheckout(enabled) {
+            if (enabled && this.checkoutData) {
+                const info = {
+                    email: this.checkoutData.email || '',
+                    firstName: this.checkoutData.firstName || '',
+                    lastName: this.checkoutData.lastName || '',
+                    phone: this.checkoutData.phone || '',
+                    address1: this.checkoutData.address1 || '',
+                    address2: this.checkoutData.address2 || '',
+                    city: this.checkoutData.city || '',
+                    region: this.checkoutData.region || '',
+                    postcode: this.checkoutData.postcode || '',
+                    savedAt: Date.now()
+                };
+                localStorage.setItem('savedCheckoutInfo', JSON.stringify(info));
+                DebugLog.log('Saved checkout details for future auto-fill');
+            } else {
+                localStorage.removeItem('savedCheckoutInfo');
+                DebugLog.log('Cleared saved checkout details');
+            }
         },
 
         // Note: Apple Pay / Google Pay are handled natively by PaymentElement

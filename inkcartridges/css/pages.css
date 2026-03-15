@@ -10001,3 +10001,79 @@
     background: #f0f7fc;
     color: #267FB5;
 }
+
+/* Save info toggle (payment page) */
+.save-info-toggle {
+    margin: 12px 0;
+    padding: 12px 16px;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    background: #f8fafc;
+}
+.save-info-toggle__label {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    cursor: pointer;
+    font-size: 14px;
+    color: #475569;
+}
+.save-info-toggle__checkbox {
+    width: 16px;
+    height: 16px;
+    accent-color: #267FB5;
+    cursor: pointer;
+    flex-shrink: 0;
+}
+.save-info-toggle__icon {
+    font-size: 16px;
+    line-height: 1;
+}
+
+/* Use saved details banner (checkout page) */
+.use-saved-details-banner {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 16px;
+    margin-bottom: 16px;
+    border: 1px solid #bfdbfe;
+    border-radius: 8px;
+    background: #eff6ff;
+    font-size: 14px;
+    color: #1e40af;
+}
+.use-saved-details-banner__icon {
+    font-size: 16px;
+    flex-shrink: 0;
+}
+.use-saved-details-banner__text {
+    flex: 1;
+}
+.use-saved-details-banner__btn {
+    padding: 6px 14px;
+    border: none;
+    border-radius: 6px;
+    background: #267FB5;
+    color: #fff;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    flex-shrink: 0;
+}
+.use-saved-details-banner__btn:hover {
+    background: #1d6a9e;
+}
+.use-saved-details-banner__dismiss {
+    border: none;
+    background: none;
+    color: #64748b;
+    font-size: 16px;
+    cursor: pointer;
+    padding: 0 4px;
+    line-height: 1;
+    flex-shrink: 0;
+}
+.use-saved-details-banner__dismiss:hover {
+    color: #1e40af;
+}

@@ -49,6 +49,9 @@
             // Restore any saved checkout state (after auth prefill, so auth data takes priority)
             this.restoreCheckoutState();
 
+            // Show "Use saved details" banner if user previously saved their info
+            this.offerSavedCheckoutInfo();
+
             // Setup accordion for checkout sections
             this.setupAccordion();
 
@@ -613,6 +616,51 @@
         },
 
         // Restore checkout state from session storage
+        // Offer to pre-fill form from previously saved checkout info (localStorage)
+        offerSavedCheckoutInfo() {
+            try {
+                const raw = localStorage.getItem('savedCheckoutInfo');
+                if (!raw) return;
+
+                const info = JSON.parse(raw);
+                // Expire after 90 days
+                if (!info.savedAt || Date.now() - info.savedAt > 90 * 24 * 60 * 60 * 1000) {
+                    localStorage.removeItem('savedCheckoutInfo');
+                    return;
+                }
+
+                const form = document.getElementById('checkout-form');
+                if (!form) return;
+
+                const esc = typeof Security !== 'undefined' ? Security.escapeHtml : (s) => s;
+                const name = [info.firstName, info.lastName].filter(Boolean).join(' ');
+                const banner = document.createElement('div');
+                banner.id = 'use-saved-details-banner';
+                banner.className = 'use-saved-details-banner';
+                banner.innerHTML = `<span class="use-saved-details-banner__icon">&#9889;</span>
+<span class="use-saved-details-banner__text">Use saved details for <strong>${esc(name || info.email || 'your account')}</strong>?</span>
+<button type="button" class="use-saved-details-banner__btn" id="apply-saved-details-btn">Apply</button>
+<button type="button" class="use-saved-details-banner__dismiss" id="dismiss-saved-details-btn" aria-label="Dismiss">&#x2715;</button>`;
+
+                form.insertAdjacentElement('beforebegin', banner);
+
+                document.getElementById('apply-saved-details-btn').addEventListener('click', () => {
+                    const fields = ['email', 'phone', 'firstName', 'lastName', 'address1', 'address2', 'city', 'region', 'postcode'];
+                    fields.forEach(field => {
+                        const el = document.querySelector(`[name="${field}"]`);
+                        if (el && info[field]) el.value = info[field];
+                    });
+                    banner.remove();
+                });
+
+                document.getElementById('dismiss-saved-details-btn').addEventListener('click', () => {
+                    banner.remove();
+                });
+            } catch (e) {
+                // Fail silently — not critical
+            }
+        },
+
         restoreCheckoutState() {
             try {
                 // Check both storage keys - checkoutData (from payment page flow) and checkout_state (older format)
