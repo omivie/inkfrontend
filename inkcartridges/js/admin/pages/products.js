@@ -206,143 +206,246 @@ async function loadProducts() {
   loadCompatCounts();
 }
 
-async function openProductDrawer(product) {
-  const drawer = Drawer.open({
-    title: product.name || product.sku || 'Product',
-    width: '640px',
-  });
-  if (!drawer) return;
-  drawer.setLoading(true);
+let _activeModal = null;
 
+function closeProductModal() {
+  if (!_activeModal) return;
+  const modal = _activeModal;
+  _activeModal = null;
+  modal.classList.remove('open');
+  setTimeout(() => modal.remove(), 220);
+}
+
+async function openProductDrawer(product) {
+  // Close any existing modal first
+  if (_activeModal) closeProductModal();
+
+  // Build modal shell immediately (loading state)
+  const modal = document.createElement('div');
+  modal.className = 'admin-product-modal';
+  modal.innerHTML = `
+    <div class="admin-product-modal__inner">
+      <div class="admin-product-modal__header">
+        <button class="admin-product-modal__close" data-action="close" aria-label="Close">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
+        </button>
+        <div class="admin-product-modal__title">${esc(product.name || product.sku || 'Product')}</div>
+        <div class="admin-product-modal__actions">
+          <button class="admin-btn admin-btn--ghost admin-btn--sm" data-action="cancel">Cancel</button>
+          <button class="admin-btn admin-btn--primary admin-btn--sm" data-action="save">${icon('orders', 14, 14)} Save Changes</button>
+        </div>
+      </div>
+      <div class="admin-product-modal__layout">
+        <div class="admin-product-modal__sidebar" id="pm-sidebar">
+          <div style="display:flex;align-items:center;justify-content:center;height:120px;background:var(--surface-hover);border-radius:var(--radius);color:var(--text-muted)">
+            ${icon('products', 32, 32)}
+          </div>
+          <div class="admin-product-modal__sidebar-stats">
+            <div class="admin-product-modal__sidebar-stat"><span>Loading&hellip;</span></div>
+          </div>
+        </div>
+        <div class="admin-product-modal__main">
+          <div class="admin-product-modal__tabs" id="pm-tabs"></div>
+          <div class="admin-product-modal__tab-panels" id="pm-panels">
+            <div style="padding:40px;text-align:center;color:var(--text-muted)">Loading product&hellip;</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+
+  document.body.appendChild(modal);
+  _activeModal = modal;
+
+  // Trigger open animation on next frame
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => modal.classList.add('open'));
+  });
+
+  // Wire close handlers immediately
+  modal.querySelector('[data-action="close"]').addEventListener('click', closeProductModal);
+
+  // Escape key
+  const onKeyDown = (e) => {
+    if (e.key === 'Escape' && _activeModal === modal) {
+      closeProductModal();
+      document.removeEventListener('keydown', onKeyDown);
+    }
+  };
+  document.addEventListener('keydown', onKeyDown);
+  modal._removeKeyHandler = () => document.removeEventListener('keydown', onKeyDown);
+
+  // Fetch full product data
   const full = await AdminAPI.getProduct(product.id) || product;
   const isOwner = AdminAuth.isOwner();
 
-  let html = '';
+  // Update title with full name
+  modal.querySelector('.admin-product-modal__title').textContent = full.name || full.sku || 'Product';
 
-  // Image Gallery
-  html += `<div class="admin-detail-block">`;
-  html += `<div class="admin-detail-block__title" style="display:flex;justify-content:space-between;align-items:center">Images <button class="admin-btn admin-btn--ghost admin-btn--sm" data-action="generate-image">${icon('download', 12, 12)} Generate</button></div>`;
-  html += `<div class="admin-product-gallery" id="product-gallery">`;
-  // Build image list: prefer images array, fall back to primary_image / image_url
+  // Build sidebar
+  buildProductModalSidebar(modal, full);
+
+  // Build tabbed content
+  buildProductModalTabs(modal, full, isOwner);
+
+  // Wire action buttons
+  bindProductModalActions(modal, full);
+}
+
+function buildProductModalSidebar(modal, full) {
+  const sidebar = modal.querySelector('#pm-sidebar');
+
+  // Build image list
   let images = full.images || [];
   if (!images.length) {
     const fallback = full.primary_image || full.image_url || '';
     const fbRaw = typeof fallback === 'object' ? (fallback.image_url || fallback.url || (fallback.path && typeof storageUrl === 'function' ? storageUrl(fallback.path) : fallback.path) || '') : fallback;
-    const fbUrl = fbRaw;
-    if (fbUrl) images = [{ image_url: fbUrl, id: '' }];
+    if (fbRaw) images = [{ image_url: fbRaw, id: '' }];
   }
+
+  let galleryHtml = `<div class="admin-product-gallery" id="product-gallery">`;
   if (images.length) {
     for (const img of images) {
       const rawPath = typeof img === 'string' ? img : img.image_url || img.url || img.thumbnail_url || (img.path && typeof storageUrl === 'function' ? storageUrl(img.path) : img.path) || '';
-      const url = rawPath;
       const imgId = typeof img === 'object' ? (img.id || img.image_id || '') : '';
-      if (!url) continue;
-      html += `<div class="admin-product-gallery__item" data-image-id="${esc(String(imgId))}" data-image-url="${esc(url)}">`;
-      html += `<img src="${esc(url)}" alt="${esc((typeof img === 'object' ? img.alt_text : '') || full.name || '')}" loading="lazy" data-fallback="broken-parent">`;
-      html += `<button class="admin-product-gallery__delete" data-delete-image="${esc(String(imgId))}" title="Remove image"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg></button>`;
-      html += `</div>`;
+      if (!rawPath) continue;
+      galleryHtml += `<div class="admin-product-gallery__item" data-image-id="${esc(String(imgId))}" data-image-url="${esc(rawPath)}">`;
+      galleryHtml += `<img src="${esc(rawPath)}" alt="${esc((typeof img === 'object' ? img.alt_text : '') || full.name || '')}" loading="lazy" data-fallback="broken-parent">`;
+      galleryHtml += `<button class="admin-product-gallery__delete" data-delete-image="${esc(String(imgId))}" title="Remove image"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg></button>`;
+      galleryHtml += `</div>`;
     }
   } else {
-    html += `<div class="admin-product-gallery__empty">No images yet</div>`;
+    galleryHtml += `<div class="admin-product-gallery__empty">No images yet</div>`;
   }
-  html += `</div>`;
-  html += `<div class="admin-dropzone" id="image-dropzone"><span>${icon('download', 20, 20)} Drop images or click to upload</span><input type="file" accept="image/png,image/jpeg,image/webp,image/gif" multiple id="image-upload" hidden></div>`;
-  html += `</div>`;
+  galleryHtml += `</div>`;
 
-  // Basic Info
-  html += `<div class="admin-detail-block">`;
-  html += `<div class="admin-detail-block__title">Basic Info</div>`;
-  html += formGroup('SKU', `<input class="admin-input" id="edit-sku" value="${esc(full.sku || '')}">`);
-  html += formGroup('Name', `<input class="admin-input" id="edit-name" value="${esc(full.name || '')}">`);
-  html += formGroup('Description', `<textarea class="admin-textarea" id="edit-description" rows="3">${esc(full.description || '')}</textarea>`);
-  html += `<div class="admin-form-row">`;
-  html += formGroup('Brand', buildBrandSelect(full.brand_id || full.brand));
-  html += formGroup('Product Type', buildSelect('edit-type', [
-    { value: 'ink_cartridge',   label: 'Ink Cartridge' },
-    { value: 'ink_bottle',      label: 'Ink Bottle' },
-    { value: 'toner_cartridge', label: 'Toner Cartridge' },
-    { value: 'drum_unit',       label: 'Drum Unit' },
-    { value: 'waste_toner',     label: 'Waste Toner' },
-    { value: 'belt_unit',       label: 'Belt Unit' },
-    { value: 'fuser_kit',       label: 'Fuser Kit' },
-    { value: 'fax_film',        label: 'Fax Film' },
-    { value: 'fax_film_refill', label: 'Fax Film Refill' },
-    { value: 'ribbon',          label: 'Ribbon' },
-    { value: 'label_tape',      label: 'Label Tape' },
-    { value: 'photo_paper',     label: 'Photo Paper' },
-    { value: 'printer',         label: 'Printer' },
-  ], full.product_type));
-  html += `</div>`;
-  html += `<div class="admin-form-row">`;
-  html += formGroup('Color', `<input class="admin-input" id="edit-color" value="${esc(full.color || '')}">`);
-  html += formGroup('Source', buildSelect('edit-source', ['genuine', 'compatible', 'remanufactured'], full.source));
-  html += `</div>`;
-  html += `</div>`;
+  // Quick stats
+  const active = full.is_active !== false;
+  const qty = full.stock_quantity;
+  const price = full.retail_price;
+  const statsHtml = `
+    <div class="admin-product-modal__sidebar-stats">
+      <div class="admin-product-modal__sidebar-stat">
+        <span class="admin-badge admin-badge--${active ? 'completed' : 'failed'}">${active ? 'Active' : 'Inactive'}</span>
+      </div>
+      ${qty != null ? `<div class="admin-product-modal__sidebar-stat"><strong>${qty}</strong><span>in stock</span></div>` : ''}
+      ${price != null ? `<div class="admin-product-modal__sidebar-stat"><strong>${formatPrice(price)}</strong><span>NZD</span></div>` : ''}
+    </div>
+  `;
 
-  // Pricing
-  html += `<div class="admin-detail-block">`;
-  html += `<div class="admin-detail-block__title">Pricing</div>`;
-  html += `<div class="admin-form-row">`;
-  html += formGroup('Retail Price', `<input class="admin-input" id="edit-retail-price" type="number" step="0.01" value="${full.retail_price || ''}">`);
-  html += formGroup('Compare Price', `<input class="admin-input" id="edit-compare-price" type="number" step="0.01" value="${full.compare_at_price || full.compare_price || ''}">`);
-  html += `</div>`;
-  if (isOwner) {
-    html += formGroup('Supplier Price', `<input class="admin-input" id="edit-cost-price" type="number" step="0.01" value="${full.cost_price || ''}">`);
-  }
-  html += `</div>`;
+  sidebar.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;font-size:12px;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.05em">
+      Images
+      <button class="admin-btn admin-btn--ghost admin-btn--sm" data-action="generate-image">${icon('download', 12, 12)} Generate</button>
+    </div>
+    ${galleryHtml}
+    <div class="admin-dropzone" id="image-dropzone">
+      <span>${icon('download', 20, 20)} Drop images or click to upload</span>
+      <input type="file" accept="image/png,image/jpeg,image/webp,image/gif" multiple id="image-upload" hidden>
+    </div>
+    ${statsHtml}
+  `;
+}
 
-  // Inventory
-  html += `<div class="admin-detail-block">`;
-  html += `<div class="admin-detail-block__title">Inventory</div>`;
-  html += `<div class="admin-form-row">`;
-  html += formGroup('Stock Qty', `<input class="admin-input" id="edit-stock" type="number" min="0" value="${full.stock_quantity ?? ''}">`);
-  html += formGroup('Low Stock Threshold', `<input class="admin-input" id="edit-low-threshold" type="number" min="0" value="${full.low_stock_threshold ?? ''}">`);
-  html += `</div>`;
-  html += `<div class="admin-form-row">`;
-  html += formGroup('Weight (kg)', `<input class="admin-input" id="edit-weight" type="number" step="0.01" min="0" value="${full.weight_kg ?? ''}">`);
-  html += `<div class="admin-form-group"></div>`;
-  html += `</div>`;
-  html += `<div class="admin-form-row">`;
-  html += formGroup('Active', toggleHtml('edit-active', full.is_active !== false));
-  html += formGroup('Track Inventory', toggleHtml('edit-track-inventory', full.track_inventory !== false));
-  html += `</div>`;
-  html += `</div>`;
+function buildProductModalTabs(modal, full, isOwner) {
+  const tabsEl = modal.querySelector('#pm-tabs');
+  const panelsEl = modal.querySelector('#pm-panels');
 
-  // SEO
-  html += `<div class="admin-detail-block">`;
-  html += `<div class="admin-detail-block__title" style="display:flex;justify-content:space-between;align-items:center">SEO <button class="admin-btn admin-btn--ghost admin-btn--sm" data-action="generate-seo">${icon('search', 12, 12)} Generate</button></div>`;
-  html += formGroup('Meta Title', `<input class="admin-input" id="edit-meta-title" value="${esc(full.meta_title || '')}">`);
-  html += formGroup('Meta Description', `<textarea class="admin-textarea" id="edit-meta-desc" rows="2">${esc(full.meta_description || '')}</textarea>`);
-  html += formGroup('Meta Keywords', `<input class="admin-input" id="edit-meta-keywords" value="${esc(full.meta_keywords || '')}">`);
-  html += `</div>`;
+  const tabs = ['Basic Info', 'Pricing', 'Inventory', 'SEO', 'Advanced'];
+  tabsEl.innerHTML = tabs.map((t, i) =>
+    `<button class="admin-product-modal__tab${i === 0 ? ' active' : ''}" data-tab="${i}">${esc(t)}</button>`
+  ).join('');
 
-  // Compatibility
-  html += `<div class="admin-detail-block">`;
-  html += `<div class="admin-detail-block__title">Compatibility</div>`;
-  html += formGroup('Page Yield', `<input class="admin-input" id="edit-page-yield" type="number" min="0" value="${full.page_yield ?? ''}">`);
-  html += `<div class="admin-form-group"><label id="compat-heading">Compatible Printers</label><div class="admin-compat-printers" id="compat-printers"><span class="admin-text-muted">Loading&hellip;</span></div></div>`;
-  html += `</div>`;
+  // Basic Info panel
+  let basicHtml = `
+    <div class="admin-form-row">
+      ${formGroup('SKU', `<input class="admin-input" id="edit-sku" value="${esc(full.sku || '')}">`)}
+      ${formGroup('Name', `<input class="admin-input" id="edit-name" value="${esc(full.name || '')}">`)}
+    </div>
+    ${formGroup('Description', `<textarea class="admin-textarea" id="edit-description" rows="4">${esc(full.description || '')}</textarea>`)}
+    <div class="admin-form-row">
+      ${formGroup('Brand', buildBrandSelect(full.brand_id || full.brand))}
+      ${formGroup('Product Type', buildSelect('edit-type', [
+        { value: 'ink_cartridge',   label: 'Ink Cartridge' },
+        { value: 'ink_bottle',      label: 'Ink Bottle' },
+        { value: 'toner_cartridge', label: 'Toner Cartridge' },
+        { value: 'drum_unit',       label: 'Drum Unit' },
+        { value: 'waste_toner',     label: 'Waste Toner' },
+        { value: 'belt_unit',       label: 'Belt Unit' },
+        { value: 'fuser_kit',       label: 'Fuser Kit' },
+        { value: 'fax_film',        label: 'Fax Film' },
+        { value: 'fax_film_refill', label: 'Fax Film Refill' },
+        { value: 'ribbon',          label: 'Ribbon' },
+        { value: 'label_tape',      label: 'Label Tape' },
+        { value: 'photo_paper',     label: 'Photo Paper' },
+        { value: 'printer',         label: 'Printer' },
+      ], full.product_type))}
+    </div>
+    <div class="admin-form-row">
+      ${formGroup('Color', `<input class="admin-input" id="edit-color" value="${esc(full.color || '')}">`)}
+      ${formGroup('Source', buildSelect('edit-source', ['genuine', 'compatible', 'remanufactured'], full.source))}
+    </div>
+  `;
 
-  // Tags
-  html += `<div class="admin-detail-block">`;
-  html += `<div class="admin-detail-block__title">Tags</div>`;
-  html += formGroup('Tags (comma-separated)', `<input class="admin-input" id="edit-tags" value="${esc((full.tags || []).join(', '))}">`);
-  html += `</div>`;
+  // Pricing panel
+  let pricingHtml = `
+    <div class="admin-form-row">
+      ${formGroup('Retail Price', `<input class="admin-input" id="edit-retail-price" type="number" step="0.01" value="${full.retail_price || ''}">`)}
+      ${formGroup('Compare Price', `<input class="admin-input" id="edit-compare-price" type="number" step="0.01" value="${full.compare_at_price || full.compare_price || ''}">`)}
+    </div>
+    ${isOwner ? formGroup('Supplier Price', `<input class="admin-input" id="edit-cost-price" type="number" step="0.01" value="${full.cost_price || ''}">`) : ''}
+  `;
 
-  // Admin Notes
-  html += `<div class="admin-detail-block">`;
-  html += `<div class="admin-detail-block__title">Admin Notes</div>`;
-  html += formGroup('Internal Notes', `<textarea class="admin-textarea" id="edit-admin-notes" rows="3">${esc(full.admin_notes || '')}</textarea>`);
-  html += `</div>`;
+  // Inventory panel
+  let inventoryHtml = `
+    <div class="admin-form-row">
+      ${formGroup('Stock Qty', `<input class="admin-input" id="edit-stock" type="number" min="0" value="${full.stock_quantity ?? ''}">`)}
+      ${formGroup('Low Stock Threshold', `<input class="admin-input" id="edit-low-threshold" type="number" min="0" value="${full.low_stock_threshold ?? ''}">`)}
+    </div>
+    <div class="admin-form-row">
+      ${formGroup('Weight (kg)', `<input class="admin-input" id="edit-weight" type="number" step="0.01" min="0" value="${full.weight_kg ?? ''}">`)}
+      <div class="admin-form-group"></div>
+    </div>
+    <div class="admin-form-row">
+      ${formGroup('Active', toggleHtml('edit-active', full.is_active !== false))}
+      ${formGroup('Track Inventory', toggleHtml('edit-track-inventory', full.track_inventory !== false))}
+    </div>
+  `;
 
-  // Save button
-  html += `<div style="display:flex;gap:8px;justify-content:flex-end;padding-top:12px;border-top:1px solid var(--border)">`;
-  html += `<button type="button" class="admin-btn admin-btn--ghost" data-action="cancel">Cancel</button>`;
-  html += `<button type="button" class="admin-btn admin-btn--primary" data-action="save">${icon('orders', 14, 14)} Save Changes</button>`;
-  html += `</div>`;
+  // SEO panel
+  let seoHtml = `
+    <div style="display:flex;justify-content:flex-end;margin-bottom:12px">
+      <button class="admin-btn admin-btn--ghost admin-btn--sm" data-action="generate-seo">${icon('search', 12, 12)} Generate</button>
+    </div>
+    ${formGroup('Meta Title', `<input class="admin-input" id="edit-meta-title" value="${esc(full.meta_title || '')}">`)}
+    ${formGroup('Meta Description', `<textarea class="admin-textarea" id="edit-meta-desc" rows="3">${esc(full.meta_description || '')}</textarea>`)}
+    ${formGroup('Meta Keywords', `<input class="admin-input" id="edit-meta-keywords" value="${esc(full.meta_keywords || '')}">`)}
+  `;
 
-  drawer.setBody(html);
-  bindProductDrawerActions(drawer, full);
+  // Advanced panel
+  let advancedHtml = `
+    ${formGroup('Page Yield', `<input class="admin-input" id="edit-page-yield" type="number" min="0" value="${full.page_yield ?? ''}">`)}
+    <div class="admin-form-group">
+      <label id="compat-heading">Compatible Printers</label>
+      <div class="admin-compat-printers" id="compat-printers"><span class="admin-text-muted">Loading&hellip;</span></div>
+    </div>
+    ${formGroup('Tags (comma-separated)', `<input class="admin-input" id="edit-tags" value="${esc((full.tags || []).join(', '))}">`)}
+    ${formGroup('Internal Notes', `<textarea class="admin-textarea" id="edit-admin-notes" rows="3">${esc(full.admin_notes || '')}</textarea>`)}
+  `;
+
+  const panelContents = [basicHtml, pricingHtml, inventoryHtml, seoHtml, advancedHtml];
+  panelsEl.innerHTML = panelContents.map((content, i) =>
+    `<div class="admin-product-modal__tab-panel${i === 0 ? ' active' : ''}" data-panel="${i}">${content}</div>`
+  ).join('');
+
+  // Wire tab switching
+  tabsEl.addEventListener('click', (e) => {
+    const btn = e.target.closest('.admin-product-modal__tab');
+    if (!btn) return;
+    const idx = btn.dataset.tab;
+    tabsEl.querySelectorAll('.admin-product-modal__tab').forEach(t => t.classList.toggle('active', t.dataset.tab === idx));
+    panelsEl.querySelectorAll('.admin-product-modal__tab-panel').forEach(p => p.classList.toggle('active', p.dataset.panel === idx));
+  });
 }
 
 function formGroup(label, inputHtml) {
@@ -377,25 +480,23 @@ function toggleHtml(id, checked) {
   return `<label class="admin-toggle"><input type="checkbox" id="${id}"${checked ? ' checked' : ''}><span class="admin-toggle__slider"></span></label>`;
 }
 
-function bindProductDrawerActions(drawer, product) {
-  const body = drawer.body;
-
+function bindProductModalActions(modal, product) {
   // Enter key triggers save (except in textareas)
-  body.addEventListener('keydown', (e) => {
+  modal.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && e.target.tagName !== 'TEXTAREA') {
       e.preventDefault();
       e.stopPropagation();
-      body.querySelector('[data-action="save"]')?.click();
+      modal.querySelector('[data-action="save"]')?.click();
     }
   });
 
   // Async-load compatible printers (non-blocking)
   if (product.sku && window.API?.getCompatiblePrinters) {
-    const container = body.querySelector('#compat-printers');
+    const container = modal.querySelector('#compat-printers');
     window.API.getCompatiblePrinters(product.sku).then(response => {
       const printers = response?.data?.compatible_printers || response?.data?.printers || response?.data || [];
       const count = Array.isArray(printers) ? printers.length : 0;
-      const heading = body.querySelector('#compat-heading');
+      const heading = modal.querySelector('#compat-heading');
       if (heading) heading.textContent = `Compatible Printers (${count})`;
       if (container) {
         if (count > 0) {
@@ -412,22 +513,23 @@ function bindProductDrawerActions(drawer, product) {
         }
       }
     }).catch(() => {
+      const container = modal.querySelector('#compat-printers');
       if (container) container.innerHTML = '<span class="admin-text-muted">Could not load</span>';
     });
   } else {
-    const container = body.querySelector('#compat-printers');
+    const container = modal.querySelector('#compat-printers');
     if (container) container.innerHTML = '<span class="admin-text-muted">No SKU</span>';
   }
 
   // Bind image error fallbacks
-  body.querySelectorAll('img[data-fallback="broken-parent"]').forEach(img => {
+  modal.querySelectorAll('img[data-fallback="broken-parent"]').forEach(img => {
     img.addEventListener('error', function() {
       this.parentElement.classList.add('admin-product-gallery__item--broken');
     }, { once: true });
   });
 
   // Generate image for this product
-  body.querySelector('[data-action="generate-image"]')?.addEventListener('click', async (e) => {
+  modal.querySelector('[data-action="generate-image"]')?.addEventListener('click', async (e) => {
     const btn = e.currentTarget;
     btn.disabled = true;
     btn.textContent = 'Generating\u2026';
@@ -435,7 +537,6 @@ function bindProductDrawerActions(drawer, product) {
       const success = await generateProductImage(product);
       if (success) {
         Toast.success('Image generated and saved');
-        // Re-open drawer to refresh gallery
         const updated = await AdminAPI.getProduct(product.id);
         if (updated) openProductDrawer(updated);
         loadProducts();
@@ -449,8 +550,8 @@ function bindProductDrawerActions(drawer, product) {
   });
 
   // Image upload (supports multiple files)
-  const dropzone = body.querySelector('#image-dropzone');
-  const fileInput = body.querySelector('#image-upload');
+  const dropzone = modal.querySelector('#image-dropzone');
+  const fileInput = modal.querySelector('#image-upload');
   const ALLOWED_TYPES = ['image/png', 'image/jpeg', 'image/webp', 'image/gif'];
 
   async function uploadFiles(files) {
@@ -486,7 +587,7 @@ function bindProductDrawerActions(drawer, product) {
   }
 
   // Image delete buttons
-  body.querySelectorAll('[data-delete-image]').forEach(btn => {
+  modal.querySelectorAll('[data-delete-image]').forEach(btn => {
     btn.addEventListener('click', async (e) => {
       e.stopPropagation();
       const imageId = btn.dataset.deleteImage;
@@ -494,10 +595,8 @@ function bindProductDrawerActions(drawer, product) {
       if (item) item.style.opacity = '0.4';
       try {
         if (imageId) {
-          // Has a backend image ID — delete via API
           await AdminAPI.deleteProductImage(product.id, imageId);
         } else {
-          // Fallback image (from image_url/primary_image) — clear it on the product
           await AdminAPI.updateProduct(product.id, {
             image_url: null,
             primary_image: null,
@@ -507,8 +606,7 @@ function bindProductDrawerActions(drawer, product) {
         }
         Toast.success('Image removed');
         if (item) item.remove();
-        // Show empty state if no images left
-        const gallery = body.querySelector('#product-gallery');
+        const gallery = modal.querySelector('#product-gallery');
         if (gallery && !gallery.querySelector('.admin-product-gallery__item')) {
           gallery.innerHTML = '<div class="admin-product-gallery__empty">No images yet</div>';
         }
@@ -519,8 +617,8 @@ function bindProductDrawerActions(drawer, product) {
     });
   });
 
-  // Generate SEO for this product and auto-save
-  body.querySelector('[data-action="generate-seo"]')?.addEventListener('click', async () => {
+  // Generate SEO
+  modal.querySelector('[data-action="generate-seo"]')?.addEventListener('click', async () => {
     const seo = generateSEO(product);
     const data = {
       retail_price: product.retail_price,
@@ -532,10 +630,9 @@ function bindProductDrawerActions(drawer, product) {
 
     try {
       await AdminAPI.updateProduct(product.id, data);
-      // Update the form fields to reflect saved values
-      const titleEl = body.querySelector('#edit-meta-title');
-      const descEl = body.querySelector('#edit-meta-desc');
-      const keywordsEl = body.querySelector('#edit-meta-keywords');
+      const titleEl = modal.querySelector('#edit-meta-title');
+      const descEl = modal.querySelector('#edit-meta-desc');
+      const keywordsEl = modal.querySelector('#edit-meta-keywords');
       if (titleEl) titleEl.value = seo.meta_title;
       if (descEl) descEl.value = seo.meta_description;
       if (keywordsEl) keywordsEl.value = seo.meta_keywords;
@@ -546,13 +643,13 @@ function bindProductDrawerActions(drawer, product) {
   });
 
   // Cancel
-  body.querySelector('[data-action="cancel"]')?.addEventListener('click', () => Drawer.close());
+  modal.querySelector('[data-action="cancel"]')?.addEventListener('click', closeProductModal);
 
   // Save
-  body.querySelector('[data-action="save"]')?.addEventListener('click', async () => {
-    const val = (id) => body.querySelector(`#${id}`)?.value?.trim() ?? '';
+  modal.querySelector('[data-action="save"]')?.addEventListener('click', async () => {
+    const val = (id) => modal.querySelector(`#${id}`)?.value?.trim() ?? '';
     const numVal = (id) => { const v = val(id); return v !== '' ? Number(v) : null; };
-    const chk = (id) => !!body.querySelector(`#${id}`)?.checked;
+    const chk = (id) => !!modal.querySelector(`#${id}`)?.checked;
 
     const tagsRaw = val('edit-tags');
     const tagsArr = tagsRaw ? tagsRaw.split(',').map(t => t.trim()).filter(Boolean) : [];
@@ -587,7 +684,7 @@ function bindProductDrawerActions(drawer, product) {
     try {
       await AdminAPI.updateProduct(product.id, data);
       Toast.success('Product updated');
-      Drawer.close();
+      closeProductModal();
       loadProducts();
     } catch (e) {
       Toast.error(`Save failed: ${e.message}`);

@@ -23,7 +23,7 @@
         { "key": "Permissions-Policy", "value": "camera=(), microphone=(), geolocation=()" },
         {
           "key": "Content-Security-Policy",
-          "value": "default-src 'self'; script-src 'self' https://cdn.jsdelivr.net https://js.stripe.com https://www.googletagmanager.com https://static.cloudflareinsights.com https://challenges.cloudflare.com https://www.paypal.com https://*.paypal.com https://*.paypalobjects.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://fonts.gstatic.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' https: data:; connect-src 'self' https://ink-backend-zaeq.onrender.com https://*.supabase.co https://*.stripe.com https://*.google-analytics.com https://cdn.jsdelivr.net https://challenges.cloudflare.com https://static.cloudflareinsights.com https://*.paypal.com https://*.paypalobjects.com; frame-ancestors 'none'; frame-src https://js.stripe.com https://challenges.cloudflare.com https://*.paypal.com https://*.paypalobjects.com; upgrade-insecure-requests"
+          "value": "default-src 'self'; script-src 'self' https://cdn.jsdelivr.net https://js.stripe.com https://www.googletagmanager.com https://static.cloudflareinsights.com https://challenges.cloudflare.com https://www.paypal.com https://*.paypal.com https://*.paypalobjects.com 'sha256-0JmmTUETUXDHkK3pNmvl/MoDE5MN0DDwFCnqKmhR2Go='; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://fonts.gstatic.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' https: data:; connect-src 'self' https://ink-backend-zaeq.onrender.com https://*.supabase.co https://*.stripe.com https://*.google-analytics.com https://cdn.jsdelivr.net https://challenges.cloudflare.com https://static.cloudflareinsights.com https://*.paypal.com https://*.paypalobjects.com https://fonts.googleapis.com; frame-ancestors 'none'; frame-src https://js.stripe.com https://challenges.cloudflare.com https://*.paypal.com https://*.paypalobjects.com; upgrade-insecure-requests"
         }
       ]
     }
@@ -43,7 +43,22 @@
     { "source": "/brother-h12140-laser-printer", "destination": "/html/shop?search=Brother+HL-2140", "permanent": true },
     { "source": "/Brother-MFC-9340-cdw-Printer-Toner-Cartridges-TN251-TN255", "destination": "/html/shop?search=Brother+MFC-9340CDW", "permanent": true },
     { "source": "/hl2130-brother-laser-printer-uses-tn2030-toner-cartridge-and-dr2225-drum", "destination": "/html/shop?search=Brother+HL-2130", "permanent": true },
-    { "source": "/hp-no.564-oem-inkjet-cartridges", "destination": "/html/shop?search=HP+564", "permanent": true }
+    { "source": "/hp-no.564-oem-inkjet-cartridges", "destination": "/html/shop?search=HP+564", "permanent": true },
+
+    { "source": "/([^/]*[Rr]ibbon[^/]*)", "destination": "/html/ribbons", "permanent": true },
+    { "source": "/([^/]*[Tt]ypewriter[^/]*)", "destination": "/html/ribbons", "permanent": true },
+
+    { "source": "/[^/]*-[Ii]nk-[Cc]artridges?-([^/]+)", "destination": "/html/shop?search=$1", "permanent": true },
+    { "source": "/[^/]*-[Ii]nkjet-[Cc]artridges?-([^/]+)", "destination": "/html/shop?search=$1", "permanent": true },
+    { "source": "/[^/]*-[Tt]oner-[Cc]artridges?-([^/]+)", "destination": "/html/shop?search=$1", "permanent": true },
+
+    { "source": "/([^/]+)-[Ll]aser-[Pp]rinter", "destination": "/html/shop?search=$1", "permanent": true },
+    { "source": "/([^/]+)-[Ii]nkjet-[Pp]rinter", "destination": "/html/shop?search=$1", "permanent": true },
+    { "source": "/([^/]+)-[Pp]rinter", "destination": "/html/shop?search=$1", "permanent": true },
+
+    { "source": "/([^/]+)-[Ii]nk-[Cc]artridges?", "destination": "/html/shop?search=$1", "permanent": true },
+    { "source": "/([^/]+)-[Ii]nkjet-[Cc]artridges?", "destination": "/html/shop?search=$1", "permanent": true },
+    { "source": "/([^/]+)-[Tt]oner-[Cc]artridges?", "destination": "/html/shop?search=$1", "permanent": true }
   ],
   "rewrites": [
     { "source": "/products/:slug/:sku", "destination": "/html/product" },
