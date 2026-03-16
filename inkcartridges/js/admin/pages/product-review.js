@@ -1,7 +1,7 @@
 /**
  * Product Review Page — Review queue for newly imported products
  */
-import { AdminAPI, icon, esc, updateReviewBadge } from '../app.js';
+import { AdminAPI, FilterState, icon, esc, updateReviewBadge } from '../app.js';
 import { DataTable } from '../components/table.js';
 import { Drawer } from '../components/drawer.js';
 import { Toast } from '../components/toast.js';
@@ -287,6 +287,7 @@ export default {
   title: 'Product Review',
 
   async init(container) {
+    FilterState.showBar(false);
     _container = container;
     _page = 1;
     _search = '';

@@ -1,7 +1,7 @@
 /**
  * Contact Emails Page — Owner-only: Manage contact form recipient emails
  */
-import { AdminAPI, icon, esc } from '../app.js';
+import { AdminAPI, FilterState, icon, esc } from '../app.js';
 import { Toast } from '../components/toast.js';
 
 let _container = null;
@@ -104,6 +104,7 @@ export default {
   title: 'Contact Emails',
 
   async init(container) {
+    FilterState.showBar(false);
     _container = container;
     await loadEmails();
   },

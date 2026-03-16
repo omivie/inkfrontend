@@ -129,6 +129,7 @@ export default {
   title: 'Settings',
 
   async init(container) {
+    FilterState.showBar(false);
     _container = container;
     await loadSettings();
   },

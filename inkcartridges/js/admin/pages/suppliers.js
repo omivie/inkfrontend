@@ -110,6 +110,7 @@ export default {
   title: 'Suppliers',
 
   async init(container) {
+    FilterState.showBar(false);
     _container = container;
     await loadSuppliers();
   },

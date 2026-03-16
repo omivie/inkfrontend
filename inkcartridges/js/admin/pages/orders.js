@@ -1,5 +1,5 @@
 /**
- * Orders Page — Triage queue with detail drawer
+ * Orders Page — Full-page modal detail + bulk selection/delete
  */
 import { AdminAuth, FilterState, AdminAPI, icon, esc, exportDropdown, bindExportDropdown } from '../app.js';
 import { DataTable } from '../components/table.js';
@@ -16,6 +16,8 @@ let _page = 1;
 let _search = '';
 let _sort = 'created_at';
 let _sortDir = 'desc';
+let _activeModal = null;
+let _bulkBar = null;
 
 function statusBadge(status) {
   const s = String(status || '').toLowerCase();
@@ -89,7 +91,7 @@ async function loadOrders() {
     order: _sortDir,
   };
   const data = await AdminAPI.getOrders(filters, _page, 20);
-  if (!_table) return; // destroyed during await
+  if (!_table) return;
   if (!data) {
     _table.setData([], null);
     return;
@@ -103,51 +105,214 @@ async function loadOrders() {
   _table.setData(rows, pagination);
 }
 
-async function openOrderDrawer(order) {
-  const drawer = Drawer.open({
-    title: `Order ${esc(order.order_number || order.id?.slice(0, 8) || '')}`,
-  });
-  if (!drawer) return;
-  drawer.setLoading(true);
+// ---- Bulk bar ----
 
-  // Fetch full order + events
+function updateBulkBar(selected) {
+  const count = selected.size;
+  if (count === 0) {
+    if (_bulkBar) { _bulkBar.remove(); _bulkBar = null; }
+    return;
+  }
+  if (!_bulkBar) {
+    _bulkBar = document.createElement('div');
+    _bulkBar.className = 'admin-bulk-bar';
+    document.body.appendChild(_bulkBar);
+  }
+  _bulkBar.innerHTML = `
+    <span class="admin-bulk-bar__count">${count} selected</span>
+    <div class="admin-bulk-bar__actions">
+      <button class="admin-btn admin-btn--sm admin-btn--danger" data-bulk="delete">Delete</button>
+      <button class="admin-btn admin-btn--sm admin-btn--ghost" data-bulk="clear">Clear</button>
+    </div>
+  `;
+  _bulkBar.querySelector('[data-bulk="delete"]').addEventListener('click', bulkDelete);
+  _bulkBar.querySelector('[data-bulk="clear"]').addEventListener('click', () => {
+    if (_table) _table.clearSelection();
+    updateBulkBar(new Set());
+  });
+}
+
+async function bulkDelete() {
+  if (!_table) return;
+  const selected = _table.getSelected();
+  const count = selected.size;
+  if (count === 0) return;
+
+  Modal.confirm({
+    title: 'Delete Orders',
+    message: `Permanently delete ${count} order${count > 1 ? 's' : ''}? This cannot be undone.`,
+    confirmLabel: `Delete ${count}`,
+    confirmClass: 'admin-btn--danger',
+    onConfirm: async () => {
+      const ids = [...selected];
+      let done = 0;
+      let failed = 0;
+      Toast.info(`Deleting ${count} order${count > 1 ? 's' : ''}\u2026`);
+      for (let i = 0; i < ids.length; i += 5) {
+        const batch = ids.slice(i, i + 5);
+        const results = await Promise.allSettled(batch.map(id => AdminAPI.deleteOrder(id)));
+        for (const r of results) {
+          if (r.status === 'fulfilled') done++;
+          else failed++;
+        }
+      }
+      if (_table) _table.clearSelection();
+      updateBulkBar(new Set());
+      if (failed > 0) {
+        Toast.error(`${done} deleted, ${failed} failed`);
+      } else {
+        Toast.success(`${done} order${done > 1 ? 's' : ''} deleted`);
+      }
+      loadOrders();
+    },
+  });
+}
+
+// ---- Full-page order modal ----
+
+function closeOrderModal() {
+  if (!_activeModal) return;
+  const modal = _activeModal;
+  _activeModal = null;
+  if (modal._removeKeyHandler) modal._removeKeyHandler();
+  modal.classList.remove('open');
+  setTimeout(() => modal.remove(), 220);
+}
+
+async function openOrderModal(order) {
+  if (_activeModal) closeOrderModal();
+
+  const modal = document.createElement('div');
+  modal.className = 'admin-product-modal';
+  modal.innerHTML = `
+    <div class="admin-product-modal__inner">
+      <div class="admin-product-modal__header">
+        <button class="admin-product-modal__close" data-action="close" aria-label="Close">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
+        </button>
+        <div class="admin-product-modal__title">${esc(order.order_number || order.id?.slice(0, 8) || 'Order')}</div>
+        <div class="admin-product-modal__actions" id="om-header-actions">
+          ${statusBadge(order.status)}
+        </div>
+      </div>
+      <div class="admin-product-modal__layout">
+        <div class="admin-product-modal__sidebar" id="om-sidebar">
+          <div style="padding:8px 0;color:var(--text-muted);font-size:13px">Loading&hellip;</div>
+        </div>
+        <div class="admin-product-modal__main">
+          <div class="admin-product-modal__tabs" id="om-tabs"></div>
+          <div class="admin-product-modal__tab-panels" id="om-panels">
+            <div style="padding:40px;text-align:center;color:var(--text-muted)">Loading order&hellip;</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+
+  document.body.appendChild(modal);
+  _activeModal = modal;
+
+  requestAnimationFrame(() => requestAnimationFrame(() => modal.classList.add('open')));
+
+  modal.querySelector('[data-action="close"]').addEventListener('click', closeOrderModal);
+
+  const onKeyDown = (e) => {
+    if (e.key === 'Escape' && _activeModal === modal) {
+      closeOrderModal();
+      document.removeEventListener('keydown', onKeyDown);
+    }
+  };
+  document.addEventListener('keydown', onKeyDown);
+  modal._removeKeyHandler = () => document.removeEventListener('keydown', onKeyDown);
+
+  // Fetch full data
   const [fullOrder, events] = await Promise.all([
     AdminAPI.getOrder(order.id),
     AdminAPI.getOrderEvents(order.id),
   ]);
+  if (_activeModal !== modal) return; // closed during fetch
 
   const o = fullOrder || order;
-  let html = '';
 
-  // Order Info
-  html += `<div class="admin-detail-block">`;
-  html += `<div class="admin-detail-block__title">Order Details</div>`;
-  html += detailRow('Status', statusBadge(o.status));
-  html += detailRow('Created', formatDateTime(o.created_at));
+  // Update header
+  modal.querySelector('.admin-product-modal__title').textContent = o.order_number || o.id?.slice(0, 8) || 'Order';
+  modal.querySelector('#om-header-actions').innerHTML = statusBadge(o.status);
+
+  // Build sidebar
+  buildOrderModalSidebar(modal, o);
+
+  // Build tabs
+  buildOrderModalTabs(modal, o, events || []);
+}
+
+function buildOrderModalSidebar(modal, o) {
   const profile = o.user_profile || o.user_profiles || o.customer || {};
   const custName = o.customer_name || profile.full_name
     || [profile.first_name, profile.last_name].filter(Boolean).join(' ')
-    || o.customer_email || profile.email || MISSING;
-  html += detailRow('Customer', esc(custName));
-  html += detailRow('Email', esc(o.customer_email || profile.email || MISSING));
+    || MISSING;
+  const custEmail = o.customer_email || profile.email || MISSING;
   const orderTotal = o.total_amount ?? o.total;
-  if (orderTotal != null) html += detailRow('Total', `<span class="mono">${formatPrice(orderTotal)}</span>`);
-  if (o.shipping_tier) html += detailRow('Shipping', esc(o.shipping_tier) + (o.shipping_fee != null ? ` (${formatPrice(o.shipping_fee)})` : ''));
-  if (o.delivery_zone) html += detailRow('Zone', esc(o.delivery_zone));
-  if (o.carrier || o.tracking_number) {
-    html += detailRow('Carrier', esc(o.carrier || MISSING));
-    html += detailRow('Tracking', esc(o.tracking_number || MISSING));
-  }
-  if (o.paid_at) html += detailRow('Paid', formatDateTime(o.paid_at));
-  if (o.shipped_at) html += detailRow('Shipped', formatDateTime(o.shipped_at));
-  if (o.delivered_at) html += detailRow('Delivered', formatDateTime(o.delivered_at));
-  if (o.completed_at) html += detailRow('Completed', formatDateTime(o.completed_at));
-  if (o.cancelled_at) html += detailRow('Cancelled', formatDateTime(o.cancelled_at));
+  const isOwner = AdminAuth.isOwner();
+
+  let html = `<div class="admin-product-modal__sidebar-stats">`;
+  html += sidebarStat('Customer', esc(custName));
+  html += sidebarStat('Email', esc(custEmail));
+  if (orderTotal != null) html += sidebarStat('Total', `<strong>${formatPrice(orderTotal)}</strong>`);
+  if (o.shipping_fee != null) html += sidebarStat('Shipping', formatPrice(o.shipping_fee));
+  if (o.shipping_tier) html += sidebarStat('Tier', esc(o.shipping_tier));
+  if (o.delivery_zone) html += sidebarStat('Zone', esc(o.delivery_zone));
+  html += sidebarStat('Created', formatDate(o.created_at));
+  if (o.paid_at) html += sidebarStat('Paid', formatDate(o.paid_at));
+  if (o.shipped_at) html += sidebarStat('Shipped', formatDate(o.shipped_at));
+  if (o.delivered_at) html += sidebarStat('Delivered', formatDate(o.delivered_at));
+  if (o.completed_at) html += sidebarStat('Completed', formatDate(o.completed_at));
+  if (o.cancelled_at) html += sidebarStat('Cancelled', formatDate(o.cancelled_at));
+  if (o.source) html += sidebarStat('Source', esc(o.source));
   html += `</div>`;
 
-  // Shipping Address
+  modal.querySelector('#om-sidebar').innerHTML = html;
+}
+
+function sidebarStat(label, value) {
+  return `<div class="admin-product-modal__sidebar-stat"><span>${label}</span><strong>${value}</strong></div>`;
+}
+
+function buildOrderModalTabs(modal, o, events) {
+  const showCost = AdminAuth.isOwner();
+  const tabs = ['Items', 'Shipping', 'Timeline', 'Actions'];
+  const tabsEl = modal.querySelector('#om-tabs');
+  const panelsEl = modal.querySelector('#om-panels');
+
+  tabsEl.innerHTML = tabs.map((t, i) =>
+    `<button class="admin-product-modal__tab${i === 0 ? ' active' : ''}" data-tab="${i}">${t}</button>`
+  ).join('');
+
+  // Items panel
+  let itemsHtml = '';
+  if (o.items?.length) {
+    itemsHtml += `<table class="admin-order-items"><thead><tr>`;
+    itemsHtml += `<th>Product</th><th>SKU</th><th>Qty</th><th>Price</th>`;
+    if (showCost) itemsHtml += `<th>Cost</th>`;
+    itemsHtml += `</tr></thead><tbody>`;
+    for (const item of o.items) {
+      const itemPrice = item.sell_price ?? item.unit_price ?? item.price;
+      itemsHtml += `<tr>
+        <td class="cell-truncate">${esc(item.product_name || item.name || item.description || MISSING)}</td>
+        <td class="mono">${esc(item.sku || MISSING)}</td>
+        <td>${item.qty ?? item.quantity ?? MISSING}</td>
+        <td class="mono">${itemPrice != null ? formatPrice(itemPrice) : MISSING}</td>
+        ${showCost ? `<td class="mono">${item.supplier_cost_snapshot != null ? formatPrice(item.supplier_cost_snapshot) : MISSING}</td>` : ''}
+      </tr>`;
+    }
+    itemsHtml += `</tbody></table>`;
+  } else {
+    itemsHtml = `<p class="admin-text-muted">${MISSING} No items</p>`;
+  }
+
+  // Shipping panel
   const addr = o.shipping_address || {};
   const hasAddr = addr.address_line1 || o.shipping_address_line1;
+  let shippingHtml = '';
   if (hasAddr) {
     const name = addr.recipient_name || o.shipping_recipient_name || '';
     const phone = addr.phone || o.shipping_phone || '';
@@ -157,98 +322,96 @@ async function openOrderDrawer(order) {
     const region = addr.region || o.shipping_region || '';
     const postal = addr.postal_code || o.shipping_postal_code || '';
     const country = addr.country || o.shipping_country || 'New Zealand';
-    const parts = [
-      name, phone, line1, line2,
+    const parts = [name, phone, line1, line2,
       city && region ? `${city}, ${region} ${postal}`.trim() : (city || region),
       country,
     ].filter(Boolean).map(p => esc(p)).join('<br>');
-    html += `<div class="admin-detail-block">`;
-    html += `<div class="admin-detail-block__title">Shipping Address</div>`;
-    html += `<address style="font-style:normal;line-height:1.6;font-size:0.9rem">${parts}</address>`;
-    html += `</div>`;
+    shippingHtml += `<div class="admin-detail-block"><div class="admin-detail-block__title">Delivery Address</div>`;
+    shippingHtml += `<address style="font-style:normal;line-height:1.8;font-size:0.9rem">${parts}</address></div>`;
   }
-
-  // Items
-  if (o.items?.length) {
-    html += `<div class="admin-detail-block">`;
-    html += `<div class="admin-detail-block__title">Items (${o.items.length})</div>`;
-    html += `<table class="admin-order-items"><thead><tr>`;
-    html += `<th>Product</th><th>SKU</th><th>Qty</th><th>Price</th>`;
-    const showCost = AdminAuth.isOwner();
-    if (showCost) html += `<th>Cost</th>`;
-    html += `</tr></thead><tbody>`;
-    for (const item of o.items) {
-      html += `<tr>`;
-      html += `<td class="cell-truncate">${esc(item.product_name || item.name || MISSING)}</td>`;
-      html += `<td class="mono">${esc(item.sku || MISSING)}</td>`;
-      html += `<td>${item.qty ?? item.quantity ?? MISSING}</td>`;
-      const itemPrice = item.sell_price ?? item.unit_price ?? item.price;
-      html += `<td class="mono">${itemPrice != null ? formatPrice(itemPrice) : MISSING}</td>`;
-      if (showCost) {
-        html += `<td class="mono">${item.supplier_cost_snapshot != null ? formatPrice(item.supplier_cost_snapshot) : MISSING}</td>`;
-      }
-      html += `</tr>`;
-    }
-    html += `</tbody></table></div>`;
+  if (o.carrier || o.tracking_number) {
+    shippingHtml += `<div class="admin-detail-block"><div class="admin-detail-block__title">Tracking</div>`;
+    shippingHtml += detailRow('Carrier', esc(o.carrier || MISSING));
+    shippingHtml += detailRow('Tracking #', esc(o.tracking_number || MISSING));
+    shippingHtml += `</div>`;
   }
+  if (!shippingHtml) shippingHtml = `<p class="admin-text-muted">${MISSING} No shipping info</p>`;
 
-  // Timeline
-  html += `<div class="admin-detail-block">`;
-  html += `<div class="admin-detail-block__title">Timeline</div>`;
-  if (events?.length) {
-    html += `<div class="admin-timeline">`;
+  // Timeline panel
+  let timelineHtml = '';
+  if (events.length) {
+    timelineHtml = `<div class="admin-timeline">`;
     for (const ev of events) {
-      const dotClass = ev.type === 'status_change' ? 'cyan' : (ev.type === 'refund_created' || ev.type === 'refund') ? 'magenta' : 'yellow';
-      html += `<div class="admin-timeline__item">`;
-      html += `<div class="admin-timeline__dot admin-timeline__dot--${dotClass}"></div>`;
-      html += `<div class="admin-timeline__time">${formatDateTime(ev.created_at)}</div>`;
-      html += `<div class="admin-timeline__text"><strong>${esc(ev.type || 'Event')}</strong>`;
-      if (ev.payload?.note) html += ` \u2014 ${esc(ev.payload.note)}`;
-      if (ev.payload?.status) html += ` \u2192 ${statusBadge(ev.payload.status)}`;
-      html += `</div></div>`;
+      const dotClass = ev.type === 'status_change' ? 'cyan'
+        : (ev.type === 'refund_created' || ev.type === 'refund') ? 'magenta' : 'yellow';
+      timelineHtml += `<div class="admin-timeline__item">
+        <div class="admin-timeline__dot admin-timeline__dot--${dotClass}"></div>
+        <div class="admin-timeline__time">${formatDateTime(ev.created_at)}</div>
+        <div class="admin-timeline__text"><strong>${esc(ev.type || 'Event')}</strong>`;
+      if (ev.payload?.note) timelineHtml += ` \u2014 ${esc(ev.payload.note)}`;
+      if (ev.payload?.status) timelineHtml += ` \u2192 ${statusBadge(ev.payload.status)}`;
+      timelineHtml += `</div></div>`;
     }
-    html += `</div>`;
+    timelineHtml += `</div>`;
   } else {
-    html += `<p class="admin-text-muted" data-tooltip="Requires order_events table">${MISSING} No timeline events</p>`;
+    timelineHtml = `<p class="admin-text-muted" data-tooltip="Requires order_events table">${MISSING} No timeline events</p>`;
   }
-  html += `</div>`;
 
-  // Actions
-  html += `<div class="admin-detail-block">`;
-  html += `<div class="admin-detail-block__title">Actions</div>`;
-  html += `<div style="display:flex;flex-wrap:wrap;gap:8px">`;
-  html += `<button class="admin-btn admin-btn--ghost admin-btn--sm" data-action="update-status">${icon('orders', 14, 14)} Update Status</button>`;
-  html += `<button class="admin-btn admin-btn--ghost admin-btn--sm" data-action="add-tracking">${icon('fulfillment', 14, 14)} Add Tracking</button>`;
-  html += `<button class="admin-btn admin-btn--ghost admin-btn--sm" data-action="add-note">${icon('dashboard', 14, 14)} Add Note</button>`;
-  html += `<button class="admin-btn admin-btn--danger admin-btn--sm" data-action="create-refund">${icon('refunds', 14, 14)} Refund</button>`;
-  html += `</div></div>`;
+  // Actions panel
+  let actionsHtml = `<div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:24px">`;
+  actionsHtml += `<button class="admin-btn admin-btn--ghost" data-action="update-status">${icon('orders', 14, 14)} Update Status</button>`;
+  actionsHtml += `<button class="admin-btn admin-btn--ghost" data-action="add-tracking">${icon('fulfillment', 14, 14)} Add Tracking</button>`;
+  actionsHtml += `<button class="admin-btn admin-btn--ghost" data-action="add-note">${icon('dashboard', 14, 14)} Add Note</button>`;
+  actionsHtml += `<button class="admin-btn admin-btn--danger" data-action="create-refund">${icon('refunds', 14, 14)} Refund</button>`;
+  if (o.status === 'cancelled') {
+    actionsHtml += `<button class="admin-btn admin-btn--ghost" style="color:var(--danger);border-color:var(--danger)" data-action="delete">${icon('trash', 14, 14)} Delete Order</button>`;
+  }
+  actionsHtml += `</div>`;
 
-  drawer.setBody(html);
-  bindDrawerActions(drawer, o);
+  panelsEl.innerHTML = [itemsHtml, shippingHtml, timelineHtml, actionsHtml]
+    .map((html, i) => `<div class="admin-product-modal__tab-panel${i === 0 ? ' active' : ''}">${html}</div>`)
+    .join('');
+
+  // Tab switching
+  tabsEl.querySelectorAll('.admin-product-modal__tab').forEach(btn => {
+    btn.addEventListener('click', () => {
+      tabsEl.querySelectorAll('.admin-product-modal__tab').forEach(b => b.classList.remove('active'));
+      panelsEl.querySelectorAll('.admin-product-modal__tab-panel').forEach(p => p.classList.remove('active'));
+      btn.classList.add('active');
+      panelsEl.children[Number(btn.dataset.tab)].classList.add('active');
+    });
+  });
+
+  // Bind action buttons
+  bindModalActions(modal, o);
 }
 
 function detailRow(label, value) {
   return `<div class="admin-detail-row"><span class="admin-detail-row__label">${label}</span><span class="admin-detail-row__value">${value}</span></div>`;
 }
 
-function bindDrawerActions(drawer, order) {
-  const body = drawer.body;
+function bindModalActions(modal, order) {
+  modal.querySelector('[data-action="update-status"]')?.addEventListener('click', () => showStatusModal(order));
+  modal.querySelector('[data-action="add-tracking"]')?.addEventListener('click', () => showTrackingModal(order));
+  modal.querySelector('[data-action="add-note"]')?.addEventListener('click', () => showNoteModal(order));
+  modal.querySelector('[data-action="create-refund"]')?.addEventListener('click', () => showRefundModal(order));
 
-  body.querySelector('[data-action="update-status"]')?.addEventListener('click', () => {
-    showStatusModal(order);
-  });
-
-  body.querySelector('[data-action="add-tracking"]')?.addEventListener('click', () => {
-    showTrackingModal(order);
-  });
-
-  body.querySelector('[data-action="add-note"]')?.addEventListener('click', () => {
-    showNoteModal(order);
-  });
-
-  body.querySelector('[data-action="create-refund"]')?.addEventListener('click', () => {
-    showRefundModal(order);
-  });
+  if (order.status === 'cancelled') {
+    modal.querySelector('[data-action="delete"]')?.addEventListener('click', () => {
+      Modal.confirm({
+        title: 'Delete Order',
+        message: `Permanently delete ${esc(order.order_number || order.id?.slice(0, 8) || 'this order')}? This cannot be undone.`,
+        confirmLabel: 'Delete',
+        confirmClass: 'admin-btn--danger',
+        onConfirm: async () => {
+          await AdminAPI.deleteOrder(order.id);
+          Toast.success('Order deleted');
+          closeOrderModal();
+          loadOrders();
+        },
+      });
+    });
+  }
 }
 
 // Backend state machine: valid transitions from each status
@@ -270,7 +433,6 @@ function showStatusModal(order) {
     return;
   }
 
-  // If shipped is an option, show tracking fields inline
   const canShip = allowed.includes('shipped');
   const canCancel = allowed.includes('cancelled');
 
@@ -319,7 +481,6 @@ function showStatusModal(order) {
   });
   if (!modal) return;
 
-  // Show/hide tracking fields when shipped is selected
   const statusSelect = modal.body.querySelector('#modal-status');
   const trackingFields = modal.body.querySelector('#tracking-fields');
   const cancelConfirm = modal.body.querySelector('#cancel-confirm');
@@ -328,7 +489,6 @@ function showStatusModal(order) {
     if (trackingFields) trackingFields.style.display = statusSelect.value === 'shipped' ? '' : 'none';
     if (cancelConfirm) cancelConfirm.style.display = statusSelect.value === 'cancelled' ? '' : 'none';
   });
-  // Trigger initial state
   statusSelect.dispatchEvent(new Event('change'));
 
   modal.footer.querySelector('[data-action="cancel"]').addEventListener('click', () => Modal.close());
@@ -336,7 +496,6 @@ function showStatusModal(order) {
     const newStatus = statusSelect.value;
     const body = { status: newStatus };
 
-    // Shipped requires tracking
     if (newStatus === 'shipped') {
       const carrier = modal.body.querySelector('#modal-carrier')?.value;
       const tracking = modal.body.querySelector('#modal-tracking')?.value?.trim();
@@ -348,7 +507,6 @@ function showStatusModal(order) {
       body.tracking_number = tracking;
     }
 
-    // Processing → cancelled requires confirmation
     if (newStatus === 'cancelled' && current === 'processing') {
       body.confirm_processing_cancellation = true;
     }
@@ -357,7 +515,7 @@ function showStatusModal(order) {
       await AdminAPI.updateOrderStatus(order.id, newStatus, body);
       Toast.success(`Order updated to ${newStatus}`);
       Modal.close();
-      Drawer.close();
+      closeOrderModal();
       loadOrders();
     } catch (e) {
       Toast.error(`Failed: ${e.message}`);
@@ -409,7 +567,7 @@ function showTrackingModal(order) {
       await AdminAPI.updateTracking(order.id, carrier, tracking, shippedAt || null);
       Toast.success('Tracking info saved');
       Modal.close();
-      Drawer.close();
+      closeOrderModal();
       loadOrders();
     } catch (e) {
       Toast.error(`Failed: ${e.message}`);
@@ -509,7 +667,6 @@ function showRefundModal(order) {
     const reasonCode = modal.body.querySelector('#refund-reason').value;
     const reasonNote = modal.body.querySelector('#refund-note').value.trim();
 
-    // Validation
     if (!amount || amount <= 0) { Toast.warning('Enter a valid amount'); return; }
     if (amount > total) { Toast.warning('Amount cannot exceed order total.'); return; }
     if (!canFullRefund && amount >= total) {
@@ -525,12 +682,142 @@ function showRefundModal(order) {
       await AdminAPI.createRefund(order.id, { type, amount, reasonCode, reasonNote });
       Toast.success(`${type === 'chargeback' ? 'Chargeback' : 'Refund'} created for ${formatPrice(amount)}`);
       Modal.close();
-      Drawer.close();
+      closeOrderModal();
       loadOrders();
     } catch (e) {
       Toast.error(`Failed: ${e.message}`);
       btn.disabled = false;
       btn.textContent = 'Create Refund';
+    }
+  });
+}
+
+// ---- Create Order Drawer ----
+
+function openCreateOrderDrawer() {
+  const drawer = Drawer.open({ title: 'New Order', width: '600px' });
+  if (!drawer) return;
+
+  const formHtml = `
+    <form id="create-order-form" novalidate>
+      <div class="admin-form-group">
+        <label>Customer Name *</label>
+        <input class="admin-input" type="text" name="customer_name" placeholder="Full name" required>
+      </div>
+      <div class="admin-form-group">
+        <label>Customer Email *</label>
+        <input class="admin-input" type="email" name="customer_email" placeholder="email@example.com" required>
+      </div>
+      <div class="admin-form-group">
+        <label>Status</label>
+        <select class="admin-select" name="status">
+          <option value="pending">Pending (Invoice sent)</option>
+          <option value="paid">Paid (Already paid)</option>
+        </select>
+      </div>
+
+      <div class="admin-detail-block__title" style="margin:16px 0 8px">Line Items</div>
+      <div id="line-items">
+        <div class="create-order-item" style="display:grid;grid-template-columns:1fr 64px 96px 32px;gap:8px;align-items:start;margin-bottom:8px">
+          <input class="admin-input" type="text" name="description" placeholder="Description *" required>
+          <input class="admin-input" type="number" name="qty" placeholder="Qty" min="1" value="1" style="text-align:center">
+          <input class="admin-input" type="number" name="unit_price" placeholder="Price" min="0" step="0.01">
+          <button type="button" class="admin-btn admin-btn--ghost admin-btn--sm remove-item-btn" style="display:none;padding:6px" title="Remove">${icon('close', 12, 12)}</button>
+        </div>
+      </div>
+      <button type="button" class="admin-btn admin-btn--ghost admin-btn--sm" id="add-item-btn" style="margin-bottom:16px">+ Add Item</button>
+
+      <div class="admin-form-group">
+        <label>Notes <span style="color:var(--text-muted);font-weight:400">(optional)</span></label>
+        <textarea class="admin-textarea" name="notes" rows="3" placeholder="Internal notes\u2026"></textarea>
+      </div>
+
+      <div style="display:flex;justify-content:flex-end;gap:8px;padding-top:8px">
+        <button type="button" class="admin-btn admin-btn--ghost" id="cancel-order-btn">Cancel</button>
+        <button type="submit" class="admin-btn admin-btn--primary" id="submit-order-btn">Create Order</button>
+      </div>
+    </form>
+  `;
+  drawer.setBody(formHtml);
+
+  const body = drawer.body;
+
+  function updateRemoveButtons() {
+    const rows = body.querySelectorAll('.create-order-item');
+    rows.forEach(row => {
+      const btn = row.querySelector('.remove-item-btn');
+      if (btn) btn.style.display = rows.length > 1 ? '' : 'none';
+    });
+  }
+
+  function addItemRow() {
+    const row = document.createElement('div');
+    row.className = 'create-order-item';
+    row.style.cssText = 'display:grid;grid-template-columns:1fr 64px 96px 32px;gap:8px;align-items:start;margin-bottom:8px';
+    row.innerHTML = `
+      <input class="admin-input" type="text" name="description" placeholder="Description *" required>
+      <input class="admin-input" type="number" name="qty" placeholder="Qty" min="1" value="1" style="text-align:center">
+      <input class="admin-input" type="number" name="unit_price" placeholder="Price" min="0" step="0.01">
+      <button type="button" class="admin-btn admin-btn--ghost admin-btn--sm remove-item-btn" style="padding:6px" title="Remove">${icon('close', 12, 12)}</button>
+    `;
+    row.querySelector('.remove-item-btn').addEventListener('click', () => {
+      row.remove();
+      updateRemoveButtons();
+    });
+    body.querySelector('#line-items').appendChild(row);
+    updateRemoveButtons();
+  }
+
+  body.querySelector('.remove-item-btn').addEventListener('click', function () {
+    this.closest('.create-order-item').remove();
+    updateRemoveButtons();
+  });
+
+  body.querySelector('#add-item-btn').addEventListener('click', addItemRow);
+  body.querySelector('#cancel-order-btn').addEventListener('click', () => Drawer.close());
+
+  body.querySelector('#create-order-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const form = e.target;
+    const customerName = form.querySelector('[name="customer_name"]').value.trim();
+    const customerEmail = form.querySelector('[name="customer_email"]').value.trim();
+    const status = form.querySelector('[name="status"]').value;
+    const notes = form.querySelector('[name="notes"]').value.trim();
+
+    const itemRows = body.querySelectorAll('.create-order-item');
+    const items = [];
+    for (const row of itemRows) {
+      const description = row.querySelector('[name="description"]').value.trim();
+      const qty = parseInt(row.querySelector('[name="qty"]').value, 10) || 1;
+      const unit_price = parseFloat(row.querySelector('[name="unit_price"]').value);
+      if (!description || isNaN(unit_price) || unit_price <= 0) continue;
+      items.push({ description, qty, unit_price });
+    }
+
+    if (!customerName) { Toast.warning('Customer name is required'); return; }
+    if (!customerEmail) { Toast.warning('Customer email is required'); return; }
+    if (!items.length) { Toast.warning('Add at least one item with a description and price'); return; }
+
+    const submitBtn = body.querySelector('#submit-order-btn');
+    submitBtn.disabled = true;
+    submitBtn.textContent = 'Creating\u2026';
+
+    try {
+      await AdminAPI.createOrder({
+        customer_name: customerName,
+        customer_email: customerEmail,
+        status,
+        source: 'manual',
+        items,
+        notes: notes || undefined,
+      });
+      Toast.success('Order created');
+      Drawer.close();
+      loadOrders();
+    } catch (e) {
+      Toast.error(e.message || 'Failed to create order');
+      submitBtn.disabled = false;
+      submitBtn.textContent = 'Create Order';
     }
   });
 }
@@ -551,6 +838,7 @@ export default {
   async init(container) {
     _container = container;
     _page = 1;
+    FilterState.setVisibleFilters(['statuses']);
 
     // Header
     const header = document.createElement('div');
@@ -562,6 +850,7 @@ export default {
           <input class="admin-input" type="search" placeholder="Search orders\u2026" id="order-search" style="width:220px;padding-left:32px">
           <span style="position:absolute;left:10px;top:50%;transform:translateY(-50%);color:var(--text-muted)">${icon('search', 14, 14)}</span>
         </div>
+        <button class="admin-btn admin-btn--primary" id="create-order-btn">${icon('plus', 14, 14)} New Order</button>
         ${exportDropdown('export-orders')}
       </div>
     `;
@@ -574,7 +863,9 @@ export default {
     _table = new DataTable(tableContainer, {
       columns: COLUMNS,
       rowKey: 'id',
-      onRowClick: (row) => openOrderDrawer(row),
+      selectable: true,
+      onSelectionChange: (sel) => updateBulkBar(sel),
+      onRowClick: (row) => openOrderModal(row),
       onSort: (key, dir) => { _sort = key; _sortDir = dir; _page = 1; loadOrders(); },
       onPageChange: (page) => { _page = page; loadOrders(); },
       emptyMessage: 'No orders found',
@@ -593,6 +884,9 @@ export default {
       }, 300);
     });
 
+    // New Order
+    header.querySelector('#create-order-btn').addEventListener('click', openCreateOrderDrawer);
+
     // Export
     bindExportDropdown(header, 'export-orders', handleExport);
 
@@ -600,11 +894,14 @@ export default {
   },
 
   destroy() {
+    FilterState.setVisibleFilters(null);
     if (_table) _table.destroy();
     _table = null;
     _container = null;
     _search = '';
     _page = 1;
+    if (_activeModal) closeOrderModal();
+    if (_bulkBar) { _bulkBar.remove(); _bulkBar = null; }
   },
 
   async onFilterChange() {

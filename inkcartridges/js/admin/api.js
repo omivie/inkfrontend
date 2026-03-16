@@ -132,6 +132,26 @@ const AdminAPI = {
     }
   },
 
+  async createOrder(payload) {
+    try {
+      const resp = await window.API.post('/api/admin/orders', payload);
+      return resp?.data ?? null;
+    } catch (e) {
+      DebugLog.warn('[AdminAPI] createOrder failed:', e.message);
+      throw e;
+    }
+  },
+
+  async deleteOrder(orderId) {
+    try {
+      const resp = await window.API.delete(`/api/admin/orders/${orderId}`);
+      return resp?.data ?? null;
+    } catch (e) {
+      DebugLog.warn('[AdminAPI] deleteOrder failed:', e.message);
+      throw e;
+    }
+  },
+
   // ---- Refunds ----
   async getRefunds(filters = {}, page = 1, limit = 20) {
     try {

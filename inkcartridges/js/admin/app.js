@@ -29,6 +29,9 @@ const I = {
   download: '<path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"/>',
   copy: '<rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/>',
   mail: '<path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/>',
+  plus: '<line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>',
+  trash: '<polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6m3 0V4a1 1 0 011-1h4a1 1 0 011 1v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/>',
+  close: '<line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>',
 };
 
 function icon(name, w = 18, h = 18) {
@@ -121,16 +124,18 @@ function renderSidebar() {
         </div>
       </div>
     </div>
-    <button class="admin-sidebar__collapse-btn" id="sidebar-collapse-btn" aria-label="Collapse sidebar">
-      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-        <polyline points="15 18 9 12 15 6"/>
-      </svg>
-    </button>
   `;
 
   sidebar.innerHTML = html;
 
-  document.getElementById('sidebar-collapse-btn').addEventListener('click', toggleCollapse);
+  // Collapse button lives outside sidebar to avoid overflow clipping
+  const collapseBtn = document.createElement('button');
+  collapseBtn.className = 'admin-sidebar__collapse-btn';
+  collapseBtn.id = 'sidebar-collapse-btn';
+  collapseBtn.setAttribute('aria-label', 'Collapse sidebar');
+  collapseBtn.innerHTML = `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>`;
+  document.getElementById('app-shell').appendChild(collapseBtn);
+  collapseBtn.addEventListener('click', toggleCollapse);
 
   // Back to store on user card click
   document.getElementById('user-card').addEventListener('click', () => {
@@ -293,6 +298,9 @@ async function navigate(pageName) {
 
   // Update title
   document.title = `${page.title || pageName} | Admin | InkCartridges.co.nz`;
+
+  // Reset filter bar visibility — page init() will hide it if not needed
+  FilterState.showBar(true);
 
   // Init page
   content.innerHTML = '';

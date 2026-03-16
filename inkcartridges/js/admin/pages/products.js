@@ -158,13 +158,7 @@ function productHasImage(p) {
 async function loadProducts() {
   _table.setLoading(true);
   const filters = { search: _search, sort: _sort, order: _sortDir };
-  // Prefer page-level filter; fall back to global FilterState brands
-  const globalBrands = FilterState.get('brands') || [];
-  if (_brandFilter) {
-    filters.brand = _brandFilter;
-  } else if (globalBrands.length) {
-    filters.brand = globalBrands.join(',');
-  }
+  if (_brandFilter) filters.brand = _brandFilter;
   if (_activeFilter !== '') filters.active = _activeFilter;
 
   // When image filter is active, we need to paginate client-side since
@@ -1531,33 +1525,40 @@ export default {
     if (_container !== container) return; // destroyed or re-routed during await
     _brands = brandsData && Array.isArray(brandsData) ? brandsData : [];
 
-    // Header with filters
+    // Hide global filter bar — products page uses local toolbar instead
+    FilterState.showBar(false);
+
+    // Header with two-row layout: title+actions row, then filter toolbar
     const header = document.createElement('div');
-    header.className = 'admin-page-header';
+    header.className = 'admin-page-header admin-page-header--with-toolbar';
     let brandOpts = '<option value="">All Brands</option>';
     for (const b of _brands) {
       const name = typeof b === 'string' ? b : b.name || b.brand || String(b);
       brandOpts += `<option value="${esc(name)}">${esc(name)}</option>`;
     }
     header.innerHTML = `
-      <h1>Products & SKUs</h1>
-      <div class="admin-page-header__actions">
-        <div style="position:relative">
-          <input class="admin-input" type="search" placeholder="Search products\u2026" id="product-search" style="width:200px;padding-left:32px">
-          <span style="position:absolute;left:10px;top:50%;transform:translateY(-50%);color:var(--text-muted)">${icon('search', 14, 14)}</span>
+      <div class="admin-page-header__top">
+        <h1>Products &amp; SKUs</h1>
+        <div class="admin-page-header__actions">
+          ${exportDropdown('export-products')}
         </div>
-        <select class="admin-select" id="brand-filter" style="width:140px">${brandOpts}</select>
-        <select class="admin-select" id="active-filter" style="width:120px">
+      </div>
+      <div class="admin-toolbar">
+        <div class="admin-search" id="product-search-wrap">
+          <span class="admin-search__icon">${icon('search', 14, 14)}</span>
+          <input type="search" placeholder="Search products\u2026" id="product-search">
+        </div>
+        <select class="admin-select" id="brand-filter">${brandOpts}</select>
+        <select class="admin-select" id="active-filter">
           <option value="">All Status</option>
           <option value="true">Active</option>
           <option value="false">Inactive</option>
         </select>
-        <select class="admin-select" id="image-filter" style="width:140px">
+        <select class="admin-select" id="image-filter">
           <option value="">All Images</option>
           <option value="no-images">No Images</option>
           <option value="has-images">Has Images</option>
         </select>
-        ${exportDropdown('export-products')}
       </div>
     `;
     container.appendChild(header);
@@ -1661,20 +1662,6 @@ export default {
     _imageFilter = '';
     _brands = [];
     _diagnostics = null;
-  },
-
-  async onFilterChange() {
-    // Sync page-level brand dropdown with global filter
-    const globalBrands = FilterState.get('brands') || [];
-    const brandSelect = document.getElementById('brand-filter');
-    if (brandSelect && globalBrands.length === 1) {
-      brandSelect.value = globalBrands[0];
-      _brandFilter = globalBrands[0];
-    } else if (brandSelect && globalBrands.length === 0 && !_brandFilter) {
-      brandSelect.value = '';
-    }
-    _page = 1;
-    if (_table) await loadProducts();
   },
 
   onSearch(query) {

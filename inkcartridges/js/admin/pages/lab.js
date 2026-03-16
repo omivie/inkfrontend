@@ -1,7 +1,7 @@
 /**
  * Lab Page — Owner-only, enhanced visual stub with styled feature cards
  */
-import { icon, esc } from '../app.js';
+import { FilterState, icon, esc } from '../app.js';
 
 const FEATURES = [
   { name: 'A/B Testing', desc: 'Run experiments on product pages, pricing, and checkout flows to optimize conversions.', ic: 'analytics', color: 'cyan' },
@@ -14,6 +14,7 @@ export default {
   title: 'Lab',
 
   init(container) {
+    FilterState.showBar(false);
     let html = `<div class="admin-page-header"><h1>Lab</h1></div>`;
     html += `<p style="color:var(--text-secondary);margin-bottom:24px">Experimental features and tools. These are in development and not yet available for production use.</p>`;
     html += `<div class="admin-grid-4">`;

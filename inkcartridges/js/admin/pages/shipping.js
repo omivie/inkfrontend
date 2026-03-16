@@ -1,7 +1,7 @@
 /**
  * Shipping Rates Page — Admin CRUD for zone-based shipping rates
  */
-import { AdminAuth, AdminAPI, icon, esc } from '../app.js';
+import { AdminAuth, FilterState, AdminAPI, icon, esc } from '../app.js';
 import { DataTable } from '../components/table.js';
 import { Drawer } from '../components/drawer.js';
 import { Toast } from '../components/toast.js';
@@ -254,6 +254,7 @@ export default {
   title: 'Shipping Rates',
 
   async init(container) {
+    FilterState.showBar(false);
     _container = container;
     _page = 1;
     await loadRates();

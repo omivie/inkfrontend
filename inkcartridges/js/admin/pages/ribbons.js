@@ -2,7 +2,7 @@
  * Ribbons Page — Admin CRUD for printer/typewriter ribbons & correction tapes
  * Follows the same pattern as Products & SKUs page
  */
-import { AdminAuth, AdminAPI, icon, esc } from '../app.js';
+import { AdminAuth, FilterState, AdminAPI, icon, esc } from '../app.js';
 import { DataTable } from '../components/table.js';
 import { Drawer } from '../components/drawer.js';
 import { Toast } from '../components/toast.js';
@@ -440,12 +440,13 @@ export default {
     _typeFilter = '';
     _activeFilter = '';
 
+    FilterState.showBar(false);
+
     // Load brands for filter
     await loadBrands();
 
-    // Header with filters (matches Products pattern)
+    // Header with two-row layout
     const header = document.createElement('div');
-    header.className = 'admin-page-header';
 
     let brandOpts = '<option value="">All Brands</option>';
     for (const b of _brands) {
@@ -457,26 +458,31 @@ export default {
       typeOpts += `<option value="${esc(t)}">${esc(RIBBON_TYPE_LABELS[t])}</option>`;
     }
 
+    header.className = 'admin-page-header admin-page-header--with-toolbar';
     header.innerHTML = `
-      <h1>Ribbons</h1>
-      <div class="admin-page-header__actions">
-        <div style="position:relative">
-          <input class="admin-input" type="search" placeholder="Search ribbons\u2026" id="ribbon-search" style="width:200px;padding-left:32px">
-          <span style="position:absolute;left:10px;top:50%;transform:translateY(-50%);color:var(--text-muted)">${icon('search', 14, 14)}</span>
+      <div class="admin-page-header__top">
+        <h1>Ribbons</h1>
+        <div class="admin-page-header__actions">
+          <button class="admin-btn admin-btn--ghost" id="export-ribbons-btn">
+            ${icon('download', 14, 14)} Export
+          </button>
+          <button class="admin-btn admin-btn--primary" id="add-ribbon-btn">
+            ${icon('products', 14, 14)} Add Ribbon
+          </button>
         </div>
-        <select class="admin-select" id="brand-filter" style="width:140px">${brandOpts}</select>
-        <select class="admin-select" id="type-filter" style="width:160px">${typeOpts}</select>
-        <select class="admin-select" id="active-filter" style="width:120px">
+      </div>
+      <div class="admin-toolbar">
+        <div class="admin-search">
+          <span class="admin-search__icon">${icon('search', 14, 14)}</span>
+          <input type="search" placeholder="Search ribbons\u2026" id="ribbon-search">
+        </div>
+        <select class="admin-select" id="brand-filter">${brandOpts}</select>
+        <select class="admin-select" id="type-filter">${typeOpts}</select>
+        <select class="admin-select" id="active-filter">
           <option value="">All Status</option>
           <option value="true">Active</option>
           <option value="false">Inactive</option>
         </select>
-        <button class="admin-btn admin-btn--ghost" id="export-ribbons-btn">
-          ${icon('download', 14, 14)} Export
-        </button>
-        <button class="admin-btn admin-btn--primary" id="add-ribbon-btn">
-          ${icon('products', 14, 14)} Add Ribbon
-        </button>
       </div>
     `;
     container.appendChild(header);

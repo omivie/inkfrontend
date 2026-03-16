@@ -29,6 +29,7 @@ const FilterState = {
   _debounceTimer: null,
   _el: null,
   _dropdowns: new Map(),
+  _visibleFilters: null, // null = show all; array = only show these keys
 
   // Available options (populated from data)
   _options: {
@@ -105,6 +106,11 @@ const FilterState = {
     this._render();
   },
 
+  setVisibleFilters(keys) {
+    this._visibleFilters = keys; // null resets to "show all"
+    this._render();
+  },
+
   subscribe(cb) {
     this._listeners.push(cb);
     return () => {
@@ -120,6 +126,11 @@ const FilterState = {
     this._writeToURL();
     this._render();
     this._notify();
+  },
+
+  showBar(show = true) {
+    const bar = document.getElementById('filter-bar');
+    if (bar) bar.style.display = show ? '' : 'none';
   },
 
   // AbortController for current request cycle
@@ -218,11 +229,12 @@ const FilterState = {
     html += `<input type="date" class="admin-date-to" value="${esc(s.dateTo)}">`;
     html += '</div>';
 
-    // Multi-selects
-    html += this._renderMultiSelect('brands', 'Brand');
-    html += this._renderMultiSelect('suppliers', 'Supplier');
-    html += this._renderMultiSelect('statuses', 'Status');
-    html += this._renderMultiSelect('categories', 'Category');
+    // Multi-selects (only render filters relevant to the current page)
+    const visible = this._visibleFilters;
+    if (!visible || visible.includes('brands')) html += this._renderMultiSelect('brands', 'Brand');
+    if (!visible || visible.includes('suppliers')) html += this._renderMultiSelect('suppliers', 'Supplier');
+    if (!visible || visible.includes('statuses')) html += this._renderMultiSelect('statuses', 'Status');
+    if (!visible || visible.includes('categories')) html += this._renderMultiSelect('categories', 'Category');
 
     // Reset
     const hasFilters = s.brands.length || s.suppliers.length || s.statuses.length || s.categories.length || s.period !== 'all';
