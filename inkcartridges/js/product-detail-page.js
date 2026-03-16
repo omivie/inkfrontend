@@ -217,8 +217,8 @@
 
                 this.product = response.data;
 
-                // Gate test products — super admins only
-                if (this._isTestProduct(this.product) && typeof isCachedSuperAdmin === 'function' && !isCachedSuperAdmin()) {
+                // Gate test products — active test products are visible to all; inactive only to super admins
+                if (this._isTestProduct(this.product) && !this.product.active && typeof isCachedSuperAdmin === 'function' && !isCachedSuperAdmin()) {
                     this.showError('Product not found');
                     return;
                 }
