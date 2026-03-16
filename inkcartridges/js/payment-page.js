@@ -9,6 +9,9 @@
         checkoutData: null,
         isSubmitting: false,
         paymentAuthorized: false,
+        isGuestCheckout: false,
+        turnstileToken: null,
+        turnstileWidgetId: undefined,
 
 
         // Idempotency key — deterministic SHA-256 hash including payment method
@@ -57,6 +60,9 @@
 
             // Initialize Stripe
             this.initStripe();
+
+            // Initialize Turnstile (guest-only bot protection)
+            this.initTurnstile();
 
             // Initialize PayPal button (custom integration, not via Stripe)
             this.initPayPalButton();
@@ -528,7 +534,8 @@
                     payment_method: 'stripe',
                     idempotency_key: await this.getIdempotencyKey('stripe'),
                     ...(isGuest && { guest_email: this.checkoutData.email }),
-                    ...(isGuest && this.checkoutData.phone && { guest_phone: this.checkoutData.phone })
+                    ...(isGuest && this.checkoutData.phone && { guest_phone: this.checkoutData.phone }),
+                    ...(isGuest && this.turnstileToken && { turnstile_token: this.turnstileToken })
                 });
 
                 // Handle duplicate/idempotent replay
@@ -718,6 +725,20 @@
                             showToast('Your account has been flagged for review. Please contact support.', 'error', 0);
                         }
                         return; // Don't throw — just show toast
+                    } else if (errorCode === 'DISPOSABLE_EMAIL') {
+                        this.resetTurnstile();
+                        throw new Error('Please use a permanent email address for your order.');
+                    } else if (errorCode === 'IP_FLAGGED') {
+                        if (typeof showToast === 'function') {
+                            showToast('Unable to process your order. Please contact support.', 'error', 0);
+                        }
+                        return;
+                    } else if (errorCode === 'TURNSTILE_MISSING') {
+                        this.resetTurnstile();
+                        throw new Error('Please complete the security check and try again.');
+                    } else if (errorCode === 'TURNSTILE_FAILED') {
+                        this.resetTurnstile();
+                        throw new Error('Security verification failed. Please complete the check and try again.');
                     }
                     throw new Error(errorMsg);
                 }
@@ -872,6 +893,57 @@
         },
 
         /**
+         * Initialize Cloudflare Turnstile widget for guest checkouts.
+         * Widget is shown only when the user is not authenticated.
+         */
+        initTurnstile() {
+            this.isGuestCheckout = typeof Auth === 'undefined' || !Auth.isAuthenticated();
+            if (!this.isGuestCheckout) return;
+
+            const siteKey = (typeof Config !== 'undefined' && Config.TURNSTILE_SITE_KEY) || '';
+            if (!siteKey) return;
+
+            const container = document.getElementById('turnstile-container');
+            if (container) container.style.display = '';
+
+            const self = this;
+            const doRender = () => {
+                self.turnstileWidgetId = turnstile.render('#turnstile-widget', {
+                    sitekey: siteKey,
+                    callback: (token) => { self.turnstileToken = token; },
+                    'expired-callback': () => { self.turnstileToken = null; },
+                    'error-callback': () => { self.turnstileToken = null; }
+                });
+            };
+
+            if (typeof turnstile !== 'undefined') {
+                doRender();
+            } else {
+                // Poll until Turnstile SDK is ready (loaded async/defer)
+                let attempts = 0;
+                const poll = setInterval(() => {
+                    if (typeof turnstile !== 'undefined') {
+                        clearInterval(poll);
+                        doRender();
+                    } else if (++attempts > 20) {
+                        clearInterval(poll);
+                        DebugLog.warn('Turnstile SDK did not load in time');
+                    }
+                }, 250);
+            }
+        },
+
+        /**
+         * Reset the Turnstile widget after a failed/expired challenge.
+         */
+        resetTurnstile() {
+            if (typeof turnstile !== 'undefined' && this.turnstileWidgetId !== undefined) {
+                turnstile.reset(this.turnstileWidgetId);
+            }
+            this.turnstileToken = null;
+        },
+
+        /**
          * Initialize PayPal button using PayPal JS SDK (popup approach)
          * Separate from Stripe — backend has its own PayPal integration
          */
@@ -931,7 +1003,8 @@
                         payment_method: 'paypal',
                         idempotency_key: await self.getIdempotencyKey('paypal'),
                         ...(isGuest && { guest_email: self.checkoutData.email }),
-                        ...(isGuest && self.checkoutData.phone && { guest_phone: self.checkoutData.phone })
+                        ...(isGuest && self.checkoutData.phone && { guest_phone: self.checkoutData.phone }),
+                        ...(isGuest && self.turnstileToken && { turnstile_token: self.turnstileToken })
                     };
 
                     console.log('[PayPal] Sending order payload:', JSON.stringify(orderPayload, null, 2));
@@ -944,6 +1017,18 @@
                         console.error('[PayPal] API returned error:', errorCode, response.error);
                         if (errorCode === 'ORDER_TOTAL_TOO_LOW') {
                             throw new Error('Your order total is below the minimum. Please add more items.');
+                        } else if (errorCode === 'DISPOSABLE_EMAIL') {
+                            self.resetTurnstile();
+                            throw new Error('Please use a permanent email address for your order.');
+                        } else if (errorCode === 'IP_FLAGGED') {
+                            self.showError('Unable to process your order. Please contact support.');
+                            throw new Error('IP_FLAGGED'); // halt PayPal flow
+                        } else if (errorCode === 'TURNSTILE_MISSING') {
+                            self.resetTurnstile();
+                            throw new Error('Please complete the security check and try again.');
+                        } else if (errorCode === 'TURNSTILE_FAILED') {
+                            self.resetTurnstile();
+                            throw new Error('Security verification failed. Please complete the check and try again.');
                         }
                         throw new Error(response.error || 'Failed to create PayPal order');
                     }

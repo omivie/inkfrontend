@@ -846,11 +846,7 @@ export default {
     header.innerHTML = `
       <h1>Orders</h1>
       <div class="admin-page-header__actions">
-        <div style="position:relative">
-          <input class="admin-input" type="search" placeholder="Search orders\u2026" id="order-search" style="width:220px;padding-left:32px">
-          <span style="position:absolute;left:10px;top:50%;transform:translateY(-50%);color:var(--text-muted)">${icon('search', 14, 14)}</span>
-        </div>
-        <button class="admin-btn admin-btn--primary" id="create-order-btn">${icon('plus', 14, 14)} New Order</button>
+<button class="admin-btn admin-btn--primary" id="create-order-btn">${icon('plus', 14, 14)} New Order</button>
         ${exportDropdown('export-orders')}
       </div>
     `;
@@ -870,18 +866,6 @@ export default {
       onPageChange: (page) => { _page = page; loadOrders(); },
       emptyMessage: 'No orders found',
       emptyIcon: icon('orders', 40, 40),
-    });
-
-    // Search
-    const searchInput = header.querySelector('#order-search');
-    let searchTimer;
-    searchInput.addEventListener('input', () => {
-      clearTimeout(searchTimer);
-      searchTimer = setTimeout(() => {
-        _search = searchInput.value.trim();
-        _page = 1;
-        loadOrders();
-      }, 300);
     });
 
     // New Order

@@ -399,6 +399,7 @@ export default {
 
   async init(container) {
     _container = container;
+    FilterState.setVisibleFilters(['statuses']);
     _page = 1;
     _tab = 'queue';
     renderContent();

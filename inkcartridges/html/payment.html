@@ -24,6 +24,7 @@
 
     <script defer src="https://js.stripe.com/v3/"></script>
     <script defer src="https://www.paypal.com/sdk/js?client-id=ASCSnoeTrj2EkqTuWH_JBnuCzYzGVcGk05BpeeTu46up60pJIBsbVN0Z6Prvj9Bjq6YXsGYNOOfKwHAG&currency=NZD&disable-funding=card"></script>
+    <script src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit" defer></script>
 
 
     <style>
@@ -663,6 +664,11 @@
                                                     </div>
                                                 </div>
                                             </label>
+                                        </div>
+
+                                        <!-- Turnstile widget (rendered for guest checkouts only) -->
+                                        <div id="turnstile-container" style="display:none; margin-bottom: 0.75rem;">
+                                            <div id="turnstile-widget"></div>
                                         </div>
 
                                         <button type="submit" id="pay-now-btn" class="pay-button" disabled>

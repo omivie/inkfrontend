@@ -264,6 +264,7 @@ export default {
 
   async init(container) {
     _container = container;
+    FilterState.setVisibleFilters([]);
     _page = 1;
     _activeTab = 'ready';
 

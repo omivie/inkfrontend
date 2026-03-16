@@ -26,6 +26,7 @@ const I = {
   sun: '<circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/>',
   moon: '<path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/>',
   logout: '<path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9"/>',
+  finance: '<line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/>',
   download: '<path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"/>',
   copy: '<rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/>',
   mail: '<path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/>',
@@ -52,6 +53,7 @@ const NAV_ITEMS = [
   { key: 'refunds', label: 'Refunds & Chargebacks', icon: 'refunds' },
   { key: 'fulfillment', label: 'Fulfillment', icon: 'fulfillment' },
   { key: 'shipping', label: 'Shipping Rates', icon: 'suppliers' },
+  { key: 'financial-health', label: 'Financial Health', icon: 'finance' },
   { divider: true },
   { key: 'analytics', label: 'Analytics', icon: 'analytics', ownerOnly: true },
   { key: 'settings', label: 'Settings', icon: 'settings', ownerOnly: true },
@@ -151,6 +153,7 @@ function renderTopbar() {
     <button class="admin-topbar__hamburger" id="menu-toggle" aria-label="Toggle menu">
       ${icon('menu', 20, 20)}
     </button>
+    <div class="admin-topbar__spacer"></div>
     <div class="admin-topbar__search">
       ${icon('search', 16, 16)}
       <input type="search" placeholder="Search orders, customers, SKUs\u2026" id="global-search" autocomplete="off">

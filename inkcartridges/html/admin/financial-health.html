@@ -277,6 +277,27 @@
 
             <div class="chart-card" style="margin-bottom: var(--spacing-6);">
                 <div class="chart-card__header">
+                    <div>
+                        <h2 class="chart-card__title">Profit Over Time</h2>
+                        <p style="font-size: var(--font-size-sm); color: var(--color-text-muted); margin: 4px 0 0;">Gross & net profit per month</p>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: var(--spacing-3);">
+                        <div id="profit-chart-totals" style="display: flex; gap: var(--spacing-5); font-size: var(--font-size-sm);"></div>
+                        <select class="btn btn--secondary btn--sm" id="profit-period" style="padding: 6px 12px;">
+                            <option value="6">Last 6 Months</option>
+                            <option value="12" selected>Last 12 Months</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="chart-card__body">
+                    <div class="chart-container">
+                        <canvas id="profit-chart"></canvas>
+                    </div>
+                </div>
+            </div>
+
+            <div class="chart-card" style="margin-bottom: var(--spacing-6);">
+                <div class="chart-card__header">
                     <h2 class="chart-card__title">Profit & Loss Statement</h2>
                     <select class="btn btn--secondary btn--sm" id="pnl-period" style="padding: 6px 12px;">
                         <option value="current">Current Month</option>
@@ -457,6 +478,7 @@
     <script defer src="/js/admin-nav.js"></script>
     <script defer src="/js/admin.js"></script>
     <script defer src="/js/analytics-api.js"></script>
+    <script defer src="/js/admin/api.js"></script>
     <script defer src="/js/admin/financial-health-page.js"></script>
     <script defer src="/js/modern-effects.js"></script>
 </body>

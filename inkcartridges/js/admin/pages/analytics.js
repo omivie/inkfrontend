@@ -682,6 +682,7 @@ export default {
 
   async init(container) {
     _container = container;
+    FilterState.setVisibleFilters([]);
     _activeTab = 'financial';
     renderShell();
     await loadTab();

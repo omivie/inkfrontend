@@ -50,6 +50,10 @@
                 this.loadCashFlowChart(parseInt(e.target.value));
             });
 
+            document.getElementById('profit-period').addEventListener('change', (e) => {
+                this.loadProfitChart(parseInt(e.target.value));
+            });
+
             document.getElementById('pnl-period').addEventListener('change', (e) => {
                 this.loadPnL(e.target.value);
             });
@@ -58,11 +62,13 @@
         async loadData() {
             try {
                 // Load orders for revenue calculations
-                const ordersResponse = await API.getOrders({ limit: 500 });
-                const orders = ordersResponse.ok ? (ordersResponse.data?.orders || []) : [];
+                const ordersResponse = await AdminAPI.getOrders({}, 1, 500);
+                const orders = ordersResponse?.orders || [];
 
                 // Calculate financial metrics from orders
                 this.calculateMetrics(orders);
+                this.data.orders = orders;
+                this.loadProfitChart(12);
 
                 // Load cash flow chart
                 this.loadCashFlowChart(12);
@@ -93,8 +99,8 @@
                        o.status !== 'cancelled' && o.status !== 'refunded';
             });
 
-            const thisMonthRevenue = thisMonth.reduce((sum, o) => sum + (o.total || 0), 0);
-            const lastMonthRevenue = lastMonth.reduce((sum, o) => sum + (o.total || 0), 0);
+            const thisMonthRevenue = thisMonth.reduce((sum, o) => sum + ((o.total_amount ?? o.total) || 0), 0);
+            const lastMonthRevenue = lastMonth.reduce((sum, o) => sum + ((o.total_amount ?? o.total) || 0), 0);
 
             // Estimate COGS at 60% (typical for ink cartridges)
             const cogsRate = 0.60;
@@ -218,6 +224,100 @@
                         y: {
                             beginAtZero: true,
                             ticks: { callback: v => '$' + (v / 1000).toFixed(0) + 'k' }
+                        }
+                    }
+                }
+            });
+        },
+
+        loadProfitChart(months) {
+            const ctx = document.getElementById('profit-chart');
+            if (!ctx) return;
+            if (this.charts.profit) this.charts.profit.destroy();
+
+            const orders = this.data.orders || [];
+            const cogsRate = 0.60;
+            const monthlyExpenses = this.data.monthlyExpenses || 2000;
+
+            const labels = [];
+            const grossProfits = [];
+            const netProfits = [];
+
+            for (let i = months - 1; i >= 0; i--) {
+                const d = new Date();
+                d.setDate(1);
+                d.setMonth(d.getMonth() - i);
+                labels.push(d.toLocaleDateString('en-NZ', { month: 'short', year: '2-digit' }));
+
+                const monthOrders = orders.filter(o => {
+                    const od = new Date(o.created_at);
+                    return od.getMonth() === d.getMonth() &&
+                           od.getFullYear() === d.getFullYear() &&
+                           o.status !== 'cancelled' && o.status !== 'refunded';
+                });
+
+                const revenue = monthOrders.reduce((sum, o) => sum + ((o.total_amount ?? o.total) || 0), 0);
+                const gross = revenue * (1 - cogsRate);
+                const net = gross - monthlyExpenses;
+                grossProfits.push(parseFloat(gross.toFixed(2)));
+                netProfits.push(parseFloat(net.toFixed(2)));
+            }
+
+            const totalGross = grossProfits.reduce((a, b) => a + b, 0);
+            const totalNet = netProfits.reduce((a, b) => a + b, 0);
+            const totalsEl = document.getElementById('profit-chart-totals');
+            if (totalsEl) {
+                const netColor = totalNet >= 0 ? '#059669' : 'var(--magenta-primary)';
+                totalsEl.innerHTML =
+                    `<span style="color:#059669;">Gross <strong>${formatPrice(totalGross)}</strong></span>` +
+                    `<span style="color:${netColor};">Net <strong>${formatPrice(totalNet)}</strong></span>`;
+            }
+
+            this.charts.profit = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels,
+                    datasets: [
+                        {
+                            label: 'Gross Profit',
+                            data: grossProfits,
+                            borderColor: '#10b981',
+                            backgroundColor: 'rgba(16,185,129,0.08)',
+                            borderWidth: 2,
+                            pointRadius: 4,
+                            pointBackgroundColor: '#10b981',
+                            fill: true,
+                            tension: 0.3
+                        },
+                        {
+                            label: 'Net Profit',
+                            data: netProfits,
+                            borderColor: '#267FB5',
+                            backgroundColor: 'rgba(38,127,181,0.08)',
+                            borderWidth: 2,
+                            pointRadius: 4,
+                            pointBackgroundColor: '#267FB5',
+                            fill: true,
+                            tension: 0.3
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { position: 'top' },
+                        tooltip: {
+                            callbacks: {
+                                label: ctx => ` ${ctx.dataset.label}: ${formatPrice(ctx.parsed.y)}`
+                            }
+                        }
+                    },
+                    scales: {
+                        x: { grid: { display: false } },
+                        y: {
+                            ticks: { callback: v => '$' + (v / 1000).toFixed(0) + 'k' },
+                            grid: { color: 'rgba(0,0,0,0.05)' }
                         }
                     }
                 }
