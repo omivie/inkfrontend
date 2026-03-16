@@ -48,17 +48,23 @@
     { "source": "/([^/]*[Rr]ibbon[^/]*)", "destination": "/html/ribbons", "permanent": true },
     { "source": "/([^/]*[Tt]ypewriter[^/]*)", "destination": "/html/ribbons", "permanent": true },
 
-    { "source": "/[^/]*-[Ii]nk-[Cc]artridges?-([^/]+)", "destination": "/html/shop?search=$1", "permanent": true },
-    { "source": "/[^/]*-[Ii]nkjet-[Cc]artridges?-([^/]+)", "destination": "/html/shop?search=$1", "permanent": true },
-    { "source": "/[^/]*-[Tt]oner-[Cc]artridges?-([^/]+)", "destination": "/html/shop?search=$1", "permanent": true },
+    { "source": "/(.+)-ink-cartridges-(.+)", "destination": "/html/shop?search=$2", "permanent": true },
+    { "source": "/(.+)-ink-cartridge-(.+)", "destination": "/html/shop?search=$2", "permanent": true },
+    { "source": "/(.+)-inkjet-cartridges-(.+)", "destination": "/html/shop?search=$2", "permanent": true },
+    { "source": "/(.+)-inkjet-cartridge-(.+)", "destination": "/html/shop?search=$2", "permanent": true },
+    { "source": "/(.+)-toner-cartridges-(.+)", "destination": "/html/shop?search=$2", "permanent": true },
+    { "source": "/(.+)-toner-cartridge-(.+)", "destination": "/html/shop?search=$2", "permanent": true },
 
-    { "source": "/([^/]+)-[Ll]aser-[Pp]rinter", "destination": "/html/shop?search=$1", "permanent": true },
-    { "source": "/([^/]+)-[Ii]nkjet-[Pp]rinter", "destination": "/html/shop?search=$1", "permanent": true },
-    { "source": "/([^/]+)-[Pp]rinter", "destination": "/html/shop?search=$1", "permanent": true },
+    { "source": "/(.+)-laser-printer", "destination": "/html/shop?search=$1", "permanent": true },
+    { "source": "/(.+)-inkjet-printer", "destination": "/html/shop?search=$1", "permanent": true },
+    { "source": "/(.+)-printer", "destination": "/html/shop?search=$1", "permanent": true },
 
-    { "source": "/([^/]+)-[Ii]nk-[Cc]artridges?", "destination": "/html/shop?search=$1", "permanent": true },
-    { "source": "/([^/]+)-[Ii]nkjet-[Cc]artridges?", "destination": "/html/shop?search=$1", "permanent": true },
-    { "source": "/([^/]+)-[Tt]oner-[Cc]artridges?", "destination": "/html/shop?search=$1", "permanent": true }
+    { "source": "/(.+)-ink-cartridges", "destination": "/html/shop?search=$1", "permanent": true },
+    { "source": "/(.+)-ink-cartridge", "destination": "/html/shop?search=$1", "permanent": true },
+    { "source": "/(.+)-inkjet-cartridges", "destination": "/html/shop?search=$1", "permanent": true },
+    { "source": "/(.+)-inkjet-cartridge", "destination": "/html/shop?search=$1", "permanent": true },
+    { "source": "/(.+)-toner-cartridges", "destination": "/html/shop?search=$1", "permanent": true },
+    { "source": "/(.+)-toner-cartridge", "destination": "/html/shop?search=$1", "permanent": true }
   ],
   "rewrites": [
     { "source": "/products/:slug/:sku", "destination": "/html/product" },
