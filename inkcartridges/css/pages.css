@@ -10066,3 +10066,82 @@
     background: #f0f7fc;
     color: #267FB5;
 }
+
+/* ============================================
+   SEO / CRO: Product Page Enhancements
+   ============================================ */
+
+/* Trust strip */
+.product-trust-strip {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 16px;
+    font-size: var(--text-xs, 0.75rem);
+    color: var(--color-success, #16a34a);
+    padding: 10px 0;
+    border-top: 1px solid var(--color-border, #e5e7eb);
+    border-bottom: 1px solid var(--color-border, #e5e7eb);
+    margin: 12px 0;
+}
+.product-trust-strip span {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+/* Stock urgency */
+.product-info__urgency {
+    font-size: var(--text-sm, 0.875rem);
+    color: var(--color-warning, #d97706);
+    font-weight: 500;
+    margin-top: 4px;
+}
+
+/* Compat preview */
+.product-info__compat-preview {
+    font-size: var(--text-sm, 0.875rem);
+    color: var(--color-text-muted, #6b7280);
+    margin-top: 6px;
+    line-height: 1.5;
+}
+.product-info__compat-label {
+    font-weight: 600;
+    margin-right: 4px;
+}
+.product-info__compat-more {
+    margin-left: 6px;
+    color: var(--color-primary, #267FB5);
+    text-decoration: underline;
+}
+
+/* Brand index page */
+.brand-index-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+    gap: 1.5rem;
+    margin-top: 2rem;
+}
+.brand-index-card {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 1.5rem 1rem;
+    border: 1px solid var(--color-border, #e5e7eb);
+    border-radius: 8px;
+    text-decoration: none;
+    color: var(--color-text, #1a1a1a);
+    font-weight: 600;
+    font-size: 0.9rem;
+    transition: border-color 0.2s, box-shadow 0.2s;
+    background: #fff;
+}
+.brand-index-card:hover {
+    border-color: var(--color-primary, #267FB5);
+    box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+}
+.brand-index-card img {
+    max-height: 48px;
+    width: auto;
+    object-fit: contain;
+}

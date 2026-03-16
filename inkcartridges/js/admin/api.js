@@ -197,6 +197,16 @@ const AdminAPI = {
     }
   },
 
+  async deleteRefund(refundId) {
+    try {
+      const resp = await window.API.delete(`/api/admin/refunds/${refundId}`);
+      return resp?.data ?? null;
+    } catch (e) {
+      DebugLog.warn('[AdminAPI] deleteRefund failed:', e.message);
+      throw e;
+    }
+  },
+
   // ---- Dashboard Analytics (RPC — owner-only by RLS) ----
   async getDashboardKPIs(filterParams, signal) {
     const { from, to } = Object.fromEntries(filterParams);

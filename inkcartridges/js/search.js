@@ -53,6 +53,7 @@ function createSmartSearch() {
         _results: [],
         _currentQuery: '',
         _effectiveQuery: '',
+        _printerModel: null,
         _isVisible: false,
         _scrollCleanup: null,
         _instanceId: instanceId,
@@ -145,6 +146,7 @@ function createSmartSearch() {
         async _executeSearch(query) {
             this._currentQuery = query;
             this._hideCorrection();
+            this._printerModel = null;
 
             // Step 1: Normalize the query (silent, always runs)
             let searchQuery = query;
@@ -230,6 +232,7 @@ function createSmartSearch() {
                 if (query !== this._currentQuery) return;
                 if (printerResult && printerResult.products.length > 0) {
                     this._setCache(query, printerResult);
+                    this._printerModel = printerResult.printerName;
                     this._showCorrection(query, 'compatible products for ' + printerResult.printerName, 'normalize');
                     this._renderResults(printerResult.products, query, printerResult.total);
                     return;
@@ -685,9 +688,14 @@ function createSmartSearch() {
                 : 'View all results';
 
             const footerQueryLower = footerQuery.toLowerCase();
-            const href = (footerQueryLower === 'genuine' || footerQueryLower === 'compatible')
-                ? '/html/shop?type=' + encodeURIComponent(footerQueryLower)
-                : '/html/shop?search=' + encodeURIComponent(footerQuery);
+            let href;
+            if (this._printerModel) {
+                href = '/html/shop?printer_model=' + encodeURIComponent(this._printerModel);
+            } else if (footerQueryLower === 'genuine' || footerQueryLower === 'compatible') {
+                href = '/html/shop?type=' + encodeURIComponent(footerQueryLower);
+            } else {
+                href = '/html/shop?search=' + encodeURIComponent(footerQuery);
+            }
 
             this._footer.innerHTML = '<a class="smart-search__view-all" href="' + Security.escapeAttr(href) + '">'
                 + Security.escapeHtml(label)
@@ -905,7 +913,10 @@ function createSmartSearch() {
                 url = '/html/product/?sku=' + encodeURIComponent(sku);
                 if (product._isRibbon) url += '&type=ribbon';
             } else {
-                url = searchConfig.buildShopUrl(product, this._currentQuery);
+                const name = product.name || product.title || '';
+                url = name
+                    ? '/html/product-by-name?name=' + encodeURIComponent(name)
+                    : searchConfig.buildShopUrl(product, this._currentQuery);
             }
             this._hide();
             window.location.href = url;

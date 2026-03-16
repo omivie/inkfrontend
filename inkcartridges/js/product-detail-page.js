@@ -429,6 +429,17 @@
                 document.getElementById('add-to-cart-btn').disabled = true;
             }
 
+            // Stock urgency
+            const urgencyEl = document.getElementById('stock-urgency');
+            if (urgencyEl) {
+                if (info.stock_quantity > 0 && info.stock_quantity <= 5) {
+                    urgencyEl.textContent = `Only ${info.stock_quantity} left in stock — order soon`;
+                    urgencyEl.hidden = false;
+                } else {
+                    urgencyEl.hidden = true;
+                }
+            }
+
             // Product image with color fallback
             const productImageEl = document.getElementById('product-image');
             if (info.image_url) {
@@ -521,6 +532,24 @@
 
             // Set up event listeners
             this.setupEventListeners(info);
+        },
+
+        renderCompatPreview(printers) {
+            const wrap = document.getElementById('compat-preview');
+            const list = document.getElementById('compat-preview-list');
+            const more = document.getElementById('compat-preview-more');
+            if (!wrap || !printers || !printers.length) return;
+            const shown = printers.slice(0, 3);
+            list.textContent = shown.map(p => p.name || p).join(', ');
+            if (printers.length > 3) {
+                more.textContent = `+${printers.length - 3} more`;
+                more.hidden = false;
+                more.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    document.getElementById('tab-btn-compatibility')?.click();
+                });
+            }
+            wrap.hidden = false;
         },
 
         async renderCompatiblePrinters(info) {
@@ -618,6 +647,7 @@
                 }).join('');
 
                 tabBtn.hidden = false;
+                this.renderCompatPreview(printers);
             } catch (e) {
                 // Compatibility tab is optional
             }

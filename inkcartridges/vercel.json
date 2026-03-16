@@ -67,7 +67,8 @@
     { "source": "/(.+)-toner-cartridge", "destination": "/html/shop?search=$1", "permanent": true }
   ],
   "rewrites": [
-    { "source": "/products/:slug/:sku", "destination": "/html/product" },
+    { "source": "/html/product-by-name", "destination": "https://ink-backend-zaeq.onrender.com/html/product-by-name" },
+    { "source": "/products/:slug/:sku", "destination": "/html/product?sku=:sku" },
     { "source": "/brands/:slug", "destination": "/brands/index.html" },
     { "source": "/printers/:slug", "destination": "/printers/index.html" },
     { "source": "/sitemap.xml", "destination": "https://ink-backend-zaeq.onrender.com/sitemap.xml" },

@@ -2005,6 +2005,14 @@
                                     this.state.printerModel = modelName;
                                     this.state.printerBrand = brand;
                                     this.state.level = 'printer-model-products';
+                                    this.state.search = null;
+
+                                    // Update URL to reflect printer context so subsequent searches start clean
+                                    const printerParams = new URLSearchParams({ printer_model: modelName });
+                                    if (brand) printerParams.set('printer_brand', brand);
+                                    if (this.state.type) printerParams.set('type', this.state.type);
+                                    history.replaceState({ ...this.state }, '', `/html/shop?${printerParams}`);
+
                                     this.showLoading(false);
                                     await this.loadPrinterModelProducts(navVersion);
                                     return;

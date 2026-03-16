@@ -35,49 +35,49 @@
           categories: [
               { label: 'Ink Cartridges', param: 'ink' },
               { label: 'Toner Cartridges', param: 'toner' },
-              { label: 'Drums & Supplies', param: 'consumable' }
+              { label: 'Drums & Supplies', param: 'drums' }
           ]},
         { slug: 'canon', name: 'Canon', logo: '/assets/brands/canon.png',
           categories: [
               { label: 'Ink Cartridges', param: 'ink' },
               { label: 'Toner Cartridges', param: 'toner' },
-              { label: 'Drums & Supplies', param: 'consumable' }
+              { label: 'Drums & Supplies', param: 'drums' }
           ]},
         { slug: 'epson', name: 'Epson', logo: '/assets/brands/epson.png',
           categories: [
               { label: 'Ink Cartridges', param: 'ink' },
-              { label: 'Drums & Supplies', param: 'consumable' }
+              { label: 'Drums & Supplies', param: 'drums' }
           ]},
         { slug: 'hp', name: 'HP', logo: '/assets/brands/hp.png',
           categories: [
               { label: 'Ink Cartridges', param: 'ink' },
               { label: 'Toner Cartridges', param: 'toner' },
-              { label: 'Drums & Supplies', param: 'consumable' }
+              { label: 'Drums & Supplies', param: 'drums' }
           ]},
         { slug: 'samsung', name: 'Samsung', logo: '/assets/brands/samsung.svg',
           categories: [
               { label: 'Toner Cartridges', param: 'toner' },
-              { label: 'Drums & Supplies', param: 'consumable' }
+              { label: 'Drums & Supplies', param: 'drums' }
           ]},
         { slug: 'lexmark', name: 'Lexmark', logo: '/assets/brands/lexmark.png',
           categories: [
               { label: 'Toner Cartridges', param: 'toner' },
-              { label: 'Drums & Supplies', param: 'consumable' }
+              { label: 'Drums & Supplies', param: 'drums' }
           ]},
         { slug: 'oki', name: 'OKI', logo: '/assets/brands/oki.svg',
           categories: [
               { label: 'Toner Cartridges', param: 'toner' },
-              { label: 'Drums & Supplies', param: 'consumable' }
+              { label: 'Drums & Supplies', param: 'drums' }
           ]},
         { slug: 'fuji-xerox', name: 'Fuji Xerox', logo: '/assets/brands/fuji-xerox.png',
           categories: [
               { label: 'Toner Cartridges', param: 'toner' },
-              { label: 'Drums & Supplies', param: 'consumable' }
+              { label: 'Drums & Supplies', param: 'drums' }
           ]},
         { slug: 'kyocera', name: 'Kyocera', logo: '/assets/brands/kyocera.svg',
           categories: [
               { label: 'Toner Cartridges', param: 'toner' },
-              { label: 'Drums & Supplies', param: 'consumable' }
+              { label: 'Drums & Supplies', param: 'drums' }
           ]}
     ];
 

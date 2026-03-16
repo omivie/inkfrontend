@@ -187,15 +187,18 @@ function openRefundDrawer(refund) {
   if (refund.processed_by) html += detailRow('Processed By', esc(refund.processed_by));
   html += `</div>`;
 
-  // Actions for pending refunds
+  // Actions block
+  html += `<div class="admin-detail-block">`;
+  html += `<div class="admin-detail-block__title">Actions</div>`;
+  html += `<div style="display:flex;gap:8px;flex-wrap:wrap">`;
   if (refund.status === 'pending') {
-    html += `<div class="admin-detail-block">`;
-    html += `<div class="admin-detail-block__title">Actions</div>`;
-    html += `<div style="display:flex;gap:8px">`;
     html += `<button class="admin-btn admin-btn--primary admin-btn--sm" data-action="process">Mark Processed</button>`;
     html += `<button class="admin-btn admin-btn--danger admin-btn--sm" data-action="fail">Mark Failed</button>`;
-    html += `</div></div>`;
   }
+  if (AdminAuth.isOwner()) {
+    html += `<button class="admin-btn admin-btn--ghost admin-btn--sm" data-action="delete" style="margin-left:auto">Delete</button>`;
+  }
+  html += `</div></div>`;
 
   drawer.setBody(html);
 
@@ -215,6 +218,18 @@ function openRefundDrawer(refund) {
     try {
       await AdminAPI.updateRefundStatus(refund.id, 'failed');
       Toast.warning('Refund marked as failed');
+      Drawer.close();
+      loadRefunds();
+    } catch (e) {
+      Toast.error(`Failed: ${e.message}`);
+    }
+  });
+
+  drawer.body.querySelector('[data-action="delete"]')?.addEventListener('click', async () => {
+    if (!confirm('Delete this refund record? This cannot be undone.')) return;
+    try {
+      await AdminAPI.deleteRefund(refund.id);
+      Toast.success('Refund deleted');
       Drawer.close();
       loadRefunds();
     } catch (e) {
