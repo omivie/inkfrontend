@@ -701,7 +701,7 @@
 
                 const titleEl = section.querySelector('.related-products__title');
                 if (titleEl) {
-                    const code = info.manufacturer_part_number || info.sku;
+                    const code = info.manufacturer_part_number || this.extractProductCode(info) || info.sku;
                     titleEl.textContent = `Products related to ${code}`;
                 }
 

@@ -3005,7 +3005,7 @@
     align-items: flex-start;
     justify-content: space-between;
     gap: var(--spacing-lg);
-    margin-bottom: -30px;
+    margin-bottom: var(--spacing-lg);
 }
 
 .cart-page__title {
