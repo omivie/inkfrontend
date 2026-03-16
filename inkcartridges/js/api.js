@@ -119,6 +119,11 @@ const API = {
         try {
             const response = await this._fetchWithAuth(url, { ...options, headers });
 
+            // Handle 204 No Content — DELETE endpoints return no body
+            if (response.status === 204) {
+                return { ok: true, data: null };
+            }
+
             // Parse JSON safely — gateway errors (502/503/504) may return HTML
             let data;
             try {

@@ -143,13 +143,37 @@ const AdminAPI = {
   },
 
   async deleteOrder(orderId) {
-    try {
-      const resp = await window.API.delete(`/api/admin/orders/${orderId}`);
-      return resp?.data ?? null;
-    } catch (e) {
-      DebugLog.warn('[AdminAPI] deleteOrder failed:', e.message);
-      throw e;
+    // Backend doesn't implement DELETE /api/admin/orders/:id — delete directly via Supabase REST.
+    // Must delete child rows first (FK: order_items.order_id → orders.id).
+    const token = window.Auth?.session?.access_token || Config.SUPABASE_ANON_KEY;
+    const headers = {
+      'apikey': Config.SUPABASE_ANON_KEY,
+      'Authorization': `Bearer ${token}`,
+      'Prefer': 'return=minimal',
+    };
+    const id = encodeURIComponent(orderId);
+
+    // 1. Delete all child rows in parallel (FK constraints on orders.id)
+    const childTables = ['order_items', 'order_fulfillment', 'order_events'];
+    const childResults = await Promise.all(
+      childTables.map(t => fetch(`${Config.SUPABASE_URL}/rest/v1/${t}?order_id=eq.${id}`, { method: 'DELETE', headers }))
+    );
+    for (let i = 0; i < childResults.length; i++) {
+      const r = childResults[i];
+      if (!r.ok && r.status !== 404) {
+        const err = await r.json().catch(() => ({ message: r.statusText }));
+        throw new Error(err.message || `Failed to delete ${childTables[i]} (HTTP ${r.status})`);
+      }
     }
+
+    // 2. Delete the order
+    const orderResp = await fetch(`${Config.SUPABASE_URL}/rest/v1/orders?id=eq.${id}`, { method: 'DELETE', headers });
+    if (!orderResp.ok) {
+      const err = await orderResp.json().catch(() => ({ message: orderResp.statusText }));
+      throw new Error(err.message || `Failed to delete order (HTTP ${orderResp.status})`);
+    }
+
+    return null;
   },
 
   // ---- Refunds ----

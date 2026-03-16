@@ -77,6 +77,17 @@ const COLUMNS = [
     render: (r) => `<span class="cell-mono cell-right">${(r.total_amount ?? r.total) != null ? formatPrice(r.total_amount ?? r.total) : MISSING}</span>`,
     align: 'right',
   },
+  {
+    key: '_actions', label: '',
+    render: (r) => {
+      const trackable = ['paid', 'processing', 'shipped'].includes((r.status || '').toLowerCase());
+      if (!trackable) return '';
+      return `<button class="admin-btn admin-btn--ghost admin-btn--xs order-track-btn"
+        data-order-id="${esc(r.id)}" data-action="quick-track"
+        title="Add tracking">${icon('fulfillment', 12, 12)} Track</button>`;
+    },
+    align: 'right',
+  },
 ];
 
 async function loadOrders() {
@@ -147,19 +158,20 @@ async function bulkDelete() {
       const ids = [...selected];
       let done = 0;
       let failed = 0;
+      let firstError = null;
       Toast.info(`Deleting ${count} order${count > 1 ? 's' : ''}\u2026`);
       for (let i = 0; i < ids.length; i += 5) {
         const batch = ids.slice(i, i + 5);
         const results = await Promise.allSettled(batch.map(id => AdminAPI.deleteOrder(id)));
         for (const r of results) {
           if (r.status === 'fulfilled') done++;
-          else failed++;
+          else { failed++; firstError = firstError || r.reason?.message; }
         }
       }
       if (_table) _table.clearSelection();
       updateBulkBar(new Set());
       if (failed > 0) {
-        Toast.error(`${done} deleted, ${failed} failed`);
+        Toast.error(`${done} deleted, ${failed} failed${firstError ? `: ${firstError}` : ''}`);
       } else {
         Toast.success(`${done} order${done > 1 ? 's' : ''} deleted`);
       }
@@ -195,16 +207,8 @@ async function openOrderModal(order) {
           ${statusBadge(order.status)}
         </div>
       </div>
-      <div class="admin-product-modal__layout">
-        <div class="admin-product-modal__sidebar" id="om-sidebar">
-          <div style="padding:8px 0;color:var(--text-muted);font-size:13px">Loading&hellip;</div>
-        </div>
-        <div class="admin-product-modal__main">
-          <div class="admin-product-modal__tabs" id="om-tabs"></div>
-          <div class="admin-product-modal__tab-panels" id="om-panels">
-            <div style="padding:40px;text-align:center;color:var(--text-muted)">Loading order&hellip;</div>
-          </div>
-        </div>
+      <div class="admin-product-modal__scroll" id="om-content">
+        <div style="padding:40px;text-align:center;color:var(--text-muted)">Loading order&hellip;</div>
       </div>
     </div>
   `;
@@ -234,85 +238,45 @@ async function openOrderModal(order) {
 
   const o = fullOrder || order;
 
-  // Update header
+  // Update header title (actions + badge will be set by buildOrderModalContent)
   modal.querySelector('.admin-product-modal__title').textContent = o.order_number || o.id?.slice(0, 8) || 'Order';
-  modal.querySelector('#om-header-actions').innerHTML = statusBadge(o.status);
 
-  // Build sidebar
-  buildOrderModalSidebar(modal, o);
-
-  // Build tabs
-  buildOrderModalTabs(modal, o, events || []);
+  // Build single-page content
+  buildOrderModalContent(modal, o, events || []);
 }
 
-function buildOrderModalSidebar(modal, o) {
+function buildOrderModalContent(modal, o, events) {
+  const showCost = AdminAuth.isOwner();
+  const omRow = (label, value) =>
+    `<div class="om-meta-row"><span>${label}</span><span>${value}</span></div>`;
+
   const profile = o.user_profile || o.user_profiles || o.customer || {};
   const custName = o.customer_name || profile.full_name
     || [profile.first_name, profile.last_name].filter(Boolean).join(' ')
     || MISSING;
   const custEmail = o.customer_email || profile.email || MISSING;
   const orderTotal = o.total_amount ?? o.total;
-  const isOwner = AdminAuth.isOwner();
 
-  let html = `<div class="admin-product-modal__sidebar-stats">`;
-  html += sidebarStat('Customer', esc(custName));
-  html += sidebarStat('Email', esc(custEmail));
-  if (orderTotal != null) html += sidebarStat('Total', `<strong>${formatPrice(orderTotal)}</strong>`);
-  if (o.shipping_fee != null) html += sidebarStat('Shipping', formatPrice(o.shipping_fee));
-  if (o.shipping_tier) html += sidebarStat('Tier', esc(o.shipping_tier));
-  if (o.delivery_zone) html += sidebarStat('Zone', esc(o.delivery_zone));
-  html += sidebarStat('Created', formatDate(o.created_at));
-  if (o.paid_at) html += sidebarStat('Paid', formatDate(o.paid_at));
-  if (o.shipped_at) html += sidebarStat('Shipped', formatDate(o.shipped_at));
-  if (o.delivered_at) html += sidebarStat('Delivered', formatDate(o.delivered_at));
-  if (o.completed_at) html += sidebarStat('Completed', formatDate(o.completed_at));
-  if (o.cancelled_at) html += sidebarStat('Cancelled', formatDate(o.cancelled_at));
-  if (o.source) html += sidebarStat('Source', esc(o.source));
-  html += `</div>`;
+  // Meta grid
+  let metaLeft = omRow('Customer', esc(custName));
+  metaLeft += omRow('Email', esc(custEmail));
+  if (orderTotal != null) metaLeft += omRow('Total', `<strong>${formatPrice(orderTotal)}</strong>`);
+  if (o.shipping_fee != null) metaLeft += omRow('Shipping', formatPrice(o.shipping_fee));
+  if (o.shipping_tier) metaLeft += omRow('Tier', esc(o.shipping_tier));
+  if (o.delivery_zone) metaLeft += omRow('Zone', esc(o.delivery_zone));
+  if (o.source) metaLeft += omRow('Source', esc(o.source));
 
-  modal.querySelector('#om-sidebar').innerHTML = html;
-}
+  let metaRight = omRow('Created', formatDate(o.created_at));
+  if (o.paid_at) metaRight += omRow('Paid', formatDate(o.paid_at));
+  if (o.shipped_at) metaRight += omRow('Shipped', formatDate(o.shipped_at));
+  if (o.delivered_at) metaRight += omRow('Delivered', formatDate(o.delivered_at));
+  if (o.completed_at) metaRight += omRow('Completed', formatDate(o.completed_at));
+  if (o.cancelled_at) metaRight += omRow('Cancelled', formatDate(o.cancelled_at));
 
-function sidebarStat(label, value) {
-  return `<div class="admin-product-modal__sidebar-stat"><span>${label}</span><strong>${value}</strong></div>`;
-}
-
-function buildOrderModalTabs(modal, o, events) {
-  const showCost = AdminAuth.isOwner();
-  const tabs = ['Items', 'Shipping', 'Timeline', 'Actions'];
-  const tabsEl = modal.querySelector('#om-tabs');
-  const panelsEl = modal.querySelector('#om-panels');
-
-  tabsEl.innerHTML = tabs.map((t, i) =>
-    `<button class="admin-product-modal__tab${i === 0 ? ' active' : ''}" data-tab="${i}">${t}</button>`
-  ).join('');
-
-  // Items panel
-  let itemsHtml = '';
-  if (o.items?.length) {
-    itemsHtml += `<table class="admin-order-items"><thead><tr>`;
-    itemsHtml += `<th>Product</th><th>SKU</th><th>Qty</th><th>Price</th>`;
-    if (showCost) itemsHtml += `<th>Cost</th>`;
-    itemsHtml += `</tr></thead><tbody>`;
-    for (const item of o.items) {
-      const itemPrice = item.sell_price ?? item.unit_price ?? item.price;
-      itemsHtml += `<tr>
-        <td class="cell-truncate">${esc(item.product_name || item.name || item.description || MISSING)}</td>
-        <td class="mono">${esc(item.sku || MISSING)}</td>
-        <td>${item.qty ?? item.quantity ?? MISSING}</td>
-        <td class="mono">${itemPrice != null ? formatPrice(itemPrice) : MISSING}</td>
-        ${showCost ? `<td class="mono">${item.supplier_cost_snapshot != null ? formatPrice(item.supplier_cost_snapshot) : MISSING}</td>` : ''}
-      </tr>`;
-    }
-    itemsHtml += `</tbody></table>`;
-  } else {
-    itemsHtml = `<p class="admin-text-muted">${MISSING} No items</p>`;
-  }
-
-  // Shipping panel
+  // Shipping address — shown inline as middle meta column
   const addr = o.shipping_address || {};
   const hasAddr = addr.address_line1 || o.shipping_address_line1;
-  let shippingHtml = '';
+  let metaMiddle = '';
   if (hasAddr) {
     const name = addr.recipient_name || o.shipping_recipient_name || '';
     const phone = addr.phone || o.shipping_phone || '';
@@ -326,21 +290,55 @@ function buildOrderModalTabs(modal, o, events) {
       city && region ? `${city}, ${region} ${postal}`.trim() : (city || region),
       country,
     ].filter(Boolean).map(p => esc(p)).join('<br>');
-    shippingHtml += `<div class="admin-detail-block"><div class="admin-detail-block__title">Delivery Address</div>`;
-    shippingHtml += `<address style="font-style:normal;line-height:1.8;font-size:0.9rem">${parts}</address></div>`;
+    metaMiddle = `<div class="om-meta-addr-label">Ship to</div><address style="font-style:normal;line-height:1.7;font-size:0.9rem">${parts}</address>`;
   }
-  if (o.carrier || o.tracking_number) {
-    shippingHtml += `<div class="admin-detail-block"><div class="admin-detail-block__title">Tracking</div>`;
-    shippingHtml += detailRow('Carrier', esc(o.carrier || MISSING));
-    shippingHtml += detailRow('Tracking #', esc(o.tracking_number || MISSING));
-    shippingHtml += `</div>`;
-  }
-  if (!shippingHtml) shippingHtml = `<p class="admin-text-muted">${MISSING} No shipping info</p>`;
 
-  // Timeline panel
+  const metaSection = `<div class="om-meta-grid${metaMiddle ? ' om-meta-grid--3col' : ''}"><div>${metaLeft}</div>${metaMiddle ? `<div>${metaMiddle}</div>` : ''}<div>${metaRight}</div></div>`;
+
+  // Items section
+  let itemsHtml = '';
+  if (o.items?.length) {
+    itemsHtml += `<table class="admin-order-items"><thead><tr>`;
+    itemsHtml += `<th>Product</th><th>SKU</th><th>Qty</th><th>Price</th>`;
+    if (showCost) itemsHtml += `<th>Cost</th><th>Profit</th>`;
+    itemsHtml += `</tr></thead><tbody>`;
+    let totalPrice = 0, totalCost = 0;
+    for (const item of o.items) {
+      const itemPrice = item.sell_price ?? item.unit_price ?? item.price;
+      const qty = item.qty ?? item.quantity ?? 0;
+      totalPrice += (itemPrice ?? 0) * qty;
+      if (showCost) totalCost += (item.supplier_cost_snapshot ?? 0) * qty;
+      itemsHtml += `<tr>
+        <td class="cell-truncate">${esc(item.product_name || item.name || item.description || MISSING)}</td>
+        <td class="mono">${esc(item.sku || MISSING)}</td>
+        <td>${item.qty ?? item.quantity ?? MISSING}</td>
+        <td class="mono">${itemPrice != null ? formatPrice(itemPrice) : MISSING}</td>
+        ${showCost ? `<td class="mono">${item.supplier_cost_snapshot != null ? formatPrice(item.supplier_cost_snapshot) : MISSING}</td><td></td>` : ''}
+      </tr>`;
+    }
+    const profit = totalPrice - totalCost;
+    itemsHtml += `</tbody><tfoot><tr class="admin-order-items__total">
+      <td colspan="3"></td>
+      <td class="mono"><strong>${formatPrice(totalPrice)}</strong></td>
+      ${showCost ? `<td class="mono"><strong>${formatPrice(totalCost)}</strong></td><td class="mono" style="color:var(--success-text,#15803d)"><strong>${formatPrice(profit)}</strong></td>` : ''}
+    </tr></tfoot></table>`;
+  } else {
+    itemsHtml += `<p class="admin-text-muted">${MISSING} No items</p>`;
+  }
+
+  // Tracking section (conditional — address is now in the meta grid)
+  let shippingHtml = '';
+  if (o.carrier || o.tracking_number) {
+    shippingHtml += `<div class="om-section-title">Tracking</div>`;
+    shippingHtml += `<div class="admin-detail-block"><div class="admin-detail-row"><span class="admin-detail-row__label">Carrier</span><span class="admin-detail-row__value">${esc(o.carrier || MISSING)}</span></div>`;
+    shippingHtml += `<div class="admin-detail-row"><span class="admin-detail-row__label">Tracking #</span><span class="admin-detail-row__value">${esc(o.tracking_number || MISSING)}</span></div></div>`;
+  }
+
+  // Timeline section (conditional)
   let timelineHtml = '';
   if (events.length) {
-    timelineHtml = `<div class="admin-timeline">`;
+    timelineHtml += `<div class="om-section-title">Timeline</div>`;
+    timelineHtml += `<div class="admin-timeline">`;
     for (const ev of events) {
       const dotClass = ev.type === 'status_change' ? 'cyan'
         : (ev.type === 'refund_created' || ev.type === 'refund') ? 'magenta' : 'yellow';
@@ -353,41 +351,25 @@ function buildOrderModalTabs(modal, o, events) {
       timelineHtml += `</div></div>`;
     }
     timelineHtml += `</div>`;
-  } else {
-    timelineHtml = `<p class="admin-text-muted" data-tooltip="Requires order_events table">${MISSING} No timeline events</p>`;
   }
 
-  // Actions panel
-  let actionsHtml = `<div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:24px">`;
-  actionsHtml += `<button class="admin-btn admin-btn--ghost" data-action="update-status">${icon('orders', 14, 14)} Update Status</button>`;
-  actionsHtml += `<button class="admin-btn admin-btn--ghost" data-action="add-tracking">${icon('fulfillment', 14, 14)} Add Tracking</button>`;
-  actionsHtml += `<button class="admin-btn admin-btn--ghost" data-action="add-note">${icon('dashboard', 14, 14)} Add Note</button>`;
-  actionsHtml += `<button class="admin-btn admin-btn--danger" data-action="create-refund">${icon('refunds', 14, 14)} Refund</button>`;
+  // Actions — moved into header
+  const btns = [
+    `<button class="admin-btn admin-btn--ghost admin-btn--sm" data-action="update-status">${icon('orders', 13, 13)} Update Status</button>`,
+    `<button class="admin-btn admin-btn--ghost admin-btn--sm" data-action="add-tracking">${icon('fulfillment', 13, 13)} Add Tracking</button>`,
+    `<button class="admin-btn admin-btn--ghost admin-btn--sm" data-action="add-note">${icon('dashboard', 13, 13)} Add Note</button>`,
+    `<button class="admin-btn admin-btn--danger admin-btn--sm" data-action="create-refund">${icon('refunds', 13, 13)} Refund</button>`,
+  ];
   if (o.status === 'cancelled') {
-    actionsHtml += `<button class="admin-btn admin-btn--ghost" style="color:var(--danger);border-color:var(--danger)" data-action="delete">${icon('trash', 14, 14)} Delete Order</button>`;
+    btns.push(`<button class="admin-btn admin-btn--ghost admin-btn--sm" style="color:var(--danger);border-color:var(--danger)" data-action="delete">${icon('trash', 13, 13)} Delete</button>`);
   }
-  actionsHtml += `</div>`;
+  modal.querySelector('#om-header-actions').innerHTML =
+    `<div class="om-header-btns">${btns.join('')}</div>${statusBadge(o.status)}`;
 
-  panelsEl.innerHTML = [itemsHtml, shippingHtml, timelineHtml, actionsHtml]
-    .map((html, i) => `<div class="admin-product-modal__tab-panel${i === 0 ? ' active' : ''}">${html}</div>`)
-    .join('');
+  modal.querySelector('#om-content').innerHTML = [metaSection, itemsHtml, timelineHtml, shippingHtml]
+    .filter(Boolean).join('');
 
-  // Tab switching
-  tabsEl.querySelectorAll('.admin-product-modal__tab').forEach(btn => {
-    btn.addEventListener('click', () => {
-      tabsEl.querySelectorAll('.admin-product-modal__tab').forEach(b => b.classList.remove('active'));
-      panelsEl.querySelectorAll('.admin-product-modal__tab-panel').forEach(p => p.classList.remove('active'));
-      btn.classList.add('active');
-      panelsEl.children[Number(btn.dataset.tab)].classList.add('active');
-    });
-  });
-
-  // Bind action buttons
   bindModalActions(modal, o);
-}
-
-function detailRow(label, value) {
-  return `<div class="admin-detail-row"><span class="admin-detail-row__label">${label}</span><span class="admin-detail-row__value">${value}</span></div>`;
 }
 
 function bindModalActions(modal, order) {
@@ -404,10 +386,14 @@ function bindModalActions(modal, order) {
         confirmLabel: 'Delete',
         confirmClass: 'admin-btn--danger',
         onConfirm: async () => {
-          await AdminAPI.deleteOrder(order.id);
-          Toast.success('Order deleted');
-          closeOrderModal();
-          loadOrders();
+          try {
+            await AdminAPI.deleteOrder(order.id);
+            Toast.success('Order deleted');
+            closeOrderModal();
+            loadOrders();
+          } catch (e) {
+            Toast.error(`Delete failed: ${e.message}`);
+          }
         },
       });
     });
@@ -866,6 +852,16 @@ export default {
       onPageChange: (page) => { _page = page; loadOrders(); },
       emptyMessage: 'No orders found',
       emptyIcon: icon('orders', 40, 40),
+    });
+
+    // Quick-track delegation
+    tableContainer.addEventListener('click', (e) => {
+      const btn = e.target.closest('[data-action="quick-track"]');
+      if (!btn) return;
+      e.stopPropagation();
+      const orderId = btn.dataset.orderId;
+      const order = (_table.data || []).find(r => r.id === orderId);
+      if (order) showTrackingModal(order);
     });
 
     // New Order
