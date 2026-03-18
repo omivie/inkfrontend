@@ -127,6 +127,7 @@ const Favourites = {
                     image: product.image || '',
                     brand: product.brand || '',
                     color: product.color || '',
+                    color_hex: product.color_hex || null,
                     addedAt: response.data.added_at || new Date().toISOString()
                 });
                 this.updateUI();
@@ -436,8 +437,7 @@ const Favourites = {
      * Get image HTML for a favourite item (with color fallback)
      */
     getItemImageHTML(item) {
-        const color = item.color || (typeof ProductColors !== 'undefined' ? ProductColors.detectFromName(item.name) : null);
-        const colorStyle = color && typeof ProductColors !== 'undefined' ? ProductColors.getStyle(color) : null;
+        const colorStyle = typeof ProductColors !== 'undefined' ? ProductColors.getProductStyle(item) : null;
 
         if (item.image) {
             if (colorStyle) {

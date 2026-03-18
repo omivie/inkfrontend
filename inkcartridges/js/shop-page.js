@@ -2370,9 +2370,8 @@
                     </svg>`;
             let imageContent;
             const resolvedImageUrl = typeof storageUrl === 'function' ? storageUrl(product.image_url) : product.image_url;
+            const colorStyle = ProductColors.getProductStyle(product);
             if (resolvedImageUrl && resolvedImageUrl !== '/assets/images/placeholder-product.svg') {
-                const detectedColor = color || ProductColors.detectFromName(product.name);
-                const colorStyle = detectedColor ? this.getColorStyle(detectedColor) : null;
                 if (colorStyle) {
                     imageContent = `<img src="${Security.escapeAttr(resolvedImageUrl)}" alt="${Security.escapeAttr(product.name)}" loading="lazy" data-fallback="color-block">
                         <div class="product-card__color-block" style="${colorStyle}; display: none;"></div>`;
@@ -2380,9 +2379,7 @@
                     imageContent = `<img src="${Security.escapeAttr(resolvedImageUrl)}" alt="${Security.escapeAttr(product.name)}" loading="lazy" data-fallback="placeholder">`;
                 }
             } else if (isCompatible) {
-                const detectedColor = color || ProductColors.detectFromName(product.name);
-                const colorStyle = detectedColor ? this.getColorStyle(detectedColor) : 'background-color: #1a1a1a;';
-                imageContent = `<div class="product-card__color-block" style="${colorStyle}"></div>`;
+                imageContent = `<div class="product-card__color-block" style="${colorStyle || 'background-color: #1a1a1a;'}"></div>`;
             } else {
                 imageContent = `<img src="/assets/images/placeholder-product.svg" alt="${Security.escapeAttr(product.name)}" loading="lazy">`;
             }

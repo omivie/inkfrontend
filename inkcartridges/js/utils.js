@@ -153,6 +153,39 @@ const ProductColors = {
     },
 
     /**
+     * Get CSS style string from a color_hex array (from backend API).
+     * Single hex → background-color; multiple → striped gradient.
+     * @param {string[]} hexArray - Array of hex strings e.g. ["#1a1a1a"] or ["#00bcd4","#e91e63"]
+     * @returns {string|null}
+     */
+    getStyleFromHex(hexArray) {
+        if (!hexArray || !Array.isArray(hexArray) || hexArray.length === 0) return null;
+        if (hexArray.length === 1) return `background-color: ${hexArray[0]};`;
+        const step = 100 / hexArray.length;
+        const stops = hexArray.flatMap((hex, i) => [
+            `${hex} ${(i * step).toFixed(2)}%`,
+            `${hex} ${((i + 1) * step).toFixed(2)}%`
+        ]);
+        return `background: linear-gradient(to right, ${stops.join(', ')});`;
+    },
+
+    /**
+     * Get CSS style string for any product/item object.
+     * Priority: color_hex array > color name > detectFromName fallback.
+     * @param {Object} obj - Product or cart item with optional color_hex, color, name fields
+     * @param {string} fallback - Fallback style if no color found
+     * @returns {string|null}
+     */
+    getProductStyle(obj, fallback = null) {
+        if (obj && obj.color_hex && Array.isArray(obj.color_hex) && obj.color_hex.length > 0) {
+            return this.getStyleFromHex(obj.color_hex);
+        }
+        const colorName = obj && (obj.color || this.detectFromName(obj.name));
+        if (colorName) return this.getStyle(colorName, fallback);
+        return fallback;
+    },
+
+    /**
      * Detect color from product name
      * @param {string} name - Product name
      * @returns {string|null} Detected color name or null

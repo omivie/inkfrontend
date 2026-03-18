@@ -442,10 +442,8 @@
 
             // Product image with color fallback
             const productImageEl = document.getElementById('product-image');
+            const colorStyle = ProductColors.getProductStyle(info);
             if (info.image_url) {
-                const color = info.color || this.detectColorFromName(info.displayName);
-                const colorStyle = color ? this.getColorStyle(color) : null;
-
                 if (colorStyle) {
                     // Image with color fallback on error
                     productImageEl.innerHTML = `
@@ -473,9 +471,6 @@
                 });
             } else {
                 // No image - show color block or placeholder
-                const color = info.color || this.detectColorFromName(info.displayName);
-                const colorStyle = color ? this.getColorStyle(color) : null;
-
                 if (colorStyle) {
                     // colorStyle is safe — sourced from hardcoded ProductColors.map
                     productImageEl.classList.add('product-gallery__main--color-only');
@@ -524,6 +519,7 @@
             // Compatible Printers tab (skip for ribbons)
             if (info.category !== 'ribbon') {
                 this.renderCompatibilityTab(info);
+                this.renderCompatiblePrinters(info);
             }
 
             // Compatible products for ALL categories
@@ -587,8 +583,7 @@
                 if (printers.length === 0) return;
 
                 const printerLinks = printers.map(p => {
-                    const printerSlug = p.slug || p.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
-                    return `<a href="/printers/${Security.escapeAttr(printerSlug)}" class="printer-link">${Security.escapeHtml(p.name)}</a>`;
+                    return `<a href="/html/shop?printer_model=${encodeURIComponent(p.name)}" class="printer-link">${Security.escapeHtml(p.name)}</a>`;
                 }).join(', ');
 
                 const html = `
@@ -645,8 +640,7 @@
                 if (!list || !tabBtn) return;
 
                 list.innerHTML = printers.map(p => {
-                    const printerSlug = p.slug || p.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
-                    return `<li><a href="/printers/${Security.escapeAttr(printerSlug)}">${Security.escapeHtml(p.name)}</a></li>`;
+                    return `<li><a href="/html/shop?printer_model=${encodeURIComponent(p.name)}">${Security.escapeHtml(p.name)}</a></li>`;
                 }).join('');
 
                 tabBtn.hidden = false;

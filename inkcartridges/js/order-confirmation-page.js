@@ -259,8 +259,7 @@
 
         // Uses ProductColors from utils.js for color lookups
         getItemImageHtml(item) {
-            const color = item.color || (typeof ProductColors !== 'undefined' ? ProductColors.detectFromName(item.name) : null);
-            const colorStyle = color && typeof ProductColors !== 'undefined' ? ProductColors.getStyle(color) : null;
+            const colorStyle = typeof ProductColors !== 'undefined' ? ProductColors.getProductStyle(item) : null;
 
             const esc = typeof Security !== 'undefined' ? Security.escapeAttr : (s) => s;
 

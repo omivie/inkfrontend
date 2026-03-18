@@ -23,8 +23,7 @@ const Products = {
      * Get image HTML for a product (with color fallback)
      */
     getProductImageHTML(product) {
-        const color = product.color || this.detectColorFromName(product.name);
-        const colorStyle = color ? this.getColorStyle(color) : null;
+        const colorStyle = ProductColors.getProductStyle(product);
         const imageUrl = typeof storageUrl === 'function' ? storageUrl(product.image_url) : product.image_url;
 
         if (imageUrl && imageUrl !== '/assets/images/placeholder-product.svg') {

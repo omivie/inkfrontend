@@ -84,8 +84,7 @@ const Cart = {
      * Get image HTML for a cart item
      */
     getItemImageHTML: function(item) {
-        const color = item.color || this.detectColorFromName(item.name);
-        const colorStyle = color ? this.getColorStyle(color) : null;
+        const colorStyle = ProductColors.getProductStyle(item, 'background-color: #e0e0e0;');
         const escapedName = Security.escapeHtml(item.name);
         const imageUrl = typeof storageUrl === 'function' ? storageUrl(item.image) : item.image;
 
@@ -201,6 +200,7 @@ const Cart = {
                 sku: item.product.sku,
                 brand: item.product.brand?.name || '',
                 color: item.product.color || '',
+                color_hex: item.product.color_hex || null,
                 quantity: item.quantity,
                 inStock: item.in_stock !== false,
                 stockQuantity: item.product.stock_quantity,
@@ -1010,6 +1010,7 @@ const Cart = {
                 sku: product.sku || '',
                 brand: product.brand || '',
                 color: product.color || '',
+                color_hex: product.color_hex || null,
                 quantity: product.quantity || 1,
                 source: source,
                 key: key,
