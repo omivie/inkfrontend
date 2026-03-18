@@ -117,7 +117,6 @@
                     ${brand.categories.map(cat =>
                         `<a href="/html/shop?brand=${Security.escapeAttr(brand.slug)}&category=${Security.escapeAttr(cat.param)}" class="brands-mega__card-link">${Security.escapeHtml(cat.label)}</a>`
                     ).join('\n                    ')}
-                    <a href="/html/shop?brand=${Security.escapeAttr(brand.slug)}" class="brands-mega__card-link">All Products</a>
                 </div>
             </div>
         `).join('');
