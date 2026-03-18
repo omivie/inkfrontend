@@ -71,6 +71,7 @@
           ]},
         { slug: 'fuji-xerox', name: 'Fuji Xerox', logo: '/assets/brands/fuji-xerox.png',
           categories: [
+              { label: 'Ink Cartridges', param: 'ink' },
               { label: 'Toner Cartridges', param: 'toner' },
               { label: 'Drums & Supplies', param: 'drums' }
           ]},

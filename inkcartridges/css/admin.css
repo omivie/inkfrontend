@@ -1444,6 +1444,31 @@
 .admin-bulk-bar__actions { display: flex; gap: 8px; }
 @keyframes bulkBarSlide { from { transform: translateY(100%); } to { transform: translateY(0); } }
 
+/* ---- Compatibility Management ---- */
+.admin-compat-suggestions {
+  position: absolute;
+  z-index: 100;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  max-height: 200px;
+  overflow-y: auto;
+  width: 100%;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+}
+.admin-compat-suggestions__item {
+  padding: 8px 12px;
+  cursor: pointer;
+  font-size: 0.9em;
+}
+.admin-compat-suggestions__item:hover { background: var(--hover); }
+.admin-badge .compat-remove {
+  background: none; border: none; cursor: pointer;
+  color: inherit; opacity: 0.6; margin-left: 4px; padding: 0;
+  font-size: 1em; line-height: 1; vertical-align: middle;
+}
+.admin-badge .compat-remove:hover { opacity: 1; }
+
 /* ---- Print ---- */
 @media print {
   .admin-sidebar, .admin-topbar, .admin-reg-strip, .admin-toasts,

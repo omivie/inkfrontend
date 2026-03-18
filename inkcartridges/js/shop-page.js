@@ -367,6 +367,7 @@
             if (this.navigationVersion === expectedVersion) {
                 this.updateBreadcrumb();
                 this.updateTitle();
+                this.updateSEO();
             }
         },
 
@@ -531,16 +532,23 @@
             if (!categoryCounts) {
                 try {
                     if (this._shopEndpointAvailable) {
-                        // Use /api/shop endpoint for category counts in a single call
-                        const response = await API.getShopData({ brand: this.state.brand });
+                        // Use /api/shop endpoint for category counts; fetch consumable series
+                        // separately to get accurate count (counts.drums only reflects drum units)
+                        const [response, consumableResponse] = await Promise.all([
+                            API.getShopData({ brand: this.state.brand }),
+                            API.getShopData({ brand: this.state.brand, category: 'consumable' })
+                        ]);
                         // Check if navigation changed during fetch
                         if (navVersion !== undefined && this.navigationVersion !== navVersion) return;
 
                         if (response.ok && response.data?.counts) {
+                            const consumableCount = consumableResponse.ok && consumableResponse.data?.series
+                                ? consumableResponse.data.series.reduce((sum, s) => sum + (s.count || 0), 0)
+                                : response.data.counts.drums || 0;
                             categoryCounts = {
                                 ink: response.data.counts.ink || 0,
                                 toner: response.data.counts.toner || 0,
-                                consumable: response.data.counts.drums || 0
+                                consumable: consumableCount
                             };
                         } else {
                             // Endpoint returned error — fall back to legacy
@@ -670,7 +678,7 @@
 
                 if (this._shopEndpointAvailable) {
                     // Use /api/shop endpoint for server-side series extraction
-                    const apiParams = { brand: this.state.brand, category: this.state.category };
+                    const apiParams = { brand: this.state.brand, category: apiCategory };
                     if (this.state.type === 'genuine' || this.state.type === 'compatible') {
                         apiParams.source = this.state.type;
                     }
@@ -1353,7 +1361,7 @@
                 const firstProduct = (products && products.length > 0) ? products[0] : null;
                 const productName = firstProduct ? Security.escapeHtml(firstProduct.name || '') : '';
                 box.innerHTML = `
-                    <span class="drilldown-box__code">${code}</span>
+                    <span class="drilldown-box__code">${code.replace(/-/g, '')}</span>
                     ${productName ? `<span class="drilldown-box__name">${productName}</span>` : ''}
                     <span class="drilldown-box__count">${count} product${count > 1 ? 's' : ''}</span>
                 `;
@@ -1394,9 +1402,11 @@
                 // If still no products, fetch via /api/shop or legacy
                 if (mergedProducts.length === 0) {
                     if (this._shopEndpointAvailable) {
+                        const loadCategoryConfig = this.categories.find(c => c.id === this.state.category);
+                        const loadApiCategory = loadCategoryConfig?.apiCategory || this.state.category;
                         const response = await API.getShopData({
                             brand: this.state.brand,
-                            category: this.state.category,
+                            category: loadApiCategory,
                             code: code,
                             limit: 200
                         });
@@ -2531,6 +2541,93 @@
                 } catch (error) {
                     // Could not fetch compatible printers - continue without them
                 }
+            }
+        },
+
+        updateSEO() {
+            const BASE = 'https://www.inkcartridges.co.nz';
+            const brand = this.state.brand;
+            const category = this.state.category;
+            const code = this.state.code;
+            const brandName = this.brandInfo[brand]?.name || brand || '';
+            const categoryLabels = {
+                ink: 'Ink Cartridges', toner: 'Toner Cartridges',
+                drum: 'Drum Units', consumable: 'Consumables'
+            };
+            const catLabel = categoryLabels[category] || 'Printing Supplies';
+
+            let title, description, canonical;
+
+            const params = new URLSearchParams();
+            if (brand)              params.set('brand', brand);
+            if (category)           params.set('category', category);
+            if (code)               params.set('code', code);
+            if (this.state.search)  params.set('q', this.state.search);
+            const qs = params.toString() ? '?' + params.toString() : '';
+            canonical = `${BASE}/html/shop${qs}`;
+
+            switch (this.state.level) {
+                case 'categories':
+                    title       = `${brandName} Ink Cartridges & Toner NZ | InkCartridges.co.nz`;
+                    description = `Shop genuine and compatible ${brandName} ink cartridges, toner, and printing supplies. Free NZ-wide shipping over $100.`;
+                    break;
+                case 'codes':
+                    title       = `${brandName} ${catLabel} NZ | InkCartridges.co.nz`;
+                    description = `Browse all ${brandName} ${catLabel.toLowerCase()} — genuine and compatible options with free NZ shipping over $100.`;
+                    break;
+                case 'products': {
+                    const codeStr = code ? code.replace(/-/g, ' ').toUpperCase() : '';
+                    title       = `${brandName} ${codeStr} ${catLabel} NZ | InkCartridges.co.nz`;
+                    description = `Shop ${brandName} ${codeStr} ${catLabel.toLowerCase()} — genuine and compatible. Free NZ shipping over $100.`;
+                    break;
+                }
+                case 'search-results':
+                    title       = `Search: "${this.state.search}" | InkCartridges.co.nz`;
+                    description = `Search results for "${this.state.search}" — ink cartridges, toner, and printing supplies NZ.`;
+                    break;
+                case 'printer-products':
+                case 'printer-model-products': {
+                    const printerDisplay = this.state.printerModelDisplay || this.state.printerModel || this.state.printer || '';
+                    const pBrandName = this.state.printerBrand
+                        ? (this.brandInfo[this.state.printerBrand]?.name || this.state.printerBrand) : '';
+                    const printerFull = [pBrandName, printerDisplay].filter(Boolean).join(' ');
+                    title       = `Compatible Ink for ${printerFull} NZ | InkCartridges.co.nz`;
+                    description = `Shop compatible ink cartridges for the ${printerFull}. Free NZ-wide shipping over $100.`;
+                    break;
+                }
+                default: // brands level
+                    title       = 'Shop Ink Cartridges & Toner NZ | InkCartridges.co.nz';
+                    description = 'Browse all printing supplies — ink cartridges, toner, drums and accessories. Filter by brand, type, and compatibility.';
+                    canonical   = `${BASE}/html/shop`;
+            }
+
+            document.title = title;
+
+            const set = (id, attr, val) => { const el = document.getElementById(id); if (el) el[attr] = val; };
+            set('meta-description', 'content', description);
+            set('og-title',         'content', title);
+            set('og-description',   'content', description);
+            set('og-url',           'content', canonical);
+            set('canonical-url',    'href',    canonical);
+
+            // Update JSON-LD CollectionPage schema
+            const schemaEl = document.getElementById('shop-schema');
+            if (schemaEl) {
+                const breadcrumbItems = [
+                    { "@type": "ListItem", "position": 1, "name": "Home", "item": `${BASE}/` },
+                    { "@type": "ListItem", "position": 2, "name": "Shop", "item": `${BASE}/html/shop` }
+                ];
+                if (brandName) breadcrumbItems.push({ "@type": "ListItem", "position": 3, "name": brandName, "item": canonical });
+                if (catLabel && brandName) breadcrumbItems.push({ "@type": "ListItem", "position": 4, "name": catLabel, "item": canonical });
+
+                schemaEl.textContent = JSON.stringify({
+                    "@context": "https://schema.org",
+                    "@type": "CollectionPage",
+                    "name": title.replace(' | InkCartridges.co.nz', ''),
+                    "description": description,
+                    "url": canonical,
+                    "breadcrumb": { "@type": "BreadcrumbList", "itemListElement": breadcrumbItems }
+                }, null, 2);
             }
         },
 

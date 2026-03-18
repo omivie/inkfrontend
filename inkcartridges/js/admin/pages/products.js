@@ -419,9 +419,19 @@ function buildProductModalTabs(modal, full, isOwner) {
   // Advanced panel
   let advancedHtml = `
     ${formGroup('Page Yield', `<input class="admin-input" id="edit-page-yield" type="number" min="0" value="${full.page_yield ?? ''}">`)}
-    <div class="admin-form-group">
-      <label id="compat-heading">Compatible Printers</label>
-      <div class="admin-compat-printers" id="compat-printers"><span class="admin-text-muted">Loading&hellip;</span></div>
+    <div class="admin-form-group" id="compat-section">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <label id="compat-heading">Compatible Printers</label>
+        <button class="admin-btn admin-btn--ghost admin-btn--sm" id="compat-add-btn">+ Add Printer</button>
+      </div>
+      <div id="compat-search-wrap" style="display:none;margin-bottom:8px;position:relative">
+        <input class="admin-input" id="compat-search" placeholder="Search printers\u2026" autocomplete="off">
+        <div id="compat-suggestions" class="admin-compat-suggestions"></div>
+      </div>
+      <div class="admin-compat-printers" id="compat-printers"><span class="admin-text-muted">Loading\u2026</span></div>
+      <div id="compat-bulk-wrap" style="margin-top:10px;display:none">
+        <button class="admin-btn admin-btn--ghost admin-btn--sm" id="compat-bulk-btn">Apply to all variants with prefix &ldquo;<span id="compat-prefix"></span>&rdquo;</button>
+      </div>
     </div>
     ${formGroup('Tags (comma-separated)', `<input class="admin-input" id="edit-tags" value="${esc((full.tags || []).join(', '))}">`)}
     ${formGroup('Internal Notes', `<textarea class="admin-textarea" id="edit-admin-notes" rows="3">${esc(full.admin_notes || '')}</textarea>`)}
@@ -484,35 +494,155 @@ function bindProductModalActions(modal, product) {
     }
   });
 
-  // Async-load compatible printers (non-blocking)
-  if (product.sku && window.API?.getCompatiblePrinters) {
+  // Compatibility management (editable)
+  {
+    let compatPrinters = [];
     const container = modal.querySelector('#compat-printers');
-    window.API.getCompatiblePrinters(product.sku).then(response => {
-      const printers = response?.data?.compatible_printers || response?.data?.printers || response?.data || [];
-      const count = Array.isArray(printers) ? printers.length : 0;
-      const heading = modal.querySelector('#compat-heading');
-      if (heading) heading.textContent = `Compatible Printers (${count})`;
-      if (container) {
-        if (count > 0) {
-          container.innerHTML = printers.map(p => {
-            const name = typeof p === 'string' ? p : (p.full_name || p.model_name || p.model || p.name || String(p));
-            return `<span class="admin-badge">${esc(name)}</span>`;
-          }).join('');
-        } else {
-          container.innerHTML = `
-            <div style="background:var(--yellow-light,#fffbe6);border:1px solid var(--yellow,#f0a500);border-radius:6px;padding:10px 12px;font-size:0.85em;">
-              <strong>No compatible printers found</strong><br>
-              <span style="color:var(--text-muted);">This product has no printer associations in the database. It won't appear in printer-based searches or "You May Also Need" sections on the storefront.</span>
-            </div>`;
-        }
+    const heading = modal.querySelector('#compat-heading');
+    const addBtn = modal.querySelector('#compat-add-btn');
+    const searchWrap = modal.querySelector('#compat-search-wrap');
+    const searchInput = modal.querySelector('#compat-search');
+    const suggestions = modal.querySelector('#compat-suggestions');
+    const bulkWrap = modal.querySelector('#compat-bulk-wrap');
+    const bulkBtn = modal.querySelector('#compat-bulk-btn');
+    const prefixEl = modal.querySelector('#compat-prefix');
+
+    // Derive SKU prefix: strip trailing uppercase letters (LC3313BK → LC3313, TN3440 → TN3440)
+    const skuPrefix = product.sku ? product.sku.replace(/[A-Z]+$/, '') : '';
+    const showBulk = skuPrefix && skuPrefix !== product.sku;
+
+    function renderCompatBadges() {
+      if (heading) heading.textContent = `Compatible Printers (${compatPrinters.length})`;
+      if (!container) return;
+      if (compatPrinters.length > 0) {
+        container.innerHTML = compatPrinters.map(p => {
+          const name = typeof p === 'string' ? p : (p.full_name || p.model_name || p.model || p.name || String(p));
+          const id = typeof p === 'object' ? (p.id || p.printer_id || '') : '';
+          return `<span class="admin-badge">${esc(name)}<button class="compat-remove" data-printer-id="${esc(String(id))}" title="Remove">\u00d7</button></span>`;
+        }).join('');
+      } else {
+        container.innerHTML = `
+          <div style="background:var(--yellow-light,#fffbe6);border:1px solid var(--yellow,#f0a500);border-radius:6px;padding:10px 12px;font-size:0.85em;">
+            <strong>No compatible printers found</strong><br>
+            <span style="color:var(--text-muted);">This product has no printer associations in the database. It won't appear in printer-based searches or \u201cYou May Also Need\u201d sections on the storefront.</span>
+          </div>`;
       }
-    }).catch(() => {
-      const container = modal.querySelector('#compat-printers');
-      if (container) container.innerHTML = '<span class="admin-text-muted">Could not load</span>';
-    });
-  } else {
-    const container = modal.querySelector('#compat-printers');
-    if (container) container.innerHTML = '<span class="admin-text-muted">No SKU</span>';
+    }
+
+    // Remove printer handler (delegated)
+    if (container) {
+      container.addEventListener('click', async (e) => {
+        const btn = e.target.closest('.compat-remove');
+        if (!btn || !product.sku) return;
+        const printerId = btn.dataset.printerId;
+        btn.disabled = true;
+        try {
+          await AdminAPI.removeCompatiblePrinter(product.sku, printerId);
+          compatPrinters = compatPrinters.filter(p => String(typeof p === 'object' ? (p.id || p.printer_id) : '') !== String(printerId));
+          renderCompatBadges();
+        } catch (err) {
+          Toast.error(`Remove failed: ${err.message}`);
+          btn.disabled = false;
+        }
+      });
+    }
+
+    // Add printer toggle
+    if (addBtn && searchWrap && searchInput) {
+      addBtn.addEventListener('click', () => {
+        const visible = searchWrap.style.display !== 'none';
+        searchWrap.style.display = visible ? 'none' : 'block';
+        if (!visible) { searchInput.value = ''; suggestions.innerHTML = ''; searchInput.focus(); }
+      });
+
+      let searchTimer = null;
+      searchInput.addEventListener('input', () => {
+        clearTimeout(searchTimer);
+        const q = searchInput.value.trim();
+        if (q.length < 2) { suggestions.innerHTML = ''; return; }
+        searchTimer = setTimeout(async () => {
+          try {
+            const resp = await window.API.searchPrinters(q);
+            const results = resp?.data?.printers || resp?.data || [];
+            if (!Array.isArray(results) || results.length === 0) {
+              suggestions.innerHTML = '<div class="admin-compat-suggestions__item" style="color:var(--text-muted)">No results</div>';
+              return;
+            }
+            suggestions.innerHTML = results.slice(0, 10).map(p => {
+              const name = p.full_name || p.model_name || p.model || p.name || String(p);
+              return `<div class="admin-compat-suggestions__item" data-printer-id="${esc(String(p.id || ''))}" data-printer-name="${esc(name)}">${esc(name)}</div>`;
+            }).join('');
+          } catch (_) {
+            suggestions.innerHTML = '<div class="admin-compat-suggestions__item" style="color:var(--text-muted)">Search failed</div>';
+          }
+        }, 300);
+      });
+
+      suggestions.addEventListener('click', async (e) => {
+        const item = e.target.closest('.admin-compat-suggestions__item');
+        if (!item || !item.dataset.printerId || !product.sku) return;
+        const printerId = item.dataset.printerId;
+        const printerName = item.dataset.printerName;
+        // Don't add duplicates
+        if (compatPrinters.some(p => String(typeof p === 'object' ? (p.id || p.printer_id) : '') === String(printerId))) {
+          searchWrap.style.display = 'none';
+          return;
+        }
+        item.style.opacity = '0.5';
+        try {
+          await AdminAPI.addCompatiblePrinter(product.sku, printerId);
+          compatPrinters.push({ id: printerId, full_name: printerName });
+          renderCompatBadges();
+          searchWrap.style.display = 'none';
+          searchInput.value = '';
+          suggestions.innerHTML = '';
+        } catch (err) {
+          Toast.error(`Add failed: ${err.message}`);
+          item.style.opacity = '1';
+        }
+      });
+
+      // Close suggestions on outside click
+      document.addEventListener('click', (e) => {
+        if (!searchWrap.contains(e.target) && e.target !== addBtn) {
+          searchWrap.style.display = 'none';
+        }
+      }, { once: false });
+    }
+
+    // Bulk apply
+    if (showBulk && bulkWrap && bulkBtn && prefixEl) {
+      prefixEl.textContent = skuPrefix;
+      bulkWrap.style.display = 'block';
+      bulkBtn.addEventListener('click', async () => {
+        if (compatPrinters.length === 0) { Toast.error('No printers to apply'); return; }
+        const printerIds = compatPrinters.map(p => typeof p === 'object' ? (p.id || p.printer_id) : null).filter(Boolean);
+        bulkBtn.disabled = true;
+        bulkBtn.textContent = 'Applying\u2026';
+        try {
+          await AdminAPI.bulkApplyCompatibility(skuPrefix, printerIds);
+          Toast.success(`Applied to all variants with prefix \u201c${skuPrefix}\u201d`);
+        } catch (err) {
+          Toast.error(`Bulk apply failed: ${err.message}`);
+        } finally {
+          bulkBtn.disabled = false;
+          bulkBtn.innerHTML = `Apply to all variants with prefix \u201c<span id="compat-prefix">${esc(skuPrefix)}</span>\u201d`;
+        }
+      });
+    }
+
+    // Load printers
+    if (product.sku && window.API?.getCompatiblePrinters) {
+      window.API.getCompatiblePrinters(product.sku).then(response => {
+        compatPrinters = response?.data?.compatible_printers || response?.data?.printers || response?.data || [];
+        if (!Array.isArray(compatPrinters)) compatPrinters = [];
+        renderCompatBadges();
+      }).catch(() => {
+        if (container) container.innerHTML = '<span class="admin-text-muted">Could not load</span>';
+      });
+    } else {
+      if (container) container.innerHTML = '<span class="admin-text-muted">No SKU</span>';
+    }
   }
 
   // Bind image error fallbacks

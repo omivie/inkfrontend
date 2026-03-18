@@ -80,11 +80,11 @@ const COLUMNS = [
   {
     key: '_actions', label: '',
     render: (r) => {
-      const trackable = ['paid', 'processing', 'shipped'].includes((r.status || '').toLowerCase());
-      if (!trackable) return '';
+      const actionable = ['paid', 'shipped'].includes((r.status || '').toLowerCase());
+      if (!actionable) return '';
       return `<button class="admin-btn admin-btn--ghost admin-btn--xs order-track-btn"
-        data-order-id="${esc(r.id)}" data-action="quick-track"
-        title="Add tracking">${icon('fulfillment', 12, 12)} Track</button>`;
+        data-order-id="${esc(r.id)}" data-action="quick-status"
+        title="Update status">${icon('orders', 12, 12)} Status</button>`;
     },
     align: 'right',
   },
@@ -356,7 +356,6 @@ function buildOrderModalContent(modal, o, events) {
   // Actions — moved into header
   const btns = [
     `<button class="admin-btn admin-btn--ghost admin-btn--sm" data-action="update-status">${icon('orders', 13, 13)} Update Status</button>`,
-    `<button class="admin-btn admin-btn--ghost admin-btn--sm" data-action="add-tracking">${icon('fulfillment', 13, 13)} Add Tracking</button>`,
     `<button class="admin-btn admin-btn--ghost admin-btn--sm" data-action="add-note">${icon('dashboard', 13, 13)} Add Note</button>`,
     `<button class="admin-btn admin-btn--danger admin-btn--sm" data-action="create-refund">${icon('refunds', 13, 13)} Refund</button>`,
   ];
@@ -374,7 +373,6 @@ function buildOrderModalContent(modal, o, events) {
 
 function bindModalActions(modal, order) {
   modal.querySelector('[data-action="update-status"]')?.addEventListener('click', () => showStatusModal(order));
-  modal.querySelector('[data-action="add-tracking"]')?.addEventListener('click', () => showTrackingModal(order));
   modal.querySelector('[data-action="add-note"]')?.addEventListener('click', () => showNoteModal(order));
   modal.querySelector('[data-action="create-refund"]')?.addEventListener('click', () => showRefundModal(order));
 
@@ -403,8 +401,7 @@ function bindModalActions(modal, order) {
 // Backend state machine: valid transitions from each status
 const STATUS_TRANSITIONS = {
   pending: ['paid', 'cancelled'],
-  paid: ['processing', 'cancelled'],
-  processing: ['shipped', 'cancelled'],
+  paid: ['shipped', 'cancelled'],
   shipped: ['completed'],
   completed: [],
   cancelled: [],
@@ -453,10 +450,6 @@ function showStatusModal(order) {
     `;
   }
 
-  if (canCancel && current === 'processing') {
-    bodyHtml += `<div id="cancel-confirm" style="display:none"><div class="admin-form-help" style="color:var(--danger)">Cancelling a processing order requires confirmation. This may affect fulfillment.</div></div>`;
-  }
-
   const modal = Modal.open({
     title: 'Update Status',
     body: bodyHtml,
@@ -469,11 +462,9 @@ function showStatusModal(order) {
 
   const statusSelect = modal.body.querySelector('#modal-status');
   const trackingFields = modal.body.querySelector('#tracking-fields');
-  const cancelConfirm = modal.body.querySelector('#cancel-confirm');
 
   statusSelect.addEventListener('change', () => {
     if (trackingFields) trackingFields.style.display = statusSelect.value === 'shipped' ? '' : 'none';
-    if (cancelConfirm) cancelConfirm.style.display = statusSelect.value === 'cancelled' ? '' : 'none';
   });
   statusSelect.dispatchEvent(new Event('change'));
 
@@ -493,65 +484,13 @@ function showStatusModal(order) {
       body.tracking_number = tracking;
     }
 
-    if (newStatus === 'cancelled' && current === 'processing') {
-      body.confirm_processing_cancellation = true;
-    }
-
     try {
+      // Backend requires paid → processing → shipped; bridge automatically when needed
+      if (newStatus === 'shipped' && current === 'paid') {
+        await AdminAPI.updateOrderStatus(order.id, 'processing', { status: 'processing' });
+      }
       await AdminAPI.updateOrderStatus(order.id, newStatus, body);
       Toast.success(`Order updated to ${newStatus}`);
-      Modal.close();
-      closeOrderModal();
-      loadOrders();
-    } catch (e) {
-      Toast.error(`Failed: ${e.message}`);
-    }
-  });
-}
-
-function showTrackingModal(order) {
-  const modal = Modal.open({
-    title: 'Add Tracking',
-    body: `
-      <div class="admin-form-group">
-        <label>Carrier</label>
-        <select class="admin-select" id="modal-carrier">
-          <option value="">Select carrier</option>
-          <option value="NZ Post">NZ Post</option>
-          <option value="CourierPost">CourierPost</option>
-          <option value="Aramex">Aramex</option>
-          <option value="DHL">DHL</option>
-          <option value="Other">Other</option>
-        </select>
-      </div>
-      <div class="admin-form-group">
-        <label>Tracking Number</label>
-        <input class="admin-input" id="modal-tracking" placeholder="Enter tracking number">
-      </div>
-      <div class="admin-form-group">
-        <label>Shipped At</label>
-        <input class="admin-input" type="datetime-local" id="modal-shipped-at" value="${new Date().toISOString().slice(0, 16)}">
-      </div>
-    `,
-    footer: `
-      <button class="admin-btn admin-btn--ghost" data-action="cancel">Cancel</button>
-      <button class="admin-btn admin-btn--primary" data-action="save">Save Tracking</button>
-    `,
-  });
-  if (!modal) return;
-
-  modal.footer.querySelector('[data-action="cancel"]').addEventListener('click', () => Modal.close());
-  modal.footer.querySelector('[data-action="save"]').addEventListener('click', async () => {
-    const carrier = modal.body.querySelector('#modal-carrier').value;
-    const tracking = modal.body.querySelector('#modal-tracking').value;
-    const shippedAt = modal.body.querySelector('#modal-shipped-at').value;
-    if (!carrier || !tracking) {
-      Toast.warning('Please fill in carrier and tracking number');
-      return;
-    }
-    try {
-      await AdminAPI.updateTracking(order.id, carrier, tracking, shippedAt || null);
-      Toast.success('Tracking info saved');
       Modal.close();
       closeOrderModal();
       loadOrders();
@@ -854,14 +793,14 @@ export default {
       emptyIcon: icon('orders', 40, 40),
     });
 
-    // Quick-track delegation
+    // Quick-status delegation
     tableContainer.addEventListener('click', (e) => {
-      const btn = e.target.closest('[data-action="quick-track"]');
+      const btn = e.target.closest('[data-action="quick-status"]');
       if (!btn) return;
       e.stopPropagation();
       const orderId = btn.dataset.orderId;
       const order = (_table.data || []).find(r => r.id === orderId);
-      if (order) showTrackingModal(order);
+      if (order) showStatusModal(order);
     });
 
     // New Order

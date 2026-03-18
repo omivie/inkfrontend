@@ -23,7 +23,8 @@ async function rpc(fnName, params = {}, signal = null) {
       const err = await resp.json().catch(() => ({ message: resp.statusText }));
       throw new Error(err.message || `RPC ${fnName}: ${resp.status}`);
     }
-    const result = await resp.json();
+    const text = await resp.text();
+    const result = text ? JSON.parse(text) : true;
     // Supabase RPCs that RETURN TABLE return arrays even for single-row results.
     // Unwrap single-element arrays so callers can access fields directly.
     if (Array.isArray(result) && result.length === 1) return result[0];
@@ -143,20 +144,14 @@ const AdminAPI = {
   },
 
   async deleteOrder(orderId) {
-    const token = window.Auth?.session?.access_token;
-    if (!token) throw new Error('Not authenticated');
-
-    const resp = await fetch(`${Config.API_BASE}/api/admin/orders/${encodeURIComponent(orderId)}`, {
-      method: 'DELETE',
-      headers: {
-        'Authorization': `Bearer ${token}`,
-      },
-    });
-
-    if (resp.status === 204) return null;
-
-    const err = await resp.json().catch(() => ({ message: resp.statusText }));
-    throw new Error(err.message || `Failed to delete order (HTTP ${resp.status})`);
+    try {
+      const resp = await window.API.delete(`/api/admin/orders/${orderId}`);
+      if (resp && resp.ok === false) throw new Error(resp.error || 'Delete failed');
+      return true;
+    } catch (e) {
+      DebugLog.warn('[AdminAPI] deleteOrder failed:', e.message);
+      throw e;
+    }
   },
 
   // ---- Refunds ----
@@ -918,6 +913,40 @@ const AdminAPI = {
       return resp?.data ?? null;
     } catch (e) {
       DebugLog.warn('[AdminAPI] removeContactEmail failed:', e.message);
+      throw e;
+    }
+  },
+
+  // ---- Compatibility ----
+  async addCompatiblePrinter(sku, printerId) {
+    try {
+      const resp = await window.API.post('/api/admin/compatibility', { sku, printer_id: printerId });
+      return resp?.data ?? null;
+    } catch (e) {
+      DebugLog.warn('[AdminAPI] addCompatiblePrinter failed:', e.message);
+      throw e;
+    }
+  },
+
+  async removeCompatiblePrinter(sku, printerId) {
+    try {
+      const resp = await window.API.delete(`/api/admin/compatibility/${encodeURIComponent(sku)}/${encodeURIComponent(printerId)}`);
+      return resp?.data ?? null;
+    } catch (e) {
+      DebugLog.warn('[AdminAPI] removeCompatiblePrinter failed:', e.message);
+      throw e;
+    }
+  },
+
+  async bulkApplyCompatibility(skuPrefix, printerIds) {
+    try {
+      const resp = await window.API.post('/api/admin/compatibility/bulk-by-prefix', {
+        sku_prefix: skuPrefix,
+        printer_ids: printerIds,
+      });
+      return resp?.data ?? null;
+    } catch (e) {
+      DebugLog.warn('[AdminAPI] bulkApplyCompatibility failed:', e.message);
       throw e;
     }
   },
