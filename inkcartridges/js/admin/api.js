@@ -327,6 +327,17 @@ const AdminAPI = {
     }
   },
 
+  async generateProductSEO(sku) {
+    try {
+      const resp = await window.API.post(`/api/admin/products/${encodeURIComponent(sku)}/generate-seo`, {});
+      if (resp && resp.ok === false) throw new Error(resp.error || 'Generate SEO failed');
+      return resp?.data ?? resp;
+    } catch (e) {
+      DebugLog.warn('[AdminAPI] generateProductSEO failed:', e.message);
+      throw e;
+    }
+  },
+
   async updateProduct(productId, data) {
     try {
       const resp = await window.API.put(`/api/admin/products/${productId}`, data);

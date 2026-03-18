@@ -354,6 +354,9 @@
             // Schema.org Product structured data
             this.updateProductSchema(info, price);
 
+            // FAQ JSON-LD from backend SEO response
+            this._injectFaqSchema(info);
+
             // Breadcrumb
             const isRibbon = info.category === 'ribbon';
             const categoryName = isRibbon ? 'Ribbons' :
@@ -945,6 +948,20 @@
             if (schemaEl) {
                 schemaEl.textContent = JSON.stringify(schema, null, 2);
             }
+        },
+
+        _injectFaqSchema(info) {
+            const faqJsonLd = info.seo?.faqJsonLd;
+            const existing = document.getElementById('faq-schema');
+            if (!faqJsonLd) {
+                if (existing) existing.remove();
+                return;
+            }
+            const el = existing || document.createElement('script');
+            el.type = 'application/ld+json';
+            el.id = 'faq-schema';
+            el.textContent = typeof faqJsonLd === 'string' ? faqJsonLd : JSON.stringify(faqJsonLd);
+            if (!existing) document.head.appendChild(el);
         },
 
         _isTestProduct(product) {

@@ -660,6 +660,14 @@ const API = {
         return this.put('/api/user/profile', updates);
     },
 
+    async getEmailPreferences() {
+        return this.get('/api/user/email-preferences');
+    },
+
+    async updateEmailPreferences(prefs) {
+        return this.put('/api/user/email-preferences', prefs);
+    },
+
     /**
      * Get user's saved addresses
      */

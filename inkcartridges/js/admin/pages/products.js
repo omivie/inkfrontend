@@ -743,26 +743,19 @@ function bindProductModalActions(modal, product) {
 
   // Generate SEO
   modal.querySelector('[data-action="generate-seo"]')?.addEventListener('click', async () => {
-    const seo = generateSEO(product);
-    const data = {
-      retail_price: product.retail_price,
-      stock_quantity: product.stock_quantity ?? 0,
-    };
-    if (seo.meta_title) data.meta_title = seo.meta_title;
-    if (seo.meta_description) data.meta_description = seo.meta_description;
-    if (seo.meta_keywords) data.meta_keywords = seo.meta_keywords.substring(0, 200);
-
+    const btn = modal.querySelector('[data-action="generate-seo"]');
+    if (btn) btn.disabled = true;
     try {
-      await AdminAPI.updateProduct(product.id, data);
+      const seo = await AdminAPI.generateProductSEO(product.sku);
       const titleEl = modal.querySelector('#edit-meta-title');
       const descEl = modal.querySelector('#edit-meta-desc');
-      const keywordsEl = modal.querySelector('#edit-meta-keywords');
-      if (titleEl) titleEl.value = seo.meta_title;
-      if (descEl) descEl.value = seo.meta_description;
-      if (keywordsEl) keywordsEl.value = seo.meta_keywords;
+      if (titleEl && seo.meta_title) titleEl.value = seo.meta_title;
+      if (descEl && seo.meta_description) descEl.value = seo.meta_description;
       Toast.success('SEO generated and saved');
     } catch (e) {
-      Toast.error(`SEO save failed: ${e.message}`);
+      Toast.error(`SEO generate failed: ${e.message}`);
+    } finally {
+      if (btn) btn.disabled = false;
     }
   });
 

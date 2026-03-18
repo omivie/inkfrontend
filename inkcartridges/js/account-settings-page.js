@@ -105,18 +105,29 @@
                     if (user.email) document.getElementById('email').value = user.email;
                     if (user.phone) this.setPhoneFields(user.phone);
 
-                    // Load email preferences if available
-                    if (user.email_preferences) {
-                        const prefs = user.email_preferences;
-                        const checkboxes = document.querySelectorAll('.form-section:last-of-type input[type="checkbox"]');
-                        if (checkboxes[0]) checkboxes[0].checked = prefs.order_updates !== false;
-                        if (checkboxes[1]) checkboxes[1].checked = prefs.promotions !== false;
-                        if (checkboxes[2]) checkboxes[2].checked = prefs.recommendations === true;
-                    }
+                    // Load email preferences from dedicated endpoint
+                    this.loadEmailPreferences();
                 }
             } catch (error) {
                 DebugLog.log('Could not load profile from API:', error.message);
                 // Form still works with Auth.user data
+            }
+        },
+
+        async loadEmailPreferences() {
+            try {
+                const response = await API.getEmailPreferences();
+                if (response.ok && response.data) {
+                    const prefs = response.data;
+                    const orderUpdates = document.getElementById('pref-order-updates');
+                    const promotions = document.getElementById('pref-promotions');
+                    const recommendations = document.getElementById('pref-recommendations');
+                    if (orderUpdates) orderUpdates.checked = prefs.order_updates !== false;
+                    if (promotions) promotions.checked = prefs.promotions !== false;
+                    if (recommendations) recommendations.checked = prefs.recommendations === true;
+                }
+            } catch (error) {
+                DebugLog.log('Could not load email preferences:', error.message);
             }
         },
 
@@ -143,29 +154,30 @@
                     const phone = phoneNumber ? `${phoneCountry} ${phoneNumber}` : '';
 
                     // Get email preferences
-                    const checkboxes = document.querySelectorAll('.form-section:last-of-type input[type="checkbox"]');
                     const emailPreferences = {
-                        order_updates: checkboxes[0]?.checked ?? true,
-                        promotions: checkboxes[1]?.checked ?? true,
-                        recommendations: checkboxes[2]?.checked ?? false
+                        order_updates: document.getElementById('pref-order-updates')?.checked ?? true,
+                        promotions: document.getElementById('pref-promotions')?.checked ?? true,
+                        recommendations: document.getElementById('pref-recommendations')?.checked ?? false
                     };
 
                     // Prepare profile data
                     const profileData = {
                         first_name: firstName,
                         last_name: lastName,
-                        phone: phone,
-                        email_preferences: emailPreferences
+                        phone: phone
                     };
 
-                    // Try to save to backend API first
+                    // Save profile and email preferences in parallel
                     let backendSuccess = false;
                     try {
-                        const response = await API.updateProfile(profileData);
-                        if (response.ok) {
+                        const [profileResponse, prefsResponse] = await Promise.all([
+                            API.updateProfile(profileData),
+                            API.updateEmailPreferences(emailPreferences)
+                        ]);
+                        if (profileResponse.ok && prefsResponse.ok) {
                             backendSuccess = true;
                         } else {
-                            DebugLog.warn('Backend API failed:', response.error);
+                            DebugLog.warn('Backend API failed:', profileResponse.error || prefsResponse.error);
                         }
                     } catch (apiError) {
                         DebugLog.warn('Backend API error:', apiError.message);
@@ -177,8 +189,7 @@
                             first_name: firstName,
                             last_name: lastName,
                             phone: phone,
-                            full_name: `${firstName} ${lastName}`.trim(),
-                            email_preferences: emailPreferences
+                            full_name: `${firstName} ${lastName}`.trim()
                         }
                     });
 

@@ -152,6 +152,8 @@ const Auth = {
         }
 
         return new Promise((resolve) => {
+            const timeout = setTimeout(() => resolve(null), 8000);
+            const done = (val) => { clearTimeout(timeout); resolve(val); };
             // Remove any previous widget in this container
             turnstile.remove('#auth-turnstile');
             turnstile.render('#auth-turnstile', {
@@ -159,9 +161,9 @@ const Auth = {
                 action: 'account-sync',
                 execution: 'execute',
                 appearance: 'interaction-only',
-                callback: (token) => resolve(token),
-                'error-callback': () => resolve(null),
-                'expired-callback': () => resolve(null)
+                callback: (token) => done(token),
+                'error-callback': () => done(null),
+                'expired-callback': () => done(null)
             });
             turnstile.execute('#auth-turnstile');
         });
