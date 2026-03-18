@@ -546,7 +546,11 @@
                 more.hidden = false;
                 more.addEventListener('click', (e) => {
                     e.preventDefault();
-                    document.getElementById('tab-btn-compatibility')?.click();
+                    const tabBtn = document.getElementById('tab-btn-compatibility');
+                    if (tabBtn) {
+                        tabBtn.click();
+                        tabBtn.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                    }
                 });
             }
             wrap.hidden = false;
