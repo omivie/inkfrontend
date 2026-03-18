@@ -27,12 +27,12 @@
         },
 
         // Static categories - mapped to backend API values
-        // Note: 'consumable' uses 'toner' API category since drums/supplies are toner-related
-        // Client-side filtering by product_type separates toner cartridges from drums/supplies
         categories: [
-            { id: 'ink', name: 'Ink Cartridges', icon: 'droplet', apiCategory: 'ink' },
-            { id: 'toner', name: 'Toner Cartridges', icon: 'box', apiCategory: 'toner' },
-            { id: 'consumable', name: 'Drums & Supplies', icon: 'disc', apiCategory: 'toner' }
+            { id: 'ink',          name: 'Ink Cartridges',  icon: 'droplet',   apiCategory: 'ink' },
+            { id: 'toner',        name: 'Toner Cartridges', icon: 'box',       apiCategory: 'toner' },
+            { id: 'consumable',   name: 'Drums & Supplies', icon: 'disc',      apiCategory: 'drums' },
+            { id: 'glossy_paper', name: 'Glossy Paper',     icon: 'image',     apiCategory: 'drums' },
+            { id: 'matte_paper',  name: 'Matte Paper',      icon: 'file-text', apiCategory: 'drums' }
         ],
 
         // Compatible products now have "Compatible" prefix in their name
@@ -522,33 +522,41 @@
                 droplet: '<svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z"/></svg>',
                 box: '<svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>',
                 disc: '<svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="3"/></svg>',
-                package: '<svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><line x1="16.5" y1="9.4" x2="7.5" y2="4.21"/><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>'
+                package: '<svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><line x1="16.5" y1="9.4" x2="7.5" y2="4.21"/><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>',
+                image: '<svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>',
+                'file-text': '<svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>'
             };
 
             // Check cache for category counts
-            const cacheKey = `${this.state.brand}-category-counts-v3`;
+            const cacheKey = `${this.state.brand}-category-counts-v4`;
             let categoryCounts = this.cache.products[cacheKey];
 
             if (!categoryCounts) {
                 try {
                     if (this._shopEndpointAvailable) {
-                        // Use /api/shop endpoint for category counts; fetch consumable series
-                        // separately to get accurate count (counts.drums only reflects drum units)
-                        const [response, consumableResponse] = await Promise.all([
+                        // Fetch brand summary + drums series in parallel to compute paper/drum split
+                        const [response, drumsResponse] = await Promise.all([
                             API.getShopData({ brand: this.state.brand }),
-                            API.getShopData({ brand: this.state.brand, category: 'consumable' })
+                            API.getShopData({ brand: this.state.brand, category: 'drums' })
                         ]);
                         // Check if navigation changed during fetch
                         if (navVersion !== undefined && this.navigationVersion !== navVersion) return;
 
                         if (response.ok && response.data?.counts) {
-                            const consumableCount = consumableResponse.ok && consumableResponse.data?.series
-                                ? consumableResponse.data.series.reduce((sum, s) => sum + (s.count || 0), 0)
-                                : response.data.counts.drums || 0;
+                            const drumsSeries = drumsResponse.ok ? (drumsResponse.data?.series || []) : [];
+                            let drumCount = 0, glossyCount = 0, matteCount = 0;
+                            for (const s of drumsSeries) {
+                                const paperType = this.classifyPaperCode(s.code);
+                                if (paperType === 'glossy' && !this.isPureSizeCode(s.code)) glossyCount += s.count;
+                                else if (paperType === 'matte' && !this.isPureSizeCode(s.code)) matteCount += s.count;
+                                else if (paperType === null) drumCount += s.count;
+                            }
                             categoryCounts = {
                                 ink: response.data.counts.ink || 0,
                                 toner: response.data.counts.toner || 0,
-                                consumable: consumableCount
+                                consumable: drumCount,
+                                glossy_paper: glossyCount,
+                                matte_paper: matteCount
                             };
                         } else {
                             // Endpoint returned error — fall back to legacy
@@ -590,6 +598,10 @@
                                            productType === 'belt_unit' ||
                                            productType === 'fuser_kit' ||
                                            productType === 'maintenance_kit';
+                                } else if (categoryId === 'glossy_paper') {
+                                    return productType === 'photo_paper'; // can't distinguish gloss/matte from legacy
+                                } else if (categoryId === 'matte_paper') {
+                                    return false; // legacy can't distinguish matte, skip
                                 }
                                 return true;
                             }).length;
@@ -604,6 +616,8 @@
                         categoryCounts['ink'] = countByProductType(allProducts, 'ink');
                         categoryCounts['toner'] = countByProductType(allProducts, 'toner');
                         categoryCounts['consumable'] = countByProductType(allProducts, 'consumable');
+                        categoryCounts['glossy_paper'] = countByProductType(allProducts, 'glossy_paper');
+                        categoryCounts['matte_paper'] = 0; // not classifiable via legacy
                     }
 
                     this.cache.products[cacheKey] = categoryCounts;
@@ -662,7 +676,9 @@
                 const codesCacheKey = `${cacheKey}-final`;
 
                 // Check if we have cached codes with counts already
-                if (this.cache.products[codesCacheKey]) {
+                // Paper categories skip the early return (need to fetch products which aren't cached in series objects)
+                if (this.cache.products[codesCacheKey] &&
+                        this.state.category !== 'glossy_paper' && this.state.category !== 'matte_paper') {
                     const cachedCodes = this.cache.products[codesCacheKey];
                     if (cachedCodes.length === 0) {
                         this.showEmpty('No products found for this category.');
@@ -687,7 +703,16 @@
                     if (navVersion !== undefined && this.navigationVersion !== navVersion) return;
 
                     if (response.ok && response.data?.series) {
-                        codes = response.data.series;
+                        const allSeries = response.data.series;
+                        if (categoryId === 'consumable') {
+                            codes = allSeries.filter(s => this.classifyPaperCode(s.code) === null);
+                        } else if (categoryId === 'glossy_paper') {
+                            codes = allSeries.filter(s => this.classifyPaperCode(s.code) === 'glossy' && !this.isPureSizeCode(s.code));
+                        } else if (categoryId === 'matte_paper') {
+                            codes = allSeries.filter(s => this.classifyPaperCode(s.code) === 'matte' && !this.isPureSizeCode(s.code));
+                        } else {
+                            codes = allSeries;
+                        }
                     } else {
                         // Endpoint failed — fall back to legacy for the rest of the session
                         this._shopEndpointAvailable = false;
@@ -780,6 +805,7 @@
                             if (categoryId === 'ink') return productType === 'ink_cartridge' || productType === 'ink_bottle';
                             if (categoryId === 'toner') return productType === 'toner_cartridge';
                             if (categoryId === 'consumable') return productType === 'drum_unit' || productType === 'waste_toner' || productType === 'belt_unit' || productType === 'fuser_kit' || productType === 'maintenance_kit';
+                            if (categoryId === 'glossy_paper' || categoryId === 'matte_paper') return productType === 'photo_paper';
                             return true;
                         });
                         compatibleProducts = filterByBrand(compatibleProducts);
@@ -798,6 +824,7 @@
                         if (categoryId === 'ink') return productType === 'ink_cartridge' || productType === 'ink_bottle';
                         if (categoryId === 'toner') return productType === 'toner_cartridge';
                         if (categoryId === 'consumable') return productType === 'drum_unit' || productType === 'waste_toner' || productType === 'belt_unit' || productType === 'fuser_kit' || productType === 'maintenance_kit';
+                        if (categoryId === 'glossy_paper' || categoryId === 'matte_paper') return productType === 'photo_paper';
                         return true;
                     });
 
@@ -810,6 +837,50 @@
 
                 if (codes.length === 0) {
                     this.showEmpty('No products found for this category.');
+                } else if (this.state.category === 'glossy_paper' || this.state.category === 'matte_paper') {
+                    // Paper categories: skip code selection, show all products with images directly
+                    const seenIds = new Set();
+                    let allPaperProducts = [];
+
+                    // Legacy path: extractProductCodes populates entry.products — use directly
+                    for (const entry of codes) {
+                        for (const p of (entry.products || [])) {
+                            if (!seenIds.has(p.id)) { seenIds.add(p.id); allPaperProducts.push(p); }
+                        }
+                    }
+
+                    // Shop-endpoint path: series objects have no products — fetch each code individually
+                    if (allPaperProducts.length === 0 && codes.length > 0) {
+                        const results = await Promise.all(
+                            codes.map(({ code }) =>
+                                API.getShopData({ brand: this.state.brand, category: apiCategory, code, limit: 200 })
+                                    .then(r => (r.ok && r.data?.products) ? r.data.products : [])
+                                    .catch(() => [])
+                            )
+                        );
+                        if (navVersion !== undefined && this.navigationVersion !== navVersion) return;
+                        for (const products of results) {
+                            for (const p of products) {
+                                if (!seenIds.has(p.id)) { seenIds.add(p.id); allPaperProducts.push(p); }
+                            }
+                        }
+                    }
+                    const isCompatibleProduct = (p) => {
+                        if (p.source) return p.source === 'compatible';
+                        return (p.name || '').toLowerCase().trim().startsWith(this.compatiblePrefix);
+                    };
+                    let genuine = allPaperProducts.filter(p => !isCompatibleProduct(p));
+                    let compatible = allPaperProducts.filter(p => isCompatibleProduct(p));
+                    if (this.state.type === 'genuine') compatible = [];
+                    else if (this.state.type === 'compatible') genuine = [];
+                    this.renderProducts(compatible, this.elements.compatibleProducts, this.elements.compatibleSection, true);
+                    this.renderProducts(genuine, this.elements.genuineProducts, this.elements.genuineSection, false);
+                    if (genuine.length === 0 && compatible.length === 0) {
+                        this.showEmpty('No products found for this category.');
+                    } else {
+                        this.state.level = 'products';
+                        this.elements.levelProducts.hidden = false;
+                    }
                 } else {
                     this.renderProductCodes(codes);
                     this.elements.levelCodes.hidden = false;
@@ -1129,6 +1200,67 @@
             });
         },
 
+        formatPaperCodeLabel(code) {
+            let s = code;
+            // Strip brand prefix (e.g. CANON-KC-18IS → KC-18IS)
+            s = s.replace(/^(CANON|BROTHER|EPSON|HP|SAMSUNG)[-\s]?/i, '');
+            // Size patterns: 4X6 → 4×6, 5X5 → 5×5, 10X15 → 10×15
+            s = s.replace(/(\d+)X(\d+)/gi, (_, a, b) => `${a}×${b}`);
+            // Long descriptive words → clean equivalents
+            s = s.replace(/GLOSSYPHOTOPAPER/gi, ' Glossy Photo ');
+            s = s.replace(/PHOTOPAPER/gi, ' Photo Paper ');
+            s = s.replace(/GLOSSY/gi, ' Glossy ');
+            // Pack/sheet suffixes: -100P → 100-Pack, 20SHEETS → 20 Sheets
+            s = s.replace(/-?(\d+)P$/i, ' $1-Pack');
+            s = s.replace(/-?(\d+)SHEETS$/i, ' $1 Sheets');
+            // Clean up whitespace
+            return s.replace(/\s+/g, ' ').trim();
+        },
+
+        isPureSizeCode(code) {
+            // Returns true for codes that are ONLY a paper size/count with no product identifier.
+            // These should not be shown as series tiles — products should appear under their real code.
+            const c = code.replace(/[-\s]/g, '').toUpperCase();
+            return /^(A[2-6]|A3PLUS|A3\+|4X6|5X5|5X7|10X15|10P|20P|50P|100P|\d+SHEETS)$/.test(c);
+        },
+
+        classifyPaperCode(code) {
+            // Returns 'glossy', 'matte', or null (not paper)
+            const c = code.replace(/[-\s]/g, '').toUpperCase();
+            // Strip brand name prefix if backend prepended it (e.g. CANONKC18IS → KC18IS)
+            const bare = c.replace(/^(CANON|BROTHER|EPSON|HP|SAMSUNG|LEXMARK|OKI|KYOCERA|FUJIXEROX)/, '');
+
+            // Matte: explicit keyword, semi-gloss, hi-res plain paper, or Brother matte prefix
+            if (/MATTE|MATT|SEMIGLOSS|SEMIGLOS|HIGHRES|HIRES/.test(c)) return 'matte';
+            if (/^BP60/.test(c) || /^BP60/.test(bare)) return 'matte';
+            // Canon HR = High Resolution Paper (plain/uncoated, not glossy); SG = Semi-Gloss
+            const mattePaperPrefix = /^(HR|SG)/;
+            if (mattePaperPrefix.test(c) || mattePaperPrefix.test(bare)) return 'matte';
+            // 260GS = 260gsm Semi-Gloss
+            if (/^260GS$/.test(c)) return 'matte';
+
+            // Standard paper size codes → glossy
+            if (/^(A[2-6]|A3PLUS|A3\+|4X6|5X5|5X7|10X15|10P|20P|50P|100P)$/.test(c)) return 'glossy';
+            // Sheet-count codes (any number: 20SHEETS, 50SHEETS, 60SHEETS, 100SHEETS, etc.)
+            if (/^\d+SHEETS$/.test(c)) return 'glossy';
+
+            // Codes containing paper/glossy keywords → glossy
+            if (/PAPER|GLOSSY|GLOSS|PHOTO|PREMIUM|PLATINUM/.test(c)) return 'glossy';
+
+            // Canon paper prefix codes: GP=Glossy Photo, PP=Photo Plus, PT=Pro Titanium,
+            // KP=Photo Kit, RP=Ribbon Paper, NB=paper, KC=Selphy card, XS=Selphy sticker set
+            const canonPaperPrefix = /^(GP|PP|PT|KP|RP54|RP108|NB|LK72|LK|LKCP|KC|XS\d)/;
+            if (canonPaperPrefix.test(c) || canonPaperPrefix.test(bare)) return 'glossy';
+
+            // Brother glossy paper prefix (BP71)
+            if (/^BP71/.test(c)) return 'glossy';
+
+            // Epson luster/gloss/satin paper codes (S-series are often paper)
+            if (/^(S04[1-9]|S04[0-9]{2})/.test(c)) return 'glossy';
+
+            return null; // Not paper — drum unit, fuser, waste toner, fax ribbon, etc.
+        },
+
         normalizeCode(code, brand = null) {
             // Remove hyphens and spaces, uppercase
             let normalized = code.replace(/[-\s]/g, '').toUpperCase();
@@ -1358,11 +1490,12 @@
                 const box = document.createElement('button');
                 box.className = 'drilldown-box drilldown-box--code';
                 box.dataset.code = code;
-                const firstProduct = (products && products.length > 0) ? products[0] : null;
-                const productName = firstProduct ? Security.escapeHtml(firstProduct.name || '') : '';
                 box.innerHTML = `
-                    <span class="drilldown-box__code">${code.replace(/-/g, '')}</span>
-                    ${productName ? `<span class="drilldown-box__name">${productName}</span>` : ''}
+                    <span class="drilldown-box__code">${
+                        (this.state.category === 'glossy_paper' || this.state.category === 'matte_paper')
+                            ? this.formatPaperCodeLabel(code)
+                            : code.replace(/-/g, '')
+                    }</span>
                     <span class="drilldown-box__count">${count} product${count > 1 ? 's' : ''}</span>
                 `;
                 box.addEventListener('click', () => this.navigateTo('products', { code }));
