@@ -871,6 +871,17 @@ const AccountPage = {
         if (nameEl) nameEl.textContent = displayName;
         if (emailEl) emailEl.textContent = email;
         if (welcomeEl) welcomeEl.textContent = `, ${displayName}`;
+
+        // Wire up logout — the dashboard uses a static modal in its HTML;
+        // all other account pages need this handler from account.js
+        const logoutLink = document.querySelector('.logout-link');
+        if (logoutLink && !document.getElementById('logout-modal')) {
+            logoutLink.addEventListener('click', async (e) => {
+                e.preventDefault();
+                if (typeof Auth !== 'undefined') await Auth.signOut();
+                window.location.href = '/html/index.html';
+            });
+        }
     },
 
     /**
