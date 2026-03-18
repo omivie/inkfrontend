@@ -873,6 +873,8 @@
                     let compatible = allPaperProducts.filter(p => isCompatibleProduct(p));
                     if (this.state.type === 'genuine') compatible = [];
                     else if (this.state.type === 'compatible') genuine = [];
+                    await this.displayProductInfo(allPaperProducts);
+                    if (navVersion !== undefined && this.navigationVersion !== navVersion) return;
                     this.renderProducts(compatible, this.elements.compatibleProducts, this.elements.compatibleSection, true);
                     this.renderProducts(genuine, this.elements.genuineProducts, this.elements.genuineSection, false);
                     if (genuine.length === 0 && compatible.length === 0) {
@@ -2597,7 +2599,9 @@
             const typeMap = {
                 'ink': 'Inkjet Cartridges',
                 'toner': 'Toner Cartridges',
-                'consumable': 'Drums & Supplies'
+                'consumable': 'Drums & Supplies',
+                'glossy_paper': 'Photo Paper',
+                'matte_paper': 'Photo Paper'
             };
             let label = typeMap[this.state.category] || 'Cartridges';
 
