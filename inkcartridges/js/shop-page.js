@@ -2646,6 +2646,9 @@
             });
 
 
+            // Paper categories don't have a "For Use In" printer association
+            if (this.state.category === 'glossy_paper' || this.state.category === 'matte_paper') return;
+
             // Fetch compatible printers from API using first product's SKU
             const firstProduct = products.find(p => p.sku);
             if (firstProduct && firstProduct.sku) {
