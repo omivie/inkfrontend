@@ -35,18 +35,24 @@
           categories: [
               { label: 'Ink Cartridges', param: 'ink' },
               { label: 'Toner Cartridges', param: 'toner' },
-              { label: 'Drums & Supplies', param: 'consumable' }
+              { label: 'Drums & Supplies', param: 'consumable' },
+              { label: 'Glossy Paper', param: 'glossy_paper' },
+              { label: 'Matte Paper', param: 'matte_paper' }
           ]},
         { slug: 'canon', name: 'Canon', logo: '/assets/brands/canon.png',
           categories: [
               { label: 'Ink Cartridges', param: 'ink' },
               { label: 'Toner Cartridges', param: 'toner' },
-              { label: 'Drums & Supplies', param: 'consumable' }
+              { label: 'Drums & Supplies', param: 'consumable' },
+              { label: 'Glossy Paper', param: 'glossy_paper' },
+              { label: 'Matte Paper', param: 'matte_paper' }
           ]},
         { slug: 'epson', name: 'Epson', logo: '/assets/brands/epson.png',
           categories: [
               { label: 'Ink Cartridges', param: 'ink' },
-              { label: 'Drums & Supplies', param: 'consumable' }
+              { label: 'Drums & Supplies', param: 'consumable' },
+              { label: 'Glossy Paper', param: 'glossy_paper' },
+              { label: 'Matte Paper', param: 'matte_paper' }
           ]},
         { slug: 'hp', name: 'HP', logo: '/assets/brands/hp.png',
           categories: [
