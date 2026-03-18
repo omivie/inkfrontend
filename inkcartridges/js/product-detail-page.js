@@ -521,9 +521,8 @@
                 </details>
             `).join('') || '<p>No FAQs available for this product.</p>';
 
-            // Compatible Printers (skip for ribbons)
+            // Compatible Printers tab (skip for ribbons)
             if (info.category !== 'ribbon') {
-                this.renderCompatiblePrinters(info);
                 this.renderCompatibilityTab(info);
             }
 
