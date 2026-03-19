@@ -246,19 +246,6 @@ const AdminAPI = {
     }, signal);
   },
 
-  async getFulfillmentSLA(filterParams, signal) {
-    const { from, to } = Object.fromEntries(filterParams);
-    return rpc('analytics_fulfillment_sla', {
-      date_from: from, date_to: to,
-      supplier_filter: filterParams.get('suppliers') || null,
-    }, signal);
-  },
-
-  // ---- Work Queue (operational — accessible by both admin + owner) ----
-  async getWorkQueue(signal) {
-    return rpc('admin_work_queue', {}, signal);
-  },
-
   // ---- Customers ----
   async getCustomers(filters = {}, page = 1, limit = 20) {
     try {
@@ -777,63 +764,6 @@ const AdminAPI = {
       return resp?.data ?? null;
     } catch (e) {
       DebugLog.warn('[AdminAPI] updateAlertThreshold failed:', e.message);
-      throw e;
-    }
-  },
-
-  // ---- Shipping Rates (admin CRUD) ----
-  async getShippingRates(filters = {}, page = 1, limit = 50) {
-    try {
-      const params = new URLSearchParams();
-      params.set('page', page);
-      params.set('limit', limit);
-      if (filters.zone) params.set('zone', filters.zone);
-      if (filters.delivery_type) params.set('delivery_type', filters.delivery_type);
-      if (filters.is_active !== undefined) params.set('is_active', filters.is_active);
-      const resp = await window.API.get(`/api/admin/shipping/rates?${params}`);
-      return resp?.data ?? null;
-    } catch (e) {
-      DebugLog.warn('[AdminAPI] getShippingRates failed:', e.message);
-      return null;
-    }
-  },
-
-  async getShippingRate(rateId) {
-    try {
-      const resp = await window.API.get(`/api/admin/shipping/rates/${rateId}`);
-      return resp?.data ?? null;
-    } catch (e) {
-      DebugLog.warn('[AdminAPI] getShippingRate failed:', e.message);
-      return null;
-    }
-  },
-
-  async createShippingRate(data) {
-    try {
-      const resp = await window.API.post('/api/admin/shipping/rates', data);
-      return resp?.data ?? null;
-    } catch (e) {
-      DebugLog.warn('[AdminAPI] createShippingRate failed:', e.message);
-      throw e;
-    }
-  },
-
-  async updateShippingRate(rateId, data) {
-    try {
-      const resp = await window.API.put(`/api/admin/shipping/rates/${rateId}`, data);
-      return resp?.data ?? null;
-    } catch (e) {
-      DebugLog.warn('[AdminAPI] updateShippingRate failed:', e.message);
-      throw e;
-    }
-  },
-
-  async deleteShippingRate(rateId) {
-    try {
-      const resp = await window.API.delete(`/api/admin/shipping/rates/${rateId}`);
-      return resp?.data ?? null;
-    } catch (e) {
-      DebugLog.warn('[AdminAPI] deleteShippingRate failed:', e.message);
       throw e;
     }
   },

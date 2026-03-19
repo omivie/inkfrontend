@@ -29,10 +29,7 @@ async function loadDashboard() {
   const isOwner = AdminAuth.isOwner();
 
   // Parallel data fetch
-  const promises = [
-    AdminAPI.getWorkQueue(signal),
-    AdminAPI.getFulfillmentSLA(params, signal),
-  ];
+  const promises = [];
   if (isOwner) {
     promises.push(AdminAPI.getDashboardKPIs(params, signal));
     promises.push(AdminAPI.getRevenueSeries(params, signal));
@@ -41,17 +38,15 @@ async function loadDashboard() {
   }
 
   const results = await Promise.allSettled(promises);
-  const workQueue = results[0]?.value ?? null;
-  const sla = results[1]?.value ?? null;
-  const kpis = isOwner ? (results[2]?.value ?? null) : null;
-  const revSeries = isOwner ? (results[3]?.value ?? null) : null;
-  const brandData = isOwner ? (results[4]?.value ?? null) : null;
-  const refundData = isOwner ? (results[5]?.value ?? null) : null;
+  const kpis = isOwner ? (results[0]?.value ?? null) : null;
+  const revSeries = isOwner ? (results[1]?.value ?? null) : null;
+  const brandData = isOwner ? (results[2]?.value ?? null) : null;
+  const refundData = isOwner ? (results[3]?.value ?? null) : null;
 
-  render({ workQueue, sla, kpis, revSeries, brandData, refundData, isOwner });
+  render({ kpis, revSeries, brandData, refundData, isOwner });
 }
 
-function render({ workQueue, sla, kpis, revSeries, brandData, refundData, isOwner }) {
+function render({ kpis, revSeries, brandData, refundData, isOwner }) {
   if (!_container) return;
   Charts.destroyAll();
 
@@ -61,12 +56,6 @@ function render({ workQueue, sla, kpis, revSeries, brandData, refundData, isOwne
   if (isOwner) {
     html += renderOwnerKPIs(kpis);
   }
-
-  // Work Queue
-  html += renderWorkQueue(workQueue);
-
-  // SLA Section
-  html += renderSLA(sla);
 
   if (isOwner) {
     // Revenue Chart
@@ -128,67 +117,6 @@ function renderOwnerKPIs(kpis) {
     html += '</div>';
   }
   html += '</div>';
-  return html;
-}
-
-function renderWorkQueue(wq) {
-  const items = [
-    { label: 'Orders to Ship', key: 'orders_to_ship', iconType: 'warn', ic: 'orders' },
-    { label: 'Missing Tracking', key: 'missing_tracking', iconType: 'warn', ic: 'fulfillment' },
-    { label: 'Refunds Pending', key: 'refunds_pending', iconType: 'danger', ic: 'refunds' },
-    { label: 'Late Deliveries', key: 'late_deliveries', iconType: 'info', ic: 'suppliers' },
-    { label: 'Cancellations', key: 'cancellations', iconType: 'danger', ic: 'refunds' },
-  ];
-
-  let html = `<div class="admin-section">`;
-  html += `<div class="admin-section__header"><h2 class="admin-section__title">Work Queue</h2></div>`;
-  html += '<div class="admin-queue-grid">';
-
-  for (const item of items) {
-    const count = wq?.[item.key];
-    const displayCount = count != null ? count : MISSING;
-    const tooltip = count == null ? ' data-tooltip="Requires admin_work_queue RPC"' : '';
-    const href = item.key === 'refunds_pending' ? '#refunds' : '#orders';
-
-    html += `
-      <a class="admin-queue-item" href="${href}"${tooltip}>
-        <div class="admin-queue-item__icon admin-queue-item__icon--${item.iconType}">
-          ${icon(item.ic)}
-        </div>
-        <div>
-          <div class="admin-queue-item__count">${esc(String(displayCount))}</div>
-          <div class="admin-queue-item__label">${esc(item.label)}</div>
-        </div>
-      </a>
-    `;
-  }
-
-  html += '</div></div>';
-  return html;
-}
-
-function renderSLA(sla) {
-  let html = `<div class="admin-section"><div class="admin-section__header"><h2 class="admin-section__title">Fulfillment SLA</h2></div>`;
-  html += '<div class="admin-grid-3 admin-mb-lg">';
-
-  const metrics = [
-    { label: 'Paid \u2192 Shipped Median', value: sla?.median_hours != null ? `${sla.median_hours.toFixed(1)}h` : null },
-    { label: 'Shipped within 48h', value: sla?.pct_48h != null ? `${sla.pct_48h.toFixed(0)}%` : null },
-    { label: 'Tracking Coverage', value: sla?.tracking_coverage != null ? `${(sla.tracking_coverage * 100).toFixed(0)}%` : null },
-  ];
-
-  for (const m of metrics) {
-    html += `<div class="admin-card">`;
-    html += `<div class="admin-kpi__label">${esc(m.label)}</div>`;
-    if (m.value != null) {
-      html += `<div class="admin-kpi__value" style="font-size:22px">${esc(m.value)}</div>`;
-    } else {
-      html += missing('Requires analytics_fulfillment_sla RPC');
-    }
-    html += '</div>';
-  }
-
-  html += '</div></div>';
   return html;
 }
 

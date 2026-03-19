@@ -48,17 +48,12 @@ const NAV_ITEMS = [
   { section: 'Catalog' },
   { key: 'products', label: 'Products & SKUs', icon: 'products' },
   { key: 'product-review', label: 'Product Review', icon: 'orders' },
-  { key: 'suppliers', label: 'Suppliers', icon: 'suppliers' },
   { section: 'Operations' },
   { key: 'refunds', label: 'Refunds & Chargebacks', icon: 'refunds' },
-  { key: 'fulfillment', label: 'Fulfillment', icon: 'fulfillment' },
-  { key: 'shipping', label: 'Shipping Rates', icon: 'suppliers' },
   { key: 'financial-health', label: 'Financial Health', icon: 'finance' },
   { divider: true },
   { key: 'analytics', label: 'Analytics', icon: 'analytics', ownerOnly: true },
-  { key: 'settings', label: 'Settings', icon: 'settings', ownerOnly: true },
   { key: 'contact-emails', label: 'Contact Emails', icon: 'mail', ownerOnly: true },
-  { key: 'lab', label: 'Lab', icon: 'lab', ownerOnly: true },
 ];
 
 // ---- Page module cache ----
@@ -272,7 +267,7 @@ async function navigate(pageName) {
   `;
 
   // Owner-only page check
-  const ownerPages = ['analytics', 'settings', 'contact-emails', 'lab'];
+  const ownerPages = ['analytics', 'contact-emails'];
   if (ownerPages.includes(pageName) && !AdminAuth.isOwner()) {
     content.innerHTML = `
       <div class="admin-stub">
