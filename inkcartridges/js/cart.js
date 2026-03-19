@@ -546,13 +546,10 @@ const Cart = {
 
                 return { valid, errors };
             } else {
-                const errMsg = response.error || 'Cart validation failed';
-                // Bot/Turnstile errors are infrastructure failures, not stock issues.
+                // Non-ok API response = infrastructure error (auth, Turnstile, server failure).
+                // Stock/availability errors always come via data.issues in an ok: true response.
                 // Re-throw so the checkout handler's catch block allows proceeding.
-                if (errMsg.toLowerCase().includes('bot verification') || errMsg.toLowerCase().includes('turnstile')) {
-                    throw new Error(errMsg);
-                }
-                return { valid: false, errors: [errMsg] };
+                throw new Error(response.error || 'Cart validation failed');
             }
         } catch (error) {
             DebugLog.error('Cart validation error:', error);
@@ -575,69 +572,35 @@ const Cart = {
 
             e.preventDefault();
 
-            if (self.items.length === 0) {
+            // A non-empty cart means either local items exist OR server pricing exists
+            // (serverSummary is cleared on remove/clear, so it's a reliable signal).
+            const cartHasItems = self.items.length > 0 || self.hasServerPricing();
+            if (!cartHasItems) {
                 if (typeof showToast === 'function') {
                     showToast('Your cart is empty', 'error');
                 }
                 return;
             }
 
-            // If server pricing isn't available, try to refresh but don't block checkout
-            // The checkout/payment pages will validate before charging
-            if (!self.hasServerPricing()) {
-                try { await self.loadCart(); } catch (e) { /* continue */ }
-            }
-
-            // Show validating state
-            const originalText = checkoutLink.textContent;
-            checkoutLink.textContent = 'Validating cart...';
-            checkoutLink.style.pointerEvents = 'none';
-
+            // Validate cart for stock issues — advisory only, never blocks navigation.
+            // The checkout/payment pages re-validate before charging, so it's always
+            // safe to proceed. We only run this to warn the user early about stock issues.
             try {
                 const result = await self.validateCart();
-
-                if (result.valid) {
-                    // Cart is valid - proceed to checkout
-                    window.location.href = '/html/checkout.html';
-                } else if (self.items.length > 0 && (!self.isAuthenticated || result.errors.length === 0)) {
-                    // Allow proceeding when:
-                    // - Guest user: server validation may fail due to cross-origin cookie blocking.
-                    // - Any user: validation failed with no specific stock errors (infrastructure
-                    //   issue — e.g. bot-verification required, server cart empty).
-                    // Checkout/payment pages will re-validate before charging.
-                    window.location.href = '/html/checkout.html';
-                } else {
-                    // Cart has issues - show errors
-                    checkoutLink.textContent = originalText;
-                    checkoutLink.style.pointerEvents = '';
-
-                    if (result.errors.length > 0) {
-                        if (typeof showToast === 'function') {
-                            showToast(result.errors[0], 'error', 5000);
-                            result.errors.slice(1).forEach(function(err, i) {
-                                setTimeout(function() { showToast(err, 'error', 5000); }, (i + 1) * 500);
-                            });
-                        } else {
-                            alert('Cart issues:\n' + result.errors.join('\n'));
-                        }
-                    } else {
-                        if (typeof showToast === 'function') {
-                            showToast('Please review your cart before checkout', 'error');
-                        }
-                    }
-                }
-            } catch (error) {
-                // Network error — don't block checkout if we have local items
-                if (self.items.length > 0) {
-                    window.location.href = '/html/checkout.html';
-                } else {
-                    checkoutLink.textContent = originalText;
-                    checkoutLink.style.pointerEvents = '';
+                // If there are real stock errors, warn the user but still let them through.
+                // They'll get a hard block at payment if something is truly unavailable.
+                if (!result.valid && result.errors && result.errors.length > 0) {
                     if (typeof showToast === 'function') {
-                        showToast('Could not validate cart. Please try again.', 'error');
+                        result.errors.forEach(function(err, i) {
+                            setTimeout(function() { showToast(err, 'warning', 6000); }, i * 500);
+                        });
                     }
                 }
+            } catch (_) {
+                // Validation failed (network/Turnstile/auth) — proceed anyway.
             }
+
+            window.location.href = '/html/checkout.html';
         });
     },
 
