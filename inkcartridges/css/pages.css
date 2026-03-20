@@ -10169,3 +10169,287 @@
     width: auto;
     object-fit: contain;
 }
+
+/* ============================================
+   ORDER TRACKING — Timeline, Events, Recent Orders
+   ============================================ */
+
+/* Status badges (used on track & order detail pages) */
+.order-status-badge {
+    display: inline-block;
+    padding: 0.2em 0.65em;
+    border-radius: 999px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    white-space: nowrap;
+}
+.order-status-badge--paid,
+.order-status-badge--processing {
+    background: #e8f4fd;
+    color: #1a6fa3;
+}
+.order-status-badge--shipped {
+    background: #e6f6f0;
+    color: #197a50;
+}
+.order-status-badge--completed {
+    background: #d4edda;
+    color: #155724;
+}
+.order-status-badge--cancelled {
+    background: #fde8e8;
+    color: #9b1c1c;
+}
+.order-status-badge--pending {
+    background: #fef3cd;
+    color: #856404;
+}
+
+/* Timeline stepper */
+.order-timeline {
+    display: flex;
+    align-items: flex-start;
+    gap: 0;
+    margin: 1.5rem 0;
+    overflow-x: auto;
+    padding-bottom: 0.5rem;
+}
+.timeline-step {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    flex: 1;
+    min-width: 80px;
+    position: relative;
+    text-align: center;
+}
+.timeline-step + .timeline-step::before {
+    content: '';
+    position: absolute;
+    top: 10px;
+    right: 50%;
+    width: 100%;
+    height: 2px;
+    background: #e0e0e0;
+    z-index: 0;
+}
+.timeline-step--completed + .timeline-step--completed::before,
+.timeline-step--completed + .timeline-step::before {
+    background: var(--color-primary, #267FB5);
+}
+.timeline-step__dot {
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    border: 2px solid #d0d0d0;
+    background: #fff;
+    z-index: 1;
+    flex-shrink: 0;
+}
+.timeline-step--completed .timeline-step__dot {
+    background: var(--color-primary, #267FB5);
+    border-color: var(--color-primary, #267FB5);
+}
+.timeline-step--cancelled .timeline-step__dot {
+    background: #dc3545;
+    border-color: #dc3545;
+}
+.timeline-step--cancelled + .timeline-step--cancelled::before,
+.timeline-step--cancelled + .timeline-step::before {
+    background: #dc3545;
+}
+.timeline-step__label {
+    font-size: 0.72rem;
+    color: #888;
+    margin-top: 0.35rem;
+    line-height: 1.3;
+}
+.timeline-step--completed .timeline-step__label {
+    color: var(--color-text, #222);
+    font-weight: 500;
+}
+.timeline-step--cancelled .timeline-step__label {
+    color: #dc3545;
+    font-weight: 500;
+}
+.timeline-step__date {
+    font-size: 0.68rem;
+    color: #aaa;
+    margin-top: 0.15rem;
+}
+
+/* Tracking detail card */
+.tracking-detail {
+    background: #fff;
+    border: 1px solid #e8e8e8;
+    border-radius: 8px;
+    padding: 1.5rem;
+}
+.tracking-detail--error {
+    border-color: #fde8e8;
+    background: #fffafa;
+    color: #9b1c1c;
+}
+.tracking-detail__header {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin-bottom: 1rem;
+    flex-wrap: wrap;
+}
+.tracking-detail__order-number {
+    font-weight: 700;
+    font-size: 1rem;
+    color: var(--color-text, #222);
+}
+
+/* Tracking info rows */
+.tracking-info {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+    padding: 1rem 0;
+    border-top: 1px solid #f0f0f0;
+    border-bottom: 1px solid #f0f0f0;
+    margin-bottom: 1rem;
+}
+.tracking-info-row {
+    display: flex;
+    gap: 1rem;
+    font-size: 0.88rem;
+}
+.tracking-info-label {
+    color: #888;
+    min-width: 120px;
+    flex-shrink: 0;
+}
+.tracking-info-value {
+    color: var(--color-text, #222);
+    font-weight: 500;
+}
+
+/* Live tracking events */
+.tracking-events {
+    margin-top: 1rem;
+}
+.tracking-events__heading {
+    font-size: 0.85rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: #888;
+    margin-bottom: 0.75rem;
+}
+.tracking-event {
+    display: flex;
+    gap: 0.75rem;
+    align-items: flex-start;
+    margin-bottom: 0.75rem;
+    position: relative;
+}
+.tracking-event + .tracking-event {
+    padding-top: 0.75rem;
+    border-top: 1px solid #f5f5f5;
+}
+.tracking-event__dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: var(--color-primary, #267FB5);
+    flex-shrink: 0;
+    margin-top: 0.25rem;
+}
+.tracking-event__body {
+    display: flex;
+    flex-direction: column;
+    gap: 0.1rem;
+}
+.tracking-event__label {
+    font-size: 0.88rem;
+    color: var(--color-text, #222);
+}
+.tracking-event__date {
+    font-size: 0.78rem;
+    color: #aaa;
+}
+
+/* Fallback link */
+.tracking-fallback {
+    margin-top: 1rem;
+    font-size: 0.88rem;
+    color: #666;
+}
+.tracking-fallback a {
+    color: var(--color-primary, #267FB5);
+    font-weight: 500;
+}
+
+/* Recent orders list */
+.recent-orders-list {
+    margin-top: 1rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    border: 1px solid #e8e8e8;
+    border-radius: 8px;
+    overflow: hidden;
+}
+.recent-order-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.85rem 1rem;
+    background: #fff;
+    gap: 1rem;
+    flex-wrap: wrap;
+}
+.recent-order-row + .recent-order-row {
+    border-top: 1px solid #f0f0f0;
+}
+.recent-order-row:hover {
+    background: #fafafa;
+}
+.recent-order-row__main {
+    display: flex;
+    align-items: center;
+    gap: 0.65rem;
+    flex-wrap: wrap;
+}
+.recent-order-row__number {
+    background: none;
+    border: none;
+    padding: 0;
+    font-weight: 600;
+    font-size: 0.88rem;
+    color: var(--color-primary, #267FB5);
+    cursor: pointer;
+    text-decoration: underline;
+    font-family: inherit;
+}
+.recent-order-row__number:hover {
+    color: var(--color-primary-dark, #1a5c85);
+}
+.recent-order-row__date {
+    font-size: 0.78rem;
+    color: #aaa;
+}
+.recent-order-row__actions {
+    display: flex;
+    align-items: center;
+    gap: 0.65rem;
+}
+.recent-order-row__total {
+    font-size: 0.88rem;
+    font-weight: 600;
+    color: var(--color-text, #222);
+}
+.btn--sm {
+    padding: 0.3rem 0.75rem;
+    font-size: 0.8rem;
+}
+
+/* Timeline used in order-detail-page */
+.order-detail-timeline {
+    margin-bottom: 1.5rem;
+}

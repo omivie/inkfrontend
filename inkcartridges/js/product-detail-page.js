@@ -519,8 +519,10 @@
                 </details>
             `).join('') || '<p>No FAQs available for this product.</p>';
 
-            // Compatible Printers (skip for ribbons)
-            if (info.category !== 'ribbon') {
+            // Compatible devices: printers for ink/toner/drum, typewriters for ribbons
+            if (info.category === 'ribbon') {
+                this.renderCompatibleDevices(info);
+            } else {
                 this.renderCompatiblePrinters(info);
             }
 
@@ -649,6 +651,50 @@
                 this.renderCompatPreview(printers);
             } catch (e) {
                 // Compatibility tab is optional
+            }
+        },
+
+        async renderCompatibleDevices(info) {
+            try {
+                // compatible_devices may already be on the product, or require the ribbon endpoint
+                let devices = info.compatible_devices;
+                if (!devices || !devices.length) {
+                    const res = await API.getRibbon(info.sku);
+                    if (res.ok && res.data) {
+                        devices = res.data.compatible_devices;
+                    }
+                }
+                if (!devices || !devices.length) return;
+
+                const deviceLabels = devices.map(d => {
+                    const brand = Security.escapeHtml(d.device_brand || '');
+                    const model = d.device_model || '';
+                    if (d.match_type === 'brand' || model === 'All Models') {
+                        return brand ? `${brand} \u2014 All Models` : 'All Models';
+                    }
+                    const escapedModel = Security.escapeHtml(model);
+                    return brand && escapedModel ? `${brand} ${escapedModel}` : (brand || escapedModel);
+                }).filter(Boolean);
+
+                if (!deviceLabels.length) return;
+
+                const html = `
+                    <div class="product-printers-wrap">
+                        <div class="container">
+                            <div class="product-printers-banner">
+                                <strong>Compatible With:</strong>
+                                <span>${deviceLabels.join(', ')}</span>
+                            </div>
+                        </div>
+                    </div>
+                `;
+
+                const insertTarget = document.querySelector('.related-products') || document.querySelector('.product-tabs');
+                if (insertTarget) {
+                    insertTarget.insertAdjacentHTML('beforebegin', html);
+                }
+            } catch (e) {
+                // Compatible devices are optional
             }
         },
 

@@ -27,7 +27,6 @@
                             <li><a href="/html/contact.html">Contact Us</a></li>
                             <li><a href="/html/terms.html">Terms &amp; Conditions</a></li>
                             <li><a href="/html/privacy.html">Privacy Policy</a></li>
-                            <li><a href="/html/brands/">All Brands</a></li>
                         </ul>
                     </div>
 

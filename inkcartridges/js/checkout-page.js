@@ -1148,6 +1148,31 @@
             const continueBtn = document.getElementById('continue-to-payment-btn');
             const originalBtnText = continueBtn.innerHTML;
 
+            // Check contact section is complete before delivery type check
+            const contactAccordionData = this._accordionSections?.[0];
+            if (contactAccordionData) {
+                if (!contactAccordionData.collapsed) {
+                    // Section is open — validate in place
+                    if (!this._validateAccordionSection(contactAccordionData)) {
+                        return;
+                    }
+                } else {
+                    // Section collapsed — verify required fields actually have values
+                    const contactRequired = contactAccordionData.body.querySelectorAll('input[required], select[required], textarea[required]');
+                    const hasEmpty = Array.from(contactRequired).some(f => {
+                        if (f.type === 'radio') {
+                            return !contactAccordionData.body.querySelector(`input[name="${f.name}"]:checked`);
+                        }
+                        return !f.value.trim();
+                    });
+                    if (hasEmpty) {
+                        this._expandAccordionSection(contactAccordionData);
+                        this._validateAccordionSection(contactAccordionData);
+                        return;
+                    }
+                }
+            }
+
             // If delivery type hasn't been selected yet, expand shipping section and prompt
             const shippingAccordionData = this._accordionSections?.[1];
             const deliverySection = document.getElementById('delivery-type-section');

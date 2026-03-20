@@ -41,18 +41,14 @@ function icon(name, w = 18, h = 18) {
 
 // ---- Navigation config ----
 const NAV_ITEMS = [
-  { section: 'Main' },
   { key: 'dashboard', label: 'Dashboard', icon: 'dashboard' },
+  { key: 'analytics', label: 'Analytics', icon: 'analytics' },
   { key: 'orders', label: 'Orders', icon: 'orders' },
   { key: 'customers', label: 'Customers', icon: 'customers' },
-  { section: 'Catalog' },
   { key: 'products', label: 'Products & SKUs', icon: 'products' },
   { key: 'product-review', label: 'Product Review', icon: 'orders' },
-  { section: 'Operations' },
   { key: 'refunds', label: 'Refunds & Chargebacks', icon: 'refunds' },
-  { key: 'financial-health', label: 'Financial Health', icon: 'finance' },
   { divider: true },
-  { key: 'analytics', label: 'Analytics', icon: 'analytics', ownerOnly: true },
   { key: 'contact-emails', label: 'Contact Emails', icon: 'mail', ownerOnly: true },
 ];
 
@@ -142,7 +138,6 @@ function renderSidebar() {
 
 function renderTopbar() {
   const topbar = document.getElementById('topbar');
-  const isDark = document.body.dataset.theme !== 'light';
 
   topbar.innerHTML = `
     <button class="admin-topbar__hamburger" id="menu-toggle" aria-label="Toggle menu">
@@ -156,17 +151,11 @@ function renderTopbar() {
     </div>
     <div class="admin-topbar__spacer"></div>
     <div class="admin-topbar__actions">
-      <button class="admin-topbar__btn" id="theme-toggle" aria-label="Toggle theme" data-tooltip="${isDark ? 'Light mode' : 'Dark mode'}">
-        ${isDark ? icon('sun') : icon('moon')}
-      </button>
       <button class="admin-topbar__btn" id="logout-btn" aria-label="Back to store" data-tooltip="Back to store">
         ${icon('logout')}
       </button>
     </div>
   `;
-
-  // Theme toggle
-  document.getElementById('theme-toggle').addEventListener('click', toggleTheme);
 
   // Mobile menu
   document.getElementById('menu-toggle').addEventListener('click', toggleSidebar);
@@ -204,19 +193,6 @@ function renderTopbar() {
   });
 }
 
-function toggleTheme() {
-  const body = document.body;
-  const isDark = body.dataset.theme !== 'light';
-  body.dataset.theme = isDark ? 'light' : 'dark';
-  localStorage.setItem('admin-theme', body.dataset.theme);
-  // Re-render toggle icon
-  const btn = document.getElementById('theme-toggle');
-  if (btn) {
-    const nowDark = body.dataset.theme !== 'light';
-    btn.innerHTML = nowDark ? icon('sun') : icon('moon');
-    btn.dataset.tooltip = nowDark ? 'Light mode' : 'Dark mode';
-  }
-}
 
 function toggleSidebar() {
   const sidebar = document.getElementById('sidebar');
@@ -267,7 +243,7 @@ async function navigate(pageName) {
   `;
 
   // Owner-only page check
-  const ownerPages = ['analytics', 'contact-emails'];
+  const ownerPages = ['contact-emails'];
   if (ownerPages.includes(pageName) && !AdminAuth.isOwner()) {
     content.innerHTML = `
       <div class="admin-stub">
@@ -343,10 +319,6 @@ async function boot() {
   const shell = document.getElementById('app-shell');
 
   try {
-    // Restore theme
-    const savedTheme = localStorage.getItem('admin-theme');
-    if (savedTheme) document.body.dataset.theme = savedTheme;
-
     // Auth check
     await AdminAuth.init();
 

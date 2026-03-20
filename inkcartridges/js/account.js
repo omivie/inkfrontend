@@ -1075,6 +1075,8 @@ const AccountPage = {
                 printers = Array.isArray(response.data) ? response.data : (response.data.printers || []);
             }
 
+            printers = await this.enrichPrintersData(printers);
+
             if (printers.length > 0) {
                 const displayPrinters = printers.slice(0, 2); // Show max 2 on dashboard
                 if (printersPreview) {
@@ -1094,17 +1096,73 @@ const AccountPage = {
     },
 
     /**
+     * Enrich printer records that have printer_id but are missing model info.
+     * The backend may not join printer_models — this fills the gap via Supabase.
+     */
+    async enrichPrintersData(printers) {
+        if (!printers.length) return printers;
+
+        // Normalise nested model data if backend returns it nested (e.g. printer.printer_models)
+        printers = printers.map(p => {
+            const nested = p.printer_models || p.printer || null;
+            if (nested && typeof nested === 'object') {
+                return {
+                    ...p,
+                    full_name: p.full_name || nested.full_name,
+                    model_name: p.model_name || nested.model_name,
+                    slug: p.slug || nested.slug,
+                };
+            }
+            return p;
+        });
+
+        // Find printers that still have no model info but have a printer_id to look up
+        const needsLookup = printers.filter(p => {
+            const hasModelInfo = p.full_name || p.model_name || p.model || p.name || p.slug;
+            return !hasModelInfo && p.printer_id;
+        });
+
+        if (!needsLookup.length) return printers;
+
+        try {
+            const ids = needsLookup.map(p => p.printer_id);
+            const { data } = await supabaseClient
+                .from('printer_models')
+                .select('id, full_name, model_name, slug')
+                .in('id', ids);
+
+            if (data && data.length) {
+                const modelMap = {};
+                data.forEach(m => { modelMap[m.id] = m; });
+                return printers.map(p => {
+                    if (p.printer_id && modelMap[p.printer_id]) {
+                        const m = modelMap[p.printer_id];
+                        return { ...p, full_name: m.full_name, model_name: m.model_name, slug: m.slug };
+                    }
+                    return p;
+                });
+            }
+        } catch (e) {
+            // Supabase lookup failed — continue with what we have
+        }
+
+        return printers;
+    },
+
+    /**
      * Render printer card for dashboard
      */
     renderPrinterCard(printer) {
-        const model = printer.model || printer.name || 'Unknown Printer';
+        const model = printer.full_name || printer.model_name || printer.model || printer.name || 'Unknown Printer';
         const nickname = printer.nickname || printer.location || '';
-        const brand = printer.brand || '';
+        const slug = printer.slug || printer.printer_slug || '';
 
-        // Build search URL - use brand + printer_model format (same as ink-finder)
-        const searchUrl = brand
-            ? `/html/shop?brand=${encodeURIComponent(brand)}&printer_model=${encodeURIComponent(model)}`
-            : `/html/shop?search=${encodeURIComponent(model)}`;
+        // Build URL: prefer printer slug (direct API lookup), then printer_model (Supabase lookup)
+        const searchUrl = slug
+            ? `/html/shop?printer=${encodeURIComponent(slug)}`
+            : model !== 'Unknown Printer'
+                ? `/html/shop?printer_model=${encodeURIComponent(model)}`
+                : '/html/shop';
 
         return `
             <div class="printer-card-preview">
@@ -1568,6 +1626,7 @@ const AccountPage = {
                 printers = Array.isArray(response.data) ? response.data : (response.data.printers || []);
             }
 
+            printers = await this.enrichPrintersData(printers);
             this.printers = printers;
 
             if (printers.length > 0) {
@@ -1608,14 +1667,17 @@ const AccountPage = {
      * Render large printer card for printers page
      */
     renderPrinterCardLarge(printer) {
-        const model = printer.model || printer.name || 'Unknown Printer';
+        const model = printer.full_name || printer.model_name || printer.model || printer.name || 'Unknown Printer';
         const brand = printer.brand || '';
         const nickname = printer.nickname || printer.location || '';
+        const slug = printer.slug || printer.printer_slug || '';
 
-        // Build search URL - use brand + printer_model format (same as ink-finder)
-        const searchUrl = brand
-            ? `/html/shop?brand=${encodeURIComponent(brand)}&printer_model=${encodeURIComponent(model)}`
-            : `/html/shop?search=${encodeURIComponent(model)}`;
+        // Build URL: prefer printer slug (direct API lookup), then printer_model (Supabase lookup)
+        const searchUrl = slug
+            ? `/html/shop?printer=${encodeURIComponent(slug)}`
+            : model !== 'Unknown Printer'
+                ? `/html/shop?printer_model=${encodeURIComponent(model)}`
+                : '/html/shop';
 
         const escapedId = Security.escapeAttr(printer.id);
 

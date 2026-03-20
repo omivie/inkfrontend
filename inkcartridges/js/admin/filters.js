@@ -6,11 +6,13 @@
 const esc = (s) => typeof Security !== 'undefined' ? Security.escapeHtml(String(s)) : String(s);
 
 const PERIOD_PRESETS = [
-  { key: 'today', label: 'Today', days: 0 },
-  { key: '7d', label: '7D', days: 7 },
-  { key: '30d', label: '30D', days: 30 },
-  { key: '90d', label: '90D', days: 90 },
-  { key: '12m', label: '12M', days: 365 },
+  { key: '24h', label: '24h', days: 1 },
+  { key: '72h', label: '72h', days: 3 },
+  { key: '7d', label: '7d', days: 7 },
+  { key: '1m', label: '1m', days: 30 },
+  { key: '3m', label: '3m', days: 90 },
+  { key: '6m', label: '6m', days: 180 },
+  { key: '1y', label: '1y', days: 365 },
   { key: 'all', label: 'All', days: -1 },
   { key: 'custom', label: 'Custom', days: null },
 ];
@@ -213,36 +215,42 @@ const FilterState = {
     if (!this._el) return;
     const s = this._state;
 
-    let html = '<div class="admin-filters">';
-
-    // Period presets
-    html += '<div class="admin-filter-group">';
-    for (const p of PERIOD_PRESETS) {
-      html += `<button class="admin-filter-btn${s.period === p.key ? ' active' : ''}" data-period="${p.key}">${p.label}</button>`;
-    }
-    html += '</div>';
-
-    // Custom date range
-    html += `<div class="admin-filter-date${s.period === 'custom' ? ' visible' : ''}">`;
-    html += `<input type="date" class="admin-date-from" value="${esc(s.dateFrom)}">`;
-    html += `<span>to</span>`;
-    html += `<input type="date" class="admin-date-to" value="${esc(s.dateTo)}">`;
-    html += '</div>';
-
     // Multi-selects (only render filters relevant to the current page)
     const visible = this._visibleFilters;
-    if (!visible || visible.includes('brands')) html += this._renderMultiSelect('brands', 'Brand');
-    if (!visible || visible.includes('suppliers')) html += this._renderMultiSelect('suppliers', 'Supplier');
-    if (!visible || visible.includes('statuses')) html += this._renderMultiSelect('statuses', 'Status');
-    if (!visible || visible.includes('categories')) html += this._renderMultiSelect('categories', 'Category');
+    let leftHtml = '';
+    if (!visible || visible.includes('brands')) leftHtml += this._renderMultiSelect('brands', 'Brand');
+    if (!visible || visible.includes('suppliers')) leftHtml += this._renderMultiSelect('suppliers', 'Supplier');
+    if (!visible || visible.includes('statuses')) leftHtml += this._renderMultiSelect('statuses', 'Status');
+    if (!visible || visible.includes('categories')) leftHtml += this._renderMultiSelect('categories', 'Category');
 
-    // Reset
-    const hasFilters = s.brands.length || s.suppliers.length || s.statuses.length || s.categories.length || s.period !== 'all';
-    if (hasFilters) {
-      html += '<button class="admin-filter-reset" data-action="reset-filters">Clear</button>';
+    // Period presets (center)
+    let centerHtml = '<div class="admin-filter-group">';
+    for (const p of PERIOD_PRESETS) {
+      centerHtml += `<button class="admin-filter-btn${s.period === p.key ? ' active' : ''}" data-period="${p.key}">${p.label}</button>`;
     }
+    centerHtml += '</div>';
 
-    html += '</div>';
+    // Custom date range (shown inline when custom selected)
+    centerHtml += `<div class="admin-filter-date${s.period === 'custom' ? ' visible' : ''}">`;
+    centerHtml += `<input type="date" class="admin-date-from" value="${esc(s.dateFrom)}">`;
+    centerHtml += `<span>to</span>`;
+    centerHtml += `<input type="date" class="admin-date-to" value="${esc(s.dateTo)}">`;
+    centerHtml += '</div>';
+
+    // Reset button (right)
+    const hasFilters = s.brands.length || s.suppliers.length || s.statuses.length || s.categories.length || s.period !== 'all';
+    const rightHtml = hasFilters
+      ? '<button class="admin-filter-reset" data-action="reset-filters">Clear</button>'
+      : '';
+
+    const html = `
+      <div class="admin-filters">
+        <div class="admin-filters__side admin-filters__side--left">${leftHtml}</div>
+        <div class="admin-filters__center">${centerHtml}</div>
+        <div class="admin-filters__side admin-filters__side--right">${rightHtml}</div>
+      </div>
+    `;
+
     this._el.innerHTML = html;
     this._bindEvents();
   },

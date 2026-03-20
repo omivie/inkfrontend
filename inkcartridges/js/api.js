@@ -614,6 +614,14 @@ const API = {
         return this.get(`/api/orders/${orderNumber}`);
     },
 
+    async getRecentTracking() {
+        return this.get('/api/orders/recent-tracking');
+    },
+
+    async getOrderTracking(orderNumber) {
+        return this.get(`/api/orders/track/${encodeURIComponent(orderNumber)}`);
+    },
+
     /**
      * Check for a recent pending order (checkout timeout recovery)
      * Call when order creation times out to check if order was actually created

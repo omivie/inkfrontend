@@ -1643,6 +1643,8 @@
 
                     // Store printer name for display
                     this.state.printerName = printerData?.full_name || this.state.printer;
+                    this.updateBreadcrumb();
+                    this.updateTitle();
 
                     // Separate genuine and compatible using the API's source field (more reliable than name parsing)
                     const isCompatibleProduct = (product) => {
@@ -1664,6 +1666,10 @@
                     } else if (this.state.type === 'compatible') {
                         genuine = []; // Hide genuine products
                     }
+
+                    const printerDisplayName = this.state.printerName || '';
+                    this.elements.compatibleTitleText.textContent = `${printerDisplayName} Compatible Products`;
+                    this.elements.genuineTitleText.textContent = `${printerDisplayName} Original Products`;
 
                     // Render compatible first, then genuine
                     this.renderProducts(compatible, this.elements.compatibleProducts, this.elements.compatibleSection, true);
@@ -2778,7 +2784,10 @@
 
                 // Show product type inline with breadcrumb
                 let productType = this.getProductTypeLabel();
-                if (this.state.level === 'printer-model-products') {
+                if (this.state.level === 'printer-products') {
+                    const name = this.state.printerName || this.state.printer || '';
+                    productType = name ? `Compatible Ink for ${name}` : 'Compatible Ink';
+                } else if (this.state.level === 'printer-model-products') {
                     productType = this.state.printerModelDisplay || this.state.printerModel || 'Products';
                 } else if (this.state.level === 'search-results') {
                     productType = `Search Results for "${this.state.search}"`;

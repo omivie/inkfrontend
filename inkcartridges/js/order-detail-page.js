@@ -65,6 +65,11 @@
                 })}`;
             }
 
+            // Render timeline stepper
+            if (order.timeline && order.timeline.length) {
+                this.renderTimeline(order);
+            }
+
             // Render items
             const itemsContainer = document.querySelector('.order-items');
             if (itemsContainer) {
@@ -146,6 +151,36 @@
             // Update breadcrumb
             const breadcrumb = document.querySelector('.breadcrumb__item--current');
             if (breadcrumb) breadcrumb.textContent = `Order #${order.order_number}`;
+        },
+
+        renderTimeline(order) {
+            const itemsContainer = document.querySelector('.order-items');
+            if (!itemsContainer) return;
+
+            const isCancelled = order.status === 'cancelled';
+            const steps = order.timeline.map(step => {
+                const cls = isCancelled && step.step === 'cancelled'
+                    ? 'timeline-step timeline-step--completed timeline-step--cancelled'
+                    : step.completed
+                        ? 'timeline-step timeline-step--completed'
+                        : 'timeline-step';
+                const esc = typeof Security !== 'undefined' ? Security.escapeHtml : (s) => s;
+                const dateStr = step.date
+                    ? new Date(step.date).toLocaleDateString('en-NZ', { day: 'numeric', month: 'short' })
+                    : '';
+                return `
+                    <div class="${cls}">
+                        <div class="timeline-step__dot"></div>
+                        <div class="timeline-step__label">${esc(step.label)}</div>
+                        ${dateStr ? `<div class="timeline-step__date">${dateStr}</div>` : ''}
+                    </div>
+                `;
+            }).join('');
+
+            const wrapper = document.createElement('div');
+            wrapper.className = 'order-detail-timeline';
+            wrapper.innerHTML = `<div class="order-timeline">${steps}</div>`;
+            itemsContainer.parentNode.insertBefore(wrapper, itemsContainer);
         },
 
         getStatusClass(status) {

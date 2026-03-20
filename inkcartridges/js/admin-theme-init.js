@@ -1,7 +1,6 @@
 /**
- * Admin theme initializer — must run synchronously in <head> to prevent FOUC
+ * Admin theme initializer — light mode only
  */
 (function(){
-    var t = localStorage.getItem('admin-theme') || 'light';
-    document.documentElement.setAttribute('data-theme', t);
+    if (document.body) document.body.setAttribute('data-theme', 'light');
 })();
