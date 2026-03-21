@@ -111,7 +111,7 @@
 
             tbody.innerHTML = pages.map(page => `
                 <tr>
-                    <td>${this.escapeHtml(page.path)}</td>
+                    <td>${Security.escapeHtml(page.path)}</td>
                     <td>${page.views.toLocaleString()}</td>
                     <td>${page.bounceRate}%</td>
                 </tr>
@@ -129,17 +129,11 @@
 
             tbody.innerHTML = terms.map(term => `
                 <tr>
-                    <td>${this.escapeHtml(term.keyword)}</td>
+                    <td>${Security.escapeHtml(term.keyword)}</td>
                     <td>${term.searches.toLocaleString()}</td>
                     <td>${term.conversions}</td>
                 </tr>
             `).join('');
-        },
-
-        escapeHtml(str) {
-            const div = document.createElement('div');
-            div.textContent = str;
-            return div.innerHTML;
         },
 
         async showNoData() {

@@ -1,6 +1,11 @@
         document.getElementById('current-year').textContent = new Date().getFullYear();
 
         document.addEventListener('DOMContentLoaded', async () => {
+            // Remove token from URL to prevent it persisting in browser history
+            if (window.location.hash) {
+                window.history.replaceState({}, '', window.location.pathname);
+            }
+
             const form = document.getElementById('reset-password-form');
             const newPassword = document.getElementById('new-password');
             const confirmPassword = document.getElementById('confirm-password');

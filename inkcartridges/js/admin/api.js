@@ -7,8 +7,9 @@
 async function rpc(fnName, params = {}, signal = null) {
   try {
     if (signal?.aborted) return null;
+    const token = window.Auth?.session?.access_token;
+    if (!token) throw new Error('Unauthorized');
     const url = `${Config.SUPABASE_URL}/rest/v1/rpc/${fnName}`;
-    const token = window.Auth?.session?.access_token || Config.SUPABASE_ANON_KEY;
     const resp = await fetch(url, {
       method: 'POST',
       headers: {
@@ -34,6 +35,13 @@ async function rpc(fnName, params = {}, signal = null) {
     DebugLog.warn(`[AdminAPI] RPC ${fnName} failed:`, e.message);
     return null;
   }
+}
+
+// Warn in console and show a user-visible toast for silent read failures.
+// Toast may not exist in all contexts (e.g. tests) so we guard with typeof.
+function adminApiWarn(label, e) {
+  DebugLog.warn(`[AdminAPI] ${label} failed:`, e.message);
+  if (typeof Toast !== 'undefined') Toast.error(`${label}. Please try again.`);
 }
 
 const AdminAPI = {
@@ -68,7 +76,7 @@ const AdminAPI = {
       const resp = await window.API.get(`/api/admin/orders?${params}`);
       return resp?.data ?? null;
     } catch (e) {
-      DebugLog.warn('[AdminAPI] getOrders failed:', e.message);
+      adminApiWarn('Failed to load orders', e);
       return null;
     }
   },
@@ -79,7 +87,7 @@ const AdminAPI = {
       // Backend wraps single order in data.order
       return resp?.data?.order ?? resp?.data ?? null;
     } catch (e) {
-      DebugLog.warn('[AdminAPI] getOrder failed:', e.message);
+      adminApiWarn('Failed to load order', e);
       return null;
     }
   },
@@ -128,7 +136,7 @@ const AdminAPI = {
       const resp = await window.API.get(`/api/admin/orders/${orderId}/events`);
       return resp?.data ?? null;
     } catch (e) {
-      DebugLog.warn('[AdminAPI] getOrderEvents failed:', e.message);
+      adminApiWarn('Failed to load order history', e);
       return null;
     }
   },
@@ -168,7 +176,7 @@ const AdminAPI = {
       const resp = await window.API.get(`/api/admin/refunds?${params}`);
       return resp?.data ?? null;
     } catch (e) {
-      DebugLog.warn('[AdminAPI] getRefunds failed:', e.message);
+      adminApiWarn('Failed to load refunds', e);
       return null;
     }
   },
@@ -275,7 +283,7 @@ const AdminAPI = {
       const resp = await window.API.get(`/api/admin/customers?${params}`);
       return resp?.data ?? null;
     } catch (e) {
-      DebugLog.warn('[AdminAPI] getCustomers failed:', e.message);
+      adminApiWarn('Failed to load customers', e);
       return null;
     }
   },
@@ -294,7 +302,7 @@ const AdminAPI = {
       const resp = await window.API.get(`/api/admin/products?${params}`);
       return resp?.data ?? null;
     } catch (e) {
-      DebugLog.warn('[AdminAPI] getProducts failed:', e.message);
+      adminApiWarn('Failed to load products', e);
       return null;
     }
   },
@@ -311,7 +319,7 @@ const AdminAPI = {
       const resp = await window.API.get(`/api/admin/products?${params}`);
       return resp?.data ?? null;
     } catch (e) {
-      DebugLog.warn('[AdminAPI] getUnreviewedProducts failed:', e.message);
+      adminApiWarn('Failed to load products', e);
       return null;
     }
   },
@@ -326,7 +334,7 @@ const AdminAPI = {
       const resp = await window.API.get(`/api/admin/products/${productId}`);
       return resp?.data?.product ?? resp?.data ?? null;
     } catch (e) {
-      DebugLog.warn('[AdminAPI] getProduct failed:', e.message);
+      adminApiWarn('Failed to load product', e);
       return null;
     }
   },
@@ -403,7 +411,7 @@ const AdminAPI = {
     try {
       return await window.API.getAdminProductDiagnostics();
     } catch (e) {
-      DebugLog.warn('[AdminAPI] getProductDiagnostics failed:', e.message);
+      adminApiWarn('Failed to load product diagnostics', e);
       return null;
     }
   },
@@ -437,7 +445,7 @@ const AdminAPI = {
       const resp = await window.API.get('/api/brands');
       return resp?.data ?? null;
     } catch (e) {
-      DebugLog.warn('[AdminAPI] getBrands failed:', e.message);
+      adminApiWarn('Failed to load brands', e);
       return null;
     }
   },
@@ -456,7 +464,7 @@ const AdminAPI = {
       const resp = await window.API.get(`/api/admin/ribbons?${params}`);
       return resp?.data ?? null;
     } catch (e) {
-      DebugLog.warn('[AdminAPI] getAdminRibbons failed:', e.message);
+      adminApiWarn('Failed to load ribbons', e);
       return null;
     }
   },
@@ -466,7 +474,7 @@ const AdminAPI = {
       const resp = await window.API.get(`/api/admin/ribbons/${ribbonId}`);
       return resp?.data ?? null;
     } catch (e) {
-      DebugLog.warn('[AdminAPI] getAdminRibbon failed:', e.message);
+      adminApiWarn('Failed to load ribbon', e);
       return null;
     }
   },
@@ -507,7 +515,7 @@ const AdminAPI = {
       const resp = await window.API.get('/api/admin/contact-emails');
       return resp?.data ?? null;
     } catch (e) {
-      DebugLog.warn('[AdminAPI] getContactEmails failed:', e.message);
+      adminApiWarn('Failed to load contact emails', e);
       return null;
     }
   },

@@ -82,7 +82,9 @@
         loadCheckoutData() {
             try {
                 const data = sessionStorage.getItem('checkoutData');
-                return data ? JSON.parse(data) : null;
+                if (!data) return null;
+                sessionStorage.removeItem('checkoutData');
+                return JSON.parse(data);
             } catch (e) {
                 DebugLog.error('Failed to load checkout data:', e);
                 return null;
@@ -272,39 +274,10 @@
                 }
 
             } catch (error) {
-                DebugLog.warn('Server totals unavailable, using estimates:', error.message);
-
-                // Fall back to Cart object totals
-                if (typeof Cart !== 'undefined' && this.cartItems.length > 0) {
-                    const subtotal = Cart.getSubtotal();
-                    const checkoutData = this.checkoutData || {};
-                    // Prefer the shipping fee persisted from checkout over recalculating
-                    const shipping = checkoutData.estimatedShipping != null
-                        ? checkoutData.estimatedShipping
-                        : (typeof Shipping !== 'undefined'
-                            ? Shipping.calculate(Cart.items, subtotal, checkoutData.region, checkoutData.deliveryType).fee
-                            : 0);
-
-                    this.totals = {
-                        subtotal,
-                        shipping,
-                        discount: 0,
-                        total: subtotal + shipping
-                    };
-
-                    document.getElementById('checkout-subtotal').textContent = `$${this.totals.subtotal.toFixed(2)}`;
-                    document.getElementById('checkout-shipping').textContent = this.totals.shipping === 0 ? 'FREE' : `$${this.totals.shipping.toFixed(2)}`;
-                    document.getElementById('checkout-total').textContent = `$${this.totals.total.toFixed(2)} NZD`;
-                    document.getElementById('pay-button-text').textContent = `Pay $${this.totals.total.toFixed(2)} NZD`;
-
-                    if (this.elements) {
-                        this.elements.update({ amount: Math.round(this.totals.total * 100) });
-                    }
-                } else {
-                    this.showError('Unable to calculate order total. Please refresh and try again.');
-                    const payBtn = document.getElementById('pay-now-btn');
-                    if (payBtn) payBtn.disabled = true;
-                }
+                DebugLog.warn('Server totals unavailable:', error.message);
+                this.showError('Unable to load order total. Please refresh and try again.');
+                const payBtn = document.getElementById('pay-now-btn');
+                if (payBtn) payBtn.disabled = true;
             }
         },
 
@@ -1125,9 +1098,13 @@
                     console.error('[PayPal] Error message:', err?.message || String(err));
                     self.showError('Something went wrong with PayPal. Please try again or use a different payment method.');
                 }
-            }).render('#paypal-button-container');
-
-            DebugLog.log('PayPal button initialized successfully');
+            }).render('#paypal-button-container').then(() => {
+                DebugLog.log('PayPal button initialized successfully');
+            }).catch((err) => {
+                DebugLog.error('PayPal button render failed:', err);
+                const container = document.getElementById('paypal-button-container');
+                if (container) container.innerHTML = '<p style="color: var(--color-error, #dc2626); font-size: 0.8125rem; text-align: center;">PayPal is unavailable. Please use card payment.</p>';
+            });
         }
     };
 

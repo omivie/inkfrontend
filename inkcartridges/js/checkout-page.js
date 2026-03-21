@@ -145,9 +145,9 @@
             document.getElementById('resend-verification-btn')?.addEventListener('click', async () => {
                 try {
                     await API.resendVerificationEmail();
-                    alert('Verification email sent! Please check your inbox.');
+                    showToast('Verification email sent! Please check your inbox.', 'success');
                 } catch (error) {
-                    alert('Failed to resend verification email. Please try again.');
+                    showToast('Failed to resend verification email. Please try again.', 'error');
                 }
             });
         },

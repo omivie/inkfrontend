@@ -791,7 +791,8 @@
                             }
                         }
 
-                        const [brandResult, ...searchResults] = await Promise.all([brandFetchPromise, ...searchPromises]);
+                        const settled = await Promise.allSettled([brandFetchPromise, ...searchPromises]);
+                        const [brandResult, ...searchResults] = settled.map(r => r.status === 'fulfilled' ? r.value : []);
                         let searchProducts = searchResults.flat();
 
                         if (searchProducts.length === 0) {

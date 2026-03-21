@@ -292,12 +292,12 @@ window.DebugLog = DebugLog;
 
 
 /**
- * Check if current user is a cached super admin (UI-only; backend re-verifies)
+ * Stub — admin role is no longer cached client-side (sessionStorage is user-controlled).
+ * Backend re-verifies on every admin request. Always returns false.
  * @returns {boolean}
  */
 function isCachedSuperAdmin() {
-    try { return sessionStorage.getItem('adminRole') === 'superadmin'; }
-    catch (e) { return false; }
+    return false;
 }
 
 

@@ -345,7 +345,7 @@ function buildProductModalTabs(modal, full, isOwner) {
   const tabsEl = modal.querySelector('#pm-tabs');
   const panelsEl = modal.querySelector('#pm-panels');
 
-  const tabs = ['Basic Info', 'Pricing', 'Inventory', 'SEO', 'Advanced'];
+  const tabs = ['Basic Info', 'Pricing', 'Inventory', 'SEO', 'Advanced', 'Compatibility', 'FAQ'];
   tabsEl.innerHTML = tabs.map((t, i) =>
     `<button class="admin-product-modal__tab${i === 0 ? ' active' : ''}" data-tab="${i}">${esc(t)}</button>`
   ).join('');
@@ -419,6 +419,12 @@ function buildProductModalTabs(modal, full, isOwner) {
   // Advanced panel
   let advancedHtml = `
     ${formGroup('Page Yield', `<input class="admin-input" id="edit-page-yield" type="number" min="0" value="${full.page_yield ?? ''}">`)}
+    ${formGroup('Tags (comma-separated)', `<input class="admin-input" id="edit-tags" value="${esc((full.tags || []).join(', '))}">`)}
+    ${formGroup('Internal Notes', `<textarea class="admin-textarea" id="edit-admin-notes" rows="3">${esc(full.admin_notes || '')}</textarea>`)}
+  `;
+
+  // Compatibility panel
+  let compatHtml = `
     <div class="admin-form-group" id="compat-section">
       <div style="display:flex;justify-content:space-between;align-items:center">
         <label id="compat-heading">Compatible Printers</label>
@@ -433,11 +439,34 @@ function buildProductModalTabs(modal, full, isOwner) {
         <button class="admin-btn admin-btn--ghost admin-btn--sm" id="compat-bulk-btn">Apply to all variants with prefix &ldquo;<span id="compat-prefix"></span>&rdquo;</button>
       </div>
     </div>
-    ${formGroup('Tags (comma-separated)', `<input class="admin-input" id="edit-tags" value="${esc((full.tags || []).join(', '))}">`)}
-    ${formGroup('Internal Notes', `<textarea class="admin-textarea" id="edit-admin-notes" rows="3">${esc(full.admin_notes || '')}</textarea>`)}
   `;
 
-  const panelContents = [basicHtml, pricingHtml, inventoryHtml, seoHtml, advancedHtml];
+  // FAQ panel
+  let faqHtml = `
+    <div id="faq-section">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+        <span style="font-size:13px;font-weight:600;color:var(--text-secondary)">FAQs</span>
+        <button class="admin-btn admin-btn--ghost admin-btn--sm" id="faq-add-btn">+ Add FAQ</button>
+      </div>
+      <div id="faq-add-form" style="display:none;margin-bottom:16px;padding:12px;background:var(--input-bg);border:1px solid var(--border);border-radius:var(--radius)">
+        <div class="admin-form-group">
+          <label>Question</label>
+          <input class="admin-input" id="faq-new-question" placeholder="Enter question\u2026">
+        </div>
+        <div class="admin-form-group">
+          <label>Answer</label>
+          <textarea class="admin-textarea" id="faq-new-answer" rows="3" placeholder="Enter answer\u2026"></textarea>
+        </div>
+        <div style="display:flex;gap:8px">
+          <button class="admin-btn admin-btn--primary admin-btn--sm" id="faq-save-new-btn">Save</button>
+          <button class="admin-btn admin-btn--ghost admin-btn--sm" id="faq-cancel-add-btn">Cancel</button>
+        </div>
+      </div>
+      <div id="faq-list"><span class="admin-text-muted" style="font-size:13px">Loading\u2026</span></div>
+    </div>
+  `;
+
+  const panelContents = [basicHtml, pricingHtml, inventoryHtml, seoHtml, advancedHtml, compatHtml, faqHtml];
   panelsEl.innerHTML = panelContents.map((content, i) =>
     `<div class="admin-product-modal__tab-panel${i === 0 ? ' active' : ''}" data-panel="${i}">${content}</div>`
   ).join('');
@@ -449,6 +478,168 @@ function buildProductModalTabs(modal, full, isOwner) {
     const idx = btn.dataset.tab;
     tabsEl.querySelectorAll('.admin-product-modal__tab').forEach(t => t.classList.toggle('active', t.dataset.tab === idx));
     panelsEl.querySelectorAll('.admin-product-modal__tab-panel').forEach(p => p.classList.toggle('active', p.dataset.panel === idx));
+  });
+}
+
+async function buildFaqSection(modal, product) {
+  const productId = product.id;
+  const token = () => window.Auth?.session?.access_token;
+  const base = `${Config.SUPABASE_URL}/rest/v1/product_faqs`;
+  const headers = () => ({
+    'apikey': Config.SUPABASE_ANON_KEY,
+    'Authorization': `Bearer ${token()}`,
+    'Content-Type': 'application/json',
+    'Prefer': 'return=representation',
+  });
+
+  let faqs = [];
+
+  async function loadFaqs() {
+    const resp = await fetch(`${base}?product_id=eq.${productId}&order=order_index.asc,created_at.asc`, {
+      headers: headers()
+    });
+    if (!resp.ok) throw new Error('Failed to load FAQs');
+    faqs = await resp.json();
+  }
+
+  function renderFaqList() {
+    const list = modal.querySelector('#faq-list');
+    if (!faqs.length) {
+      list.innerHTML = `<div class="admin-text-muted" style="font-size:13px;padding:12px 0">No FAQs yet. Click &ldquo;+ Add FAQ&rdquo; to create one.</div>`;
+      return;
+    }
+    list.innerHTML = faqs.map((faq, i) => `
+      <div class="admin-faq-item" data-faq-id="${esc(String(faq.id))}">
+        <div class="admin-faq-item__view">
+          <div class="admin-faq-item__q">${esc(faq.question)}</div>
+          <div class="admin-faq-item__a">${esc(faq.answer)}</div>
+          <div class="admin-faq-item__actions">
+            <button class="admin-btn admin-btn--ghost admin-btn--sm faq-edit-btn" data-idx="${i}">Edit</button>
+            <button class="admin-btn admin-btn--ghost admin-btn--sm faq-delete-btn" data-faq-id="${esc(String(faq.id))}" style="color:var(--danger)">Delete</button>
+          </div>
+        </div>
+        <div class="admin-faq-item__edit" style="display:none">
+          <div class="admin-form-group">
+            <label>Question</label>
+            <input class="admin-input faq-edit-question" value="${esc(faq.question)}">
+          </div>
+          <div class="admin-form-group">
+            <label>Answer</label>
+            <textarea class="admin-textarea faq-edit-answer" rows="3">${esc(faq.answer)}</textarea>
+          </div>
+          <div style="display:flex;gap:8px">
+            <button class="admin-btn admin-btn--primary admin-btn--sm faq-save-edit-btn" data-faq-id="${esc(String(faq.id))}">Save</button>
+            <button class="admin-btn admin-btn--ghost admin-btn--sm faq-cancel-edit-btn">Cancel</button>
+          </div>
+        </div>
+      </div>
+    `).join('');
+  }
+
+  // Initial load
+  try {
+    await loadFaqs();
+    renderFaqList();
+  } catch (e) {
+    modal.querySelector('#faq-list').innerHTML = `<div class="admin-text-muted" style="font-size:13px">Failed to load FAQs.</div>`;
+  }
+
+  // Add FAQ toggle
+  modal.querySelector('#faq-add-btn').addEventListener('click', () => {
+    modal.querySelector('#faq-add-form').style.display = 'block';
+    modal.querySelector('#faq-new-question').focus();
+  });
+  modal.querySelector('#faq-cancel-add-btn').addEventListener('click', () => {
+    modal.querySelector('#faq-add-form').style.display = 'none';
+    modal.querySelector('#faq-new-question').value = '';
+    modal.querySelector('#faq-new-answer').value = '';
+  });
+
+  // Save new FAQ
+  modal.querySelector('#faq-save-new-btn').addEventListener('click', async () => {
+    const q = modal.querySelector('#faq-new-question').value.trim();
+    const a = modal.querySelector('#faq-new-answer').value.trim();
+    if (!q || !a) { Toast.error('Question and answer are required'); return; }
+    const btn = modal.querySelector('#faq-save-new-btn');
+    btn.disabled = true;
+    try {
+      const resp = await fetch(base, {
+        method: 'POST',
+        headers: headers(),
+        body: JSON.stringify({ product_id: productId, question: q, answer: a, order_index: faqs.length }),
+      });
+      if (!resp.ok) throw new Error('Save failed');
+      const [created] = await resp.json();
+      faqs.push(created);
+      renderFaqList();
+      modal.querySelector('#faq-add-form').style.display = 'none';
+      modal.querySelector('#faq-new-question').value = '';
+      modal.querySelector('#faq-new-answer').value = '';
+      Toast.success('FAQ added');
+    } catch (e) {
+      Toast.error(`Add failed: ${e.message}`);
+    } finally { btn.disabled = false; }
+  });
+
+  // Delegate edit/delete/save/cancel on list
+  modal.querySelector('#faq-list').addEventListener('click', async (e) => {
+    const item = e.target.closest('.admin-faq-item');
+    if (!item) return;
+
+    // Toggle edit view
+    if (e.target.closest('.faq-edit-btn')) {
+      item.querySelector('.admin-faq-item__view').style.display = 'none';
+      item.querySelector('.admin-faq-item__edit').style.display = 'block';
+      return;
+    }
+    if (e.target.closest('.faq-cancel-edit-btn')) {
+      item.querySelector('.admin-faq-item__view').style.display = 'block';
+      item.querySelector('.admin-faq-item__edit').style.display = 'none';
+      return;
+    }
+
+    // Save edit
+    if (e.target.closest('.faq-save-edit-btn')) {
+      const faqId = e.target.closest('.faq-save-edit-btn').dataset.faqId;
+      const q = item.querySelector('.faq-edit-question').value.trim();
+      const a = item.querySelector('.faq-edit-answer').value.trim();
+      if (!q || !a) { Toast.error('Question and answer are required'); return; }
+      const btn = e.target.closest('.faq-save-edit-btn');
+      btn.disabled = true;
+      try {
+        const resp = await fetch(`${base}?id=eq.${faqId}`, {
+          method: 'PATCH',
+          headers: headers(),
+          body: JSON.stringify({ question: q, answer: a }),
+        });
+        if (!resp.ok) throw new Error('Update failed');
+        const idx = faqs.findIndex(f => f.id === faqId);
+        if (idx !== -1) { faqs[idx].question = q; faqs[idx].answer = a; }
+        renderFaqList();
+        Toast.success('FAQ updated');
+      } catch (e) {
+        Toast.error(`Update failed: ${e.message}`);
+      } finally { btn.disabled = false; }
+      return;
+    }
+
+    // Delete
+    if (e.target.closest('.faq-delete-btn')) {
+      const faqId = e.target.closest('.faq-delete-btn').dataset.faqId;
+      if (!confirm('Delete this FAQ?')) return;
+      try {
+        const resp = await fetch(`${base}?id=eq.${faqId}`, {
+          method: 'DELETE',
+          headers: headers(),
+        });
+        if (!resp.ok) throw new Error('Delete failed');
+        faqs = faqs.filter(f => f.id !== faqId);
+        renderFaqList();
+        Toast.success('FAQ deleted');
+      } catch (e) {
+        Toast.error(`Delete failed: ${e.message}`);
+      }
+    }
   });
 }
 
@@ -807,6 +998,8 @@ function bindProductModalActions(modal, product) {
       Toast.error(`Save failed: ${e.message}`);
     }
   });
+
+  buildFaqSection(modal, product);
 }
 
 async function uploadImage(productId, file) {

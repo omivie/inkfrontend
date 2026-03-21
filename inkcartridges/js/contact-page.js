@@ -10,7 +10,8 @@
                 turnstile.render('#contact-turnstile', {
                     sitekey: siteKey,
                     callback: (token) => { turnstileToken = token; },
-                    'expired-callback': () => { turnstileToken = null; }
+                    'expired-callback': () => { turnstileToken = null; },
+                    'error-callback': () => { showPopup('Security check failed to load. Please refresh the page and try again.', 'error'); }
                 });
             }
         }

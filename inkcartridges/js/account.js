@@ -896,10 +896,7 @@ const AccountPage = {
             if (response.ok && response.data) {
                 adminNavItem.hidden = false;
 
-                // Cache admin role for UI gating on non-admin pages
-                const role = (response.data.role || '').toLowerCase();
-                const isSuperAdmin = (role === 'superadmin' || role === 'owner');
-                try { sessionStorage.setItem('adminRole', isSuperAdmin ? 'superadmin' : 'admin'); } catch (e) {}
+                // Role is verified server-side — no client-side cache needed
             }
         } catch {
             // Not an admin or backend unavailable — keep hidden

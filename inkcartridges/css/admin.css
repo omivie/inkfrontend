@@ -1556,3 +1556,28 @@
   color: var(--text-muted); letter-spacing: -0.02em;
 }
 @media (max-width: 768px) { .admin-traffic-grid { grid-template-columns: repeat(2, 1fr); } }
+
+/* --- FAQ Section --- */
+.admin-faq-item {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px;
+  margin-bottom: 10px;
+  background: var(--surface);
+}
+.admin-faq-item__q {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 4px;
+}
+.admin-faq-item__a {
+  font-size: 12px;
+  color: var(--text-secondary);
+  white-space: pre-wrap;
+  margin-bottom: 8px;
+}
+.admin-faq-item__actions {
+  display: flex;
+  gap: 6px;
+}
