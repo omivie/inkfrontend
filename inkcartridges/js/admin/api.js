@@ -271,6 +271,16 @@ const AdminAPI = {
     }, signal);
   },
 
+  async getNewOrders24h(signal) {
+    const to = new Date();
+    const from = new Date(to.getTime() - 24 * 60 * 60 * 1000);
+    const data = await this.getOrders({
+      from: from.toISOString().split('T')[0],
+      to: to.toISOString().split('T')[0],
+    }, 1, 1, signal);
+    return data?.pagination?.total ?? data?.total ?? null;
+  },
+
   // ---- Customers ----
   async getCustomers(filters = {}, page = 1, limit = 20) {
     try {
@@ -421,6 +431,10 @@ const AdminAPI = {
       adminApiWarn('Failed to load product diagnostics', e);
       return null;
     }
+  },
+
+  async bulkGenerateAllSeo() {
+    return await window.API.post('/api/admin/products/bulk-generate-seo', {});
   },
 
   async bulkActivate(data) {

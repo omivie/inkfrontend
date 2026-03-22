@@ -20,6 +20,18 @@ function delta(current, previous) {
   return `<span class="admin-kpi__delta admin-kpi__delta--${dir}">${arrow} ${Math.abs(pct)}%</span>`;
 }
 
+function badge24h() {
+  return `<span class="admin-kpi__badge-24h">&#x23F1; 24h window</span>`;
+}
+
+function emptyChart(canvasId, message = 'No data for this period') {
+  const canvas = document.getElementById(canvasId);
+  if (!canvas) return;
+  const box = canvas.closest('.admin-chart-box');
+  if (!box) return;
+  box.innerHTML = `<div class="admin-dash-empty"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 3v18h18"/><path d="M7 16l4-4 4 4 4-4"/></svg><span>${esc(message)}</span></div>`;
+}
+
 let _container = null;
 
 async function loadDashboard() {
@@ -32,28 +44,54 @@ async function loadDashboard() {
     promises.push(AdminAPI.getDashboardKPIs(params, signal));
     promises.push(AdminAPI.getRevenueSeries(params, signal));
     promises.push(AdminAPI.getCustomerStats(params, signal));
+    promises.push(AdminAPI.getTopProducts(params, signal));
+    promises.push(AdminAPI.getBrandBreakdown(params, 'revenue', signal));
+    promises.push(AdminAPI.getNewOrders24h(signal));
+    // Fetch all orders (up to 500) to build orders-over-time series
+    promises.push(AdminAPI.getOrders(
+      { from: params.get('from'), to: params.get('to') },
+      1, 500, signal
+    ));
   }
 
   const results = await Promise.allSettled(promises);
-  const kpis      = isOwner ? (results[0]?.value ?? null) : null;
-  const revSeries = isOwner ? (results[1]?.value ?? null) : null;
-  const custStats = isOwner ? (results[2]?.value ?? null) : null;
+  const kpis         = isOwner ? (results[0]?.value ?? null) : null;
+  const revSeries    = isOwner ? (results[1]?.value ?? null) : null;
+  const custStats    = isOwner ? (results[2]?.value ?? null) : null;
+  const topProducts  = isOwner ? (results[3]?.value ?? null) : null;
+  const brandData    = isOwner ? (results[4]?.value ?? null) : null;
+  const newOrders24h = isOwner ? (results[5]?.value ?? null) : null;
+  const rawOrders    = isOwner ? (results[6]?.value ?? null) : null;
 
-  render({ kpis, revSeries, custStats, isOwner });
+  render({ kpis, revSeries, custStats, topProducts, brandData, newOrders24h, rawOrders, isOwner });
 }
 
-function render({ kpis, revSeries, custStats, isOwner }) {
+function render({ kpis, revSeries, custStats, topProducts, brandData, newOrders24h, rawOrders, isOwner }) {
   if (!_container) return;
   Charts.destroyAll();
 
   let html = `<div class="admin-page-header"><h1>Dashboard</h1></div>`;
 
   if (isOwner) {
-    html += renderKPIs(kpis, custStats);
+    html += renderKPIs(kpis, custStats, newOrders24h);
     html += `
       <div class="admin-card admin-mb-lg">
         <div class="admin-card__title">Revenue Over Time <small>${FilterState.get('period')}</small></div>
         <div class="admin-chart-box"><canvas id="chart-revenue"></canvas></div>
+      </div>
+      <div class="admin-card admin-mb-lg">
+        <div class="admin-card__title">Orders Over Time <small>${FilterState.get('period')}</small></div>
+        <div class="admin-chart-box"><canvas id="chart-orders"></canvas></div>
+      </div>
+      <div class="admin-grid-2 admin-mb-lg">
+        <div class="admin-card">
+          <div class="admin-card__title">Top Products <small>by revenue</small></div>
+          <div class="admin-chart-box admin-chart-box--tall"><canvas id="chart-top-products"></canvas></div>
+        </div>
+        <div class="admin-card">
+          <div class="admin-card__title">Revenue by Brand</div>
+          <div class="admin-chart-box admin-chart-box--tall"><canvas id="chart-brand-breakdown"></canvas></div>
+        </div>
       </div>
     `;
   }
@@ -62,10 +100,13 @@ function render({ kpis, revSeries, custStats, isOwner }) {
 
   if (isOwner) {
     renderRevenueChart(revSeries);
+    renderOrdersChart(revSeries, rawOrders);
+    renderTopProductsChart(topProducts);
+    renderBrandChart(brandData);
   }
 }
 
-function renderKPIs(kpis, custStats) {
+function renderKPIs(kpis, custStats, newOrders24h) {
   const cur  = kpis?.current  ?? {};
   const prev = kpis?.previous ?? {};
   const cc   = custStats?.current  ?? {};
@@ -85,10 +126,11 @@ function renderKPIs(kpis, custStats) {
       prevRaw: prev.orders,
     },
     {
-      label: 'AOV',
-      value: cur.aov != null ? formatPrice(cur.aov) : null,
-      raw: cur.aov,
-      prevRaw: prev.aov,
+      label: 'New Orders',
+      value: newOrders24h != null ? String(newOrders24h) : null,
+      raw: null,
+      prevRaw: null,
+      is24h: true,
     },
     {
       label: 'Returning %',
@@ -97,22 +139,19 @@ function renderKPIs(kpis, custStats) {
       prevRaw: cp.returning_pct,
       missingTip: 'Requires analytics_customer_stats RPC',
     },
-    {
-      label: 'Total Customers',
-      value: cc.total_customers != null ? String(cc.total_customers) : null,
-      raw: cc.total_customers,
-      prevRaw: cp.total_customers,
-      missingTip: 'Requires analytics_customer_stats RPC',
-    },
   ];
 
-  let html = '<div class="admin-kpi-grid admin-kpi-grid--5 admin-mb-lg">';
+  let html = '<div class="admin-kpi-grid admin-kpi-grid--4 admin-mb-lg">';
   for (const card of cards) {
     html += `<div class="admin-kpi">`;
     html += `<div class="admin-kpi__label">${esc(card.label)}</div>`;
     if (card.value != null) {
       html += `<div class="admin-kpi__value">${esc(card.value)}</div>`;
-      html += delta(card.raw, card.prevRaw);
+      if (card.is24h) {
+        html += badge24h();
+      } else {
+        html += delta(card.raw, card.prevRaw);
+      }
     } else {
       html += missing(card.missingTip || 'Data unavailable');
     }
@@ -191,6 +230,129 @@ async function renderRevenueChart(data) {
               }
               return `${ctx.dataset.label}: ${formatPrice(ctx.raw || 0)}`;
             },
+          },
+        },
+      },
+    },
+  });
+}
+
+async function renderOrdersChart(revSeries, rawOrders) {
+  if (!revSeries?.series?.length) {
+    emptyChart('chart-orders', 'No order data for this period');
+    return;
+  }
+
+  // Build a date → count map from raw orders (accurate per-day counts)
+  const countByDate = {};
+  const orderList = rawOrders?.orders ?? rawOrders ?? [];
+  for (const o of orderList) {
+    const date = (o.created_at || '').slice(0, 10);
+    if (date) countByDate[date] = (countByDate[date] || 0) + 1;
+  }
+
+  const labels = revSeries.series.map(d => d.date?.slice(5) || '');
+  const orders = revSeries.series.map(d => countByDate[d.date] || 0);
+  const hasData = orders.some(v => v > 0);
+
+  if (!hasData) {
+    emptyChart('chart-orders', 'No order data for this period');
+    return;
+  }
+
+  const colors = Charts.getThemeColors();
+
+  await Charts.line('chart-orders', {
+    labels,
+    datasets: [
+      {
+        label: 'Orders',
+        data: orders,
+        borderColor: colors.magenta,
+        backgroundColor: colors.magenta + '18',
+        fill: true,
+        tension: 0.3,
+        pointRadius: 1,
+        borderWidth: 2,
+      },
+    ],
+    options: {
+      plugins: {
+        tooltip: {
+          callbacks: {
+            label: (ctx) => `Orders: ${ctx.raw}`,
+          },
+        },
+      },
+      scales: {
+        y: { ticks: { precision: 0 } },
+      },
+    },
+  });
+}
+
+async function renderTopProductsChart(data) {
+  // RPC returns raw array; single-result gets unwrapped by rpc() helper
+  const items = Array.isArray(data) ? data : (data ? [data] : []);
+  if (!items.length) {
+    emptyChart('chart-top-products', 'Top products unavailable');
+    return;
+  }
+
+  const colors = Charts.getThemeColors();
+  const palette = [colors.cyan, colors.magenta, colors.yellow, colors.success, '#60a5fa', '#a78bfa', '#fb923c', '#f472b6'];
+
+  const labels   = items.map(d => d.product_name || d.name || 'Unknown');
+  const revenues = items.map(d => d.revenue || 0);
+
+  await Charts.bar('chart-top-products', {
+    labels,
+    datasets: [
+      {
+        label: 'Revenue',
+        data: revenues,
+        backgroundColor: labels.map((_, i) => palette[i % palette.length] + 'cc'),
+        borderRadius: 4,
+        barThickness: 18,
+      },
+    ],
+    options: {
+      indexAxis: 'y',
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: {
+            label: (ctx) => `Revenue: ${formatPrice(ctx.raw || 0)}`,
+          },
+        },
+      },
+    },
+  });
+}
+
+async function renderBrandChart(data) {
+  // RPC returns { brands: [...] }
+  if (!data?.brands?.length) {
+    emptyChart('chart-brand-breakdown', 'Brand data unavailable');
+    return;
+  }
+
+  const colors = Charts.getThemeColors();
+  const palette = [colors.cyan, colors.magenta, colors.yellow, colors.success, '#60a5fa', '#a78bfa', '#fb923c', '#f472b6'];
+
+  const brands   = data.brands;
+  const labels   = brands.map(b => b.brand || 'Unknown');
+  const revenues = brands.map(b => b.current_revenue || 0);
+
+  await Charts.doughnut('chart-brand-breakdown', {
+    labels,
+    data: revenues,
+    colors: labels.map((_, i) => palette[i % palette.length]),
+    options: {
+      plugins: {
+        tooltip: {
+          callbacks: {
+            label: (ctx) => `${ctx.label}: ${formatPrice(ctx.raw || 0)}`,
           },
         },
       },

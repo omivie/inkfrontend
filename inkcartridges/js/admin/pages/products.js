@@ -1159,15 +1159,11 @@ function bindProductModalActions(modal, product) {
     btn.textContent = 'Generating\u2026';
     try {
       const result = await AdminAPI.generateProductSEO(product.sku);
-      const seo = (result?.meta_title || result?.meta_description) ? result : generateSEO(product);
-      if (titleEl) titleEl.value = seo.meta_title || '';
-      if (descEl) descEl.value = seo.meta_description || '';
+      if (titleEl) titleEl.value = result?.meta_title || '';
+      if (descEl) descEl.value = result?.meta_description || '';
       Toast.success('SEO regenerated');
-    } catch (_) {
-      const seo = generateSEO(product);
-      if (titleEl) titleEl.value = seo.meta_title;
-      if (descEl) descEl.value = seo.meta_description;
-      Toast.success('SEO regenerated');
+    } catch (err) {
+      Toast.error(`SEO generation failed: ${err.message}`);
     } finally {
       btn.disabled = false;
       btn.innerHTML = `${icon('search', 12, 12)} Generate`;
@@ -1244,6 +1240,7 @@ function renderDiagnostics(container) {
       <div style="display:flex;gap:8px">
         <button class="admin-btn admin-btn--ghost admin-btn--sm" id="bulk-images-btn">${icon('download', 14, 14)} Generate Images</button>
         <button class="admin-btn admin-btn--ghost admin-btn--sm" id="bulk-seo-btn">${icon('search', 14, 14)} Generate SEO</button>
+        <button class="admin-btn admin-btn--ghost admin-btn--sm" id="regen-all-seo-btn">${icon('search', 14, 14)} Regenerate All SEO</button>
         <button class="admin-btn admin-btn--ghost admin-btn--sm" id="bulk-activate-btn">${icon('products', 14, 14)} Bulk Activate</button>
       </div>
     </div>
@@ -1264,6 +1261,7 @@ function renderDiagnostics(container) {
 
   section.querySelector('#bulk-images-btn')?.addEventListener('click', () => bulkGenerateImages());
   section.querySelector('#bulk-seo-btn')?.addEventListener('click', () => bulkGenerateSEO());
+  section.querySelector('#regen-all-seo-btn')?.addEventListener('click', () => regenerateAllSEO());
 
   section.querySelector('#bulk-activate-btn')?.addEventListener('click', async () => {
     try {
@@ -1896,6 +1894,33 @@ async function bulkGenerateSEO() {
         loadProducts();
       } catch (e) {
         Toast.error(`SEO generation failed: ${e.message}`);
+      }
+    },
+  });
+}
+
+async function regenerateAllSEO() {
+  Modal.confirm({
+    title: 'Regenerate All SEO',
+    message: 'This will regenerate SEO metadata for all active products via the backend AI. Existing metadata will be overwritten. Continue?',
+    confirmLabel: 'Regenerate All',
+    confirmClass: 'admin-btn--primary',
+    onConfirm: async () => {
+      const btn = _container?.querySelector('#regen-all-seo-btn');
+      if (btn) { btn.disabled = true; btn.textContent = 'Regenerating\u2026'; }
+      try {
+        const result = await AdminAPI.bulkGenerateAllSeo();
+        const { updated = 0, failed = 0 } = result?.data ?? result ?? {};
+        if (failed > 0) {
+          Toast.info(`Done: ${updated} updated, ${failed} failed`);
+        } else {
+          Toast.success(`SEO regenerated for ${updated} products`);
+        }
+        loadProducts();
+      } catch (e) {
+        Toast.error(`Regenerate All SEO failed: ${e.message}`);
+      } finally {
+        if (btn) { btn.disabled = false; btn.innerHTML = `${icon('search', 14, 14)} Regenerate All SEO`; }
       }
     },
   });

@@ -503,6 +503,15 @@
 .admin-kpi__delta--down { color: var(--danger); }
 .admin-kpi__delta--flat { color: var(--text-muted); }
 .admin-kpi__sub { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+.admin-kpi__badge-24h {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: 10px; font-weight: 500; letter-spacing: .04em;
+  font-family: var(--font-mono, monospace);
+  color: var(--text-muted);
+  background: var(--border);
+  padding: 2px 8px; border-radius: 99px;
+  margin-top: 6px; text-transform: none;
+}
 
 /* ---- Work Queue ---- */
 .admin-queue-grid {
@@ -923,7 +932,14 @@
 
 /* ---- Charts ---- */
 .admin-chart-box { position: relative; height: 280px; }
+.admin-chart-box--tall { height: 340px; }
 .admin-chart-box canvas { width: 100% !important; height: 100% !important; }
+.admin-dash-empty {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 10px; height: 100%; color: var(--text-muted);
+  font-size: 13px; font-weight: 500; letter-spacing: .01em;
+}
+.admin-dash-empty svg { opacity: .35; }
 
 /* ---- Section ---- */
 .admin-section { margin-bottom: 24px; }
@@ -1531,6 +1547,10 @@
 @media (max-width: 1200px) { .admin-kpi-grid--5 { grid-template-columns: repeat(3, 1fr); } }
 @media (max-width: 768px)  { .admin-kpi-grid--5 { grid-template-columns: repeat(2, 1fr); } }
 @media (max-width: 480px)  { .admin-kpi-grid--5 { grid-template-columns: 1fr; } }
+
+.admin-kpi-grid--4 { grid-template-columns: repeat(4, 1fr); }
+@media (max-width: 1024px) { .admin-kpi-grid--4 { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 480px)  { .admin-kpi-grid--4 { grid-template-columns: 1fr; } }
 
 .admin-kpi-grid--3 { grid-template-columns: repeat(3, 1fr); }
 @media (max-width: 768px)  { .admin-kpi-grid--3 { grid-template-columns: repeat(2, 1fr); } }
