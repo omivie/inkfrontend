@@ -873,13 +873,57 @@ const AccountPage = {
         if (welcomeEl) welcomeEl.textContent = `, ${displayName}`;
 
         // Wire up logout — the dashboard uses a static modal in its HTML;
-        // all other account pages need this handler from account.js
+        // all other account pages get a dynamically injected confirmation modal
         const logoutLink = document.querySelector('.logout-link');
         if (logoutLink && !document.getElementById('logout-modal')) {
-            logoutLink.addEventListener('click', async (e) => {
+            // Inject modal HTML
+            const modalEl = document.createElement('div');
+            modalEl.id = 'logout-modal';
+            modalEl.className = 'modal';
+            modalEl.hidden = true;
+            modalEl.innerHTML = `
+                <div class="modal__backdrop"></div>
+                <div class="modal__content">
+                    <div class="modal__icon">
+                        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
+                            <polyline points="16 17 21 12 16 7"/>
+                            <line x1="21" y1="12" x2="9" y2="12"/>
+                        </svg>
+                    </div>
+                    <h2 class="modal__title">Sign Out?</h2>
+                    <p class="modal__text">Are you sure you want to sign out of your account?</p>
+                    <div class="modal__actions">
+                        <button type="button" class="btn btn--secondary" id="logout-cancel">Cancel</button>
+                        <button type="button" class="btn btn--primary" id="logout-confirm">Yes, Sign Out</button>
+                    </div>
+                </div>`;
+            document.body.appendChild(modalEl);
+
+            const closeModal = () => {
+                modalEl.hidden = true;
+                document.body.style.overflow = '';
+            };
+
+            logoutLink.addEventListener('click', (e) => {
                 e.preventDefault();
+                modalEl.hidden = false;
+                document.body.style.overflow = 'hidden';
+            });
+
+            document.getElementById('logout-cancel').addEventListener('click', closeModal);
+            modalEl.querySelector('.modal__backdrop').addEventListener('click', closeModal);
+
+            document.getElementById('logout-confirm').addEventListener('click', async () => {
+                const confirmBtn = document.getElementById('logout-confirm');
+                confirmBtn.disabled = true;
+                confirmBtn.textContent = 'Signing out...';
                 if (typeof Auth !== 'undefined') await Auth.signOut();
                 window.location.href = '/html/index.html';
+            });
+
+            document.addEventListener('keydown', (e) => {
+                if (e.key === 'Escape' && !modalEl.hidden) closeModal();
             });
         }
     },

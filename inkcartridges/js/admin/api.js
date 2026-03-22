@@ -288,6 +288,13 @@ const AdminAPI = {
     }
   },
 
+  // ---- Customer Intelligence (stubs — backend endpoints not yet implemented) ----
+  async getCustomerLTV() { return null; },
+  async getCohorts() { return null; },
+  async getChurn() { return null; },
+  async getNPS() { return null; },
+  async getRepeatPurchase() { return null; },
+
   // ---- Products ----
   async getProducts(filters = {}, page = 1, limit = 200) {
     try {

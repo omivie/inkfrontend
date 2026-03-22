@@ -1150,14 +1150,28 @@ function bindProductModalActions(modal, product) {
     });
   });
 
-  // Generate SEO
-  modal.querySelector('[data-action="generate-seo"]')?.addEventListener('click', () => {
-    const seo = generateSEO(full);
+  // Generate SEO — calls backend AI endpoint, falls back to local template
+  modal.querySelector('[data-action="generate-seo"]')?.addEventListener('click', async (e) => {
+    const btn = e.currentTarget;
     const titleEl = modal.querySelector('#edit-meta-title');
     const descEl = modal.querySelector('#edit-meta-desc');
-    if (titleEl) titleEl.value = seo.meta_title;
-    if (descEl) descEl.value = seo.meta_description;
-    Toast.success('SEO generated');
+    btn.disabled = true;
+    btn.textContent = 'Generating\u2026';
+    try {
+      const result = await AdminAPI.generateProductSEO(product.sku);
+      const seo = (result?.meta_title || result?.meta_description) ? result : generateSEO(product);
+      if (titleEl) titleEl.value = seo.meta_title || '';
+      if (descEl) descEl.value = seo.meta_description || '';
+      Toast.success('SEO regenerated');
+    } catch (_) {
+      const seo = generateSEO(product);
+      if (titleEl) titleEl.value = seo.meta_title;
+      if (descEl) descEl.value = seo.meta_description;
+      Toast.success('SEO regenerated');
+    } finally {
+      btn.disabled = false;
+      btn.innerHTML = `${icon('search', 12, 12)} Generate`;
+    }
   });
 
   // Cancel

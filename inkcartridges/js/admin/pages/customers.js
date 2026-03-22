@@ -295,9 +295,6 @@ export default {
     bindExportDropdown(header, 'export-customers', handleExport);
 
     await loadCustomers();
-
-    // Owner intelligence section
-    await renderOwnerIntel(container);
   },
 
   destroy() {
