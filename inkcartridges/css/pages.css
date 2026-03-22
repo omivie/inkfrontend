@@ -8829,26 +8829,40 @@
 
 .drilldown-box.drilldown-box--ribbon {
     min-height: 0;
-    padding: var(--spacing-3) var(--spacing-4);
+    flex-direction: row;
+    padding: var(--spacing-sm) var(--spacing-md);
     cursor: pointer;
     animation: brandTileIn 0.3s ease-out both;
-    transition: border-color 0.2s, box-shadow 0.2s, background 0.2s;
+    transition: border-color 0.2s, box-shadow 0.2s, background 0.2s, color 0.2s;
     text-decoration: none;
-    border-color: var(--steel-200);
+    background: #fff;
+    border: 1.5px solid var(--color-border);
+    border-radius: var(--radius-md);
     box-shadow: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--spacing-xs);
 }
 
 .drilldown-box.drilldown-box--ribbon:hover {
     border-color: var(--cyan-primary);
-    background: var(--steel-50);
-    box-shadow: 0 2px 8px rgba(38, 127, 181, 0.1);
+    color: var(--cyan-primary);
+    box-shadow: 0 2px 8px rgba(8, 145, 178, 0.12);
+    background: #fff;
+    text-decoration: none;
+    transform: none;
 }
 
 .drilldown-box--ribbon .drilldown-box__label {
-    font-size: var(--font-size-base);
+    font-size: var(--font-size-sm);
     font-weight: var(--font-weight-semibold);
-    color: var(--steel-700);
+    color: var(--color-text-heading);
     text-align: center;
+}
+
+.drilldown-box.drilldown-box--ribbon:hover .drilldown-box__label {
+    color: var(--cyan-primary);
 }
 
 .ribbon-brand-count {
@@ -8918,6 +8932,44 @@
     background: var(--cyan-light, #e0f2fe);
     color: var(--cyan-primary);
     font-weight: var(--font-weight-semibold);
+}
+
+/* Ribbon Model Section — shown BELOW product grid when a brand is selected */
+.ribbon-model-section {
+    margin-top: var(--spacing-lg);
+}
+
+.ribbon-model-section__heading {
+    font-size: var(--font-size-lg);
+    font-weight: var(--font-weight-semibold);
+    color: var(--steel-700);
+    margin-bottom: var(--spacing-md);
+}
+
+.ribbon-model-section__grid {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: var(--spacing-sm);
+}
+
+.ribbon-model-section__grid .ribbon-model-btn {
+    padding: var(--spacing-sm) var(--spacing-md);
+    border-radius: var(--radius-md);
+    font-size: var(--font-size-sm);
+    white-space: normal;
+    text-align: center;
+}
+
+@media (max-width: 768px) {
+    .ribbon-model-section__grid {
+        grid-template-columns: repeat(3, 1fr);
+    }
+}
+
+@media (max-width: 480px) {
+    .ribbon-model-section__grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
 }
 
 /* Ribbon Filter Bar */

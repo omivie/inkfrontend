@@ -1,5 +1,5 @@
 // ============================================
-// RIBBONS PAGE - Shows all ribbon products, optionally filtered by brand
+// RIBBONS PAGE - Brand grid → products drilldown
 // ============================================
 const RibbonsPage = {
     // Current state
@@ -21,16 +21,21 @@ const RibbonsPage = {
     // Per-brand model cache
     _modelsCache: {},
 
+    // All ribbons loaded for current brand (for client-side model filtering)
+    _allRibbons: [],
+
     // DOM Elements
     elements: {
         breadcrumbList: document.getElementById('breadcrumb-list'),
         title: document.getElementById('drilldown-title'),
+        levelBrands: document.getElementById('level-brands'),
         levelProducts: document.getElementById('level-products'),
         productsGrid: document.getElementById('ribbon-products-grid'),
         pagination: document.getElementById('ribbon-pagination'),
         loading: document.getElementById('drilldown-loading'),
         empty: document.getElementById('drilldown-empty'),
         emptyMessage: document.getElementById('empty-message'),
+        skeletonBrands: document.getElementById('skeleton-brands'),
         skeletonProducts: document.getElementById('skeleton-products')
     },
 
@@ -38,19 +43,19 @@ const RibbonsPage = {
     // INITIALIZATION
     // =========================================
     async init() {
-        // Hide the brand grid level — no longer used
-        const levelBrands = document.getElementById('level-brands');
-        if (levelBrands) levelBrands.hidden = true;
-
         this.parseURLState();
         this.initFilterControls();
         this.syncFilterUI();
 
-        // Load ribbon manufacturer brands for dropdown (non-blocking)
-        this.loadRibbonBrands();
-
-        this.navigationVersion++;
-        await this.loadProducts(this.navigationVersion);
+        if (this.state.brand) {
+            // URL already has a brand — skip brand grid, show products directly
+            this.showLevel('products');
+            this.navigationVersion++;
+            await this.loadProducts(this.navigationVersion);
+        } else {
+            // No brand selected — show brand grid
+            await this.loadBrands();
+        }
 
         // Browser back/forward
         window.addEventListener('popstate', (e) => {
@@ -61,57 +66,112 @@ const RibbonsPage = {
             }
             this.syncFilterUI();
             this.navigationVersion++;
-            this.loadProducts(this.navigationVersion);
+
+            if (this.state.brand) {
+                this.showLevel('products');
+                this.loadProducts(this.navigationVersion);
+            } else {
+                this.showLevel('brands');
+                this.updateBreadcrumb();
+                this.updateTitle();
+            }
         });
     },
 
+    // =========================================
+    // LEVEL MANAGEMENT
+    // =========================================
+    showLevel(which) {
+        const levelBrands = this.elements.levelBrands;
+        const levelProducts = this.elements.levelProducts;
+        if (which === 'brands') {
+            if (levelBrands) levelBrands.hidden = false;
+            if (levelProducts) levelProducts.hidden = true;
+            this.elements.empty.hidden = true;
+        } else {
+            if (levelBrands) levelBrands.hidden = true;
+            if (levelProducts) levelProducts.hidden = false;
+        }
+    },
+
+    // =========================================
+    // BRAND GRID
+    // =========================================
+    async loadBrands() {
+        const grid = document.getElementById('ribbons-brands-grid');
+        if (!grid) return;
+
+        // Show brand skeleton loading
+        this.showLoadingState('brands', true);
+
+        try {
+            const res = await API.getRibbonDeviceBrands();
+            const brands = res?.data?.device_brands || [];
+
+            this.showLoadingState('brands', false);
+
+            if (brands.length === 0) {
+                this.showEmpty('No ribbon brands found.');
+                return;
+            }
+
+            grid.innerHTML = '';
+            brands.forEach((b, i) => {
+                const box = document.createElement('a');
+                box.className = 'drilldown-box drilldown-box--ribbon';
+                box.href = `/html/ribbons?device_brand=${encodeURIComponent(b.value)}`;
+                box.style.animationDelay = `${i * 30}ms`;
+                box.innerHTML = `<span class="drilldown-box__label">${Security.escapeHtml(b.label)}</span>`;
+                box.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    this.navigateToBrand(b.value);
+                });
+                grid.appendChild(box);
+            });
+
+            this.showLevel('brands');
+            this.updateBreadcrumb();
+            this.updateTitle();
+        } catch (e) {
+            this.showLoadingState('brands', false);
+            this.showEmpty('Failed to load ribbon brands. Please try again.');
+        }
+    },
+
+    navigateToBrand(brand) {
+        this.state.brand = brand;
+        this.state.model = null;
+        this.state.page = 1;
+        this.updateURL();
+
+        this.showLevel('products');
+        this.navigationVersion++;
+        this.loadProducts(this.navigationVersion);
+        this.updateBreadcrumb();
+        this.updateTitle();
+    },
+
+    goBackToBrands() {
+        this.state.brand = null;
+        this.state.model = null;
+        this.state.page = 1;
+        this.clearModelSection();
+        this.updateURL();
+        window.scrollTo(0, 0);
+        this.showLevel('brands');
+        this.updateBreadcrumb();
+        this.updateTitle();
+    },
+
+    // =========================================
+    // FILTER CONTROLS
+    // =========================================
     initFilterControls() {
-        // Color filter buttons
-        document.querySelectorAll('.ribbon-color-btn').forEach(btn => {
-            btn.addEventListener('click', () => {
-                this.state.color = btn.dataset.color || null;
-                this.state.page = 1;
-                this.syncFilterUI();
-                this.navigationVersion++;
-                this.updateURL();
-                this.loadProducts(this.navigationVersion);
-            });
-        });
-
-        // Ribbon manufacturer brand select
-        const brandSelect = document.getElementById('ribbon-brand-filter');
-        if (brandSelect) {
-            brandSelect.addEventListener('change', () => {
-                this.state.ribbonBrand = brandSelect.value || null;
-                this.state.page = 1;
-                this.navigationVersion++;
-                this.updateURL();
-                this.loadProducts(this.navigationVersion);
-            });
-        }
-
-        // Sort select
-        const sortSelect = document.getElementById('ribbon-sort');
-        if (sortSelect) {
-            sortSelect.addEventListener('change', () => {
-                this.state.sort = sortSelect.value;
-                this.state.page = 1;
-                this.navigationVersion++;
-                this.updateURL();
-                this.loadProducts(this.navigationVersion);
-            });
-        }
+        // Filter bar removed — no controls to initialise
     },
 
     syncFilterUI() {
-        document.querySelectorAll('.ribbon-color-btn').forEach(btn => {
-            const btnColor = btn.dataset.color || null;
-            btn.classList.toggle('ribbon-color-btn--active', btnColor === this.state.color);
-        });
-        const brandSelect = document.getElementById('ribbon-brand-filter');
-        if (brandSelect) brandSelect.value = this.state.ribbonBrand || '';
-        const sortSelect = document.getElementById('ribbon-sort');
-        if (sortSelect) sortSelect.value = this.state.sort || 'name';
+        // Filter bar removed — nothing to sync
     },
 
     parseURLState() {
@@ -152,11 +212,19 @@ const RibbonsPage = {
         this.loadProducts(thisNavVersion);
     },
 
-    showLoading(show) {
+    showLoadingState(type, show) {
         this.elements.loading.hidden = !show;
-        if (this.elements.skeletonProducts) {
-            this.elements.skeletonProducts.hidden = !show;
+        if (type === 'brands') {
+            if (this.elements.skeletonBrands) this.elements.skeletonBrands.hidden = !show;
+            if (this.elements.skeletonProducts) this.elements.skeletonProducts.hidden = true;
+        } else {
+            if (this.elements.skeletonProducts) this.elements.skeletonProducts.hidden = !show;
+            if (this.elements.skeletonBrands) this.elements.skeletonBrands.hidden = true;
         }
+    },
+
+    showLoading(show) {
+        this.showLoadingState('products', show);
     },
 
     showEmpty(message) {
@@ -167,12 +235,13 @@ const RibbonsPage = {
     },
 
     // =========================================
-    // MODEL DRILL-DOWN
+    // MODEL SECTION (below products)
     // =========================================
     async loadModels(brand) {
-        const container = document.getElementById('ribbon-model-pills');
+        const section = document.getElementById('ribbon-model-section');
         const inner = document.getElementById('ribbon-model-pills-inner');
-        if (!container || !inner) return;
+        const heading = document.getElementById('ribbon-model-heading');
+        if (!section || !inner) return;
 
         if (!this._modelsCache[brand]) {
             try {
@@ -189,8 +258,12 @@ const RibbonsPage = {
         const models = this._modelsCache[brand];
         // Only show if there are specific models beyond "All Models"
         if (models.length <= 1) {
-            container.hidden = true;
+            section.hidden = true;
             return;
+        }
+
+        if (heading) {
+            heading.textContent = `Select a ${Security.escapeHtml(brand)} model to narrow your results`;
         }
 
         inner.innerHTML = models.map(m => {
@@ -202,22 +275,53 @@ const RibbonsPage = {
             btn.addEventListener('click', () => {
                 const val = btn.dataset.model;
                 this.state.model = (val === 'all-models') ? null : val;
-                this.state.page = 1;
                 inner.querySelectorAll('.ribbon-model-btn').forEach(b =>
                     b.classList.toggle('ribbon-model-btn--active', b.dataset.model === (this.state.model || 'all-models'))
                 );
-                this.navigationVersion++;
                 this.updateURL();
-                this.loadProducts(this.navigationVersion);
+                this.filterByModel(this.state.model);
             });
         });
 
-        container.hidden = false;
+        section.hidden = false;
     },
 
-    clearModelPills() {
-        const container = document.getElementById('ribbon-model-pills');
-        if (container) container.hidden = true;
+    filterByModel(modelValue) {
+        const grid = this.elements.productsGrid;
+        if (!grid) return;
+        const cards = grid.querySelectorAll('.product-card');
+        cards.forEach((card, i) => {
+            if (!modelValue) {
+                card.hidden = false;
+                return;
+            }
+            const ribbon = this._allRibbons[i];
+            card.hidden = !this.isRibbonCompatible(card, ribbon, modelValue);
+        });
+    },
+
+    isRibbonCompatible(card, ribbon, modelValue) {
+        // Check device_models stored on the card element
+        if (card.dataset.deviceModels) {
+            try {
+                const models = JSON.parse(card.dataset.deviceModels);
+                if (models.length > 0) {
+                    return models.some(m => m.toLowerCase() === modelValue.toLowerCase());
+                }
+            } catch (e) {}
+        }
+        // Fallback: match against ribbon name (strip hyphens for comparison)
+        if (ribbon) {
+            const name = (ribbon.name || '').toLowerCase();
+            const model = modelValue.toLowerCase().replace(/-/g, '');
+            return name.includes(model);
+        }
+        return true;
+    },
+
+    clearModelSection() {
+        const section = document.getElementById('ribbon-model-section');
+        if (section) section.hidden = true;
         const inner = document.getElementById('ribbon-model-pills-inner');
         if (inner) inner.innerHTML = '';
     },
@@ -265,12 +369,12 @@ const RibbonsPage = {
 
     async loadProducts(navVersion) {
         this.showLoading(true);
-        this.elements.levelProducts.hidden = true;
+        this.elements.levelProducts.hidden = false;
         this.elements.empty.hidden = true;
 
-        // Clear model pills when no brand is selected
+        // Clear model section when no brand is selected
         if (!this.state.brand) {
-            this.clearModelPills();
+            this.clearModelSection();
         }
 
         try {
@@ -280,7 +384,7 @@ const RibbonsPage = {
                 sort: this.state.sort
             };
             if (this.state.brand) params.device_brand = this.state.brand;
-            if (this.state.model) params.device_model = this.state.model;
+            // device_model is filtered client-side — do not pass to API
             if (this.state.ribbonBrand) params.brand = this.state.ribbonBrand;
             if (this.state.color) params.color = this.state.color;
 
@@ -313,7 +417,12 @@ const RibbonsPage = {
                 return;
             }
 
+            this._allRibbons = ribbons;
             this.renderProducts(ribbons);
+            // Apply model filter if one was active (e.g. from URL on page load)
+            if (this.state.model) {
+                this.filterByModel(this.state.model);
+            }
             this.renderPagination(pagination, ribbons.length);
             this.elements.levelProducts.hidden = false;
             this.updateBreadcrumb();
@@ -357,6 +466,13 @@ const RibbonsPage = {
         const card = document.createElement('article');
         card.className = 'product-card';
         if (ribbon.source) card.dataset.source = ribbon.source;
+        if (ribbon.device_models) {
+            card.dataset.deviceModels = JSON.stringify(
+                Array.isArray(ribbon.device_models)
+                    ? ribbon.device_models.map(m => typeof m === 'string' ? m : (m.value || m.label || ''))
+                    : []
+            );
+        }
 
         const price = ribbon.sale_price || ribbon.retail_price || 0;
         const inStock = ribbon.in_stock !== false;
@@ -535,14 +651,7 @@ const RibbonsPage = {
         if (this.state.brand) {
             // Show: Ribbons > Brand
             const ribbonsItem = this.createBreadcrumbItem('Ribbons', false, () => {
-                this.state.brand = null;
-                this.state.model = null;
-                this.state.page = 1;
-                this.clearModelPills();
-                this.navigationVersion++;
-                this.updateURL();
-                window.scrollTo(0, 0);
-                this.loadProducts(this.navigationVersion);
+                this.goBackToBrands();
             });
             list.appendChild(ribbonsItem);
 
@@ -611,7 +720,7 @@ const RibbonsPage = {
             title.textContent = `${this.state.brand} Ribbons`;
             title.hidden = false;
         } else {
-            title.textContent = 'All Ribbons';
+            title.textContent = 'Typewriter & Printer Ribbons NZ';
             title.hidden = false;
         }
     }
