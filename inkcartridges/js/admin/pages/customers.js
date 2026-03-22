@@ -20,8 +20,8 @@ let _container = null;
 let _table = null;
 let _page = 1;
 let _search = '';
-let _sort = 'created_at';
-let _sortDir = 'desc';
+let _sort = 'first_name';
+let _sortDir = 'asc';
 
 const COLUMNS = [
   {
