@@ -769,55 +769,28 @@ const AccountPage = {
      * Also handles OAuth callback - waits for Supabase to process hash tokens
      */
     async waitForAuth() {
-        // Check if URL hash contains OAuth callback tokens
+        // Wait for Auth.init() to fully complete (including getSession())
+        // Auth.readyPromise resolves only after session is populated — not just after createClient()
+        if (typeof Auth !== 'undefined' && Auth.readyPromise) {
+            await Auth.readyPromise;
+        }
+
+        // Handle OAuth callback hash (access_token in URL fragment)
         const hash = window.location.hash;
         const hasOAuthCallback = hash && (hash.includes('access_token') || hash.includes('error'));
-
-        return new Promise((resolve) => {
-            let attempts = 0;
-            const maxAttempts = 50; // 5 seconds max wait
-
-            const check = async () => {
-                attempts++;
-
-                // Wait for Auth object and supabase client to be initialized
-                if (typeof Auth === 'undefined' || Auth.supabase === null) {
-                    if (attempts < maxAttempts) {
-                        setTimeout(check, 100);
-                    } else {
-                        DebugLog.warn('Auth initialization timed out');
-                        resolve();
-                    }
-                    return;
+        if (hasOAuthCallback && typeof Auth !== 'undefined' && Auth.supabase) {
+            try {
+                const { data: { session }, error } = await Auth.supabase.auth.getSession();
+                if (error) DebugLog.error('OAuth callback error:', error);
+                Auth.session = session;
+                Auth.user = session?.user ?? null;
+                if (session && window.history.replaceState) {
+                    window.history.replaceState(null, '', window.location.pathname + window.location.search);
                 }
-
-                // If OAuth callback, wait for Supabase to process the hash
-                if (hasOAuthCallback) {
-                    try {
-                        // Force get session - this processes the hash if present
-                        const { data: { session }, error } = await Auth.supabase.auth.getSession();
-
-                        if (error) {
-                            DebugLog.error('OAuth callback error:', error);
-                        }
-
-                        // Update Auth state
-                        Auth.session = session;
-                        Auth.user = session?.user ?? null;
-
-                        // Clear the hash from URL to prevent reprocessing
-                        if (session && window.history.replaceState) {
-                            window.history.replaceState(null, '', window.location.pathname + window.location.search);
-                        }
-                    } catch (e) {
-                        DebugLog.error('Error processing OAuth callback:', e);
-                    }
-                }
-
-                resolve();
-            };
-            check();
-        });
+            } catch (e) {
+                DebugLog.error('Error processing OAuth callback:', e);
+            }
+        }
     },
 
     /**

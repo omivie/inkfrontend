@@ -194,8 +194,15 @@
 
         async init() {
             const params = new URLSearchParams(window.location.search);
-            const sku = params.get('sku');
+            let sku = params.get('sku');
             this._productType = params.get('type') || null; // 'ribbon' or null
+
+            // Handle clean URL: /ribbon/:sku
+            const ribbonPath = window.location.pathname.match(/^\/ribbon\/(.+)$/);
+            if (ribbonPath) {
+                sku = decodeURIComponent(ribbonPath[1]);
+                this._productType = 'ribbon';
+            }
 
             if (!sku) {
                 this.showError('No product specified');
@@ -208,8 +215,20 @@
             }
 
             try {
-                // Always use getProduct — it handles ribbons too (type=ribbon products)
-                const response = await API.getProduct(sku);
+                let response;
+                if (this._productType === 'ribbon') {
+                    response = await API.getRibbon(sku);
+                    if (response.ok && response.data) {
+                        const r = response.data;
+                        // Normalize ribbon fields to match product page expectations
+                        if (r.retail_price == null && r.sale_price != null) r.retail_price = r.sale_price;
+                        if (r.image_url == null && r.image_path) r.image_url = r.image_path;
+                        if (r.active == null) r.active = r.is_active !== false;
+                    }
+                } else {
+                    response = await API.getProduct(sku);
+                }
+
                 if (!response.ok || !response.data) {
                     this.showError('Product not found');
                     return;
@@ -379,7 +398,7 @@
             const brandSlug = info.brandName.toLowerCase().replace(/\s+/g, '-');
             if (isRibbon) {
                 document.getElementById('breadcrumb-category').innerHTML = `<a href="/html/ribbons.html">${Security.escapeHtml(categoryName)}</a>`;
-                document.getElementById('breadcrumb-brand').innerHTML = `<a href="/html/ribbons?brand=${Security.escapeAttr(info.brandName)}">${Security.escapeHtml(info.brandName)}</a>`;
+                document.getElementById('breadcrumb-brand').innerHTML = `<a href="/html/ribbons?device_brand=${Security.escapeAttr(info.brandName.toLowerCase())}">${Security.escapeHtml(info.brandName)}</a>`;
             } else {
                 document.getElementById('breadcrumb-category').innerHTML = `<a href="/html/shop?brand=${Security.escapeAttr(brandSlug)}&category=${Security.escapeAttr(info.category)}">${Security.escapeHtml(categoryName)}</a>`;
                 document.getElementById('breadcrumb-brand').innerHTML = `<a href="/html/shop?brand=${Security.escapeAttr(brandSlug)}">${Security.escapeHtml(info.brandName)}</a>`;
@@ -687,8 +706,8 @@
                 if (!devices || !devices.length) return;
 
                 const deviceLabels = devices.map(d => {
-                    const brand = Security.escapeHtml(d.device_brand || '');
-                    const model = d.device_model || '';
+                    const brand = Security.escapeHtml(d.brand || d.device_brand || '');
+                    const model = d.model || d.device_model || '';
                     if (d.match_type === 'brand' || model === 'All Models') {
                         return brand ? `${brand} \u2014 All Models` : 'All Models';
                     }

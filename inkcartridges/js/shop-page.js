@@ -48,7 +48,8 @@
             lexmark: { name: 'Lexmark', logo: '/assets/brands/lexmark.png' },
             oki: { name: 'OKI', logo: '/assets/brands/oki.svg' },
             'fuji-xerox': { name: 'Fuji Xerox', logo: '/assets/brands/fuji-xerox.png' },
-            kyocera: { name: 'Kyocera', logo: '/assets/brands/kyocera.svg' }
+            kyocera: { name: 'Kyocera', logo: '/assets/brands/kyocera.svg' },
+            dymo: { name: 'Dymo', logo: '/assets/brands/dymo.svg' }
         },
 
         // DOM Elements
@@ -445,7 +446,7 @@
                 if (navVersion !== undefined && this.navigationVersion !== navVersion) return;
 
                 this.renderBrands(this.cache.brands);
-                this.renderRibbonBrands();
+                await this.renderRibbonBrands();
                 this.elements.levelBrands.hidden = false;
             } catch (error) {
                 DebugLog.error('Failed to load brands:', error);
@@ -459,7 +460,7 @@
                     slug: id
                 }));
                 this.renderBrands(this.cache.brands);
-                this.renderRibbonBrands();
+                await this.renderRibbonBrands();
                 this.elements.levelBrands.hidden = false;
             }
 
@@ -470,45 +471,58 @@
             const grid = this.elements.brandsGrid;
             grid.innerHTML = '';
 
-            // Render in preferred order
-            const orderedBrands = ['brother', 'canon', 'epson', 'hp', 'samsung', 'lexmark', 'oki', 'fuji-xerox', 'kyocera'];
+            // Known brands shown first, in preferred order
+            const preferredOrder = ['brother', 'canon', 'epson', 'hp', 'samsung', 'lexmark', 'oki', 'fuji-xerox', 'kyocera', 'dymo'];
 
-            orderedBrands.forEach(brandId => {
-                const brand = brands.find(b => b.slug === brandId || b.id === brandId);
+            // Sort: preferred (logo) brands first, then remaining API brands alphabetically
+            const sorted = [...brands].sort((a, b) => {
+                const aId = a.slug || a.id || '';
+                const bId = b.slug || b.id || '';
+                const aIdx = preferredOrder.indexOf(aId);
+                const bIdx = preferredOrder.indexOf(bId);
+                if (aIdx !== -1 && bIdx !== -1) return aIdx - bIdx;
+                if (aIdx !== -1) return -1;
+                if (bIdx !== -1) return 1;
+                return (a.name || '').localeCompare(b.name || '');
+            });
+
+            sorted.forEach(brand => {
+                const brandId = brand.slug || brand.id || '';
                 const info = this.brandInfo[brandId];
-
-                if (info) {
-                    const box = document.createElement('button');
-                    box.className = 'drilldown-box drilldown-box--brand';
-                    box.dataset.brand = brandId;
-                    box.innerHTML = `
-                        <img src="${info.logo}" alt="${info.name}" class="drilldown-box__logo drilldown-box__logo--${brandId}">
-                    `;
-                    box.addEventListener('click', () => this.navigateTo('categories', { brand: brandId }));
-                    grid.appendChild(box);
+                const box = document.createElement('button');
+                box.className = 'drilldown-box drilldown-box--brand';
+                box.dataset.brand = brandId;
+                if (info && info.logo) {
+                    box.innerHTML = `<img src="${Security.escapeAttr(info.logo)}" alt="${Security.escapeAttr(info.name)}" class="drilldown-box__logo drilldown-box__logo--${Security.escapeAttr(brandId)}">`;
+                } else {
+                    box.innerHTML = `<span class="drilldown-box__name">${Security.escapeHtml(brand.name || brandId)}</span>`;
                 }
+                box.addEventListener('click', () => this.navigateTo('categories', { brand: brandId }));
+                grid.appendChild(box);
             });
         },
 
-        // Ribbon brands data
-        ribbonBrands: [
-            'Amano', 'Brother', 'Canon', 'Citizen', 'Epson',
-            'Fujitsu', 'IBM', 'Nakajima', 'NEC', 'NCR',
-            'OKI', 'Olivetti', 'Olympia', 'Panasonic', 'Printronix',
-            'Seiko', 'Sharp', 'Star', 'Triumph-Adler', 'Universal'
-        ],
-
-        renderRibbonBrands() {
+        async renderRibbonBrands() {
             const grid = this.elements.ribbonsBrandsGrid;
             if (!grid) return;
-            grid.innerHTML = '';
 
-            this.ribbonBrands.forEach((brand, i) => {
+            // Use cached device brands or fetch from API
+            if (!this.cache.ribbonDeviceBrands) {
+                try {
+                    const res = await API.getRibbonDeviceBrands();
+                    this.cache.ribbonDeviceBrands = res?.data?.device_brands || [];
+                } catch (e) {
+                    this.cache.ribbonDeviceBrands = [];
+                }
+            }
+
+            grid.innerHTML = '';
+            this.cache.ribbonDeviceBrands.forEach((b, i) => {
                 const box = document.createElement('a');
                 box.className = 'drilldown-box drilldown-box--ribbon';
-                box.href = `/html/ribbons?brand=${encodeURIComponent(brand)}`;
+                box.href = `/html/ribbons?device_brand=${encodeURIComponent(b.value)}`;
                 box.style.animationDelay = `${60 + i * 30}ms`;
-                box.innerHTML = `<span class="drilldown-box__label">${Security.escapeHtml(brand)}</span>`;
+                box.innerHTML = `<span class="drilldown-box__label">${Security.escapeHtml(b.label)}</span><span class="ribbon-brand-count">${b.count}</span>`;
                 grid.appendChild(box);
             });
         },

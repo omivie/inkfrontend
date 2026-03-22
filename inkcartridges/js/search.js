@@ -909,9 +909,10 @@ function createSmartSearch() {
         _navigateToProduct(product) {
             const sku = product.sku || product.code || product.product_code || '';
             let url;
-            if (sku) {
+            if (sku && product._isRibbon) {
+                url = '/ribbon/' + encodeURIComponent(sku);
+            } else if (sku) {
                 url = '/html/product/?sku=' + encodeURIComponent(sku);
-                if (product._isRibbon) url += '&type=ribbon';
             } else {
                 const name = product.name || product.title || '';
                 url = name

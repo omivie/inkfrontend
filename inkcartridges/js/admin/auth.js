@@ -21,27 +21,36 @@ const AdminAuth = {
       throw new Error('Not authenticated');
     }
 
-    // Verify admin role via backend
+    // Verify admin role via backend (retry once for Render cold-start / transient errors)
+    let resp;
     try {
-      const resp = await window.API.verifyAdmin();
-      if (!resp || !resp.data) {
-        window.location.href = '/html/account/';
-        throw new Error('Not authorized as admin');
-      }
-      // Whitelist recognized roles — reject unknown values
-      const ALLOWED_ROLES = { superadmin: 'owner', owner: 'owner', admin: 'admin' };
-      const rawRole = (resp.data.role || '').toLowerCase().replace(/[^a-z]/g, '');
-      if (!ALLOWED_ROLES[rawRole]) {
-        DebugLog.error('[AdminAuth] Unrecognized role:', resp.data.role);
-        window.location.href = '/html/account/';
-        throw new Error('Unrecognized admin role');
-      }
-      this.role = ALLOWED_ROLES[rawRole];
+      resp = await window.API.verifyAdmin();
     } catch (e) {
-      DebugLog.error('[AdminAuth] Verification failed:', e);
-      window.location.href = '/html/account/';
-      throw e;
+      DebugLog.warn('[AdminAuth] verifyAdmin failed, retrying in 2s:', e.message);
+      try {
+        await new Promise(r => setTimeout(r, 2000));
+        resp = await window.API.verifyAdmin();
+      } catch (e2) {
+        DebugLog.error('[AdminAuth] Verification failed after retry:', e2);
+        window.location.href = '/html/account/';
+        throw e2;
+      }
     }
+
+    if (!resp || !resp.data) {
+      window.location.href = '/html/account/';
+      throw new Error('Not authorized as admin');
+    }
+
+    // Whitelist recognized roles — reject unknown values
+    const ALLOWED_ROLES = { superadmin: 'owner', owner: 'owner', admin: 'admin' };
+    const rawRole = (resp.data.role || '').toLowerCase().replace(/[^a-z]/g, '');
+    if (!ALLOWED_ROLES[rawRole]) {
+      DebugLog.error('[AdminAuth] Unrecognized role:', resp.data.role);
+      window.location.href = '/html/account/';
+      throw new Error('Unrecognized admin role');
+    }
+    this.role = ALLOWED_ROLES[rawRole];
 
     this.user = window.Auth.getUser();
     this._ready = true;

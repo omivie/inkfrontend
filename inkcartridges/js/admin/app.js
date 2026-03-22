@@ -146,7 +146,7 @@ function renderTopbar() {
     <div class="admin-topbar__spacer"></div>
     <div class="admin-topbar__search">
       ${icon('search', 16, 16)}
-      <input type="search" placeholder="Search orders, customers, SKUs\u2026" id="global-search" autocomplete="off">
+      <input type="search" placeholder="Search\u2026" id="global-search" autocomplete="off">
       <kbd>/</kbd>
     </div>
     <div class="admin-topbar__spacer"></div>

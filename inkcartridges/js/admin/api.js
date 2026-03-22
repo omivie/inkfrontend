@@ -388,6 +388,25 @@ const AdminAPI = {
     }
   },
 
+  async createProduct(data) {
+    try {
+      const resp = await window.API.post('/api/admin/products', data);
+      if (resp && resp.ok === false) {
+        let msg = resp.error || 'Create failed';
+        if (resp.details) {
+          msg += ': ' + (Array.isArray(resp.details)
+            ? resp.details.map(d => d.message || d).join(', ')
+            : resp.details);
+        }
+        throw new Error(msg);
+      }
+      return resp?.data ?? resp;
+    } catch (e) {
+      DebugLog.warn('[AdminAPI] createProduct failed:', e.message);
+      throw e;
+    }
+  },
+
   async uploadProductImage(productId, file) {
     try {
       return await window.API.uploadProductImage(productId, file);
@@ -591,6 +610,22 @@ const AdminAPI = {
       return resp?.data ?? null;
     } catch (e) {
       DebugLog.warn('[AdminAPI] bulkApplyCompatibility failed:', e.message);
+      throw e;
+    }
+  },
+
+  async createPrinter(name) {
+    try {
+      const resp = await window.API.post('/api/admin/printers', { name });
+      // 409 — printer already exists; return the existing record so callers work transparently
+      if (resp?.ok === false) {
+        const existing = resp?.data?.error?.details?.printer;
+        if (existing) return existing;
+        throw new Error(resp?.error || 'Failed to create printer');
+      }
+      return resp?.data ?? null;
+    } catch (e) {
+      DebugLog.warn('[AdminAPI] createPrinter failed:', e.message);
       throw e;
     }
   },

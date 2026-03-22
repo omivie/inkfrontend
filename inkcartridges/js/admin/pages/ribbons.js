@@ -474,7 +474,7 @@ export default {
       <div class="admin-toolbar">
         <div class="admin-search">
           <span class="admin-search__icon">${icon('search', 14, 14)}</span>
-          <input type="search" placeholder="Search ribbons\u2026" id="ribbon-search">
+          <input type="search" placeholder="Search\u2026" id="ribbon-search">
         </div>
         <select class="admin-select" id="brand-filter">${brandOpts}</select>
         <select class="admin-select" id="type-filter">${typeOpts}</select>

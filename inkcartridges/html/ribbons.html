@@ -205,6 +205,29 @@
                     </div>
 
                     <div class="drilldown-level" id="level-products" hidden>
+                        <div class="ribbon-model-pills" id="ribbon-model-pills" hidden>
+                            <span class="ribbon-model-pills__label">Model:</span>
+                            <div class="ribbon-model-pills__inner" id="ribbon-model-pills-inner"></div>
+                        </div>
+                        <div class="ribbon-filters" id="ribbon-filters">
+                            <div class="ribbon-filters__colors" role="group" aria-label="Filter by colour">
+                                <button class="ribbon-color-btn ribbon-color-btn--active" data-color="" type="button">All</button>
+                                <button class="ribbon-color-btn" data-color="Black" type="button">Black</button>
+                                <button class="ribbon-color-btn" data-color="Black/Red" type="button">Black/Red</button>
+                                <button class="ribbon-color-btn" data-color="Purple" type="button">Purple</button>
+                                <button class="ribbon-color-btn" data-color="Red" type="button">Red</button>
+                                <button class="ribbon-color-btn" data-color="Blue" type="button">Blue</button>
+                                <button class="ribbon-color-btn" data-color="Black/Blue" type="button">Black/Blue</button>
+                            </div>
+                            <select class="ribbon-sort-select" id="ribbon-brand-filter" aria-label="Filter by ribbon brand">
+                                <option value="">All Brands</option>
+                            </select>
+                            <select class="ribbon-sort-select" id="ribbon-sort" aria-label="Sort ribbons">
+                                <option value="name">Name A–Z</option>
+                                <option value="price_asc">Price: Low to High</option>
+                                <option value="price_desc">Price: High to Low</option>
+                            </select>
+                        </div>
                         <div class="ribbon-products-grid" id="ribbon-products-grid">
                         </div>
                         <div class="pagination" id="ribbon-pagination"></div>

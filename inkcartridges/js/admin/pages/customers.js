@@ -256,7 +256,7 @@ export default {
       <h1>Customers</h1>
       <div class="admin-page-header__actions">
         <div style="position:relative">
-          <input class="admin-input" type="search" placeholder="Search customers\u2026" id="customer-search" style="width:220px;padding-left:32px">
+          <input class="admin-input" type="search" placeholder="Search\u2026" id="customer-search" style="width:220px;padding-left:32px">
           <span style="position:absolute;left:10px;top:50%;transform:translateY(-50%);color:var(--text-muted)">${icon('search', 14, 14)}</span>
         </div>
         ${exportDropdown('export-customers')}

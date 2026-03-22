@@ -8868,6 +8868,127 @@
 
 /* Ribbon tile stagger — animation-delay set inline by JS */
 
+/* Ribbon Model Pills (device model drill-down) */
+.ribbon-model-pills {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-xs);
+    flex-wrap: wrap;
+    margin-bottom: var(--spacing-sm);
+    padding: var(--spacing-sm) var(--spacing-md);
+    background: var(--steel-50);
+    border: 1px solid var(--steel-100);
+    border-radius: var(--radius-md);
+}
+
+.ribbon-model-pills__label {
+    font-size: var(--font-size-sm);
+    font-weight: var(--font-weight-semibold);
+    color: var(--steel-500);
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
+.ribbon-model-pills__inner {
+    display: flex;
+    gap: var(--spacing-xs);
+    flex-wrap: wrap;
+}
+
+.ribbon-model-btn {
+    padding: 3px 12px;
+    border-radius: 16px;
+    border: 1.5px solid var(--steel-200);
+    background: var(--white-primary);
+    color: var(--steel-600);
+    font-size: var(--font-size-xs, 0.75rem);
+    font-weight: var(--font-weight-medium);
+    cursor: pointer;
+    transition: border-color 0.15s, background 0.15s, color 0.15s;
+    white-space: nowrap;
+}
+
+.ribbon-model-btn:hover {
+    border-color: var(--cyan-primary);
+    color: var(--cyan-primary);
+}
+
+.ribbon-model-btn--active {
+    border-color: var(--cyan-primary);
+    background: var(--cyan-light, #e0f2fe);
+    color: var(--cyan-primary);
+    font-weight: var(--font-weight-semibold);
+}
+
+/* Ribbon Filter Bar */
+.ribbon-filters {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-3);
+    flex-wrap: wrap;
+    margin-bottom: var(--spacing-md);
+}
+
+.ribbon-filters__colors {
+    display: flex;
+    gap: var(--spacing-xs);
+    flex-wrap: wrap;
+    flex: 1;
+}
+
+.ribbon-color-btn {
+    padding: 5px 14px;
+    border-radius: 20px;
+    border: 1.5px solid var(--steel-200);
+    background: var(--white-primary);
+    color: var(--steel-700);
+    font-size: var(--font-size-sm);
+    font-weight: var(--font-weight-medium);
+    cursor: pointer;
+    transition: border-color 0.15s, background 0.15s, color 0.15s;
+    white-space: nowrap;
+}
+
+.ribbon-color-btn:hover {
+    border-color: var(--cyan-primary);
+    color: var(--cyan-primary);
+}
+
+.ribbon-color-btn--active {
+    border-color: var(--cyan-primary);
+    background: var(--cyan-primary);
+    color: var(--white-primary);
+}
+
+.ribbon-color-btn--active:hover {
+    color: var(--white-primary);
+}
+
+.ribbon-sort-select {
+    padding: 6px 32px 6px 12px;
+    border-radius: var(--radius-md);
+    border: 1.5px solid var(--steel-200);
+    background: var(--white-primary);
+    color: var(--steel-700);
+    font-size: var(--font-size-sm);
+    font-weight: var(--font-weight-medium);
+    cursor: pointer;
+    appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2364748b' stroke-width='2'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 10px center;
+    flex-shrink: 0;
+}
+
+@media (max-width: 480px) {
+    .ribbon-filters {
+        gap: var(--spacing-sm);
+    }
+    .ribbon-sort-select {
+        width: 100%;
+    }
+}
+
 /* Ribbon Products Grid (ribbons.html page) */
 .ribbon-products-grid {
     display: grid;
@@ -9150,6 +9271,7 @@
 .drilldown-box__logo--oki { height: 24px; }
 .drilldown-box__logo--fuji-xerox { height: 29px; }
 .drilldown-box__logo--kyocera { height: 26px; }
+.drilldown-box__logo--dymo { height: 24px; }
 
 .drilldown-box__name {
     font-size: var(--font-size-md);

@@ -85,18 +85,16 @@
           categories: [
               { label: 'Toner Cartridges', param: 'toner' },
               { label: 'Drums & Supplies', param: 'consumable' }
+          ]},
+        { slug: 'dymo', name: 'Dymo', logo: '/assets/brands/dymo.svg',
+          categories: [
+              { label: 'Label Cartridges', param: 'ink' }
           ]}
     ];
 
     // ============================================
-    // DATA — Ribbon Brands
+    // DATA — Ribbon Device Brands (fetched from API)
     // ============================================
-    const RIBBON_BRANDS = [
-        'Amano', 'Brother', 'Canon', 'Citizen', 'Epson',
-        'Fujitsu', 'IBM', 'Nakajima', 'NEC', 'NCR',
-        'OKI', 'Olivetti', 'Olympia', 'Panasonic', 'Printronix',
-        'Seiko', 'Sharp', 'Star', 'Triumph-Adler', 'Universal'
-    ];
 
     // ============================================
     // STATE
@@ -125,11 +123,24 @@
     // ============================================
     // RENDER RIBBON BRAND BUTTONS
     // ============================================
-    function renderRibbons() {
+    function renderRibbons(deviceBrands) {
         if (!ribbonsGrid) return;
-        ribbonsGrid.innerHTML = RIBBON_BRANDS.map(brand =>
-            `<a href="/html/ribbons?brand=${Security.escapeAttr(brand)}" class="ribbons-mega__brand-btn">${Security.escapeHtml(brand)}</a>`
+        ribbonsGrid.innerHTML = deviceBrands.map(b =>
+            `<a href="/html/ribbons?device_brand=${Security.escapeAttr(b.value)}" class="ribbons-mega__brand-btn">${Security.escapeHtml(b.label)}</a>`
         ).join('');
+    }
+
+    async function loadAndRenderRibbons() {
+        if (!ribbonsGrid) return;
+        try {
+            const res = await API.getRibbonDeviceBrands();
+            const brands = res?.data?.device_brands || [];
+            if (brands.length > 0) {
+                renderRibbons(brands);
+            }
+        } catch (e) {
+            // silently fail — grid stays empty
+        }
     }
 
     // ============================================
@@ -228,6 +239,6 @@
     // INITIALIZE
     // ============================================
     renderBrands();
-    renderRibbons();
+    loadAndRenderRibbons();
 
 })();

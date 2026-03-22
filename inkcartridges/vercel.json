@@ -73,11 +73,17 @@
     { "source": "/(.+)-toner-cartridge", "destination": "/html/shop?search=$1", "permanent": true }
   ],
   "rewrites": [
+    { "source": "/ribbon/:sku", "destination": "/html/product/index.html" },
     { "source": "/html/product-by-name", "destination": "https://ink-backend-zaeq.onrender.com/html/product-by-name" },
     { "source": "/products/:slug/:sku", "destination": "/html/product?sku=:sku" },
     { "source": "/brands/:slug", "destination": "/brands/index.html" },
     { "source": "/printers/:slug", "destination": "/printers/index.html" },
     { "source": "/sitemap.xml", "destination": "https://ink-backend-zaeq.onrender.com/sitemap.xml" },
+    { "source": "/sitemap-static.xml", "destination": "https://ink-backend-zaeq.onrender.com/sitemap-static.xml" },
+    { "source": "/sitemap-products.xml", "destination": "https://ink-backend-zaeq.onrender.com/sitemap-products.xml" },
+    { "source": "/sitemap-brands.xml", "destination": "https://ink-backend-zaeq.onrender.com/sitemap-brands.xml" },
+    { "source": "/sitemap-printers.xml", "destination": "https://ink-backend-zaeq.onrender.com/sitemap-printers.xml" },
+    { "source": "/sitemap-ribbons.xml", "destination": "https://ink-backend-zaeq.onrender.com/sitemap-ribbons.xml" },
     { "source": "/robots.txt", "destination": "https://ink-backend-zaeq.onrender.com/robots.txt" }
   ]
 }

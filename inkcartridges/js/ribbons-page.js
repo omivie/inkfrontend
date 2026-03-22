@@ -4,7 +4,11 @@
 const RibbonsPage = {
     // Current state
     state: {
-        brand: null,
+        brand: null,        // device_brand (what machine the customer has)
+        model: null,        // device_model (specific model drill-down)
+        ribbonBrand: null,  // manufacturer brand (API param: 'brand')
+        color: null,
+        sort: 'name',
         page: 1
     },
 
@@ -13,6 +17,9 @@ const RibbonsPage = {
 
     // Products per page
     pageLimit: 48,
+
+    // Per-brand model cache
+    _modelsCache: {},
 
     // DOM Elements
     elements: {
@@ -36,6 +43,12 @@ const RibbonsPage = {
         if (levelBrands) levelBrands.hidden = true;
 
         this.parseURLState();
+        this.initFilterControls();
+        this.syncFilterUI();
+
+        // Load ribbon manufacturer brands for dropdown (non-blocking)
+        this.loadRibbonBrands();
+
         this.navigationVersion++;
         await this.loadProducts(this.navigationVersion);
 
@@ -46,20 +59,78 @@ const RibbonsPage = {
             } else {
                 this.parseURLState();
             }
+            this.syncFilterUI();
             this.navigationVersion++;
             this.loadProducts(this.navigationVersion);
         });
     },
 
+    initFilterControls() {
+        // Color filter buttons
+        document.querySelectorAll('.ribbon-color-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                this.state.color = btn.dataset.color || null;
+                this.state.page = 1;
+                this.syncFilterUI();
+                this.navigationVersion++;
+                this.updateURL();
+                this.loadProducts(this.navigationVersion);
+            });
+        });
+
+        // Ribbon manufacturer brand select
+        const brandSelect = document.getElementById('ribbon-brand-filter');
+        if (brandSelect) {
+            brandSelect.addEventListener('change', () => {
+                this.state.ribbonBrand = brandSelect.value || null;
+                this.state.page = 1;
+                this.navigationVersion++;
+                this.updateURL();
+                this.loadProducts(this.navigationVersion);
+            });
+        }
+
+        // Sort select
+        const sortSelect = document.getElementById('ribbon-sort');
+        if (sortSelect) {
+            sortSelect.addEventListener('change', () => {
+                this.state.sort = sortSelect.value;
+                this.state.page = 1;
+                this.navigationVersion++;
+                this.updateURL();
+                this.loadProducts(this.navigationVersion);
+            });
+        }
+    },
+
+    syncFilterUI() {
+        document.querySelectorAll('.ribbon-color-btn').forEach(btn => {
+            const btnColor = btn.dataset.color || null;
+            btn.classList.toggle('ribbon-color-btn--active', btnColor === this.state.color);
+        });
+        const brandSelect = document.getElementById('ribbon-brand-filter');
+        if (brandSelect) brandSelect.value = this.state.ribbonBrand || '';
+        const sortSelect = document.getElementById('ribbon-sort');
+        if (sortSelect) sortSelect.value = this.state.sort || 'name';
+    },
+
     parseURLState() {
         const params = new URLSearchParams(window.location.search);
-        this.state.brand = params.get('brand');
+        this.state.brand = params.get('device_brand');
+        this.state.model = params.get('device_model');
+        this.state.ribbonBrand = params.get('brand');
+        this.state.color = params.get('color');
+        this.state.sort = params.get('sort') || 'name';
         this.state.page = parseInt(params.get('page')) || 1;
     },
 
     updateURL() {
         const params = new URLSearchParams();
-        if (this.state.brand) params.set('brand', this.state.brand);
+        if (this.state.brand) params.set('device_brand', this.state.brand);
+        if (this.state.model) params.set('device_model', this.state.model);
+        if (this.state.ribbonBrand) params.set('brand', this.state.ribbonBrand);
+        if (this.state.color) params.set('color', this.state.color);
+        if (this.state.sort && this.state.sort !== 'name') params.set('sort', this.state.sort);
         if (this.state.page > 1) params.set('page', this.state.page);
 
         const newURL = params.toString()
@@ -96,6 +167,80 @@ const RibbonsPage = {
     },
 
     // =========================================
+    // MODEL DRILL-DOWN
+    // =========================================
+    async loadModels(brand) {
+        const container = document.getElementById('ribbon-model-pills');
+        const inner = document.getElementById('ribbon-model-pills-inner');
+        if (!container || !inner) return;
+
+        if (!this._modelsCache[brand]) {
+            try {
+                const res = await API.getRibbonDeviceModels({ device_brand: brand });
+                this._modelsCache[brand] = res?.data?.device_models || [];
+            } catch (e) {
+                this._modelsCache[brand] = [];
+            }
+        }
+
+        // Guard: brand may have changed while we were fetching
+        if (this.state.brand !== brand) return;
+
+        const models = this._modelsCache[brand];
+        // Only show if there are specific models beyond "All Models"
+        if (models.length <= 1) {
+            container.hidden = true;
+            return;
+        }
+
+        inner.innerHTML = models.map(m => {
+            const isActive = m.value === (this.state.model || 'all-models');
+            return `<button class="ribbon-model-btn${isActive ? ' ribbon-model-btn--active' : ''}" data-model="${Security.escapeAttr(m.value)}" type="button">${Security.escapeHtml(m.label)}</button>`;
+        }).join('');
+
+        inner.querySelectorAll('.ribbon-model-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const val = btn.dataset.model;
+                this.state.model = (val === 'all-models') ? null : val;
+                this.state.page = 1;
+                inner.querySelectorAll('.ribbon-model-btn').forEach(b =>
+                    b.classList.toggle('ribbon-model-btn--active', b.dataset.model === (this.state.model || 'all-models'))
+                );
+                this.navigationVersion++;
+                this.updateURL();
+                this.loadProducts(this.navigationVersion);
+            });
+        });
+
+        container.hidden = false;
+    },
+
+    clearModelPills() {
+        const container = document.getElementById('ribbon-model-pills');
+        if (container) container.hidden = true;
+        const inner = document.getElementById('ribbon-model-pills-inner');
+        if (inner) inner.innerHTML = '';
+    },
+
+    // =========================================
+    // RIBBON MANUFACTURER BRANDS
+    // =========================================
+    async loadRibbonBrands() {
+        const select = document.getElementById('ribbon-brand-filter');
+        if (!select) return;
+        try {
+            const res = await API.getRibbonBrands();
+            const brands = res?.data?.brands || [];
+            if (brands.length > 0) {
+                select.innerHTML = '<option value="">All Brands</option>' +
+                    brands.map(b => `<option value="${Security.escapeAttr(b)}"${this.state.ribbonBrand === b ? ' selected' : ''}>${Security.escapeHtml(b)}</option>`).join('');
+            }
+        } catch (e) {
+            // leave default "All Brands" option
+        }
+    },
+
+    // =========================================
     // PRODUCTS
     // =========================================
     normalizeRibbon(ribbon) {
@@ -123,13 +268,26 @@ const RibbonsPage = {
         this.elements.levelProducts.hidden = true;
         this.elements.empty.hidden = true;
 
+        // Clear model pills when no brand is selected
+        if (!this.state.brand) {
+            this.clearModelPills();
+        }
+
         try {
-            // Use dedicated /api/ribbons endpoint with server-side brand filtering
             const params = {
                 page: this.state.page,
-                limit: this.pageLimit
+                limit: this.pageLimit,
+                sort: this.state.sort
             };
-            if (this.state.brand) params.brand = this.state.brand;
+            if (this.state.brand) params.device_brand = this.state.brand;
+            if (this.state.model) params.device_model = this.state.model;
+            if (this.state.ribbonBrand) params.brand = this.state.ribbonBrand;
+            if (this.state.color) params.color = this.state.color;
+
+            // Load models in parallel when a device brand is selected
+            if (this.state.brand) {
+                this.loadModels(this.state.brand);
+            }
 
             const res = await API.getRibbons(params);
 
@@ -182,7 +340,6 @@ const RibbonsPage = {
             img.addEventListener('error', function() {
                 if (this.dataset.fallback === 'placeholder') {
                     this.removeAttribute('data-fallback');
-                    // For compatible ribbons, show the black box placeholder
                     if (this.closest('.product-card')?.dataset.source === 'compatible') {
                         const placeholder = document.createElement('div');
                         placeholder.className = 'product-card__compatible-placeholder';
@@ -218,9 +375,10 @@ const RibbonsPage = {
         }
 
         const isFav = typeof Favourites !== 'undefined' && Favourites.isFavourite && Favourites.isFavourite(ribbonId);
+        const productUrl = sku ? `/ribbon/${Security.escapeAttr(sku)}` : '#';
 
         card.innerHTML = `
-            <a href="/html/product/?sku=${Security.escapeAttr(sku)}&type=ribbon" class="product-card__link">
+            <a href="${productUrl}" class="product-card__link">
                 <div class="product-card__image-wrapper">
                     ${imageContent}
                 </div>
@@ -317,7 +475,6 @@ const RibbonsPage = {
         const container = this.elements.pagination;
         if (!container) return;
 
-        // Always show item count, even on single page
         const totalItems = pagination ? (pagination.total || pagination.total_items || 0) : ribbonCount || 0;
         const current = pagination ? pagination.page : 1;
         const limit = this.pageLimit;
@@ -356,9 +513,7 @@ const RibbonsPage = {
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 6 15 12 9 18"></polyline></svg>
         </button></li>`;
 
-        const paginationHtml = `<ul class="pagination__list">${items}</ul>`;
-
-        container.innerHTML = `<div class="pagination__center">${countHtml}${paginationHtml}</div>`;
+        container.innerHTML = `<div class="pagination__center">${countHtml}<ul class="pagination__list">${items}</ul></div>`;
 
         container.querySelectorAll('.pagination__link[data-page]').forEach(btn => {
             btn.addEventListener('click', () => {
@@ -381,7 +536,9 @@ const RibbonsPage = {
             // Show: Ribbons > Brand
             const ribbonsItem = this.createBreadcrumbItem('Ribbons', false, () => {
                 this.state.brand = null;
+                this.state.model = null;
                 this.state.page = 1;
+                this.clearModelPills();
                 this.navigationVersion++;
                 this.updateURL();
                 window.scrollTo(0, 0);
@@ -392,7 +549,6 @@ const RibbonsPage = {
             const brandItem = this.createBreadcrumbItem(this.state.brand, true);
             list.appendChild(brandItem);
         } else {
-            // Show: Ribbons (current)
             const ribbonsItem = this.createBreadcrumbItem('Ribbons', true);
             list.appendChild(ribbonsItem);
         }
@@ -412,7 +568,7 @@ const RibbonsPage = {
         let pageUrl = ribbonsUrl;
         let pageName = 'Typewriter & Printer Ribbons NZ';
         if (this.state.brand) {
-            pageUrl = ribbonsUrl + '?brand=' + encodeURIComponent(this.state.brand);
+            pageUrl = ribbonsUrl + '?device_brand=' + encodeURIComponent(this.state.brand);
             pageName = this.state.brand + ' Ribbons';
             items.push({ "@type": "ListItem", "position": 3, "name": this.state.brand, "item": pageUrl });
         }

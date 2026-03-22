@@ -503,6 +503,10 @@
 .admin-kpi__delta--down { color: var(--danger); }
 .admin-kpi__delta--flat { color: var(--text-muted); }
 .admin-kpi__sub { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+.admin-kpi--danger::before  { background: var(--danger) !important; }
+.admin-kpi--warning::before { background: var(--yellow) !important; }
+@keyframes kpi-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+.admin-kpi-grid--loading .admin-kpi__value { animation: kpi-pulse 1.4s ease-in-out infinite; color: var(--text-muted); }
 .admin-kpi__badge-24h {
   display: inline-flex; align-items: center; gap: 4px;
   font-size: 10px; font-weight: 500; letter-spacing: .04em;
@@ -844,6 +848,7 @@
   display: block; font-size: 12px; font-weight: 600;
   color: var(--text-secondary); margin-bottom: 6px;
 }
+.admin-form-group label .required-star { color: var(--danger); margin-left: 2px; }
 .admin-input, .admin-select, .admin-textarea {
   width: 100%; padding: 8px 12px; font-size: 13px; font-family: inherit;
   color: var(--text); background: var(--input-bg);

@@ -286,6 +286,229 @@ async function openProductDrawer(product) {
   bindProductModalActions(modal, full);
 }
 
+function openCreateProductModal() {
+  if (_activeModal) closeProductModal();
+
+  const isOwner = AdminAuth.isOwner();
+  const modal = document.createElement('div');
+  modal.className = 'admin-product-modal';
+  modal.innerHTML = `
+    <div class="admin-product-modal__inner">
+      <div class="admin-product-modal__header">
+        <button class="admin-product-modal__close" data-action="close" aria-label="Close">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
+        </button>
+        <div class="admin-product-modal__title">New Product</div>
+        <div class="admin-product-modal__actions">
+          <button class="admin-btn admin-btn--ghost admin-btn--sm" data-action="cancel">Cancel</button>
+          <button class="admin-btn admin-btn--primary admin-btn--sm" data-action="create">${icon('products', 14, 14)} Create Product</button>
+        </div>
+      </div>
+      <div class="admin-product-modal__layout">
+        <div class="admin-product-modal__sidebar" id="pm-sidebar">
+          <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;height:140px;background:var(--surface-hover);border-radius:var(--radius);color:var(--text-muted)">
+            ${icon('products', 36, 36)}
+            <span style="font-size:12px">Images can be added after creation</span>
+          </div>
+        </div>
+        <div class="admin-product-modal__main">
+          <div class="admin-product-modal__tabs" id="pm-tabs"></div>
+          <div class="admin-product-modal__tab-panels" id="pm-panels"></div>
+        </div>
+      </div>
+    </div>
+  `;
+
+  document.body.appendChild(modal);
+  _activeModal = modal;
+
+  requestAnimationFrame(() => requestAnimationFrame(() => modal.classList.add('open')));
+
+  const closeCreate = () => {
+    modal._removeKeyHandler?.();
+    modal.classList.remove('open');
+    setTimeout(() => modal.remove(), 300);
+    if (_activeModal === modal) _activeModal = null;
+  };
+
+  modal.querySelector('[data-action="close"]').addEventListener('click', closeCreate);
+  modal.querySelector('[data-action="cancel"]').addEventListener('click', closeCreate);
+
+  const onKeyDown = (e) => { if (e.key === 'Escape' && _activeModal === modal) { closeCreate(); document.removeEventListener('keydown', onKeyDown); } };
+  document.addEventListener('keydown', onKeyDown);
+  modal._removeKeyHandler = () => document.removeEventListener('keydown', onKeyDown);
+
+  // Build tabs (Basic Info, Pricing, Inventory, SEO, Advanced — no Compatibility/FAQ)
+  const tabsEl = modal.querySelector('#pm-tabs');
+  const panelsEl = modal.querySelector('#pm-panels');
+  const tabNames = ['Basic Info', 'Pricing', 'Inventory', 'SEO', 'Advanced'];
+  const empty = {};
+
+  tabsEl.innerHTML = tabNames.map((t, i) =>
+    `<button class="admin-product-modal__tab${i === 0 ? ' active' : ''}" data-tab="${i}">${esc(t)}</button>`
+  ).join('');
+
+  const basicHtml = `
+    <div class="admin-form-row">
+      <div class="admin-form-group"><label>SKU<span class="required-star">*</span></label><input class="admin-input" id="edit-sku" placeholder="e.g. LC-3317BK"></div>
+      <div class="admin-form-group"><label>Name<span class="required-star">*</span></label><input class="admin-input" id="edit-name" placeholder="Product name"></div>
+    </div>
+    ${formGroup('Description', `<textarea class="admin-textarea" id="edit-description" rows="4" placeholder="Optional product description\u2026"></textarea>`)}
+    <div class="admin-form-row">
+      ${formGroup('Brand', buildBrandSelect(null))}
+      ${formGroup('Product Type', buildSelect('edit-type', [
+        { value: 'ink_cartridge',   label: 'Ink Cartridge' },
+        { value: 'ink_bottle',      label: 'Ink Bottle' },
+        { value: 'toner_cartridge', label: 'Toner Cartridge' },
+        { value: 'drum_unit',       label: 'Drum Unit' },
+        { value: 'waste_toner',     label: 'Waste Toner' },
+        { value: 'belt_unit',       label: 'Belt Unit' },
+        { value: 'fuser_kit',       label: 'Fuser Kit' },
+        { value: 'fax_film',        label: 'Fax Film' },
+        { value: 'fax_film_refill', label: 'Fax Film Refill' },
+        { value: 'ribbon',          label: 'Ribbon' },
+        { value: 'label_tape',      label: 'Label Tape' },
+        { value: 'photo_paper',     label: 'Photo Paper' },
+        { value: 'printer',         label: 'Printer' },
+      ], empty.product_type))}
+    </div>
+    <div class="admin-form-row">
+      ${formGroup('Color', `<input class="admin-input" id="edit-color" placeholder="e.g. Black">`)}
+      ${formGroup('Source', buildSelect('edit-source', ['genuine', 'compatible', 'remanufactured'], empty.source))}
+    </div>
+  `;
+
+  const pricingHtml = `
+    <div class="admin-form-row">
+      <div class="admin-form-group"><label>Retail Price (NZD)<span class="required-star">*</span></label><input class="admin-input" id="edit-retail-price" type="number" step="0.01" placeholder="0.00"></div>
+      ${formGroup('Compare Price', `<input class="admin-input" id="edit-compare-price" type="number" step="0.01" placeholder="0.00">`)}
+    </div>
+    ${isOwner ? formGroup('Supplier Price', `<input class="admin-input" id="edit-cost-price" type="number" step="0.01" placeholder="0.00">`) : ''}
+  `;
+
+  const inventoryHtml = `
+    <div class="admin-form-row">
+      ${formGroup('Stock Qty', `<input class="admin-input" id="edit-stock" type="number" min="0" placeholder="0">`)}
+      ${formGroup('Low Stock Threshold', `<input class="admin-input" id="edit-low-threshold" type="number" min="0" placeholder="5">`)}
+    </div>
+    <div class="admin-form-row">
+      ${formGroup('Weight (kg)', `<input class="admin-input" id="edit-weight" type="number" step="0.01" min="0" placeholder="0.00">`)}
+      <div class="admin-form-group"></div>
+    </div>
+    <div class="admin-form-row">
+      ${formGroup('Active', toggleHtml('edit-active', true))}
+      ${formGroup('Track Inventory', toggleHtml('edit-track-inventory', true))}
+    </div>
+  `;
+
+  const seoHtml = `
+    ${formGroup('Meta Title', `<input class="admin-input" id="edit-meta-title" placeholder="Page title for search results">`)}
+    ${formGroup('Meta Description', `<textarea class="admin-textarea" id="edit-meta-desc" rows="3" placeholder="Brief description for search results\u2026"></textarea>`)}
+  `;
+
+  const advancedHtml = `
+    ${formGroup('Page Yield', `<input class="admin-input" id="edit-page-yield" type="number" min="0" placeholder="e.g. 300">`)}
+    ${formGroup('Tags (comma-separated)', `<input class="admin-input" id="edit-tags" placeholder="e.g. black, compatible, brother">`)}
+    ${formGroup('Internal Notes', `<textarea class="admin-textarea" id="edit-admin-notes" rows="3" placeholder="Notes visible only to admins\u2026"></textarea>`)}
+  `;
+
+  panelsEl.innerHTML = [basicHtml, pricingHtml, inventoryHtml, seoHtml, advancedHtml].map((content, i) =>
+    `<div class="admin-product-modal__tab-panel${i === 0 ? ' active' : ''}" data-panel="${i}">${content}</div>`
+  ).join('');
+
+  tabsEl.addEventListener('click', (e) => {
+    const btn = e.target.closest('.admin-product-modal__tab');
+    if (!btn) return;
+    const idx = btn.dataset.tab;
+    tabsEl.querySelectorAll('.admin-product-modal__tab').forEach(t => t.classList.toggle('active', t.dataset.tab === idx));
+    panelsEl.querySelectorAll('.admin-product-modal__tab-panel').forEach(p => p.classList.toggle('active', p.dataset.panel === idx));
+  });
+
+  const switchToTab = (tabIdx) => {
+    const idx = String(tabIdx);
+    tabsEl.querySelectorAll('.admin-product-modal__tab').forEach(t => t.classList.toggle('active', t.dataset.tab === idx));
+    panelsEl.querySelectorAll('.admin-product-modal__tab-panel').forEach(p => p.classList.toggle('active', p.dataset.panel === idx));
+  };
+
+  const requireField = (fieldId, tabIdx, message) => {
+    const el = modal.querySelector(`#${fieldId}`);
+    if (!el) return false;
+    if (el.value.trim()) { el.style.borderColor = ''; el.nextElementSibling?.remove(); return false; }
+    switchToTab(tabIdx);
+    el.style.borderColor = 'var(--danger)';
+    el.focus();
+    if (!el.nextElementSibling || !el.nextElementSibling.classList.contains('field-error')) {
+      const err = document.createElement('div');
+      err.className = 'field-error';
+      err.style.cssText = 'font-size:11px;color:var(--danger);margin-top:4px';
+      err.textContent = message;
+      el.after(err);
+    }
+    el.addEventListener('input', () => {
+      el.style.borderColor = '';
+      el.nextElementSibling?.classList.contains('field-error') && el.nextElementSibling.remove();
+    }, { once: true });
+    return true;
+  };
+
+  modal.querySelector('[data-action="create"]').addEventListener('click', async () => {
+    const val = (id) => modal.querySelector(`#${id}`)?.value?.trim() ?? '';
+    const chk = (id) => !!modal.querySelector(`#${id}`)?.checked;
+
+    // Validate required fields — redirect user to the tab containing the missing field
+    if (requireField('edit-sku', 0, 'SKU is required')) return;
+    if (requireField('edit-name', 0, 'Product name is required')) return;
+    const retailPrice = parseFloat(val('edit-retail-price'));
+    if (!retailPrice || retailPrice <= 0) {
+      requireField('edit-retail-price', 1, 'A valid retail price is required');
+      return;
+    }
+
+    const sku = val('edit-sku');
+    const name = val('edit-name');
+    const tagsRaw = val('edit-tags');
+    const data = {
+      sku,
+      name,
+      description: val('edit-description') || null,
+      brand_id: val('edit-brand') || null,
+      product_type: val('edit-type') || null,
+      color: val('edit-color') || null,
+      source: val('edit-source') || null,
+      retail_price: retailPrice,
+      compare_at_price: parseFloat(val('edit-compare-price')) || null,
+      stock_quantity: parseInt(val('edit-stock'), 10) || 0,
+      low_stock_threshold: parseInt(val('edit-low-threshold'), 10) || null,
+      weight_kg: parseFloat(val('edit-weight')) || null,
+      is_active: chk('edit-active'),
+      track_inventory: chk('edit-track-inventory'),
+      meta_title: val('edit-meta-title') || null,
+      meta_description: val('edit-meta-desc') || null,
+      page_yield: parseInt(val('edit-page-yield'), 10) || null,
+      tags: tagsRaw ? tagsRaw.split(',').map(t => t.trim()).filter(Boolean) : [],
+      internal_notes: val('edit-admin-notes') || null,
+    };
+    if (isOwner) data.cost_price = parseFloat(val('edit-cost-price')) || null;
+
+    const saveBtn = modal.querySelector('[data-action="create"]');
+    saveBtn.disabled = true;
+    saveBtn.textContent = 'Creating\u2026';
+
+    try {
+      const result = await AdminAPI.createProduct(data);
+      const newProduct = result?.product ?? result;
+      closeCreate();
+      Toast.success('Product created');
+      loadProducts();
+      if (newProduct?.id) openProductDrawer(newProduct);
+    } catch (e) {
+      Toast.error(`Create failed: ${e.message}`);
+      saveBtn.disabled = false;
+      saveBtn.innerHTML = `${icon('products', 14, 14)} Create Product`;
+    }
+  });
+}
+
 function buildProductModalSidebar(modal, full) {
   const sidebar = modal.querySelector('#pm-sidebar');
 
@@ -451,7 +674,10 @@ function buildProductModalTabs(modal, full, isOwner) {
       <div id="compat-unmatched-wrap" style="display:none;margin-top:14px">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
           <label style="font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted)">Unmatched Models (not in DB)</label>
-          <button class="admin-btn admin-btn--ghost admin-btn--sm" id="compat-clear-unmatched-btn" style="font-size:11px;padding:2px 8px">Clear</button>
+          <div style="display:flex;gap:4px">
+            <button class="admin-btn admin-btn--ghost admin-btn--sm" id="compat-create-all-btn" style="font-size:11px;padding:2px 8px">Create All</button>
+            <button class="admin-btn admin-btn--ghost admin-btn--sm" id="compat-clear-unmatched-btn" style="font-size:11px;padding:2px 8px">Clear</button>
+          </div>
         </div>
         <div id="compat-unmatched-list" class="admin-compat-unmatched-list"></div>
       </div>
@@ -720,6 +946,7 @@ function bindProductModalActions(modal, product) {
     const unmatchedWrap = modal.querySelector('#compat-unmatched-wrap');
     const unmatchedList = modal.querySelector('#compat-unmatched-list');
     const clearUnmatchedBtn = modal.querySelector('#compat-clear-unmatched-btn');
+    const createAllBtn = modal.querySelector('#compat-create-all-btn');
 
     // Helpers: embed/extract unmatched block inside internal_notes
     const UM_START = '=== Unmatched Compatibility Models ===';
@@ -761,6 +988,45 @@ function bindProductModalActions(modal, product) {
         } catch (err) {
           Toast.error(`Clear failed: ${err.message}`);
         } finally { clearUnmatchedBtn.disabled = false; }
+      });
+    }
+    // Create All button — creates all stored unmatched models in the DB and links them
+    if (createAllBtn) {
+      createAllBtn.addEventListener('click', async () => {
+        if (!product.sku) return;
+        const csv = getUnmatchedNote(product.internal_notes);
+        const names = csv ? csv.split(',').map(s => s.trim()).filter(Boolean) : [];
+        if (names.length === 0) return;
+        createAllBtn.disabled = true;
+        createAllBtn.textContent = 'Creating\u2026';
+        let created = 0;
+        const remaining = [];
+        for (const name of names) {
+          try {
+            const newPrinter = await AdminAPI.createPrinter(name);
+            const id = String(newPrinter.id || newPrinter.printer_id || '');
+            const displayName = newPrinter.full_name || newPrinter.name || name;
+            if (id) {
+              await AdminAPI.addCompatiblePrinter(product.sku, id);
+              compatPrinters.push({ id, full_name: displayName });
+              created++;
+            } else {
+              remaining.push(name);
+            }
+          } catch (_) {
+            remaining.push(name);
+          }
+        }
+        renderCompatBadges();
+        const newNotes = setUnmatchedNote(product.internal_notes, remaining.join(', '));
+        try {
+          await AdminAPI.updateProduct(product.id, { internal_notes: newNotes });
+          product.internal_notes = newNotes;
+        } catch (_) {}
+        renderUnmatchedNote(remaining.join(', '));
+        if (created > 0) Toast.success(`Created ${created} printer${created > 1 ? 's' : ''}`);
+        createAllBtn.disabled = false;
+        createAllBtn.textContent = 'Create All';
       });
     }
     const bulkWrap = modal.querySelector('#compat-bulk-wrap');
@@ -953,10 +1219,11 @@ function bindProductModalActions(modal, product) {
               <span class="result-query">(searched: ${esc(r.query)})</span>
             </div>`;
           }
-          return `<div class="admin-compat-parse-result admin-compat-parse-result--unmatched">
+          return `<div class="admin-compat-parse-result admin-compat-parse-result--unmatched" data-query="${esc(r.query)}">
             <span>&#8212;</span>
             <span class="result-query">${esc(r.query)}</span>
             <span style="font-size:11px">not found</span>
+            <button class="admin-btn admin-btn--ghost admin-btn--sm compat-create-btn" style="font-size:11px;padding:2px 8px;margin-left:auto" data-query="${esc(r.query)}">Create</button>
           </div>`;
         }).join('');
 
@@ -1014,6 +1281,46 @@ function bindProductModalActions(modal, product) {
         pasteMatches = [];
         if (added > 0) Toast.success(`Added ${added} printer${added > 1 ? 's' : ''}`);
         addMatchedBtn.disabled = false;
+      });
+    }
+
+    // Individual "Create" button on unmatched search result rows
+    if (parseResults) {
+      parseResults.addEventListener('click', async (e) => {
+        const btn = e.target.closest('.compat-create-btn');
+        if (!btn || !product.sku) return;
+        const query = btn.dataset.query;
+        if (!query) return;
+        btn.disabled = true;
+        btn.textContent = 'Creating\u2026';
+        try {
+          const newPrinter = await AdminAPI.createPrinter(query);
+          const id = String(newPrinter.id || newPrinter.printer_id || '');
+          const name = newPrinter.full_name || newPrinter.name || query;
+          if (id) {
+            await AdminAPI.addCompatiblePrinter(product.sku, id);
+            compatPrinters.push({ id, full_name: name });
+            renderCompatBadges();
+          }
+          // Update row to matched style
+          const row = btn.closest('.admin-compat-parse-result');
+          if (row) {
+            row.className = 'admin-compat-parse-result admin-compat-parse-result--matched';
+            row.innerHTML = `<span>&#10003;</span><span class="result-name">${esc(name)}</span><span class="result-query">(created)</span>`;
+          }
+          // Remove from unmatched notes
+          const existing = getUnmatchedNote(product.internal_notes);
+          const updated = existing.split(',').map(s => s.trim()).filter(s => s && s !== query).join(', ');
+          const newNotes = setUnmatchedNote(product.internal_notes, updated);
+          await AdminAPI.updateProduct(product.id, { internal_notes: newNotes });
+          product.internal_notes = newNotes;
+          renderUnmatchedNote(updated);
+          Toast.success(`Created printer: ${name}`);
+        } catch (err) {
+          btn.disabled = false;
+          btn.textContent = 'Create';
+          Toast.error(`Failed to create: ${err.message}`);
+        }
       });
     }
 
@@ -1229,8 +1536,9 @@ async function uploadImage(productId, file) {
 }
 
 function renderDiagnostics(container) {
-  if (!_container || !AdminAuth.isOwner() || !_diagnostics) return;
+  if (!_container || !AdminAuth.isOwner()) return;
   const d = _diagnostics;
+  const isLoading = !d;
 
   const section = document.createElement('div');
   section.className = 'admin-section';
@@ -1240,15 +1548,18 @@ function renderDiagnostics(container) {
       <div style="display:flex;gap:8px">
         <button class="admin-btn admin-btn--ghost admin-btn--sm" id="bulk-images-btn">${icon('download', 14, 14)} Generate Images</button>
         <button class="admin-btn admin-btn--ghost admin-btn--sm" id="bulk-seo-btn">${icon('search', 14, 14)} Generate SEO</button>
-        <button class="admin-btn admin-btn--ghost admin-btn--sm" id="regen-all-seo-btn">${icon('search', 14, 14)} Regenerate All SEO</button>
         <button class="admin-btn admin-btn--ghost admin-btn--sm" id="bulk-activate-btn">${icon('products', 14, 14)} Bulk Activate</button>
       </div>
     </div>
-    <div class="admin-kpi-grid" style="grid-template-columns:repeat(4,1fr)">
-      ${diagKpi('Total Products', d.total ?? d.total_products ?? MISSING)}
-      ${diagKpi('Active', d.active ?? d.active_count ?? MISSING)}
-      ${diagKpi('Missing Images', d.missing_images ?? MISSING)}
-      ${diagKpi('Missing Prices', d.missing_prices ?? MISSING)}
+    <div class="admin-kpi-grid${isLoading ? ' admin-kpi-grid--loading' : ''}" style="grid-template-columns:repeat(4,1fr)">
+      ${diagKpi('Total Products',        d?.total ?? d?.total_products ?? MISSING)}
+      ${diagKpi('Active',                d?.active ?? d?.active_count ?? MISSING)}
+      ${diagKpi('Missing Images',        d?.missing_images ?? MISSING)}
+      ${diagKpi('Missing Prices',        d?.missing_prices ?? MISSING)}
+      ${diagKpi('Missing Weight',        d?.missing_weight ?? MISSING)}
+      ${diagKpi('Missing Compatibility', d?.missing_compatibility ?? (d ? 'N/A' : MISSING))}
+      ${diagKpi('Zero Stock',            d?.zero_stock ?? MISSING, 'danger')}
+      ${diagKpi('Critical Stock (\u22645)', d?.critical_stock ?? MISSING, 'warning')}
     </div>
   `;
   // Remove any existing diagnostics section before inserting updated one
@@ -1261,7 +1572,6 @@ function renderDiagnostics(container) {
 
   section.querySelector('#bulk-images-btn')?.addEventListener('click', () => bulkGenerateImages());
   section.querySelector('#bulk-seo-btn')?.addEventListener('click', () => bulkGenerateSEO());
-  section.querySelector('#regen-all-seo-btn')?.addEventListener('click', () => regenerateAllSEO());
 
   section.querySelector('#bulk-activate-btn')?.addEventListener('click', async () => {
     try {
@@ -1284,8 +1594,11 @@ function renderDiagnostics(container) {
   });
 }
 
-function diagKpi(label, value) {
-  return `<div class="admin-kpi" style="padding:12px 14px"><div class="admin-kpi__label">${esc(label)}</div><div class="admin-kpi__value" style="font-size:18px">${esc(String(value))}</div></div>`;
+function diagKpi(label, value, variant = null) {
+  const cls = variant ? ` admin-kpi--${variant}` : '';
+  const isMissing = value === MISSING;
+  const valCls = isMissing ? ' admin-kpi__value--missing' : '';
+  return `<div class="admin-kpi${cls}" style="padding:12px 14px"><div class="admin-kpi__label">${esc(label)}</div><div class="admin-kpi__value${valCls}" style="font-size:18px">${esc(String(value))}</div></div>`;
 }
 
 function getProductExportParams() {
@@ -1827,65 +2140,15 @@ async function bulkGenerateImages() {
 async function bulkGenerateSEO() {
   Modal.confirm({
     title: 'Generate SEO Metadata',
-    message: 'This will auto-generate meta titles and descriptions for all products missing SEO data. Existing metadata will NOT be overwritten. Continue?',
+    message: 'This will generate meta titles and descriptions for all active products. Existing metadata will be overwritten. Continue?',
     confirmLabel: 'Generate SEO',
     confirmClass: 'admin-btn--primary',
     onConfirm: async () => {
-      Toast.info('Scanning products\u2026');
-
+      const btn = _container?.querySelector('#bulk-seo-btn');
+      if (btn) { btn.disabled = true; btn.textContent = 'Generating\u2026'; }
       try {
-        // Fetch all products
-        let page = 1;
-        let allProducts = [];
-        while (true) {
-          const data = await AdminAPI.getProducts({}, page, 200);
-          const rows = Array.isArray(data) ? data : (data?.products || data?.data || []);
-          if (rows.length === 0) break;
-          allProducts = allProducts.concat(rows);
-          const total = data?.pagination?.total || data?.total || 0;
-          if (allProducts.length >= total || rows.length < 200) break;
-          page++;
-        }
-
-        // Filter to products missing SEO
-        const needsSEO = allProducts.filter(p =>
-          !p.meta_title || !p.meta_description
-        );
-
-        if (needsSEO.length === 0) {
-          Toast.success('All products already have SEO metadata!');
-          return;
-        }
-
-        Toast.info(`Generating SEO for ${needsSEO.length} products\u2026`);
-
-        let updated = 0;
-        let failed = 0;
-
-        for (const product of needsSEO) {
-          // Fetch full product detail for better data
-          const full = await AdminAPI.getProduct(product.id) || product;
-          const seo = generateSEO(full);
-          const data = {
-            retail_price: full.retail_price,
-            stock_quantity: full.stock_quantity ?? 0,
-          };
-
-          // Only fill in missing fields
-          let hasNew = false;
-          if (!full.meta_title) { data.meta_title = seo.meta_title; hasNew = true; }
-          if (!full.meta_description) { data.meta_description = seo.meta_description; hasNew = true; }
-
-          if (!hasNew) continue;
-
-          try {
-            await AdminAPI.updateProduct(product.id, data);
-            updated++;
-          } catch {
-            failed++;
-          }
-        }
-
+        const result = await AdminAPI.bulkGenerateAllSeo();
+        const { updated = 0, failed = 0 } = result?.data ?? result ?? {};
         if (failed > 0) {
           Toast.info(`Done: ${updated} updated, ${failed} failed`);
         } else {
@@ -1894,6 +2157,8 @@ async function bulkGenerateSEO() {
         loadProducts();
       } catch (e) {
         Toast.error(`SEO generation failed: ${e.message}`);
+      } finally {
+        if (btn) { btn.disabled = false; btn.innerHTML = `${icon('search', 14, 14)} Generate SEO`; }
       }
     },
   });
@@ -2075,13 +2340,14 @@ export default {
       <div class="admin-page-header__top">
         <h1>Products &amp; SKUs</h1>
         <div class="admin-page-header__actions">
+          <button class="admin-btn admin-btn--primary admin-btn--sm" id="add-product-btn">${icon('products', 14, 14)} Add Product</button>
           ${exportDropdown('export-products')}
         </div>
       </div>
       <div class="admin-toolbar">
         <div class="admin-search" id="product-search-wrap">
           <span class="admin-search__icon">${icon('search', 14, 14)}</span>
-          <input type="search" placeholder="Search products\u2026" id="product-search">
+          <input type="search" placeholder="Search\u2026" id="product-search">
         </div>
         <select class="admin-select" id="brand-filter">${brandOpts}</select>
         <select class="admin-select" id="active-filter">
@@ -2102,6 +2368,9 @@ export default {
     const tableContainer = document.createElement('div');
     tableContainer.className = 'admin-mb-lg';
     container.appendChild(tableContainer);
+
+    // Show skeleton diagnostics immediately (before data loads)
+    renderDiagnostics(container);
 
     _table = new DataTable(tableContainer, {
       columns: buildColumns(),
@@ -2149,6 +2418,7 @@ export default {
 
     // Export
     bindExportDropdown(header, 'export-products', handleExport);
+    header.querySelector('#add-product-btn')?.addEventListener('click', () => openCreateProductModal());
 
     // Load products + try diagnostics endpoint
     const [, diag] = await Promise.allSettled([loadProducts(), AdminAPI.getProductDiagnostics()]);
@@ -2172,11 +2442,18 @@ export default {
         page++;
       }
       if (all.length > 0 || totalFromApi != null) {
+        const hasCompatField = all.some(p => 'compatible_printers' in p || 'printer_count' in p);
         _diagnostics = {
           total: totalFromApi ?? all.length,
           active: all.filter(p => p.is_active !== false).length,
           missing_images: all.filter(p => !p.images?.length && !p.primary_image && !p.image_url).length,
           missing_prices: all.filter(p => p.retail_price == null).length,
+          missing_weight: all.filter(p => !p.weight_kg && p.weight_kg !== 0).length,
+          missing_compatibility: hasCompatField
+            ? all.filter(p => !(p.compatible_printers?.length) && !(p.printer_count)).length
+            : null,
+          zero_stock: all.filter(p => (p.stock_quantity ?? 0) === 0).length,
+          critical_stock: all.filter(p => (p.stock_quantity ?? 0) > 0 && (p.stock_quantity ?? 0) <= 5).length,
         };
       }
     } catch { /* ignore */ }

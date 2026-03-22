@@ -697,6 +697,7 @@
 .brands-mega__brand-logo--oki { height: 24px; }
 .brands-mega__brand-logo--fuji-xerox { height: 29px; }
 .brands-mega__brand-logo--kyocera { height: 26px; }
+.brands-mega__brand-logo--dymo { height: 24px; }
 
 .brands-mega__brand-text {
     font-size: var(--font-size-sm);
