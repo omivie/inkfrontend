@@ -553,7 +553,6 @@ function buildProductModalSidebar(modal, full) {
   sidebar.innerHTML = `
     <div style="display:flex;justify-content:space-between;align-items:center;font-size:12px;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.05em">
       Images
-      <button class="admin-btn admin-btn--ghost admin-btn--sm" data-action="generate-image">${icon('download', 12, 12)} Generate</button>
     </div>
     ${galleryHtml}
     <div class="admin-dropzone" id="image-dropzone">
@@ -1368,26 +1367,6 @@ function bindProductModalActions(modal, product) {
     }, { once: true });
   });
 
-  // Generate image for this product
-  modal.querySelector('[data-action="generate-image"]')?.addEventListener('click', async (e) => {
-    const btn = e.currentTarget;
-    btn.disabled = true;
-    btn.textContent = 'Generating\u2026';
-    try {
-      const success = await generateProductImage(product);
-      if (success) {
-        Toast.success('Image generated and saved');
-        const updated = await AdminAPI.getProduct(product.id);
-        if (updated) openProductDrawer(updated);
-        loadProducts();
-      }
-    } catch (err) {
-      Toast.error(`Image generation failed: ${err.message}`);
-    } finally {
-      btn.disabled = false;
-      btn.innerHTML = `${icon('download', 12, 12)} Generate`;
-    }
-  });
 
   // Image upload (supports multiple files)
   const dropzone = modal.querySelector('#image-dropzone');
@@ -1546,7 +1525,6 @@ function renderDiagnostics(container) {
     <div class="admin-section__header">
       <h2 class="admin-section__title">Product Diagnostics</h2>
       <div style="display:flex;gap:8px">
-        <button class="admin-btn admin-btn--ghost admin-btn--sm" id="bulk-images-btn">${icon('download', 14, 14)} Generate Images</button>
         <button class="admin-btn admin-btn--ghost admin-btn--sm" id="bulk-seo-btn">${icon('search', 14, 14)} Generate SEO</button>
         <button class="admin-btn admin-btn--ghost admin-btn--sm" id="bulk-activate-btn">${icon('products', 14, 14)} Bulk Activate</button>
       </div>
@@ -1570,7 +1548,6 @@ function renderDiagnostics(container) {
   if (ref) container.insertBefore(section, ref);
   else container.appendChild(section);
 
-  section.querySelector('#bulk-images-btn')?.addEventListener('click', () => bulkGenerateImages());
   section.querySelector('#bulk-seo-btn')?.addEventListener('click', () => bulkGenerateSEO());
 
   section.querySelector('#bulk-activate-btn')?.addEventListener('click', async () => {
@@ -1746,178 +1723,6 @@ async function exportProductsPDF() {
   }
 }
 
-// ---- Product Image Generator ----
-
-// Color map matching ProductColors from utils.js
-const COLOR_HEX = {
-  'black': '#1a1a1a', 'cyan': '#00bcd4', 'magenta': '#e91e63', 'yellow': '#ffeb3b',
-  'red': '#f44336', 'blue': '#2196f3', 'green': '#4caf50', 'photo black': '#000000',
-  'matte black': '#2d2d2d', 'light cyan': '#80deea', 'light magenta': '#f48fb1',
-  'gray': '#9e9e9e', 'grey': '#9e9e9e', 'light gray': '#bdbdbd', 'light grey': '#bdbdbd',
-};
-
-// Multi-pack color arrays (ordered stripe colors)
-const PACK_COLORS = {
-  'cmy': ['#00bcd4', '#e91e63', '#ffeb3b'],
-  'bcmy': ['#1a1a1a', '#00bcd4', '#e91e63', '#ffeb3b'],
-  'kcmy': ['#1a1a1a', '#00bcd4', '#e91e63', '#ffeb3b'],
-  'cmyk': ['#00bcd4', '#e91e63', '#ffeb3b', '#1a1a1a'],
-  'tri-color': ['#00bcd4', '#e91e63', '#ffeb3b'],
-  'tri-colour': ['#00bcd4', '#e91e63', '#ffeb3b'],
-  '4-pack': ['#1a1a1a', '#00bcd4', '#e91e63', '#ffeb3b'],
-  '4 pack': ['#1a1a1a', '#00bcd4', '#e91e63', '#ffeb3b'],
-  'color': ['#00bcd4', '#e91e63', '#ffeb3b'],
-  'colour': ['#00bcd4', '#e91e63', '#ffeb3b'],
-};
-
-function detectProductColor(product) {
-  const color = (product.color || '').toLowerCase().trim();
-  if (PACK_COLORS[color]) return { type: 'pack', colors: PACK_COLORS[color] };
-  if (COLOR_HEX[color]) return { type: 'single', hex: COLOR_HEX[color] };
-  // Detect from name
-  if (typeof ProductColors !== 'undefined') {
-    const detected = ProductColors.detectFromName(product.name);
-    if (detected) {
-      if (PACK_COLORS[detected]) return { type: 'pack', colors: PACK_COLORS[detected] };
-      if (COLOR_HEX[detected]) return { type: 'single', hex: COLOR_HEX[detected] };
-    }
-  }
-  return null;
-}
-
-function renderColorCanvas(colorInfo, size = 400) {
-  const canvas = document.createElement('canvas');
-  canvas.width = size;
-  canvas.height = size;
-  const ctx = canvas.getContext('2d');
-  const r = size * 0.06; // rounded corner radius
-
-  // Clipping path with rounded corners
-  ctx.beginPath();
-  ctx.moveTo(r, 0);
-  ctx.lineTo(size - r, 0);
-  ctx.quadraticCurveTo(size, 0, size, r);
-  ctx.lineTo(size, size - r);
-  ctx.quadraticCurveTo(size, size, size - r, size);
-  ctx.lineTo(r, size);
-  ctx.quadraticCurveTo(0, size, 0, size - r);
-  ctx.lineTo(0, r);
-  ctx.quadraticCurveTo(0, 0, r, 0);
-  ctx.closePath();
-  ctx.clip();
-
-  if (colorInfo.type === 'single') {
-    ctx.fillStyle = colorInfo.hex;
-    ctx.fillRect(0, 0, size, size);
-  } else if (colorInfo.type === 'pack') {
-    const count = colorInfo.colors.length;
-    const stripeW = size / count;
-    colorInfo.colors.forEach((hex, i) => {
-      ctx.fillStyle = hex;
-      ctx.fillRect(i * stripeW, 0, stripeW + 1, size); // +1 to prevent gaps
-    });
-  }
-
-  return canvas;
-}
-
-function canvasToBlob(canvas) {
-  return new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', 0.92));
-}
-
-async function generateProductImage(product, silent = false) {
-  const source = (product.source || '').toLowerCase();
-  const isCompatible = source === 'compatible' || source === 'remanufactured' ||
-    (product.name || '').toLowerCase().startsWith('compatible ') ||
-    (product.sku || '').match(/^I[A-Z]/);
-  const isGenuine = source === 'genuine' && !isCompatible;
-  const isPack = /pack|value\s*pack|combo/i.test(product.name || '');
-
-  // Compatible products: generate color block/stripes
-  if (isCompatible) {
-    const colorInfo = detectProductColor(product);
-    if (!colorInfo) {
-      if (!silent) Toast.error('Cannot detect color for this product');
-      return false;
-    }
-    const canvas = renderColorCanvas(colorInfo);
-    const blob = await canvasToBlob(canvas);
-    const file = new File([blob], `${product.sku || 'product'}-color.jpg`, { type: 'image/jpeg' });
-    await AdminAPI.uploadProductImage(product.id, file);
-    return true;
-  }
-
-  // Genuine packs: find individual genuine products and composite their images
-  if (isGenuine && isPack) {
-    // Extract cartridge code from name
-    const codeMatch = (product.name || '').match(/\b([A-Z]{1,3}[\-]?\d{2,5}[A-Z]*(?:XL)?)\b/i);
-    if (!codeMatch) {
-      if (!silent) Toast.error('Cannot extract cartridge code from product name');
-      return false;
-    }
-    const code = codeMatch[1];
-    const brand = (product.brand_name || (typeof product.brand === 'object' ? product.brand?.name : product.brand) || '').toLowerCase().replace(/\s+/g, '-');
-
-    // Search for individual genuine products with this code
-    const searchResp = await AdminAPI.getProducts({ search: code, brand: brand }, 1, 50);
-    const allResults = Array.isArray(searchResp) ? searchResp : (searchResp?.products || searchResp?.data || []);
-
-    // Filter to individual genuine products (not packs) with images
-    const singles = allResults.filter(p => {
-      const pSource = (p.source || '').toLowerCase();
-      const pName = (p.name || '').toLowerCase();
-      return pSource === 'genuine' && !(/pack|value\s*pack|combo/i.test(pName)) && (p.images?.length || p.primary_image || p.image_url);
-    });
-
-    if (singles.length === 0) {
-      if (!silent) Toast.error('No individual genuine product images found for this pack');
-      return false;
-    }
-
-    // Upload each individual product's image as an image for this pack
-    let uploaded = 0;
-    for (const single of singles) {
-      const imgRaw = single.primary_image || single.image_url || (single.images?.[0]?.image_url || single.images?.[0]?.url || (single.images?.[0]?.path && typeof storageUrl === 'function' ? storageUrl(single.images?.[0]?.path) : single.images?.[0]?.path) || single.images?.[0]);
-      const imgUrl = imgRaw;
-      if (!imgUrl || typeof imgUrl !== 'string') continue;
-
-      try {
-        // Fetch the image and re-upload it
-        const resp = await fetch(imgUrl);
-        if (!resp.ok) continue;
-        const blob = await resp.blob();
-        const ext = imgUrl.split('.').pop()?.split('?')[0] || 'png';
-        const file = new File([blob], `${product.sku || 'pack'}-${single.sku || uploaded}.${ext}`, { type: blob.type || 'image/png' });
-        await AdminAPI.uploadProductImage(product.id, file);
-        uploaded++;
-      } catch { /* skip failed images */ }
-    }
-
-    if (uploaded === 0) {
-      if (!silent) Toast.error('Failed to fetch individual product images');
-      return false;
-    }
-    return true;
-  }
-
-  // Genuine single product: generate color block as fallback
-  if (isGenuine && !isPack) {
-    const colorInfo = detectProductColor(product);
-    if (!colorInfo) {
-      if (!silent) Toast.error('No color detected and not a pack product — upload an image manually');
-      return false;
-    }
-    const canvas = renderColorCanvas(colorInfo);
-    const blob = await canvasToBlob(canvas);
-    const file = new File([blob], `${product.sku || 'product'}-color.jpg`, { type: 'image/jpeg' });
-    await AdminAPI.uploadProductImage(product.id, file);
-    return true;
-  }
-
-  if (!silent) Toast.error('Cannot generate image for this product type');
-  return false;
-}
-
 // ---- SEO Metadata Generator ----
 
 function generateSEO(product) {
@@ -1981,160 +1786,6 @@ function generateSEO(product) {
   }
 
   return { meta_title: metaTitle.trim(), meta_description: metaDesc.trim() };
-}
-
-async function bulkGenerateImages() {
-  // First, scan to find products needing images
-  Toast.info('Scanning products for missing images\u2026');
-  let allProducts = [];
-  try {
-    let page = 1;
-    while (true) {
-      const data = await AdminAPI.getProducts({}, page, 200);
-      const rows = Array.isArray(data) ? data : (data?.products || data?.data || []);
-      if (rows.length === 0) break;
-      allProducts = allProducts.concat(rows);
-      const total = data?.pagination?.total ?? data?.total ?? 0;
-      if (allProducts.length >= total || rows.length < 200) break;
-      page++;
-    }
-  } catch (e) {
-    Toast.error(`Failed to scan products: ${e.message}`);
-    return;
-  }
-
-  // Filter to compatible products without any images (genuine/original images are added manually)
-  const isCompatibleProduct = (p) => {
-    const src = (p.source || '').toLowerCase();
-    if (src === 'compatible' || src === 'remanufactured') return true;
-    // Fallback: detect by name if source field is missing/null
-    if ((p.name || '').toLowerCase().startsWith('compatible ')) return true;
-    // Fallback: detect by SKU prefix (compatible SKUs start with 'I')
-    if ((p.sku || '').match(/^I[A-Z]/)) return true;
-    return false;
-  };
-
-  const noImage = allProducts.filter(p =>
-    (!p.images || p.images.length === 0) && !p.primary_image && !p.image_url
-  );
-  const needsImages = noImage.filter(p => isCompatibleProduct(p));
-
-  // Debug: log what we found to help diagnose issues
-  const skippedGenuine = noImage.length - needsImages.length;
-  DebugLog.log(`[BulkImages] ${allProducts.length} total products, ${noImage.length} without images, ${needsImages.length} compatible, ${skippedGenuine} genuine/unknown skipped`);
-  if (noImage.length > 0 && needsImages.length === 0) {
-    // Log a sample to help debug source field values
-    const sample = noImage.slice(0, 5).map(p => ({ name: p.name, source: p.source, sku: p.sku }));
-    DebugLog.log('[BulkImages] Sample products without images (source field check):', sample);
-  }
-
-  if (needsImages.length === 0) {
-    Toast.success(`All compatible products already have images! (${skippedGenuine} genuine products without images skipped)`);
-    return;
-  }
-
-  // Build preview of first 3 products
-  const previewItems = needsImages.slice(0, 3);
-  let previewHTML = `
-    <p style="margin:0 0 12px;color:var(--text-secondary)">
-      Found <strong>${needsImages.length}</strong> compatible products without images.<br>
-      Color block/stripe images will be generated.<br>
-      Genuine/original products are skipped (add images manually).
-    </p>
-    <div style="margin:12px 0;border:1px solid var(--steel-200,#e2e8f0);border-radius:6px;overflow:hidden">
-      <div style="padding:6px 10px;background:var(--steel-100,#f1f5f9);font-size:11px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.04em">Preview (${Math.min(3, needsImages.length)} of ${needsImages.length})</div>`;
-  for (const p of previewItems) {
-    const brand = typeof p.brand === 'object' ? p.brand?.name : p.brand || '';
-    const color = detectProductColor(p);
-    const colorDot = color?.hex
-      ? `<span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${color.hex};border:1px solid rgba(0,0,0,0.15);vertical-align:middle;margin-right:4px"></span>`
-      : '';
-    previewHTML += `
-      <div style="display:flex;align-items:center;gap:10px;padding:8px 10px;border-top:1px solid var(--steel-200,#e2e8f0)">
-        ${colorDot}
-        <div style="flex:1;min-width:0">
-          <div style="font-size:13px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(p.name || '')}</div>
-          <div style="font-size:11px;color:var(--text-muted)">${esc(p.sku || '')} · ${esc(brand)}</div>
-        </div>
-      </div>`;
-  }
-  if (needsImages.length > 3) {
-    previewHTML += `<div style="padding:6px 10px;font-size:11px;color:var(--text-muted);border-top:1px solid var(--steel-200,#e2e8f0)">…and ${needsImages.length - 3} more</div>`;
-  }
-  previewHTML += `</div><p style="margin:8px 0 0;font-size:13px;color:var(--text-muted)">This may take several minutes.</p>`;
-
-  const modal = Modal.open({
-    title: 'Bulk Generate Images',
-    body: previewHTML,
-    footer: `
-      <button class="admin-btn admin-btn--ghost" data-action="cancel">Cancel</button>
-      <button class="admin-btn admin-btn--primary" data-action="confirm">Generate ${needsImages.length} Images</button>
-    `,
-  });
-  if (!modal) return;
-
-  modal.footer.querySelector('[data-action="cancel"]').addEventListener('click', () => Modal.close());
-  modal.footer.querySelector('[data-action="confirm"]').addEventListener('click', async () => {
-    const btn = modal.footer.querySelector('[data-action="confirm"]');
-    btn.disabled = true;
-    btn.textContent = 'Processing…';
-    try {
-      await (async () => {
-      let generated = 0;
-      let skipped = 0;
-      let failed = 0;
-      const total = needsImages.length;
-
-      Toast.info(`Generating images: 0 / ${total}\u2026`);
-
-      for (let i = 0; i < needsImages.length; i++) {
-        const product = needsImages[i];
-
-        // Update progress every 10 products
-        if (i > 0 && i % 10 === 0) {
-          Toast.info(`Generating images: ${i} / ${total} (${generated} done, ${skipped} skipped, ${failed} failed)\u2026`);
-        }
-
-        try {
-          const result = await generateProductImage(product, true);
-          if (result) {
-            generated++;
-          } else {
-            skipped++;
-          }
-        } catch {
-          failed++;
-        }
-
-        // Small delay to avoid overwhelming the backend
-        if (i % 5 === 4) {
-          await new Promise(r => setTimeout(r, 300));
-        }
-      }
-
-      // Final summary
-      if (generated > 0) {
-        Toast.success(`Done! ${generated} images generated, ${skipped} skipped, ${failed} failed`);
-      } else if (skipped > 0) {
-        Toast.info(`No images generated. ${skipped} products skipped (no color detected or no pack components found). ${failed} failed.`);
-      } else {
-        Toast.error(`Image generation failed for all ${total} products`);
-      }
-
-      // Refresh the diagnostics and product list
-      loadProducts();
-
-      // Update diagnostics count
-      if (_diagnostics) {
-        _diagnostics.missing_images = Math.max(0, (_diagnostics.missing_images || 0) - generated);
-        renderDiagnostics(_container);
-      }
-      })();
-    } catch (e) {
-      DebugLog.error('[BulkImages] error:', e);
-    }
-    Modal.close();
-  });
 }
 
 async function bulkGenerateSEO() {
