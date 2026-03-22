@@ -321,38 +321,52 @@
         renderProduct() {
             const info = this.getProductInfo();
             const price = parseFloat(info.retail_price || 0);
+            const seo = info.seo || {};
+            const og = seo.og || {};
 
-            // Build canonical slug URL
+            // Build canonical slug URL (fallback when seo.canonical not provided)
             const slug = info.slug || info.sku.toLowerCase();
-            const canonicalUrl = `https://www.inkcartridges.co.nz/products/${slug}/${info.sku}`;
+            const canonicalUrl = seo.canonical || `https://www.inkcartridges.co.nz/products/${slug}/${info.sku}`;
 
-            // Page title and meta description
-            const metaDescription = this.generateMetaDescription(info);
+            // Page title and meta description — prefer API seo fields, fall back to computed
             const prefix = info.isCompatible ? 'Compatible ' : 'Genuine ';
-            document.title = `${prefix}${info.displayName} NZ | InkCartridges.co.nz`;
+            const computedTitle = `${prefix}${info.displayName} NZ | InkCartridges.co.nz`;
+            document.title = seo.title || computedTitle;
+
+            const metaDescription = seo.description || this.generateMetaDescription(info);
             document.getElementById('meta-description').content = metaDescription;
 
-            // Open Graph tags
-            document.getElementById('og-title').content = `${info.displayName} | InkCartridges.co.nz`;
-            document.getElementById('og-description').content = metaDescription;
-            document.getElementById('og-url').content = canonicalUrl;
-            document.getElementById('og-price').content = price.toFixed(2);
-            if (info.image_url) {
-                document.getElementById('og-image').content = info.image_url;
-            }
+            // Keywords — set when provided
+            const keywordsEl = document.getElementById('meta-keywords');
+            if (keywordsEl) keywordsEl.content = seo.keywords || '';
 
-            // Twitter tags
-            document.getElementById('twitter-title').content = `${info.displayName} | InkCartridges.co.nz`;
-            document.getElementById('twitter-description').content = metaDescription;
-            if (info.image_url) {
-                document.getElementById('twitter-image').content = info.image_url;
+            // Open Graph tags — prefer seo.og.* fields
+            document.getElementById('og-title').content = og.title || `${info.displayName} | InkCartridges.co.nz`;
+            document.getElementById('og-description').content = og.description || metaDescription;
+            document.getElementById('og-url').content = canonicalUrl;
+            document.getElementById('og-image').content = og.image || info.image_url || '/assets/images/logo.png';
+            document.getElementById('og-type').content = og.type || 'product';
+            document.getElementById('og-price').content = price.toFixed(2);
+
+            // Twitter tags mirror OG
+            document.getElementById('twitter-title').content = og.title || `${info.displayName} | InkCartridges.co.nz`;
+            document.getElementById('twitter-description').content = og.description || metaDescription;
+            if (og.image || info.image_url) {
+                document.getElementById('twitter-image').content = og.image || info.image_url;
             }
 
             // Canonical URL
             document.getElementById('canonical-url').href = canonicalUrl;
 
-            // Schema.org Product structured data
-            this.updateProductSchema(info, price);
+            // Schema.org Product structured data — prefer seo.jsonLd if provided
+            if (seo.jsonLd) {
+                const schemaEl = document.getElementById('product-schema');
+                if (schemaEl) {
+                    schemaEl.textContent = typeof seo.jsonLd === 'string' ? seo.jsonLd : JSON.stringify(seo.jsonLd);
+                }
+            } else {
+                this.updateProductSchema(info, price);
+            }
 
             // FAQ JSON-LD from backend SEO response
             this._injectFaqSchema(info);
@@ -383,19 +397,25 @@
 
             document.getElementById('breadcrumb-product').textContent = info.displayName;
 
-            // BreadcrumbList JSON-LD (H5)
+            // BreadcrumbList JSON-LD — prefer seo.breadcrumbJsonLd if provided
             const breadcrumbSchemaEl = document.getElementById('breadcrumb-schema');
             if (breadcrumbSchemaEl) {
-                const breadcrumbSchema = {
-                    "@context": "https://schema.org",
-                    "@type": "BreadcrumbList",
-                    "itemListElement": [
-                        { "@type": "ListItem", "position": 1, "name": "Home", "item": "https://www.inkcartridges.co.nz" },
-                        { "@type": "ListItem", "position": 2, "name": `${info.brandName} Ink Cartridges`, "item": `https://www.inkcartridges.co.nz/brands/${brandSlug}` },
-                        { "@type": "ListItem", "position": 3, "name": info.displayName }
-                    ]
-                };
-                breadcrumbSchemaEl.textContent = JSON.stringify(breadcrumbSchema);
+                if (seo.breadcrumbJsonLd) {
+                    breadcrumbSchemaEl.textContent = typeof seo.breadcrumbJsonLd === 'string'
+                        ? seo.breadcrumbJsonLd
+                        : JSON.stringify(seo.breadcrumbJsonLd);
+                } else {
+                    const breadcrumbSchema = {
+                        "@context": "https://schema.org",
+                        "@type": "BreadcrumbList",
+                        "itemListElement": [
+                            { "@type": "ListItem", "position": 1, "name": "Home", "item": "https://www.inkcartridges.co.nz" },
+                            { "@type": "ListItem", "position": 2, "name": `${info.brandName} Ink Cartridges`, "item": `https://www.inkcartridges.co.nz/brands/${brandSlug}` },
+                            { "@type": "ListItem", "position": 3, "name": info.displayName }
+                        ]
+                    };
+                    breadcrumbSchemaEl.textContent = JSON.stringify(breadcrumbSchema);
+                }
             }
 
             // Product badge
