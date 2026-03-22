@@ -255,6 +255,50 @@
 
             // Update totals
             this.renderTotals(order);
+
+            // Google Customer Reviews opt-in
+            this.renderGoogleReviewsOptIn(order);
+        },
+
+        renderGoogleReviewsOptIn(order) {
+            if (!order || !order.email || !order.orderNumber) return;
+
+            const data = {
+                merchant_id: 5748243992,
+                order_id: String(order.orderNumber),
+                email: order.email,
+                delivery_country: 'NZ',
+                estimated_delivery_date: this.getEstimatedDeliveryDate(order.shipping)
+            };
+
+            // Store for renderOptIn callback (fires when platform.js loads)
+            window._googleReviewsOptInData = data;
+
+            // If platform.js already loaded and gapi.surveyoptin is ready, render immediately
+            if (window.gapi && window.gapi.surveyoptin) {
+                window.gapi.surveyoptin.render(data);
+            }
+        },
+
+        getEstimatedDeliveryDate(shippingMethod) {
+            const shipping = (shippingMethod || '').toLowerCase();
+            let businessDays;
+            if (shipping.includes('overnight')) {
+                businessDays = 1;
+            } else if (shipping.includes('express')) {
+                businessDays = 2;
+            } else {
+                businessDays = 5;
+            }
+
+            const date = new Date();
+            let added = 0;
+            while (added < businessDays) {
+                date.setDate(date.getDate() + 1);
+                const day = date.getDay();
+                if (day !== 0 && day !== 6) added++;
+            }
+            return date.toISOString().split('T')[0];
         },
 
         // Uses ProductColors from utils.js for color lookups

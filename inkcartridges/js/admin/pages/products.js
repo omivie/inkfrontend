@@ -54,7 +54,7 @@ function buildColumns() {
         }
         return `<div class="admin-product-thumb admin-product-thumb--empty">${icon('products', 16, 16)}</div>`;
       },
-      className: 'cell-center',
+      className: 'cell-center cell-image',
     },
     {
       key: 'name', label: 'Name', sortable: true,
@@ -413,14 +413,13 @@ function buildProductModalTabs(modal, full, isOwner) {
     </div>
     ${formGroup('Meta Title', `<input class="admin-input" id="edit-meta-title" value="${esc(full.meta_title || '')}">`)}
     ${formGroup('Meta Description', `<textarea class="admin-textarea" id="edit-meta-desc" rows="3">${esc(full.meta_description || '')}</textarea>`)}
-    ${formGroup('Meta Keywords', `<input class="admin-input" id="edit-meta-keywords" value="${esc(full.meta_keywords || '')}">`)}
   `;
 
   // Advanced panel
   let advancedHtml = `
     ${formGroup('Page Yield', `<input class="admin-input" id="edit-page-yield" type="number" min="0" value="${full.page_yield ?? ''}">`)}
     ${formGroup('Tags (comma-separated)', `<input class="admin-input" id="edit-tags" value="${esc((full.tags || []).join(', '))}">`)}
-    ${formGroup('Internal Notes', `<textarea class="admin-textarea" id="edit-admin-notes" rows="3">${esc(full.admin_notes || '')}</textarea>`)}
+    ${formGroup('Internal Notes', `<textarea class="admin-textarea" id="edit-admin-notes" rows="3">${esc(full.internal_notes || '')}</textarea>`)}
   `;
 
   // Compatibility panel
@@ -428,15 +427,33 @@ function buildProductModalTabs(modal, full, isOwner) {
     <div class="admin-form-group" id="compat-section">
       <div style="display:flex;justify-content:space-between;align-items:center">
         <label id="compat-heading">Compatible Printers</label>
-        <button class="admin-btn admin-btn--ghost admin-btn--sm" id="compat-add-btn">+ Add Printer</button>
+        <div style="display:flex;gap:6px">
+          <button class="admin-btn admin-btn--ghost admin-btn--sm" id="compat-paste-btn">Paste Bulk</button>
+          <button class="admin-btn admin-btn--ghost admin-btn--sm" id="compat-add-btn">+ Add Printer</button>
+        </div>
       </div>
       <div id="compat-search-wrap" style="display:none;margin-bottom:8px;position:relative">
         <input class="admin-input" id="compat-search" placeholder="Search printers\u2026" autocomplete="off">
         <div id="compat-suggestions" class="admin-compat-suggestions"></div>
       </div>
+      <div id="compat-paste-wrap" class="admin-compat-paste-wrap" style="display:none">
+        <textarea id="compat-paste-area" class="admin-input admin-compat-paste-area" placeholder="Paste printer compatibility list\u2026&#10;Each line: Brand Model1 / Model2 / Model3&#10;Example: Brother 1500 / 2000 / Charger11"></textarea>
+        <div style="display:flex;gap:8px;margin-top:8px;align-items:center">
+          <button class="admin-btn admin-btn--sm admin-btn--primary" id="compat-parse-btn">Find Printers</button>
+          <button class="admin-btn admin-btn--sm admin-btn--ghost" id="compat-add-matched-btn" style="display:none"></button>
+        </div>
+        <div id="compat-parse-results" class="admin-compat-parse-results"></div>
+      </div>
       <div class="admin-compat-printers" id="compat-printers"><span class="admin-text-muted">Loading\u2026</span></div>
       <div id="compat-bulk-wrap" style="margin-top:10px;display:none">
         <button class="admin-btn admin-btn--ghost admin-btn--sm" id="compat-bulk-btn">Apply to all variants with prefix &ldquo;<span id="compat-prefix"></span>&rdquo;</button>
+      </div>
+      <div id="compat-unmatched-wrap" style="display:none;margin-top:14px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+          <label style="font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted)">Unmatched Models (not in DB)</label>
+          <button class="admin-btn admin-btn--ghost admin-btn--sm" id="compat-clear-unmatched-btn" style="font-size:11px;padding:2px 8px">Clear</button>
+        </div>
+        <div id="compat-unmatched-list" class="admin-compat-unmatched-list"></div>
       </div>
     </div>
   `;
@@ -694,6 +711,58 @@ function bindProductModalActions(modal, product) {
     const searchWrap = modal.querySelector('#compat-search-wrap');
     const searchInput = modal.querySelector('#compat-search');
     const suggestions = modal.querySelector('#compat-suggestions');
+    const pasteBtn = modal.querySelector('#compat-paste-btn');
+    const pasteWrap = modal.querySelector('#compat-paste-wrap');
+    const pasteArea = modal.querySelector('#compat-paste-area');
+    const parseBtn = modal.querySelector('#compat-parse-btn');
+    const addMatchedBtn = modal.querySelector('#compat-add-matched-btn');
+    const parseResults = modal.querySelector('#compat-parse-results');
+    const unmatchedWrap = modal.querySelector('#compat-unmatched-wrap');
+    const unmatchedList = modal.querySelector('#compat-unmatched-list');
+    const clearUnmatchedBtn = modal.querySelector('#compat-clear-unmatched-btn');
+
+    // Helpers: embed/extract unmatched block inside internal_notes
+    const UM_START = '=== Unmatched Compatibility Models ===';
+    const UM_END = '=====================================';
+    function getUnmatchedNote(notes) {
+      const s = (notes || '').indexOf(UM_START);
+      const e = (notes || '').indexOf(UM_END);
+      if (s === -1 || e === -1) return '';
+      return notes.slice(s + UM_START.length, e).trim();
+    }
+    function setUnmatchedNote(notes, csv) {
+      const base = (notes || '').replace(new RegExp('\\n?' + UM_START.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '[\\s\\S]*?' + UM_END.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\n?'), '').trim();
+      if (!csv) return base;
+      return `${base ? base + '\n\n' : ''}${UM_START}\n${csv}\n${UM_END}`;
+    }
+    function renderUnmatchedNote(csv) {
+      if (!unmatchedWrap || !unmatchedList) return;
+      if (csv) {
+        unmatchedList.textContent = csv;
+        unmatchedWrap.style.display = 'block';
+      } else {
+        unmatchedWrap.style.display = 'none';
+        unmatchedList.textContent = '';
+      }
+    }
+
+    // Show existing unmatched note on load
+    renderUnmatchedNote(getUnmatchedNote(product.internal_notes));
+
+    // Clear button
+    if (clearUnmatchedBtn) {
+      clearUnmatchedBtn.addEventListener('click', async () => {
+        clearUnmatchedBtn.disabled = true;
+        try {
+          const newNotes = setUnmatchedNote(product.internal_notes, '');
+          await AdminAPI.updateProduct(product.id, { internal_notes: newNotes });
+          product.internal_notes = newNotes;
+          renderUnmatchedNote('');
+        } catch (err) {
+          Toast.error(`Clear failed: ${err.message}`);
+        } finally { clearUnmatchedBtn.disabled = false; }
+      });
+    }
     const bulkWrap = modal.querySelector('#compat-bulk-wrap');
     const bulkBtn = modal.querySelector('#compat-bulk-btn');
     const prefixEl = modal.querySelector('#compat-prefix');
@@ -801,6 +870,153 @@ function bindProductModalActions(modal, product) {
       }, { once: false });
     }
 
+    // Bulk paste
+    function parsePrinterBulkText(raw) {
+      const queries = [];
+      const lines = raw.split(/\n/).map(s => s.trim()).filter(Boolean);
+      for (const line of lines) {
+        const segments = line.split(/\s*\/\s*|\s*,\s*|\s*;\s*|\s+-\s+/);
+        if (segments.length === 1) { queries.push(line.trim()); continue; }
+        // Brand = words in first segment before the first digit-starting word
+        const words = segments[0].trim().split(/\s+/);
+        let brandEnd = words.findIndex(w => /^\d/.test(w));
+        if (brandEnd === -1) brandEnd = words.length;
+        const brand = words.slice(0, brandEnd).join(' ');
+        const firstModel = words.slice(brandEnd).join(' ');
+        if (firstModel) queries.push(`${brand} ${firstModel}`.trim());
+        else queries.push(brand);
+        for (let i = 1; i < segments.length; i++) {
+          const seg = segments[i].trim();
+          if (seg) queries.push(`${brand} ${seg}`);
+        }
+      }
+      return [...new Set(queries)];
+    }
+
+    if (pasteBtn && pasteWrap && pasteArea && parseBtn && addMatchedBtn && parseResults) {
+      let pasteMatches = [];
+      let lastResults = [];
+
+      pasteBtn.addEventListener('click', () => {
+        const visible = pasteWrap.style.display !== 'none';
+        pasteWrap.style.display = visible ? 'none' : 'block';
+        if (!visible) { pasteArea.value = ''; parseResults.innerHTML = ''; addMatchedBtn.style.display = 'none'; pasteMatches = []; pasteArea.focus(); }
+        // Close the single-add search if open
+        if (!visible && searchWrap) searchWrap.style.display = 'none';
+      });
+
+      parseBtn.addEventListener('click', async () => {
+        const raw = pasteArea.value.trim();
+        if (!raw) return;
+        const names = parsePrinterBulkText(raw);
+        if (names.length === 0) return;
+
+        parseBtn.disabled = true;
+        parseBtn.textContent = 'Searching\u2026';
+        addMatchedBtn.style.display = 'none';
+        pasteMatches = [];
+
+        parseResults.innerHTML = `<div id="compat-parse-progress" style="color:var(--text-muted);font-size:12px">Searching 0 / ${names.length}\u2026</div>`;
+        const progressEl = parseResults.querySelector('#compat-parse-progress');
+
+        const BATCH = 20;
+        const results = [];
+        lastResults = results;
+        for (let i = 0; i < names.length; i += BATCH) {
+          const batch = names.slice(i, i + BATCH);
+          const batchResults = await Promise.all(batch.map(async name => {
+            try {
+              const resp = await window.API.searchPrinters(name);
+              const list = resp?.data?.printers || resp?.data || [];
+              const top = Array.isArray(list) ? list[0] : null;
+              return top ? { query: name, printer: top, matched: true } : { query: name, matched: false };
+            } catch (_) {
+              return { query: name, matched: false };
+            }
+          }));
+          results.push(...batchResults);
+          if (progressEl) progressEl.textContent = `Searching ${Math.min(i + BATCH, names.length)} / ${names.length}\u2026`;
+        }
+
+        pasteMatches = results.filter(r => r.matched);
+        const newMatches = pasteMatches.filter(r => {
+          const id = String(r.printer.id || r.printer.printer_id || '');
+          return !compatPrinters.some(p => String(typeof p === 'object' ? (p.id || p.printer_id) : '') === id);
+        });
+
+        parseResults.innerHTML = results.map(r => {
+          if (r.matched) {
+            const resolvedName = r.printer.full_name || r.printer.model_name || r.printer.model || r.printer.name || '';
+            return `<div class="admin-compat-parse-result admin-compat-parse-result--matched">
+              <span>&#10003;</span>
+              <span class="result-name">${esc(resolvedName)}</span>
+              <span class="result-query">(searched: ${esc(r.query)})</span>
+            </div>`;
+          }
+          return `<div class="admin-compat-parse-result admin-compat-parse-result--unmatched">
+            <span>&#8212;</span>
+            <span class="result-query">${esc(r.query)}</span>
+            <span style="font-size:11px">not found</span>
+          </div>`;
+        }).join('');
+
+        if (newMatches.length > 0) {
+          addMatchedBtn.textContent = `Add ${newMatches.length} Printer${newMatches.length > 1 ? 's' : ''}`;
+          addMatchedBtn.style.display = 'inline-flex';
+        }
+
+        // Auto-save unmatched names immediately after search
+        const unmatchedNow = results.filter(r => !r.matched).map(r => r.query);
+        if (unmatchedNow.length > 0 && product.id) {
+          const existing = getUnmatchedNote(product.internal_notes);
+          const existingSet = new Set(existing ? existing.split(',').map(s => s.trim()).filter(Boolean) : []);
+          unmatchedNow.forEach(n => existingSet.add(n));
+          const merged = [...existingSet].join(', ');
+          const newNotes = setUnmatchedNote(product.internal_notes, merged);
+          renderUnmatchedNote(merged); // show immediately in UI
+          try {
+            await AdminAPI.updateProduct(product.id, { internal_notes: newNotes });
+            product.internal_notes = newNotes;
+          } catch (err) {
+            Toast.error(`Could not save unmatched note: ${err.message}`);
+          }
+        }
+
+        parseBtn.disabled = false;
+        parseBtn.textContent = 'Find Printers';
+      });
+
+      addMatchedBtn.addEventListener('click', async () => {
+        if (!product.sku) return;
+        const toAdd = pasteMatches.filter(r => {
+          const id = String(r.printer.id || r.printer.printer_id || '');
+          return !compatPrinters.some(p => String(typeof p === 'object' ? (p.id || p.printer_id) : '') === id);
+        });
+        if (toAdd.length === 0) return;
+
+        addMatchedBtn.disabled = true;
+        addMatchedBtn.textContent = 'Adding\u2026';
+        let added = 0;
+        for (const r of toAdd) {
+          const id = String(r.printer.id || r.printer.printer_id || '');
+          const name = r.printer.full_name || r.printer.model_name || r.printer.model || r.printer.name || '';
+          try {
+            await AdminAPI.addCompatiblePrinter(product.sku, id);
+            compatPrinters.push({ id, full_name: name });
+            added++;
+          } catch (_) {}
+        }
+        renderCompatBadges();
+        pasteWrap.style.display = 'none';
+        pasteArea.value = '';
+        parseResults.innerHTML = '';
+        addMatchedBtn.style.display = 'none';
+        pasteMatches = [];
+        if (added > 0) Toast.success(`Added ${added} printer${added > 1 ? 's' : ''}`);
+        addMatchedBtn.disabled = false;
+      });
+    }
+
     // Bulk apply
     if (showBulk && bulkWrap && bulkBtn && prefixEl) {
       prefixEl.textContent = skuPrefix;
@@ -824,15 +1040,17 @@ function bindProductModalActions(modal, product) {
 
     // Load printers
     if (product.sku && window.API?.getCompatiblePrinters) {
-      window.API.getCompatiblePrinters(product.sku).then(response => {
+      const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 10000));
+      Promise.race([window.API.getCompatiblePrinters(product.sku), timeout]).then(response => {
         compatPrinters = response?.data?.compatible_printers || response?.data?.printers || response?.data || [];
         if (!Array.isArray(compatPrinters)) compatPrinters = [];
         renderCompatBadges();
       }).catch(() => {
-        if (container) container.innerHTML = '<span class="admin-text-muted">Could not load</span>';
+        compatPrinters = [];
+        renderCompatBadges();
       });
     } else {
-      if (container) container.innerHTML = '<span class="admin-text-muted">No SKU</span>';
+      renderCompatBadges();
     }
   }
 
@@ -933,21 +1151,13 @@ function bindProductModalActions(modal, product) {
   });
 
   // Generate SEO
-  modal.querySelector('[data-action="generate-seo"]')?.addEventListener('click', async () => {
-    const btn = modal.querySelector('[data-action="generate-seo"]');
-    if (btn) btn.disabled = true;
-    try {
-      const seo = await AdminAPI.generateProductSEO(product.sku);
-      const titleEl = modal.querySelector('#edit-meta-title');
-      const descEl = modal.querySelector('#edit-meta-desc');
-      if (titleEl && seo.meta_title) titleEl.value = seo.meta_title;
-      if (descEl && seo.meta_description) descEl.value = seo.meta_description;
-      Toast.success('SEO generated and saved');
-    } catch (e) {
-      Toast.error(`SEO generate failed: ${e.message}`);
-    } finally {
-      if (btn) btn.disabled = false;
-    }
+  modal.querySelector('[data-action="generate-seo"]')?.addEventListener('click', () => {
+    const seo = generateSEO(full);
+    const titleEl = modal.querySelector('#edit-meta-title');
+    const descEl = modal.querySelector('#edit-meta-desc');
+    if (titleEl) titleEl.value = seo.meta_title;
+    if (descEl) descEl.value = seo.meta_description;
+    Toast.success('SEO generated');
   });
 
   // Cancel
@@ -978,11 +1188,10 @@ function bindProductModalActions(modal, product) {
       track_inventory: chk('edit-track-inventory'),
       meta_title: val('edit-meta-title'),
       meta_description: val('edit-meta-desc'),
-      meta_keywords: val('edit-meta-keywords'),
       page_yield: numVal('edit-page-yield'),
       weight_kg: numVal('edit-weight'),
       tags: tagsArr,
-      admin_notes: val('edit-admin-notes'),
+      internal_notes: val('edit-admin-notes'),
     };
 
     if (AdminAuth.isOwner()) {
@@ -1417,64 +1626,36 @@ function generateSEO(product) {
   const sourceLabel = source === 'genuine' ? 'Genuine' : source === 'compatible' ? 'Compatible' : source === 'remanufactured' ? 'Remanufactured' : '';
 
   // ---- Meta Title (50-60 chars ideal) ----
-  // Pattern: "{Brand} {Code} {Type} - {Source} | InkCartridges NZ"
+  // Pattern: "Buy {Brand} {Code} {Type} NZ | InkCartridges.co.nz"
   let metaTitle;
   if (code && sourceLabel) {
-    metaTitle = `${brand} ${code} ${typeLabel} - ${sourceLabel} | InkCartridges NZ`;
+    metaTitle = `Buy ${brand} ${code} ${typeLabel} NZ - ${sourceLabel} | InkCartridges.co.nz`;
   } else if (code) {
-    metaTitle = `${brand} ${code} ${typeLabel} | InkCartridges NZ`;
+    metaTitle = `Buy ${brand} ${code} ${typeLabel} NZ | InkCartridges.co.nz`;
   } else {
-    metaTitle = `${name} | InkCartridges NZ`;
+    metaTitle = `Buy ${name} NZ | InkCartridges.co.nz`;
   }
-  // Trim if too long
   if (metaTitle.length > 60) {
-    metaTitle = `${brand} ${code || name.split(' ').slice(1, 3).join(' ')} | InkCartridges NZ`;
+    metaTitle = `Buy ${brand} ${code || name.split(' ').slice(1, 3).join(' ')} NZ | InkCartridges.co.nz`;
   }
 
   // ---- Meta Description (150-160 chars ideal) ----
-  const colorPart = color ? ` ${color}` : '';
+  const colorPart = color && color.toLowerCase() !== 'n/a' ? ` ${color}` : '';
   const sourcePart = sourceLabel ? `${sourceLabel.toLowerCase()} ` : '';
+  const qualityNote = sourceLabel === 'Genuine' ? 'OEM quality guaranteed.' : sourceLabel === 'Compatible' ? 'Quality tested, NZ warranty.' : '';
   let metaDesc;
   if (type === 'ribbon') {
-    metaDesc = `Buy ${sourcePart}${brand} ${code || name}${colorPart} printer ribbon online at InkCartridges.co.nz. Fast NZ-wide delivery. Free shipping over $100.`;
+    metaDesc = `Buy ${sourcePart}${brand} ${code || name}${colorPart} printer ribbon in NZ. In stock, ships fast. ${qualityNote} Free delivery on orders over $100 inc GST.`.trim();
   } else if (type === 'drum_unit') {
-    metaDesc = `Buy ${sourcePart}${brand} ${code || name} drum unit online at InkCartridges.co.nz. Fast NZ-wide delivery. Free shipping over $100.`;
+    metaDesc = `Buy ${sourcePart}${brand} ${code || name} drum unit in NZ. In stock, ships fast. ${qualityNote} Free delivery on orders over $100 inc GST.`.trim();
   } else {
-    metaDesc = `Buy ${sourcePart}${brand} ${code || name}${colorPart} ${typeLabel.toLowerCase()} online at InkCartridges.co.nz. Fast NZ-wide delivery. Free shipping over $100.`;
+    metaDesc = `Buy ${sourcePart}${brand} ${code || name}${colorPart} ${typeLabel.toLowerCase()} in NZ. In stock, ships fast. ${qualityNote} Free delivery on orders over $100 inc GST.`.trim();
   }
   if (metaDesc.length > 160) {
     metaDesc = metaDesc.substring(0, 157) + '...';
   }
 
-  // ---- Meta Keywords ----
-  const keywords = new Set();
-  if (brand) {
-    keywords.add(`${brand} ${type} cartridge`.toLowerCase());
-    keywords.add(`${brand} ink`.toLowerCase());
-    keywords.add(`buy ${brand} ink nz`.toLowerCase());
-  }
-  if (code) {
-    keywords.add(`${brand} ${code}`.toLowerCase());
-    keywords.add(`${code} cartridge`.toLowerCase());
-    keywords.add(`${code} ${type}`.toLowerCase());
-  }
-  if (sourceLabel) {
-    keywords.add(`${sourceLabel} ${brand} ${type}`.toLowerCase());
-  }
-  if (color && color.toLowerCase() !== 'n/a') {
-    keywords.add(`${brand} ${color} ${type}`.toLowerCase());
-  }
-  keywords.add(`printer ${type} nz`.toLowerCase());
-  keywords.add('ink cartridges nz');
-  let metaKeywords = [...keywords].join(', ');
-  // Backend limit: 200 chars — trim to last full keyword
-  if (metaKeywords.length > 200) {
-    metaKeywords = metaKeywords.substring(0, 200);
-    const lastComma = metaKeywords.lastIndexOf(',');
-    if (lastComma > 0) metaKeywords = metaKeywords.substring(0, lastComma);
-  }
-
-  return { meta_title: metaTitle.trim(), meta_description: metaDesc.trim(), meta_keywords: metaKeywords.trim() };
+  return { meta_title: metaTitle.trim(), meta_description: metaDesc.trim() };
 }
 
 async function bulkGenerateImages() {
@@ -1634,7 +1815,7 @@ async function bulkGenerateImages() {
 async function bulkGenerateSEO() {
   Modal.confirm({
     title: 'Generate SEO Metadata',
-    message: 'This will auto-generate meta titles, descriptions, and keywords for all products missing SEO data. Existing metadata will NOT be overwritten. Continue?',
+    message: 'This will auto-generate meta titles and descriptions for all products missing SEO data. Existing metadata will NOT be overwritten. Continue?',
     confirmLabel: 'Generate SEO',
     confirmClass: 'admin-btn--primary',
     onConfirm: async () => {
@@ -1656,7 +1837,7 @@ async function bulkGenerateSEO() {
 
         // Filter to products missing SEO
         const needsSEO = allProducts.filter(p =>
-          !p.meta_title || !p.meta_description || !p.meta_keywords
+          !p.meta_title || !p.meta_description
         );
 
         if (needsSEO.length === 0) {
@@ -1682,7 +1863,6 @@ async function bulkGenerateSEO() {
           let hasNew = false;
           if (!full.meta_title) { data.meta_title = seo.meta_title; hasNew = true; }
           if (!full.meta_description) { data.meta_description = seo.meta_description; hasNew = true; }
-          if (!full.meta_keywords) { data.meta_keywords = seo.meta_keywords; hasNew = true; }
 
           if (!hasNew) continue;
 
