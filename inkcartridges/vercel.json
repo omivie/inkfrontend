@@ -78,10 +78,10 @@
     { "source": "/products/:slug/:sku", "destination": "/html/product?sku=:sku" },
     { "source": "/brands/:slug", "destination": "/brands/index.html" },
     { "source": "/printers/:slug", "destination": "/printers/index.html" },
-    { "source": "/sitemap.xml", "destination": "https://api.inkcartridges.co.nz/sitemap.xml" },
-    { "source": "/sitemap-:path*.xml", "destination": "https://api.inkcartridges.co.nz/sitemap-:path*.xml" },
-    { "source": "/feeds/google-shopping.xml", "destination": "https://api.inkcartridges.co.nz/feeds/google-shopping.xml" },
-    { "source": "/feeds/facebook-catalog.tsv", "destination": "https://api.inkcartridges.co.nz/feeds/facebook-catalog.tsv" },
-    { "source": "/robots.txt", "destination": "https://api.inkcartridges.co.nz/robots.txt" }
+    { "source": "/sitemap.xml", "destination": "https://ink-backend-zaeq.onrender.com/sitemap.xml" },
+    { "source": "/sitemap-:path.xml", "destination": "https://ink-backend-zaeq.onrender.com/sitemap-:path.xml" },
+    { "source": "/feeds/google-shopping.xml", "destination": "https://ink-backend-zaeq.onrender.com/feeds/google-shopping.xml" },
+    { "source": "/feeds/facebook-catalog.tsv", "destination": "https://ink-backend-zaeq.onrender.com/feeds/facebook-catalog.tsv" },
+    { "source": "/robots.txt", "destination": "https://ink-backend-zaeq.onrender.com/robots.txt" }
   ]
 }
