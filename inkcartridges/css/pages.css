@@ -2754,10 +2754,27 @@
 }
 
 /* Related Products */
+.related-products__group {
+    margin-bottom: var(--spacing-xl);
+}
+
+.related-products__group-heading {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-sm);
+    font-size: var(--font-size-lg);
+    font-weight: var(--font-weight-semibold);
+    margin-bottom: var(--spacing-md);
+}
+
+.related-products__type-group {
+    margin-bottom: var(--spacing-xl);
+}
+
 .related-products__title {
     font-size: var(--font-size-xs);
     font-weight: var(--font-weight-semibold);
-    color: var(--color-text-muted);
+    color: var(--color-text-light);
     letter-spacing: var(--letter-spacing-wide);
     text-transform: uppercase;
     margin-bottom: var(--spacing-md);

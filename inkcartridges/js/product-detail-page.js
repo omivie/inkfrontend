@@ -222,7 +222,7 @@
                         const r = response.data;
                         // Normalize ribbon fields to match product page expectations
                         if (r.retail_price == null && r.sale_price != null) r.retail_price = r.sale_price;
-                        if (r.image_url == null && r.image_path) r.image_url = r.image_path;
+                        if (r.image_url == null && r.image_path) r.image_url = typeof storageUrl === 'function' ? storageUrl(r.image_path) : r.image_path;
                         if (r.active == null) r.active = r.is_active !== false;
                     }
                 } else {
@@ -737,18 +737,28 @@
             }
         },
 
+        _sortByColor(products) {
+            const ORDER = { black: 0, cyan: 1, magenta: 2, yellow: 3, cmy: 4, kcmy: 5 };
+            return [...products].sort((a, b) => {
+                const ca = (a.color || '').toLowerCase();
+                const cb = (b.color || '').toLowerCase();
+                const ia = ORDER[ca] ?? 99;
+                const ib = ORDER[cb] ?? 99;
+                return ia - ib;
+            });
+        },
+
         async renderRelatedProducts(info) {
             try {
-                const grid = document.getElementById('related-products-grid');
                 const section = document.getElementById('related-products');
-                if (!grid || !section) return;
+                if (!section) return;
 
                 let related = [];
 
                 // Primary: use new related products endpoint
                 const relatedResponse = await API.getRelatedProducts(info.sku);
                 if (relatedResponse.ok && relatedResponse.data?.related?.length > 0) {
-                    related = relatedResponse.data.related.slice(0, 6);
+                    related = relatedResponse.data.related;
                 }
 
                 // Fallback: search by first compatible printer
@@ -756,9 +766,9 @@
                     const printers = await this._fetchPrinters(info.sku);
                     if (printers.length > 0) {
                         const firstPrinter = printers[0].name;
-                        const response = await API.searchByPrinter(firstPrinter, { limit: 10 });
+                        const response = await API.searchByPrinter(firstPrinter, { limit: 50 });
                         if (response.ok && response.data?.products) {
-                            related = response.data.products.filter(p => p.sku !== info.sku).slice(0, 6);
+                            related = response.data.products.filter(p => p.sku !== info.sku).slice(0, 50);
                         }
                     }
 
@@ -767,11 +777,11 @@
                         const productCode = this._extractProductCode(info.manufacturer_part_number);
                         if (productCode) {
                             const brandName = info.brandName || '';
-                            const params = { search: productCode, limit: 10 };
+                            const params = { search: productCode, limit: 50 };
                             if (brandName) params.brand = brandName;
                             const response = await API.getProducts(params);
                             if (response.ok && response.data?.products) {
-                                related = response.data.products.filter(p => p.sku !== info.sku).slice(0, 6);
+                                related = response.data.products.filter(p => p.sku !== info.sku).slice(0, 50);
                             }
                         }
                     }
@@ -779,15 +789,75 @@
 
                 if (related.length === 0) return;
 
-                grid.innerHTML = related.map(p => Products.renderCard(p)).join('');
-                Products.bindImageFallbacks(grid);
-                Products.bindAddToCartEvents(grid);
+                // Infer source from name/slug since related endpoint omits the source field
+                const inferSource = (p) => {
+                    if (p.source) return p.source;
+                    const name = (p.name || '').toLowerCase();
+                    const slug = (p.slug || '').toLowerCase();
+                    if (name.startsWith('compatible') || slug.startsWith('compatible-')) return 'compatible';
+                    if (name.startsWith('genuine') || slug.startsWith('genuine-')) return 'genuine';
+                    return 'unknown';
+                };
 
-                const titleEl = section.querySelector('.related-products__title');
-                if (titleEl) {
-                    const code = info.manufacturer_part_number || this.extractProductCode(info) || info.sku;
-                    titleEl.textContent = `Products related to ${code}`;
-                }
+                const isCompatible = info.source === 'compatible';
+                const compatibles = this._sortByColor(related.filter(p => inferSource(p) === 'compatible'));
+                const genuines    = this._sortByColor(related.filter(p => inferSource(p) === 'genuine'));
+
+                const firstGroup  = isCompatible ? compatibles : genuines;
+                const secondGroup = isCompatible ? genuines    : compatibles;
+                const firstLabel  = isCompatible ? 'compatible' : 'genuine';
+                const secondLabel = isCompatible ? 'genuine'    : 'compatible';
+
+                const inferProductType = (p) => {
+                    const name = (p.name || '').toLowerCase();
+                    if (name.includes('toner')) return 'toner';
+                    return 'ink';
+                };
+
+                const buildSection = (products, type) => {
+                    if (!products.length) return '';
+                    const badge = type === 'compatible'
+                        ? '<span class="badge badge-compatible">COMPATIBLE</span>'
+                        : '<span class="badge badge-genuine">GENUINE</span>';
+                    const brandName = Security.escapeHtml((info.brandName || '').trim());
+
+                    const inks   = products.filter(p => inferProductType(p) === 'ink');
+                    const toners = products.filter(p => inferProductType(p) === 'toner');
+
+                    const buildTypeGrid = (items, productType) => {
+                        if (!items.length) return '';
+                        const label = productType === 'toner' ? 'Toner Cartridges' : 'Ink Cartridges';
+                        const heading = `${brandName} ${label}`.trim();
+                        return `
+                            <div class="related-products__type-group">
+                                <h3 class="related-products__group-heading">${badge} ${heading}</h3>
+                                <div class="related-products__grid product-grid">
+                                    ${items.map(p => Products.renderCard(p)).join('')}
+                                </div>
+                            </div>
+                        `;
+                    };
+
+                    return `
+                        <div class="related-products__group">
+                            ${buildTypeGrid(inks, 'ink')}
+                            ${buildTypeGrid(toners, 'toner')}
+                        </div>
+                    `;
+                };
+
+                const code = info.manufacturer_part_number || info.sku;
+                const container = section.querySelector('.container');
+                container.innerHTML = `
+                    <p class="related-products__title">PRODUCTS RELATED TO ${Security.escapeHtml(code)}</p>
+                    ${buildSection(firstGroup, firstLabel)}
+                    ${buildSection(secondGroup, secondLabel)}
+                `;
+
+                container.querySelectorAll('.related-products__grid').forEach(grid => {
+                    Products.bindImageFallbacks(grid);
+                    Products.bindAddToCartEvents(grid);
+                });
 
                 section.hidden = false;
             } catch (e) {

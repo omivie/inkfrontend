@@ -486,7 +486,10 @@
                 return (a.name || '').localeCompare(b.name || '');
             });
 
-            sorted.forEach(brand => {
+            // Only show ink/toner brands — filter out typewriter brands that bleed in from API
+            const inkBrands = sorted.filter(b => preferredOrder.includes(b.slug || b.id || ''));
+
+            inkBrands.forEach(brand => {
                 const brandId = brand.slug || brand.id || '';
                 const info = this.brandInfo[brandId];
                 const box = document.createElement('button');
@@ -522,7 +525,7 @@
                 box.className = 'drilldown-box drilldown-box--ribbon';
                 box.href = `/html/ribbons?device_brand=${encodeURIComponent(b.value)}`;
                 box.style.animationDelay = `${60 + i * 30}ms`;
-                box.innerHTML = `<span class="drilldown-box__label">${Security.escapeHtml(b.label)}</span><span class="ribbon-brand-count">${b.count}</span>`;
+                box.innerHTML = `<span class="drilldown-box__label">${Security.escapeHtml(b.label)}</span>`;
                 grid.appendChild(box);
             });
         },
@@ -2824,9 +2827,9 @@
                     this.elements.title.textContent = titleText;
                     this.elements.title.hidden = false;
                 } else {
-                    // Brands level — show default H1 for SEO
+                    // Brands level — keep H1 in DOM for SEO but visually hide it
                     this.elements.title.textContent = 'Shop Ink Cartridges & Toner NZ';
-                    this.elements.title.hidden = false;
+                    this.elements.title.hidden = true;
                 }
             }
         }

@@ -687,12 +687,9 @@ function createSmartSearch() {
                 ? 'View all ' + total + ' results'
                 : 'View all results';
 
-            const footerQueryLower = footerQuery.toLowerCase();
             let href;
             if (this._printerModel) {
                 href = '/html/shop?printer_model=' + encodeURIComponent(this._printerModel);
-            } else if (footerQueryLower === 'genuine' || footerQueryLower === 'compatible') {
-                href = '/html/shop?type=' + encodeURIComponent(footerQueryLower);
             } else {
                 href = '/html/shop?search=' + encodeURIComponent(footerQuery);
             }

@@ -773,6 +773,17 @@
     display: none;
 }
 
+/* Heading above brand grid */
+.ribbons-mega__heading {
+    text-align: center;
+    font-size: var(--font-size-sm);
+    font-weight: var(--font-weight-semibold);
+    color: var(--steel-500);
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    margin-bottom: var(--spacing-md);
+}
+
 /* Button grid — 5 per row on desktop */
 .ribbons-mega__grid {
     display: grid;
