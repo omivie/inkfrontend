@@ -1518,11 +1518,11 @@
   padding: 12px; background: var(--surface-hover);
 }
 .admin-compat-paste-area {
-  width: 100%; min-height: 80px; resize: vertical;
+  width: 100%; min-height: 200px; resize: vertical;
   font-size: 12px; font-family: var(--font-mono); margin-bottom: 0;
 }
 .admin-compat-parse-results {
-  margin-top: 10px; display: flex; flex-direction: column; gap: 4px; max-height: 200px; overflow-y: auto;
+  margin-top: 10px; display: flex; flex-direction: column; gap: 4px; max-height: 320px; overflow-y: auto;
 }
 .admin-compat-parse-result {
   font-size: 12px; padding: 4px 8px; border-radius: 4px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap;

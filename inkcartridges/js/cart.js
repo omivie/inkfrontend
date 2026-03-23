@@ -55,6 +55,9 @@ const Cart = {
     // Guard against concurrent mergeGuestCartAndLoad calls
     _mergeInProgress: false,
 
+    // Set of item IDs/keys currently being removed (in-flight delete API calls)
+    _removingItems: new Set(),
+
     /**
      * Compute composite key for cart item identity.
      * Uses source prefix + best available identifier (sku > slug > id).
@@ -397,6 +400,14 @@ const Cart = {
             const response = await API.getCart();
             if (response.ok && response.data) {
                 const parsed = this._parseServerCart(response.data);
+
+                // Filter out items that are currently being removed (in-flight deletes)
+                // to prevent them from reappearing while their delete API call is still in flight
+                if (this._removingItems.size > 0) {
+                    parsed.items = parsed.items.filter(function(item) {
+                        return !Cart._removingItems.has(item.id) && !Cart._removingItems.has(item.key);
+                    });
+                }
 
                 this.items = parsed.items;
                 this.serverSummary = parsed.summary;
@@ -1159,10 +1170,15 @@ const Cart = {
 
         // Sync to server only for core items
         if (isCore && typeof API !== 'undefined') {
+            // Mark as in-flight so loadFromServer() won't re-add it
+            this._removingItems.add(actualId);
+            if (removedItem && removedItem.key) this._removingItems.add(removedItem.key);
             try {
                 const response = await API.removeFromCart(actualId);
                 if (response && !response.ok) {
                     // Server rejected removal - rollback
+                    this._removingItems.delete(actualId);
+                    if (removedItem && removedItem.key) this._removingItems.delete(removedItem.key);
                     this.items = previousItems;
                     this.saveToLocalStorage();
                     this.updateUI();
@@ -1177,6 +1193,8 @@ const Cart = {
             } catch (error) {
                 DebugLog.error('Failed to sync removal to server:', error);
                 // Rollback on network error
+                this._removingItems.delete(actualId);
+                if (removedItem && removedItem.key) this._removingItems.delete(removedItem.key);
                 this.items = previousItems;
                 this.saveToLocalStorage();
                 this.updateUI();
@@ -1184,6 +1202,10 @@ const Cart = {
                     showToast('Network error. Item not removed.', 'error');
                 }
                 return;
+            } finally {
+                // Always clear in-flight markers after API call completes
+                this._removingItems.delete(actualId);
+                if (removedItem && removedItem.key) this._removingItems.delete(removedItem.key);
             }
         }
 

@@ -660,8 +660,9 @@ function buildProductModalTabs(modal, full, isOwner) {
       </div>
       <div id="compat-paste-wrap" class="admin-compat-paste-wrap" style="display:none">
         <textarea id="compat-paste-area" class="admin-input admin-compat-paste-area" placeholder="Paste printer compatibility list\u2026&#10;Each line: Brand Model1 / Model2 / Model3&#10;Example: Brother 1500 / 2000 / Charger11"></textarea>
-        <div style="display:flex;gap:8px;margin-top:8px;align-items:center">
+        <div style="display:flex;gap:8px;margin-top:8px;align-items:center;flex-wrap:wrap">
           <button class="admin-btn admin-btn--sm admin-btn--primary" id="compat-parse-btn">Find Printers</button>
+          <button class="admin-btn admin-btn--sm admin-btn--ghost" id="compat-ribbon-parse-btn" title="Convert ribbon-style blob text into one model per line">Parse Ribbon Text ▶</button>
           <button class="admin-btn admin-btn--sm admin-btn--ghost" id="compat-add-matched-btn" style="display:none"></button>
         </div>
         <div id="compat-parse-results" class="admin-compat-parse-results"></div>
@@ -940,6 +941,7 @@ function bindProductModalActions(modal, product) {
     const pasteWrap = modal.querySelector('#compat-paste-wrap');
     const pasteArea = modal.querySelector('#compat-paste-area');
     const parseBtn = modal.querySelector('#compat-parse-btn');
+    const ribbonParseBtn = modal.querySelector('#compat-ribbon-parse-btn');
     const addMatchedBtn = modal.querySelector('#compat-add-matched-btn');
     const parseResults = modal.querySelector('#compat-parse-results');
     const unmatchedWrap = modal.querySelector('#compat-unmatched-wrap');
@@ -1135,6 +1137,54 @@ function bindProductModalActions(modal, product) {
       }, { once: false });
     }
 
+    // Ribbon/typewriter compatibility text parser
+    // Handles blobs like "Brother CE25 Brother CE30 Casio CW110..." where brand name is the delimiter
+    const _RIB_BRANDS = ['Brother', 'Casio', 'Epson', 'Lanier', 'Minolta', 'Olympia', 'Philips', 'Samsung', 'SamSung', 'Sears', 'Xerox'];
+    // Brand name variants to normalise before parsing
+    const _RIB_ALIASES = [['CasioWriter', 'Casio']];
+    function parseRibbonCompatText(text) {
+      if (!text) return [];
+      let clean = text.replace(/\s+/g, ' ').trim();
+      // Normalise brand aliases (e.g. CasioWriter → Casio)
+      for (const [alias, canonical] of _RIB_ALIASES) {
+        clean = clean.replace(new RegExp(`\\b${alias}\\b`, 'gi'), canonical);
+      }
+      // Strip noise phrases that may trail a valid model code
+      const NOISE = [
+        'Correctible ribbon', 'Correction ribbon', 'Correctable ribbon',
+        'also used in', 'following models', 'For use in',
+        'Typewriter Ribbons?', 'Printer Ribbons?', 'Typewriter Supplies',
+        'equiv\\.', 'equivalent', 'compatible with',
+      ];
+      const brandLA = _RIB_BRANDS.join('|');
+      clean = clean.replace(new RegExp(`(${NOISE.join('|')}).*?(?=${brandLA}|$)`, 'gi'), '');
+      // Fix missing spaces before brand names (e.g. "35Brother" → "35 Brother")
+      const brandPat = _RIB_BRANDS.join('|');
+      clean = clean.replace(new RegExp(`([a-z0-9])(${brandPat})`, 'g'), '$1 $2');
+      // Insert pipe delimiter before each brand name
+      clean = clean.replace(new RegExp(`\\b(${brandPat})\\b`, 'g'), '|$1');
+      return [...new Set(
+        clean
+          .split('|')
+          .map(s => s
+            .replace(/[/;,]+/g, ' ')
+            .replace(/\s+[a-z]\s*$/, '')  // strip trailing single-letter artifact (e.g. "68 s")
+            .replace(/\s+/g, ' ')
+            .trim()
+          )
+          .filter(s => {
+            // Must start with a known brand AND have model content after it
+            const brand = _RIB_BRANDS.find(b => s.startsWith(b));
+            return brand && s.length > brand.length + 1;
+          })
+      )].sort((a, b) => {
+        const [bA, ...rA] = a.split(' ');
+        const [bB, ...rB] = b.split(' ');
+        if (bA !== bB) return bA.localeCompare(bB);
+        return rA.join(' ').localeCompare(rB.join(' '), undefined, { numeric: true });
+      });
+    }
+
     // Bulk paste
     function parsePrinterBulkText(raw) {
       const queries = [];
@@ -1168,6 +1218,18 @@ function bindProductModalActions(modal, product) {
         if (!visible) { pasteArea.value = ''; parseResults.innerHTML = ''; addMatchedBtn.style.display = 'none'; pasteMatches = []; pasteArea.focus(); }
         // Close the single-add search if open
         if (!visible && searchWrap) searchWrap.style.display = 'none';
+      });
+
+      // Parse ribbon-style "for use in" blob text → one model per line in the textarea
+      ribbonParseBtn?.addEventListener('click', () => {
+        const raw = pasteArea.value.trim();
+        if (!raw) return;
+        const models = parseRibbonCompatText(raw);
+        if (models.length === 0) return;
+        pasteArea.value = models.join('\n');
+        parseResults.innerHTML = `<div style="color:var(--text-muted);font-size:12px">${models.length} models extracted — click Find Printers to search</div>`;
+        addMatchedBtn.style.display = 'none';
+        pasteMatches = [];
       });
 
       parseBtn.addEventListener('click', async () => {
@@ -1232,14 +1294,15 @@ function bindProductModalActions(modal, product) {
         }
 
         // Auto-save unmatched names immediately after search
+        // Skip if there are too many unmatched items — the merged string would exceed the 2000-char field limit
         const unmatchedNow = results.filter(r => !r.matched).map(r => r.query);
-        if (unmatchedNow.length > 0 && product.id) {
-          const existing = getUnmatchedNote(product.internal_notes);
-          const existingSet = new Set(existing ? existing.split(',').map(s => s.trim()).filter(Boolean) : []);
-          unmatchedNow.forEach(n => existingSet.add(n));
-          const merged = [...existingSet].join(', ');
-          const newNotes = setUnmatchedNote(product.internal_notes, merged);
-          renderUnmatchedNote(merged); // show immediately in UI
+        const existing = getUnmatchedNote(product.internal_notes);
+        const existingSet = new Set(existing ? existing.split(',').map(s => s.trim()).filter(Boolean) : []);
+        unmatchedNow.forEach(n => existingSet.add(n));
+        const merged = [...existingSet].join(', ');
+        const newNotes = setUnmatchedNote(product.internal_notes, merged);
+        renderUnmatchedNote(merged);
+        if (unmatchedNow.length > 0 && product.id && newNotes.length <= 2000) {
           try {
             await AdminAPI.updateProduct(product.id, { internal_notes: newNotes });
             product.internal_notes = newNotes;
