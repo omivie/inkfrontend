@@ -36,6 +36,7 @@
               { label: 'Ink Cartridges', param: 'ink' },
               { label: 'Toner Cartridges', param: 'toner' },
               { label: 'Drums & Supplies', param: 'consumable' },
+              { label: 'Label Tape', param: 'label_tape' },
               { label: 'Glossy Paper', param: 'glossy_paper' },
               { label: 'Matte Paper', param: 'matte_paper' }
           ]},

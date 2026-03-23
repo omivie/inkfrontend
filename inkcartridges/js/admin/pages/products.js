@@ -658,42 +658,38 @@ function buildProductModalTabs(modal, full, isOwner) {
 
   // Compatibility panel
   let compatHtml = `
-    <div class="admin-form-group" id="compat-section">
-      <div style="display:flex;justify-content:space-between;align-items:center">
-        <label id="compat-heading">Compatible Printers</label>
-        <div style="display:flex;gap:6px">
-          <button class="admin-btn admin-btn--ghost admin-btn--sm" id="compat-paste-btn">Paste Bulk</button>
-          <button class="admin-btn admin-btn--ghost admin-btn--sm" id="compat-add-btn">+ Add Printer</button>
-        </div>
+    <div id="compat-section">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+        <label id="compat-heading" style="font-weight:600">Compatible Printers (0)</label>
+        <button class="admin-btn admin-btn--ghost admin-btn--sm" id="compat-add-btn">+ Add Printer</button>
       </div>
-      <div id="compat-search-wrap" style="display:none;margin-bottom:8px;position:relative">
-        <input class="admin-input" id="compat-search" placeholder="Search printers\u2026" autocomplete="off">
+
+      <div id="compat-search-wrap" style="display:none;margin-bottom:10px;position:relative">
+        <input class="admin-input" id="compat-search" placeholder="Search printer models\u2026" autocomplete="off">
         <div id="compat-suggestions" class="admin-compat-suggestions"></div>
       </div>
-      <div id="compat-paste-wrap" class="admin-compat-paste-wrap" style="display:none">
-        <textarea id="compat-paste-area" class="admin-input admin-compat-paste-area" placeholder="Paste printer compatibility list\u2026&#10;Each line: Brand Model1 / Model2 / Model3&#10;Example: Brother 1500 / 2000 / Charger11"></textarea>
-        <div style="display:flex;gap:8px;margin-top:8px;align-items:center;flex-wrap:wrap">
-          <button class="admin-btn admin-btn--sm admin-btn--primary" id="compat-parse-btn">Find Printers</button>
-          <button class="admin-btn admin-btn--sm admin-btn--ghost" id="compat-ribbon-parse-btn" title="Convert ribbon-style blob text into one model per line">Parse Ribbon Text ▶</button>
-          <button class="admin-btn admin-btn--sm admin-btn--ghost" id="compat-add-matched-btn" style="display:none"></button>
-          <button class="admin-btn admin-btn--sm admin-btn--ghost" id="compat-create-unmatched-btn" style="display:none"></button>
-        </div>
-        <div id="compat-parse-results" class="admin-compat-parse-results"></div>
-      </div>
+
       <div class="admin-compat-printers" id="compat-printers"><span class="admin-text-muted">Loading\u2026</span></div>
+
       <div id="compat-bulk-wrap" style="margin-top:10px;display:none">
         <button class="admin-btn admin-btn--ghost admin-btn--sm" id="compat-bulk-btn">Apply to all variants with prefix &ldquo;<span id="compat-prefix"></span>&rdquo;</button>
       </div>
-      <div id="compat-unmatched-wrap" style="display:none;margin-top:14px">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
-          <label style="font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted)">Unmatched Models (not in DB)</label>
-          <div style="display:flex;gap:4px">
-            <button class="admin-btn admin-btn--ghost admin-btn--sm" id="compat-create-all-btn" style="font-size:11px;padding:2px 8px">Create All</button>
-            <button class="admin-btn admin-btn--ghost admin-btn--sm" id="compat-clear-unmatched-btn" style="font-size:11px;padding:2px 8px">Clear</button>
-          </div>
-        </div>
-        <div id="compat-unmatched-list" class="admin-compat-unmatched-list"></div>
+
+      <hr style="margin:16px 0;border:none;border-top:1px solid var(--border)">
+
+      <div style="margin-bottom:8px">
+        <label style="font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted)">Bulk Import</label>
       </div>
+      <textarea id="compat-bulk-textarea" class="admin-input" rows="14"
+        placeholder="Paste raw compatibility text \u2014 any format:\nBrother CE70 Brother CE80 Brother CE320\nPhilips ET600 Philips ET800 Philips ET850\nBrother MFC-J995DW / MFC-J805DW / MFC-J995DW XL\n\nClick \u201cParse Text\u201d first to clean it into one model per line."></textarea>
+      <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap;align-items:center">
+        <button class="admin-btn admin-btn--ghost admin-btn--sm" id="compat-parse-text-btn">Parse Text</button>
+        <button class="admin-btn admin-btn--primary admin-btn--sm" id="compat-find-btn">Find Printers</button>
+        <button class="admin-btn admin-btn--ghost admin-btn--sm" id="compat-add-matched-btn" style="display:none"></button>
+        <button class="admin-btn admin-btn--ghost admin-btn--sm" id="compat-create-unmatched-btn" style="display:none"></button>
+      </div>
+      <div id="compat-parse-msg" style="font-size:12px;color:var(--text-muted);margin-top:6px;display:none"></div>
+      <div id="compat-bulk-results" style="margin-top:12px"></div>
     </div>
   `;
 
@@ -941,521 +937,472 @@ function bindProductModalActions(modal, product) {
     }
   });
 
-  // Compatibility management (editable)
+  // Compatibility management
   {
     let compatPrinters = [];
-    const container = modal.querySelector('#compat-printers');
-    const heading = modal.querySelector('#compat-heading');
-    const addBtn = modal.querySelector('#compat-add-btn');
-    const searchWrap = modal.querySelector('#compat-search-wrap');
-    const searchInput = modal.querySelector('#compat-search');
-    const suggestions = modal.querySelector('#compat-suggestions');
-    const pasteBtn = modal.querySelector('#compat-paste-btn');
-    const pasteWrap = modal.querySelector('#compat-paste-wrap');
-    const pasteArea = modal.querySelector('#compat-paste-area');
-    const parseBtn = modal.querySelector('#compat-parse-btn');
-    const ribbonParseBtn = modal.querySelector('#compat-ribbon-parse-btn');
-    const addMatchedBtn = modal.querySelector('#compat-add-matched-btn');
+
+    const container    = modal.querySelector('#compat-printers');
+    const heading      = modal.querySelector('#compat-heading');
+    const addBtn       = modal.querySelector('#compat-add-btn');
+    const searchWrap   = modal.querySelector('#compat-search-wrap');
+    const searchInput  = modal.querySelector('#compat-search');
+    const suggestions  = modal.querySelector('#compat-suggestions');
+    const bulkTextarea   = modal.querySelector('#compat-bulk-textarea');
+    const parseTextBtn   = modal.querySelector('#compat-parse-text-btn');
+    const findBtn        = modal.querySelector('#compat-find-btn');
+    const addMatchedBtn      = modal.querySelector('#compat-add-matched-btn');
     const createUnmatchedBtn = modal.querySelector('#compat-create-unmatched-btn');
-    const parseResults = modal.querySelector('#compat-parse-results');
-    const unmatchedWrap = modal.querySelector('#compat-unmatched-wrap');
-    const unmatchedList = modal.querySelector('#compat-unmatched-list');
-    const clearUnmatchedBtn = modal.querySelector('#compat-clear-unmatched-btn');
-    const createAllBtn = modal.querySelector('#compat-create-all-btn');
+    const parseMsg   = modal.querySelector('#compat-parse-msg');
+    const bulkResults  = modal.querySelector('#compat-bulk-results');
+    const bulkWrap     = modal.querySelector('#compat-bulk-wrap');
+    const bulkBtn      = modal.querySelector('#compat-bulk-btn');
+    const prefixEl     = modal.querySelector('#compat-prefix');
 
-    // Helpers: embed/extract unmatched block inside internal_notes
-    const UM_START = '=== Unmatched Compatibility Models ===';
-    const UM_END = '=====================================';
-    function getUnmatchedNote(notes) {
-      const s = (notes || '').indexOf(UM_START);
-      const e = (notes || '').indexOf(UM_END);
-      if (s === -1 || e === -1) return '';
-      return notes.slice(s + UM_START.length, e).trim();
-    }
-    function setUnmatchedNote(notes, csv) {
-      const base = (notes || '').replace(new RegExp('\\n?' + UM_START.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '[\\s\\S]*?' + UM_END.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\n?'), '').trim();
-      if (!csv) return base;
-      return `${base ? base + '\n\n' : ''}${UM_START}\n${csv}\n${UM_END}`;
-    }
-    function renderUnmatchedNote(csv) {
-      if (!unmatchedWrap || !unmatchedList) return;
-      if (csv) {
-        unmatchedList.textContent = csv;
-        unmatchedWrap.style.display = 'block';
-      } else {
-        unmatchedWrap.style.display = 'none';
-        unmatchedList.textContent = '';
-      }
-    }
-
-    // Show existing unmatched note on load
-    renderUnmatchedNote(getUnmatchedNote(product.internal_notes));
-
-    // Clear button
-    if (clearUnmatchedBtn) {
-      clearUnmatchedBtn.addEventListener('click', async () => {
-        clearUnmatchedBtn.disabled = true;
-        const newNotes = setUnmatchedNote(product.internal_notes, '');
-        product.internal_notes = newNotes;
-        renderUnmatchedNote('');
-        try {
-          await AdminAPI.updateProduct(product.id, { internal_notes: newNotes });
-        } catch (err) {
-          Toast.error(`Save failed: ${err.message}`);
-        } finally { clearUnmatchedBtn.disabled = false; }
-      });
-    }
-    // Create All button — create & link each unmatched model individually
-    if (createAllBtn) {
-      createAllBtn.addEventListener('click', async () => {
-        if (!product.sku) return;
-        const csv = getUnmatchedNote(product.internal_notes);
-        const names = csv ? csv.split(',').map(s => s.trim()).filter(Boolean) : [];
-        if (names.length === 0) return;
-        createAllBtn.disabled = true;
-        let linked = 0;
-        const BATCH = 3;
-        for (let i = 0; i < names.length; i += BATCH) {
-          createAllBtn.textContent = `Creating\u2026 (${i}/${names.length})`;
-          const batch = names.slice(i, i + BATCH);
-          await Promise.all(batch.map(async (name) => {
-            try {
-              const printer = await AdminAPI.createPrinter(name);
-              const id = String(printer?.id || printer?.printer_id || '');
-              if (id) { await AdminAPI.addCompatiblePrinter(product.sku, id); linked++; }
-            } catch (_) {}
-          }));
-          if (i + BATCH < names.length) await new Promise(r => setTimeout(r, 200));
-        }
-        // Clear unmatched note
-        const newNotes = setUnmatchedNote(product.internal_notes, '');
-        product.internal_notes = newNotes;
-        renderUnmatchedNote('');
-        try { await AdminAPI.updateProduct(product.id, { internal_notes: newNotes }); } catch (_) {}
-        // Reload compatible printers
-        const fresh = await window.API.getCompatiblePrinters(product.sku);
-        compatPrinters = Array.isArray(fresh) ? fresh : (fresh?.data?.compatible_printers || fresh?.data?.printers || []);
-        renderCompatBadges();
-        Toast.success(`Linked ${linked} model${linked !== 1 ? 's' : ''}`);
-        createAllBtn.disabled = false;
-        createAllBtn.textContent = 'Create All';
-      });
-    }
-    const bulkWrap = modal.querySelector('#compat-bulk-wrap');
-    const bulkBtn = modal.querySelector('#compat-bulk-btn');
-    const prefixEl = modal.querySelector('#compat-prefix');
-
-    // Derive SKU prefix: strip trailing uppercase letters (LC3313BK → LC3313, TN3440 → TN3440)
     const skuPrefix = product.sku ? product.sku.replace(/[A-Z]+$/, '') : '';
-    const showBulk = skuPrefix && skuPrefix !== product.sku;
+    const showBulk  = skuPrefix && skuPrefix !== product.sku;
+
+    // ── Helpers ─────────────────────────────────────────────────────────────
+
+    function printerId(p) {
+      return String(typeof p === 'object' ? (p.id || p.printer_id || '') : '');
+    }
+    function printerName(p) {
+      return typeof p === 'string' ? p : (p.full_name || p.model_name || p.model || p.name || String(p));
+    }
+
+    // Known brands (sorted longest-first so "Fuji Xerox" matches before "Xerox")
+    const _COMPAT_BRANDS = [
+      'Fuji Xerox',
+      'Amano', 'Brother', 'Canon', 'Casio', 'Epson', 'HP',
+      'Kyocera', 'Lanier', 'Lexmark', 'Minolta', 'OKI', 'Olympia', 'Panasonic',
+      'Philips', 'Samsung', 'Sears', 'Sharp', 'Xerox',
+    ];
+
+    // Aliases to normalise before parsing (case-insensitive)
+    const _COMPAT_ALIASES = [
+      ['CasioWriter', 'Casio'],
+      ['SamSung',     'Samsung'],
+    ];
+
+    // Noise phrases — strip from match point to end-of-segment
+    const _NOISE_RE = [
+      /\s+correcti(?:b|c)le\s+ribbons?\b.*/i,
+      /\s+correction\s+ribbons?\b.*/i,
+      /\s+is\s+also\s+used\b.*/i,
+      /\s+also\s+used\s+in\b.*/i,
+      /\s+for\s+use\s+in\b.*/i,
+      /\s+following\s+models?\b.*/i,
+      /\s+compatible\s+with\b.*/i,
+      /\s+equiv(?:alent|\.)\b.*/i,
+      /\s+typewriter\s+(?:ribbons?|supplies)\b.*/i,
+      /\s+printer\s+ribbons?\b.*/i,
+      /\s+\(see\s+also\b.*/i,
+    ];
+
+    function _stripNoise(s) {
+      let out = s;
+      for (const re of _NOISE_RE) out = out.replace(re, '');
+      return out.trim();
+    }
+
+    /** True if segment starts with a known brand AND has model content after it */
+    function _isValidModel(s) {
+      const sl = s.trim().toLowerCase();
+      const brand = _COMPAT_BRANDS.find(b => sl.startsWith(b.toLowerCase()));
+      if (!brand) return false;
+      const rest = s.trim().slice(brand.length).trim();
+      return rest.length > 0 && /[a-z0-9]/i.test(rest);
+    }
+
+    /**
+     * Find all positions in `line` where a known brand starts.
+     * Longer brands take priority over shorter ones to avoid "Xerox" matching inside "Fuji Xerox".
+     * Only matches at start-of-string or after whitespace.
+     */
+    function _findBrandPositions(line) {
+      const covered = new Set(); // chars already claimed by a longer brand match
+      const positions = [];
+
+      for (const brand of _COMPAT_BRANDS) { // already sorted longest-first
+        const escaped = brand.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        // (^|\s)(brand)(?=\s|$)  — capture leading whitespace so we get exact brand start pos
+        const re = new RegExp(`(^|\\s)(${escaped})(?=\\s|$)`, 'gi');
+        let m;
+        while ((m = re.exec(line)) !== null) {
+          const pos = m.index + m[1].length; // skip any leading space
+          if (!covered.has(pos)) {
+            positions.push(pos);
+            for (let i = pos; i < pos + brand.length; i++) covered.add(i);
+          }
+        }
+      }
+
+      return positions.sort((a, b) => a - b);
+    }
+
+    /**
+     * Parse raw compatibility text into clean "Brand Model" strings.
+     *
+     * Handles all three formats:
+     *   • Explicit delimiters  — "Brother MFC-J995DW / MFC-J805DW / MFC-J995DW XL"
+     *   • Brand-as-delimiter   — "Philips ET600 Philips ET800 Philips ET850"
+     *   • Multiple brands      — "Casio CW220 Epson CRII Epson CRIIE Epson CRIV"
+     *   • Run-together brands  — "Brother CE35Brother CE40" → inserts space first
+     *   • Noise phrases        — "Brother EM100 Typewriter Ribbons" → "Brother EM100"
+     */
+    function parseBulkText(raw) {
+      // 1. Normalise aliases across the entire text
+      let text = raw;
+      for (const [alias, canonical] of _COMPAT_ALIASES) {
+        text = text.replace(new RegExp(alias, 'gi'), canonical);
+      }
+
+      // 2. Insert space before any brand name that is directly preceded by a letter/digit
+      //    (handles "35Brother" → "35 Brother", "CE35Brother" → "CE35 Brother")
+      for (const brand of _COMPAT_BRANDS) {
+        const escaped = brand.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        text = text.replace(new RegExp(`([a-zA-Z0-9])(${escaped})`, 'g'), '$1 $2');
+      }
+
+      const queries = [];
+
+      for (const rawLine of text.split(/\n/).map(s => s.trim()).filter(Boolean)) {
+        // 3. Strip noise from the full line first
+        const line = _stripNoise(rawLine);
+        if (!line) continue;
+
+        // 4. Explicit delimiters: / , ;
+        if (/[\/,;]/.test(line)) {
+          const segs = line.split(/\s*[\/,;]\s*/);
+          const words = segs[0].trim().split(/\s+/);
+          const brandEnd = (() => { const i = words.findIndex(w => /^\d/.test(w)); return i === -1 ? words.length : i; })();
+          const brand = words.slice(0, brandEnd).join(' ');
+          const firstModel = words.slice(brandEnd).join(' ');
+          const first = firstModel ? `${brand} ${firstModel}`.trim() : brand;
+          if (_isValidModel(first)) queries.push(first);
+          for (let i = 1; i < segs.length; i++) {
+            const s = _stripNoise(segs[i].trim());
+            if (!s) continue;
+            // Prefix brand if this segment has no brand of its own
+            const hasBrand = _COMPAT_BRANDS.some(b => s.toLowerCase().startsWith(b.toLowerCase()));
+            const entry = (brand && !hasBrand) ? `${brand} ${s}` : s;
+            if (_isValidModel(entry)) queries.push(entry);
+          }
+          continue;
+        }
+
+        // 5. Find all brand positions in this line
+        const positions = _findBrandPositions(line);
+
+        if (positions.length === 0) {
+          // No known brand — include as-is (may be an uncommon brand)
+          if (/\s/.test(line)) queries.push(line);
+          continue;
+        }
+
+        if (positions.length === 1) {
+          // Single brand occurrence — take from brand start onwards (drops any leading junk)
+          const seg = _stripNoise(line.slice(positions[0]).trim());
+          if (_isValidModel(seg)) queries.push(seg);
+          continue;
+        }
+
+        // 6. Multiple brand positions — split at each one
+        for (let i = 0; i < positions.length; i++) {
+          const seg = _stripNoise(line.slice(positions[i], positions[i + 1] ?? line.length).trim());
+          if (seg && _isValidModel(seg)) queries.push(seg);
+        }
+      }
+
+      return [...new Set(queries.filter(Boolean))];
+    }
+
+    // ── Render ───────────────────────────────────────────────────────────────
 
     function renderCompatBadges() {
       if (heading) heading.textContent = `Compatible Printers (${compatPrinters.length})`;
       if (!container) return;
-      if (compatPrinters.length > 0) {
-        container.innerHTML = compatPrinters.map(p => {
-          const name = typeof p === 'string' ? p : (p.full_name || p.model_name || p.model || p.name || String(p));
-          const id = typeof p === 'object' ? (p.id || p.printer_id || '') : '';
-          return `<span class="admin-badge">${esc(name)}<button class="compat-remove" data-printer-id="${esc(String(id))}" title="Remove">\u00d7</button></span>`;
-        }).join('');
-      } else {
+      if (compatPrinters.length === 0) {
         container.innerHTML = `
           <div style="background:var(--yellow-light,#fffbe6);border:1px solid var(--yellow,#f0a500);border-radius:6px;padding:10px 12px;font-size:0.85em;">
-            <strong>No compatible printers found</strong><br>
-            <span style="color:var(--text-muted);">This product has no printer associations in the database. It won't appear in printer-based searches or \u201cYou May Also Need\u201d sections on the storefront.</span>
+            <strong>No compatible printers linked</strong><br>
+            <span style="color:var(--text-muted)">Use &ldquo;+ Add Printer&rdquo; or paste a bulk list below.</span>
           </div>`;
+        return;
       }
+      container.innerHTML = compatPrinters.map(p =>
+        `<span class="admin-badge">${esc(printerName(p))}<button class="compat-remove" data-printer-id="${esc(printerId(p))}" title="Remove">\u00d7</button></span>`
+      ).join('');
     }
 
-    // Remove printer handler (delegated)
-    if (container) {
-      container.addEventListener('click', async (e) => {
-        const btn = e.target.closest('.compat-remove');
-        if (!btn || !product.sku) return;
-        const printerId = btn.dataset.printerId;
-        btn.disabled = true;
-        try {
-          await AdminAPI.removeCompatiblePrinter(product.sku, printerId);
-          compatPrinters = compatPrinters.filter(p => String(typeof p === 'object' ? (p.id || p.printer_id) : '') !== String(printerId));
-          renderCompatBadges();
-        } catch (err) {
-          Toast.error(`Remove failed: ${err.message}`);
-          btn.disabled = false;
-        }
-      });
-    }
+    // ── Remove (delegated on badge container) ────────────────────────────────
 
-    // Add printer toggle
-    if (addBtn && searchWrap && searchInput) {
-      addBtn.addEventListener('click', () => {
-        const visible = searchWrap.style.display !== 'none';
-        searchWrap.style.display = visible ? 'none' : 'block';
-        if (!visible) { searchInput.value = ''; suggestions.innerHTML = ''; searchInput.focus(); }
-      });
-
-      let searchTimer = null;
-      searchInput.addEventListener('input', () => {
-        clearTimeout(searchTimer);
-        const q = searchInput.value.trim();
-        if (q.length < 2) { suggestions.innerHTML = ''; return; }
-        searchTimer = setTimeout(async () => {
-          try {
-            const resp = await window.API.searchPrinters(q);
-            const results = resp?.data?.printers || resp?.data || [];
-            if (!Array.isArray(results) || results.length === 0) {
-              suggestions.innerHTML = '<div class="admin-compat-suggestions__item" style="color:var(--text-muted)">No results</div>';
-              return;
-            }
-            suggestions.innerHTML = results.slice(0, 10).map(p => {
-              const name = p.full_name || p.model_name || p.model || p.name || String(p);
-              return `<div class="admin-compat-suggestions__item" data-printer-id="${esc(String(p.id || ''))}" data-printer-name="${esc(name)}">${esc(name)}</div>`;
-            }).join('');
-          } catch (_) {
-            suggestions.innerHTML = '<div class="admin-compat-suggestions__item" style="color:var(--text-muted)">Search failed</div>';
-          }
-        }, 300);
-      });
-
-      suggestions.addEventListener('click', async (e) => {
-        const item = e.target.closest('.admin-compat-suggestions__item');
-        if (!item || !item.dataset.printerId || !product.sku) return;
-        const printerId = item.dataset.printerId;
-        const printerName = item.dataset.printerName;
-        // Don't add duplicates
-        if (compatPrinters.some(p => String(typeof p === 'object' ? (p.id || p.printer_id) : '') === String(printerId))) {
-          searchWrap.style.display = 'none';
-          return;
-        }
-        item.style.opacity = '0.5';
-        try {
-          await AdminAPI.addCompatiblePrinter(product.sku, printerId);
-          compatPrinters.push({ id: printerId, full_name: printerName });
-          renderCompatBadges();
-          searchWrap.style.display = 'none';
-          searchInput.value = '';
-          suggestions.innerHTML = '';
-        } catch (err) {
-          Toast.error(`Add failed: ${err.message}`);
-          item.style.opacity = '1';
-        }
-      });
-
-      // Close suggestions on outside click
-      document.addEventListener('click', (e) => {
-        if (!searchWrap.contains(e.target) && e.target !== addBtn) {
-          searchWrap.style.display = 'none';
-        }
-      }, { once: false });
-    }
-
-    // Ribbon/typewriter compatibility text parser
-    // Handles blobs like "Brother CE25 Brother CE30 Casio CW110..." where brand name is the delimiter
-    const _RIB_BRANDS = ['Brother', 'Casio', 'Epson', 'Lanier', 'Minolta', 'Olympia', 'Philips', 'Samsung', 'SamSung', 'Sears', 'Xerox'];
-    // Brand name variants to normalise before parsing
-    const _RIB_ALIASES = [['CasioWriter', 'Casio']];
-    function parseRibbonCompatText(text) {
-      if (!text) return [];
-      let clean = text.replace(/\s+/g, ' ').trim();
-      // Normalise brand aliases (e.g. CasioWriter → Casio)
-      for (const [alias, canonical] of _RIB_ALIASES) {
-        clean = clean.replace(new RegExp(`\\b${alias}\\b`, 'gi'), canonical);
-      }
-      // Strip noise phrases that may trail a valid model code
-      const NOISE = [
-        'Correctible ribbon', 'Correction ribbon', 'Correctable ribbon',
-        'also used in', 'following models', 'For use in',
-        'Typewriter Ribbons?', 'Printer Ribbons?', 'Typewriter Supplies',
-        'equiv\\.', 'equivalent', 'compatible with',
-      ];
-      const brandLA = _RIB_BRANDS.join('|');
-      clean = clean.replace(new RegExp(`(${NOISE.join('|')}).*?(?=${brandLA}|$)`, 'gi'), '');
-      // Fix missing spaces before brand names (e.g. "35Brother" → "35 Brother")
-      const brandPat = _RIB_BRANDS.join('|');
-      clean = clean.replace(new RegExp(`([a-z0-9])(${brandPat})`, 'g'), '$1 $2');
-      // Insert pipe delimiter before each brand name
-      clean = clean.replace(new RegExp(`\\b(${brandPat})\\b`, 'g'), '|$1');
-      return [...new Set(
-        clean
-          .split('|')
-          .map(s => s
-            .replace(/[/;,]+/g, ' ')
-            .replace(/\s+[a-z]\s*$/, '')  // strip trailing single-letter artifact (e.g. "68 s")
-            .replace(/\s+/g, ' ')
-            .trim()
-          )
-          .filter(s => {
-            // Must start with a known brand AND have model content after it
-            const brand = _RIB_BRANDS.find(b => s.startsWith(b));
-            return brand && s.length > brand.length + 1;
-          })
-      )].sort((a, b) => {
-        const [bA, ...rA] = a.split(' ');
-        const [bB, ...rB] = b.split(' ');
-        if (bA !== bB) return bA.localeCompare(bB);
-        return rA.join(' ').localeCompare(rB.join(' '), undefined, { numeric: true });
-      });
-    }
-
-    // Bulk paste
-    function parsePrinterBulkText(raw) {
-      const queries = [];
-      const lines = raw.split(/\n/).map(s => s.trim()).filter(Boolean);
-      for (const line of lines) {
-        const segments = line.split(/\s*\/\s*|\s*,\s*|\s*;\s*|\s+-\s+/);
-        if (segments.length === 1) { queries.push(line.trim()); continue; }
-        // Brand = words in first segment before the first digit-starting word
-        const words = segments[0].trim().split(/\s+/);
-        let brandEnd = words.findIndex(w => /^\d/.test(w));
-        if (brandEnd === -1) brandEnd = words.length;
-        const brand = words.slice(0, brandEnd).join(' ');
-        const firstModel = words.slice(brandEnd).join(' ');
-        if (firstModel) queries.push(`${brand} ${firstModel}`.trim());
-        else queries.push(brand);
-        for (let i = 1; i < segments.length; i++) {
-          const seg = segments[i].trim();
-          if (seg) queries.push(`${brand} ${seg}`);
-        }
-      }
-      return [...new Set(queries)];
-    }
-
-    if (pasteBtn && pasteWrap && pasteArea && parseBtn && addMatchedBtn && parseResults) {
-      let pasteMatches = [];
-      let lastResults = [];
-
-      pasteBtn.addEventListener('click', () => {
-        const visible = pasteWrap.style.display !== 'none';
-        pasteWrap.style.display = visible ? 'none' : 'block';
-        if (!visible) { pasteArea.value = ''; parseResults.innerHTML = ''; addMatchedBtn.style.display = 'none'; pasteMatches = []; pasteArea.focus(); }
-        // Close the single-add search if open
-        if (!visible && searchWrap) searchWrap.style.display = 'none';
-      });
-
-      // Parse ribbon-style "for use in" blob text → one model per line in the textarea
-      ribbonParseBtn?.addEventListener('click', () => {
-        const raw = pasteArea.value.trim();
-        if (!raw) return;
-        const models = parseRibbonCompatText(raw);
-        if (models.length === 0) return;
-        pasteArea.value = models.join('\n');
-        parseResults.innerHTML = `<div style="color:var(--text-muted);font-size:12px">${models.length} models extracted — click Find Printers to search</div>`;
-        addMatchedBtn.style.display = 'none';
-        pasteMatches = [];
-      });
-
-      // Create All Unmatched — bulk creates and links all unmatched from current search session
-      createUnmatchedBtn?.addEventListener('click', async () => {
-        const queries = createUnmatchedBtn._queries;
-        if (!queries?.length || !product.sku) return;
-        createUnmatchedBtn.disabled = true;
-        let linked = 0;
-        const BATCH = 3;
-        for (let i = 0; i < queries.length; i += BATCH) {
-          createUnmatchedBtn.textContent = `Creating\u2026 (${i}/${queries.length})`;
-          const batch = queries.slice(i, i + BATCH);
-          await Promise.all(batch.map(async (name) => {
-            try {
-              const printer = await AdminAPI.createPrinter(name);
-              const id = String(printer?.id || printer?.printer_id || '');
-              if (id) { await AdminAPI.addCompatiblePrinter(product.sku, id); linked++; }
-            } catch (_) {}
-          }));
-          if (i + BATCH < queries.length) await new Promise(r => setTimeout(r, 200));
-        }
-        createUnmatchedBtn.style.display = 'none';
-        const fresh = await window.API.getCompatiblePrinters(product.sku);
-        compatPrinters = Array.isArray(fresh) ? fresh : (fresh?.data?.compatible_printers || fresh?.data?.printers || []);
+    container?.addEventListener('click', async (e) => {
+      const btn = e.target.closest('.compat-remove');
+      if (!btn || !product.sku) return;
+      const pid = btn.dataset.printerId;
+      btn.disabled = true;
+      try {
+        await AdminAPI.removeCompatiblePrinter(product.sku, pid);
+        compatPrinters = compatPrinters.filter(p => printerId(p) !== pid);
         renderCompatBadges();
-        Toast.success(`Linked ${linked} model${linked !== 1 ? 's' : ''}`);
-      });
+      } catch (err) {
+        Toast.error(`Remove failed: ${err.message}`);
+        btn.disabled = false;
+      }
+    });
 
-      parseBtn.addEventListener('click', async () => {
-        const raw = pasteArea.value.trim();
-        if (!raw) return;
-        const names = parsePrinterBulkText(raw);
-        if (names.length === 0) return;
+    // ── + Add Printer (single search) ────────────────────────────────────────
 
-        parseBtn.disabled = true;
-        parseBtn.textContent = 'Searching\u2026';
-        addMatchedBtn.style.display = 'none';
-        if (createUnmatchedBtn) createUnmatchedBtn.style.display = 'none';
-        pasteMatches = [];
+    addBtn?.addEventListener('click', () => {
+      const open = searchWrap.style.display !== 'none';
+      searchWrap.style.display = open ? 'none' : 'block';
+      if (!open) { searchInput.value = ''; suggestions.innerHTML = ''; searchInput.focus(); }
+    });
 
-        parseResults.innerHTML = `<div id="compat-parse-progress" style="color:var(--text-muted);font-size:12px">Searching 0 / ${names.length}\u2026</div>`;
-        const progressEl = parseResults.querySelector('#compat-parse-progress');
+    let _searchTimer = null;
+    searchInput?.addEventListener('input', () => {
+      clearTimeout(_searchTimer);
+      const q = searchInput.value.trim();
+      if (q.length < 2) { suggestions.innerHTML = ''; return; }
+      _searchTimer = setTimeout(async () => {
+        try {
+          const resp = await window.API.searchPrinters(q);
+          const list = resp?.data?.printers || resp?.data || [];
+          if (!Array.isArray(list) || list.length === 0) {
+            suggestions.innerHTML = `<div class="admin-compat-suggestions__item" style="color:var(--text-muted)">No results</div>`;
+            return;
+          }
+          suggestions.innerHTML = list.slice(0, 10).map(p =>
+            `<div class="admin-compat-suggestions__item" data-printer-id="${esc(String(p.id || ''))}" data-printer-name="${esc(printerName(p))}">${esc(printerName(p))}</div>`
+          ).join('');
+        } catch (_) {
+          suggestions.innerHTML = `<div class="admin-compat-suggestions__item" style="color:var(--text-muted)">Search failed</div>`;
+        }
+      }, 300);
+    });
 
-        const results = [];
-        lastResults = results;
+    suggestions?.addEventListener('click', async (e) => {
+      const item = e.target.closest('.admin-compat-suggestions__item');
+      if (!item?.dataset.printerId || !product.sku) return;
+      const pid  = item.dataset.printerId;
+      const name = item.dataset.printerName;
+      if (compatPrinters.some(p => printerId(p) === pid)) { searchWrap.style.display = 'none'; return; }
+      item.style.opacity = '0.5';
+      try {
+        await AdminAPI.addCompatiblePrinter(product.sku, pid);
+        compatPrinters.push({ id: pid, full_name: name });
+        renderCompatBadges();
+        searchWrap.style.display = 'none';
+        searchInput.value = '';
+        suggestions.innerHTML = '';
+      } catch (err) {
+        Toast.error(`Add failed: ${err.message}`);
+        item.style.opacity = '1';
+      }
+    });
+
+    document.addEventListener('click', (e) => {
+      if (searchWrap && !searchWrap.contains(e.target) && e.target !== addBtn) {
+        searchWrap.style.display = 'none';
+      }
+    });
+
+    // ── Bulk: Parse Text ─────────────────────────────────────────────────────
+
+    parseTextBtn?.addEventListener('click', () => {
+      const raw = bulkTextarea.value.trim();
+      if (!raw) return;
+      const parsed = parseBulkText(raw);
+      if (parsed.length === 0) return;
+      bulkTextarea.value = parsed.join('\n');
+      parseMsg.textContent = `Extracted ${parsed.length} model${parsed.length !== 1 ? 's' : ''} \u2014 review then click Find Printers`;
+      parseMsg.style.display = 'block';
+      // Reset any previous search results
+      bulkResults.innerHTML = '';
+      addMatchedBtn.style.display = 'none';
+      createUnmatchedBtn.style.display = 'none';
+    });
+
+    // ── Bulk: Find Printers ──────────────────────────────────────────────────
+
+    let _sessionMatches = [];   // matched results from last Find run
+
+    findBtn?.addEventListener('click', async () => {
+      const raw = bulkTextarea.value.trim();
+      if (!raw) { Toast.error('Paste some printer models first'); return; }
+      const names = parseBulkText(raw);
+      if (names.length === 0) { Toast.error('No models found \u2014 try Parse Text first'); return; }
+
+      findBtn.disabled = true;
+      findBtn.textContent = 'Searching\u2026';
+      parseMsg.style.display = 'none';
+      addMatchedBtn.style.display = 'none';
+      createUnmatchedBtn.style.display = 'none';
+      _sessionMatches = [];
+      bulkResults.innerHTML = `<div style="color:var(--text-muted);font-size:12px">Searching 0 / ${names.length}\u2026</div>`;
+
+      const results = [];
+
+      try {
+        // Try bulk endpoint first, fall back to sequential individual calls
         try {
           const bulkResp = await window.API.searchPrintersBulk(names);
-          const bulkResults = bulkResp?.data?.results || [];
-          for (const r of bulkResults) {
-            results.push(r.printer
-              ? { query: r.query, printer: r.printer, matched: true }
-              : { query: r.query, matched: false }
-            );
+          for (const r of (bulkResp?.data?.results || [])) {
+            results.push(r.printer ? { query: r.query, printer: r.printer, matched: true } : { query: r.query, matched: false });
           }
-          if (progressEl) progressEl.textContent = `Found ${results.filter(r => r.matched).length} / ${results.length} models\u2026`;
         } catch (_) {
-          // Fallback to individual requests if bulk endpoint fails
-          const BATCH = 5;
-          const BATCH_DELAY = 300;
-          for (let i = 0; i < names.length; i += BATCH) {
-            if (i > 0) await new Promise(r => setTimeout(r, BATCH_DELAY));
-            const batch = names.slice(i, i + BATCH);
-            const batchResults = await Promise.all(batch.map(async name => {
+          for (let i = 0; i < names.length; i += 5) {
+            const batch = names.slice(i, i + 5);
+            const batchRes = await Promise.all(batch.map(async name => {
               try {
                 const resp = await window.API.searchPrinters(name);
                 const list = resp?.data?.printers || resp?.data || [];
                 const top = Array.isArray(list) ? list[0] : null;
                 return top ? { query: name, printer: top, matched: true } : { query: name, matched: false };
-              } catch (_e) {
-                return { query: name, matched: false };
-              }
+              } catch (_e) { return { query: name, matched: false }; }
             }));
-            results.push(...batchResults);
-            if (progressEl) progressEl.textContent = `Searching ${Math.min(i + BATCH, names.length)} / ${names.length}\u2026`;
+            results.push(...batchRes);
+            bulkResults.innerHTML = `<div style="color:var(--text-muted);font-size:12px">Searching ${Math.min(i + 5, names.length)} / ${names.length}\u2026</div>`;
+            if (i + 5 < names.length) await new Promise(r => setTimeout(r, 300));
           }
         }
 
-        pasteMatches = results.filter(r => r.matched);
-        const newMatches = pasteMatches.filter(r => {
-          const id = String(r.printer.id || r.printer.printer_id || '');
-          return !compatPrinters.some(p => String(typeof p === 'object' ? (p.id || p.printer_id) : '') === id);
-        });
+        // Render results
+        const matched   = results.filter(r => r.matched);
+        const unmatched = results.filter(r => !r.matched);
+        _sessionMatches = matched;
 
-        parseResults.innerHTML = results.map(r => {
+        bulkResults.innerHTML = results.map(r => {
           if (r.matched) {
-            const resolvedName = r.printer.full_name || r.printer.model_name || r.printer.model || r.printer.name || '';
+            const name = printerName(r.printer);
+            const alreadyLinked = compatPrinters.some(p => printerId(p) === String(r.printer.id || r.printer.printer_id || ''));
             return `<div class="admin-compat-parse-result admin-compat-parse-result--matched">
               <span>&#10003;</span>
-              <span class="result-name">${esc(resolvedName)}</span>
-              <span class="result-query">(searched: ${esc(r.query)})</span>
+              <span class="result-name">${esc(name)}</span>
+              ${alreadyLinked ? '<span style="font-size:11px;color:var(--text-muted)">(already linked)</span>' : ''}
             </div>`;
           }
-          return `<div class="admin-compat-parse-result admin-compat-parse-result--unmatched" data-query="${esc(r.query)}">
+          return `<div class="admin-compat-parse-result admin-compat-parse-result--unmatched">
             <span>&#8212;</span>
             <span class="result-query">${esc(r.query)}</span>
-            <span style="font-size:11px">not found</span>
-            <button class="admin-btn admin-btn--ghost admin-btn--sm compat-create-btn" style="font-size:11px;padding:2px 8px;margin-left:auto" data-query="${esc(r.query)}">Create</button>
+            <span style="font-size:11px;color:var(--text-muted)">not found</span>
+            <button class="admin-btn admin-btn--ghost admin-btn--sm compat-create-one-btn" style="font-size:11px;padding:2px 8px;margin-left:auto" data-query="${esc(r.query)}">Create</button>
           </div>`;
         }).join('');
 
+        // Show action buttons
+        const newMatches = matched.filter(r => !compatPrinters.some(p => printerId(p) === String(r.printer.id || r.printer.printer_id || '')));
         if (newMatches.length > 0) {
-          addMatchedBtn.textContent = `Add ${newMatches.length} Printer${newMatches.length > 1 ? 's' : ''}`;
+          addMatchedBtn.textContent = `Add ${newMatches.length} Matched Printer${newMatches.length !== 1 ? 's' : ''}`;
           addMatchedBtn.style.display = 'inline-flex';
         }
-        const unmatchedQueries = results.filter(r => !r.matched).map(r => r.query);
-        if (unmatchedQueries.length > 0 && createUnmatchedBtn) {
-          createUnmatchedBtn.textContent = `Create All Unmatched (${unmatchedQueries.length})`;
+        if (unmatched.length > 0) {
+          createUnmatchedBtn.textContent = `Create All Unmatched (${unmatched.length})`;
           createUnmatchedBtn.style.display = 'inline-flex';
-          createUnmatchedBtn._queries = unmatchedQueries;
+          createUnmatchedBtn._queries = unmatched.map(r => r.query);
         }
+      } catch (err) {
+        Toast.error(`Search failed: ${err.message}`);
+        bulkResults.innerHTML = '';
+      }
 
-        // Auto-save unmatched names immediately after search
-        // Skip if there are too many unmatched items — the merged string would exceed the 2000-char field limit
-        const unmatchedNow = results.filter(r => !r.matched).map(r => r.query);
-        const existing = getUnmatchedNote(product.internal_notes);
-        const existingSet = new Set(existing ? existing.split(',').map(s => s.trim()).filter(Boolean) : []);
-        unmatchedNow.forEach(n => existingSet.add(n));
-        const merged = [...existingSet].join(', ');
-        const newNotes = setUnmatchedNote(product.internal_notes, merged);
-        renderUnmatchedNote(merged);
-        if (unmatchedNow.length > 0 && product.id && newNotes.length <= 10000) {
-          try {
-            await AdminAPI.updateProduct(product.id, { internal_notes: newNotes });
-            product.internal_notes = newNotes;
-          } catch (_) {
-            // silent — unmatched note is a convenience backup, not critical
-          }
-        }
+      findBtn.disabled = false;
+      findBtn.textContent = 'Find Printers';
+    });
 
-        parseBtn.disabled = false;
-        parseBtn.textContent = 'Find Printers';
-      });
+    // ── Bulk: Add Matched ────────────────────────────────────────────────────
 
-      addMatchedBtn.addEventListener('click', async () => {
-        if (!product.sku) return;
-        const toAdd = pasteMatches.filter(r => {
-          const id = String(r.printer.id || r.printer.printer_id || '');
-          return !compatPrinters.some(p => String(typeof p === 'object' ? (p.id || p.printer_id) : '') === id);
-        });
-        if (toAdd.length === 0) return;
-
-        addMatchedBtn.disabled = true;
-        addMatchedBtn.textContent = 'Adding\u2026';
-        let added = 0;
-        for (const r of toAdd) {
-          const id = String(r.printer.id || r.printer.printer_id || '');
-          const name = r.printer.full_name || r.printer.model_name || r.printer.model || r.printer.name || '';
-          try {
-            await AdminAPI.addCompatiblePrinter(product.sku, id);
-            compatPrinters.push({ id, full_name: name });
-            added++;
-          } catch (_) {}
-        }
-        renderCompatBadges();
-        pasteWrap.style.display = 'none';
-        pasteArea.value = '';
-        parseResults.innerHTML = '';
-        addMatchedBtn.style.display = 'none';
-        pasteMatches = [];
-        if (added > 0) Toast.success(`Added ${added} printer${added > 1 ? 's' : ''}`);
-        addMatchedBtn.disabled = false;
-      });
-    }
-
-    // Individual "Create" button on unmatched search result rows
-    if (parseResults) {
-      parseResults.addEventListener('click', async (e) => {
-        const btn = e.target.closest('.compat-create-btn');
-        if (!btn || !product.sku) return;
-        const query = btn.dataset.query;
-        if (!query) return;
-        btn.disabled = true;
-        btn.textContent = 'Creating\u2026';
+    addMatchedBtn?.addEventListener('click', async () => {
+      if (!product.sku) return;
+      const toAdd = _sessionMatches.filter(r => !compatPrinters.some(p => printerId(p) === String(r.printer.id || r.printer.printer_id || '')));
+      if (toAdd.length === 0) return;
+      addMatchedBtn.disabled = true;
+      addMatchedBtn.textContent = 'Adding\u2026';
+      let added = 0;
+      for (const r of toAdd) {
+        const pid  = String(r.printer.id || r.printer.printer_id || '');
+        const name = printerName(r.printer);
         try {
-          const newPrinter = await AdminAPI.createPrinter(query);
-          const id = String(newPrinter.id || newPrinter.printer_id || '');
-          const name = newPrinter.full_name || newPrinter.name || query;
-          if (id) {
-            await AdminAPI.addCompatiblePrinter(product.sku, id);
-            compatPrinters.push({ id, full_name: name });
-            renderCompatBadges();
-          }
-          // Update row to matched style
-          const row = btn.closest('.admin-compat-parse-result');
-          if (row) {
-            row.className = 'admin-compat-parse-result admin-compat-parse-result--matched';
-            row.innerHTML = `<span>&#10003;</span><span class="result-name">${esc(name)}</span><span class="result-query">(created)</span>`;
-          }
-          // Remove from unmatched notes
-          const existing = getUnmatchedNote(product.internal_notes);
-          const updated = existing.split(',').map(s => s.trim()).filter(s => s && s !== query).join(', ');
-          const newNotes = setUnmatchedNote(product.internal_notes, updated);
-          await AdminAPI.updateProduct(product.id, { internal_notes: newNotes });
-          product.internal_notes = newNotes;
-          renderUnmatchedNote(updated);
-          Toast.success(`Created printer: ${name}`);
-        } catch (err) {
-          btn.disabled = false;
-          btn.textContent = 'Create';
-          Toast.error(`Failed to create: ${err.message}`);
-        }
-      });
-    }
+          await AdminAPI.addCompatiblePrinter(product.sku, pid);
+          compatPrinters.push({ id: pid, full_name: name });
+          added++;
+        } catch (_) {}
+      }
+      renderCompatBadges();
+      addMatchedBtn.style.display = 'none';
+      _sessionMatches = [];
+      if (added > 0) Toast.success(`Added ${added} printer${added !== 1 ? 's' : ''}`);
+      addMatchedBtn.disabled = false;
+    });
 
-    // Bulk apply
+    // ── Bulk: Create All Unmatched ───────────────────────────────────────────
+
+    createUnmatchedBtn?.addEventListener('click', async () => {
+      const queries = createUnmatchedBtn._queries;
+      if (!queries?.length || !product.sku) return;
+      createUnmatchedBtn.disabled = true;
+      let linked = 0;
+      for (let i = 0; i < queries.length; i += 3) {
+        createUnmatchedBtn.textContent = `Creating\u2026 (${i}/${queries.length})`;
+        const batch = queries.slice(i, i + 3);
+        await Promise.all(batch.map(async (name) => {
+          try {
+            const printer = await AdminAPI.createPrinter(name);
+            const pid = String(printer?.id || printer?.printer_id || '');
+            if (pid) { await AdminAPI.addCompatiblePrinter(product.sku, pid); compatPrinters.push({ id: pid, full_name: name }); linked++; }
+          } catch (_) {}
+        }));
+        if (i + 3 < queries.length) await new Promise(r => setTimeout(r, 200));
+      }
+      renderCompatBadges();
+      createUnmatchedBtn.style.display = 'none';
+      Toast.success(`Created and linked ${linked} printer${linked !== 1 ? 's' : ''}`);
+      createUnmatchedBtn.disabled = false;
+    });
+
+    // ── Bulk results: individual Create buttons ──────────────────────────────
+
+    bulkResults?.addEventListener('click', async (e) => {
+      const btn = e.target.closest('.compat-create-one-btn');
+      if (!btn || !product.sku) return;
+      const query = btn.dataset.query;
+      btn.disabled = true;
+      btn.textContent = 'Creating\u2026';
+      try {
+        const printer = await AdminAPI.createPrinter(query);
+        const pid  = String(printer?.id || printer?.printer_id || '');
+        const name = printer?.full_name || printer?.name || query;
+        if (pid) {
+          await AdminAPI.addCompatiblePrinter(product.sku, pid);
+          compatPrinters.push({ id: pid, full_name: name });
+          renderCompatBadges();
+        }
+        const row = btn.closest('.admin-compat-parse-result');
+        if (row) {
+          row.className = 'admin-compat-parse-result admin-compat-parse-result--matched';
+          row.innerHTML = `<span>&#10003;</span><span class="result-name">${esc(name)}</span><span style="font-size:11px;color:var(--text-muted)">(created)</span>`;
+        }
+        Toast.success(`Created: ${name}`);
+      } catch (err) {
+        btn.disabled = false;
+        btn.textContent = 'Create';
+        Toast.error(`Failed: ${err.message}`);
+      }
+    });
+
+    // ── Bulk apply to variants ────────────────────────────────────────────────
+
     if (showBulk && bulkWrap && bulkBtn && prefixEl) {
       prefixEl.textContent = skuPrefix;
       bulkWrap.style.display = 'block';
       bulkBtn.addEventListener('click', async () => {
         if (compatPrinters.length === 0) { Toast.error('No printers to apply'); return; }
-        const printerIds = compatPrinters.map(p => typeof p === 'object' ? (p.id || p.printer_id) : null).filter(Boolean);
+        const ids = compatPrinters.map(p => typeof p === 'object' ? (p.id || p.printer_id) : null).filter(Boolean);
         bulkBtn.disabled = true;
         bulkBtn.textContent = 'Applying\u2026';
         try {
-          await AdminAPI.bulkApplyCompatibility(skuPrefix, printerIds);
+          await AdminAPI.bulkApplyCompatibility(skuPrefix, ids);
           Toast.success(`Applied to all variants with prefix \u201c${skuPrefix}\u201d`);
         } catch (err) {
           Toast.error(`Bulk apply failed: ${err.message}`);
@@ -1466,17 +1413,17 @@ function bindProductModalActions(modal, product) {
       });
     }
 
-    // Load printers
+    // ── Initial load ─────────────────────────────────────────────────────────
+
     if (product.sku && window.API?.getCompatiblePrinters) {
       const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 10000));
-      Promise.race([window.API.getCompatiblePrinters(product.sku), timeout]).then(response => {
-        compatPrinters = response?.data?.compatible_printers || response?.data?.printers || response?.data || [];
-        if (!Array.isArray(compatPrinters)) compatPrinters = [];
-        renderCompatBadges();
-      }).catch(() => {
-        compatPrinters = [];
-        renderCompatBadges();
-      });
+      Promise.race([window.API.getCompatiblePrinters(product.sku), timeout])
+        .then(resp => {
+          compatPrinters = resp?.data?.compatible_printers || resp?.data?.printers || resp?.data || [];
+          if (!Array.isArray(compatPrinters)) compatPrinters = [];
+          renderCompatBadges();
+        })
+        .catch(() => { compatPrinters = []; renderCompatBadges(); });
     } else {
       renderCompatBadges();
     }
