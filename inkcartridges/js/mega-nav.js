@@ -132,15 +132,15 @@
     function renderRibbons(deviceBrands) {
         if (!ribbonsGrid) return;
         ribbonsGrid.innerHTML = deviceBrands.map(b =>
-            `<a href="/html/ribbons?device_brand=${Security.escapeAttr(b.value)}" class="ribbons-mega__brand-btn">${Security.escapeHtml(b.label)}</a>`
+            `<a href="/html/ribbons?device_brand=${Security.escapeAttr(b)}" class="ribbons-mega__brand-btn">${Security.escapeHtml(b)}</a>`
         ).join('');
     }
 
     async function loadAndRenderRibbons() {
         if (!ribbonsGrid) return;
         try {
-            const res = await API.getRibbonDeviceBrands();
-            const brands = res?.data?.device_brands || [];
+            const res = await API.getRibbonBrands();
+            const brands = res?.data?.brands || [];
             if (brands.length > 0) {
                 renderRibbons(brands);
             }

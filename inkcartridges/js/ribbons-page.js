@@ -105,8 +105,8 @@ const RibbonsPage = {
         this.showLoadingState('brands', true);
 
         try {
-            const res = await API.getRibbonDeviceBrands();
-            const brands = res?.data?.device_brands || [];
+            const res = await API.getRibbonBrands();
+            const brands = res?.data?.brands || [];
 
             this.showLoadingState('brands', false);
 
@@ -119,12 +119,12 @@ const RibbonsPage = {
             brands.forEach((b, i) => {
                 const box = document.createElement('a');
                 box.className = 'drilldown-box drilldown-box--ribbon';
-                box.href = `/html/ribbons?device_brand=${encodeURIComponent(b.value)}`;
+                box.href = `/html/ribbons?device_brand=${encodeURIComponent(b)}`;
                 box.style.animationDelay = `${i * 30}ms`;
-                box.innerHTML = `<span class="drilldown-box__label">${Security.escapeHtml(b.label)}</span>`;
+                box.innerHTML = `<span class="drilldown-box__label">${Security.escapeHtml(b)}</span>`;
                 box.addEventListener('click', (e) => {
                     e.preventDefault();
-                    this.navigateToBrand(b.value);
+                    this.navigateToBrand(b);
                 });
                 grid.appendChild(box);
             });

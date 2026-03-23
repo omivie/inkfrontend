@@ -153,7 +153,7 @@ async function loadCompatCounts() {
         if (!signal.aborted) cell.outerHTML = `<span class="admin-text-muted" style="font-size:0.72rem;">—</span>`;
       }
     }));
-    if (i + batch < arr.length && !signal.aborted) await new Promise(r => setTimeout(r, 100));
+    if (i + batch < arr.length && !signal.aborted) await new Promise(r => setTimeout(r, 300));
   }
 }
 
@@ -2198,6 +2198,7 @@ export default {
       let page = 1;
       let totalFromApi = null;
       while (true) {
+        if (page > 1) await new Promise(r => setTimeout(r, 400));
         const data = await AdminAPI.getProducts({}, page, 200);
         const rows = Array.isArray(data) ? data : (data?.products || data?.data || []);
         if (totalFromApi === null) {
