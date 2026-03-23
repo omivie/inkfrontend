@@ -679,6 +679,17 @@
     justify-content: flex-start;
 }
 
+.brands-mega__logo-link {
+    display: flex;
+    align-items: center;
+    opacity: 1;
+    transition: opacity 0.15s;
+}
+
+.brands-mega__logo-link:hover {
+    opacity: 0.75;
+}
+
 .brands-mega__brand-logo {
     height: 24px;
     width: auto;

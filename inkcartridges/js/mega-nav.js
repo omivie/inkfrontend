@@ -86,9 +86,9 @@
               { label: 'Toner Cartridges', param: 'toner' },
               { label: 'Drums & Supplies', param: 'consumable' }
           ]},
-        { slug: 'dymo', name: 'Dymo', logo: '/assets/brands/dymo.svg',
+        { slug: 'dymo', name: 'Dymo', logo: 'https://lmdlgldjgcanknsjrcxh.supabase.co/storage/v1/object/public/public-assets/logos/dymo.png',
           categories: [
-              { label: 'Label Cartridges', param: 'ink' }
+              { label: 'Label Tape', param: 'label_tape' }
           ]}
     ];
 
@@ -106,18 +106,24 @@
     // RENDER BRAND CARDS (Ink/Toner)
     // ============================================
     function renderBrands() {
-        brandsCardsContainer.innerHTML = BRANDS.map(brand => `
+        brandsCardsContainer.innerHTML = BRANDS.map(brand => {
+            const brandUrl = brand.categories.length === 1
+                ? `/html/shop?brand=${Security.escapeAttr(brand.slug)}&category=${Security.escapeAttr(brand.categories[0].param)}`
+                : `/html/shop?brand=${Security.escapeAttr(brand.slug)}`;
+            return `
             <div class="brands-mega__card">
                 <div class="brands-mega__logo-wrap">
-                    <img src="${Security.escapeAttr(brand.logo)}" alt="${Security.escapeAttr(brand.name)}" class="brands-mega__brand-logo brands-mega__brand-logo--${Security.escapeAttr(brand.slug)}">
+                    <a href="${brandUrl}" class="brands-mega__logo-link">
+                        <img src="${Security.escapeAttr(brand.logo)}" alt="${Security.escapeAttr(brand.name)}" class="brands-mega__brand-logo brands-mega__brand-logo--${Security.escapeAttr(brand.slug)}">
+                    </a>
                 </div>
                 <div class="brands-mega__card-links">
                     ${brand.categories.map(cat =>
                         `<a href="/html/shop?brand=${Security.escapeAttr(brand.slug)}&category=${Security.escapeAttr(cat.param)}" class="brands-mega__card-link">${Security.escapeHtml(cat.label)}</a>`
                     ).join('\n                    ')}
                 </div>
-            </div>
-        `).join('');
+            </div>`;
+        }).join('');
     }
 
     // ============================================

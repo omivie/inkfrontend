@@ -601,6 +601,16 @@ const AdminAPI = {
     }
   },
 
+  async bulkUpsertCompatibility(sku, models) {
+    try {
+      const resp = await window.API.post('/api/admin/compatibility/bulk-upsert', { sku, models });
+      return resp?.data ?? null;
+    } catch (e) {
+      DebugLog.warn('[AdminAPI] bulkUpsertCompatibility failed:', e.message);
+      throw e;
+    }
+  },
+
   async bulkApplyCompatibility(skuPrefix, printerIds) {
     try {
       const resp = await window.API.post('/api/admin/compatibility/bulk-by-prefix', {

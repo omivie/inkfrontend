@@ -31,6 +31,7 @@
             { id: 'ink',          name: 'Ink Cartridges',  icon: 'droplet',   apiCategory: 'ink' },
             { id: 'toner',        name: 'Toner Cartridges', icon: 'box',       apiCategory: 'toner' },
             { id: 'consumable',   name: 'Drums & Supplies', icon: 'disc',      apiCategory: 'drums' },
+            { id: 'label_tape',   name: 'Label Tape',       icon: 'tag',       apiCategory: 'label' },
             { id: 'glossy_paper', name: 'Glossy Paper',     icon: 'image',     apiCategory: 'drums' },
             { id: 'matte_paper',  name: 'Matte Paper',      icon: 'file-text', apiCategory: 'drums' }
         ],
@@ -49,7 +50,7 @@
             oki: { name: 'OKI', logo: '/assets/brands/oki.svg' },
             'fuji-xerox': { name: 'Fuji Xerox', logo: '/assets/brands/fuji-xerox.png' },
             kyocera: { name: 'Kyocera', logo: '/assets/brands/kyocera.svg' },
-            dymo: { name: 'Dymo', logo: '/assets/brands/dymo.svg' }
+            dymo: { name: 'Dymo', logo: 'https://lmdlgldjgcanknsjrcxh.supabase.co/storage/v1/object/public/public-assets/logos/dymo.png' }
         },
 
         // DOM Elements
@@ -495,8 +496,10 @@
                 const box = document.createElement('button');
                 box.className = 'drilldown-box drilldown-box--brand';
                 box.dataset.brand = brandId;
-                if (info && info.logo) {
-                    box.innerHTML = `<img src="${Security.escapeAttr(info.logo)}" alt="${Security.escapeAttr(info.name)}" class="drilldown-box__logo drilldown-box__logo--${Security.escapeAttr(brandId)}">`;
+                const logoSrc = brand.logo_path || (info && info.logo);
+                const displayName = (info && info.name) || brand.name || brandId;
+                if (logoSrc) {
+                    box.innerHTML = `<img src="${Security.escapeAttr(logoSrc)}" alt="${Security.escapeAttr(displayName)}" class="drilldown-box__logo drilldown-box__logo--${Security.escapeAttr(brandId)}">`;
                 } else {
                     box.innerHTML = `<span class="drilldown-box__name">${Security.escapeHtml(brand.name || brandId)}</span>`;
                 }
@@ -541,7 +544,8 @@
                 disc: '<svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="3"/></svg>',
                 package: '<svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><line x1="16.5" y1="9.4" x2="7.5" y2="4.21"/><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>',
                 image: '<svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>',
-                'file-text': '<svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>'
+                'file-text': '<svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>',
+                tag: '<svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>'
             };
 
             // Check cache for category counts
@@ -568,13 +572,20 @@
                                 else if (paperType === 'matte' && !this.isPureSizeCode(s.code)) matteCount += s.count;
                                 else if (paperType === null) drumCount += s.count;
                             }
-                            categoryCounts = {
-                                ink: response.data.counts.ink || 0,
-                                toner: response.data.counts.toner || 0,
-                                consumable: drumCount,
-                                glossy_paper: glossyCount,
-                                matte_paper: matteCount
-                            };
+                            const totalCount = (response.data.counts.ink || 0) + (response.data.counts.toner || 0) +
+                                drumCount + glossyCount + matteCount + (response.data.counts.label_tape || 0);
+                            if (totalCount > 0) {
+                                categoryCounts = {
+                                    ink: response.data.counts.ink || 0,
+                                    toner: response.data.counts.toner || 0,
+                                    consumable: drumCount,
+                                    label_tape: response.data.counts.label_tape || 0,
+                                    glossy_paper: glossyCount,
+                                    matte_paper: matteCount
+                                };
+                            }
+                            // If all counts are 0 (e.g. brand only has label_tape products not reflected in counts),
+                            // fall through to legacy product fetch for accurate counting
                         } else {
                             // Endpoint returned error — fall back to legacy
                             this._shopEndpointAvailable = false;
@@ -615,6 +626,8 @@
                                            productType === 'belt_unit' ||
                                            productType === 'fuser_kit' ||
                                            productType === 'maintenance_kit';
+                                } else if (categoryId === 'label_tape') {
+                                    return productType === 'label_tape';
                                 } else if (categoryId === 'glossy_paper') {
                                     return productType === 'photo_paper'; // can't distinguish gloss/matte from legacy
                                 } else if (categoryId === 'matte_paper') {
@@ -633,6 +646,7 @@
                         categoryCounts['ink'] = countByProductType(allProducts, 'ink');
                         categoryCounts['toner'] = countByProductType(allProducts, 'toner');
                         categoryCounts['consumable'] = countByProductType(allProducts, 'consumable');
+                        categoryCounts['label_tape'] = countByProductType(allProducts, 'label_tape');
                         categoryCounts['glossy_paper'] = countByProductType(allProducts, 'glossy_paper');
                         categoryCounts['matte_paper'] = 0; // not classifiable via legacy
                     }
@@ -656,6 +670,12 @@
 
             if (availableCategories.length === 0) {
                 this.showEmpty('No products available for this brand.');
+                return;
+            }
+
+            // If there's only one category, skip the selection step and go straight to codes
+            if (availableCategories.length === 1) {
+                this.navigateTo('codes', { category: availableCategories[0].id });
                 return;
             }
 
@@ -823,6 +843,7 @@
                             if (categoryId === 'ink') return productType === 'ink_cartridge' || productType === 'ink_bottle';
                             if (categoryId === 'toner') return productType === 'toner_cartridge';
                             if (categoryId === 'consumable') return productType === 'drum_unit' || productType === 'waste_toner' || productType === 'belt_unit' || productType === 'fuser_kit' || productType === 'maintenance_kit';
+                            if (categoryId === 'label_tape') return productType === 'label_tape';
                             if (categoryId === 'glossy_paper' || categoryId === 'matte_paper') return productType === 'photo_paper';
                             return true;
                         });
@@ -842,6 +863,7 @@
                         if (categoryId === 'ink') return productType === 'ink_cartridge' || productType === 'ink_bottle';
                         if (categoryId === 'toner') return productType === 'toner_cartridge';
                         if (categoryId === 'consumable') return productType === 'drum_unit' || productType === 'waste_toner' || productType === 'belt_unit' || productType === 'fuser_kit' || productType === 'maintenance_kit';
+                        if (categoryId === 'label_tape') return productType === 'label_tape';
                         if (categoryId === 'glossy_paper' || categoryId === 'matte_paper') return productType === 'photo_paper';
                         return true;
                     });

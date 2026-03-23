@@ -664,6 +664,7 @@ function buildProductModalTabs(modal, full, isOwner) {
           <button class="admin-btn admin-btn--sm admin-btn--primary" id="compat-parse-btn">Find Printers</button>
           <button class="admin-btn admin-btn--sm admin-btn--ghost" id="compat-ribbon-parse-btn" title="Convert ribbon-style blob text into one model per line">Parse Ribbon Text ▶</button>
           <button class="admin-btn admin-btn--sm admin-btn--ghost" id="compat-add-matched-btn" style="display:none"></button>
+          <button class="admin-btn admin-btn--sm admin-btn--ghost" id="compat-create-unmatched-btn" style="display:none"></button>
         </div>
         <div id="compat-parse-results" class="admin-compat-parse-results"></div>
       </div>
@@ -943,6 +944,7 @@ function bindProductModalActions(modal, product) {
     const parseBtn = modal.querySelector('#compat-parse-btn');
     const ribbonParseBtn = modal.querySelector('#compat-ribbon-parse-btn');
     const addMatchedBtn = modal.querySelector('#compat-add-matched-btn');
+    const createUnmatchedBtn = modal.querySelector('#compat-create-unmatched-btn');
     const parseResults = modal.querySelector('#compat-parse-results');
     const unmatchedWrap = modal.querySelector('#compat-unmatched-wrap');
     const unmatchedList = modal.querySelector('#compat-unmatched-list');
@@ -991,7 +993,7 @@ function bindProductModalActions(modal, product) {
         } finally { clearUnmatchedBtn.disabled = false; }
       });
     }
-    // Create All button — creates all stored unmatched models in the DB and links them
+    // Create All button — bulk creates/links all unmatched models via single API call
     if (createAllBtn) {
       createAllBtn.addEventListener('click', async () => {
         if (!product.sku) return;
@@ -1000,32 +1002,25 @@ function bindProductModalActions(modal, product) {
         if (names.length === 0) return;
         createAllBtn.disabled = true;
         createAllBtn.textContent = 'Creating\u2026';
-        let created = 0;
-        const remaining = [];
-        for (const name of names) {
-          try {
-            const newPrinter = await AdminAPI.createPrinter(name);
-            const id = String(newPrinter.id || newPrinter.printer_id || '');
-            const displayName = newPrinter.full_name || newPrinter.name || name;
-            if (id) {
-              await AdminAPI.addCompatiblePrinter(product.sku, id);
-              compatPrinters.push({ id, full_name: displayName });
-              created++;
-            } else {
-              remaining.push(name);
-            }
-          } catch (_) {
-            remaining.push(name);
-          }
-        }
-        renderCompatBadges();
-        const newNotes = setUnmatchedNote(product.internal_notes, remaining.join(', '));
         try {
-          await AdminAPI.updateProduct(product.id, { internal_notes: newNotes });
-          product.internal_notes = newNotes;
-        } catch (_) {}
-        renderUnmatchedNote(remaining.join(', '));
-        if (created > 0) Toast.success(`Created ${created} printer${created > 1 ? 's' : ''}`);
+          const result = await AdminAPI.bulkUpsertCompatibility(product.sku, names);
+          const linked = result?.linked ?? names.length;
+          const created = result?.created ?? 0;
+          // Clear unmatched note — everything is now linked
+          const newNotes = setUnmatchedNote(product.internal_notes, '');
+          try {
+            await AdminAPI.updateProduct(product.id, { internal_notes: newNotes });
+            product.internal_notes = newNotes;
+          } catch (_) {}
+          renderUnmatchedNote('');
+          // Reload compatible printers to reflect new links
+          const fresh = await window.API.getCompatiblePrinters(product.sku);
+          compatPrinters = Array.isArray(fresh) ? fresh : (fresh?.data?.compatible_printers || fresh?.data?.printers || []);
+          renderCompatBadges();
+          Toast.success(`Linked ${linked} model${linked !== 1 ? 's' : ''}${created > 0 ? ` (${created} new)` : ''}`);
+        } catch (err) {
+          Toast.error(`Bulk create failed: ${err.message}`);
+        }
         createAllBtn.disabled = false;
         createAllBtn.textContent = 'Create All';
       });
@@ -1232,6 +1227,28 @@ function bindProductModalActions(modal, product) {
         pasteMatches = [];
       });
 
+      // Create All Unmatched — bulk creates and links all unmatched from current search session
+      createUnmatchedBtn?.addEventListener('click', async () => {
+        const queries = createUnmatchedBtn._queries;
+        if (!queries?.length || !product.sku) return;
+        createUnmatchedBtn.disabled = true;
+        createUnmatchedBtn.textContent = 'Creating\u2026';
+        try {
+          const result = await AdminAPI.bulkUpsertCompatibility(product.sku, queries);
+          const linked = result?.linked ?? queries.length;
+          const created = result?.created ?? 0;
+          createUnmatchedBtn.style.display = 'none';
+          const fresh = await window.API.getCompatiblePrinters(product.sku);
+          compatPrinters = Array.isArray(fresh) ? fresh : (fresh?.data?.compatible_printers || fresh?.data?.printers || []);
+          renderCompatBadges();
+          Toast.success(`Linked ${linked} model${linked !== 1 ? 's' : ''}${created > 0 ? ` (${created} new)` : ''}`);
+        } catch (err) {
+          Toast.error(`Failed: ${err.message}`);
+          createUnmatchedBtn.disabled = false;
+          createUnmatchedBtn.textContent = `Create All Unmatched (${queries.length})`;
+        }
+      });
+
       parseBtn.addEventListener('click', async () => {
         const raw = pasteArea.value.trim();
         if (!raw) return;
@@ -1241,15 +1258,18 @@ function bindProductModalActions(modal, product) {
         parseBtn.disabled = true;
         parseBtn.textContent = 'Searching\u2026';
         addMatchedBtn.style.display = 'none';
+        if (createUnmatchedBtn) createUnmatchedBtn.style.display = 'none';
         pasteMatches = [];
 
         parseResults.innerHTML = `<div id="compat-parse-progress" style="color:var(--text-muted);font-size:12px">Searching 0 / ${names.length}\u2026</div>`;
         const progressEl = parseResults.querySelector('#compat-parse-progress');
 
-        const BATCH = 20;
+        const BATCH = 5;
+        const BATCH_DELAY = 300; // ms between batches to avoid rate limiting
         const results = [];
         lastResults = results;
         for (let i = 0; i < names.length; i += BATCH) {
+          if (i > 0) await new Promise(r => setTimeout(r, BATCH_DELAY));
           const batch = names.slice(i, i + BATCH);
           const batchResults = await Promise.all(batch.map(async name => {
             try {
@@ -1292,6 +1312,12 @@ function bindProductModalActions(modal, product) {
           addMatchedBtn.textContent = `Add ${newMatches.length} Printer${newMatches.length > 1 ? 's' : ''}`;
           addMatchedBtn.style.display = 'inline-flex';
         }
+        const unmatchedQueries = results.filter(r => !r.matched).map(r => r.query);
+        if (unmatchedQueries.length > 0 && createUnmatchedBtn) {
+          createUnmatchedBtn.textContent = `Create All Unmatched (${unmatchedQueries.length})`;
+          createUnmatchedBtn.style.display = 'inline-flex';
+          createUnmatchedBtn._queries = unmatchedQueries;
+        }
 
         // Auto-save unmatched names immediately after search
         // Skip if there are too many unmatched items — the merged string would exceed the 2000-char field limit
@@ -1302,12 +1328,12 @@ function bindProductModalActions(modal, product) {
         const merged = [...existingSet].join(', ');
         const newNotes = setUnmatchedNote(product.internal_notes, merged);
         renderUnmatchedNote(merged);
-        if (unmatchedNow.length > 0 && product.id && newNotes.length <= 2000) {
+        if (unmatchedNow.length > 0 && product.id && newNotes.length <= 10000) {
           try {
             await AdminAPI.updateProduct(product.id, { internal_notes: newNotes });
             product.internal_notes = newNotes;
-          } catch (err) {
-            Toast.error(`Could not save unmatched note: ${err.message}`);
+          } catch (_) {
+            // silent — unmatched note is a convenience backup, not critical
           }
         }
 
