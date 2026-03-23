@@ -441,6 +441,10 @@ const API = {
         return this.get(`/api/printers/search?${params}`);
     },
 
+    async searchPrintersBulk(queries) {
+        return this.post('/api/printers/search/bulk', { queries });
+    },
+
     /**
      * Smart search - returns product cards for autocomplete dropdown
      * @param {string} query - Search query

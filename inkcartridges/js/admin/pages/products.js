@@ -21,6 +21,7 @@ function extractBrandName(p) {
 
 let _container = null;
 let _table = null;
+let _compatController = null;
 let _page = 1;
 let _search = '';
 let _sort = 'name';
@@ -123,17 +124,24 @@ function buildColumns() {
 }
 
 async function loadCompatCounts() {
+  if (_compatController) _compatController.abort();
+  _compatController = new AbortController();
+  const signal = _compatController.signal;
+
   const cells = document.querySelectorAll('[data-compat-sku]');
   if (!cells.length) return;
   const batch = 5;
   const arr = Array.from(cells);
   for (let i = 0; i < arr.length; i += batch) {
+    if (signal.aborted) return;
     const slice = arr.slice(i, i + batch);
     await Promise.all(slice.map(async (cell) => {
+      if (signal.aborted) return;
       const sku = cell.dataset.compatSku;
       if (!sku) return;
       try {
         const res = await window.API.getCompatiblePrinters(sku);
+        if (signal.aborted) return;
         const printers = res?.data?.compatible_printers || res?.data?.printers || [];
         const count = Array.isArray(printers) ? printers.length : 0;
         if (count > 0) {
@@ -142,10 +150,10 @@ async function loadCompatCounts() {
           cell.outerHTML = `<span class="admin-badge admin-badge--pending" style="font-size:0.72rem;">⚠ None</span>`;
         }
       } catch {
-        cell.outerHTML = `<span class="admin-text-muted" style="font-size:0.72rem;">—</span>`;
+        if (!signal.aborted) cell.outerHTML = `<span class="admin-text-muted" style="font-size:0.72rem;">—</span>`;
       }
     }));
-    if (i + batch < arr.length) await new Promise(r => setTimeout(r, 100));
+    if (i + batch < arr.length && !signal.aborted) await new Promise(r => setTimeout(r, 100));
   }
 }
 
@@ -208,11 +216,15 @@ function closeProductModal() {
   _activeModal = null;
   modal.classList.remove('open');
   setTimeout(() => modal.remove(), 220);
+  // Resume compat count loading for any cells still showing placeholders
+  loadCompatCounts();
 }
 
 async function openProductDrawer(product) {
   // Close any existing modal first
   if (_activeModal) closeProductModal();
+  // Pause background compat loading so modal API calls aren't rate-limited
+  if (_compatController) _compatController.abort();
 
   // Build modal shell immediately (loading state)
   const modal = document.createElement('div');
@@ -1264,25 +1276,38 @@ function bindProductModalActions(modal, product) {
         parseResults.innerHTML = `<div id="compat-parse-progress" style="color:var(--text-muted);font-size:12px">Searching 0 / ${names.length}\u2026</div>`;
         const progressEl = parseResults.querySelector('#compat-parse-progress');
 
-        const BATCH = 5;
-        const BATCH_DELAY = 300; // ms between batches to avoid rate limiting
         const results = [];
         lastResults = results;
-        for (let i = 0; i < names.length; i += BATCH) {
-          if (i > 0) await new Promise(r => setTimeout(r, BATCH_DELAY));
-          const batch = names.slice(i, i + BATCH);
-          const batchResults = await Promise.all(batch.map(async name => {
-            try {
-              const resp = await window.API.searchPrinters(name);
-              const list = resp?.data?.printers || resp?.data || [];
-              const top = Array.isArray(list) ? list[0] : null;
-              return top ? { query: name, printer: top, matched: true } : { query: name, matched: false };
-            } catch (_) {
-              return { query: name, matched: false };
-            }
-          }));
-          results.push(...batchResults);
-          if (progressEl) progressEl.textContent = `Searching ${Math.min(i + BATCH, names.length)} / ${names.length}\u2026`;
+        try {
+          const bulkResp = await window.API.searchPrintersBulk(names);
+          const bulkResults = bulkResp?.data?.results || [];
+          for (const r of bulkResults) {
+            results.push(r.printer
+              ? { query: r.query, printer: r.printer, matched: true }
+              : { query: r.query, matched: false }
+            );
+          }
+          if (progressEl) progressEl.textContent = `Found ${results.filter(r => r.matched).length} / ${results.length} models\u2026`;
+        } catch (_) {
+          // Fallback to individual requests if bulk endpoint fails
+          const BATCH = 5;
+          const BATCH_DELAY = 300;
+          for (let i = 0; i < names.length; i += BATCH) {
+            if (i > 0) await new Promise(r => setTimeout(r, BATCH_DELAY));
+            const batch = names.slice(i, i + BATCH);
+            const batchResults = await Promise.all(batch.map(async name => {
+              try {
+                const resp = await window.API.searchPrinters(name);
+                const list = resp?.data?.printers || resp?.data || [];
+                const top = Array.isArray(list) ? list[0] : null;
+                return top ? { query: name, printer: top, matched: true } : { query: name, matched: false };
+              } catch (_e) {
+                return { query: name, matched: false };
+              }
+            }));
+            results.push(...batchResults);
+            if (progressEl) progressEl.textContent = `Searching ${Math.min(i + BATCH, names.length)} / ${names.length}\u2026`;
+          }
         }
 
         pasteMatches = results.filter(r => r.matched);
@@ -2166,6 +2191,8 @@ export default {
     _diagnostics = raw?.data ?? raw;
 
     // Compute diagnostics by paginating through all products
+    // Delay start so the initial loadCompatCounts() requests can settle first
+    await new Promise(r => setTimeout(r, 3000));
     try {
       let all = [];
       let page = 1;
