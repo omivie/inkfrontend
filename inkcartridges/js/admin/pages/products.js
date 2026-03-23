@@ -995,17 +995,17 @@ function bindProductModalActions(modal, product) {
     if (clearUnmatchedBtn) {
       clearUnmatchedBtn.addEventListener('click', async () => {
         clearUnmatchedBtn.disabled = true;
+        const newNotes = setUnmatchedNote(product.internal_notes, '');
+        product.internal_notes = newNotes;
+        renderUnmatchedNote('');
         try {
-          const newNotes = setUnmatchedNote(product.internal_notes, '');
           await AdminAPI.updateProduct(product.id, { internal_notes: newNotes });
-          product.internal_notes = newNotes;
-          renderUnmatchedNote('');
         } catch (err) {
-          Toast.error(`Clear failed: ${err.message}`);
+          Toast.error(`Save failed: ${err.message}`);
         } finally { clearUnmatchedBtn.disabled = false; }
       });
     }
-    // Create All button — bulk creates/links all unmatched models via single API call
+    // Create All button — create & link each unmatched model individually
     if (createAllBtn) {
       createAllBtn.addEventListener('click', async () => {
         if (!product.sku) return;
@@ -1013,26 +1013,30 @@ function bindProductModalActions(modal, product) {
         const names = csv ? csv.split(',').map(s => s.trim()).filter(Boolean) : [];
         if (names.length === 0) return;
         createAllBtn.disabled = true;
-        createAllBtn.textContent = 'Creating\u2026';
-        try {
-          const result = await AdminAPI.bulkUpsertCompatibility(product.sku, names);
-          const linked = result?.linked ?? names.length;
-          const created = result?.created ?? 0;
-          // Clear unmatched note — everything is now linked
-          const newNotes = setUnmatchedNote(product.internal_notes, '');
-          try {
-            await AdminAPI.updateProduct(product.id, { internal_notes: newNotes });
-            product.internal_notes = newNotes;
-          } catch (_) {}
-          renderUnmatchedNote('');
-          // Reload compatible printers to reflect new links
-          const fresh = await window.API.getCompatiblePrinters(product.sku);
-          compatPrinters = Array.isArray(fresh) ? fresh : (fresh?.data?.compatible_printers || fresh?.data?.printers || []);
-          renderCompatBadges();
-          Toast.success(`Linked ${linked} model${linked !== 1 ? 's' : ''}${created > 0 ? ` (${created} new)` : ''}`);
-        } catch (err) {
-          Toast.error(`Bulk create failed: ${err.message}`);
+        let linked = 0;
+        const BATCH = 3;
+        for (let i = 0; i < names.length; i += BATCH) {
+          createAllBtn.textContent = `Creating\u2026 (${i}/${names.length})`;
+          const batch = names.slice(i, i + BATCH);
+          await Promise.all(batch.map(async (name) => {
+            try {
+              const printer = await AdminAPI.createPrinter(name);
+              const id = String(printer?.id || printer?.printer_id || '');
+              if (id) { await AdminAPI.addCompatiblePrinter(product.sku, id); linked++; }
+            } catch (_) {}
+          }));
+          if (i + BATCH < names.length) await new Promise(r => setTimeout(r, 200));
         }
+        // Clear unmatched note
+        const newNotes = setUnmatchedNote(product.internal_notes, '');
+        product.internal_notes = newNotes;
+        renderUnmatchedNote('');
+        try { await AdminAPI.updateProduct(product.id, { internal_notes: newNotes }); } catch (_) {}
+        // Reload compatible printers
+        const fresh = await window.API.getCompatiblePrinters(product.sku);
+        compatPrinters = Array.isArray(fresh) ? fresh : (fresh?.data?.compatible_printers || fresh?.data?.printers || []);
+        renderCompatBadges();
+        Toast.success(`Linked ${linked} model${linked !== 1 ? 's' : ''}`);
         createAllBtn.disabled = false;
         createAllBtn.textContent = 'Create All';
       });
@@ -1244,21 +1248,25 @@ function bindProductModalActions(modal, product) {
         const queries = createUnmatchedBtn._queries;
         if (!queries?.length || !product.sku) return;
         createUnmatchedBtn.disabled = true;
-        createUnmatchedBtn.textContent = 'Creating\u2026';
-        try {
-          const result = await AdminAPI.bulkUpsertCompatibility(product.sku, queries);
-          const linked = result?.linked ?? queries.length;
-          const created = result?.created ?? 0;
-          createUnmatchedBtn.style.display = 'none';
-          const fresh = await window.API.getCompatiblePrinters(product.sku);
-          compatPrinters = Array.isArray(fresh) ? fresh : (fresh?.data?.compatible_printers || fresh?.data?.printers || []);
-          renderCompatBadges();
-          Toast.success(`Linked ${linked} model${linked !== 1 ? 's' : ''}${created > 0 ? ` (${created} new)` : ''}`);
-        } catch (err) {
-          Toast.error(`Failed: ${err.message}`);
-          createUnmatchedBtn.disabled = false;
-          createUnmatchedBtn.textContent = `Create All Unmatched (${queries.length})`;
+        let linked = 0;
+        const BATCH = 3;
+        for (let i = 0; i < queries.length; i += BATCH) {
+          createUnmatchedBtn.textContent = `Creating\u2026 (${i}/${queries.length})`;
+          const batch = queries.slice(i, i + BATCH);
+          await Promise.all(batch.map(async (name) => {
+            try {
+              const printer = await AdminAPI.createPrinter(name);
+              const id = String(printer?.id || printer?.printer_id || '');
+              if (id) { await AdminAPI.addCompatiblePrinter(product.sku, id); linked++; }
+            } catch (_) {}
+          }));
+          if (i + BATCH < queries.length) await new Promise(r => setTimeout(r, 200));
         }
+        createUnmatchedBtn.style.display = 'none';
+        const fresh = await window.API.getCompatiblePrinters(product.sku);
+        compatPrinters = Array.isArray(fresh) ? fresh : (fresh?.data?.compatible_printers || fresh?.data?.printers || []);
+        renderCompatBadges();
+        Toast.success(`Linked ${linked} model${linked !== 1 ? 's' : ''}`);
       });
 
       parseBtn.addEventListener('click', async () => {
