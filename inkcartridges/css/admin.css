@@ -1536,6 +1536,22 @@
 .admin-compat-parse-result .result-query { font-style: italic; opacity: 0.7; }
 .admin-compat-parse-result .result-name { font-weight: 500; }
 
+.compat-status-chip {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 10px;
+  margin-left: 4px;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  vertical-align: middle;
+}
+.compat-status-chip--created { background: #d1fae5; color: #065f46; }
+.compat-status-chip--found   { background: #e5e7eb; color: #374151; }
+.compat-status-chip--added   { background: #dbeafe; color: #1e40af; }
+.compat-status-chip--linked  { background: #f3f4f6; color: #6b7280; }
+
 /* ---- Print ---- */
 @media print {
   .admin-sidebar, .admin-topbar, .admin-reg-strip, .admin-toasts,

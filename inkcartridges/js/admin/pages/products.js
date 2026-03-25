@@ -369,19 +369,21 @@ function openCreateProductModal() {
     <div class="admin-form-row">
       ${formGroup('Brand', buildBrandSelect(null))}
       ${formGroup('Product Type', buildSelect('edit-type', [
-        { value: 'ink_cartridge',   label: 'Ink Cartridge' },
-        { value: 'ink_bottle',      label: 'Ink Bottle' },
-        { value: 'toner_cartridge', label: 'Toner Cartridge' },
-        { value: 'drum_unit',       label: 'Drum Unit' },
-        { value: 'waste_toner',     label: 'Waste Toner' },
-        { value: 'belt_unit',       label: 'Belt Unit' },
-        { value: 'fuser_kit',       label: 'Fuser Kit' },
-        { value: 'fax_film',        label: 'Fax Film' },
-        { value: 'fax_film_refill', label: 'Fax Film Refill' },
-        { value: 'ribbon',          label: 'Ribbon' },
-        { value: 'label_tape',      label: 'Label Tape' },
-        { value: 'photo_paper',     label: 'Photo Paper' },
-        { value: 'printer',         label: 'Printer' },
+        { value: 'ink_cartridge',    label: 'Ink Cartridge' },
+        { value: 'ink_bottle',       label: 'Ink Bottle' },
+        { value: 'toner_cartridge',  label: 'Toner Cartridge' },
+        { value: 'drum_unit',        label: 'Drum Unit' },
+        { value: 'waste_toner',      label: 'Waste Toner' },
+        { value: 'belt_unit',        label: 'Belt Unit' },
+        { value: 'fuser_kit',        label: 'Fuser Kit' },
+        { value: 'fax_film',         label: 'Fax Film' },
+        { value: 'fax_film_refill',  label: 'Fax Film Refill' },
+        { value: 'printer_ribbon',   label: 'Printer Ribbon' },
+        { value: 'typewriter_ribbon', label: 'Typewriter Ribbon' },
+        { value: 'correction_tape',  label: 'Correction Tape' },
+        { value: 'label_tape',       label: 'Label Tape' },
+        { value: 'photo_paper',      label: 'Photo Paper' },
+        { value: 'printer',          label: 'Printer' },
       ], empty.product_type))}
     </div>
     <div class="admin-form-row">
@@ -594,19 +596,21 @@ function buildProductModalTabs(modal, full, isOwner) {
     <div class="admin-form-row">
       ${formGroup('Brand', buildBrandSelect(full.brand_id || full.brand))}
       ${formGroup('Product Type', buildSelect('edit-type', [
-        { value: 'ink_cartridge',   label: 'Ink Cartridge' },
-        { value: 'ink_bottle',      label: 'Ink Bottle' },
-        { value: 'toner_cartridge', label: 'Toner Cartridge' },
-        { value: 'drum_unit',       label: 'Drum Unit' },
-        { value: 'waste_toner',     label: 'Waste Toner' },
-        { value: 'belt_unit',       label: 'Belt Unit' },
-        { value: 'fuser_kit',       label: 'Fuser Kit' },
-        { value: 'fax_film',        label: 'Fax Film' },
-        { value: 'fax_film_refill', label: 'Fax Film Refill' },
-        { value: 'ribbon',          label: 'Ribbon' },
-        { value: 'label_tape',      label: 'Label Tape' },
-        { value: 'photo_paper',     label: 'Photo Paper' },
-        { value: 'printer',         label: 'Printer' },
+        { value: 'ink_cartridge',    label: 'Ink Cartridge' },
+        { value: 'ink_bottle',       label: 'Ink Bottle' },
+        { value: 'toner_cartridge',  label: 'Toner Cartridge' },
+        { value: 'drum_unit',        label: 'Drum Unit' },
+        { value: 'waste_toner',      label: 'Waste Toner' },
+        { value: 'belt_unit',        label: 'Belt Unit' },
+        { value: 'fuser_kit',        label: 'Fuser Kit' },
+        { value: 'fax_film',         label: 'Fax Film' },
+        { value: 'fax_film_refill',  label: 'Fax Film Refill' },
+        { value: 'printer_ribbon',   label: 'Printer Ribbon' },
+        { value: 'typewriter_ribbon', label: 'Typewriter Ribbon' },
+        { value: 'correction_tape',  label: 'Correction Tape' },
+        { value: 'label_tape',       label: 'Label Tape' },
+        { value: 'photo_paper',      label: 'Photo Paper' },
+        { value: 'printer',          label: 'Printer' },
       ], full.product_type))}
     </div>
     <div class="admin-form-row">
@@ -958,8 +962,65 @@ function bindProductModalActions(modal, product) {
     const bulkBtn      = modal.querySelector('#compat-bulk-btn');
     const prefixEl     = modal.querySelector('#compat-prefix');
 
+    const isRibbon  = ['printer_ribbon', 'typewriter_ribbon', 'correction_tape'].includes(product.product_type);
     const skuPrefix = product.sku ? product.sku.replace(/[A-Z]+$/, '') : '';
-    const showBulk  = skuPrefix && skuPrefix !== product.sku;
+    const showBulk  = !isRibbon && skuPrefix && skuPrefix !== product.sku;
+
+    // ── Ribbon helpers (only used when isRibbon) ─────────────────────────────
+
+    const _supabaseHeaders = () => ({
+      'apikey': Config.SUPABASE_ANON_KEY,
+      'Authorization': `Bearer ${window.Auth?.session?.access_token}`,
+      'Content-Type': 'application/json',
+      'Prefer': 'return=representation',
+    });
+    const _ribbonBase = `${Config.SUPABASE_URL}/rest/v1/ribbon_compatibility`;
+
+    function _splitBrandModel(fullName) {
+      const brand = _COMPAT_BRANDS.find(b => fullName.toLowerCase().startsWith(b.toLowerCase()));
+      if (!brand) return { brand: fullName.trim(), model: '' };
+      return { brand, model: fullName.slice(brand.length).trim() };
+    }
+
+    async function _loadRibbonEntries() {
+      const resp = await fetch(
+        `${_ribbonBase}?ribbon_id=eq.${product.id}&select=id,device_brand,device_model,device_brand_norm,device_model_norm&order=device_brand.asc,device_model.asc`,
+        { headers: _supabaseHeaders() }
+      );
+      if (!resp.ok) throw new Error('Failed to load ribbon compatibility');
+      return resp.json();
+    }
+
+    async function _insertRibbonEntry(brand, model) {
+      const row = {
+        ribbon_id: product.id,
+        device_brand: brand,
+        device_model: model,
+        device_brand_norm: brand.toLowerCase(),
+        device_model_norm: model.toLowerCase().replace(/\s+/g, '-'),
+        match_type: 'exact',
+        confidence: 100,
+        source_rank: 100,
+        source_name: 'admin-manual',
+      };
+      const resp = await fetch(_ribbonBase, {
+        method: 'POST',
+        headers: _supabaseHeaders(),
+        body: JSON.stringify(row),
+      });
+      if (resp.status === 409) return null; // already exists
+      if (!resp.ok) throw new Error(`Insert failed: ${resp.status}`);
+      const [inserted] = await resp.json();
+      return inserted;
+    }
+
+    async function _deleteRibbonEntry(id) {
+      const resp = await fetch(`${_ribbonBase}?id=eq.${encodeURIComponent(id)}`, {
+        method: 'DELETE',
+        headers: _supabaseHeaders(),
+      });
+      if (!resp.ok) throw new Error(`Delete failed: ${resp.status}`);
+    }
 
     // ── Helpers ─────────────────────────────────────────────────────────────
 
@@ -1120,31 +1181,40 @@ function bindProductModalActions(modal, product) {
     // ── Render ───────────────────────────────────────────────────────────────
 
     function renderCompatBadges() {
-      if (heading) heading.textContent = `Compatible Printers (${compatPrinters.length})`;
+      const label = isRibbon ? 'Compatible Devices' : 'Compatible Printers';
+      if (heading) heading.textContent = `${label} (${compatPrinters.length})`;
       if (!container) return;
       if (compatPrinters.length === 0) {
         container.innerHTML = `
           <div style="background:var(--yellow-light,#fffbe6);border:1px solid var(--yellow,#f0a500);border-radius:6px;padding:10px 12px;font-size:0.85em;">
-            <strong>No compatible printers linked</strong><br>
-            <span style="color:var(--text-muted)">Use &ldquo;+ Add Printer&rdquo; or paste a bulk list below.</span>
+            <strong>No compatible ${isRibbon ? 'devices' : 'printers'} linked</strong><br>
+            <span style="color:var(--text-muted)">Paste a bulk list below and click &ldquo;${isRibbon ? 'Add to Compatibility' : 'Find Printers'}&rdquo;.</span>
           </div>`;
         return;
       }
-      container.innerHTML = compatPrinters.map(p =>
-        `<span class="admin-badge">${esc(printerName(p))}<button class="compat-remove" data-printer-id="${esc(printerId(p))}" title="Remove">\u00d7</button></span>`
-      ).join('');
+      container.innerHTML = compatPrinters.map(p => {
+        const name = isRibbon ? `${p.device_brand} ${p.device_model}`.trim() : printerName(p);
+        const id   = isRibbon ? p.id : printerId(p);
+        return `<span class="admin-badge">${esc(name)}<button class="compat-remove" data-printer-id="${esc(String(id))}" title="Remove">\u00d7</button></span>`;
+      }).join('');
     }
 
     // ── Remove (delegated on badge container) ────────────────────────────────
 
     container?.addEventListener('click', async (e) => {
       const btn = e.target.closest('.compat-remove');
-      if (!btn || !product.sku) return;
-      const pid = btn.dataset.printerId;
+      if (!btn) return;
+      const id = btn.dataset.printerId;
       btn.disabled = true;
       try {
-        await AdminAPI.removeCompatiblePrinter(product.sku, pid);
-        compatPrinters = compatPrinters.filter(p => printerId(p) !== pid);
+        if (isRibbon) {
+          await _deleteRibbonEntry(id);
+          compatPrinters = compatPrinters.filter(p => String(p.id) !== id);
+        } else {
+          if (!product.sku) return;
+          await AdminAPI.removeCompatiblePrinter(product.sku, id);
+          compatPrinters = compatPrinters.filter(p => printerId(p) !== id);
+        }
         renderCompatBadges();
       } catch (err) {
         Toast.error(`Remove failed: ${err.message}`);
@@ -1153,6 +1223,9 @@ function bindProductModalActions(modal, product) {
     });
 
     // ── + Add Printer (single search) ────────────────────────────────────────
+
+    if (isRibbon) addBtn?.remove();
+    if (findBtn && isRibbon) findBtn.textContent = 'Add to Compatibility';
 
     addBtn?.addEventListener('click', () => {
       const open = searchWrap.style.display !== 'none';
@@ -1230,109 +1303,170 @@ function bindProductModalActions(modal, product) {
 
     findBtn?.addEventListener('click', async () => {
       const raw = bulkTextarea.value.trim();
-      if (!raw) { Toast.error('Paste some printer models first'); return; }
+      if (!raw) { Toast.error('Paste some models first'); return; }
       const names = parseBulkText(raw);
       if (names.length === 0) { Toast.error('No models found \u2014 try Parse Text first'); return; }
 
       findBtn.disabled = true;
-      findBtn.textContent = 'Searching\u2026';
       parseMsg.style.display = 'none';
       addMatchedBtn.style.display = 'none';
       createUnmatchedBtn.style.display = 'none';
       _sessionMatches = [];
-      bulkResults.innerHTML = `<div style="color:var(--text-muted);font-size:12px">Searching 0 / ${names.length}\u2026</div>`;
+      bulkResults.innerHTML = '';
 
-      const results = [];
-
-      try {
-        // Try bulk endpoint first, fall back to sequential individual calls
-        try {
-          const bulkResp = await window.API.searchPrintersBulk(names);
-          for (const r of (bulkResp?.data?.results || [])) {
-            results.push(r.printer ? { query: r.query, printer: r.printer, matched: true } : { query: r.query, matched: false });
-          }
-        } catch (_) {
-          for (let i = 0; i < names.length; i += 5) {
-            const batch = names.slice(i, i + 5);
-            const batchRes = await Promise.all(batch.map(async name => {
-              try {
-                const resp = await window.API.searchPrinters(name);
-                const list = resp?.data?.printers || resp?.data || [];
-                const top = Array.isArray(list) ? list[0] : null;
-                return top ? { query: name, printer: top, matched: true } : { query: name, matched: false };
-              } catch (_e) { return { query: name, matched: false }; }
-            }));
-            results.push(...batchRes);
-            bulkResults.innerHTML = `<div style="color:var(--text-muted);font-size:12px">Searching ${Math.min(i + 5, names.length)} / ${names.length}\u2026</div>`;
-            if (i + 5 < names.length) await new Promise(r => setTimeout(r, 300));
-          }
+      if (isRibbon) {
+        // ── Ribbon path: direct insert into ribbon_compatibility ──────────────
+        findBtn.textContent = 'Adding\u2026';
+        let added = 0, skipped = 0;
+        const existingKeys = new Set(
+          compatPrinters.map(p => `${p.device_brand_norm}|${p.device_model_norm}`)
+        );
+        const rows = names.map(n => ({ full: n, ..._splitBrandModel(n) }));
+        const resultHtml = [];
+        for (let i = 0; i < rows.length; i += 5) {
+          const batch = rows.slice(i, i + 5);
+          await Promise.all(batch.map(async ({ full, brand, model }) => {
+            const key = `${brand.toLowerCase()}|${model.toLowerCase().replace(/\s+/g, '-')}`;
+            if (existingKeys.has(key)) {
+              skipped++;
+              resultHtml.push({ full, status: 'already_linked' });
+              return;
+            }
+            try {
+              const row = await _insertRibbonEntry(brand, model);
+              if (row) {
+                compatPrinters.push(row);
+                existingKeys.add(key);
+                added++;
+                resultHtml.push({ full, status: 'added' });
+              } else {
+                skipped++;
+                resultHtml.push({ full, status: 'already_linked' });
+              }
+            } catch (err) {
+              resultHtml.push({ full, status: 'error', err: err.message });
+            }
+          }));
         }
-
-        // Render results
-        const matched   = results.filter(r => r.matched);
-        const unmatched = results.filter(r => !r.matched);
-        _sessionMatches = matched;
-
-        bulkResults.innerHTML = results.map(r => {
-          if (r.matched) {
-            const name = printerName(r.printer);
-            const alreadyLinked = compatPrinters.some(p => printerId(p) === String(r.printer.id || r.printer.printer_id || ''));
-            return `<div class="admin-compat-parse-result admin-compat-parse-result--matched">
-              <span>&#10003;</span>
-              <span class="result-name">${esc(name)}</span>
-              ${alreadyLinked ? '<span style="font-size:11px;color:var(--text-muted)">(already linked)</span>' : ''}
-            </div>`;
-          }
+        renderCompatBadges();
+        bulkResults.innerHTML = resultHtml.map(({ full, status, err }) => {
+          if (status === 'added') return `<div class="admin-compat-parse-result admin-compat-parse-result--matched">
+            <span>&#10003;</span><span class="result-name">${esc(full)}</span>
+            <span class="compat-status-chip compat-status-chip--added">Added</span></div>`;
+          if (status === 'already_linked') return `<div class="admin-compat-parse-result admin-compat-parse-result--matched">
+            <span>&#10003;</span><span class="result-name">${esc(full)}</span>
+            <span class="compat-status-chip compat-status-chip--linked">Already linked</span></div>`;
           return `<div class="admin-compat-parse-result admin-compat-parse-result--unmatched">
-            <span>&#8212;</span>
-            <span class="result-query">${esc(r.query)}</span>
-            <span style="font-size:11px;color:var(--text-muted)">not found</span>
-            <button class="admin-btn admin-btn--ghost admin-btn--sm compat-create-one-btn" style="font-size:11px;padding:2px 8px;margin-left:auto" data-query="${esc(r.query)}">Create</button>
-          </div>`;
+            <span>&#8212;</span><span class="result-query">${esc(full)}</span>
+            <span style="font-size:11px;color:var(--danger)">${esc(err || 'Error')}</span></div>`;
         }).join('');
+        if (added > 0) Toast.success(`Added ${added} device${added !== 1 ? 's' : ''}`);
+        else Toast.info(`All ${skipped} entr${skipped !== 1 ? 'ies' : 'y'} already linked`);
 
-        // Show action buttons
-        const newMatches = matched.filter(r => !compatPrinters.some(p => printerId(p) === String(r.printer.id || r.printer.printer_id || '')));
-        if (newMatches.length > 0) {
-          addMatchedBtn.textContent = `Add ${newMatches.length} Matched Printer${newMatches.length !== 1 ? 's' : ''}`;
-          addMatchedBtn.style.display = 'inline-flex';
+      } else {
+        // ── Regular path: search printer_models, then link ────────────────────
+        findBtn.textContent = 'Searching\u2026';
+        bulkResults.innerHTML = `<div style="color:var(--text-muted);font-size:12px">Searching 0 / ${names.length}\u2026</div>`;
+        const results = [];
+
+        try {
+          // Try bulk endpoint first, fall back to sequential individual calls
+          try {
+            const bulkResp = await window.API.searchPrintersBulk(names);
+            for (const r of (bulkResp?.data?.results || [])) {
+              results.push(r.printer ? { query: r.query, printer: r.printer, matched: true } : { query: r.query, matched: false });
+            }
+          } catch (_) {
+            for (let i = 0; i < names.length; i += 5) {
+              const batch = names.slice(i, i + 5);
+              const batchRes = await Promise.all(batch.map(async name => {
+                try {
+                  const resp = await window.API.searchPrinters(name);
+                  const list = resp?.data?.printers || resp?.data || [];
+                  const top = Array.isArray(list) ? list[0] : null;
+                  return top ? { query: name, printer: top, matched: true } : { query: name, matched: false };
+                } catch (_e) { return { query: name, matched: false }; }
+              }));
+              results.push(...batchRes);
+              bulkResults.innerHTML = `<div style="color:var(--text-muted);font-size:12px">Searching ${Math.min(i + 5, names.length)} / ${names.length}\u2026</div>`;
+              if (i + 5 < names.length) await new Promise(r => setTimeout(r, 300));
+            }
+          }
+
+          // Render results
+          const matched   = results.filter(r => r.matched);
+          const unmatched = results.filter(r => !r.matched);
+          _sessionMatches = matched;
+
+          bulkResults.innerHTML = results.map(r => {
+            if (r.matched) {
+              const name = printerName(r.printer);
+              const alreadyLinked = compatPrinters.some(p => printerId(p) === String(r.printer.id || r.printer.printer_id || ''));
+              return `<div class="admin-compat-parse-result admin-compat-parse-result--matched">
+                <span>&#10003;</span>
+                <span class="result-name">${esc(name)}</span>
+                ${alreadyLinked ? '<span style="font-size:11px;color:var(--text-muted)">(already linked)</span>' : ''}
+              </div>`;
+            }
+            return `<div class="admin-compat-parse-result admin-compat-parse-result--unmatched">
+              <span>&#8212;</span>
+              <span class="result-query">${esc(r.query)}</span>
+              <span style="font-size:11px;color:var(--text-muted)">not found</span>
+              <button class="admin-btn admin-btn--ghost admin-btn--sm compat-create-one-btn" style="font-size:11px;padding:2px 8px;margin-left:auto" data-query="${esc(r.query)}">Create</button>
+            </div>`;
+          }).join('');
+
+          // Show action buttons
+          const newMatches = matched.filter(r => !compatPrinters.some(p => printerId(p) === String(r.printer.id || r.printer.printer_id || '')));
+          if (newMatches.length > 0) {
+            addMatchedBtn.textContent = `Add ${newMatches.length} Matched Printer${newMatches.length !== 1 ? 's' : ''}`;
+            addMatchedBtn.style.display = 'inline-flex';
+          }
+          if (unmatched.length > 0) {
+            createUnmatchedBtn.textContent = `Create All Unmatched (${unmatched.length})`;
+            createUnmatchedBtn.style.display = 'inline-flex';
+            createUnmatchedBtn._queries = unmatched.map(r => r.query);
+          }
+        } catch (err) {
+          Toast.error(`Search failed: ${err.message}`);
+          bulkResults.innerHTML = '';
         }
-        if (unmatched.length > 0) {
-          createUnmatchedBtn.textContent = `Create All Unmatched (${unmatched.length})`;
-          createUnmatchedBtn.style.display = 'inline-flex';
-          createUnmatchedBtn._queries = unmatched.map(r => r.query);
-        }
-      } catch (err) {
-        Toast.error(`Search failed: ${err.message}`);
-        bulkResults.innerHTML = '';
       }
 
       findBtn.disabled = false;
-      findBtn.textContent = 'Find Printers';
+      findBtn.textContent = isRibbon ? 'Add to Compatibility' : 'Find Printers';
     });
 
     // ── Bulk: Add Matched ────────────────────────────────────────────────────
 
     addMatchedBtn?.addEventListener('click', async () => {
       if (!product.sku) return;
-      const toAdd = _sessionMatches.filter(r => !compatPrinters.some(p => printerId(p) === String(r.printer.id || r.printer.printer_id || '')));
-      if (toAdd.length === 0) return;
       addMatchedBtn.disabled = true;
       addMatchedBtn.textContent = 'Adding\u2026';
       let added = 0;
-      for (const r of toAdd) {
+      for (const r of _sessionMatches) {
         const pid  = String(r.printer.id || r.printer.printer_id || '');
         const name = printerName(r.printer);
         try {
-          await AdminAPI.addCompatiblePrinter(product.sku, pid);
-          compatPrinters.push({ id: pid, full_name: name });
-          added++;
+          const { status } = await AdminAPI.ensureCompatibility(
+            product.sku, pid, compatPrinters.map(p => printerId(p))
+          );
+          if (status === 'added') { compatPrinters.push({ id: pid, full_name: name }); added++; }
+          // Append inline status chip to the result row
+          bulkResults.querySelectorAll('.admin-compat-parse-result--matched').forEach(row => {
+            if (row.querySelector('.result-name')?.textContent === name && !row.querySelector('.compat-status-chip')) {
+              const chip = document.createElement('span');
+              chip.className = `compat-status-chip compat-status-chip--${status === 'added' ? 'added' : 'linked'}`;
+              chip.textContent = status === 'added' ? 'Linked' : 'Already linked';
+              row.appendChild(chip);
+            }
+          });
         } catch (_) {}
       }
       renderCompatBadges();
       addMatchedBtn.style.display = 'none';
       _sessionMatches = [];
-      if (added > 0) Toast.success(`Added ${added} printer${added !== 1 ? 's' : ''}`);
+      if (added > 0) Toast.success(`Linked ${added} printer${added !== 1 ? 's' : ''}`);
       addMatchedBtn.disabled = false;
     });
 
@@ -1344,13 +1478,26 @@ function bindProductModalActions(modal, product) {
       createUnmatchedBtn.disabled = true;
       let linked = 0;
       for (let i = 0; i < queries.length; i += 3) {
-        createUnmatchedBtn.textContent = `Creating\u2026 (${i}/${queries.length})`;
+        createUnmatchedBtn.textContent = `Working\u2026 (${i}/${queries.length})`;
         const batch = queries.slice(i, i + 3);
-        await Promise.all(batch.map(async (name) => {
+        await Promise.all(batch.map(async (query) => {
           try {
-            const printer = await AdminAPI.createPrinter(name);
-            const pid = String(printer?.id || printer?.printer_id || '');
-            if (pid) { await AdminAPI.addCompatiblePrinter(product.sku, pid); compatPrinters.push({ id: pid, full_name: name }); linked++; }
+            const { id, name, wasCreated } = await AdminAPI.getOrCreatePrinterId(query);
+            const { status } = await AdminAPI.ensureCompatibility(
+              product.sku, id, compatPrinters.map(p => printerId(p))
+            );
+            if (status === 'added') { compatPrinters.push({ id, full_name: name }); linked++; }
+            // Flip the unmatched row to matched with status chips
+            bulkResults.querySelectorAll('.admin-compat-parse-result--unmatched').forEach(row => {
+              if (row.querySelector('.result-query')?.textContent === query) {
+                row.className = 'admin-compat-parse-result admin-compat-parse-result--matched';
+                row.innerHTML = `
+                  <span>&#10003;</span>
+                  <span class="result-name">${esc(name)}</span>
+                  <span class="compat-status-chip compat-status-chip--${wasCreated ? 'created' : 'found'}">${wasCreated ? 'Created' : 'Already existed'}</span>
+                  <span class="compat-status-chip compat-status-chip--${status === 'added' ? 'added' : 'linked'}">${status === 'added' ? 'Linked' : 'Already linked'}</span>`;
+              }
+            });
           } catch (_) {}
         }));
         if (i + 3 < queries.length) await new Promise(r => setTimeout(r, 200));
@@ -1368,22 +1515,24 @@ function bindProductModalActions(modal, product) {
       if (!btn || !product.sku) return;
       const query = btn.dataset.query;
       btn.disabled = true;
-      btn.textContent = 'Creating\u2026';
+      btn.textContent = 'Working\u2026';
       try {
-        const printer = await AdminAPI.createPrinter(query);
-        const pid  = String(printer?.id || printer?.printer_id || '');
-        const name = printer?.full_name || printer?.name || query;
-        if (pid) {
-          await AdminAPI.addCompatiblePrinter(product.sku, pid);
-          compatPrinters.push({ id: pid, full_name: name });
-          renderCompatBadges();
-        }
+        const { id, name, wasCreated } = await AdminAPI.getOrCreatePrinterId(query);
+        const { status } = await AdminAPI.ensureCompatibility(
+          product.sku, id, compatPrinters.map(p => printerId(p))
+        );
+        if (status === 'added') { compatPrinters.push({ id, full_name: name }); renderCompatBadges(); }
         const row = btn.closest('.admin-compat-parse-result');
         if (row) {
           row.className = 'admin-compat-parse-result admin-compat-parse-result--matched';
-          row.innerHTML = `<span>&#10003;</span><span class="result-name">${esc(name)}</span><span style="font-size:11px;color:var(--text-muted)">(created)</span>`;
+          row.innerHTML = `
+            <span>&#10003;</span>
+            <span class="result-name">${esc(name)}</span>
+            <span class="compat-status-chip compat-status-chip--${wasCreated ? 'created' : 'found'}">${wasCreated ? 'Created' : 'Already existed'}</span>
+            <span class="compat-status-chip compat-status-chip--${status === 'added' ? 'added' : 'linked'}">${status === 'added' ? 'Linked' : 'Already linked'}</span>`;
         }
-        Toast.success(`Created: ${name}`);
+        if (status === 'added') Toast.success(`Linked: ${name}`);
+        else Toast.info(`${name} — already linked`);
       } catch (err) {
         btn.disabled = false;
         btn.textContent = 'Create';
@@ -1415,7 +1564,11 @@ function bindProductModalActions(modal, product) {
 
     // ── Initial load ─────────────────────────────────────────────────────────
 
-    if (product.sku && window.API?.getCompatiblePrinters) {
+    if (isRibbon) {
+      _loadRibbonEntries()
+        .then(rows => { compatPrinters = rows; renderCompatBadges(); })
+        .catch(() => { compatPrinters = []; renderCompatBadges(); });
+    } else if (product.sku && window.API?.getCompatiblePrinters) {
       const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 10000));
       Promise.race([window.API.getCompatiblePrinters(product.sku), timeout])
         .then(resp => {
@@ -1427,6 +1580,8 @@ function bindProductModalActions(modal, product) {
     } else {
       renderCompatBadges();
     }
+
+    if (isRibbon) { addMatchedBtn?.remove(); createUnmatchedBtn?.remove(); }
   }
 
   // Bind image error fallbacks
@@ -1818,6 +1973,9 @@ function generateSEO(product) {
     fax_film: 'Fax Film',
     fax_film_refill: 'Fax Film Refill',
     ribbon: 'Printer Ribbon',
+    printer_ribbon: 'Printer Ribbon',
+    typewriter_ribbon: 'Typewriter Ribbon',
+    correction_tape: 'Correction Tape',
     label_tape: 'Label Tape',
     photo_paper: 'Photo Paper',
     printer: 'Printer',
@@ -1843,8 +2001,9 @@ function generateSEO(product) {
   const sourcePart = sourceLabel ? `${sourceLabel.toLowerCase()} ` : '';
   const qualityNote = sourceLabel === 'Genuine' ? 'OEM quality guaranteed.' : sourceLabel === 'Compatible' ? 'Quality tested, NZ warranty.' : '';
   let metaDesc;
-  if (type === 'ribbon') {
-    metaDesc = `Buy ${sourcePart}${brand} ${code || name}${colorPart} printer ribbon in NZ. In stock, ships fast. ${qualityNote} Free delivery on orders over $100 inc GST.`.trim();
+  if (['ribbon', 'printer_ribbon', 'typewriter_ribbon', 'correction_tape'].includes(type)) {
+    const ribbonLabel = type === 'typewriter_ribbon' ? 'typewriter ribbon' : type === 'correction_tape' ? 'correction tape' : 'printer ribbon';
+    metaDesc = `Buy ${sourcePart}${brand} ${code || name}${colorPart} ${ribbonLabel} in NZ. In stock, ships fast. ${qualityNote} Free delivery on orders over $100 inc GST.`.trim();
   } else if (type === 'drum_unit') {
     metaDesc = `Buy ${sourcePart}${brand} ${code || name} drum unit in NZ. In stock, ships fast. ${qualityNote} Free delivery on orders over $100 inc GST.`.trim();
   } else {

@@ -1,11 +1,13 @@
 // ============================================
 // RIBBONS PAGE - Brand grid → products drilldown
 // ============================================
+
 const RibbonsPage = {
     // Current state
     state: {
-        brand: null,        // device_brand (what machine the customer has)
-        model: null,        // device_model (specific model drill-down)
+        brand: null,        // device_brand value (lowercase, used for URL param and API filter)
+        brandLabel: null,   // device_brand display label (e.g., "Olivetti", "Smith Corona")
+        model: null,        // printer_model (specific model drill-down)
         ribbonBrand: null,  // manufacturer brand (API param: 'brand')
         color: null,
         sort: 'name',
@@ -105,8 +107,8 @@ const RibbonsPage = {
         this.showLoadingState('brands', true);
 
         try {
-            const res = await API.getRibbonBrands();
-            const brands = res?.data?.brands || [];
+            const res = await API.getRibbonDeviceBrands();
+            const brands = res?.data?.device_brands || [];
 
             this.showLoadingState('brands', false);
 
@@ -119,12 +121,12 @@ const RibbonsPage = {
             brands.forEach((b, i) => {
                 const box = document.createElement('a');
                 box.className = 'drilldown-box drilldown-box--ribbon';
-                box.href = `/html/ribbons?device_brand=${encodeURIComponent(b)}`;
+                box.href = `/html/ribbons?device_brand=${encodeURIComponent(b.value)}`;
                 box.style.animationDelay = `${i * 30}ms`;
-                box.innerHTML = `<span class="drilldown-box__label">${Security.escapeHtml(b)}</span>`;
+                box.innerHTML = `<span class="drilldown-box__label">${Security.escapeHtml(b.label)}</span>`;
                 box.addEventListener('click', (e) => {
                     e.preventDefault();
-                    this.navigateToBrand(b);
+                    this.navigateToBrand(b.value, b.label);
                 });
                 grid.appendChild(box);
             });
@@ -138,8 +140,10 @@ const RibbonsPage = {
         }
     },
 
-    navigateToBrand(brand) {
+    navigateToBrand(brand, label) {
         this.state.brand = brand;
+        this.state.brandLabel = label || brand;
+        this.state.ribbonBrand = null;
         this.state.model = null;
         this.state.page = 1;
         this.updateURL();
@@ -153,6 +157,8 @@ const RibbonsPage = {
 
     goBackToBrands() {
         this.state.brand = null;
+        this.state.brandLabel = null;
+        this.state.ribbonBrand = null;
         this.state.model = null;
         this.state.page = 1;
         this.clearModelSection();
@@ -177,6 +183,7 @@ const RibbonsPage = {
     parseURLState() {
         const params = new URLSearchParams(window.location.search);
         this.state.brand = params.get('device_brand');
+        this.state.brandLabel = null; // resolved later from API or title-cased
         this.state.model = params.get('device_model');
         this.state.ribbonBrand = params.get('brand');
         this.state.color = params.get('color');
@@ -349,7 +356,8 @@ const RibbonsPage = {
     // =========================================
     normalizeRibbon(ribbon) {
         if (!ribbon.image_url && ribbon.image_path) {
-            ribbon.image_url = typeof storageUrl === 'function' ? storageUrl(ribbon.image_path) : ribbon.image_path;
+            const p = ribbon.image_path;
+            ribbon.image_url = typeof storageUrl === 'function' ? storageUrl(p) : p;
         }
         if (ribbon.in_stock == null && ribbon.stock_quantity != null) {
             ribbon.in_stock = ribbon.stock_quantity > 0;
@@ -399,7 +407,11 @@ const RibbonsPage = {
             this.showLoading(false);
 
             if (!res.ok || !res.data) {
-                this.showEmpty('Failed to load ribbons. Please try again.');
+                const activeBrand = this.state.brandLabel || this.state.brand || this.state.ribbonBrand;
+                const msg = activeBrand
+                    ? `No ribbons found for ${Security.escapeHtml(activeBrand)} yet. Check back soon!`
+                    : 'Failed to load ribbons. Please try again.';
+                this.showEmpty(msg);
                 return;
             }
 
@@ -410,8 +422,9 @@ const RibbonsPage = {
             ribbons = ribbons.map(r => this.normalizeRibbon(r));
 
             if (ribbons.length === 0) {
-                const msg = this.state.brand
-                    ? `No ribbons found for ${Security.escapeHtml(this.state.brand)}.`
+                const activeBrand = this.state.brandLabel || this.state.brand || this.state.ribbonBrand;
+                const msg = activeBrand
+                    ? `No ribbons found for ${Security.escapeHtml(activeBrand)} yet. Check back soon!`
                     : 'No ribbons found.';
                 this.showEmpty(msg);
                 return;
@@ -483,6 +496,13 @@ const RibbonsPage = {
         const imageUrl = ribbon.image_url || '';
         const ribbonId = ribbon.id;
 
+        const subtypeLabels = {
+            printer_ribbon: 'Printer Ribbon',
+            typewriter_ribbon: 'Typewriter Ribbon',
+            correction_tape: 'Correction Tape',
+        };
+        const subtypeLabel = subtypeLabels[ribbon.product_type] || null;
+
         let imageContent;
         if (imageUrl) {
             imageContent = `<img src="${Security.escapeAttr(imageUrl)}" alt="${Security.escapeAttr(displayName)}" loading="lazy" data-fallback="placeholder">`;
@@ -497,6 +517,7 @@ const RibbonsPage = {
             <a href="${productUrl}" class="product-card__link">
                 <div class="product-card__image-wrapper">
                     ${imageContent}
+                    ${subtypeLabel ? `<span class="product-card__subtype-badge">${Security.escapeHtml(subtypeLabel)}</span>` : ''}
                 </div>
                 <div class="product-card__content">
                     <h3 class="product-card__title">${Security.escapeHtml(displayName)}</h3>
@@ -648,14 +669,15 @@ const RibbonsPage = {
         const list = this.elements.breadcrumbList;
         list.innerHTML = '';
 
-        if (this.state.brand) {
+        const activeBrand = this.state.brandLabel || this.state.brand || this.state.ribbonBrand;
+        if (activeBrand) {
             // Show: Ribbons > Brand
             const ribbonsItem = this.createBreadcrumbItem('Ribbons', false, () => {
                 this.goBackToBrands();
             });
             list.appendChild(ribbonsItem);
 
-            const brandItem = this.createBreadcrumbItem(this.state.brand, true);
+            const brandItem = this.createBreadcrumbItem(activeBrand, true);
             list.appendChild(brandItem);
         } else {
             const ribbonsItem = this.createBreadcrumbItem('Ribbons', true);
@@ -676,10 +698,13 @@ const RibbonsPage = {
         ];
         let pageUrl = ribbonsUrl;
         let pageName = 'Typewriter & Printer Ribbons NZ';
-        if (this.state.brand) {
-            pageUrl = ribbonsUrl + '?device_brand=' + encodeURIComponent(this.state.brand);
-            pageName = this.state.brand + ' Ribbons';
-            items.push({ "@type": "ListItem", "position": 3, "name": this.state.brand, "item": pageUrl });
+        const activeBrandLabel = this.state.brandLabel || this.state.brand || this.state.ribbonBrand;
+        if (activeBrandLabel) {
+            const paramName = this.state.brand ? 'device_brand' : 'brand';
+            const paramValue = this.state.brand || this.state.ribbonBrand;
+            pageUrl = ribbonsUrl + `?${paramName}=` + encodeURIComponent(paramValue);
+            pageName = activeBrandLabel + ' Ribbons';
+            items.push({ "@type": "ListItem", "position": 3, "name": activeBrandLabel, "item": pageUrl });
         }
         el.textContent = JSON.stringify({
             "@context": "https://schema.org",
@@ -716,8 +741,9 @@ const RibbonsPage = {
 
     updateTitle() {
         const title = this.elements.title;
-        if (this.state.brand) {
-            title.textContent = `${this.state.brand} Ribbons`;
+        const activeBrand = this.state.brandLabel || this.state.brand || this.state.ribbonBrand;
+        if (activeBrand) {
+            title.textContent = `${activeBrand} Ribbons`;
             title.hidden = false;
         } else {
             title.textContent = 'Typewriter & Printer Ribbons NZ';

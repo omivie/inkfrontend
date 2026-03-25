@@ -347,8 +347,8 @@ const API = {
     },
 
     /**
-     * Get ribbon device models (filtered by device_brand)
-     * @param {object} params - { device_brand, type }
+     * Get ribbon device models (filtered by printer_brand)
+     * @param {object} params - { printer_brand }
      */
     async getRibbonDeviceModels(params = {}) {
         const query = new URLSearchParams(params).toString();

@@ -184,16 +184,24 @@ const Shipping = {
     maySplitShipment(items) {
         if (!items || items.length <= 1) return false;
 
-        const categories = new Set();
-        items.forEach(item => {
+        const getItemCategory = (item) => {
+            const pt = (item.product_type || '').toLowerCase();
+            if (pt === 'printer') return 'printer';
+            if (pt === 'drum_unit' || pt === 'waste_toner' || pt === 'belt_unit' || pt === 'fuser_kit') return 'drum';
+            if (pt === 'toner_cartridge') return 'toner';
+            if (pt === 'ink_cartridge' || pt === 'ink_bottle') return 'ink';
+            if (pt === 'photo_paper') return 'paper';
+            if (pt === 'printer_ribbon' || pt === 'typewriter_ribbon' || pt === 'correction_tape') return 'ribbon';
             const name = (item.name || '').toLowerCase();
-            if (name.includes('printer')) categories.add('printer');
-            else if (name.includes('drum')) categories.add('drum');
-            else if (name.includes('toner')) categories.add('toner');
-            else if (name.includes('ink')) categories.add('ink');
-            else if (name.includes('paper')) categories.add('paper');
-            else categories.add('accessory');
-        });
+            if (name.includes('printer')) return 'printer';
+            if (name.includes('drum')) return 'drum';
+            if (name.includes('toner')) return 'toner';
+            if (name.includes('ink')) return 'ink';
+            if (name.includes('paper')) return 'paper';
+            return 'accessory';
+        };
+        const categories = new Set();
+        items.forEach(item => categories.add(getItemCategory(item)));
 
         // Split shipment likely if mixing printers/drums with consumables
         return (categories.has('printer') && categories.size > 1) ||

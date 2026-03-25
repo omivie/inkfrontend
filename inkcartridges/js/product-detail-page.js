@@ -255,7 +255,7 @@
             const isCompatible = name.toLowerCase().startsWith('compatible ');
             const displayName = isCompatible ? name.substring(11).trim() : name;
             const brandName = p.brand?.name || (typeof p.brand === 'string' ? p.brand : null) || this.extractBrand(name) || 'Unknown';
-            const category = this.normalizeCategory(p.category) || this.detectCategory(name);
+            const category = this.normalizeProductType(p.product_type) || this.normalizeCategory(p.category) || this.detectCategory(name);
             const pageYield = p.page_yield || p.yield || null;
 
             return {
@@ -279,6 +279,27 @@
             return null;
         },
 
+        normalizeProductType(pt) {
+            if (!pt) return null;
+            switch (pt.toLowerCase()) {
+                case 'ink_cartridge':
+                case 'ink_bottle':      return 'ink';
+                case 'toner_cartridge': return 'toner';
+                case 'drum_unit':
+                case 'waste_toner':
+                case 'belt_unit':
+                case 'fuser_kit':
+                case 'maintenance_kit': return 'drum';
+                case 'ribbon':
+                case 'printer_ribbon':
+                case 'typewriter_ribbon':
+                case 'correction_tape': return 'ribbon';
+                case 'label_tape':      return 'label_tape';
+                case 'photo_paper':     return 'paper';
+                default:                return null;
+            }
+        },
+
         normalizeCategory(raw) {
             if (!raw) return null;
             const lower = raw.toLowerCase();
@@ -290,10 +311,11 @@
         },
 
         detectCategory(name) {
-            // Check URL type param or product_type field first
-            if (this._productType === 'ribbon') return 'ribbon';
+            // Check product_type field first (authoritative DB field)
             const p = this.product;
-            if (p && (p.product_type === 'ribbon' || (p.category || '').toLowerCase().includes('ribbon'))) return 'ribbon';
+            const ptCategory = p ? this.normalizeProductType(p.product_type) : null;
+            if (ptCategory) return ptCategory;
+            if (this._productType === 'ribbon') return 'ribbon';
             const lower = name.toLowerCase();
             if (lower.includes('ribbon')) return 'ribbon';
             if (lower.includes('toner')) return 'toner';
@@ -392,7 +414,10 @@
 
             // Breadcrumb
             const isRibbon = info.category === 'ribbon';
-            const categoryName = isRibbon ? 'Ribbons' :
+            const ribbonSubtypeLabel = info.product_type === 'typewriter_ribbon' ? 'Typewriter Ribbons' :
+                                       info.product_type === 'correction_tape'   ? 'Correction Tape' :
+                                       info.product_type === 'printer_ribbon'    ? 'Printer Ribbons' : 'Ribbons';
+            const categoryName = isRibbon ? ribbonSubtypeLabel :
                                  info.category === 'toner' ? 'Toner Cartridges' :
                                  info.category === 'drum' ? 'Drums' : 'Ink Cartridges';
             const brandSlug = info.brandName.toLowerCase().replace(/\s+/g, '-');
@@ -809,9 +834,10 @@
                 const secondLabel = isCompatible ? 'genuine'    : 'compatible';
 
                 const inferProductType = (p) => {
-                    const name = (p.name || '').toLowerCase();
-                    if (name.includes('toner')) return 'toner';
-                    return 'ink';
+                    const pt = (p.product_type || '').toLowerCase();
+                    if (pt === 'toner_cartridge') return 'toner';
+                    if (pt === 'ink_cartridge' || pt === 'ink_bottle') return 'ink';
+                    return (p.name || '').toLowerCase().includes('toner') ? 'toner' : 'ink';
                 };
 
                 const buildSection = (products, type) => {
@@ -1038,7 +1064,11 @@
                     "@type": "Brand",
                     "name": info.brandName
                 },
-                "category": info.category === 'ribbon' ? 'Printer Ribbons' :
+                "category": info.category === 'ribbon' ? (
+                    info.product_type === 'typewriter_ribbon' ? 'Typewriter Ribbons' :
+                    info.product_type === 'correction_tape'   ? 'Correction Tape' :
+                    info.product_type === 'printer_ribbon'    ? 'Printer Ribbons' : 'Ribbons'
+                ) :
                            info.category === 'toner' ? 'Toner Cartridges' :
                            info.category === 'drum' ? 'Drum Units' : 'Ink Cartridges',
                 "offers": {

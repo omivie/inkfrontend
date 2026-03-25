@@ -640,6 +640,37 @@ const AdminAPI = {
     }
   },
 
+  /**
+   * Search for a printer by name; create it if not found.
+   * Returns { id, name, wasCreated }
+   */
+  async getOrCreatePrinterId(rawName) {
+    const name = rawName.trim();
+    if (!name) throw new Error('Printer name cannot be empty');
+    // Search first to detect existing without relying on 409
+    const searchResp = await window.API.searchPrinters(name);
+    const results = searchResp?.data?.printers || searchResp?.data || [];
+    const existing = Array.isArray(results) ? results[0] : null;
+    if (existing?.id) {
+      return { id: String(existing.id), name: existing.full_name || name, wasCreated: false };
+    }
+    const printer = await this.createPrinter(name);
+    const id = String(printer?.id || printer?.printer_id || '');
+    if (!id) throw new Error(`Could not get ID for printer: ${name}`);
+    return { id, name: printer?.full_name || printer?.name || name, wasCreated: true };
+  },
+
+  /**
+   * Link a printer to a product by SKU — skips if already linked locally.
+   * linkedIds: string[] of already-linked printer IDs from local state.
+   * Returns { status: 'added' | 'already_linked' }
+   */
+  async ensureCompatibility(sku, printerId, linkedIds = []) {
+    if (linkedIds.includes(String(printerId))) return { status: 'already_linked' };
+    await this.addCompatiblePrinter(sku, printerId);
+    return { status: 'added' };
+  },
+
   // ---- Data Export (streaming from backend) ----
   async exportCSV(type, filterParams) {
     return this.exportData(type, 'csv', filterParams);

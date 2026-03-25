@@ -515,8 +515,8 @@
             // Use cached device brands or fetch from API
             if (!this.cache.ribbonDeviceBrands) {
                 try {
-                    const res = await API.getRibbonBrands();
-                    this.cache.ribbonDeviceBrands = res?.data?.brands || [];
+                    const res = await API.getRibbonDeviceBrands();
+                    this.cache.ribbonDeviceBrands = res?.data?.device_brands || [];
                 } catch (e) {
                     this.cache.ribbonDeviceBrands = [];
                 }
@@ -526,9 +526,9 @@
             this.cache.ribbonDeviceBrands.forEach((b, i) => {
                 const box = document.createElement('a');
                 box.className = 'drilldown-box drilldown-box--ribbon';
-                box.href = `/html/ribbons?device_brand=${encodeURIComponent(b)}`;
+                box.href = `/html/ribbons?device_brand=${encodeURIComponent(b.value)}`;
                 box.style.animationDelay = `${60 + i * 30}ms`;
-                box.innerHTML = `<span class="drilldown-box__label">${Security.escapeHtml(b)}</span>`;
+                box.innerHTML = `<span class="drilldown-box__label">${Security.escapeHtml(b.label)}</span>`;
                 grid.appendChild(box);
             });
         },

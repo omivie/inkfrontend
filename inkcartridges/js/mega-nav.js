@@ -130,18 +130,18 @@
     // ============================================
     // RENDER RIBBON BRAND BUTTONS
     // ============================================
-    function renderRibbons(deviceBrands) {
+    function renderRibbons(brands) {
         if (!ribbonsGrid) return;
-        ribbonsGrid.innerHTML = deviceBrands.map(b =>
-            `<a href="/html/ribbons?device_brand=${Security.escapeAttr(b)}" class="ribbons-mega__brand-btn">${Security.escapeHtml(b)}</a>`
+        ribbonsGrid.innerHTML = brands.map(b =>
+            `<a href="/html/ribbons?device_brand=${encodeURIComponent(b.value)}" class="ribbons-mega__brand-btn">${Security.escapeHtml(b.label)}</a>`
         ).join('');
     }
 
     async function loadAndRenderRibbons() {
         if (!ribbonsGrid) return;
         try {
-            const res = await API.getRibbonBrands();
-            const brands = res?.data?.brands || [];
+            const res = await API.getRibbonDeviceBrands();
+            const brands = res?.data?.device_brands || [];
             if (brands.length > 0) {
                 renderRibbons(brands);
             }
