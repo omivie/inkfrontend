@@ -113,7 +113,9 @@
                 total: apiOrder.total,
                 subtotal: apiOrder.subtotal,
                 gstAmount: apiOrder.gst_amount || 0,
-                shipping: apiOrder.shipping_method || 'Standard Shipping',
+                shipping: apiOrder.shipping_tier || apiOrder.shipping_method || 'Standard Shipping',
+                deliveryZone: apiOrder.delivery_zone || null,
+                estimatedDelivery: apiOrder.estimated_delivery || null,
                 shippingCost: apiOrder.shipping_fee || apiOrder.shipping_cost || 0,
                 items: (apiOrder.order_items || apiOrder.items || []).map(item => ({
                     name: item.product?.name || item.product_name || item.name,
@@ -188,6 +190,7 @@
             const paymentMethod = order.paymentMethod || order.payment_method;
             if (paymentEl && paymentMethod) {
                 const paymentLabels = {
+                    'stripe': 'Credit/Debit Card',
                     'card': 'Credit/Debit Card',
                     'paypal': 'PayPal'
                 };
@@ -229,22 +232,38 @@
                 }
             }
 
-            // Shipping method
+            // Shipping method — format shipping_tier + delivery_zone into readable label
             const shippingMethodEl = document.getElementById('shipping-method');
             if (shippingMethodEl && order.shipping) {
-                shippingMethodEl.textContent = order.shipping;
+                const tierLabels = {
+                    'urban': 'Urban Delivery',
+                    'rural': 'Rural Delivery',
+                    'overnight': 'Overnight Express',
+                    'express': 'Express Delivery',
+                    'standard': 'Standard Delivery'
+                };
+                const tierLabel = tierLabels[order.shipping.toLowerCase()] || order.shipping;
+                const zoneLabel = order.deliveryZone
+                    ? ` — ${order.deliveryZone.charAt(0).toUpperCase() + order.deliveryZone.slice(1)}`
+                    : '';
+                shippingMethodEl.textContent = tierLabel + zoneLabel;
             }
 
-            // Estimated delivery
+            // Estimated delivery — use actual date from API, fall back to tier-based estimate
             const deliveryEl = document.getElementById('estimated-delivery');
             if (deliveryEl) {
-                const shipping = order.shipping?.toLowerCase() || '';
-                if (shipping.includes('overnight')) {
-                    deliveryEl.textContent = 'Next business day';
-                } else if (shipping.includes('express')) {
-                    deliveryEl.textContent = '1-2 business days';
+                if (order.estimatedDelivery) {
+                    const d = new Date(order.estimatedDelivery);
+                    deliveryEl.textContent = d.toLocaleDateString('en-NZ', { day: 'numeric', month: 'long', year: 'numeric' });
                 } else {
-                    deliveryEl.textContent = '3-5 business days';
+                    const shipping = order.shipping?.toLowerCase() || '';
+                    if (shipping.includes('overnight')) {
+                        deliveryEl.textContent = 'Next business day';
+                    } else if (shipping.includes('express')) {
+                        deliveryEl.textContent = '1-2 business days';
+                    } else {
+                        deliveryEl.textContent = '3-5 business days';
+                    }
                 }
             }
 

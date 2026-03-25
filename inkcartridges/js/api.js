@@ -375,7 +375,7 @@ const API = {
 
     /**
      * Get ribbons with optional filters
-     * @param {object} params - Filter parameters (device_brand, device_model, brand, type, color, model, search, sort, page, limit)
+     * @param {object} params - Filter parameters (printer_brand, printer_model, brand, type, color, search, sort, page, limit)
      */
     async getRibbons(params = {}) {
         const query = new URLSearchParams(params).toString();

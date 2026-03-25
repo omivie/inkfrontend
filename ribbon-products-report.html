@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Ribbon Products Report</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: Arial, sans-serif;
+      font-size: 11px;
+      color: #222;
+      padding: 30px 40px;
+    }
+
+    h1 {
+      font-size: 18px;
+      margin-bottom: 4px;
+    }
+
+    .subtitle {
+      color: #666;
+      font-size: 11px;
+      margin-bottom: 24px;
+    }
+
+    .section {
+      margin-bottom: 28px;
+    }
+
+    .section-header {
+      font-size: 13px;
+      font-weight: bold;
+      color: #fff;
+      padding: 6px 10px;
+      margin-bottom: 0;
+    }
+
+    .printer   .section-header { background: #1a5fa8; }
+    .typewriter .section-header { background: #2e7d32; }
+    .other      .section-header { background: #6d4c41; }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+
+    th {
+      background: #f0f0f0;
+      text-align: left;
+      padding: 5px 8px;
+      border: 1px solid #ccc;
+      font-size: 10px;
+      text-transform: uppercase;
+      color: #555;
+    }
+
+    td {
+      padding: 5px 8px;
+      border: 1px solid #ddd;
+      vertical-align: top;
+    }
+
+    tr:nth-child(even) td {
+      background: #f9f9f9;
+    }
+
+    .row-num {
+      color: #999;
+      width: 30px;
+      text-align: right;
+    }
+
+    .print-btn {
+      position: fixed;
+      top: 20px;
+      right: 20px;
+      background: #1a5fa8;
+      color: white;
+      border: none;
+      padding: 8px 16px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 12px;
+    }
+
+    .print-btn:hover { background: #154d8a; }
+
+    @media print {
+      .print-btn { display: none; }
+      body { padding: 10px 20px; }
+      .section { page-break-inside: avoid; }
+    }
+  </style>
+</head>
+<body>
+
+<button class="print-btn" onclick="window.print()">Save as PDF</button>
+
+<h1>Ribbon Products Catalogue</h1>
+<p class="subtitle">Generated 25 March 2026 &mdash; 116 products across 3 categories</p>
+
+<!-- PRINTER RIBBONS -->
+<div class="section printer">
+  <div class="section-header">Printer Ribbons &mdash; 74 products</div>
+  <table>
+    <thead>
+      <tr><th>#</th><th>Product Name</th><th>Type</th></tr>
+    </thead>
+    <tbody>
+      <tr><td class="row-num">1</td><td>Amano MJR7000/8000 Printer Ribbon Black/Red</td><td>Printer Ribbon</td></tr>
+      <tr><td class="row-num">2</td><td>Amano PIX10/Vertex Printer Ribbon Black</td><td>Printer Ribbon</td></tr>
+      <tr><td class="row-num">3</td><td>Amano PIX10/Vertex Printer Ribbon Black/Red</td><td>Printer Ribbon</td></tr>
+      <tr><td class="row-num">4</td><td>Citizen DP400/410/IR41 Printer Ribbon Black/Red</td><td>Printer Ribbon</td></tr>
+      <tr><td class="row-num">5</td><td>Citizen DP600/710/IR61B Printer Ribbon Black</td><td>Printer Ribbon</td></tr>
+      <tr><td class="row-num">6</td><td>Citizen DP600/710/IR61B Printer Ribbon Black/Red</td><td>Printer Ribbon</td></tr>
+      <tr><td class="row-num">7</td><td>Citizen DP730/IR71 Printer Ribbon Purple</td><td>Printer Ribbon</td></tr>
+      <tr><td class="row-num">8</td><td>Citizen GSX140/120D/200GX Printer Ribbon</td><td>Printer Ribbon</td></tr>
+      <tr><td class="row-num">9</td><td>Citizen iDP3110/MD910 Printer Ribbon Purple</td><td>Printer Ribbon</td></tr>
+      <tr><td class="row-num">10</td><td>Citizen iDP562/IR51 Printer Ribbon Purple</td><td>Printer Ribbon</td></tr>
+      <tr><td class="row-num">11</td><td>Compatible Epson ERC23 Printer Ribbon Black</td><td>Printer Ribbon</td></tr>
+      <tr><td class="row-num">12</td><td>Compatible Epson ERC23 Printer Ribbon Black and Red</td><td>Printer Ribbon</td></tr>
+      <tr><td class="row-num">13</td><td>Compatible Epson ERC30 Printer Ribbon Black</td><td>Printer Ribbon</td></tr>
+      <tr><td class="row-num">14</td><td>Compatible Epson ERC30 Printer Ribbon Black and Red</td><td>Printer Ribbon</td></tr>
+      <tr><td class="row-num">15</td><td>Compatible Epson ERC35 Printer Ribbon Black 6-Pack</td><td>Printer Ribbon</td></tr>
+      <tr><td class="row-num">16</td><td>Compatible OKI 393 Printer Ribbon Black</td><td>Printer Ribbon</td></tr>
+      <tr><td class="row-num">17</td><td>Compatible OKI 590 Printer Ribbon Black</td><td>Printer Ribbon</td></tr>
+      <tr><td class="row-num">18</td><td>Compatible OKI 720 Printer Ribbon Black</td><td>Printer Ribbon</td></tr>
+      <tr><td class="row-num">19</td><td>Compatible OKI ML182 Printer Ribbon Black</td><td>Printer Ribbon</td></tr>
+      <tr><td class="row-num">20</td><td>Epson DFX5000/8000 Printer Ribbon</td><td>Printer Ribbon</td></tr>
+      <tr><td class="row-num">21</td><td>Epson DLQ-3000/3000+/3500 Printer Ribbon Black</td><td>Printer Ribbon</td></tr>
+      <tr><td class="row-num">22</td><td>Epson ERC-03 Printer Ribbon Black</td><td>Printer Ribbon</td></tr>
+      <tr><td class="row-num">23</td><td>Epson ERC-05/Sharp Printer Ribbon Purple</td><td>Printer Ribbon</td></tr>
+      <tr><td class="row-num">24</td><td>Epson ERC-09/22 Printer Ribbon Black</td><td>Printer Ribbon</td></tr>
+      <tr><td class="row-num">25</td><td>Epson ERC-09/22 Printer Ribbon Purple</td><td>Printer Ribbon</td></tr>
+      <tr><td class="row-num">26</td><td>Epson ERC-18 Printer Ribbon Black</td><td>Printer Ribbon</td></tr>
+      <tr><td class="row-num">27</td><td>Epson ERC-23 Printer Ribbon Black</td><td>Printer Ribbon</td></tr>
+      <tr><td class="row-num">28</td><td>Epson ERC-23 Printer Ribbon Black/Red</td><td>Printer Ribbon</td></tr>
+      <tr><td class="row-num">29</td><td>Epson ERC-27 Printer Ribbon Purple</td><td>Printer Ribbon</td></tr>
+      <tr><td class="row-num">30</td><td>Epson ERC-30 / 38 Printer Ribbon Purple</td><td>Printer Ribbon</td></tr>
+      <tr><td class="row-num">31</td><td>Epson ERC-30/38 Printer Ribbon Black/Red</td><td>Printer Ribbon</td></tr>
+      <tr><td class="row-num">32</td><td>Epson ERC-31 Printer Ribbon Black</td><td>Printer Ribbon</td></tr>
+      <tr><td class="row-num">33</td><td>Epson ERC-32/EPJ413 Printer Ribbon Black</td><td>Printer Ribbon</td></tr>
+      <tr><td class="row-num">34</td><td>Epson ERC-32/EPJ413 Printer Ribbon Purple</td><td>Printer Ribbon</td></tr>
+      <tr><td class="row-num">35</td><td>Epson ERC-35 Printer Ribbon Black</td><td>Printer Ribbon</td></tr>
+      <tr><td class="row-num">36</td><td>Epson ERC-37 Printer Ribbon Purple</td><td>Printer Ribbon</td></tr>
+      <tr><td class="row-num">37</td><td>Epson ERC-39/43 Printer Ribbon Purple</td><td>Printer Ribbon</td></tr>
+      <tr><td class="row-num">38</td><td>Epson ERC-41 Printer Ribbon Black</td><td>Printer Ribbon</td></tr>
+      <tr><td class="row-num">39</td><td>Epson HX-20 Printer Ribbon Purple</td><td>Printer Ribbon</td></tr>
+      <tr><td class="row-num">40</td><td>Epson LQ1000/1050/1070 Printer Ribbon</td><td>Printer Ribbon</td></tr>
+      <tr><td class="row-num">41</td><td>Epson LQ2070/LQ2080/LQ2170/FX2170/LQ2180 Printer Ribbon</td><td>Printer Ribbon</td></tr>
+      <tr><td class="row-num">42</td><td>Epson LQ2090/LQ2190/FX2190 Printer Ribbon Black</td><td>Printer Ribbon</td></tr>
+      <tr><td class="row-num">43</td><td>Epson LQ2550/680/860/1060/EX800 Printer Ribbon</td><td>Printer Ribbon</td></tr>
+      <tr><td class="row-num">44</td><td>Epson LQ300/500/580/800/850/LX300/MX80 Printer Ribbon</td><td>Printer Ribbon</td></tr>
+      <tr><td class="row-num">45</td><td>Epson LQ350 / LX350 Printer Ribbon Black</td><td>Printer Ribbon</td></tr>
+      <tr><td class="row-num">46</td><td>Fujitsu DL1100/DL700 Printer Ribbon</td><td>Printer Ribbon</td></tr>
+      <tr><td class="row-num">47</td><td>Fujitsu DL3700/3800/9300 Printer Ribbon</td><td>Printer Ribbon</td></tr>
+      <tr><td class="row-num">48</td><td>Fujitsu DMPG9/DX2100/DL3400 Printer Ribbon</td><td>Printer Ribbon</td></tr>
+      <tr><td class="row-num">49</td><td>Group 24 Printer Ribbon Black</td><td>Printer Ribbon</td></tr>
+      <tr><td class="row-num">50</td><td>Group 24 Printer Ribbon Black/Red</td><td>Printer Ribbon</td></tr>
+      <tr><td class="row-num">51</td><td>Group 24 Printer Ribbon Purple</td><td>Printer Ribbon</td></tr>
+      <tr><td class="row-num">52</td><td>IBM 2380/2381 Printer Ribbon</td><td>Printer Ribbon</td></tr>
+      <tr><td class="row-num">53</td><td>NCR 7156 Printer Ribbon Black</td><td>Printer Ribbon</td></tr>
+      <tr><td class="row-num">54</td><td>NEC P5200/5300/6300/P6+/7+ Printer Ribbon</td><td>Printer Ribbon</td></tr>
+      <tr><td class="row-num">55</td><td>OKI 3410/ML393/395 Printer Ribbon</td><td>Printer Ribbon</td></tr>
+      <tr><td class="row-num">56</td><td>OKI ML182/390/420/720/721/790/791 Printer Ribbon</td><td>Printer Ribbon</td></tr>
+      <tr><td class="row-num">57</td><td>OKI ML520/590 Printer Ribbon</td><td>Printer Ribbon</td></tr>
+      <tr><td class="row-num">58</td><td>Panasonic KXP145/115i/1090/1121/1124 Printer Ribbon Black</td><td>Printer Ribbon</td></tr>
+      <tr><td class="row-num">59</td><td>Panasonic KXP160/2130/2135 Printer Ribbon</td><td>Printer Ribbon</td></tr>
+      <tr><td class="row-num">60</td><td>Panasonic KXP170/3696/3626 Printer Ribbon</td><td>Printer Ribbon</td></tr>
+      <tr><td class="row-num">61</td><td>Panasonic KXP180/181/3200/1131 Printer Ribbon</td><td>Printer Ribbon</td></tr>
+      <tr><td class="row-num">62</td><td>Panasonic KXP190/191/3196 Printer Ribbon</td><td>Printer Ribbon</td></tr>
+      <tr><td class="row-num">63</td><td>Printronix P300 / HP Printer Ribbon</td><td>Printer Ribbon</td></tr>
+      <tr><td class="row-num">64</td><td>Seiko TP10/Simplex 1602/Acroprint 175 Printer Ribbon Black</td><td>Printer Ribbon</td></tr>
+      <tr><td class="row-num">65</td><td>Seiko TP10/Simplex 1602/Acroprint 175 Printer Ribbon Purple</td><td>Printer Ribbon</td></tr>
+      <tr><td class="row-num">66</td><td>Seiko TP10/Simplex 1602/Acroprint 175 Printer Ribbon Red</td><td>Printer Ribbon</td></tr>
+      <tr><td class="row-num">67</td><td>Seikosha SP800/1000/1600/2000 Printer Ribbon</td><td>Printer Ribbon</td></tr>
+      <tr><td class="row-num">68</td><td>Star LC2410/LC24-200/NX2410 Printer Ribbon</td><td>Printer Ribbon</td></tr>
+      <tr><td class="row-num">69</td><td>Star NX1020/LC200 Printer Ribbon</td><td>Printer Ribbon</td></tr>
+      <tr><td class="row-num">70</td><td>Star SP200 Printer Ribbon Black</td><td>Printer Ribbon</td></tr>
+      <tr><td class="row-num">71</td><td>Star SP200 Printer Ribbon Purple</td><td>Printer Ribbon</td></tr>
+      <tr><td class="row-num">72</td><td>Star SP300 Printer Ribbon Purple</td><td>Printer Ribbon</td></tr>
+      <tr><td class="row-num">73</td><td>Star SP700/712 Printer Ribbon Black</td><td>Printer Ribbon</td></tr>
+      <tr><td class="row-num">74</td><td>Star SP700/712 Printer Ribbon Black/Red</td><td>Printer Ribbon</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- TYPEWRITER RIBBONS -->
+<div class="section typewriter">
+  <div class="section-header">Typewriter Ribbons &mdash; 24 products</div>
+  <table>
+    <thead>
+      <tr><th>#</th><th>Product Name</th><th>Type</th></tr>
+    </thead>
+    <tbody>
+      <tr><td class="row-num">1</td><td>Brother AX 10 Typewriter Ribbon Black</td><td>Typewriter Ribbon</td></tr>
+      <tr><td class="row-num">2</td><td>Brother EM100/200/CE60 Typewriter Ribbon</td><td>Typewriter Ribbon</td></tr>
+      <tr><td class="row-num">3</td><td>Canon AP01/100/150 Typewriter Ribbon</td><td>Typewriter Ribbon</td></tr>
+      <tr><td class="row-num">4</td><td>Canon AP11/200/300/350 Typewriter Ribbon</td><td>Typewriter Ribbon</td></tr>
+      <tr><td class="row-num">5</td><td>Canon AP800 Typewriter Ribbon</td><td>Typewriter Ribbon</td></tr>
+      <tr><td class="row-num">6</td><td>Group 1 Typewriter Ribbon Black</td><td>Typewriter Ribbon</td></tr>
+      <tr><td class="row-num">7</td><td>Group 1 Typewriter Ribbon Black/Red</td><td>Typewriter Ribbon</td></tr>
+      <tr><td class="row-num">8</td><td>Group 4 Typewriter Ribbon Black</td><td>Typewriter Ribbon</td></tr>
+      <tr><td class="row-num">9</td><td>Group 4 Typewriter Ribbon Black/Red</td><td>Typewriter Ribbon</td></tr>
+      <tr><td class="row-num">10</td><td>Group 9 Typewriter Ribbon Black</td><td>Typewriter Ribbon</td></tr>
+      <tr><td class="row-num">11</td><td>Group 9 Typewriter Ribbon Black/Red</td><td>Typewriter Ribbon</td></tr>
+      <tr><td class="row-num">12</td><td>IBM 6747 Typewriter Ribbon</td><td>Typewriter Ribbon</td></tr>
+      <tr><td class="row-num">13</td><td>Nakajima AE300/330 Typewriter Ribbon Black</td><td>Typewriter Ribbon</td></tr>
+      <tr><td class="row-num">14</td><td>Nakajima AX200/220 Typewriter Ribbon Black</td><td>Typewriter Ribbon</td></tr>
+      <tr><td class="row-num">15</td><td>Olivetti ET121 / Panasonic Typewriter Ribbon</td><td>Typewriter Ribbon</td></tr>
+      <tr><td class="row-num">16</td><td>Olivetti ETP55 Typewriter Ribbon</td><td>Typewriter Ribbon</td></tr>
+      <tr><td class="row-num">17</td><td>Olivetti Praxis 20 Typewriter Ribbon</td><td>Typewriter Ribbon</td></tr>
+      <tr><td class="row-num">18</td><td>Olympia ES70 Typewriter Ribbon</td><td>Typewriter Ribbon</td></tr>
+      <tr><td class="row-num">19</td><td>Sharp AP3000 Typewriter Ribbon</td><td>Typewriter Ribbon</td></tr>
+      <tr><td class="row-num">20</td><td>Sharp ZX400/ZX500 Typewriter Ribbon</td><td>Typewriter Ribbon</td></tr>
+      <tr><td class="row-num">21</td><td>Triumph-Adler SE310/9009 Typewriter Ribbon</td><td>Typewriter Ribbon</td></tr>
+      <tr><td class="row-num">22</td><td>Triumph-Adler Typewriter Ribbon</td><td>Typewriter Ribbon</td></tr>
+      <tr><td class="row-num">23</td><td>Universal Typewriter Ribbon Black</td><td>Typewriter Ribbon</td></tr>
+      <tr><td class="row-num">24</td><td>Universal Typewriter Ribbon Black/Red</td><td>Typewriter Ribbon</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- OTHER -->
+<div class="section other">
+  <div class="section-header">Other / Genuine Ribbons &mdash; 17 products</div>
+  <table>
+    <thead>
+      <tr><th>#</th><th>Product Name</th><th>Type</th></tr>
+    </thead>
+    <tbody>
+      <tr><td class="row-num">1</td><td>390RIB Oki Black Ribbon</td><td>Other</td></tr>
+      <tr><td class="row-num">2</td><td>Compatible Epson ERC-30 Ribbon Black</td><td>Other</td></tr>
+      <tr><td class="row-num">3</td><td>Compatible Epson ERC09 Ribbon Black</td><td>Other</td></tr>
+      <tr><td class="row-num">4</td><td>Compatible Epson ERC09P Ribbon</td><td>Other</td></tr>
+      <tr><td class="row-num">5</td><td>Genuine Canon MPRIBBON Ribbon Black/Red</td><td>Other</td></tr>
+      <tr><td class="row-num">6</td><td>Genuine Epson DFX-9000 Ribbon</td><td>Other</td></tr>
+      <tr><td class="row-num">7</td><td>Genuine Epson FX-2190 Ribbon Black</td><td>Other</td></tr>
+      <tr><td class="row-num">8</td><td>Genuine Epson LQ-2070 Ribbon</td><td>Other</td></tr>
+      <tr><td class="row-num">9</td><td>Genuine Epson LQ-690 Ribbon Black</td><td>Other</td></tr>
+      <tr><td class="row-num">10</td><td>Genuine Epson Ribbon Black</td><td>Other</td></tr>
+      <tr><td class="row-num">11</td><td>Genuine Epson S015336 Ribbon Black</td><td>Other</td></tr>
+      <tr><td class="row-num">12</td><td>Genuine Epson S015337 Ribbon Black</td><td>Other</td></tr>
+      <tr><td class="row-num">13</td><td>Genuine Epson S0156 Ribbon Black</td><td>Other</td></tr>
+      <tr><td class="row-num">14</td><td>Genuine Epson S015637 Ribbon Black</td><td>Other</td></tr>
+      <tr><td class="row-num">15</td><td>Genuine OKI 100 Ribbon Black</td><td>Other</td></tr>
+      <tr><td class="row-num">16</td><td>Genuine OKI 720 Ribbon Black</td><td>Other</td></tr>
+      <tr><td class="row-num">17</td><td>Genuine OKI Ribbon Black</td><td>Other</td></tr>
+    </tbody>
+  </table>
+</div>
+
+</body>
+</html>

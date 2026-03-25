@@ -423,7 +423,7 @@
             const brandSlug = info.brandName.toLowerCase().replace(/\s+/g, '-');
             if (isRibbon) {
                 document.getElementById('breadcrumb-category').innerHTML = `<a href="/html/ribbons.html">${Security.escapeHtml(categoryName)}</a>`;
-                document.getElementById('breadcrumb-brand').innerHTML = `<a href="/html/ribbons?device_brand=${Security.escapeAttr(info.brandName.toLowerCase())}">${Security.escapeHtml(info.brandName)}</a>`;
+                document.getElementById('breadcrumb-brand').innerHTML = `<a href="/html/ribbons?printer_brand=${Security.escapeAttr(info.brandName.toLowerCase())}">${Security.escapeHtml(info.brandName)}</a>`;
             } else {
                 document.getElementById('breadcrumb-category').innerHTML = `<a href="/html/shop?brand=${Security.escapeAttr(brandSlug)}&category=${Security.escapeAttr(info.category)}">${Security.escapeHtml(categoryName)}</a>`;
                 document.getElementById('breadcrumb-brand').innerHTML = `<a href="/html/shop?brand=${Security.escapeAttr(brandSlug)}">${Security.escapeHtml(info.brandName)}</a>`;
@@ -720,43 +720,45 @@
 
         async renderCompatibleDevices(info) {
             try {
-                // compatible_devices may already be on the product, or require the ribbon endpoint
-                let devices = info.compatible_devices;
+                // Ribbon API returns compatible_printers: [{id, model_name, full_name, brand}]
+                let devices = info.compatible_printers || info.compatible_devices;
                 if (!devices || !devices.length) {
                     const res = await API.getRibbon(info.sku);
                     if (res.ok && res.data) {
-                        devices = res.data.compatible_devices;
+                        devices = res.data.compatible_printers || res.data.compatible_devices;
                     }
                 }
                 if (!devices || !devices.length) return;
 
-                const deviceLabels = devices.map(d => {
-                    const brand = Security.escapeHtml(d.brand || d.device_brand || '');
-                    const model = d.model || d.device_model || '';
-                    if (d.match_type === 'brand' || model === 'All Models') {
-                        return brand ? `${brand} \u2014 All Models` : 'All Models';
-                    }
-                    const escapedModel = Security.escapeHtml(model);
-                    return brand && escapedModel ? `${brand} ${escapedModel}` : (brand || escapedModel);
+                const deviceLinks = devices.map(d => {
+                    const modelKey = d.model_name || d.model || d.device_model || '';
+                    const label = d.full_name
+                        ? Security.escapeHtml(d.full_name)
+                        : (() => {
+                            const brand = Security.escapeHtml(d.brand || d.device_brand || '');
+                            const model = Security.escapeHtml(modelKey);
+                            return brand && model ? `${brand} ${model}` : (brand || model);
+                        })();
+                    if (!label || !modelKey) return null;
+                    return `<a href="/html/ribbons?printer_model=${encodeURIComponent(modelKey)}" class="printer-link">${label}</a>`;
                 }).filter(Boolean);
 
-                if (!deviceLabels.length) return;
+                if (!deviceLinks.length) return;
 
                 const html = `
                     <div class="product-printers-wrap">
                         <div class="container">
                             <div class="product-printers-banner">
-                                <strong>Compatible With:</strong>
-                                <span>${deviceLabels.join(', ')}</span>
+                                <strong>For Use In:</strong>
+                                <span>${deviceLinks.join(', ')}</span>
                             </div>
                         </div>
                     </div>
                 `;
 
-                const insertTarget = document.querySelector('.related-products') || document.querySelector('.product-tabs');
-                if (insertTarget) {
-                    insertTarget.insertAdjacentHTML('beforebegin', html);
-                }
+                // For ribbons: place after the Description/Specs/FAQs tabs section
+                const tabTarget = document.querySelector('.product-tabs');
+                if (tabTarget) tabTarget.insertAdjacentHTML('afterend', html);
             } catch (e) {
                 // Compatible devices are optional
             }

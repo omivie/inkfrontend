@@ -5,9 +5,9 @@
 const RibbonsPage = {
     // Current state
     state: {
-        brand: null,        // device_brand value (lowercase, used for URL param and API filter)
+        brand: null,        // printer_brand value (lowercase, used for URL param and API filter)
         brandLabel: null,   // device_brand display label (e.g., "Olivetti", "Smith Corona")
-        model: null,        // printer_model (specific model drill-down)
+        model: null,        // printer_model (specific model, used for direct URL navigation)
         ribbonBrand: null,  // manufacturer brand (API param: 'brand')
         color: null,
         sort: 'name',
@@ -19,12 +19,6 @@ const RibbonsPage = {
 
     // Products per page
     pageLimit: 48,
-
-    // Per-brand model cache
-    _modelsCache: {},
-
-    // All ribbons loaded for current brand (for client-side model filtering)
-    _allRibbons: [],
 
     // DOM Elements
     elements: {
@@ -49,13 +43,13 @@ const RibbonsPage = {
         this.initFilterControls();
         this.syncFilterUI();
 
-        if (this.state.brand) {
-            // URL already has a brand — skip brand grid, show products directly
+        if (this.state.brand || this.state.model) {
+            // URL already has a brand or model — skip brand grid, show products directly
             this.showLevel('products');
             this.navigationVersion++;
             await this.loadProducts(this.navigationVersion);
         } else {
-            // No brand selected — show brand grid
+            // No filter selected — show brand grid
             await this.loadBrands();
         }
 
@@ -108,7 +102,10 @@ const RibbonsPage = {
 
         try {
             const res = await API.getRibbonDeviceBrands();
-            const brands = res?.data?.device_brands || [];
+            const allBrands = res?.data?.device_brands || [];
+            // Exclude non-manufacturer labels (generic/compatible tags, not real brands)
+            const EXCLUDED_BRANDS = new Set(['universal']);
+            const brands = allBrands.filter(b => !EXCLUDED_BRANDS.has(b.value));
 
             this.showLoadingState('brands', false);
 
@@ -121,7 +118,7 @@ const RibbonsPage = {
             brands.forEach((b, i) => {
                 const box = document.createElement('a');
                 box.className = 'drilldown-box drilldown-box--ribbon';
-                box.href = `/html/ribbons?device_brand=${encodeURIComponent(b.value)}`;
+                box.href = `/html/ribbons?printer_brand=${encodeURIComponent(b.value)}`;
                 box.style.animationDelay = `${i * 30}ms`;
                 box.innerHTML = `<span class="drilldown-box__label">${Security.escapeHtml(b.label)}</span>`;
                 box.addEventListener('click', (e) => {
@@ -144,7 +141,6 @@ const RibbonsPage = {
         this.state.brand = brand;
         this.state.brandLabel = label || brand;
         this.state.ribbonBrand = null;
-        this.state.model = null;
         this.state.page = 1;
         this.updateURL();
 
@@ -159,9 +155,7 @@ const RibbonsPage = {
         this.state.brand = null;
         this.state.brandLabel = null;
         this.state.ribbonBrand = null;
-        this.state.model = null;
         this.state.page = 1;
-        this.clearModelSection();
         this.updateURL();
         window.scrollTo(0, 0);
         this.showLevel('brands');
@@ -182,9 +176,9 @@ const RibbonsPage = {
 
     parseURLState() {
         const params = new URLSearchParams(window.location.search);
-        this.state.brand = params.get('device_brand');
+        this.state.brand = params.get('printer_brand');
         this.state.brandLabel = null; // resolved later from API or title-cased
-        this.state.model = params.get('device_model');
+        this.state.model = params.get('printer_model');
         this.state.ribbonBrand = params.get('brand');
         this.state.color = params.get('color');
         this.state.sort = params.get('sort') || 'name';
@@ -193,8 +187,8 @@ const RibbonsPage = {
 
     updateURL() {
         const params = new URLSearchParams();
-        if (this.state.brand) params.set('device_brand', this.state.brand);
-        if (this.state.model) params.set('device_model', this.state.model);
+        if (this.state.brand) params.set('printer_brand', this.state.brand);
+        if (this.state.model) params.set('printer_model', this.state.model);
         if (this.state.ribbonBrand) params.set('brand', this.state.ribbonBrand);
         if (this.state.color) params.set('color', this.state.color);
         if (this.state.sort && this.state.sort !== 'name') params.set('sort', this.state.sort);
@@ -239,98 +233,6 @@ const RibbonsPage = {
             this.elements.emptyMessage.textContent = message;
         }
         this.elements.empty.hidden = false;
-    },
-
-    // =========================================
-    // MODEL SECTION (below products)
-    // =========================================
-    async loadModels(brand) {
-        const section = document.getElementById('ribbon-model-section');
-        const inner = document.getElementById('ribbon-model-pills-inner');
-        const heading = document.getElementById('ribbon-model-heading');
-        if (!section || !inner) return;
-
-        if (!this._modelsCache[brand]) {
-            try {
-                const res = await API.getRibbonDeviceModels({ device_brand: brand });
-                this._modelsCache[brand] = res?.data?.device_models || [];
-            } catch (e) {
-                this._modelsCache[brand] = [];
-            }
-        }
-
-        // Guard: brand may have changed while we were fetching
-        if (this.state.brand !== brand) return;
-
-        const models = this._modelsCache[brand];
-        // Only show if there are specific models beyond "All Models"
-        if (models.length <= 1) {
-            section.hidden = true;
-            return;
-        }
-
-        if (heading) {
-            heading.textContent = `Select a ${Security.escapeHtml(brand)} model to narrow your results`;
-        }
-
-        inner.innerHTML = models.map(m => {
-            const isActive = m.value === (this.state.model || 'all-models');
-            return `<button class="ribbon-model-btn${isActive ? ' ribbon-model-btn--active' : ''}" data-model="${Security.escapeAttr(m.value)}" type="button">${Security.escapeHtml(m.label)}</button>`;
-        }).join('');
-
-        inner.querySelectorAll('.ribbon-model-btn').forEach(btn => {
-            btn.addEventListener('click', () => {
-                const val = btn.dataset.model;
-                this.state.model = (val === 'all-models') ? null : val;
-                inner.querySelectorAll('.ribbon-model-btn').forEach(b =>
-                    b.classList.toggle('ribbon-model-btn--active', b.dataset.model === (this.state.model || 'all-models'))
-                );
-                this.updateURL();
-                this.filterByModel(this.state.model);
-            });
-        });
-
-        section.hidden = false;
-    },
-
-    filterByModel(modelValue) {
-        const grid = this.elements.productsGrid;
-        if (!grid) return;
-        const cards = grid.querySelectorAll('.product-card');
-        cards.forEach((card, i) => {
-            if (!modelValue) {
-                card.hidden = false;
-                return;
-            }
-            const ribbon = this._allRibbons[i];
-            card.hidden = !this.isRibbonCompatible(card, ribbon, modelValue);
-        });
-    },
-
-    isRibbonCompatible(card, ribbon, modelValue) {
-        // Check device_models stored on the card element
-        if (card.dataset.deviceModels) {
-            try {
-                const models = JSON.parse(card.dataset.deviceModels);
-                if (models.length > 0) {
-                    return models.some(m => m.toLowerCase() === modelValue.toLowerCase());
-                }
-            } catch (e) {}
-        }
-        // Fallback: match against ribbon name (strip hyphens for comparison)
-        if (ribbon) {
-            const name = (ribbon.name || '').toLowerCase();
-            const model = modelValue.toLowerCase().replace(/-/g, '');
-            return name.includes(model);
-        }
-        return true;
-    },
-
-    clearModelSection() {
-        const section = document.getElementById('ribbon-model-section');
-        if (section) section.hidden = true;
-        const inner = document.getElementById('ribbon-model-pills-inner');
-        if (inner) inner.innerHTML = '';
     },
 
     // =========================================
@@ -380,26 +282,16 @@ const RibbonsPage = {
         this.elements.levelProducts.hidden = false;
         this.elements.empty.hidden = true;
 
-        // Clear model section when no brand is selected
-        if (!this.state.brand) {
-            this.clearModelSection();
-        }
-
         try {
             const params = {
                 page: this.state.page,
                 limit: this.pageLimit,
                 sort: this.state.sort
             };
-            if (this.state.brand) params.device_brand = this.state.brand;
-            // device_model is filtered client-side — do not pass to API
+            if (this.state.brand) params.printer_brand = this.state.brand;
+            if (this.state.model) params.printer_model = this.state.model;
             if (this.state.ribbonBrand) params.brand = this.state.ribbonBrand;
             if (this.state.color) params.color = this.state.color;
-
-            // Load models in parallel when a device brand is selected
-            if (this.state.brand) {
-                this.loadModels(this.state.brand);
-            }
 
             const res = await API.getRibbons(params);
 
@@ -430,12 +322,7 @@ const RibbonsPage = {
                 return;
             }
 
-            this._allRibbons = ribbons;
             this.renderProducts(ribbons);
-            // Apply model filter if one was active (e.g. from URL on page load)
-            if (this.state.model) {
-                this.filterByModel(this.state.model);
-            }
             this.renderPagination(pagination, ribbons.length);
             this.elements.levelProducts.hidden = false;
             this.updateBreadcrumb();
@@ -670,21 +557,39 @@ const RibbonsPage = {
         list.innerHTML = '';
 
         const activeBrand = this.state.brandLabel || this.state.brand || this.state.ribbonBrand;
-        if (activeBrand) {
-            // Show: Ribbons > Brand
-            const ribbonsItem = this.createBreadcrumbItem('Ribbons', false, () => {
-                this.goBackToBrands();
-            });
-            list.appendChild(ribbonsItem);
+        const model = this.state.model;
 
-            const brandItem = this.createBreadcrumbItem(activeBrand, true);
-            list.appendChild(brandItem);
+        if (activeBrand && model) {
+            // Show: Ribbons > Brand > Model
+            list.appendChild(this.createBreadcrumbItem('Ribbons', false, () => this.goBackToBrands()));
+            list.appendChild(this.createBreadcrumbItem(activeBrand, false, () => this.goBackToBrand()));
+            list.appendChild(this.createBreadcrumbItem(model, true));
+        } else if (activeBrand) {
+            // Show: Ribbons > Brand
+            list.appendChild(this.createBreadcrumbItem('Ribbons', false, () => this.goBackToBrands()));
+            list.appendChild(this.createBreadcrumbItem(activeBrand, true));
+        } else if (model) {
+            // Show: Ribbons > Model (direct URL navigation without brand)
+            list.appendChild(this.createBreadcrumbItem('Ribbons', false, () => this.goBackToBrands()));
+            list.appendChild(this.createBreadcrumbItem(model, true));
         } else {
-            const ribbonsItem = this.createBreadcrumbItem('Ribbons', true);
-            list.appendChild(ribbonsItem);
+            list.appendChild(this.createBreadcrumbItem('Ribbons', true));
         }
 
         this.updateSchemaLD();
+    },
+
+    goBackToBrand() {
+        // Keep brand, clear model — go back to brand-level products
+        this.state.model = null;
+        this.state.page = 1;
+        this.updateURL();
+        window.scrollTo(0, 0);
+        this.showLevel('products');
+        this.navigationVersion++;
+        this.loadProducts(this.navigationVersion);
+        this.updateBreadcrumb();
+        this.updateTitle();
     },
 
     updateSchemaLD() {
@@ -699,12 +604,24 @@ const RibbonsPage = {
         let pageUrl = ribbonsUrl;
         let pageName = 'Typewriter & Printer Ribbons NZ';
         const activeBrandLabel = this.state.brandLabel || this.state.brand || this.state.ribbonBrand;
+        const model = this.state.model;
         if (activeBrandLabel) {
-            const paramName = this.state.brand ? 'device_brand' : 'brand';
+            const paramName = this.state.brand ? 'printer_brand' : 'brand';
             const paramValue = this.state.brand || this.state.ribbonBrand;
-            pageUrl = ribbonsUrl + `?${paramName}=` + encodeURIComponent(paramValue);
-            pageName = activeBrandLabel + ' Ribbons';
-            items.push({ "@type": "ListItem", "position": 3, "name": activeBrandLabel, "item": pageUrl });
+            const brandUrl = ribbonsUrl + `?${paramName}=` + encodeURIComponent(paramValue);
+            items.push({ "@type": "ListItem", "position": 3, "name": activeBrandLabel, "item": brandUrl });
+            if (model) {
+                pageUrl = brandUrl + '&printer_model=' + encodeURIComponent(model);
+                pageName = activeBrandLabel + ' ' + model + ' Ribbons';
+                items.push({ "@type": "ListItem", "position": 4, "name": model, "item": pageUrl });
+            } else {
+                pageUrl = brandUrl;
+                pageName = activeBrandLabel + ' Ribbons';
+            }
+        } else if (model) {
+            pageUrl = ribbonsUrl + '?printer_model=' + encodeURIComponent(model);
+            pageName = 'Ribbons for ' + model;
+            items.push({ "@type": "ListItem", "position": 3, "name": model, "item": pageUrl });
         }
         el.textContent = JSON.stringify({
             "@context": "https://schema.org",
@@ -742,13 +659,17 @@ const RibbonsPage = {
     updateTitle() {
         const title = this.elements.title;
         const activeBrand = this.state.brandLabel || this.state.brand || this.state.ribbonBrand;
-        if (activeBrand) {
+        const model = this.state.model;
+        if (activeBrand && model) {
+            title.textContent = `${activeBrand} ${model} Ribbons`;
+        } else if (model) {
+            title.textContent = `Ribbons for ${model}`;
+        } else if (activeBrand) {
             title.textContent = `${activeBrand} Ribbons`;
-            title.hidden = false;
         } else {
             title.textContent = 'Typewriter & Printer Ribbons NZ';
-            title.hidden = false;
         }
+        title.hidden = false;
     }
 };
 

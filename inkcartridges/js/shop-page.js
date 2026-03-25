@@ -526,7 +526,7 @@
             this.cache.ribbonDeviceBrands.forEach((b, i) => {
                 const box = document.createElement('a');
                 box.className = 'drilldown-box drilldown-box--ribbon';
-                box.href = `/html/ribbons?device_brand=${encodeURIComponent(b.value)}`;
+                box.href = `/html/ribbons?printer_brand=${encodeURIComponent(b.value)}`;
                 box.style.animationDelay = `${60 + i * 30}ms`;
                 box.innerHTML = `<span class="drilldown-box__label">${Security.escapeHtml(b.label)}</span>`;
                 grid.appendChild(box);

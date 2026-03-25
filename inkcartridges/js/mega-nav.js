@@ -133,7 +133,7 @@
     function renderRibbons(brands) {
         if (!ribbonsGrid) return;
         ribbonsGrid.innerHTML = brands.map(b =>
-            `<a href="/html/ribbons?device_brand=${encodeURIComponent(b.value)}" class="ribbons-mega__brand-btn">${Security.escapeHtml(b.label)}</a>`
+            `<a href="/html/ribbons?printer_brand=${encodeURIComponent(b.value)}" class="ribbons-mega__brand-btn">${Security.escapeHtml(b.label)}</a>`
         ).join('');
     }
 
@@ -141,7 +141,10 @@
         if (!ribbonsGrid) return;
         try {
             const res = await API.getRibbonDeviceBrands();
-            const brands = res?.data?.device_brands || [];
+            const allBrands = res?.data?.device_brands || [];
+            // Exclude non-manufacturer labels (generic/compatible tags, not real brands)
+            const EXCLUDED_BRANDS = new Set(['universal']);
+            const brands = allBrands.filter(b => !EXCLUDED_BRANDS.has(b.value));
             if (brands.length > 0) {
                 renderRibbons(brands);
             }
