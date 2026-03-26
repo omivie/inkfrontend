@@ -379,6 +379,8 @@
             this.elements.levelCodes.hidden = true;
             this.elements.levelProducts.hidden = true;
             this.elements.empty.hidden = true;
+            const colorPacksSection = document.getElementById('color-packs-section');
+            if (colorPacksSection) colorPacksSection.hidden = true;
         },
 
         showLoading(show, level = null) {
@@ -1719,6 +1721,8 @@
                         this.showEmpty('No compatible products found for this printer.');
                     } else {
                         this.elements.levelProducts.hidden = false;
+                        // Load color packs (non-blocking)
+                        this.loadColorPacks(this.state.printer);
                     }
                 } else {
                     this.showEmpty('Failed to load compatible products for this printer.');
@@ -1731,6 +1735,96 @@
             }
 
             this.showLoading(false);
+        },
+
+        // Load and render color pack bundles for a printer
+        async loadColorPacks(printerSlug) {
+            const section = document.getElementById('color-packs-section');
+            const grid = document.getElementById('color-packs-grid');
+            if (!section || !grid) return;
+
+            try {
+                const res = await API.getColorPacks(printerSlug);
+                if (!res.ok || !res.data) return;
+
+                const data = res.data;
+                const allPacks = [];
+                if (data.genuine?.packs?.length) {
+                    data.genuine.packs.forEach(p => allPacks.push({ ...p, source: 'genuine' }));
+                }
+                if (data.compatible?.packs?.length) {
+                    data.compatible.packs.forEach(p => allPacks.push({ ...p, source: 'compatible' }));
+                }
+                if (allPacks.length === 0) return;
+
+                const colorHex = { Black: '#1a1a1a', Cyan: '#00bcd4', Magenta: '#e91e63', Yellow: '#ffc107' };
+
+                grid.innerHTML = allPacks.map(pack => {
+                    const items = pack.items || [];
+                    const swatches = items.map(item => {
+                        const hex = item.color_hex || colorHex[item.color] || '#888';
+                        return `<span class="color-pack-card__swatch" style="background:${hex}" title="${Security.escapeHtml(item.color || '')}"></span>`;
+                    }).join('');
+
+                    const itemList = items.map(item =>
+                        `<li>${Security.escapeHtml(item.color || '')} - ${formatPrice(item.retail_price)}</li>`
+                    ).join('');
+
+                    const originalTotal = items.reduce((sum, i) => sum + (i.retail_price || 0), 0);
+                    const packPrice = pack.pack_price || originalTotal;
+                    const savings = originalTotal - packPrice;
+                    const savingsPct = originalTotal > 0 ? Math.round((savings / originalTotal) * 100) : 0;
+                    const sourceLabel = pack.source === 'genuine' ? 'Genuine' : 'Compatible';
+                    const sourceClass = pack.source === 'genuine' ? 'genuine' : 'compatible';
+                    const packName = pack.pack_type === 'KCMY' ? 'KCMY Full Set' : 'CMY Colour Pack';
+
+                    return `
+                        <div class="color-pack-card" data-pack='${Security.escapeAttr(JSON.stringify({ items: items.map(i => ({ product_id: i.product_id || i.id, name: i.name, price: i.retail_price })) }))}'>
+                            ${savingsPct > 0 ? `<span class="color-pack-card__badge">SAVE ${savingsPct}%</span>` : ''}
+                            <div class="color-pack-card__source color-pack-card__source--${sourceClass}">${sourceLabel}</div>
+                            <div class="color-pack-card__name">${Security.escapeHtml(packName)}</div>
+                            <div class="color-pack-card__swatches">${swatches}</div>
+                            <ul class="color-pack-card__items">${itemList}</ul>
+                            <div class="color-pack-card__pricing">
+                                <span class="color-pack-card__pack-price">${formatPrice(packPrice)}</span>
+                                ${savings > 0 ? `<span class="color-pack-card__original-price">${formatPrice(originalTotal)}</span>` : ''}
+                            </div>
+                            <button type="button" class="color-pack-card__add-btn">Add All to Cart</button>
+                        </div>`;
+                }).join('');
+
+                // Bind add-all-to-cart buttons
+                grid.querySelectorAll('.color-pack-card__add-btn').forEach(btn => {
+                    btn.addEventListener('click', async function() {
+                        const card = this.closest('.color-pack-card');
+                        const packData = JSON.parse(card.dataset.pack);
+                        this.disabled = true;
+                        this.textContent = 'Adding...';
+                        try {
+                            for (const item of packData.items) {
+                                await Cart.addItem({
+                                    id: item.product_id,
+                                    name: item.name,
+                                    price: item.price,
+                                    quantity: 1
+                                });
+                            }
+                            this.textContent = 'Added!';
+                            setTimeout(() => {
+                                this.textContent = 'Add All to Cart';
+                                this.disabled = false;
+                            }, 2000);
+                        } catch (e) {
+                            this.textContent = 'Error - Try Again';
+                            this.disabled = false;
+                        }
+                    });
+                });
+
+                section.hidden = false;
+            } catch (e) {
+                // Color packs are non-critical
+            }
         },
 
         // Mapping of printer models to compatible product codes

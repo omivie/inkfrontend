@@ -1206,8 +1206,9 @@ const API = {
      * Get approved reviews for a product
      * @param {string} productId - Product UUID
      */
-    async getProductReviews(productId) {
-        return this.get(`/api/products/${productId}/reviews`);
+    async getProductReviews(productId, params = {}) {
+        const query = new URLSearchParams(params).toString();
+        return this.get(`/api/products/${productId}/reviews${query ? `?${query}` : ''}`);
     },
 
     /**
@@ -1354,6 +1355,25 @@ const API = {
         } catch {
             return false;
         }
+    },
+
+    // =========================================================================
+    // BUSINESS ACCOUNTS
+    // =========================================================================
+
+    /**
+     * Submit business account application
+     * @param {object} data - { company_name, nzbn, contact_name, contact_email, contact_phone, estimated_monthly_spend, industry }
+     */
+    async applyBusiness(data) {
+        return this.post('/api/business/apply', data);
+    },
+
+    /**
+     * Get business account status
+     */
+    async getBusinessStatus() {
+        return this.get('/api/business/status');
     }
 };
 

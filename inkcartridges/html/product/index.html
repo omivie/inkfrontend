@@ -214,7 +214,7 @@
                             <span class="product-info__badge" id="product-badge" hidden>COMPATIBLE</span>
                             <h1 class="product-info__title" id="product-title"><span class="skeleton" style="display:inline-block;width:280px;height:1.2em;"></span></h1>
                             <p class="product-info__sku" id="product-sku"><span class="skeleton" style="display:inline-block;width:100px;height:1em;"></span></p>
-
+                            <div class="product-info__reviews" id="product-review-inline" hidden></div>
                         </div>
 
                         <div class="product-info__pricing">
@@ -290,6 +290,7 @@
                     <button role="tab" aria-selected="true" aria-controls="tab-description" id="tab-btn-description" class="tabs__button tabs__button--active">Description</button>
                     <button role="tab" aria-selected="false" aria-controls="tab-specs" id="tab-btn-specs" class="tabs__button">Specifications</button>
                     <button role="tab" aria-selected="false" aria-controls="tab-faqs" id="tab-btn-faqs" class="tabs__button">FAQs</button>
+                    <button role="tab" aria-selected="false" aria-controls="tab-reviews" id="tab-btn-reviews" class="tabs__button">Reviews</button>
                 </div>
 
                 <div class="tabs__panels">
@@ -306,6 +307,13 @@
                     <div role="tabpanel" id="tab-faqs" aria-labelledby="tab-btn-faqs" class="tabs__panel" hidden>
                         <div class="product-faqs" id="product-faqs">
                         </div>
+                    </div>
+
+                    <div role="tabpanel" id="tab-reviews" aria-labelledby="tab-btn-reviews" class="tabs__panel" hidden>
+                        <div id="reviews-summary"></div>
+                        <div id="review-form-container"></div>
+                        <div class="reviews-list" id="reviews-list"></div>
+                        <div id="reviews-pagination"></div>
                     </div>
                 </div>
             </div>

@@ -595,6 +595,9 @@
 
             // Set up event listeners
             this.setupEventListeners(info);
+
+            // Load reviews (non-blocking)
+            this.loadReviews(info);
         },
 
         renderCompatPreview(printers) {
@@ -1153,6 +1156,247 @@
         _isTestProduct(product) {
             const sku = (product.sku || '').toUpperCase();
             return sku.startsWith('TEST-') || product.admin_only === true;
+        },
+
+        // ========================================
+        // REVIEWS
+        // ========================================
+
+        _reviewsPage: 1,
+        _reviewsProductId: null,
+
+        async loadReviews(info) {
+            this._reviewsProductId = info.id;
+            try {
+                const [summaryRes, reviewsRes] = await Promise.all([
+                    API.getProductReviewSummary(info.id),
+                    API.getProductReviews(info.id)
+                ]);
+
+                const summary = summaryRes.ok ? summaryRes.data : null;
+                const reviews = reviewsRes.ok ? (reviewsRes.data?.reviews || []) : [];
+                const meta = reviewsRes.meta || null;
+
+                this.renderReviewSummary(summary);
+                this.renderReviewInline(summary);
+                this.renderReviewsList(reviews);
+                this.renderReviewForm(info);
+                if (meta) this.renderReviewsPagination(meta, info);
+
+                // Update tab label with count
+                const tabBtn = document.getElementById('tab-btn-reviews');
+                const count = summary?.review_count || 0;
+                if (tabBtn) tabBtn.textContent = count > 0 ? `Reviews (${count})` : 'Reviews';
+            } catch (e) {
+                // Reviews are non-critical
+            }
+        },
+
+        renderStars(rating, max = 5) {
+            let html = '';
+            for (let i = 1; i <= max; i++) {
+                const filled = i <= Math.round(rating) ? ' review-star--filled' : '';
+                html += `<svg class="review-star${filled}" width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>`;
+            }
+            return html;
+        },
+
+        renderReviewInline(summary) {
+            const el = document.getElementById('product-review-inline');
+            if (!el) return;
+            if (!summary || !summary.review_count) return;
+            el.innerHTML = `
+                <a href="#tab-reviews" class="product-info__reviews-link" id="review-inline-link">
+                    ${this.renderStars(summary.average_rating)}
+                    <span>${summary.average_rating.toFixed(1)} (${summary.review_count} review${summary.review_count !== 1 ? 's' : ''})</span>
+                </a>
+            `;
+            el.hidden = false;
+            el.querySelector('#review-inline-link')?.addEventListener('click', (e) => {
+                e.preventDefault();
+                const tabBtn = document.getElementById('tab-btn-reviews');
+                if (tabBtn) {
+                    tabBtn.click();
+                    tabBtn.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                }
+            });
+        },
+
+        renderReviewSummary(summary) {
+            const el = document.getElementById('reviews-summary');
+            if (!el) return;
+            if (!summary || !summary.review_count) {
+                el.innerHTML = `<div class="reviews-summary__empty">No reviews yet. Be the first to share your experience!</div>`;
+                return;
+            }
+
+            const avg = summary.average_rating || 0;
+            const total = summary.review_count || 0;
+            const dist = summary.distribution || {};
+
+            let barsHtml = '';
+            for (let i = 5; i >= 1; i--) {
+                const count = dist[i] || 0;
+                const pct = total > 0 ? (count / total * 100) : 0;
+                barsHtml += `
+                    <div class="reviews-summary__bar-row">
+                        <span class="reviews-summary__bar-label">${i}</span>
+                        <div class="reviews-summary__bar-track"><div class="reviews-summary__bar-fill" style="width:${pct}%"></div></div>
+                        <span class="reviews-summary__bar-count">${count}</span>
+                    </div>`;
+            }
+
+            el.innerHTML = `
+                <div class="reviews-summary">
+                    <div class="reviews-summary__score">
+                        <span class="reviews-summary__avg">${avg.toFixed(1)}</span>
+                        <div class="reviews-summary__stars">${this.renderStars(avg)}</div>
+                        <span class="reviews-summary__total">${total} review${total !== 1 ? 's' : ''}</span>
+                    </div>
+                    <div class="reviews-summary__distribution">${barsHtml}</div>
+                </div>
+            `;
+        },
+
+        renderReviewsList(reviews) {
+            const el = document.getElementById('reviews-list');
+            if (!el) return;
+            if (!reviews.length) {
+                el.innerHTML = '';
+                return;
+            }
+            el.innerHTML = reviews.map(r => {
+                const date = new Date(r.created_at).toLocaleDateString('en-NZ', { year: 'numeric', month: 'short', day: 'numeric' });
+                const name = Security.escapeHtml(r.user?.first_name || 'Customer');
+                return `
+                    <div class="review-card">
+                        <div class="review-card__header">
+                            <div class="review-card__stars">${this.renderStars(r.rating)}</div>
+                            ${r.title ? `<h4 class="review-card__title">${Security.escapeHtml(r.title)}</h4>` : ''}
+                        </div>
+                        ${r.body ? `<p class="review-card__body">${Security.escapeHtml(r.body)}</p>` : ''}
+                        <div class="review-card__footer">
+                            <span class="review-card__author">${name}</span>
+                            <span class="review-card__verified">Verified Purchase</span>
+                            <span class="review-card__date">${date}</span>
+                        </div>
+                    </div>`;
+            }).join('');
+        },
+
+        renderReviewForm(info) {
+            const el = document.getElementById('review-form-container');
+            if (!el) return;
+            const isAuth = typeof Auth !== 'undefined' && Auth.isAuthenticated();
+            if (!isAuth) {
+                el.innerHTML = `
+                    <div class="review-form__login-prompt">
+                        <p>Have you used this product? <a href="/html/account/index.html">Sign in</a> to leave a review.</p>
+                    </div>`;
+                return;
+            }
+
+            el.innerHTML = `
+                <div class="review-form">
+                    <h3 class="review-form__heading">Write a Review</h3>
+                    <div class="review-form__field">
+                        <label class="review-form__label">Rating</label>
+                        <div class="review-form__stars-input" id="review-stars-input">
+                            ${[1,2,3,4,5].map(i => `<button type="button" class="review-star-btn" data-rating="${i}" aria-label="${i} star${i>1?'s':''}">
+                                <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>
+                            </button>`).join('')}
+                        </div>
+                    </div>
+                    <div class="review-form__field">
+                        <label class="review-form__label" for="review-title">Title (optional)</label>
+                        <input type="text" id="review-title" class="form-input" maxlength="200" placeholder="Summarise your experience">
+                    </div>
+                    <div class="review-form__field">
+                        <label class="review-form__label" for="review-body">Your Review (optional)</label>
+                        <textarea id="review-body" class="form-input" rows="4" maxlength="2000" placeholder="What did you think of this product?"></textarea>
+                    </div>
+                    <button type="button" class="btn btn--primary review-form__submit" id="review-submit-btn" disabled>Submit Review</button>
+                    <p class="review-form__note">You must have purchased this product to leave a review.</p>
+                    <div id="review-form-message" hidden></div>
+                </div>`;
+
+            let selectedRating = 0;
+            const starsInput = document.getElementById('review-stars-input');
+            const submitBtn = document.getElementById('review-submit-btn');
+
+            starsInput.addEventListener('click', (e) => {
+                const btn = e.target.closest('.review-star-btn');
+                if (!btn) return;
+                selectedRating = parseInt(btn.dataset.rating);
+                starsInput.querySelectorAll('.review-star-btn').forEach((b, idx) => {
+                    b.classList.toggle('review-star-btn--active', idx < selectedRating);
+                });
+                submitBtn.disabled = false;
+            });
+
+            submitBtn.addEventListener('click', async () => {
+                if (!selectedRating) return;
+                submitBtn.disabled = true;
+                submitBtn.textContent = 'Submitting...';
+                const msgEl = document.getElementById('review-form-message');
+
+                try {
+                    const data = {
+                        product_id: info.id,
+                        rating: selectedRating,
+                        title: document.getElementById('review-title').value.trim(),
+                        body: document.getElementById('review-body').value.trim()
+                    };
+                    const res = await API.createReview(data);
+                    if (res.ok) {
+                        msgEl.textContent = 'Thank you! Your review has been submitted and is pending approval.';
+                        msgEl.className = 'review-form__message review-form__message--success';
+                        msgEl.hidden = false;
+                        el.querySelector('.review-form').querySelectorAll('input, textarea, .review-star-btn').forEach(f => f.disabled = true);
+                        submitBtn.textContent = 'Submitted';
+                    } else {
+                        const errMsg = res.error?.message || 'Could not submit review. You may need to have purchased this product first.';
+                        msgEl.textContent = errMsg;
+                        msgEl.className = 'review-form__message review-form__message--error';
+                        msgEl.hidden = false;
+                        submitBtn.textContent = 'Submit Review';
+                        submitBtn.disabled = false;
+                    }
+                } catch (err) {
+                    msgEl.textContent = err.message || 'Something went wrong. Please try again.';
+                    msgEl.className = 'review-form__message review-form__message--error';
+                    msgEl.hidden = false;
+                    submitBtn.textContent = 'Submit Review';
+                    submitBtn.disabled = false;
+                }
+            });
+        },
+
+        renderReviewsPagination(meta, info) {
+            const el = document.getElementById('reviews-pagination');
+            if (!el || !meta || meta.total_pages <= 1) return;
+            let html = '<div class="pagination">';
+            for (let i = 1; i <= meta.total_pages; i++) {
+                const cls = i === meta.page ? 'pagination__btn pagination__btn--active' : 'pagination__btn';
+                html += `<button class="${cls}" data-page="${i}">${i}</button>`;
+            }
+            html += '</div>';
+            el.innerHTML = html;
+            el.addEventListener('click', async (e) => {
+                const btn = e.target.closest('[data-page]');
+                if (!btn) return;
+                const page = parseInt(btn.dataset.page);
+                try {
+                    const res = await API.getProductReviews(info.id, { page });
+                    if (res.ok) {
+                        this.renderReviewsList(res.data?.reviews || []);
+                        el.querySelectorAll('.pagination__btn').forEach(b => {
+                            b.classList.toggle('pagination__btn--active', parseInt(b.dataset.page) === page);
+                        });
+                        document.getElementById('reviews-summary')?.scrollIntoView({ behavior: 'smooth' });
+                    }
+                } catch (e) { /* silent */ }
+            });
         },
 
         showError(message) {
