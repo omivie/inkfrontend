@@ -37,29 +37,28 @@
               { label: 'Toner Cartridges', param: 'toner' },
               { label: 'Drums & Supplies', param: 'consumable' },
               { label: 'Label Tape', param: 'label_tape' },
-              { label: 'Glossy Paper', param: 'glossy_paper' },
-              { label: 'Matte Paper', param: 'matte_paper' }
+              { label: 'Paper', param: 'paper' }
           ]},
         { slug: 'canon', name: 'Canon', logo: '/assets/brands/canon.png',
           categories: [
               { label: 'Ink Cartridges', param: 'ink' },
               { label: 'Toner Cartridges', param: 'toner' },
               { label: 'Drums & Supplies', param: 'consumable' },
-              { label: 'Glossy Paper', param: 'glossy_paper' },
-              { label: 'Matte Paper', param: 'matte_paper' }
+              { label: 'Paper', param: 'paper' }
           ]},
         { slug: 'epson', name: 'Epson', logo: '/assets/brands/epson.png',
           categories: [
               { label: 'Ink Cartridges', param: 'ink' },
+              { label: 'Toner Cartridges', param: 'toner' },
               { label: 'Drums & Supplies', param: 'consumable' },
-              { label: 'Glossy Paper', param: 'glossy_paper' },
-              { label: 'Matte Paper', param: 'matte_paper' }
+              { label: 'Paper', param: 'paper' }
           ]},
         { slug: 'hp', name: 'HP', logo: '/assets/brands/hp.png',
           categories: [
               { label: 'Ink Cartridges', param: 'ink' },
               { label: 'Toner Cartridges', param: 'toner' },
-              { label: 'Drums & Supplies', param: 'consumable' }
+              { label: 'Drums & Supplies', param: 'consumable' },
+              { label: 'Paper', param: 'paper' }
           ]},
         { slug: 'samsung', name: 'Samsung', logo: '/assets/brands/samsung.svg',
           categories: [
@@ -68,6 +67,7 @@
           ]},
         { slug: 'lexmark', name: 'Lexmark', logo: '/assets/brands/lexmark.png',
           categories: [
+              { label: 'Ink Cartridges', param: 'ink' },
               { label: 'Toner Cartridges', param: 'toner' },
               { label: 'Drums & Supplies', param: 'consumable' }
           ]},
@@ -80,7 +80,8 @@
           categories: [
               { label: 'Ink Cartridges', param: 'ink' },
               { label: 'Toner Cartridges', param: 'toner' },
-              { label: 'Drums & Supplies', param: 'consumable' }
+              { label: 'Drums & Supplies', param: 'consumable' },
+              { label: 'Paper', param: 'paper' }
           ]},
         { slug: 'kyocera', name: 'Kyocera', logo: '/assets/brands/kyocera.svg',
           categories: [
