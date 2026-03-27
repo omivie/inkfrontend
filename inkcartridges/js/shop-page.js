@@ -2446,24 +2446,18 @@
                     imageContent = `<img src="${Security.escapeAttr(resolvedImageUrl)}" alt="${Security.escapeAttr(product.name)}" loading="lazy" data-fallback="placeholder">`;
                 }
             } else if (isCompatible) {
-                if (colorStyle) {
-                    imageContent = `<div class="product-card__color-block" style="${colorStyle}"><span class="product-card__compatible-label">COMPATIBLE</span></div>`;
-                } else {
-                    imageContent = `<div class="product-card__compatible-placeholder"><span>COMPATIBLE</span></div>`;
-                }
+                imageContent = `<div class="product-card__color-block" style="${colorStyle || 'background-color: #1a1a1a;'}"></div>`;
             } else {
                 imageContent = `<img src="/assets/images/placeholder-product.svg" alt="${Security.escapeAttr(product.name)}" loading="lazy">`;
             }
 
             // Check if product is already a favourite
             const isFav = typeof Favourites !== 'undefined' && Favourites.isFavourite && Favourites.isFavourite(product.id);
-            const sourceBadge = getSourceBadge(product.source);
 
             card.innerHTML = `
                 <a href="/html/product/?sku=${Security.escapeAttr(product.sku)}" class="product-card__link">
                     <div class="product-card__image-wrapper">
                         ${imageContent}
-                        ${sourceBadge ? `<span class="product-card__badge ${sourceBadge.class}">${sourceBadge.text}</span>` : ''}
                     </div>
                     <div class="product-card__content">
                         <h3 class="product-card__title" title="${Security.escapeAttr(displayName)}">${Security.escapeHtml(displayName)}</h3>

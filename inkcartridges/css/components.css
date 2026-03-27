@@ -602,15 +602,6 @@
     border-radius: var(--radius-sm);
 }
 
-.product-card__compatible-label {
-    font-size: var(--font-size-sm);
-    font-weight: var(--font-weight-bold);
-    color: #fff;
-    letter-spacing: 0.12em;
-    text-transform: uppercase;
-    text-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
-}
-
 .product-card__badge {
     position: absolute;
     top: var(--spacing-3);

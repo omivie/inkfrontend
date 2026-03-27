@@ -44,15 +44,12 @@ const Products = {
                              loading="lazy"
                              data-fallback="placeholder">`;
             }
-        } else if (colorStyle && product.source === 'compatible') {
-            // Compatible with color - show color block with COMPATIBLE overlay
-            return `<div class="product-card__color-block" style="${colorStyle}"><span class="product-card__compatible-label">COMPATIBLE</span></div>`;
         } else if (colorStyle) {
             // No image but has color (single or gradient) - show color block
             return `<div class="product-card__color-block" style="${colorStyle}"></div>`;
         } else if (product.source === 'compatible') {
-            // Compatible with no known color - default to black with COMPATIBLE overlay
-            return `<div class="product-card__compatible-placeholder"><span>COMPATIBLE</span></div>`;
+            // Compatible with no known color - default to black
+            return `<div class="product-card__color-block" style="background-color: #1a1a1a;"></div>`;
         } else {
             // Genuine with no image, no color - show placeholder
             return `<img src="/assets/images/placeholder-product.svg"
