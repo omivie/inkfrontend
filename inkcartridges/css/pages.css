@@ -2025,6 +2025,12 @@
 
 .product-detail__layout--compatible {
     grid-template-columns: minmax(180px, 300px) 1fr;
+    align-items: start;
+}
+
+.product-detail__layout--compatible .product-gallery__main {
+    position: relative;
+    aspect-ratio: 1;
 }
 
 .product-gallery__main--color-only {
@@ -2787,7 +2793,7 @@
 }
 
 .related-products__grid .product-card__image-wrapper {
-    aspect-ratio: 4 / 3;
+    aspect-ratio: 1;
 }
 
 .related-products__grid .product-card__content {
