@@ -47,6 +47,8 @@ const RibbonsPage = {
             // URL already has a brand or model — skip brand grid, show products directly
             this.showLevel('products');
             this.navigationVersion++;
+            // Resolve proper brand label in parallel with loading products
+            this.resolveBrandLabelFromAPI();
             await this.loadProducts(this.navigationVersion);
         } else {
             // No filter selected — show brand grid
@@ -136,6 +138,35 @@ const RibbonsPage = {
             this.showEmpty('Failed to load ribbon brands. Please try again.');
         }
     },
+
+    resolveBrandLabel() {
+        // If we have a brand from URL but no label, title-case it as a fallback
+        // (proper label is resolved async via resolveBrandLabelFromAPI)
+        if (this.state.brand && !this.state.brandLabel) {
+            this.state.brandLabel = this.state.brand
+                .split(/[\s-]+/)
+                .map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+                .join(' ');
+        }
+    },
+
+    async resolveBrandLabelFromAPI() {
+        // Fetch the proper label from device brands for correct casing (e.g., "IBM", "OKI")
+        if (!this.state.brand) return;
+        try {
+            const res = await API.getRibbonDeviceBrands();
+            const brands = res?.data?.device_brands || [];
+            const match = brands.find(b => b.value === this.state.brand);
+            if (match && match.label !== this.state.brandLabel) {
+                this.state.brandLabel = match.label;
+                this.updateTitle();
+                this.updateBreadcrumb();
+            }
+        } catch (e) {
+            // fallback title-case is already set, ignore
+        }
+    },
+
 
     navigateToBrand(brand, label) {
         this.state.brand = brand;
@@ -282,13 +313,18 @@ const RibbonsPage = {
         this.elements.levelProducts.hidden = false;
         this.elements.empty.hidden = true;
 
+        // Update title/breadcrumb immediately so they reflect the brand even if the API fails
+        this.resolveBrandLabel();
+        this.updateBreadcrumb();
+        this.updateTitle();
+
         try {
             const params = {
                 page: this.state.page,
                 limit: this.pageLimit,
                 sort: this.state.sort
             };
-            if (this.state.brand) params.printer_brand = this.state.brand;
+            if (this.state.brand) params.brand = this.state.brandLabel || this.state.brand;
             if (this.state.model) params.printer_model = this.state.model;
             if (this.state.ribbonBrand) params.brand = this.state.ribbonBrand;
             if (this.state.color) params.color = this.state.color;
@@ -325,8 +361,6 @@ const RibbonsPage = {
             this.renderProducts(ribbons);
             this.renderPagination(pagination, ribbons.length);
             this.elements.levelProducts.hidden = false;
-            this.updateBreadcrumb();
-            this.updateTitle();
 
         } catch (error) {
             if (this.navigationVersion !== navVersion) return;
@@ -665,11 +699,15 @@ const RibbonsPage = {
         } else if (model) {
             title.textContent = `Ribbons for ${model}`;
         } else if (activeBrand) {
-            title.textContent = `${activeBrand} Ribbons`;
+            title.textContent = `${activeBrand} Typewriter & Printer Ribbons NZ`;
         } else {
             title.textContent = 'Typewriter & Printer Ribbons NZ';
         }
         title.hidden = false;
+
+        // Update document title to match
+        const docPrefix = activeBrand ? `${activeBrand} ` : '';
+        document.title = `${docPrefix}Typewriter & Printer Ribbons NZ | InkCartridges.co.nz`;
     }
 };
 
