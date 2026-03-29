@@ -32,6 +32,11 @@ let _imageFilter = '';
 let _brands = [];
 let _diagnostics = null;
 let _bulkBar = null;
+const DIAG_CACHE_KEY = 'admin_product_diagnostics';
+
+function invalidateDiagCache() {
+  localStorage.removeItem(DIAG_CACHE_KEY);
+}
 
 function stockBadge(product) {
   const qty = product.stock_quantity;
@@ -165,45 +170,94 @@ function productHasImage(p) {
 
 async function loadProducts() {
   _table.setLoading(true);
+  const LIMIT = 200;
+
+  // Try direct Supabase query first (faster — skips Render backend hop)
+  const sb = (typeof Auth !== 'undefined' && Auth.supabase) ? Auth.supabase : null;
+  if (sb) {
+    try {
+      const selectCols = 'id, sku, name, retail_price, cost_price, stock_quantity, low_stock_threshold, is_active, image_url, color, source, weight_kg, page_yield, category, product_type, brand_id, description, compare_price, track_inventory, meta_title, meta_description, tags, internal_notes, brands(name, slug)';
+      let query = sb.from('products').select(selectCols, { count: 'exact' });
+
+      // Brand filter
+      if (_brandFilter) query = query.eq('brand_id', _brandFilter);
+
+      // Search filter
+      if (_search) query = query.or(`name.ilike.%${_search}%,sku.ilike.%${_search}%`);
+
+      // Active filter
+      if (_activeFilter !== '') query = query.eq('is_active', _activeFilter === 'true');
+
+      // Sorting — map column keys to DB columns
+      const sortMap = { brand: 'brand_id' };
+      const sortCol = sortMap[_sort] || _sort || 'name';
+      query = query.order(sortCol, { ascending: _sortDir !== 'desc' });
+
+      // Image filter requires client-side processing (can't filter by image presence in SQL)
+      if (_imageFilter) {
+        const PAGE_SIZE = 100;
+        let all = [];
+        let offset = 0;
+        while (true) {
+          let imgQuery = sb.from('products').select(selectCols);
+          if (_brandFilter) imgQuery = imgQuery.eq('brand_id', _brandFilter);
+          if (_search) imgQuery = imgQuery.or(`name.ilike.%${_search}%,sku.ilike.%${_search}%`);
+          if (_activeFilter !== '') imgQuery = imgQuery.eq('is_active', _activeFilter === 'true');
+          imgQuery = imgQuery.order(sortCol, { ascending: _sortDir !== 'desc' }).range(offset, offset + 999);
+          const { data: chunk } = await imgQuery;
+          if (!_table) return;
+          if (!chunk || !chunk.length) break;
+          all = all.concat(chunk);
+          if (chunk.length < 1000) break;
+          offset += 1000;
+        }
+        all = all.map(p => ({
+          ...p,
+          brand_name: p.brands?.name || '',
+          image_url: p.image_url ? storageUrl(p.image_url) : null,
+        }));
+        const filtered = all.filter(p =>
+          _imageFilter === 'no-images' ? !productHasImage(p) : productHasImage(p)
+        );
+        const start = (_page - 1) * PAGE_SIZE;
+        const pageRows = filtered.slice(start, start + PAGE_SIZE);
+        _table.setData(pageRows, { total: filtered.length, page: _page, limit: PAGE_SIZE });
+        loadCompatCounts();
+        return;
+      }
+
+      // Pagination
+      const offset = (_page - 1) * LIMIT;
+      query = query.range(offset, offset + LIMIT - 1);
+
+      const { data: rows, count, error } = await query;
+      if (!_table) return;
+      if (error) throw error;
+
+      // Map brand names and resolve image URLs from joined brands table
+      const mapped = (rows || []).map(p => ({
+        ...p,
+        brand_name: p.brands?.name || '',
+        image_url: p.image_url ? storageUrl(p.image_url) : null,
+      }));
+      const pagination = { total: count || mapped.length, page: _page, limit: LIMIT };
+      _table.setData(mapped, pagination);
+      loadCompatCounts();
+      return;
+    } catch (e) {
+      // Fall through to backend API
+    }
+  }
+
+  // Fallback: use backend API
   const filters = { search: _search, sort: _sort, order: _sortDir };
   if (_brandFilter) filters.brand = _brandFilter;
   if (_activeFilter !== '') filters.active = _activeFilter;
-
-  // When image filter is active, we need to paginate client-side since
-  // the backend doesn't support filtering by image presence
-  if (_imageFilter) {
-    const PAGE_SIZE = 100;
-    let all = [];
-    let page = 1;
-    // Fetch all matching products (respecting other filters)
-    while (true) {
-      const data = await AdminAPI.getProducts(filters, page, 200);
-      if (!_table) return; // destroyed during await
-      const rows = Array.isArray(data) ? data : (data?.products || data?.data || []);
-      if (!rows.length) break;
-      all = all.concat(rows);
-      const total = data?.pagination?.total || data?.total;
-      if (total && all.length >= total) break;
-      if (rows.length < 200) break;
-      page++;
-    }
-    // Apply image filter
-    const filtered = all.filter(p =>
-      _imageFilter === 'no-images' ? !productHasImage(p) : productHasImage(p)
-    );
-    // Client-side pagination
-    const start = (_page - 1) * PAGE_SIZE;
-    const pageRows = filtered.slice(start, start + PAGE_SIZE);
-    _table.setData(pageRows, { total: filtered.length, page: _page, limit: PAGE_SIZE });
-    loadCompatCounts();
-    return;
-  }
-
-  const data = await AdminAPI.getProducts(filters, _page, 200);
-  if (!_table) return; // destroyed during await
+  const data = await AdminAPI.getProducts(filters, _page, LIMIT);
+  if (!_table) return;
   if (!data) { _table.setData([], null); return; }
   const rows = Array.isArray(data) ? data : (data.products || data.data || []);
-  const pagination = data.pagination || { total: data.total || rows.length, page: _page, limit: 200 };
+  const pagination = data.pagination || { total: data.total || rows.length, page: _page, limit: LIMIT };
   _table.setData(rows, pagination);
   loadCompatCounts();
 }
@@ -512,6 +566,7 @@ function openCreateProductModal() {
       const result = await AdminAPI.createProduct(data);
       const newProduct = result?.product ?? result;
       closeCreate();
+      invalidateDiagCache();
       Toast.success('Product created');
       loadProducts();
       if (newProduct?.id) openProductDrawer(newProduct);
@@ -1720,6 +1775,7 @@ function bindProductModalActions(modal, product) {
 
     try {
       await AdminAPI.updateProduct(product.id, data);
+      invalidateDiagCache();
       Toast.success('Product updated');
       closeProductModal();
       loadProducts();
@@ -1785,6 +1841,7 @@ function renderDiagnostics(container) {
         confirmClass: 'admin-btn--primary',
         onConfirm: async () => {
           await AdminAPI.bulkActivate({ dry_run: false });
+          invalidateDiagCache();
           Toast.success('Products activated');
           loadProducts();
         },
@@ -2184,6 +2241,7 @@ async function bulkDelete() {
       if (failed > 0) {
         Toast.error(`${done} deleted, ${failed} failed`);
       } else {
+        invalidateDiagCache();
         Toast.success(`${done} product${done > 1 ? 's' : ''} deleted`);
       }
       loadProducts();
@@ -2213,7 +2271,8 @@ export default {
     let brandOpts = '<option value="">All Brands</option>';
     for (const b of _brands) {
       const name = typeof b === 'string' ? b : b.name || b.brand || String(b);
-      brandOpts += `<option value="${esc(name)}">${esc(name)}</option>`;
+      const val = (typeof b === 'object' && b.id) ? b.id : name;
+      brandOpts += `<option value="${esc(val)}">${esc(name)}</option>`;
     }
     header.innerHTML = `
       <div class="admin-page-header__top">
@@ -2299,49 +2358,67 @@ export default {
     bindExportDropdown(header, 'export-products', handleExport);
     header.querySelector('#add-product-btn')?.addEventListener('click', () => openCreateProductModal());
 
-    // Load products + try diagnostics endpoint
-    const [, diag] = await Promise.allSettled([loadProducts(), AdminAPI.getProductDiagnostics()]);
-    const raw = diag.value;
-    _diagnostics = raw?.data ?? raw;
-
-    // Compute diagnostics by paginating through all products
-    // Delay start so the initial loadCompatCounts() requests can settle first
-    await new Promise(r => setTimeout(r, 3000));
+    // Show cached diagnostics instantly if available
+    const DIAG_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
     try {
-      let all = [];
-      let page = 1;
-      let totalFromApi = null;
-      while (true) {
-        if (page > 1) await new Promise(r => setTimeout(r, 400));
-        const data = await AdminAPI.getProducts({}, page, 200);
-        const rows = Array.isArray(data) ? data : (data?.products || data?.data || []);
-        if (totalFromApi === null) {
-          totalFromApi = data?.pagination?.total ?? data?.total ?? null;
-        }
-        if (rows.length === 0) break;
-        all = all.concat(rows);
-        if (all.length >= (totalFromApi || Infinity) || rows.length < 200) break;
-        page++;
+      const cached = JSON.parse(localStorage.getItem(DIAG_CACHE_KEY));
+      if (cached?.data) {
+        _diagnostics = cached.data;
+        renderDiagnostics(container);
       }
-      if (all.length > 0 || totalFromApi != null) {
-        const hasCompatField = all.some(p => 'compatible_printers' in p || 'printer_count' in p);
-        _diagnostics = {
-          total: totalFromApi ?? all.length,
-          active: all.filter(p => p.is_active !== false).length,
-          missing_images: all.filter(p => !p.images?.length && !p.primary_image && !p.image_url).length,
-          missing_prices: all.filter(p => p.retail_price == null).length,
-          missing_weight: all.filter(p => !p.weight_kg && p.weight_kg !== 0).length,
-          missing_compatibility: hasCompatField
-            ? all.filter(p => !(p.compatible_printers?.length) && !(p.printer_count)).length
-            : null,
-          zero_stock: all.filter(p => (p.stock_quantity ?? 0) === 0).length,
-          critical_stock: all.filter(p => (p.stock_quantity ?? 0) > 0 && (p.stock_quantity ?? 0) <= 5).length,
-        };
-      }
-    } catch { /* ignore */ }
+    } catch { /* no cache or invalid */ }
 
-    if (_container !== container) return; // destroyed or re-routed during await
-    renderDiagnostics(container);
+    // Load products, then refresh diagnostics in background
+    await loadProducts();
+
+    // Refresh diagnostics via Supabase (non-blocking)
+    const sb = (typeof Auth !== 'undefined' && Auth.supabase) ? Auth.supabase : null;
+    if (sb) {
+      // Quick check: has anything changed since cache?
+      const cachedEntry = (() => { try { return JSON.parse(localStorage.getItem(DIAG_CACHE_KEY)); } catch { return null; } })();
+      const isFresh = cachedEntry && (Date.now() - cachedEntry.ts < DIAG_CACHE_TTL);
+
+      if (!isFresh) {
+        // Run full diagnostics queries
+        (async () => {
+          try {
+            const [totalR, activeR, noPriceR, noWeightR, zeroStockR, critStockR, noImageR, noCompatR] = await Promise.all([
+              sb.from('products').select('id', { count: 'exact', head: true }),
+              sb.from('products').select('id', { count: 'exact', head: true }).eq('is_active', true),
+              sb.from('products').select('id', { count: 'exact', head: true }).is('retail_price', null),
+              sb.from('products').select('id', { count: 'exact', head: true }).is('weight_kg', null),
+              sb.from('products').select('id', { count: 'exact', head: true }).eq('stock_quantity', 0),
+              sb.from('products').select('id', { count: 'exact', head: true }).gt('stock_quantity', 0).lte('stock_quantity', 5),
+              sb.from('products').select('id', { count: 'exact', head: true }).is('image_url', null),
+              (async () => { try { return await sb.rpc('count_missing_compatibility'); } catch { return null; } })(),
+            ]);
+            const fresh = {
+              total: totalR.count,
+              active: activeR.count,
+              missing_images: noImageR.count,
+              missing_prices: noPriceR.count,
+              missing_weight: noWeightR.count,
+              missing_compatibility: noCompatR?.data ?? null,
+              zero_stock: zeroStockR.count,
+              critical_stock: critStockR.count,
+            };
+            _diagnostics = fresh;
+            localStorage.setItem(DIAG_CACHE_KEY, JSON.stringify({ data: fresh, ts: Date.now() }));
+            if (_container === container) renderDiagnostics(container);
+          } catch { /* diagnostics are optional */ }
+        })();
+      }
+    } else {
+      // Fallback to API endpoint if no Supabase client
+      (async () => {
+        try {
+          const raw = await AdminAPI.getProductDiagnostics();
+          _diagnostics = raw?.data ?? raw;
+          localStorage.setItem(DIAG_CACHE_KEY, JSON.stringify({ data: _diagnostics, ts: Date.now() }));
+          if (_container === container) renderDiagnostics(container);
+        } catch { /* optional */ }
+      })();
+    }
   },
 
   destroy() {
