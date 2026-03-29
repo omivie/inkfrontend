@@ -292,9 +292,7 @@ const RibbonsPage = {
             const p = ribbon.image_path;
             ribbon.image_url = typeof storageUrl === 'function' ? storageUrl(p) : p;
         }
-        if (ribbon.in_stock == null && ribbon.stock_quantity != null) {
-            ribbon.in_stock = ribbon.stock_quantity > 0;
-        }
+        ribbon.in_stock = true;
         if (ribbon.retail_price == null && ribbon.sale_price != null) {
             ribbon.retail_price = ribbon.sale_price;
         }
@@ -409,7 +407,7 @@ const RibbonsPage = {
         }
 
         const price = ribbon.sale_price || ribbon.retail_price || 0;
-        const inStock = ribbon.in_stock !== false;
+        const inStock = true;
         const brandName = ribbon._brandName || '';
         const color = ribbon.color || '';
         const displayName = ribbon.name || '';
@@ -425,10 +423,13 @@ const RibbonsPage = {
         const subtypeLabel = subtypeLabels[ribbon.product_type] || null;
 
         let imageContent;
+        const compatibleOverlay = ribbon.source === 'compatible'
+            ? '<div class="product-card__compatible-overlay"><span>COMPATIBLE</span></div>'
+            : '';
         if (imageUrl) {
-            imageContent = `<img src="${Security.escapeAttr(imageUrl)}" alt="${Security.escapeAttr(displayName)}" loading="lazy" data-fallback="placeholder">`;
+            imageContent = `<img src="${Security.escapeAttr(imageUrl)}" alt="${Security.escapeAttr(displayName)}" loading="lazy" data-fallback="placeholder">${compatibleOverlay}`;
         } else {
-            imageContent = `<div class="product-card__color-block" style="background-color: #1a1a1a;"></div>`;
+            imageContent = `<div class="product-card__color-block" style="background-color: #1a1a1a;"></div>${compatibleOverlay}`;
         }
 
         const isFav = typeof Favourites !== 'undefined' && Favourites.isFavourite && Favourites.isFavourite(ribbonId);
@@ -446,9 +447,7 @@ const RibbonsPage = {
                     <div class="product-card__pricing">
                         <span class="product-card__price">${formatPrice(price)}</span>
                     </div>
-                    <span class="product-card__stock ${inStock ? 'product-card__stock--in' : 'product-card__stock--out'}">
-                        ${inStock ? 'In Stock' : 'Out of Stock'}
-                    </span>
+                    <span class="product-card__stock product-card__stock--in">In Stock</span>
                 </div>
             </a>
             <button type="button" class="favourite-btn product-card__fav-btn ${isFav ? 'favourite-btn--active' : ''}"

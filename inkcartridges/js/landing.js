@@ -153,7 +153,7 @@
                     : `<img src="${Security.escapeAttr(p.image_url || '/assets/images/placeholder-product.svg')}" alt="${Security.escapeAttr(name)}">`;
                 return `
                     <a href="/html/product/?sku=${Security.escapeAttr(p.sku)}" class="product-card">
-                        <div class="product-card__image">${imageHtml}</div>
+                        <div class="product-card__image-wrapper">${imageHtml}</div>
                         <div class="product-card__info">
                             <span class="product-card__brand">${Security.escapeHtml(brandName)}</span>
                             <h3 class="product-card__name">${Security.escapeHtml(name)}</h3>

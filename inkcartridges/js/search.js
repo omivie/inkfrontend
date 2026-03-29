@@ -327,9 +327,7 @@ function createSmartSearch() {
                     if (ribbon.retail_price == null && ribbon.sale_price != null) {
                         ribbon.retail_price = ribbon.sale_price;
                     }
-                    if (ribbon.in_stock == null && ribbon.stock_quantity != null) {
-                        ribbon.in_stock = ribbon.stock_quantity > 0;
-                    }
+                    ribbon.in_stock = true;
                     if (typeof ribbon.brand === 'string') {
                         ribbon.brand = { name: ribbon.brand };
                     }
@@ -614,10 +612,7 @@ function createSmartSearch() {
                 imageHtml = '<img src="' + Security.escapeAttr(imgUrl) + '" alt="' + Security.escapeAttr(name) + '" loading="lazy" data-fallback="placeholder">';
             }
 
-            const inStock = stockStatus.class === 'in-stock' || stockStatus.class === 'low-stock';
-            const addToCartBtn = inStock
-                ? '<button type="button" class="smart-search__add-to-cart" data-index="' + index + '">Add to Cart</button>'
-                : '';
+            const addToCartBtn = '<button type="button" class="smart-search__add-to-cart" data-index="' + index + '">Add to Cart</button>';
 
             return '<div class="product-card product-card--compact" role="option" id="' + itemId + '" aria-selected="false" data-index="' + index + '">'
                 + '<div class="product-card__image-wrap">'
@@ -628,7 +623,7 @@ function createSmartSearch() {
                     + '<p class="product-card__brand">' + Security.escapeHtml(brand) + '</p>'
                     + '<h3 class="product-card__title">' + Security.escapeHtml(name) + '</h3>'
                     + (price != null ? '<p class="product-card__price">' + formatPrice(price) + '</p>' : '')
-                    + '<p class="product-card__stock ' + stockStatus.class + '">' + Security.escapeHtml(stockStatus.text) + '</p>'
+                    + '<p class="product-card__stock in-stock">In Stock</p>'
                     + addToCartBtn
                 + '</div>'
             + '</div>';

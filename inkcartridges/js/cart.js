@@ -36,7 +36,7 @@ const Cart = {
     loading: true,
 
     // Cart validity state
-    // 'valid' | 'invalid_stock' | 'invalid_price' | 'unknown'
+    // 'valid' | 'invalid_price' | 'unknown'
     validationState: 'unknown',
     validationErrors: [],
 
@@ -205,8 +205,6 @@ const Cart = {
                 color: item.product.color || '',
                 color_hex: item.product.color_hex || null,
                 quantity: item.quantity,
-                inStock: item.in_stock !== false,
-                stockQuantity: item.product.stock_quantity,
                 source: 'core'
             };
             parsed.key = self.cartItemKey(parsed);
@@ -507,33 +505,35 @@ const Cart = {
     /**
      * Validate cart with server before checkout.
      * Checks stock availability and price consistency.
-     * Returns { valid: boolean, errors: array }
+     * Returns { valid: boolean, errors: array, priceChanges: array }
      */
-    async validateCart() {
+    async validateCart(acknowledgePriceChanges) {
         if (typeof API === 'undefined') {
-            return { valid: false, errors: ['Unable to validate cart. Please try again.'] };
+            return { valid: false, errors: ['Unable to validate cart. Please try again.'], priceChanges: [] };
         }
 
         // Get Turnstile token for bot verification (non-blocking — returns null if unavailable)
         const turnstileToken = typeof Auth !== 'undefined' ? await Auth.getTurnstileToken() : null;
 
         try {
-            const response = await API.validateCart(turnstileToken);
+            const response = await API.validateCart(turnstileToken, acknowledgePriceChanges);
             if (response.ok) {
                 const data = response.data || {};
                 const errors = [];
+                const priceChanges = [];
 
                 // Parse issues array from backend response
-                // Backend returns: { cart_item_id, sku, issue, name?, available? }
+                // Backend returns: { cart_item_id, sku, issue, name?, available?, old_price?, new_price? }
                 if (data.issues && data.issues.length > 0) {
                     data.issues.forEach(issue => {
                         const label = issue.name || issue.sku || 'Item';
-                        if (issue.available === 0 || issue.issue === 'Insufficient stock') {
-                            errors.push(`"${label}" is out of stock`);
-                        } else if (issue.available !== undefined && issue.available > 0) {
-                            errors.push(`"${label}" quantity adjusted to ${issue.available} (limited stock)`);
-                        } else if (issue.issue === 'Price has changed') {
-                            errors.push(`Price changed for "${label}" — please review before checkout`);
+                        if (issue.issue === 'Price has changed') {
+                            priceChanges.push({
+                                name: label,
+                                sku: issue.sku,
+                                oldPrice: issue.old_price,
+                                newPrice: issue.new_price
+                            });
                         } else if (issue.issue === 'Product is no longer available') {
                             errors.push(`"${label}" is no longer available`);
                         } else {
@@ -546,16 +546,21 @@ const Cart = {
                 if (data.valid_items && data.valid_items.length > 0) {
                     data.valid_items.forEach(item => {
                         if (item.price_changed) {
-                            errors.push(`Price changed for "${item.name}": now ${formatPrice(item.unit_price)}`);
+                            priceChanges.push({
+                                name: item.name || 'Item',
+                                sku: item.sku,
+                                oldPrice: item.old_price,
+                                newPrice: item.unit_price
+                            });
                         }
                     });
                 }
 
-                const valid = errors.length === 0 && data.is_valid !== false;
-                this.validationState = valid ? 'valid' : 'invalid_stock';
+                const valid = errors.length === 0 && priceChanges.length === 0 && data.is_valid !== false;
+                this.validationState = valid ? 'valid' : 'invalid_price';
                 this.validationErrors = errors;
 
-                return { valid, errors };
+                return { valid, errors, priceChanges };
             } else {
                 // Non-ok API response = infrastructure error (auth, Turnstile, server failure).
                 // Stock/availability errors always come via data.issues in an ok: true response.
@@ -593,18 +598,30 @@ const Cart = {
                 return;
             }
 
-            // Validate cart for stock issues — advisory only, never blocks navigation.
-            // The checkout/payment pages re-validate before charging, so it's always
-            // safe to proceed. We only run this to warn the user early about stock issues.
+            // Validate cart for stock issues and price changes.
+            // Stock warnings are advisory (never block navigation — checkout re-validates).
+            // Price changes require explicit acknowledgment before proceeding.
             try {
                 const result = await self.validateCart();
-                // If there are real stock errors, warn the user but still let them through.
-                // They'll get a hard block at payment if something is truly unavailable.
-                if (!result.valid && result.errors && result.errors.length > 0) {
+
+                // Show stock/availability warnings as toasts (advisory only)
+                if (result.errors && result.errors.length > 0) {
                     if (typeof showToast === 'function') {
                         result.errors.forEach(function(err, i) {
                             setTimeout(function() { showToast(err, 'warning', 6000); }, i * 500);
                         });
+                    }
+                }
+
+                // Price changes require user acknowledgment before checkout
+                if (result.priceChanges && result.priceChanges.length > 0) {
+                    const accepted = await self.showPriceChangeModal(result.priceChanges);
+                    if (!accepted) return; // User declined — stay on cart
+                    // Acknowledge price changes so backend updates snapshots
+                    try {
+                        await self.validateCart(true);
+                    } catch (_ackErr) {
+                        // Acknowledgment failed — proceed anyway, checkout will re-validate
                     }
                 }
             } catch (_) {
@@ -612,6 +629,55 @@ const Cart = {
             }
 
             window.location.href = '/html/checkout.html';
+        });
+    },
+
+    /**
+     * Show a modal listing price changes and ask the user to accept or decline.
+     * Returns a Promise that resolves true (accept) or false (decline).
+     */
+    showPriceChangeModal(priceChanges) {
+        return new Promise((resolve) => {
+            const existing = document.getElementById('price-change-modal');
+            if (existing) existing.remove();
+
+            const esc = typeof Security !== 'undefined' ? Security.escapeHtml.bind(Security) : (s) => s;
+            const fmt = typeof formatPrice === 'function' ? formatPrice : (v) => `$${Number(v).toFixed(2)}`;
+
+            const rows = priceChanges.map(pc =>
+                `<div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid #eee">` +
+                    `<span style="font-weight:500">${esc(pc.name)}</span>` +
+                    `<span>` +
+                        (pc.oldPrice != null ? `<span style="text-decoration:line-through;color:#999;margin-right:8px">${esc(fmt(pc.oldPrice))}</span>` : '') +
+                        `<span style="color:#e53e3e;font-weight:600">${esc(fmt(pc.newPrice))}</span>` +
+                    `</span>` +
+                `</div>`
+            ).join('');
+
+            const overlay = document.createElement('div');
+            overlay.id = 'price-change-modal';
+            overlay.style.cssText = 'position:fixed;inset:0;z-index:10000;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.5)';
+            overlay.innerHTML =
+                `<div style="background:#fff;border-radius:12px;padding:28px 24px;max-width:440px;width:90%;box-shadow:0 8px 32px rgba(0,0,0,0.18)">` +
+                    `<h3 style="margin:0 0 6px;font-size:18px">Prices Have Changed</h3>` +
+                    `<p style="margin:0 0 16px;color:#666;font-size:14px">The following items have updated prices since you added them to your cart:</p>` +
+                    `<div style="margin-bottom:20px">${rows}</div>` +
+                    `<div style="display:flex;gap:12px;justify-content:flex-end">` +
+                        `<button type="button" id="price-change-decline" class="btn btn--secondary">Return to Cart</button>` +
+                        `<button type="button" id="price-change-accept" class="btn btn--primary">Accept &amp; Continue</button>` +
+                    `</div>` +
+                `</div>`;
+
+            document.body.appendChild(overlay);
+
+            const cleanup = (accepted) => {
+                overlay.remove();
+                resolve(accepted);
+            };
+
+            document.getElementById('price-change-accept').addEventListener('click', () => cleanup(true));
+            document.getElementById('price-change-decline').addEventListener('click', () => cleanup(false));
+            overlay.addEventListener('click', (e) => { if (e.target === overlay) cleanup(false); });
         });
     },
 
@@ -652,8 +718,7 @@ const Cart = {
                 const selector = increaseBtn.closest('.quantity-selector');
                 const input = selector.querySelector('.quantity-selector__input');
                 const itemId = selector.dataset.itemKey || selector.dataset.itemId;
-                const item = this.items.find(i => i.key === itemId || i.id === itemId);
-                const maxQty = (item && item.stockQuantity > 0) ? item.stockQuantity : 100;
+                const maxQty = 100;
                 const newValue = parseInt(input.value) + 1;
                 if (newValue <= maxQty) {
                     input.value = newValue;
@@ -699,8 +764,7 @@ const Cart = {
             if (e.target.matches('.quantity-selector__input')) {
                 const selector = e.target.closest('.quantity-selector');
                 const itemId = selector.dataset.itemKey || selector.dataset.itemId;
-                const item = this.items.find(i => i.key === itemId || i.id === itemId);
-                const maxQty = (item && item.stockQuantity > 0) ? item.stockQuantity : 100;
+                const maxQty = 100;
                 let newValue = parseInt(e.target.value);
 
                 // Clamp to valid range
@@ -711,9 +775,6 @@ const Cart = {
                 if (newValue > maxQty) {
                     newValue = maxQty;
                     e.target.value = maxQty;
-                    if (typeof showToast === 'function') {
-                        showToast(`Only ${maxQty} in stock`, 'error');
-                    }
                 }
 
                 this._debouncedQuantityUpdate(itemId, newValue);
@@ -733,8 +794,7 @@ const Cart = {
         const item = this.items.find(function(i) { return i.key === itemId || i.id === itemId; });
         if (!item) return;
 
-        const stockMax = (item.stockQuantity > 0) ? item.stockQuantity : 99;
-        const clampedQty = Math.min(quantity, stockMax);
+        const clampedQty = Math.min(quantity, 100);
         const oldQty = item.quantity;
         item.quantity = clampedQty;
         this.saveToLocalStorage();
@@ -799,25 +859,6 @@ const Cart = {
                             this._updateCartItemDOM(itemId);
                             this._updateCartSummaryDOM();
                         }
-                    } else if (response.available !== undefined) {
-                        // Stock limited — snap to max available
-                        const freshItem = this.items.find(i => i.key === itemId || i.id === itemId);
-                        if (freshItem) {
-                            freshItem.quantity = response.available;
-                            freshItem.stockQuantity = response.available;
-                            this.saveToLocalStorage();
-                            this._updateCartItemDOM(itemId);
-                            this._updateCartSummaryDOM();
-                        }
-                        // Clear debounce timer and queued value since stock is limited
-                        if (this._quantityDebounceTimers[itemId]) {
-                            clearTimeout(this._quantityDebounceTimers[itemId]);
-                            delete this._quantityDebounceTimers[itemId];
-                        }
-                        delete this._quantityQueued[itemId];
-                        if (typeof showToast === 'function') {
-                            showToast(`Only ${response.available} in stock`, 'error');
-                        }
                     } else {
                         // Generic failure — reload from server for correct state
                         await this.loadFromServer();
@@ -877,12 +918,11 @@ const Cart = {
             input.value = item.quantity;
         }
 
-        // Update input max and + button disabled state based on stock
-        const stockMax = (item.stockQuantity > 0) ? item.stockQuantity : 100;
-        if (input) input.max = stockMax;
+        // Update input max and + button disabled state
+        if (input) input.max = 100;
         const increaseBtn = cartItemEl.querySelector('.quantity-selector__btn--increase');
         if (increaseBtn) {
-            increaseBtn.disabled = item.inStock === false || item.quantity >= stockMax;
+            increaseBtn.disabled = item.quantity >= 100;
         }
 
         // Update line total
@@ -1004,32 +1044,12 @@ const Cart = {
             try {
                 const response = await API.addToCart(product.id, product.quantity || 1);
                 if (!response.ok) {
-                    if (response.available !== undefined) {
-                        // Stock limited — snap to max available instead of full rollback
-                        const maxAdd = response.available - (response.current_in_cart || 0);
-                        if (maxAdd > 0) {
-                            // Partially add what's available
-                            const snappedItem = this.items.find(i => (i.key || Cart.cartItemKey(i)) === key);
-                            if (snappedItem) snappedItem.quantity = response.available;
-                            this.saveToLocalStorage();
-                            this.updateUI();
-                        } else {
-                            // Already at max — rollback
-                            this.items = previousItems;
-                            this.saveToLocalStorage();
-                            this.updateUI();
-                        }
-                        if (typeof showToast === 'function') {
-                            showToast(`Only ${response.available} in stock`, 'error');
-                        }
-                    } else {
-                        // Server rejected - rollback
-                        this.items = previousItems;
-                        this.saveToLocalStorage();
-                        this.updateUI();
-                        if (typeof showToast === 'function') {
-                            showToast(response.error || 'Failed to add item to cart', 'error');
-                        }
+                    // Server rejected - rollback
+                    this.items = previousItems;
+                    this.saveToLocalStorage();
+                    this.updateUI();
+                    if (typeof showToast === 'function') {
+                        showToast(response.error || 'Failed to add item to cart', 'error');
                     }
                     return;
                 }
@@ -1104,17 +1124,6 @@ const Cart = {
                     // Refresh from server for accurate totals
                     await this.loadFromServer();
                     this.updateUI();
-                } else if (response.available !== undefined) {
-                    // Insufficient stock - snap to max available
-                    if (item) {
-                        item.quantity = response.available;
-                        item.stockQuantity = response.available;
-                        this.saveToLocalStorage();
-                        this.updateUI();
-                    }
-                    if (typeof showToast === 'function') {
-                        showToast(`Only ${response.available} in stock`, 'error');
-                    }
                 } else {
                     // Generic failure - rollback
                     if (item) {
@@ -1351,7 +1360,7 @@ const Cart = {
      * Check if any cart items are out of stock
      */
     hasOutOfStockItems: function() {
-        return this.items.some(item => item.inStock === false);
+        return false;
     },
 
     /**
@@ -1423,23 +1432,12 @@ const Cart = {
                     const escapedName = Security.escapeHtml(item.name);
                     const escapedBrand = Security.escapeHtml(item.brand || '');
                     const escapedSku = Security.escapeHtml(item.sku || '');
-                    const isOutOfStock = item.inStock === false;
                     const itemKey = item.key || self.cartItemKey(item);
-
-                    let stockWarning = '';
-                    if (isOutOfStock) {
-                        stockWarning = '<span class="cart-item__stock-warning">Out of Stock</span>';
-                    } else if (item.stockQuantity !== undefined && item.stockQuantity > 0 && item.stockQuantity <= 5) {
-                        stockWarning = '<span class="cart-item__stock-low">Only ' + item.stockQuantity + ' left</span>';
-                    }
 
                     const productLink = '/html/product/?sku=' + encodeURIComponent(item.sku || '');
 
-                    var stockMax = (item.stockQuantity > 0) ? item.stockQuantity : 100;
-                    var atStockLimit = item.quantity >= stockMax;
-
                     return '\
-                    <article class="cart-item' + (isOutOfStock ? ' cart-item--out-of-stock' : '') + '" data-item-id="' + item.id + '" data-item-key="' + Security.escapeAttr(itemKey) + '">\
+                    <article class="cart-item" data-item-id="' + item.id + '" data-item-key="' + Security.escapeAttr(itemKey) + '">\
                         <div class="cart-item__image">\
                             ' + self.getItemImageHTML(item) + '\
                         </div>\
@@ -1450,7 +1448,7 @@ const Cart = {
                             </h3>\
                             ' + (escapedBrand ? '<p class="cart-item__brand">' + escapedBrand + '</p>' : '') + '\
                             ' + (escapedSku ? '<p class="cart-item__sku">SKU: ' + escapedSku + '</p>' : '') + '\
-                            ' + stockWarning + '\
+                            \
                             <p class="cart-item__price-mobile">' + formatPrice(item.price) + '</p>\
                         </div>\
                         <div class="cart-item__price">\
@@ -1458,13 +1456,13 @@ const Cart = {
                         </div>\
                         <div class="cart-item__quantity">\
                             <div class="quantity-selector" data-item-id="' + item.id + '" data-item-key="' + Security.escapeAttr(itemKey) + '">\
-                                <button type="button" class="quantity-selector__btn quantity-selector__btn--decrease" aria-label="Decrease quantity"' + (isOutOfStock ? ' disabled' : '') + '>\
+                                <button type="button" class="quantity-selector__btn quantity-selector__btn--decrease" aria-label="Decrease quantity">\
                                     <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">\
                                         <line x1="5" y1="12" x2="19" y2="12"></line>\
                                     </svg>\
                                 </button>\
-                                <input type="number" class="quantity-selector__input" value="' + item.quantity + '" min="1" max="' + stockMax + '" aria-label="Quantity"' + (isOutOfStock ? ' disabled' : '') + '>\
-                                <button type="button" class="quantity-selector__btn quantity-selector__btn--increase" aria-label="Increase quantity"' + (isOutOfStock || atStockLimit ? ' disabled' : '') + '>\
+                                <input type="number" class="quantity-selector__input" value="' + item.quantity + '" min="1" max="100" aria-label="Quantity">\
+                                <button type="button" class="quantity-selector__btn quantity-selector__btn--increase" aria-label="Increase quantity"' + (item.quantity >= 100 ? ' disabled' : '') + '>\
                                     <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">\
                                         <line x1="12" y1="5" x2="12" y2="19"></line>\
                                         <line x1="5" y1="12" x2="19" y2="12"></line>\
@@ -1525,15 +1523,9 @@ const Cart = {
             // Disable checkout if cart has out-of-stock items
             const checkoutBtn = document.getElementById('checkout-btn');
             if (checkoutBtn) {
-                if (this.hasOutOfStockItems()) {
-                    checkoutBtn.classList.add('btn--disabled');
-                    checkoutBtn.setAttribute('aria-disabled', 'true');
-                    checkoutBtn.title = 'Remove out-of-stock items before checkout';
-                } else {
-                    checkoutBtn.classList.remove('btn--disabled');
-                    checkoutBtn.removeAttribute('aria-disabled');
-                    checkoutBtn.title = '';
-                }
+                checkoutBtn.classList.remove('btn--disabled');
+                checkoutBtn.removeAttribute('aria-disabled');
+                checkoutBtn.title = '';
             }
         }
     }

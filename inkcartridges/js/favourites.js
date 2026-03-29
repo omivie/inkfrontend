@@ -95,7 +95,7 @@ const Favourites = {
                     image: typeof storageUrl === 'function' ? storageUrl(fav.product?.image_url) : (fav.product?.image_url || ''),
                     brand: fav.product?.brand?.name || '',
                     color: fav.product?.color || '',
-                    in_stock: fav.product?.in_stock !== false,
+                    in_stock: true,
                     is_active: fav.product?.is_active !== false,
                     addedAt: fav.added_at
                 }));
@@ -364,7 +364,6 @@ const Favourites = {
                         ${item.brand ? `<p class="favourite-item__brand">${Security.escapeHtml(item.brand)}</p>` : ''}
                         ${(item.color || (typeof ProductColors !== 'undefined' ? ProductColors.detectFromName(item.name) : '')) ? `<p class="favourite-item__color">${Security.escapeHtml(item.color || ProductColors.detectFromName(item.name))}</p>` : ''}
                         <p class="favourite-item__price">${typeof formatPrice === 'function' ? formatPrice(item.price) : '$' + item.price.toFixed(2)}</p>
-                        ${item.in_stock === false ? '<p class="favourite-item__stock favourite-item__stock--out">Out of Stock</p>' : ''}
                     </div>
                 </a>
                 <div class="favourite-item__actions">
@@ -375,8 +374,8 @@ const Favourites = {
                             data-product-price="${Security.escapeAttr(item.price)}"
                             data-product-image="${Security.escapeAttr(item.image)}"
                             data-product-brand="${Security.escapeAttr(item.brand)}"
-                            ${item.in_stock === false ? 'disabled' : ''}>
-                        ${item.in_stock === false ? 'Out of Stock' : 'Add to Cart'}
+                            >
+                        Add to Cart
                     </button>
                     <button type="button" class="favourite-item__remove" data-item-id="${Security.escapeAttr(item.id)}" aria-label="Remove from favourites">
                         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">

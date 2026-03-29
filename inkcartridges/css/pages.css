@@ -2010,6 +2010,11 @@
     display: flex;
     align-items: center;
     justify-content: center;
+    position: relative;
+}
+
+.product-card__compatible-overlay--detail span {
+    font-size: 2rem;
 }
 
 .product-gallery__main img {

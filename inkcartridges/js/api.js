@@ -182,10 +182,6 @@ const API = {
                     return { ok: false, error: errorMsg, code: errorCode, details: errorDetails };
                 }
 
-                // Return stock-limit errors so cart can snap quantity to available
-                if (response.status === 400 && data.available !== undefined) {
-                    return { ok: false, error: errorMsg, available: data.available, current_in_cart: data.current_in_cart };
-                }
 
                 // Return rate limit errors with retry_after so callers can handle them
                 if (response.status === 429 || errorCode === 'RATE_LIMITED') {
@@ -1417,13 +1413,6 @@ function calculateGST(inclusiveAmount) {
  * @returns {object} Status with class and text
  */
 function getStockStatus(product) {
-    const inStock = product.in_stock ?? (product.stock_quantity != null ? product.stock_quantity > 0 : false);
-    if (!inStock) {
-        return { class: 'out-of-stock', text: 'Out of Stock', icon: 'x-circle' };
-    }
-    if (product.is_low_stock) {
-        return { class: 'low-stock', text: `Low Stock - Only ${product.stock_quantity} left`, icon: 'alert-triangle' };
-    }
     return { class: 'in-stock', text: 'In Stock', icon: 'check-circle' };
 }
 

@@ -688,6 +688,9 @@
                             if (e.message?.includes('not completed')) throw e;
                             /* fall through to error */
                         }
+                    } else if (errorCode === 'EMAIL_NOT_VERIFIED') {
+                        this.showEmailVerificationRequired();
+                        return;
                     } else if (errorCode === 'PROMO_COUPON_LIMIT_REACHED') {
                         throw new Error('This coupon has reached its usage limit. Please remove it and try again.');
                     } else if (errorCode === 'ORDER_TOTAL_TOO_LOW') {
@@ -833,7 +836,52 @@
             }
         },
 
+        showEmailVerificationRequired() {
+            const errorEl = document.getElementById('card-errors');
+            if (errorEl) {
+                errorEl.innerHTML = `
+                    <div style="display:flex;flex-direction:column;gap:10px">
+                        <div style="display:flex;align-items:center;gap:6px">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                            <strong>Email verification required.</strong>
+                        </div>
+                        <p style="margin:0;font-size:14px;color:#555">Please verify your email address before placing an order. Check your inbox for a verification link.</p>
+                        <button type="button" class="btn btn--secondary btn--sm" id="payment-resend-verification-btn">
+                            Resend Verification Email
+                        </button>
+                    </div>
+                `;
+                errorEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 
+                document.getElementById('payment-resend-verification-btn')?.addEventListener('click', async (e) => {
+                    const btn = e.target;
+                    btn.disabled = true;
+                    btn.textContent = 'Sending\u2026';
+                    try {
+                        await API.resendVerificationEmail();
+                        if (typeof showToast === 'function') {
+                            showToast('Verification email sent! Check your inbox.', 'success');
+                        }
+                        btn.textContent = 'Email Sent';
+                    } catch (err) {
+                        if (typeof showToast === 'function') {
+                            showToast('Failed to resend. Please try again.', 'error');
+                        }
+                        btn.disabled = false;
+                        btn.textContent = 'Resend Verification Email';
+                    }
+                });
+            }
+
+            // Re-enable pay button so user can retry after verifying
+            this.isSubmitting = false;
+            const submitBtn = document.getElementById('submit-payment');
+            if (submitBtn) {
+                submitBtn.disabled = false;
+                const btnText = submitBtn.querySelector('.btn__text') || submitBtn;
+                btnText.textContent = 'Pay Now';
+            }
+        },
 
         /**
          * Show authorization box when card is complete
@@ -1001,6 +1049,9 @@
                         } else if (errorCode === 'TURNSTILE_FAILED') {
                             self.resetTurnstile();
                             throw new Error('Security verification failed. Please complete the check and try again.');
+                        } else if (errorCode === 'EMAIL_NOT_VERIFIED') {
+                            self.showEmailVerificationRequired();
+                            throw new Error('EMAIL_NOT_VERIFIED');
                         }
                         throw new Error(response.error || 'Failed to create PayPal order');
                     }
@@ -1096,6 +1147,8 @@
                 onError: (err) => {
                     console.error('[PayPal] SDK onError fired:', err);
                     console.error('[PayPal] Error message:', err?.message || String(err));
+                    // Skip generic error if we already showed a specific UI (e.g. email verification)
+                    if (err?.message === 'EMAIL_NOT_VERIFIED') return;
                     self.showError('Something went wrong with PayPal. Please try again or use a different payment method.');
                 }
             }).render('#paypal-button-container').then(() => {

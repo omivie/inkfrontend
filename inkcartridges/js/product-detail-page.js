@@ -481,46 +481,32 @@
             // Price - use formatPrice() for consistent locale-aware currency display
             document.getElementById('product-price').textContent = formatPrice(price);
 
-            // Stock status
+            // Stock status — always in stock
             const stockEl = document.getElementById('product-stock');
-            if (info.in_stock) {
-                stockEl.innerHTML = `<span class="stock-status stock-status--in-stock">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
-                    In Stock
-                </span>`;
-            } else {
-                stockEl.innerHTML = `<span class="stock-status stock-status--out-of-stock">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/></svg>
-                    Out of Stock
-                </span>`;
-                document.getElementById('add-to-cart-btn').disabled = true;
-            }
-
-            // Stock urgency
-            const urgencyEl = document.getElementById('stock-urgency');
-            if (urgencyEl) {
-                if (info.stock_quantity > 0 && info.stock_quantity <= 5) {
-                    urgencyEl.textContent = `Only ${info.stock_quantity} left in stock — order soon`;
-                    urgencyEl.hidden = false;
-                } else {
-                    urgencyEl.hidden = true;
-                }
-            }
+            stockEl.innerHTML = `<span class="stock-status stock-status--in-stock">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
+                In Stock
+            </span>`;
 
             // Product image with color fallback
             const productImageEl = document.getElementById('product-image');
             const colorStyle = ProductColors.getProductStyle(info);
+            const compatibleOverlay = info.isCompatible
+                ? '<div class="product-card__compatible-overlay product-card__compatible-overlay--detail"><span>COMPATIBLE</span></div>'
+                : '';
             if (info.image_url) {
                 if (colorStyle) {
                     // Image with color fallback on error
                     productImageEl.innerHTML = `
                         <img src="${Security.escapeAttr(Security.sanitizeUrl(info.image_url))}" alt="${Security.escapeAttr(info.displayName)}" style="max-width: 100%; height: auto;"
                              data-fallback="color-block">
-                        <div class="product-gallery__color-block" style="${colorStyle}; display: none;"></div>`;
+                        <div class="product-gallery__color-block" style="${colorStyle}; display: none;"></div>
+                        ${compatibleOverlay}`;
                 } else {
                     // Image with placeholder fallback
                     productImageEl.innerHTML = `<img src="${Security.escapeAttr(Security.sanitizeUrl(info.image_url))}" alt="${Security.escapeAttr(info.displayName)}" style="max-width: 100%; height: auto;"
-                        data-fallback="placeholder">`;
+                        data-fallback="placeholder">
+                        ${compatibleOverlay}`;
                 }
 
                 // Bind image fallback handlers
@@ -542,12 +528,14 @@
                     // colorStyle is safe — sourced from hardcoded ProductColors.map
                     productImageEl.classList.add('product-gallery__main--color-only');
                     productImageEl.closest('.product-detail__layout').classList.add('product-detail__layout--color-only');
-                    productImageEl.innerHTML = `<div class="product-gallery__color-block" style="${colorStyle}"></div>`;
+                    productImageEl.innerHTML = `<div class="product-gallery__color-block" style="${colorStyle}"></div>
+                        ${compatibleOverlay}`;
                 } else if (info.isCompatible) {
                     // Compatible with no known color — default to black (matches search card behavior in products.js)
                     productImageEl.classList.add('product-gallery__main--color-only');
                     productImageEl.closest('.product-detail__layout').classList.add('product-detail__layout--color-only');
-                    productImageEl.innerHTML = `<div class="product-gallery__color-block" style="background-color: #1a1a1a;"></div>`;
+                    productImageEl.innerHTML = `<div class="product-gallery__color-block" style="background-color: #1a1a1a;"></div>
+                        ${compatibleOverlay}`;
                 } else {
                     productImageEl.innerHTML = `<img src="/assets/images/placeholder-product.svg" alt="${Security.escapeAttr(info.displayName)}" style="max-width: 100%; height: auto;">`;
                 }
@@ -630,20 +618,27 @@
                 // Try current product SKU first
                 let printers = await this._fetchPrinters(info.sku);
 
-                // If empty, find a sibling product that has printer data
-                // (compatible products often lack it, but genuine ones have it)
+                // If empty, find a sibling product that has printer data via Supabase
                 if (printers.length === 0) {
-                    const code = this.extractProductCode(info);
-                    if (code) {
-                        const searchResponse = await API.getProducts({
-                            brand: (info.brand?.slug || info.brandName || '').toLowerCase().replace(/\s+/g, '-'),
-                            search: code,
-                            limit: 10
-                        });
-                        if (searchResponse.ok && searchResponse.data?.products) {
-                            for (const product of searchResponse.data.products) {
-                                if (product.sku && product.sku !== info.sku) {
-                                    printers = await this._fetchPrinters(product.sku);
+                    const sb = (typeof Auth !== 'undefined' && Auth.supabase) ? Auth.supabase : null;
+                    if (sb) {
+                        // Extract product code for sibling search (e.g. "LC38" from "LC38M")
+                        let code = this.extractProductCode(info);
+                        // If extractProductCode fails, try a looser extraction from SKU
+                        // e.g. G-BRO-LC38M-INK-MG → extract "LC38" by matching letter+digit patterns
+                        if (!code) {
+                            const skuMatch = info.sku.match(/([A-Z]{2,3}\d{2,4})/i);
+                            if (skuMatch) code = skuMatch[1].replace(/-/g, '').toUpperCase();
+                        }
+                        if (code) {
+                            const { data: siblings } = await sb.from('products')
+                                .select('sku')
+                                .ilike('name', `%${code}%`)
+                                .neq('sku', info.sku)
+                                .limit(15);
+                            if (siblings) {
+                                for (const sib of siblings) {
+                                    printers = await this._fetchPrinters(sib.sku);
                                     if (printers.length > 0) break;
                                 }
                             }
@@ -680,22 +675,33 @@
         },
 
         /**
-         * Fetch printer names for a given SKU from the compatible-printers endpoint
+         * Fetch compatible printer names for a given SKU via Supabase
          */
         async _fetchPrinters(sku) {
             try {
-                const response = await API.getCompatiblePrinters(sku);
-                if (!response.ok || !response.data) return [];
+                const sb = (typeof Auth !== 'undefined' && Auth.supabase) ? Auth.supabase : null;
+                if (!sb) return [];
 
-                const printers = response.data.printers || response.data.compatible_printers || response.data;
-                if (!Array.isArray(printers) || printers.length === 0) return [];
+                const { data: product } = await sb
+                    .from('products')
+                    .select('id')
+                    .eq('sku', sku)
+                    .single();
+                if (!product) return [];
 
-                return printers.map(p => {
-                    if (typeof p === 'string') return { name: p, brand: '' };
-                    const name = p.full_name || p.model_name || p.name || '';
-                    const brand = p.brand_name || p.brand || '';
+                const { data: compat } = await sb
+                    .from('product_compatibility')
+                    .select('printer_models(model_name, full_name, brands(name))')
+                    .eq('product_id', product.id);
+                if (!compat || compat.length === 0) return [];
+
+                return compat.map(c => {
+                    const pm = c.printer_models;
+                    if (!pm) return null;
+                    const brand = pm.brands?.name || '';
+                    const name = pm.full_name || (brand && pm.model_name ? `${brand} ${pm.model_name}` : pm.model_name) || '';
                     return { name, brand };
-                }).filter(p => p.name).sort((a, b) => a.name.localeCompare(b.name));
+                }).filter(p => p && p.name).sort((a, b) => a.name.localeCompare(b.name));
             } catch (e) {
                 return [];
             }
@@ -905,9 +911,9 @@
         },
 
         setupEventListeners(info) {
-            // Quantity controls — cap at stock_quantity if available
+            // Quantity controls
             const qtyInput = document.getElementById('qty-input');
-            const maxQty = (info.stock_quantity > 0) ? info.stock_quantity : 99;
+            const maxQty = 99;
             qtyInput.max = maxQty;
             const qtyIncreaseBtn = document.getElementById('qty-increase');
             document.getElementById('qty-decrease').addEventListener('click', () => {
@@ -971,7 +977,7 @@
                     btn.textContent = 'Error';
                     setTimeout(() => {
                         btn.textContent = 'Add to Cart';
-                        btn.disabled = !info.in_stock;
+                        btn.disabled = false;
                     }, 1500);
                 }
             });
@@ -1081,7 +1087,7 @@
                     "url": canonicalUrl,
                     "priceCurrency": "NZD",
                     "price": price.toFixed(2),
-                    "availability": info.in_stock ? "https://schema.org/InStock" : "https://schema.org/OutOfStock",
+                    "availability": "https://schema.org/InStock",
                     "seller": {
                         "@type": "Organization",
                         "name": "InkCartridges.co.nz"

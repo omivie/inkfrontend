@@ -2155,9 +2155,7 @@
                             if (ribbon.retail_price == null && ribbon.sale_price != null) {
                                 ribbon.retail_price = ribbon.sale_price;
                             }
-                            if (ribbon.in_stock == null && ribbon.stock_quantity != null) {
-                                ribbon.in_stock = ribbon.stock_quantity > 0;
-                            }
+                            ribbon.in_stock = true;
                             if (typeof ribbon.brand === 'string') {
                                 ribbon.brand = { name: ribbon.brand };
                             }
@@ -2438,15 +2436,18 @@
             let imageContent;
             const resolvedImageUrl = typeof storageUrl === 'function' ? storageUrl(product.image_url) : product.image_url;
             const colorStyle = ProductColors.getProductStyle(product);
+            const compatibleOverlay = product.source === 'compatible'
+                ? '<div class="product-card__compatible-overlay"><span>COMPATIBLE</span></div>'
+                : '';
             if (resolvedImageUrl && resolvedImageUrl !== '/assets/images/placeholder-product.svg') {
                 if (colorStyle) {
                     imageContent = `<img src="${Security.escapeAttr(resolvedImageUrl)}" alt="${Security.escapeAttr(product.name)}" loading="lazy" data-fallback="color-block">
-                        <div class="product-card__color-block" style="${colorStyle}; display: none;"></div>`;
+                        <div class="product-card__color-block" style="${colorStyle}; display: none;"></div>${compatibleOverlay}`;
                 } else {
-                    imageContent = `<img src="${Security.escapeAttr(resolvedImageUrl)}" alt="${Security.escapeAttr(product.name)}" loading="lazy" data-fallback="placeholder">`;
+                    imageContent = `<img src="${Security.escapeAttr(resolvedImageUrl)}" alt="${Security.escapeAttr(product.name)}" loading="lazy" data-fallback="placeholder">${compatibleOverlay}`;
                 }
             } else if (isCompatible) {
-                imageContent = `<div class="product-card__color-block" style="${colorStyle || 'background-color: #1a1a1a;'}"></div>`;
+                imageContent = `<div class="product-card__color-block" style="${colorStyle || 'background-color: #1a1a1a;'}"></div>${compatibleOverlay}`;
             } else {
                 imageContent = `<img src="/assets/images/placeholder-product.svg" alt="${Security.escapeAttr(product.name)}" loading="lazy">`;
             }

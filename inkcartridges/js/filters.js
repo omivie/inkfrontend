@@ -32,7 +32,6 @@ const Filters = {
         colour: [],
         priceMin: null,
         priceMax: null,
-        inStock: false,
         sort: 'relevance',
         page: 1
     },
@@ -155,7 +154,6 @@ const Filters = {
             colour: [],
             priceMin: null,
             priceMax: null,
-            inStock: false,
             sort: 'relevance',
             page: 1
         };
@@ -305,7 +303,6 @@ const Filters = {
         if (this.state.priceMax) params.set('max', this.state.priceMax);
 
         // Add other filters
-        if (this.state.inStock) params.set('instock', '1');
         if (this.state.sort !== 'relevance') params.set('sort', this.state.sort);
         if (this.state.page > 1) params.set('page', this.state.page);
 
@@ -338,7 +335,6 @@ const Filters = {
         if (max) this.state.priceMax = parseFloat(max);
 
         // Load other filters
-        if (params.get('instock')) this.state.inStock = true;
         if (params.get('sort')) this.state.sort = params.get('sort');
         if (params.get('page')) this.state.page = parseInt(params.get('page'));
     },
@@ -408,11 +404,6 @@ const Filters = {
             chips.push({ filterName: 'price', label: 'Price', value: priceLabel });
         }
 
-        // In stock only
-        if (this.state.inStock) {
-            chips.push({ filterName: 'inStock', label: 'Stock', value: 'In Stock Only' });
-        }
-
         // Render or clear
         if (chips.length === 0) {
             container.innerHTML = '';
@@ -447,8 +438,6 @@ const Filters = {
                     const maxInput = $('input[name="max-price"]');
                     if (minInput) minInput.value = '';
                     if (maxInput) maxInput.value = '';
-                } else if (filterName === 'inStock') {
-                    this.state.inStock = false;
                 } else {
                     this.removeFilter(filterName, value);
                     return; // removeFilter already calls applyFilters

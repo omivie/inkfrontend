@@ -25,6 +25,9 @@ const Products = {
     getProductImageHTML(product) {
         const colorStyle = ProductColors.getProductStyle(product);
         const imageUrl = typeof storageUrl === 'function' ? storageUrl(product.image_url) : product.image_url;
+        const compatibleOverlay = product.source === 'compatible'
+            ? '<div class="product-card__compatible-overlay"><span>COMPATIBLE</span></div>'
+            : '';
 
         if (imageUrl && imageUrl !== '/assets/images/placeholder-product.svg') {
             // Has image URL - use it with error fallback (listeners attached after DOM insertion)
@@ -35,21 +38,25 @@ const Products = {
                              width="200" height="200"
                              loading="lazy"
                              data-fallback="color-block">
-                        <div class="product-card__color-block" style="${colorStyle}; display: none;"></div>`;
+                        <div class="product-card__color-block" style="${colorStyle}; display: none;"></div>
+                        ${compatibleOverlay}`;
             } else {
                 return `<img src="${Security.escapeAttr(imageUrl)}"
                              alt="${Security.escapeAttr(product.name)}"
                              class="product-card__image"
                              width="200" height="200"
                              loading="lazy"
-                             data-fallback="placeholder">`;
+                             data-fallback="placeholder">
+                        ${compatibleOverlay}`;
             }
         } else if (colorStyle) {
             // No image but has color (single or gradient) - show color block
-            return `<div class="product-card__color-block" style="${colorStyle}"></div>`;
+            return `<div class="product-card__color-block" style="${colorStyle}"></div>
+                    ${compatibleOverlay}`;
         } else if (product.source === 'compatible') {
             // Compatible with no known color - default to black
-            return `<div class="product-card__color-block" style="background-color: #1a1a1a;"></div>`;
+            return `<div class="product-card__color-block" style="background-color: #1a1a1a;"></div>
+                    ${compatibleOverlay}`;
         } else {
             // Genuine with no image, no color - show placeholder
             return `<img src="/assets/images/placeholder-product.svg"
@@ -66,7 +73,6 @@ const Products = {
      * @returns {string} HTML string
      */
     renderCard(product) {
-        const stockStatus = getStockStatus(product);
         const sourceBadge = getSourceBadge(product.source);
         const resolvedImage = typeof storageUrl === 'function' ? storageUrl(product.image_url) : (product.image_url || '');
 
@@ -76,25 +82,24 @@ const Products = {
                     <div class="product-card__image-wrapper">
                         ${this.getProductImageHTML(product)}
                         ${sourceBadge ? `<span class="product-card__badge ${sourceBadge.class}">${sourceBadge.text}</span>` : ''}
-                        ${!product.in_stock ? '<span class="product-card__badge badge-out-of-stock">Out of Stock</span>' : ''}
                     </div>
                     <div class="product-card__content">
                         <p class="product-card__brand">${Security.escapeHtml(product.brand?.name || '')}</p>
                         <h3 class="product-card__title" title="${Security.escapeAttr(product.name)}">${Security.escapeHtml(product.name)}</h3>
                         ${product.color ? `<p class="product-card__color">${Security.escapeHtml(product.color)}</p>` : ''}
                         <p class="product-card__price">${product.retail_price == null ? 'Price unavailable' : formatPrice(product.retail_price)}</p>
-                        <p class="product-card__stock ${stockStatus.class}">${stockStatus.text}</p>
+                        <p class="product-card__stock stock-in">In Stock</p>
                     </div>
                 </a>
                 <button class="product-card__add-btn btn btn--primary"
-                        ${!product.in_stock || product.retail_price == null ? 'disabled' : ''}
+                        ${product.retail_price == null ? 'disabled' : ''}
                         data-product-id="${Security.escapeAttr(product.id)}"
                         data-product-sku="${Security.escapeAttr(product.sku)}"
                         data-product-name="${Security.escapeAttr(product.name)}"
                         data-product-price="${Security.escapeAttr(product.retail_price)}"
                         data-product-image="${Security.escapeAttr(resolvedImage)}"
                         data-product-color="${Security.escapeAttr(product.color || this.detectColorFromName(product.name) || '')}">
-                    ${product.in_stock ? 'Add to Cart' : 'Out of Stock'}
+                    Add to Cart
                 </button>
             </article>
         `;

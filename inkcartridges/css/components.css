@@ -575,6 +575,33 @@
     line-height: 1.4;
 }
 
+.product-card__compatible-overlay {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    pointer-events: none;
+    z-index: 10;
+}
+
+.product-card__compatible-overlay span {
+    color: #ffffff;
+    font-family: Impact, 'Arial Black', sans-serif;
+    font-weight: bold;
+    font-size: 1.25rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.5);
+}
+
+/* Ensure interactive buttons (favourites, etc.) stay above overlay */
+.product-card__fav-btn,
+.product-card__cart-btn {
+    z-index: 20;
+    position: relative;
+}
+
 .product-card__compatible-placeholder {
     width: 100%;
     height: 100%;
