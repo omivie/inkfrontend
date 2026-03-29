@@ -144,8 +144,6 @@
 }
 
 .product-card--compact .in-stock { color: var(--color-success); }
-.product-card--compact .out-of-stock { color: var(--color-error); }
-.product-card--compact .low-stock { color: var(--color-accent-dark); }
 
 /* Add to Cart button */
 .smart-search__add-to-cart {

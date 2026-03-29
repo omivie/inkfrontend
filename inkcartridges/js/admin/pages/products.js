@@ -38,15 +38,6 @@ function invalidateDiagCache() {
   localStorage.removeItem(DIAG_CACHE_KEY);
 }
 
-function stockBadge(product) {
-  const qty = product.stock_quantity;
-  if (qty == null) return `<span class="admin-badge admin-badge--pending">Unknown</span>`;
-  if (qty <= 0) return `<span class="admin-badge admin-badge--failed">Out of stock</span>`;
-  if (product.is_low_stock || (product.low_stock_threshold && qty <= product.low_stock_threshold))
-    return `<span class="admin-badge admin-badge--pending">Low (${qty})</span>`;
-  return `<span class="admin-badge admin-badge--completed">In stock (${qty})</span>`;
-}
-
 function buildColumns() {
   const isOwner = AdminAuth.isOwner();
   const cols = [
@@ -96,20 +87,6 @@ function buildColumns() {
   }
 
   cols.push(
-    {
-      key: 'stock_quantity', label: 'Stock', sortable: true,
-      render: (r) => {
-        const qty = r.stock_quantity;
-        const isLow = r.is_low_stock || (r.low_stock_threshold && qty <= r.low_stock_threshold);
-        const color = qty <= 0 ? 'var(--danger)' : isLow ? 'var(--yellow)' : 'var(--text)';
-        return `<span class="cell-mono cell-center" style="color:${color}">${qty != null ? qty : MISSING}</span>`;
-      },
-      align: 'center',
-    },
-    {
-      key: 'status', label: 'Status',
-      render: (r) => stockBadge(r),
-    },
     {
       key: 'is_active', label: 'Active',
       render: (r) => {
@@ -176,7 +153,7 @@ async function loadProducts() {
   const sb = (typeof Auth !== 'undefined' && Auth.supabase) ? Auth.supabase : null;
   if (sb) {
     try {
-      const selectCols = 'id, sku, name, retail_price, cost_price, stock_quantity, low_stock_threshold, is_active, image_url, color, source, weight_kg, page_yield, category, product_type, brand_id, description, compare_price, track_inventory, meta_title, meta_description, tags, internal_notes, brands(name, slug)';
+      const selectCols = 'id, sku, name, retail_price, cost_price, is_active, image_url, color, source, weight_kg, page_yield, category, product_type, brand_id, description, compare_price, meta_title, meta_description, tags, internal_notes, brands(name, slug)';
       let query = sb.from('products').select(selectCols, { count: 'exact' });
 
       // Brand filter
@@ -456,16 +433,12 @@ function openCreateProductModal() {
 
   const inventoryHtml = `
     <div class="admin-form-row">
-      ${formGroup('Stock Qty', `<input class="admin-input" id="edit-stock" type="number" min="0" placeholder="0">`)}
-      ${formGroup('Low Stock Threshold', `<input class="admin-input" id="edit-low-threshold" type="number" min="0" placeholder="5">`)}
-    </div>
-    <div class="admin-form-row">
       ${formGroup('Weight (kg)', `<input class="admin-input" id="edit-weight" type="number" step="0.01" min="0" placeholder="0.00">`)}
       <div class="admin-form-group"></div>
     </div>
     <div class="admin-form-row">
       ${formGroup('Active', toggleHtml('edit-active', true))}
-      ${formGroup('Track Inventory', toggleHtml('edit-track-inventory', true))}
+      <div class="admin-form-group"></div>
     </div>
   `;
 
@@ -545,11 +518,8 @@ function openCreateProductModal() {
       source: val('edit-source') || null,
       retail_price: retailPrice,
       compare_at_price: parseFloat(val('edit-compare-price')) || null,
-      stock_quantity: parseInt(val('edit-stock'), 10) || 0,
-      low_stock_threshold: parseInt(val('edit-low-threshold'), 10) || null,
       weight_kg: parseFloat(val('edit-weight')) || null,
       is_active: chk('edit-active'),
-      track_inventory: chk('edit-track-inventory'),
       meta_title: val('edit-meta-title') || null,
       meta_description: val('edit-meta-desc') || null,
       page_yield: parseInt(val('edit-page-yield'), 10) || null,
@@ -607,14 +577,12 @@ function buildProductModalSidebar(modal, full) {
 
   // Quick stats
   const active = full.is_active !== false;
-  const qty = full.stock_quantity;
   const price = full.retail_price;
   const statsHtml = `
     <div class="admin-product-modal__sidebar-stats">
       <div class="admin-product-modal__sidebar-stat">
         <span class="admin-badge admin-badge--${active ? 'completed' : 'failed'}">${active ? 'Active' : 'Inactive'}</span>
       </div>
-      ${qty != null ? `<div class="admin-product-modal__sidebar-stat"><strong>${qty}</strong><span>in stock</span></div>` : ''}
       ${price != null ? `<div class="admin-product-modal__sidebar-stat"><strong>${formatPrice(price)}</strong><span>NZD</span></div>` : ''}
     </div>
   `;
@@ -686,16 +654,12 @@ function buildProductModalTabs(modal, full, isOwner) {
   // Inventory panel
   let inventoryHtml = `
     <div class="admin-form-row">
-      ${formGroup('Stock Qty', `<input class="admin-input" id="edit-stock" type="number" min="0" value="${full.stock_quantity ?? ''}">`)}
-      ${formGroup('Low Stock Threshold', `<input class="admin-input" id="edit-low-threshold" type="number" min="0" value="${full.low_stock_threshold ?? ''}">`)}
-    </div>
-    <div class="admin-form-row">
       ${formGroup('Weight (kg)', `<input class="admin-input" id="edit-weight" type="number" step="0.01" min="0" value="${full.weight_kg ?? ''}">`)}
       <div class="admin-form-group"></div>
     </div>
     <div class="admin-form-row">
       ${formGroup('Active', toggleHtml('edit-active', full.is_active !== false))}
-      ${formGroup('Track Inventory', toggleHtml('edit-track-inventory', full.track_inventory !== false))}
+      <div class="admin-form-group"></div>
     </div>
   `;
 
@@ -1699,7 +1663,6 @@ function bindProductModalActions(modal, product) {
             image_url: null,
             primary_image: null,
             retail_price: product.retail_price,
-            stock_quantity: product.stock_quantity ?? 0,
           });
         }
         Toast.success('Image removed');
@@ -1757,10 +1720,7 @@ function bindProductModalActions(modal, product) {
       source: val('edit-source'),
       retail_price: numVal('edit-retail-price'),
       compare_at_price: numVal('edit-compare-price'),
-      stock_quantity: numVal('edit-stock'),
-      low_stock_threshold: numVal('edit-low-threshold'),
       is_active: chk('edit-active'),
-      track_inventory: chk('edit-track-inventory'),
       meta_title: val('edit-meta-title'),
       meta_description: val('edit-meta-desc'),
       page_yield: numVal('edit-page-yield'),
@@ -1816,8 +1776,6 @@ function renderDiagnostics(container) {
       ${diagKpi('Missing Prices',        d?.missing_prices ?? MISSING)}
       ${diagKpi('Missing Weight',        d?.missing_weight ?? MISSING)}
       ${diagKpi('Missing Compatibility', d?.missing_compatibility ?? (d ? 'N/A' : MISSING))}
-      ${diagKpi('Zero Stock',            d?.zero_stock ?? MISSING, 'danger')}
-      ${diagKpi('Critical Stock (\u22645)', d?.critical_stock ?? MISSING, 'warning')}
     </div>
   `;
   // Remove any existing diagnostics section before inserting updated one
@@ -1963,7 +1921,7 @@ async function exportProductsPDF() {
     doc.setTextColor(0);
 
     // Table columns
-    const head = ['Name', 'SKU', 'Brand', 'Price', ...(isOwner ? ['Cost'] : []), 'Stock', 'Active'];
+    const head = ['Name', 'SKU', 'Brand', 'Price', ...(isOwner ? ['Cost'] : []), 'Active'];
     const body = all.map(p => {
       const brand = extractBrandName(p) || MISSING;
       const price = p.retail_price ?? p.cost_price;
@@ -1973,7 +1931,6 @@ async function exportProductsPDF() {
         brand,
         price != null ? formatPrice(price) : MISSING,
         ...(isOwner ? [p.cost_price != null ? formatPrice(p.cost_price) : MISSING] : []),
-        p.stock_quantity != null ? String(p.stock_quantity) : 'Unknown',
         p.is_active !== false ? 'Yes' : 'No',
       ];
     });
@@ -2174,7 +2131,7 @@ async function bulkSetActive(activate) {
       let done = 0;
       let failed = 0;
       Toast.info(`${activate ? 'Activating' : 'Deactivating'} ${count} products\u2026`);
-      // Build update payloads — backend requires retail_price & stock_quantity
+      // Build update payloads — backend requires retail_price
       const payloads = ids.map(id => {
         const row = _table.data.find(r => String(r.id) === id);
         return {
@@ -2182,7 +2139,6 @@ async function bulkSetActive(activate) {
           data: {
             is_active: activate,
             retail_price: row?.retail_price ?? 0,
-            stock_quantity: row?.stock_quantity ?? 0,
           },
         };
       });
@@ -2382,13 +2338,11 @@ export default {
         // Run full diagnostics queries
         (async () => {
           try {
-            const [totalR, activeR, noPriceR, noWeightR, zeroStockR, critStockR, noImageR, noCompatR] = await Promise.all([
+            const [totalR, activeR, noPriceR, noWeightR, noImageR, noCompatR] = await Promise.all([
               sb.from('products').select('id', { count: 'exact', head: true }),
               sb.from('products').select('id', { count: 'exact', head: true }).eq('is_active', true),
               sb.from('products').select('id', { count: 'exact', head: true }).is('retail_price', null),
               sb.from('products').select('id', { count: 'exact', head: true }).is('weight_kg', null),
-              sb.from('products').select('id', { count: 'exact', head: true }).eq('stock_quantity', 0),
-              sb.from('products').select('id', { count: 'exact', head: true }).gt('stock_quantity', 0).lte('stock_quantity', 5),
               sb.from('products').select('id', { count: 'exact', head: true }).is('image_url', null),
               (async () => { try { return await sb.rpc('count_missing_compatibility'); } catch { return null; } })(),
             ]);
@@ -2399,8 +2353,6 @@ export default {
               missing_prices: noPriceR.count,
               missing_weight: noWeightR.count,
               missing_compatibility: noCompatR?.data ?? null,
-              zero_stock: zeroStockR.count,
-              critical_stock: critStockR.count,
             };
             _diagnostics = fresh;
             localStorage.setItem(DIAG_CACHE_KEY, JSON.stringify({ data: fresh, ts: Date.now() }));

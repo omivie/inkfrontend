@@ -3277,28 +3277,6 @@
     margin: 0;
 }
 
-/* Cart item - out of stock state */
-.cart-item--out-of-stock {
-    opacity: 0.7;
-    border-left: 3px solid var(--color-error, #e53e3e);
-}
-
-.cart-item__stock-warning {
-    display: inline-block;
-    color: var(--color-error, #e53e3e);
-    font-size: var(--font-size-sm);
-    font-weight: var(--font-weight-semibold);
-    margin-top: var(--spacing-1);
-}
-
-.cart-item__stock-low {
-    display: inline-block;
-    color: var(--color-warning, #d69e2e);
-    font-size: var(--font-size-sm);
-    font-weight: var(--font-weight-medium);
-    margin-top: var(--spacing-1);
-}
-
 /* Disabled checkout button */
 .btn--disabled {
     opacity: 0.5;
@@ -8126,10 +8104,6 @@
     color: var(--color-success);
 }
 
-.product-box__stock--out {
-    color: var(--color-error);
-}
-
 .product-box__cart-btn {
     margin: var(--spacing-sm);
     margin-top: 0;
@@ -8506,10 +8480,6 @@
 
 .search-results__stock--in {
     color: var(--color-success);
-}
-
-.search-results__stock--out {
-    color: var(--color-error);
 }
 
 .search-results__empty {
@@ -9641,10 +9611,6 @@
 
 .product-card__stock--in {
     color: var(--color-success);
-}
-
-.product-card__stock--out {
-    color: var(--color-error);
 }
 
 .product-card__cart-btn {

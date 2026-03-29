@@ -247,7 +247,6 @@ function openDetailDrawer(product) {
     ['Type', product.product_type || product.type],
     ['Color', product.color],
     ['Source', product.source],
-    ['Stock', product.stock_quantity != null ? String(product.stock_quantity) : null],
   ];
 
   for (const [label, value] of fields) {

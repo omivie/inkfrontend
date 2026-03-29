@@ -210,15 +210,7 @@
             color: #059669;
         }
 
-        .product-status--low-stock {
-            background: var(--yellow-light);
-            color: var(--yellow-dark);
-        }
 
-        .product-status--out-of-stock {
-            background: var(--magenta-light);
-            color: var(--magenta-dark);
-        }
 
         .action-link {
             display: inline-flex;
@@ -345,8 +337,6 @@
                     <div class="filter-bar__chips">
                         <button class="filter-chip filter-chip--active" data-stock="">All</button>
                         <button class="filter-chip" data-stock="in-stock">In Stock</button>
-                        <button class="filter-chip" data-stock="low-stock">Low Stock</button>
-                        <button class="filter-chip" data-stock="out-of-stock">Out of Stock</button>
                     </div>
 
                     <div class="filter-bar__divider"></div>
@@ -363,9 +353,7 @@
                     </select>
 
                     <select class="admin-select admin-select--pill" id="sort-filter">
-                        <option value="stock-low" selected>Stock: Low to High</option>
-                        <option value="stock-high">Stock: High to Low</option>
-                        <option value="name-asc">Name: A-Z</option>
+                        <option value="name-asc" selected>Name: A-Z</option>
                         <option value="name-desc">Name: Z-A</option>
                         <option value="price-low">Price: Low to High</option>
                         <option value="price-high">Price: High to Low</option>

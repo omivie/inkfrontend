@@ -6,6 +6,11 @@
         currentSort: 'velocity-desc',
 
         async init() {
+            const container = document.querySelector('.operations-container') || document.querySelector('main');
+            if (container) {
+                container.innerHTML = '<div style="padding:40px;text-align:center;color:var(--text-secondary);font-size:15px;">Stock tracking has been disabled</div>';
+            }
+            return;
             this.bindEvents();
             await this.loadData();
         },

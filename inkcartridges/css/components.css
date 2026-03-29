@@ -1030,22 +1030,6 @@
     background-color: var(--color-success);
 }
 
-.stock-status--low-stock {
-    color: var(--color-warning);
-}
-
-.stock-status--low-stock::before {
-    background-color: var(--color-warning);
-}
-
-.stock-status--out-of-stock {
-    color: var(--color-error);
-}
-
-.stock-status--out-of-stock::before {
-    background-color: var(--color-error);
-}
-
 /* Order Status */
 .order-status {
     display: inline-flex;
