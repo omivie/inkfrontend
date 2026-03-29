@@ -47,7 +47,8 @@ const API = {
             const response = await fetch(url, {
                 ...fetchOptions,
                 signal: controller.signal,
-                credentials: 'include'
+                credentials: 'include',
+                cache: 'no-store'
             });
             clearTimeout(timeoutId);
 
@@ -548,9 +549,10 @@ const API = {
     /**
      * Validate cart before checkout
      */
-    async validateCart(turnstileToken) {
+    async validateCart(turnstileToken, acknowledgePriceChanges) {
         const body = {};
         if (turnstileToken) body.turnstile_token = turnstileToken;
+        if (acknowledgePriceChanges) body.acknowledge_price_changes = true;
         return this.post('/api/cart/validate', body);
     },
 
