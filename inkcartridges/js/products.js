@@ -25,9 +25,7 @@ const Products = {
     getProductImageHTML(product) {
         const colorStyle = ProductColors.getProductStyle(product);
         const imageUrl = typeof storageUrl === 'function' ? storageUrl(product.image_url) : product.image_url;
-        const compatibleOverlay = product.source === 'compatible'
-            ? '<div class="product-card__compatible-overlay"><span>COMPATIBLE</span></div>'
-            : '';
+        const compatibleOverlay = '';
 
         if (imageUrl && imageUrl !== '/assets/images/placeholder-product.svg') {
             // Has image URL - use it with error fallback (listeners attached after DOM insertion)
@@ -49,8 +47,8 @@ const Products = {
                              data-fallback="placeholder">
                         ${compatibleOverlay}`;
             }
-        } else if (colorStyle) {
-            // No image but has color (single or gradient) - show color block
+        } else if (colorStyle && product.source === 'compatible') {
+            // Compatible with no image but has color - show color block
             return `<div class="product-card__color-block" style="${colorStyle}"></div>
                     ${compatibleOverlay}`;
         } else if (product.source === 'compatible') {

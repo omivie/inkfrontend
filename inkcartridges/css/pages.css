@@ -2782,6 +2782,16 @@
     margin-bottom: var(--spacing-md);
 }
 
+.related-products__group-heading .badge {
+    font-family: inherit;
+    font-size: inherit;
+    font-weight: inherit;
+    letter-spacing: inherit;
+    padding: 0;
+    background: none;
+    border-radius: 0;
+}
+
 .related-products__type-group {
     margin-bottom: var(--spacing-xl);
 }
@@ -2814,6 +2824,10 @@
 .related-products__grid .product-card__content {
     padding: var(--spacing-xs) var(--spacing-sm);
     gap: 1px;
+}
+
+.related-products__grid .product-card__badge {
+    display: none;
 }
 
 @media (max-width: 1024px) {
