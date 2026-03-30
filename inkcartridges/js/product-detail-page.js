@@ -826,35 +826,43 @@
                 if (!section) return;
 
                 let related = [];
+                const seenSkus = new Set([info.sku]);
 
-                // Primary: use new related products endpoint
-                const relatedResponse = await API.getRelatedProducts(info.sku);
-                if (relatedResponse.ok && relatedResponse.data?.related?.length > 0) {
-                    related = relatedResponse.data.related;
-                }
-
-                // Fallback: search by first compatible printer
-                if (related.length === 0) {
-                    const printers = await this._fetchPrinters(info.sku);
-                    if (printers.length > 0) {
-                        const firstPrinter = printers[0].name;
-                        const response = await API.searchByPrinter(firstPrinter, { limit: 50 });
-                        if (response.ok && response.data?.products) {
-                            related = response.data.products.filter(p => p.sku !== info.sku).slice(0, 50);
+                const addProducts = (products) => {
+                    for (const p of products) {
+                        if (!seenSkus.has(p.sku)) {
+                            seenSkus.add(p.sku);
+                            related.push(p);
                         }
                     }
+                };
 
-                    // Fallback: search by product code extracted from manufacturer_part_number
-                    if (related.length === 0) {
-                        const productCode = this._extractProductCode(info.manufacturer_part_number);
-                        if (productCode) {
-                            const brandName = info.brandName || '';
-                            const params = { search: productCode, limit: 50 };
-                            if (brandName) params.brand = brandName;
-                            const response = await API.getProducts(params);
-                            if (response.ok && response.data?.products) {
-                                related = response.data.products.filter(p => p.sku !== info.sku).slice(0, 50);
-                            }
+                // Primary: use related products endpoint
+                const relatedResponse = await API.getRelatedProducts(info.sku);
+                if (relatedResponse.ok && relatedResponse.data?.related?.length > 0) {
+                    addProducts(relatedResponse.data.related);
+                }
+
+                // Supplement: also search by compatible printer to catch products the related endpoint missed
+                const printers = await this._fetchPrinters(info.sku);
+                if (printers.length > 0) {
+                    const firstPrinter = printers[0].name;
+                    const response = await API.searchByPrinter(firstPrinter, { limit: 50 });
+                    if (response.ok && response.data?.products) {
+                        addProducts(response.data.products);
+                    }
+                }
+
+                // Fallback: search by product code if still empty
+                if (related.length === 0) {
+                    const productCode = this._extractProductCode(info.manufacturer_part_number);
+                    if (productCode) {
+                        const brandName = info.brandName || '';
+                        const params = { search: productCode, limit: 50 };
+                        if (brandName) params.brand = brandName;
+                        const response = await API.getProducts(params);
+                        if (response.ok && response.data?.products) {
+                            addProducts(response.data.products);
                         }
                     }
                 }
