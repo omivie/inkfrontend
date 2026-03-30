@@ -799,13 +799,24 @@
         },
 
         _sortByColor(products) {
-            const ORDER = { black: 0, cyan: 1, magenta: 2, yellow: 3, cmy: 4, kcmy: 5 };
+            const packOrder = { single: 0, value_pack: 1, multipack: 2 };
+            const colorOrder = { black: 0, 'photo black': 1, cyan: 2, 'light cyan': 3, magenta: 4, 'light magenta': 5, yellow: 6, cmy: 7, kcmy: 8, cmyk: 9 };
+            const sizeOrder = (name) => {
+                const n = (name || '').toLowerCase();
+                if (n.includes('xxl') || n.includes('super high')) return 2;
+                if (n.includes('xl') || n.includes('high yield') || /\bhy\b/.test(n)) return 1;
+                return 0;
+            };
             return [...products].sort((a, b) => {
-                const ca = (a.color || '').toLowerCase();
-                const cb = (b.color || '').toLowerCase();
-                const ia = ORDER[ca] ?? 99;
-                const ib = ORDER[cb] ?? 99;
-                return ia - ib;
+                const pa = packOrder[a.pack_type] ?? 0;
+                const pb = packOrder[b.pack_type] ?? 0;
+                if (pa !== pb) return pa - pb;
+                const sa = sizeOrder(a.name);
+                const sb = sizeOrder(b.name);
+                if (sa !== sb) return sa - sb;
+                const ca = colorOrder[(a.color || '').toLowerCase()] ?? 99;
+                const cb = colorOrder[(b.color || '').toLowerCase()] ?? 99;
+                return ca - cb;
             });
         },
 
