@@ -2363,29 +2363,32 @@
 
         // Sort products: singles by color first, then value packs at the end
         sortProducts(products) {
+            const packOrder = { single: 0, value_pack: 1, multipack: 2 };
             const colorOrder = ['black', 'photo black', 'matte black', 'cyan', 'light cyan',
                                'magenta', 'light magenta', 'yellow', 'red', 'blue', 'green',
-                               'gray', 'grey', 'light gray', 'light grey'];
+                               'gray', 'grey', 'light gray', 'light grey', 'cmy', 'kcmy', 'cmyk'];
+            const sizeOrder = (name) => {
+                const n = (name || '').toLowerCase();
+                if (n.includes('xxl') || n.includes('super high')) return 2;
+                if (n.includes('xl')) return 1;
+                return 0;
+            };
 
             return products.sort((a, b) => {
-                const aIsValuePack = this.isValuePack(a);
-                const bIsValuePack = this.isValuePack(b);
+                // 1. Pack type: single → value_pack → multipack
+                const pa = packOrder[a.pack_type] ?? (this.isValuePack(a) ? 1 : 0);
+                const pb = packOrder[b.pack_type] ?? (this.isValuePack(b) ? 1 : 0);
+                if (pa !== pb) return pa - pb;
 
-                // Value packs go to the end
-                if (aIsValuePack && !bIsValuePack) return 1;
-                if (!aIsValuePack && bIsValuePack) return -1;
+                // 2. Color order
+                const ca = colorOrder.indexOf((a.color || '').toLowerCase());
+                const cb = colorOrder.indexOf((b.color || '').toLowerCase());
+                const oa = ca === -1 ? 999 : ca;
+                const ob = cb === -1 ? 999 : cb;
+                if (oa !== ob) return oa - ob;
 
-                // Both are value packs or both are singles - sort by color
-                const colorA = (a.color || '').toLowerCase();
-                const colorB = (b.color || '').toLowerCase();
-                const indexA = colorOrder.indexOf(colorA);
-                const indexB = colorOrder.indexOf(colorB);
-
-                // If color not in order list, put at end of its group
-                const orderA = indexA === -1 ? 999 : indexA;
-                const orderB = indexB === -1 ? 999 : indexB;
-
-                return orderA - orderB;
+                // 3. Size variant: Standard → XL → XXL
+                return sizeOrder(a.name) - sizeOrder(b.name);
             });
         },
 
@@ -2465,7 +2468,9 @@
                         ${color ? `<span class="product-card__color">${Security.escapeHtml(color)}</span>` : ''}
                         <div class="product-card__pricing">
                             <span class="product-card__price">${formatPrice(price)}</span>
+                            ${product.compare_price && product.compare_price > price ? `<span class="product-card__compare-price">${formatPrice(product.compare_price)}</span>` : ''}
                         </div>
+                        ${product.compare_price && product.compare_price > price ? `<span class="product-card__savings">Save ${formatPrice(product.compare_price - price)}</span>` : ''}
                         <span class="product-card__stock product-card__stock--${stockStatus.class}">
                             ${stockStatus.text}
                         </span>

@@ -74,6 +74,7 @@ const Products = {
      */
     renderCard(product) {
         const sourceBadge = getSourceBadge(product.source);
+        const stockInfo = getStockStatus(product);
         const resolvedImage = typeof storageUrl === 'function' ? storageUrl(product.image_url) : (product.image_url || '');
 
         return `
@@ -87,12 +88,13 @@ const Products = {
                         <p class="product-card__brand">${Security.escapeHtml(product.brand?.name || '')}</p>
                         <h3 class="product-card__title" title="${Security.escapeAttr(product.name)}">${Security.escapeHtml(product.name)}</h3>
                         ${product.color ? `<p class="product-card__color">${Security.escapeHtml(product.color)}</p>` : ''}
-                        <p class="product-card__price">${product.retail_price == null ? 'Price unavailable' : formatPrice(product.retail_price)}</p>
-                        <p class="product-card__stock stock-in">In Stock</p>
+                        <p class="product-card__price">${product.retail_price == null ? 'Price unavailable' : formatPrice(product.retail_price)}${product.compare_price && product.compare_price > product.retail_price ? `<span class="product-card__compare-price">${formatPrice(product.compare_price)}</span>` : ''}</p>
+                        ${product.compare_price && product.compare_price > product.retail_price ? `<p class="product-card__savings">Save ${formatPrice(product.compare_price - product.retail_price)}</p>` : ''}
+                        <p class="product-card__stock stock-${stockInfo.class}">${Security.escapeHtml(stockInfo.text)}</p>
                     </div>
                 </a>
                 <button class="product-card__add-btn btn btn--primary"
-                        ${product.retail_price == null ? 'disabled' : ''}
+                        ${product.retail_price == null || !product.in_stock ? 'disabled' : ''}
                         data-product-id="${Security.escapeAttr(product.id)}"
                         data-product-sku="${Security.escapeAttr(product.sku)}"
                         data-product-name="${Security.escapeAttr(product.name)}"

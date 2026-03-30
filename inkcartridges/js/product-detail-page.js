@@ -479,14 +479,39 @@
             document.getElementById('product-sku').textContent = `SKU: ${info.sku}${info.manufacturer_part_number ? ' | Model: ' + info.manufacturer_part_number : ''}`;
 
             // Price - use formatPrice() for consistent locale-aware currency display
-            document.getElementById('product-price').textContent = formatPrice(price);
+            const priceEl = document.getElementById('product-price');
+            priceEl.textContent = formatPrice(price);
 
-            // Stock status — always in stock
+            // Compare price & savings
+            const comparePrice = parseFloat(info.compare_price || 0);
+            if (comparePrice && comparePrice > price) {
+                const savingsAmount = comparePrice - price;
+                const savingsPct = Math.round((savingsAmount / comparePrice) * 100);
+                priceEl.insertAdjacentHTML('afterend',
+                    `<span class="product-detail__compare-price">Was ${formatPrice(comparePrice)}</span>
+                     <span class="product-detail__savings">Save ${formatPrice(savingsAmount)} (${savingsPct}%)</span>`);
+            }
+
+            // Stock status — dynamic based on API fields
+            const stockStatus = getStockStatus(info);
             const stockEl = document.getElementById('product-stock');
-            stockEl.innerHTML = `<span class="stock-status stock-status--in-stock">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
-                In Stock
+            const stockIcons = {
+                'in-stock': '<polyline points="20 6 9 17 4 12"/>',
+                'low-stock': '<circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>',
+                'out-of-stock': '<circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/>'
+            };
+            stockEl.innerHTML = `<span class="stock-status stock-status--${stockStatus.class}">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">${stockIcons[stockStatus.class] || stockIcons['in-stock']}</svg>
+                ${Security.escapeHtml(stockStatus.text)}
             </span>`;
+
+            // Disable Add to Cart if out of stock
+            if (!info.in_stock) {
+                const addBtn = document.getElementById('add-to-cart-btn');
+                if (addBtn) { addBtn.disabled = true; addBtn.textContent = 'Out of Stock'; }
+                const qtyInput = document.getElementById('product-quantity');
+                if (qtyInput) qtyInput.disabled = true;
+            }
 
             // Product image with color fallback
             const productImageEl = document.getElementById('product-image');

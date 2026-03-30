@@ -1030,6 +1030,59 @@
     background-color: var(--color-success);
 }
 
+.stock-status--low-stock {
+    color: var(--color-warning, #f59e0b);
+}
+
+.stock-status--low-stock::before {
+    background-color: var(--color-warning, #f59e0b);
+}
+
+.stock-status--out-of-stock {
+    color: var(--color-error, #ef4444);
+}
+
+.stock-status--out-of-stock::before {
+    background-color: var(--color-error, #ef4444);
+}
+
+/* Product card stock variants */
+.product-card__stock.stock-out {
+    color: var(--color-error, #ef4444);
+}
+
+.product-card__stock.stock-low {
+    color: var(--color-warning, #f59e0b);
+}
+
+/* Compare price & savings */
+.product-card__compare-price {
+    text-decoration: line-through;
+    color: var(--color-text-muted, #6b7280);
+    font-size: 0.85em;
+}
+
+.product-card__savings {
+    color: var(--color-success, #22c55e);
+    font-weight: 600;
+    font-size: 0.85em;
+}
+
+.product-detail__compare-price {
+    text-decoration: line-through;
+    color: var(--color-text-muted, #6b7280);
+    font-size: 0.9em;
+    margin-left: 0.5rem;
+}
+
+.product-detail__savings {
+    color: var(--color-success, #22c55e);
+    font-weight: 600;
+    font-size: 0.9em;
+    display: block;
+    margin-top: 0.25rem;
+}
+
 /* Order Status */
 .order-status {
     display: inline-flex;

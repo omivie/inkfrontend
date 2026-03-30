@@ -43,6 +43,7 @@ function icon(name, w = 18, h = 18) {
 const NAV_ITEMS = [
   { key: 'dashboard', label: 'Dashboard', icon: 'dashboard' },
   { key: 'analytics', label: 'Analytics', icon: 'analytics' },
+  { key: 'margin', label: 'Margin Analysis', icon: 'finance', ownerOnly: true },
   { key: 'orders', label: 'Orders', icon: 'orders' },
   { key: 'customers', label: 'Customers', icon: 'customers' },
   { key: 'products', label: 'Products & SKUs', icon: 'products' },

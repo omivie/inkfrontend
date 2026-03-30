@@ -447,7 +447,7 @@ const RibbonsPage = {
                     <div class="product-card__pricing">
                         <span class="product-card__price">${formatPrice(price)}</span>
                     </div>
-                    <span class="product-card__stock product-card__stock--in">In Stock</span>
+                    <span class="product-card__stock product-card__stock--${getStockStatus(ribbon).class}">${Security.escapeHtml(getStockStatus(ribbon).text)}</span>
                 </div>
             </a>
             <button type="button" class="favourite-btn product-card__fav-btn ${isFav ? 'favourite-btn--active' : ''}"

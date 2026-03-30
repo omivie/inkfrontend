@@ -104,7 +104,35 @@ const PrintersPage = {
             return;
         }
 
-        grid.innerHTML = products.map(p => Products.renderCard(p)).join('');
+        // Sort: genuine first, then compatible; within each: single → value_pack → multipack, then by color, then size
+        const packOrder = { single: 0, value_pack: 1, multipack: 2 };
+        const colorOrder = ['black', 'photo black', 'matte black', 'cyan', 'light cyan',
+                           'magenta', 'light magenta', 'yellow', 'red', 'blue', 'green',
+                           'gray', 'grey', 'cmy', 'kcmy', 'cmyk'];
+        const sizeOrder = (name) => {
+            const n = (name || '').toLowerCase();
+            if (n.includes('xxl') || n.includes('super high')) return 2;
+            if (n.includes('xl')) return 1;
+            return 0;
+        };
+        const sorted = [...products].sort((a, b) => {
+            // Source: genuine before compatible
+            const sa = a.source === 'genuine' ? 0 : 1;
+            const sb = b.source === 'genuine' ? 0 : 1;
+            if (sa !== sb) return sa - sb;
+            // Pack type
+            const pa = packOrder[a.pack_type] ?? 0;
+            const pb = packOrder[b.pack_type] ?? 0;
+            if (pa !== pb) return pa - pb;
+            // Color
+            const ca = colorOrder.indexOf((a.color || '').toLowerCase());
+            const cb = colorOrder.indexOf((b.color || '').toLowerCase());
+            if ((ca === -1 ? 999 : ca) !== (cb === -1 ? 999 : cb)) return (ca === -1 ? 999 : ca) - (cb === -1 ? 999 : cb);
+            // Size
+            return sizeOrder(a.name) - sizeOrder(b.name);
+        });
+
+        grid.innerHTML = sorted.map(p => Products.renderCard(p)).join('');
         Products.bindImageFallbacks(grid);
         Products.bindAddToCartEvents(grid);
         grid.hidden = false;
