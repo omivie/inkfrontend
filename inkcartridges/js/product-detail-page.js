@@ -901,12 +901,35 @@
                         if (!items.length) return '';
                         const label = productType === 'toner' ? 'Toner Cartridges' : 'Ink Cartridges';
                         const heading = `${brandName} ${label}`.trim();
+
+                        // Group items by size/pack variant for separate rows
+                        const sizeOf = (p) => {
+                            const n = (p.name || '').toLowerCase();
+                            if (n.includes('xxl') || n.includes('super high')) return 2;
+                            if (n.includes('xl') || n.includes('high yield') || /\bhy\b/.test(n)) return 1;
+                            return 0;
+                        };
+                        const groupKey = (p) => {
+                            const pt = p.pack_type || 'single';
+                            if (pt === 'value_pack') return 'value_pack';
+                            if (pt === 'multipack') return 'multipack';
+                            return 'single_' + sizeOf(p);
+                        };
+                        const groups = {};
+                        items.forEach(p => {
+                            const k = groupKey(p);
+                            (groups[k] = groups[k] || []).push(p);
+                        });
+                        const groupOrder = ['single_0', 'single_1', 'single_2', 'value_pack', 'multipack'];
+                        const grids = groupOrder
+                            .filter(k => groups[k]?.length)
+                            .map(k => `<div class="related-products__grid product-grid">${groups[k].map(p => Products.renderCard(p)).join('')}</div>`)
+                            .join('');
+
                         return `
                             <div class="related-products__type-group">
                                 <h3 class="related-products__group-heading">${badge} ${heading}</h3>
-                                <div class="related-products__grid product-grid">
-                                    ${items.map(p => Products.renderCard(p)).join('')}
-                                </div>
+                                ${grids}
                             </div>
                         `;
                     };
