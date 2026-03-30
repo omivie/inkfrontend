@@ -475,7 +475,7 @@
 
             // Title and SKU
             const h1Prefix = info.isCompatible ? 'Compatible ' : '';
-            document.getElementById('product-title').textContent = `${h1Prefix}${info.displayName} NZ`;
+            document.getElementById('product-title').textContent = `${h1Prefix}${info.displayName}`;
             document.getElementById('product-sku').textContent = `SKU: ${info.sku}${info.manufacturer_part_number ? ' | Model: ' + info.manufacturer_part_number : ''}`;
 
             // Price - use formatPrice() for consistent locale-aware currency display
