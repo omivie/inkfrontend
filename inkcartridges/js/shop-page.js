@@ -2370,7 +2370,7 @@
             const sizeOrder = (name) => {
                 const n = (name || '').toLowerCase();
                 if (n.includes('xxl') || n.includes('super high')) return 2;
-                if (n.includes('xl')) return 1;
+                if (n.includes('xl') || n.includes('high yield') || /\bhy\b/.test(n)) return 1;
                 return 0;
             };
 
@@ -2380,15 +2380,17 @@
                 const pb = packOrder[b.pack_type] ?? (this.isValuePack(b) ? 1 : 0);
                 if (pa !== pb) return pa - pb;
 
-                // 2. Color order
+                // 2. Size variant: Standard → XL → XXL (group by size first)
+                const sa = sizeOrder(a.name);
+                const sb = sizeOrder(b.name);
+                if (sa !== sb) return sa - sb;
+
+                // 3. Color order within same size group
                 const ca = colorOrder.indexOf((a.color || '').toLowerCase());
                 const cb = colorOrder.indexOf((b.color || '').toLowerCase());
                 const oa = ca === -1 ? 999 : ca;
                 const ob = cb === -1 ? 999 : cb;
-                if (oa !== ob) return oa - ob;
-
-                // 3. Size variant: Standard → XL → XXL
-                return sizeOrder(a.name) - sizeOrder(b.name);
+                return oa - ob;
             });
         },
 

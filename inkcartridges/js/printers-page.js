@@ -112,7 +112,7 @@ const PrintersPage = {
         const sizeOrder = (name) => {
             const n = (name || '').toLowerCase();
             if (n.includes('xxl') || n.includes('super high')) return 2;
-            if (n.includes('xl')) return 1;
+            if (n.includes('xl') || n.includes('high yield') || /\bhy\b/.test(n)) return 1;
             return 0;
         };
         const sorted = [...products].sort((a, b) => {
@@ -124,12 +124,14 @@ const PrintersPage = {
             const pa = packOrder[a.pack_type] ?? 0;
             const pb = packOrder[b.pack_type] ?? 0;
             if (pa !== pb) return pa - pb;
-            // Color
+            // Size variant first (group Standard together, then XL, then XXL)
+            const za = sizeOrder(a.name);
+            const zb = sizeOrder(b.name);
+            if (za !== zb) return za - zb;
+            // Color within same size group
             const ca = colorOrder.indexOf((a.color || '').toLowerCase());
             const cb = colorOrder.indexOf((b.color || '').toLowerCase());
-            if ((ca === -1 ? 999 : ca) !== (cb === -1 ? 999 : cb)) return (ca === -1 ? 999 : ca) - (cb === -1 ? 999 : cb);
-            // Size
-            return sizeOrder(a.name) - sizeOrder(b.name);
+            return (ca === -1 ? 999 : ca) - (cb === -1 ? 999 : cb);
         });
 
         grid.innerHTML = sorted.map(p => Products.renderCard(p)).join('');
