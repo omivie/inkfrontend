@@ -861,19 +861,21 @@
 
                 if (related.length === 0) return;
 
-                // Infer source from name/slug since related endpoint omits the source field
+                // Infer source from available fields
                 const inferSource = (p) => {
                     if (p.source) return p.source;
                     const name = (p.name || '').toLowerCase();
                     const slug = (p.slug || '').toLowerCase();
-                    if (name.startsWith('compatible') || slug.startsWith('compatible-')) return 'compatible';
-                    if (name.startsWith('genuine') || slug.startsWith('genuine-')) return 'genuine';
-                    return 'unknown';
+                    const sku = (p.sku || '').toLowerCase();
+                    if (name.startsWith('compatible') || slug.startsWith('compatible-') || sku.startsWith('comp-')) return 'compatible';
+                    if (name.startsWith('genuine') || slug.startsWith('genuine-') || sku.startsWith('g-') || sku.startsWith('gen-')) return 'genuine';
+                    // Default: assume same source as the current product
+                    return info.source || 'genuine';
                 };
 
                 const isCompatible = info.source === 'compatible';
                 const compatibles = this._sortByColor(related.filter(p => inferSource(p) === 'compatible'));
-                const genuines    = this._sortByColor(related.filter(p => inferSource(p) === 'genuine'));
+                const genuines    = this._sortByColor(related.filter(p => inferSource(p) !== 'compatible'));
 
                 const firstGroup  = isCompatible ? compatibles : genuines;
                 const secondGroup = isCompatible ? genuines    : compatibles;
