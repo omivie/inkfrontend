@@ -1413,7 +1413,9 @@ function calculateGST(inclusiveAmount) {
  * @returns {object} Status with class and text
  */
 function getStockStatus(product) {
-    if (!product.in_stock) {
+    // Determine stock: prefer in_stock field, fall back to stock_quantity > 0
+    const inStock = product.in_stock !== undefined ? product.in_stock : (product.stock_quantity > 0);
+    if (!inStock) {
         return { class: 'out-of-stock', text: 'Out of Stock', icon: 'x-circle' };
     }
     if (product.is_low_stock && product.source !== 'compatible') {
