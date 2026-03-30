@@ -506,7 +506,7 @@
             </span>`;
 
             // Disable Add to Cart if out of stock
-            if (!info.in_stock) {
+            if (stockStatus.class === 'out-of-stock') {
                 const addBtn = document.getElementById('add-to-cart-btn');
                 if (addBtn) { addBtn.disabled = true; addBtn.textContent = 'Out of Stock'; }
                 const qtyInput = document.getElementById('product-quantity');

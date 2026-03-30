@@ -94,7 +94,7 @@ const Products = {
                     </div>
                 </a>
                 <button class="product-card__add-btn btn btn--primary"
-                        ${product.retail_price == null || !product.in_stock ? 'disabled' : ''}
+                        ${product.retail_price == null || stockInfo.class === 'out-of-stock' ? 'disabled' : ''}
                         data-product-id="${Security.escapeAttr(product.id)}"
                         data-product-sku="${Security.escapeAttr(product.sku)}"
                         data-product-name="${Security.escapeAttr(product.name)}"
