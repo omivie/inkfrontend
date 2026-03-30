@@ -2826,7 +2826,8 @@
     gap: 1px;
 }
 
-.related-products__grid .product-card__badge {
+.related-products__grid .product-card__badge,
+.related-products__grid .product-card__brand {
     display: none;
 }
 

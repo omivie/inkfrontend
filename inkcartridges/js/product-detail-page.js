@@ -830,7 +830,15 @@
 
                 const addProducts = (products) => {
                     for (const p of products) {
-                        if (!seenSkus.has(p.sku)) {
+                        if (seenSkus.has(p.sku)) {
+                            // Merge image_url into existing entry if the new source has one
+                            if (p.image_url) {
+                                const existing = related.find(r => r.sku === p.sku);
+                                if (existing && !existing.image_url) {
+                                    existing.image_url = p.image_url;
+                                }
+                            }
+                        } else {
                             seenSkus.add(p.sku);
                             related.push(p);
                         }
@@ -868,6 +876,19 @@
                 }
 
                 if (related.length === 0) return;
+
+                // Fill in missing image_url by fetching individual products
+                const missingImages = related.filter(p => !p.image_url);
+                if (missingImages.length > 0) {
+                    const lookups = missingImages.map(p =>
+                        API.getProduct(p.sku).then(resp => {
+                            if (resp.ok && resp.data?.image_url) {
+                                p.image_url = resp.data.image_url;
+                            }
+                        }).catch(() => {})
+                    );
+                    await Promise.all(lookups);
+                }
 
                 // Infer source from available fields
                 const inferSource = (p) => {

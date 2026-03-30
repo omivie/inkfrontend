@@ -50,7 +50,7 @@ const NAV_ITEMS = [
   { key: 'product-review', label: 'Product Review', icon: 'orders' },
   { key: 'refunds', label: 'Refunds & Chargebacks', icon: 'refunds' },
   { divider: true },
-  { key: 'contact-emails', label: 'Contact Emails', icon: 'mail', ownerOnly: true },
+  { key: 'contact-emails', label: 'Notification Recipients', icon: 'mail', ownerOnly: true },
 ];
 
 // ---- Page module cache ----
