@@ -199,7 +199,7 @@ const Cart = {
                 id: item.product.id,
                 name: item.product.name,
                 price: item.product.retail_price,
-                image: item.product.image_url || '',
+                image: typeof storageUrl === 'function' ? storageUrl(item.product.image_url) : (item.product.image_url || ''),
                 sku: item.product.sku,
                 brand: item.product.brand?.name || '',
                 color: item.product.color || '',

@@ -550,7 +550,7 @@ function createSmartSearch() {
                     ...p,
                     brand: p.brand || {},
                     retail_price: p.retail_price ?? p.price,
-                    image_url: p.image_url || ''
+                    image_url: typeof storageUrl === 'function' ? storageUrl(p.image_url) : (p.image_url || '')
                 }));
 
                 return {
@@ -608,7 +608,7 @@ function createSmartSearch() {
             if (typeof Products !== 'undefined' && Products.getProductImageHTML) {
                 imageHtml = Products.getProductImageHTML(product);
             } else {
-                const imgUrl = product.image_url || '/assets/images/placeholder-product.svg';
+                const imgUrl = typeof storageUrl === 'function' ? storageUrl(product.image_url) : (product.image_url || '/assets/images/placeholder-product.svg');
                 imageHtml = '<img src="' + Security.escapeAttr(imgUrl) + '" alt="' + Security.escapeAttr(name) + '" loading="lazy" data-fallback="placeholder">';
             }
 

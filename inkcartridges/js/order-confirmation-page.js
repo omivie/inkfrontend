@@ -122,7 +122,7 @@
                     sku: item.product?.sku || item.product_sku || item.sku,
                     quantity: item.quantity,
                     price: item.unit_price || item.price,
-                    image_url: item.product?.image_url || item.image_url || null,
+                    image_url: typeof storageUrl === 'function' ? storageUrl(item.product?.image_url || item.image_url) : (item.product?.image_url || item.image_url || null),
                     brand: item.product?.brand?.name || item.brand || null,
                     source: item.product?.source || item.source || null
                 })),

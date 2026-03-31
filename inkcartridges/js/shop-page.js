@@ -2527,7 +2527,7 @@
                     name: product.name,
                     price: product.retail_price || 0,
                     sku: product.sku || '',
-                    image: product.image_url || '',
+                    image: typeof storageUrl === 'function' ? storageUrl(product.image_url) : (product.image_url || ''),
                     brand: product.brand?.name || '',
                     color: product.color || '',
                     quantity: 1

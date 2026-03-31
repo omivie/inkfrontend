@@ -224,7 +224,7 @@
                         name: item.product?.name || 'Product',
                         price: item.product?.retail_price || item.price_snapshot || 0,
                         quantity: item.quantity,
-                        image: item.product?.image_url || '/assets/images/placeholder.png'
+                        image: typeof storageUrl === 'function' ? storageUrl(item.product?.image_url) : (item.product?.image_url || '/assets/images/placeholder.png')
                     }));
                     this.renderOrderSummary();
                 }

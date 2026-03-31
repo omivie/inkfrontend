@@ -265,7 +265,8 @@
                 brandName,
                 category,
                 pageYield,
-                color: p.color || null
+                color: p.color || null,
+                image_url: typeof storageUrl === 'function' ? storageUrl(p.image_url) : (p.image_url || '')
             };
         },
 

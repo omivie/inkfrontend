@@ -80,7 +80,8 @@
                     <h2>Items Ordered</h2>
                     <div class="order-items-list">
                         ${items.map(item => {
-                            const imageUrl = item.product?.image_url || item.image_url || null;
+                            const rawImageUrl = item.product?.image_url || item.image_url || null;
+                            const imageUrl = rawImageUrl && typeof storageUrl === 'function' ? storageUrl(rawImageUrl) : rawImageUrl;
                             return `
                             <div class="order-item">
                                 <div class="order-item__image">
