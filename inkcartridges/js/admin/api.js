@@ -388,6 +388,17 @@ const AdminAPI = {
     }
   },
 
+  async updateProductOverrides(productId, overrides) {
+    try {
+      const resp = await window.API.put(`/api/admin/products/${productId}/overrides`, { overrides });
+      if (resp && resp.ok === false) throw new Error(resp.error || 'Update overrides failed');
+      return resp?.data ?? null;
+    } catch (e) {
+      DebugLog.warn('[AdminAPI] updateProductOverrides failed:', e.message);
+      throw e;
+    }
+  },
+
   async createProduct(data) {
     try {
       const resp = await window.API.post('/api/admin/products', data);

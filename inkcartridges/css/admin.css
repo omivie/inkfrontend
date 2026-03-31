@@ -845,10 +845,26 @@
 /* ---- Forms ---- */
 .admin-form-group { margin-bottom: 16px; }
 .admin-form-group label {
-  display: block; font-size: 12px; font-weight: 600;
+  display: flex; align-items: center; gap: 6px;
+  font-size: 12px; font-weight: 600;
   color: var(--text-secondary); margin-bottom: 6px;
 }
 .admin-form-group label .required-star { color: var(--danger); margin-left: 2px; }
+
+/* Override / Pin badges */
+.override-badge {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 20px; height: 20px; padding: 0; margin-left: auto;
+  border: 1px solid var(--border); border-radius: var(--radius);
+  background: transparent; color: var(--text-muted);
+  cursor: pointer; transition: all 0.15s; flex-shrink: 0;
+}
+.override-badge:hover { border-color: var(--cyan); color: var(--cyan); background: rgba(0, 200, 255, 0.06); }
+.override-badge--active {
+  border-color: var(--cyan); color: var(--cyan);
+  background: rgba(0, 200, 255, 0.1);
+}
+.override-badge--active:hover { border-color: var(--danger); color: var(--danger); background: rgba(255, 80, 80, 0.08); }
 .admin-input, .admin-select, .admin-textarea {
   width: 100%; padding: 8px 12px; font-size: 13px; font-family: inherit;
   color: var(--text); background: var(--input-bg);

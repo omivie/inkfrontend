@@ -613,11 +613,11 @@ function buildProductModalTabs(modal, full, isOwner) {
   let basicHtml = `
     <div class="admin-form-row">
       ${formGroup('SKU', `<input class="admin-input" id="edit-sku" value="${esc(full.sku || '')}">`)}
-      ${formGroup('Name', `<input class="admin-input" id="edit-name" value="${esc(full.name || '')}">`)}
+      ${formGroup('Name', `<input class="admin-input" id="edit-name" value="${esc(full.name || '')}">`, 'name')}
     </div>
-    ${formGroup('Description', `<textarea class="admin-textarea" id="edit-description" rows="4">${esc(full.description || '')}</textarea>`)}
+    ${formGroup('Description', `<textarea class="admin-textarea" id="edit-description" rows="4">${esc(full.description || '')}</textarea>`, 'description')}
     <div class="admin-form-row">
-      ${formGroup('Brand', buildBrandSelect(full.brand_id || full.brand))}
+      ${formGroup('Brand', buildBrandSelect(full.brand_id || full.brand), 'brand_id')}
       ${formGroup('Product Type', buildSelect('edit-type', [
         { value: 'ink_cartridge',    label: 'Ink Cartridge' },
         { value: 'ink_bottle',       label: 'Ink Bottle' },
@@ -634,31 +634,31 @@ function buildProductModalTabs(modal, full, isOwner) {
         { value: 'label_tape',       label: 'Label Tape' },
         { value: 'photo_paper',      label: 'Photo Paper' },
         { value: 'printer',          label: 'Printer' },
-      ], full.product_type))}
+      ], full.product_type), 'product_type')}
     </div>
     <div class="admin-form-row">
-      ${formGroup('Color', `<input class="admin-input" id="edit-color" value="${esc(full.color || '')}">`)}
-      ${formGroup('Source', buildSelect('edit-source', ['genuine', 'compatible', 'remanufactured'], full.source))}
+      ${formGroup('Color', `<input class="admin-input" id="edit-color" value="${esc(full.color || '')}">`, 'color')}
+      ${formGroup('Source', buildSelect('edit-source', ['genuine', 'compatible', 'remanufactured'], full.source), 'source')}
     </div>
   `;
 
   // Pricing panel
   let pricingHtml = `
     <div class="admin-form-row">
-      ${formGroup('Retail Price', `<input class="admin-input" id="edit-retail-price" type="number" step="0.01" value="${full.retail_price || ''}">`)}
-      ${formGroup('Compare Price', `<input class="admin-input" id="edit-compare-price" type="number" step="0.01" value="${full.compare_at_price || full.compare_price || ''}">`)}
+      ${formGroup('Retail Price', `<input class="admin-input" id="edit-retail-price" type="number" step="0.01" value="${full.retail_price || ''}">`, 'retail_price')}
+      ${formGroup('Compare Price', `<input class="admin-input" id="edit-compare-price" type="number" step="0.01" value="${full.compare_at_price || full.compare_price || ''}">`, 'compare_at_price')}
     </div>
-    ${isOwner ? formGroup('Supplier Price', `<input class="admin-input" id="edit-cost-price" type="number" step="0.01" value="${full.cost_price || ''}">`) : ''}
+    ${isOwner ? formGroup('Supplier Price', `<input class="admin-input" id="edit-cost-price" type="number" step="0.01" value="${full.cost_price || ''}">`, 'cost_price') : ''}
   `;
 
   // Inventory panel
   let inventoryHtml = `
     <div class="admin-form-row">
-      ${formGroup('Weight (kg)', `<input class="admin-input" id="edit-weight" type="number" step="0.01" min="0" value="${full.weight_kg ?? ''}">`)}
+      ${formGroup('Weight (kg)', `<input class="admin-input" id="edit-weight" type="number" step="0.01" min="0" value="${full.weight_kg ?? ''}">`, 'weight_kg')}
       <div class="admin-form-group"></div>
     </div>
     <div class="admin-form-row">
-      ${formGroup('Active', toggleHtml('edit-active', full.is_active !== false))}
+      ${formGroup('Active', toggleHtml('edit-active', full.is_active !== false), 'is_active')}
       <div class="admin-form-group"></div>
     </div>
   `;
@@ -668,14 +668,14 @@ function buildProductModalTabs(modal, full, isOwner) {
     <div style="display:flex;justify-content:flex-end;margin-bottom:12px">
       <button class="admin-btn admin-btn--ghost admin-btn--sm" data-action="generate-seo">${icon('search', 12, 12)} Generate</button>
     </div>
-    ${formGroup('Meta Title', `<input class="admin-input" id="edit-meta-title" value="${esc(full.meta_title || '')}">`)}
-    ${formGroup('Meta Description', `<textarea class="admin-textarea" id="edit-meta-desc" rows="3">${esc(full.meta_description || '')}</textarea>`)}
+    ${formGroup('Meta Title', `<input class="admin-input" id="edit-meta-title" value="${esc(full.meta_title || '')}">`, 'meta_title')}
+    ${formGroup('Meta Description', `<textarea class="admin-textarea" id="edit-meta-desc" rows="3">${esc(full.meta_description || '')}</textarea>`, 'meta_description')}
   `;
 
   // Advanced panel
   let advancedHtml = `
-    ${formGroup('Page Yield', `<input class="admin-input" id="edit-page-yield" type="number" min="0" value="${full.page_yield ?? ''}">`)}
-    ${formGroup('Tags (comma-separated)', `<input class="admin-input" id="edit-tags" value="${esc((full.tags || []).join(', '))}">`)}
+    ${formGroup('Page Yield', `<input class="admin-input" id="edit-page-yield" type="number" min="0" value="${full.page_yield ?? ''}">`, 'page_yield')}
+    ${formGroup('Tags (comma-separated)', `<input class="admin-input" id="edit-tags" value="${esc((full.tags || []).join(', '))}">`, 'tags')}
     ${formGroup('Internal Notes', `<textarea class="admin-textarea" id="edit-admin-notes" rows="3">${esc(full.internal_notes || '')}</textarea>`)}
   `;
 
@@ -754,6 +754,67 @@ function buildProductModalTabs(modal, full, isOwner) {
     tabsEl.querySelectorAll('.admin-product-modal__tab').forEach(t => t.classList.toggle('active', t.dataset.tab === idx));
     panelsEl.querySelectorAll('.admin-product-modal__tab-panel').forEach(p => p.classList.toggle('active', p.dataset.panel === idx));
   });
+
+  // ── Manual Override Indicators ──────────────────────────────────────────
+  applyOverrideBadges(modal, full);
+}
+
+/**
+ * Renders pin badges on fields that have manual overrides, and wires
+ * click-to-toggle so admins can unpin fields to let the feed take over.
+ */
+function applyOverrideBadges(modal, product) {
+  const overrides = product.manual_overrides || {};
+  const productId = product.id;
+
+  // Find all form groups tagged with data-override-field
+  const groups = modal.querySelectorAll('[data-override-field]');
+  for (const group of groups) {
+    const field = group.dataset.overrideField;
+    const label = group.querySelector('label');
+    if (!label) continue;
+
+    // Remove any existing badge
+    label.querySelector('.override-badge')?.remove();
+
+    const isPinned = !!overrides[field];
+    const badge = document.createElement('button');
+    badge.type = 'button';
+    badge.className = `override-badge${isPinned ? ' override-badge--active' : ''}`;
+    badge.title = isPinned
+      ? 'Pinned — this value won\u2019t be overwritten by feed imports. Click to unpin.'
+      : 'Not pinned — feed imports may update this value. Click to pin.';
+    badge.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="${isPinned ? 'currentColor' : 'none'}" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l0 10"/><path d="M18.364 5.636a9 9 0 1 1-12.728 0"/><circle cx="12" cy="12" r="3"/></svg>`;
+
+    // Pin icon — simpler and more recognizable
+    badge.innerHTML = isPinned
+      ? `<svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="1.5"><path d="M16 3a3 3 0 0 0-2.12.88L9.17 8.59a1.5 1.5 0 0 1-.71.39L5 10l-.7.7a1 1 0 0 0 0 1.42l3.58 3.58-5.3 5.3 1.42 1.42 5.3-5.3 3.58 3.58a1 1 0 0 0 1.42 0l.7-.7 1.02-3.46a1.5 1.5 0 0 1 .39-.71l4.71-4.71A3 3 0 0 0 16 3z"/></svg>`
+      : `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M16 3a3 3 0 0 0-2.12.88L9.17 8.59a1.5 1.5 0 0 1-.71.39L5 10l-.7.7a1 1 0 0 0 0 1.42l3.58 3.58-5.3 5.3 1.42 1.42 5.3-5.3 3.58 3.58a1 1 0 0 0 1.42 0l.7-.7 1.02-3.46a1.5 1.5 0 0 1 .39-.71l4.71-4.71A3 3 0 0 0 16 3z"/></svg>`;
+
+    badge.addEventListener('click', async (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const newState = !badge.classList.contains('override-badge--active');
+      badge.style.opacity = '0.5';
+      badge.style.pointerEvents = 'none';
+      try {
+        const result = await AdminAPI.updateProductOverrides(productId, { [field]: newState });
+        // Update local overrides from response
+        const updated = result?.manual_overrides ?? (newState ? { ...overrides, [field]: true } : { ...overrides });
+        if (!newState) delete updated[field];
+        product.manual_overrides = updated;
+        // Re-render badges
+        applyOverrideBadges(modal, product);
+        Toast.success(newState ? `${field.replace(/_/g, ' ')} pinned` : `${field.replace(/_/g, ' ')} unpinned`);
+      } catch (err) {
+        Toast.error(`Override update failed: ${err.message}`);
+        badge.style.opacity = '';
+        badge.style.pointerEvents = '';
+      }
+    });
+
+    label.appendChild(badge);
+  }
 }
 
 async function buildFaqSection(modal, product) {
@@ -918,7 +979,10 @@ async function buildFaqSection(modal, product) {
   });
 }
 
-function formGroup(label, inputHtml) {
+function formGroup(label, inputHtml, overrideField) {
+  if (overrideField) {
+    return `<div class="admin-form-group" data-override-field="${esc(overrideField)}"><label>${esc(label)}</label>${inputHtml}</div>`;
+  }
   return `<div class="admin-form-group"><label>${esc(label)}</label>${inputHtml}</div>`;
 }
 
@@ -1734,7 +1798,11 @@ function bindProductModalActions(modal, product) {
     }
 
     try {
-      await AdminAPI.updateProduct(product.id, data);
+      const result = await AdminAPI.updateProduct(product.id, data);
+      // Update override badges if the backend auto-flagged fields
+      if (result?.manual_overrides) {
+        product.manual_overrides = result.manual_overrides;
+      }
       invalidateDiagCache();
       Toast.success('Product updated');
       closeProductModal();
