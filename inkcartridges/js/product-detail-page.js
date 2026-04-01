@@ -258,10 +258,11 @@
         getProductInfo() {
             const p = this.product;
             const name = p.name || '';
-            const isCompatible = name.toLowerCase().startsWith('compatible ');
-            const displayName = isCompatible ? name.substring(11).trim() : name;
-            const brandName = p.brand?.name || (typeof p.brand === 'string' ? p.brand : null) || this.extractBrand(name) || 'Unknown';
             const category = this.normalizeProductType(p.product_type) || this.normalizeCategory(p.category) || this.detectCategory(name);
+            const isRibbonProduct = category === 'ribbon';
+            const isCompatible = isRibbonProduct || name.toLowerCase().startsWith('compatible ');
+            const displayName = (!isRibbonProduct && name.toLowerCase().startsWith('compatible ')) ? name.substring(11).trim() : name;
+            const brandName = p.brand?.name || (typeof p.brand === 'string' ? p.brand : null) || this.extractBrand(name) || 'Unknown';
             const pageYield = p.page_yield || p.yield || null;
 
             return {
@@ -920,9 +921,12 @@
 
                 const inferProductType = (p) => {
                     const pt = (p.product_type || '').toLowerCase();
+                    if (pt.includes('ribbon') || pt === 'correction_tape') return 'ribbon';
                     if (pt === 'toner_cartridge') return 'toner';
                     if (pt === 'ink_cartridge' || pt === 'ink_bottle') return 'ink';
-                    return (p.name || '').toLowerCase().includes('toner') ? 'toner' : 'ink';
+                    const n = (p.name || '').toLowerCase();
+                    if (n.includes('ribbon') || n.includes('correction tape')) return 'ribbon';
+                    return n.includes('toner') ? 'toner' : 'ink';
                 };
 
                 const buildSection = (products, type) => {
@@ -932,12 +936,14 @@
                         : '<span class="badge badge-genuine">GENUINE</span>';
                     const brandName = Security.escapeHtml((info.brandName || '').trim());
 
-                    const inks   = products.filter(p => inferProductType(p) === 'ink');
-                    const toners = products.filter(p => inferProductType(p) === 'toner');
+                    const ribbons = products.filter(p => inferProductType(p) === 'ribbon');
+                    const inks    = products.filter(p => inferProductType(p) === 'ink');
+                    const toners  = products.filter(p => inferProductType(p) === 'toner');
 
                     const buildTypeGrid = (items, productType) => {
                         if (!items.length) return '';
-                        const label = productType === 'toner' ? 'Toner Cartridges' : 'Ink Cartridges';
+                        const label = productType === 'ribbon' ? 'Ribbons' :
+                                     productType === 'toner' ? 'Toner Cartridges' : 'Ink Cartridges';
                         const heading = `${brandName} ${label}`.trim();
 
                         // Group items by size/pack variant for separate rows
@@ -974,6 +980,7 @@
 
                     return `
                         <div class="related-products__group">
+                            ${buildTypeGrid(ribbons, 'ribbon')}
                             ${buildTypeGrid(inks, 'ink')}
                             ${buildTypeGrid(toners, 'toner')}
                         </div>
