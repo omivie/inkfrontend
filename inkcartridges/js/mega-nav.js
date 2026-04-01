@@ -49,7 +49,6 @@
         { slug: 'epson', name: 'Epson', logo: '/assets/brands/epson.png',
           categories: [
               { label: 'Ink Cartridges', param: 'ink' },
-              { label: 'Toner Cartridges', param: 'toner' },
               { label: 'Drums & Supplies', param: 'consumable' },
               { label: 'Paper', param: 'paper' }
           ]},
@@ -80,8 +79,7 @@
           categories: [
               { label: 'Ink Cartridges', param: 'ink' },
               { label: 'Toner Cartridges', param: 'toner' },
-              { label: 'Drums & Supplies', param: 'consumable' },
-              { label: 'Paper', param: 'paper' }
+              { label: 'Drums & Supplies', param: 'consumable' }
           ]},
         { slug: 'kyocera', name: 'Kyocera', logo: '/assets/brands/kyocera.svg',
           categories: [

@@ -1434,7 +1434,9 @@ const Cart = {
                     const escapedSku = Security.escapeHtml(item.sku || '');
                     const itemKey = item.key || self.cartItemKey(item);
 
-                    const productLink = '/html/product/?sku=' + encodeURIComponent(item.sku || '');
+                    const productLink = item.slug
+                        ? '/products/' + encodeURIComponent(item.slug) + '/' + encodeURIComponent(item.sku || '')
+                        : '/html/product/?sku=' + encodeURIComponent(item.sku || '');
 
                     return '\
                     <article class="cart-item" data-item-id="' + item.id + '" data-item-key="' + Security.escapeAttr(itemKey) + '">\

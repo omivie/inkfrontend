@@ -204,6 +204,12 @@
                 this._productType = 'ribbon';
             }
 
+            // Handle SEO URL: /products/:slug/:sku
+            if (!sku) {
+                const productPath = window.location.pathname.match(/^\/products\/[^/]+\/(.+)$/);
+                if (productPath) sku = decodeURIComponent(productPath[1]);
+            }
+
             if (!sku) {
                 this.showError('No product specified');
                 return;

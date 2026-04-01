@@ -10,7 +10,7 @@
             <div class="container">
                 <div class="footer-grid">
                     <div class="footer-brand">
-                        <a href="/html/index.html" class="footer-brand__logo">
+                        <a href="/" class="footer-brand__logo">
                             <img class="logo__icon" src="https://lmdlgldjgcanknsjrcxh.supabase.co/storage/v1/object/public/public-assets/images/site/inklogo.png" alt="" aria-hidden="true">
                             <span class="logo__text">Ink<span>Cartridges</span>.co.nz</span>
                         </a>

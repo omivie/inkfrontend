@@ -122,6 +122,7 @@ const Favourites = {
                 this.items.push({
                     id: product.id,
                     sku: product.sku,
+                    slug: product.slug || '',
                     name: product.name,
                     price: product.price,
                     image: product.image || '',
@@ -354,7 +355,7 @@ const Favourites = {
         // Render items
         grid.innerHTML = this.items.map(item => `
             <article class="favourite-item" data-item-id="${Security.escapeAttr(item.id)}">
-                <a href="/html/product/?sku=${Security.escapeAttr(item.sku)}" class="favourite-item__link">
+                <a href="${item.slug ? `/products/${Security.escapeAttr(item.slug)}/${Security.escapeAttr(item.sku)}` : `/html/product/?sku=${Security.escapeAttr(item.sku)}`}" class="favourite-item__link">
                     <div class="favourite-item__image">
                         ${this.getItemImageHTML(item)}
                     </div>

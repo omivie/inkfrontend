@@ -29,14 +29,14 @@
 
                     const urlParams = new URLSearchParams(window.location.search);
                     if (urlParams.get('dev') === 'true') {
-                        window.location.href = '/html/index.html';
+                        window.location.href = '/';
                         return;
                     }
 
                     if (typeof Auth !== 'undefined') {
                         await Auth.signOut();
                     }
-                    window.location.href = '/html/index.html';
+                    window.location.href = '/';
                 });
 
                 document.addEventListener('keydown', (e) => {

@@ -16,6 +16,6 @@
             window.location.href = '/html/account/login.html' + window.location.hash;
         }
     } else {
-        window.location.href = '/html/index.html';
+        window.location.href = '/';
     }
 })();

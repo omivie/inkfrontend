@@ -3,25 +3,35 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="description" id="meta-description" content="Shop ink cartridges and toner by brand at InkCartridges.co.nz. Free NZ-wide shipping over $100.">
+    <meta name="description" content="Buy genuine and compatible ink cartridges in NZ. Shop HP, Canon, Epson, Brother and more at InkCartridges.co.nz. Free NZ-wide shipping over $100.">
     <meta name="robots" content="index, follow">
 
     <meta property="og:type" content="website">
     <meta property="og:site_name" content="InkCartridges.co.nz">
-    <meta property="og:title" id="og-title" content="Ink Cartridges by Brand | InkCartridges.co.nz">
-    <meta property="og:description" id="og-description" content="Shop ink cartridges and toner by brand at InkCartridges.co.nz.">
+    <meta property="og:title" content="Ink Cartridges NZ — Genuine & Compatible | InkCartridges.co.nz">
+    <meta property="og:description" content="Buy genuine and compatible ink cartridges in NZ. Shop HP, Canon, Epson, Brother and more. Free shipping over $100.">
 
-    <link rel="canonical" id="canonical-url" href="">
+    <link rel="canonical" href="https://www.inkcartridges.co.nz/ink-cartridges">
     <link rel="icon" type="image/svg+xml" href="/assets/icons/favicon.svg">
-    <title id="page-title">Ink Cartridges by Brand | InkCartridges.co.nz</title>
+    <title>Ink Cartridges NZ — Genuine & Compatible | InkCartridges.co.nz</title>
 
-    <script type="application/ld+json" id="page-schema">
+    <script type="application/ld+json">
+    {
+        "@context": "https://schema.org",
+        "@type": "BreadcrumbList",
+        "itemListElement": [
+            { "@type": "ListItem", "position": 1, "name": "Home", "item": "https://www.inkcartridges.co.nz" },
+            { "@type": "ListItem", "position": 2, "name": "Ink Cartridges", "item": "https://www.inkcartridges.co.nz/ink-cartridges" }
+        ]
+    }
+    </script>
+    <script type="application/ld+json">
     {
         "@context": "https://schema.org",
         "@type": "CollectionPage",
-        "name": "",
-        "description": "",
-        "url": ""
+        "name": "Ink Cartridges NZ",
+        "description": "Shop genuine and compatible ink cartridges from top brands including HP, Canon, Epson, and Brother. Free NZ-wide shipping on orders over $100.",
+        "url": "https://www.inkcartridges.co.nz/ink-cartridges"
     }
     </script>
 
@@ -29,6 +39,7 @@
     <script src="/js/gtag.js"></script>
 
     <link rel="preconnect" href="https://ink-backend-zaeq.onrender.com">
+    <link rel="preconnect" href="https://www.ds.co.nz">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link rel="stylesheet" href="/css/base.css">
@@ -37,6 +48,22 @@
     <link rel="stylesheet" href="/css/modern-effects.css">
     <link rel="stylesheet" href="/css/pages.css">
     <link rel="stylesheet" href="/css/search.css">
+
+    <style>
+        .category-intro { max-width: 800px; margin: 0 auto 2rem; line-height: 1.7; color: var(--text-secondary, #555); }
+        .brand-filters { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 2rem; justify-content: center; }
+        .brand-filters__btn { padding: 0.5rem 1.25rem; border: 2px solid var(--border-color, #ddd); border-radius: 6px; background: #fff; cursor: pointer; font-size: 0.95rem; font-weight: 500; transition: all 0.2s; }
+        .brand-filters__btn:hover { border-color: var(--primary, #0066cc); color: var(--primary, #0066cc); }
+        .brand-filters__btn--active { background: var(--primary, #0066cc); color: #fff; border-color: var(--primary, #0066cc); }
+        .faq-section { max-width: 800px; margin: 3rem auto; }
+        .faq-section h2 { font-size: 1.5rem; margin-bottom: 1.5rem; }
+        .faq-item { border-bottom: 1px solid var(--border-color, #e0e0e0); }
+        .faq-item summary { padding: 1rem 0; cursor: pointer; font-weight: 600; font-size: 1.05rem; list-style: none; display: flex; justify-content: space-between; align-items: center; }
+        .faq-item summary::-webkit-details-marker { display: none; }
+        .faq-item summary::after { content: '+'; font-size: 1.4rem; font-weight: 300; transition: transform 0.2s; }
+        .faq-item[open] summary::after { content: '\2212'; }
+        .faq-item .faq-answer { padding: 0 0 1rem; line-height: 1.7; color: var(--text-secondary, #555); }
+    </style>
 </head>
 <body>
     <a href="#main-content" class="skip-link">Skip to main content</a>
@@ -142,31 +169,42 @@
             <div class="container">
                 <ol class="breadcrumb__list">
                     <li class="breadcrumb__item"><a href="/">Home</a></li>
-                    <li class="breadcrumb__item" id="breadcrumb-brand"></li>
+                    <li class="breadcrumb__item">Ink Cartridges</li>
                 </ol>
             </div>
         </nav>
 
         <section class="shop-header">
             <div class="container">
-                <h1 id="page-heading" class="shop-header__title"></h1>
-                <div id="brand-intro" class="brand-intro" hidden>
-                    <p id="brand-intro-text"></p>
+                <h1 class="shop-header__title">Ink Cartridges NZ</h1>
+                <div class="category-intro">
+                    <p>
+                        Find the right ink cartridges for your printer at InkCartridges.co.nz, New Zealand's trusted
+                        source for printing supplies. We stock both genuine OEM cartridges from leading brands like
+                        HP, Canon, Epson, and Brother, as well as high-quality compatible alternatives that deliver
+                        excellent print results at a fraction of the cost. Whether you need black ink for everyday
+                        documents or vibrant colour cartridges for photo printing, we have you covered. All our ink
+                        cartridges are tested for reliability and backed by our quality guarantee. With free NZ-wide
+                        shipping on orders over $100 and fast delivery to every corner of the country, keeping your
+                        printer running has never been easier. Browse our full range below or filter by your preferred
+                        brand to find exactly what you need.
+                    </p>
                 </div>
             </div>
         </section>
 
         <div class="container">
-            <nav class="tabs" id="category-tabs" role="tablist" aria-label="Filter by category" hidden>
-                <button class="tabs__button tabs__button--active" role="tab" aria-selected="true" data-category="all">All</button>
-                <button class="tabs__button" role="tab" aria-selected="false" data-category="ink">Ink Cartridges</button>
-                <button class="tabs__button" role="tab" aria-selected="false" data-category="toner">Toner</button>
-                <button class="tabs__button" role="tab" aria-selected="false" data-category="drum">Drums</button>
-            </nav>
+            <div class="brand-filters" id="brand-filters">
+                <button class="brand-filters__btn brand-filters__btn--active" data-brand="all">All Brands</button>
+                <button class="brand-filters__btn" data-brand="hp">HP</button>
+                <button class="brand-filters__btn" data-brand="canon">Canon</button>
+                <button class="brand-filters__btn" data-brand="epson">Epson</button>
+                <button class="brand-filters__btn" data-brand="brother">Brother</button>
+            </div>
 
             <div id="products-loading" class="loading-state">
                 <div class="spinner"></div>
-                <p>Loading products&hellip;</p>
+                <p>Loading ink cartridges&hellip;</p>
             </div>
 
             <div id="products-error" class="error-state" hidden>
@@ -176,15 +214,47 @@
             <div id="products-grid" class="product-grid" hidden></div>
 
             <div id="no-products" class="empty-state" hidden>
-                <p>No products found for this brand. <a href="/html/shop.html">Browse all products</a>.</p>
+                <p>No ink cartridges found. <a href="/html/shop.html">Browse all products</a>.</p>
             </div>
         </div>
 
-        <section class="faq-section" id="brand-faq-section" hidden>
-            <div class="container">
-                <h2 id="faq-heading" class="section-title" style="text-align:center; margin-bottom: var(--spacing-xl);">Frequently Asked Questions</h2>
-                <div class="faq-list" id="faq-list"></div>
-            </div>
+        <section class="faq-section">
+            <h2>Frequently Asked Questions</h2>
+
+            <details class="faq-item">
+                <summary>What is the difference between genuine and compatible ink cartridges?</summary>
+                <div class="faq-answer">
+                    <p>Genuine (OEM) ink cartridges are manufactured by the printer brand itself, such as HP or Canon. Compatible cartridges are produced by third-party manufacturers and designed to work with the same printers. Both types deliver quality prints, but compatible cartridges typically cost significantly less while still meeting high performance standards.</p>
+                </div>
+            </details>
+
+            <details class="faq-item">
+                <summary>Will compatible ink cartridges void my printer warranty?</summary>
+                <div class="faq-answer">
+                    <p>No. Under New Zealand consumer law, using compatible or third-party ink cartridges does not void your printer warranty. Printer manufacturers cannot require you to use only their branded cartridges as a condition of warranty coverage.</p>
+                </div>
+            </details>
+
+            <details class="faq-item">
+                <summary>How do I find the right ink cartridge for my printer?</summary>
+                <div class="faq-answer">
+                    <p>The easiest way is to search for your printer model using the search bar at the top of the page. You can also filter by brand and browse our product listings. Each product page lists compatible printer models so you can confirm the cartridge fits your printer before purchasing.</p>
+                </div>
+            </details>
+
+            <details class="faq-item">
+                <summary>Do you offer free shipping on ink cartridges in New Zealand?</summary>
+                <div class="faq-answer">
+                    <p>Yes, we offer free NZ-wide shipping on all orders over $100. Orders under $100 have a flat-rate shipping fee. Most orders are dispatched the same business day and delivered within 1-3 working days anywhere in New Zealand.</p>
+                </div>
+            </details>
+
+            <details class="faq-item">
+                <summary>How should I store ink cartridges?</summary>
+                <div class="faq-answer">
+                    <p>Store ink cartridges in their original sealed packaging in a cool, dry place at room temperature. Avoid exposing them to direct sunlight or extreme heat. Unopened cartridges typically have a shelf life of 1-2 years. Once installed, use the cartridge within six months for the best print quality.</p>
+                </div>
+            </details>
         </section>
     </main>
 
@@ -277,6 +347,70 @@
     <script defer src="/js/search.js"></script>
     <script defer src="/js/mega-nav.js"></script>
     <script defer src="/js/products.js"></script>
-    <script defer src="/js/brands-page.js"></script>
+
+    <script>
+    document.addEventListener('DOMContentLoaded', async function() {
+        const grid = document.getElementById('products-grid');
+        const loading = document.getElementById('products-loading');
+        const errorEl = document.getElementById('products-error');
+        const noProducts = document.getElementById('no-products');
+        const filtersEl = document.getElementById('brand-filters');
+
+        let allProducts = [];
+        let activeFilter = 'all';
+
+        try {
+            const res = await API.getProducts({ category: 'ink', limit: 40 });
+            loading.hidden = true;
+
+            const products = res.ok ? (res.data?.products || []) : [];
+            allProducts = products;
+
+            if (products.length === 0) {
+                noProducts.hidden = false;
+                return;
+            }
+
+            renderGrid(products);
+        } catch (err) {
+            loading.hidden = true;
+            errorEl.hidden = false;
+        }
+
+        filtersEl.addEventListener('click', function(e) {
+            const btn = e.target.closest('.brand-filters__btn');
+            if (!btn) return;
+
+            const brand = btn.dataset.brand;
+            activeFilter = brand;
+
+            filtersEl.querySelectorAll('.brand-filters__btn').forEach(function(b) {
+                b.classList.remove('brand-filters__btn--active');
+            });
+            btn.classList.add('brand-filters__btn--active');
+
+            const filtered = brand === 'all'
+                ? allProducts
+                : allProducts.filter(function(p) {
+                    return (p.brand || '').toLowerCase() === brand.toLowerCase();
+                });
+
+            if (filtered.length === 0) {
+                grid.hidden = true;
+                noProducts.hidden = false;
+            } else {
+                noProducts.hidden = true;
+                renderGrid(filtered);
+            }
+        });
+
+        function renderGrid(products) {
+            grid.innerHTML = products.map(function(p) { return Products.renderCard(p); }).join('');
+            Products.bindImageFallbacks(grid);
+            Products.bindAddToCartEvents(grid);
+            grid.hidden = false;
+        }
+    });
+    </script>
 </body>
 </html>

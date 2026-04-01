@@ -2461,7 +2461,7 @@
             const isFav = typeof Favourites !== 'undefined' && Favourites.isFavourite && Favourites.isFavourite(product.id);
 
             card.innerHTML = `
-                <a href="/html/product/?sku=${Security.escapeAttr(product.sku)}" class="product-card__link">
+                <a href="${product.slug ? `/products/${Security.escapeAttr(product.slug)}/${Security.escapeAttr(product.sku)}` : `/html/product/?sku=${Security.escapeAttr(product.sku)}`}" class="product-card__link">
                     <div class="product-card__image-wrapper">
                         ${imageContent}
                     </div>
@@ -2618,7 +2618,7 @@
         updateSchemaLD() {
             const el = document.getElementById('shop-schema');
             if (!el) return;
-            const base = 'https://inkcartridges.co.nz';
+            const base = 'https://www.inkcartridges.co.nz';
             const shopUrl = base + '/html/shop';
             const items = [
                 { "@type": "ListItem", "position": 1, "name": "Home", "item": base + '/' },
@@ -2839,6 +2839,19 @@
                     "url": canonical,
                     "breadcrumb": { "@type": "BreadcrumbList", "itemListElement": breadcrumbItems }
                 }, null, 2);
+            }
+
+            // Noindex deep filter combinations to avoid thin content
+            let robotsMeta = document.querySelector('meta[name="robots"]');
+            if (brand && category && code) {
+                if (!robotsMeta) {
+                    robotsMeta = document.createElement('meta');
+                    robotsMeta.name = 'robots';
+                    document.head.appendChild(robotsMeta);
+                }
+                robotsMeta.content = 'noindex, follow';
+            } else if (robotsMeta) {
+                robotsMeta.content = 'index, follow';
             }
         },
 

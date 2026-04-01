@@ -321,7 +321,7 @@ function initBasicAutocomplete(searchForm, searchInput) {
             } else {
                 return `
                     <li class="search-autocomplete__item search-autocomplete__item--product"
-                        data-index="${index}" data-type="product" data-sku="${Security.escapeAttr(item.sku)}">
+                        data-index="${index}" data-type="product" data-sku="${Security.escapeAttr(item.sku)}"${item.slug ? ` data-slug="${Security.escapeAttr(item.slug)}"` : ''}>
                         <span class="search-autocomplete__icon">
                             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                 <path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z"/>
@@ -350,7 +350,9 @@ function initBasicAutocomplete(searchForm, searchInput) {
         if (type === 'printer') {
             window.location.href = `/html/shop?printer=${encodeURIComponent(item.dataset.slug)}`;
         } else if (type === 'product') {
-            window.location.href = `/html/product/?sku=${item.dataset.sku}`;
+            window.location.href = item.dataset.slug
+                ? `/products/${item.dataset.slug}/${item.dataset.sku}`
+                : `/html/product/?sku=${item.dataset.sku}`;
         }
 
         hideDropdown();

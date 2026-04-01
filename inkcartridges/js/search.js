@@ -904,7 +904,9 @@ function createSmartSearch() {
             if (sku && product._isRibbon) {
                 url = '/ribbon/' + encodeURIComponent(sku);
             } else if (sku) {
-                url = '/html/product/?sku=' + encodeURIComponent(sku);
+                url = product.slug
+                    ? '/products/' + encodeURIComponent(product.slug) + '/' + encodeURIComponent(sku)
+                    : '/html/product/?sku=' + encodeURIComponent(sku);
             } else {
                 const name = product.name || product.title || '';
                 url = name

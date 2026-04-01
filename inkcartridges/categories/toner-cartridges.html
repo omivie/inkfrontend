@@ -3,25 +3,35 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="description" id="meta-description" content="Shop ink cartridges and toner by brand at InkCartridges.co.nz. Free NZ-wide shipping over $100.">
+    <meta name="description" content="Buy genuine and compatible toner cartridges in NZ. Shop HP, Canon, Brother and more at InkCartridges.co.nz. Free NZ-wide shipping over $100.">
     <meta name="robots" content="index, follow">
 
     <meta property="og:type" content="website">
     <meta property="og:site_name" content="InkCartridges.co.nz">
-    <meta property="og:title" id="og-title" content="Ink Cartridges by Brand | InkCartridges.co.nz">
-    <meta property="og:description" id="og-description" content="Shop ink cartridges and toner by brand at InkCartridges.co.nz.">
+    <meta property="og:title" content="Toner Cartridges NZ — Genuine & Compatible | InkCartridges.co.nz">
+    <meta property="og:description" content="Buy genuine and compatible toner cartridges in NZ. Shop HP, Canon, Brother and more. Free shipping over $100.">
 
-    <link rel="canonical" id="canonical-url" href="">
+    <link rel="canonical" href="https://www.inkcartridges.co.nz/toner-cartridges">
     <link rel="icon" type="image/svg+xml" href="/assets/icons/favicon.svg">
-    <title id="page-title">Ink Cartridges by Brand | InkCartridges.co.nz</title>
+    <title>Toner Cartridges NZ — Genuine & Compatible | InkCartridges.co.nz</title>
 
-    <script type="application/ld+json" id="page-schema">
+    <script type="application/ld+json">
+    {
+        "@context": "https://schema.org",
+        "@type": "BreadcrumbList",
+        "itemListElement": [
+            { "@type": "ListItem", "position": 1, "name": "Home", "item": "https://www.inkcartridges.co.nz" },
+            { "@type": "ListItem", "position": 2, "name": "Toner Cartridges", "item": "https://www.inkcartridges.co.nz/toner-cartridges" }
+        ]
+    }
+    </script>
+    <script type="application/ld+json">
     {
         "@context": "https://schema.org",
         "@type": "CollectionPage",
-        "name": "",
-        "description": "",
-        "url": ""
+        "name": "Toner Cartridges NZ",
+        "description": "Shop genuine and compatible toner cartridges from top brands including HP, Canon, Brother, and more. Free NZ-wide shipping on orders over $100.",
+        "url": "https://www.inkcartridges.co.nz/toner-cartridges"
     }
     </script>
 
@@ -29,6 +39,7 @@
     <script src="/js/gtag.js"></script>
 
     <link rel="preconnect" href="https://ink-backend-zaeq.onrender.com">
+    <link rel="preconnect" href="https://www.ds.co.nz">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link rel="stylesheet" href="/css/base.css">
@@ -37,6 +48,22 @@
     <link rel="stylesheet" href="/css/modern-effects.css">
     <link rel="stylesheet" href="/css/pages.css">
     <link rel="stylesheet" href="/css/search.css">
+
+    <style>
+        .category-intro { max-width: 800px; margin: 0 auto 2rem; line-height: 1.7; color: var(--text-secondary, #555); }
+        .brand-filters { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 2rem; justify-content: center; }
+        .brand-filters__btn { padding: 0.5rem 1.25rem; border: 2px solid var(--border-color, #ddd); border-radius: 6px; background: #fff; cursor: pointer; font-size: 0.95rem; font-weight: 500; transition: all 0.2s; }
+        .brand-filters__btn:hover { border-color: var(--primary, #0066cc); color: var(--primary, #0066cc); }
+        .brand-filters__btn--active { background: var(--primary, #0066cc); color: #fff; border-color: var(--primary, #0066cc); }
+        .faq-section { max-width: 800px; margin: 3rem auto; }
+        .faq-section h2 { font-size: 1.5rem; margin-bottom: 1.5rem; }
+        .faq-item { border-bottom: 1px solid var(--border-color, #e0e0e0); }
+        .faq-item summary { padding: 1rem 0; cursor: pointer; font-weight: 600; font-size: 1.05rem; list-style: none; display: flex; justify-content: space-between; align-items: center; }
+        .faq-item summary::-webkit-details-marker { display: none; }
+        .faq-item summary::after { content: '+'; font-size: 1.4rem; font-weight: 300; transition: transform 0.2s; }
+        .faq-item[open] summary::after { content: '\2212'; }
+        .faq-item .faq-answer { padding: 0 0 1rem; line-height: 1.7; color: var(--text-secondary, #555); }
+    </style>
 </head>
 <body>
     <a href="#main-content" class="skip-link">Skip to main content</a>
@@ -142,31 +169,42 @@
             <div class="container">
                 <ol class="breadcrumb__list">
                     <li class="breadcrumb__item"><a href="/">Home</a></li>
-                    <li class="breadcrumb__item" id="breadcrumb-brand"></li>
+                    <li class="breadcrumb__item">Toner Cartridges</li>
                 </ol>
             </div>
         </nav>
 
         <section class="shop-header">
             <div class="container">
-                <h1 id="page-heading" class="shop-header__title"></h1>
-                <div id="brand-intro" class="brand-intro" hidden>
-                    <p id="brand-intro-text"></p>
+                <h1 class="shop-header__title">Toner Cartridges NZ</h1>
+                <div class="category-intro">
+                    <p>
+                        Shop toner cartridges for your laser printer at InkCartridges.co.nz, New Zealand's trusted
+                        supplier of printing consumables. We carry genuine OEM toner from brands like HP, Canon, and
+                        Brother alongside premium compatible toner cartridges that deliver sharp, professional-quality
+                        prints at a lower cost. Laser toner is ideal for high-volume office printing, producing crisp
+                        text documents and reliable graphics page after page. Our compatible toner cartridges are
+                        rigorously tested to match OEM performance and page yield. With free NZ-wide shipping on orders
+                        over $100 and prompt dispatch, you can keep your office running without interruption. Use the
+                        brand filters below to narrow your search or browse the full range of toner cartridges available
+                        for delivery anywhere in New Zealand.
+                    </p>
                 </div>
             </div>
         </section>
 
         <div class="container">
-            <nav class="tabs" id="category-tabs" role="tablist" aria-label="Filter by category" hidden>
-                <button class="tabs__button tabs__button--active" role="tab" aria-selected="true" data-category="all">All</button>
-                <button class="tabs__button" role="tab" aria-selected="false" data-category="ink">Ink Cartridges</button>
-                <button class="tabs__button" role="tab" aria-selected="false" data-category="toner">Toner</button>
-                <button class="tabs__button" role="tab" aria-selected="false" data-category="drum">Drums</button>
-            </nav>
+            <div class="brand-filters" id="brand-filters">
+                <button class="brand-filters__btn brand-filters__btn--active" data-brand="all">All Brands</button>
+                <button class="brand-filters__btn" data-brand="hp">HP</button>
+                <button class="brand-filters__btn" data-brand="canon">Canon</button>
+                <button class="brand-filters__btn" data-brand="epson">Epson</button>
+                <button class="brand-filters__btn" data-brand="brother">Brother</button>
+            </div>
 
             <div id="products-loading" class="loading-state">
                 <div class="spinner"></div>
-                <p>Loading products&hellip;</p>
+                <p>Loading toner cartridges&hellip;</p>
             </div>
 
             <div id="products-error" class="error-state" hidden>
@@ -176,15 +214,47 @@
             <div id="products-grid" class="product-grid" hidden></div>
 
             <div id="no-products" class="empty-state" hidden>
-                <p>No products found for this brand. <a href="/html/shop.html">Browse all products</a>.</p>
+                <p>No toner cartridges found. <a href="/html/shop.html">Browse all products</a>.</p>
             </div>
         </div>
 
-        <section class="faq-section" id="brand-faq-section" hidden>
-            <div class="container">
-                <h2 id="faq-heading" class="section-title" style="text-align:center; margin-bottom: var(--spacing-xl);">Frequently Asked Questions</h2>
-                <div class="faq-list" id="faq-list"></div>
-            </div>
+        <section class="faq-section">
+            <h2>Frequently Asked Questions</h2>
+
+            <details class="faq-item">
+                <summary>What is the difference between ink cartridges and toner cartridges?</summary>
+                <div class="faq-answer">
+                    <p>Ink cartridges contain liquid ink and are used in inkjet printers, while toner cartridges contain a fine powder and are used in laser printers. Toner cartridges generally have a much higher page yield, making them more cost-effective for high-volume printing. Laser printers with toner also tend to print faster and produce sharper text documents.</p>
+                </div>
+            </details>
+
+            <details class="faq-item">
+                <summary>How long do toner cartridges last?</summary>
+                <div class="faq-answer">
+                    <p>Toner cartridge lifespan depends on the model and your print volume. Standard toner cartridges typically yield 1,500 to 3,000 pages, while high-yield cartridges can produce 5,000 to 10,000 pages or more. Unlike ink, toner powder does not dry out, so unopened toner cartridges can be stored for several years without losing quality.</p>
+                </div>
+            </details>
+
+            <details class="faq-item">
+                <summary>Are compatible toner cartridges as good as genuine?</summary>
+                <div class="faq-answer">
+                    <p>High-quality compatible toner cartridges are engineered to meet or closely match the print quality and page yield of genuine OEM cartridges. Our compatible toner products undergo rigorous quality testing to ensure consistent, professional results. They offer significant cost savings, often 30-60% less than OEM equivalents, without compromising on output quality.</p>
+                </div>
+            </details>
+
+            <details class="faq-item">
+                <summary>Do you ship toner cartridges throughout New Zealand?</summary>
+                <div class="faq-answer">
+                    <p>Yes, we deliver toner cartridges to every address in New Zealand. Orders over $100 qualify for free NZ-wide shipping. Most orders are dispatched the same business day and arrive within 1-3 working days. We package all toner cartridges securely to ensure they arrive in perfect condition.</p>
+                </div>
+            </details>
+
+            <details class="faq-item">
+                <summary>How do I know which toner cartridge fits my printer?</summary>
+                <div class="faq-answer">
+                    <p>You can search for your printer model using the search bar above, or filter by brand to browse compatible options. Each toner cartridge listing includes a full list of compatible printer models. You can also check the cartridge number printed on your current toner and search for that directly.</p>
+                </div>
+            </details>
         </section>
     </main>
 
@@ -277,6 +347,70 @@
     <script defer src="/js/search.js"></script>
     <script defer src="/js/mega-nav.js"></script>
     <script defer src="/js/products.js"></script>
-    <script defer src="/js/brands-page.js"></script>
+
+    <script>
+    document.addEventListener('DOMContentLoaded', async function() {
+        const grid = document.getElementById('products-grid');
+        const loading = document.getElementById('products-loading');
+        const errorEl = document.getElementById('products-error');
+        const noProducts = document.getElementById('no-products');
+        const filtersEl = document.getElementById('brand-filters');
+
+        let allProducts = [];
+        let activeFilter = 'all';
+
+        try {
+            const res = await API.getProducts({ category: 'toner', limit: 40 });
+            loading.hidden = true;
+
+            const products = res.ok ? (res.data?.products || []) : [];
+            allProducts = products;
+
+            if (products.length === 0) {
+                noProducts.hidden = false;
+                return;
+            }
+
+            renderGrid(products);
+        } catch (err) {
+            loading.hidden = true;
+            errorEl.hidden = false;
+        }
+
+        filtersEl.addEventListener('click', function(e) {
+            const btn = e.target.closest('.brand-filters__btn');
+            if (!btn) return;
+
+            const brand = btn.dataset.brand;
+            activeFilter = brand;
+
+            filtersEl.querySelectorAll('.brand-filters__btn').forEach(function(b) {
+                b.classList.remove('brand-filters__btn--active');
+            });
+            btn.classList.add('brand-filters__btn--active');
+
+            const filtered = brand === 'all'
+                ? allProducts
+                : allProducts.filter(function(p) {
+                    return (p.brand || '').toLowerCase() === brand.toLowerCase();
+                });
+
+            if (filtered.length === 0) {
+                grid.hidden = true;
+                noProducts.hidden = false;
+            } else {
+                noProducts.hidden = true;
+                renderGrid(filtered);
+            }
+        });
+
+        function renderGrid(products) {
+            grid.innerHTML = products.map(function(p) { return Products.renderCard(p); }).join('');
+            Products.bindImageFallbacks(grid);
+            Products.bindAddToCartEvents(grid);
+            grid.hidden = false;
+        }
+    });
+    </script>
 </body>
 </html>

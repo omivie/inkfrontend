@@ -892,7 +892,7 @@ const AccountPage = {
                 confirmBtn.disabled = true;
                 confirmBtn.textContent = 'Signing out...';
                 if (typeof Auth !== 'undefined') await Auth.signOut();
-                window.location.href = '/html/index.html';
+                window.location.href = '/';
             });
 
             document.addEventListener('keydown', (e) => {

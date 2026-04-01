@@ -628,7 +628,7 @@ const RibbonsPage = {
     updateSchemaLD() {
         const el = document.getElementById('ribbons-schema');
         if (!el) return;
-        const base = 'https://inkcartridges.co.nz';
+        const base = 'https://www.inkcartridges.co.nz';
         const ribbonsUrl = base + '/html/ribbons';
         const items = [
             { "@type": "ListItem", "position": 1, "name": "Home", "item": base + '/' },
