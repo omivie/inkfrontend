@@ -325,7 +325,7 @@ const RibbonsPage = {
                 limit: this.pageLimit,
                 sort: this.state.sort
             };
-            if (this.state.brand) params.printer_brand = this.state.brand;
+            if (this.state.brand) params.brand = this.state.brand;
             if (this.state.model) params.printer_model = this.state.model;
             if (this.state.ribbonBrand) params.brand = this.state.ribbonBrand;
             if (this.state.color) params.color = this.state.color;
