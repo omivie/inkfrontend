@@ -182,7 +182,7 @@
             container.innerHTML = this.cartItems.map(item => `
                 <li class="checkout-summary__item">
                     <div class="checkout-summary__item-image">
-                        <img src="${escAttr(item.image || '/assets/images/placeholder.png')}" alt="${escAttr(item.name)}" loading="lazy">
+                        <img src="${escAttr(item.image || '/assets/images/placeholder.png')}" alt="${escAttr(item.name)}" loading="lazy" data-fallback="placeholder">
                         <span class="checkout-summary__item-qty">${parseInt(item.quantity) || 0}</span>
                     </div>
                     <div class="checkout-summary__item-details">
@@ -192,6 +192,14 @@
                     <span class="checkout-summary__item-price">$${(parseFloat(item.price) * parseInt(item.quantity)).toFixed(2)}</span>
                 </li>
             `).join('');
+
+            // Bind image error fallbacks
+            container.querySelectorAll('img[data-fallback="placeholder"]').forEach(img => {
+                img.addEventListener('error', function() {
+                    this.removeAttribute('data-fallback');
+                    this.src = '/assets/images/placeholder-product.svg';
+                }, { once: true });
+            });
         },
 
         /**

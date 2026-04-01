@@ -360,7 +360,7 @@ const Favourites = {
                         ${this.getItemImageHTML(item)}
                     </div>
                     <div class="favourite-item__info">
-                        <span class="source-badge source-badge--${(item.name || '').toLowerCase().startsWith('compatible ') ? 'compatible' : 'genuine'}">${(item.name || '').toLowerCase().startsWith('compatible ') ? 'COMPATIBLE' : 'GENUINE'}</span>
+                        <span class="source-badge source-badge--${item.source === 'compatible' || (item.name || '').toLowerCase().includes('compatible') ? 'compatible' : 'genuine'}">${item.source === 'compatible' || (item.name || '').toLowerCase().includes('compatible') ? 'COMPATIBLE' : 'GENUINE'}</span>
                         <h3 class="favourite-item__name">${Security.escapeHtml(item.name)}</h3>
                         ${item.brand ? `<p class="favourite-item__brand">${Security.escapeHtml(item.brand)}</p>` : ''}
                         ${(item.color || (typeof ProductColors !== 'undefined' ? ProductColors.detectFromName(item.name) : '')) ? `<p class="favourite-item__color">${Security.escapeHtml(item.color || ProductColors.detectFromName(item.name))}</p>` : ''}

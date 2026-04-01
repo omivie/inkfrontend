@@ -32,7 +32,8 @@
             { id: 'toner',        name: 'Toner Cartridges', icon: 'box',       apiCategory: 'toner' },
             { id: 'consumable',   name: 'Drums & Supplies', icon: 'disc',      apiCategory: 'drums' },
             { id: 'label_tape',   name: 'Label Tape',       icon: 'tag',       apiCategory: 'label' },
-            { id: 'paper',        name: 'Paper',             icon: 'image',     apiCategory: 'paper' }
+            { id: 'paper',        name: 'Paper',             icon: 'image',     apiCategory: 'paper' },
+            { id: 'ribbons',      name: 'Printer Ribbons',  icon: 'file-text', apiCategory: 'ribbons' }
         ],
 
         // Compatible products now have "Compatible" prefix in their name
@@ -263,6 +264,12 @@
             this.state.printerBrand = params.get('printer_brand'); // Brand of printer (for display, not filtering)
             this.state.search = params.get('search') || params.get('q'); // Support both 'search' and 'q' params
             this.state.type = params.get('type'); // Support 'type' param for genuine/compatible filtering
+
+            // Ribbons category → redirect to dedicated ribbons page
+            if (this.state.category === 'ribbons' && this.state.brand) {
+                window.location.replace(`/html/ribbons?printer_brand=${encodeURIComponent(this.state.brand)}`);
+                return;
+            }
 
             // Determine level from state - search takes priority when combined with filters
             if (this.state.search) {
@@ -569,7 +576,8 @@
                                     toner: counts.toner || 0,
                                     consumable: counts.drums || 0,
                                     label_tape: counts.label_tape || counts.label || 0,
-                                    paper: counts.paper || 0
+                                    paper: counts.paper || 0,
+                                    ribbons: 0
                                 };
                             }
                         } else {
@@ -631,6 +639,19 @@
                         categoryCounts['consumable'] = countByProductType(allProducts, 'consumable');
                         categoryCounts['label_tape'] = countByProductType(allProducts, 'label_tape');
                         categoryCounts['paper'] = countByProductType(allProducts, 'paper');
+                        categoryCounts['ribbons'] = 0;
+                    }
+
+                    // Also check if this brand has ribbon products
+                    if (categoryCounts && this.state.brand) {
+                        try {
+                            const ribbonRes = await API.getRibbons({ printer_brand: this.state.brand, limit: 1 });
+                            if (navVersion !== undefined && this.navigationVersion !== navVersion) return;
+                            const ribbonTotal = ribbonRes?.meta?.total_items || ribbonRes?.data?.pagination?.total || 0;
+                            categoryCounts.ribbons = ribbonTotal;
+                        } catch (e) {
+                            categoryCounts.ribbons = 0;
+                        }
                     }
 
                     this.cache.products[cacheKey] = categoryCounts;
@@ -657,7 +678,12 @@
 
             // If there's only one category, skip the selection step and go straight to codes
             if (availableCategories.length === 1) {
-                this.navigateTo('codes', { category: availableCategories[0].id });
+                const onlyCat = availableCategories[0];
+                if (onlyCat.id === 'ribbons') {
+                    window.location.href = `/html/ribbons?printer_brand=${encodeURIComponent(this.state.brand)}`;
+                    return;
+                }
+                this.navigateTo('codes', { category: onlyCat.id });
                 return;
             }
 
@@ -671,7 +697,13 @@
                     <span class="drilldown-box__name">${cat.name}</span>
                     <span class="drilldown-box__count">${count} product${count !== 1 ? 's' : ''}</span>
                 `;
-                box.addEventListener('click', () => this.navigateTo('codes', { category: cat.id }));
+                if (cat.id === 'ribbons') {
+                    box.addEventListener('click', () => {
+                        window.location.href = `/html/ribbons?printer_brand=${encodeURIComponent(this.state.brand)}`;
+                    });
+                } else {
+                    box.addEventListener('click', () => this.navigateTo('codes', { category: cat.id }));
+                }
                 grid.appendChild(box);
             });
 
@@ -880,7 +912,7 @@
                     }
                     const isCompatibleProduct = (p) => {
                         if (p.source) return p.source === 'compatible';
-                        return (p.name || '').toLowerCase().trim().startsWith(this.compatiblePrefix);
+                        return (p.name || '').toLowerCase().trim().includes(this.compatiblePrefix);
                     };
                     let genuine = allPaperProducts.filter(p => !isCompatibleProduct(p));
                     let compatible = allPaperProducts.filter(p => isCompatibleProduct(p));
@@ -1557,7 +1589,7 @@
                     }
                     // Fallback: check if name starts with "Compatible"
                     const productName = (product.name || '').toLowerCase().trim();
-                    return productName.startsWith(this.compatiblePrefix);
+                    return productName.includes(this.compatiblePrefix);
                 };
 
                 let genuine = mergedProducts.filter(p => !isCompatibleProduct(p));
@@ -1623,7 +1655,7 @@
                         }
                         // Fallback: check if name starts with "Compatible"
                         const productName = (product.name || '').toLowerCase().trim();
-                        return productName.startsWith(this.compatiblePrefix);
+                        return productName.includes(this.compatiblePrefix);
                     };
 
                     let genuine = products.filter(p => !isCompatibleProduct(p));
@@ -2067,7 +2099,7 @@
                         }
                         // Fallback: check if name starts with "Compatible"
                         const productName = (product.name || '').toLowerCase().trim();
-                        return productName.startsWith(this.compatiblePrefix);
+                        return productName.includes(this.compatiblePrefix);
                     };
 
                     let genuine = filteredProducts.filter(p => !isCompatibleProduct(p));
@@ -2288,7 +2320,7 @@
                     const isCompatibleProduct = (product) => {
                         if (product.source) return product.source === 'compatible';
                         const productName = (product.name || '').toLowerCase().trim();
-                        return productName.startsWith(this.compatiblePrefix);
+                        return productName.includes(this.compatiblePrefix);
                     };
 
                     let genuine = filteredProducts.filter(p => !isCompatibleProduct(p));

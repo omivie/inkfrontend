@@ -260,8 +260,9 @@
             const name = p.name || '';
             const category = this.normalizeProductType(p.product_type) || this.normalizeCategory(p.category) || this.detectCategory(name);
             const isRibbonProduct = category === 'ribbon';
-            const isCompatible = isRibbonProduct || name.toLowerCase().startsWith('compatible ');
-            const displayName = (!isRibbonProduct && name.toLowerCase().startsWith('compatible ')) ? name.substring(11).trim() : name;
+            const nameLower = name.toLowerCase();
+            const isCompatible = isRibbonProduct || p.source === 'compatible' || nameLower.includes('compatible');
+            const displayName = (!isRibbonProduct && nameLower.startsWith('compatible ')) ? name.substring(11).trim() : name;
             const brandName = p.brand?.name || (typeof p.brand === 'string' ? p.brand : null) || this.extractBrand(name) || 'Unknown';
             const pageYield = p.page_yield || p.yield || null;
 

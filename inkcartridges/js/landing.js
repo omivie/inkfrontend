@@ -150,7 +150,7 @@
                 const brandName = p.brand?.name || (typeof p.brand === 'string' ? p.brand : '') || '';
                 const imageHtml = typeof Products !== 'undefined' && Products.getProductImageHTML
                     ? Products.getProductImageHTML(p)
-                    : `<img src="${Security.escapeAttr(typeof storageUrl === 'function' ? storageUrl(p.image_url) : (p.image_url || '/assets/images/placeholder-product.svg'))}" alt="${Security.escapeAttr(name)}">`;
+                    : `<img src="${Security.escapeAttr(typeof storageUrl === 'function' ? storageUrl(p.image_url) : (p.image_url || '/assets/images/placeholder-product.svg'))}" alt="${Security.escapeAttr(name)}" data-fallback="placeholder">`;
                 return `
                     <a href="${p.slug ? `/products/${Security.escapeAttr(p.slug)}/${Security.escapeAttr(p.sku)}` : `/html/product/?sku=${Security.escapeAttr(p.sku)}`}" class="product-card">
                         <div class="product-card__image-wrapper">${imageHtml}</div>
@@ -161,6 +161,11 @@
                         </div>
                     </a>`;
             }).join('');
+
+            // Bind image error fallbacks
+            if (typeof Products !== 'undefined' && Products.bindImageFallbacks) {
+                Products.bindImageFallbacks(grid);
+            }
 
             section.hidden = false;
         } catch (e) {

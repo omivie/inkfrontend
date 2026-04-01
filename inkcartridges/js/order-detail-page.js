@@ -86,12 +86,12 @@
                             <div class="order-item">
                                 <div class="order-item__image">
                                     ${imageUrl
-                                        ? `<img src="${escAttr(imageUrl)}" alt="${escAttr(item.product_name)}">`
+                                        ? `<img src="${escAttr(imageUrl)}" alt="${escAttr(item.product_name)}" data-fallback="placeholder">`
                                         : this.getColorPlaceholder(item.product_name)
                                     }
                                 </div>
                                 <div class="order-item__details">
-                                    <span class="source-badge source-badge--${(item.product_name || '').toLowerCase().startsWith('compatible ') ? 'compatible' : 'genuine'}">${(item.product_name || '').toLowerCase().startsWith('compatible ') ? 'COMPATIBLE' : 'GENUINE'}</span>
+                                    <span class="source-badge source-badge--${item.source === 'compatible' || (item.product_name || '').toLowerCase().includes('compatible') ? 'compatible' : 'genuine'}">${item.source === 'compatible' || (item.product_name || '').toLowerCase().includes('compatible') ? 'COMPATIBLE' : 'GENUINE'}</span>
                                     <h3>${esc(item.product_name)}</h3>
                                     <p class="order-item__sku">SKU: ${esc(item.product_sku || 'N/A')}</p>
                                     <p class="order-item__qty">Qty: ${item.quantity} × ${formatPrice(item.unit_price)}</p>
@@ -101,6 +101,14 @@
                         `}).join('')}
                     </div>
                 `;
+
+                // Bind image error fallbacks
+                itemsContainer.querySelectorAll('img[data-fallback="placeholder"]').forEach(img => {
+                    img.addEventListener('error', function() {
+                        this.removeAttribute('data-fallback');
+                        this.src = '/assets/images/placeholder-product.svg';
+                    }, { once: true });
+                });
             }
 
             // Render summary
