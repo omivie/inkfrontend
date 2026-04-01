@@ -25,8 +25,6 @@ const Products = {
     getProductImageHTML(product) {
         const colorStyle = ProductColors.getProductStyle(product);
         const imageUrl = typeof storageUrl === 'function' ? storageUrl(product.image_url) : product.image_url;
-        const compatibleOverlay = '';
-
         if (imageUrl && imageUrl !== '/assets/images/placeholder-product.svg') {
             // Has image URL - use it with error fallback (listeners attached after DOM insertion)
             if (colorStyle) {
@@ -36,25 +34,21 @@ const Products = {
                              width="200" height="200"
                              loading="lazy"
                              data-fallback="color-block">
-                        <div class="product-card__color-block" style="${colorStyle}; display: none;"></div>
-                        ${compatibleOverlay}`;
+                        <div class="product-card__color-block" style="${colorStyle}; display: none;"></div>`;
             } else {
                 return `<img src="${Security.escapeAttr(imageUrl)}"
                              alt="${Security.escapeAttr(product.name)}"
                              class="product-card__image"
                              width="200" height="200"
                              loading="lazy"
-                             data-fallback="placeholder">
-                        ${compatibleOverlay}`;
+                             data-fallback="placeholder">`;
             }
         } else if (colorStyle && product.source === 'compatible') {
             // Compatible with no image but has color - show color block
-            return `<div class="product-card__color-block" style="${colorStyle}"></div>
-                    ${compatibleOverlay}`;
+            return `<div class="product-card__color-block" style="${colorStyle}"></div>`;
         } else if (product.source === 'compatible') {
             // Compatible with no known color - default to black
-            return `<div class="product-card__color-block" style="background-color: #1a1a1a;"></div>
-                    ${compatibleOverlay}`;
+            return `<div class="product-card__color-block" style="background-color: #1a1a1a;"></div>`;
         } else {
             // Genuine with no image, no color - show placeholder
             return `<img src="/assets/images/placeholder-product.svg"

@@ -524,22 +524,17 @@
             // Product image with color fallback
             const productImageEl = document.getElementById('product-image');
             const colorStyle = ProductColors.getProductStyle(info);
-            const compatibleOverlay = info.isCompatible
-                ? '<div class="product-card__compatible-overlay product-card__compatible-overlay--detail"><span>COMPATIBLE</span></div>'
-                : '';
             if (info.image_url) {
                 if (colorStyle) {
                     // Image with color fallback on error
                     productImageEl.innerHTML = `
                         <img src="${Security.escapeAttr(Security.sanitizeUrl(info.image_url))}" alt="${Security.escapeAttr(info.displayName)}" style="max-width: 100%; height: auto;"
                              data-fallback="color-block">
-                        <div class="product-gallery__color-block" style="${colorStyle}; display: none;"></div>
-                        ${compatibleOverlay}`;
+                        <div class="product-gallery__color-block" style="${colorStyle}; display: none;"></div>`;
                 } else {
                     // Image with placeholder fallback
                     productImageEl.innerHTML = `<img src="${Security.escapeAttr(Security.sanitizeUrl(info.image_url))}" alt="${Security.escapeAttr(info.displayName)}" style="max-width: 100%; height: auto;"
-                        data-fallback="placeholder">
-                        ${compatibleOverlay}`;
+                        data-fallback="placeholder">`;
                 }
 
                 // Bind image fallback handlers
@@ -561,14 +556,12 @@
                     // colorStyle is safe — sourced from hardcoded ProductColors.map
                     productImageEl.classList.add('product-gallery__main--color-only');
                     productImageEl.closest('.product-detail__layout').classList.add('product-detail__layout--color-only');
-                    productImageEl.innerHTML = `<div class="product-gallery__color-block" style="${colorStyle}"></div>
-                        ${compatibleOverlay}`;
+                    productImageEl.innerHTML = `<div class="product-gallery__color-block" style="${colorStyle}"></div>`;
                 } else if (info.isCompatible) {
-                    // Compatible with no known color — default to black (matches search card behavior in products.js)
+                    // Compatible with no known color — default to black
                     productImageEl.classList.add('product-gallery__main--color-only');
                     productImageEl.closest('.product-detail__layout').classList.add('product-detail__layout--color-only');
-                    productImageEl.innerHTML = `<div class="product-gallery__color-block" style="background-color: #1a1a1a;"></div>
-                        ${compatibleOverlay}`;
+                    productImageEl.innerHTML = `<div class="product-gallery__color-block" style="background-color: #1a1a1a;"></div>`;
                 } else {
                     productImageEl.innerHTML = `<img src="/assets/images/placeholder-product.svg" alt="${Security.escapeAttr(info.displayName)}" style="max-width: 100%; height: auto;">`;
                 }

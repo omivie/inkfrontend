@@ -2441,18 +2441,15 @@
             let imageContent;
             const resolvedImageUrl = typeof storageUrl === 'function' ? storageUrl(product.image_url) : product.image_url;
             const colorStyle = ProductColors.getProductStyle(product);
-            const compatibleOverlay = product.source === 'compatible'
-                ? '<div class="product-card__compatible-overlay"><span>COMPATIBLE</span></div>'
-                : '';
             if (resolvedImageUrl && resolvedImageUrl !== '/assets/images/placeholder-product.svg') {
                 if (colorStyle) {
                     imageContent = `<img src="${Security.escapeAttr(resolvedImageUrl)}" alt="${Security.escapeAttr(product.name)}" loading="lazy" data-fallback="color-block">
-                        <div class="product-card__color-block" style="${colorStyle}; display: none;"></div>${compatibleOverlay}`;
+                        <div class="product-card__color-block" style="${colorStyle}; display: none;"></div>`;
                 } else {
-                    imageContent = `<img src="${Security.escapeAttr(resolvedImageUrl)}" alt="${Security.escapeAttr(product.name)}" loading="lazy" data-fallback="placeholder">${compatibleOverlay}`;
+                    imageContent = `<img src="${Security.escapeAttr(resolvedImageUrl)}" alt="${Security.escapeAttr(product.name)}" loading="lazy" data-fallback="placeholder">`;
                 }
             } else if (isCompatible) {
-                imageContent = `<div class="product-card__color-block" style="${colorStyle || 'background-color: #1a1a1a;'}"></div>${compatibleOverlay}`;
+                imageContent = `<div class="product-card__color-block" style="${colorStyle || 'background-color: #1a1a1a;'}"></div>`;
             } else {
                 imageContent = `<img src="/assets/images/placeholder-product.svg" alt="${Security.escapeAttr(product.name)}" loading="lazy">`;
             }

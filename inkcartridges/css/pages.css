@@ -2029,10 +2029,6 @@
     position: relative;
 }
 
-.product-card__compatible-overlay--detail span {
-    font-size: 2rem;
-}
-
 .product-gallery__main img {
     max-width: 100%;
     max-height: 100%;

@@ -423,13 +423,10 @@ const RibbonsPage = {
         const subtypeLabel = subtypeLabels[ribbon.product_type] || null;
 
         let imageContent;
-        const compatibleOverlay = ribbon.source === 'compatible'
-            ? '<div class="product-card__compatible-overlay"><span>COMPATIBLE</span></div>'
-            : '';
         if (imageUrl) {
-            imageContent = `<img src="${Security.escapeAttr(imageUrl)}" alt="${Security.escapeAttr(displayName)}" loading="lazy" data-fallback="placeholder">${compatibleOverlay}`;
+            imageContent = `<img src="${Security.escapeAttr(imageUrl)}" alt="${Security.escapeAttr(displayName)}" loading="lazy" data-fallback="placeholder">`;
         } else {
-            imageContent = `<div class="product-card__color-block" style="background-color: #1a1a1a;"></div>${compatibleOverlay}`;
+            imageContent = `<div class="product-card__color-block" style="background-color: #1a1a1a;"></div>`;
         }
 
         const isFav = typeof Favourites !== 'undefined' && Favourites.isFavourite && Favourites.isFavourite(ribbonId);
