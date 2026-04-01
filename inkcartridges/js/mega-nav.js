@@ -139,11 +139,13 @@
     async function loadAndRenderRibbons() {
         if (!ribbonsGrid) return;
         try {
-            const res = await API.getRibbonDeviceBrands();
-            const allBrands = res?.data?.device_brands || [];
+            const res = await API.getRibbonBrands();
+            const rawBrands = res?.data?.brands || [];
             // Exclude non-manufacturer labels (generic/compatible tags, not real brands)
             const EXCLUDED_BRANDS = new Set(['universal']);
-            const brands = allBrands.filter(b => !EXCLUDED_BRANDS.has(b.value));
+            const brands = rawBrands
+                .filter(name => !EXCLUDED_BRANDS.has(name.toLowerCase()))
+                .map(name => ({ value: name.toLowerCase(), label: name }));
             if (brands.length > 0) {
                 renderRibbons(brands);
             }

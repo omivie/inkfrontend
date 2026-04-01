@@ -103,11 +103,13 @@ const RibbonsPage = {
         this.showLoadingState('brands', true);
 
         try {
-            const res = await API.getRibbonDeviceBrands();
-            const allBrands = res?.data?.device_brands || [];
+            const res = await API.getRibbonBrands();
+            const rawBrands = res?.data?.brands || [];
             // Exclude non-manufacturer labels (generic/compatible tags, not real brands)
             const EXCLUDED_BRANDS = new Set(['universal']);
-            const brands = allBrands.filter(b => !EXCLUDED_BRANDS.has(b.value));
+            const brands = rawBrands
+                .filter(name => !EXCLUDED_BRANDS.has(name.toLowerCase()))
+                .map(name => ({ value: name.toLowerCase(), label: name }));
 
             this.showLoadingState('brands', false);
 
@@ -154,8 +156,9 @@ const RibbonsPage = {
         // Fetch the proper label from device brands for correct casing (e.g., "IBM", "OKI")
         if (!this.state.brand) return;
         try {
-            const res = await API.getRibbonDeviceBrands();
-            const brands = res?.data?.device_brands || [];
+            const res = await API.getRibbonBrands();
+            const rawBrands = res?.data?.brands || [];
+            const brands = rawBrands.map(name => ({ value: name.toLowerCase(), label: name }));
             const match = brands.find(b => b.value === this.state.brand);
             if (match && match.label !== this.state.brandLabel) {
                 this.state.brandLabel = match.label;

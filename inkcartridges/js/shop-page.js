@@ -523,8 +523,11 @@
             // Use cached device brands or fetch from API
             if (!this.cache.ribbonDeviceBrands) {
                 try {
-                    const res = await API.getRibbonDeviceBrands();
-                    this.cache.ribbonDeviceBrands = res?.data?.device_brands || [];
+                    const res = await API.getRibbonBrands();
+                    const rawBrands = res?.data?.brands || [];
+                    this.cache.ribbonDeviceBrands = rawBrands
+                        .filter(name => name.toLowerCase() !== 'universal')
+                        .map(name => ({ value: name.toLowerCase(), label: name }));
                 } catch (e) {
                     this.cache.ribbonDeviceBrands = [];
                 }
