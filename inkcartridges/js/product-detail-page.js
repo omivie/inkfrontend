@@ -597,12 +597,8 @@
                 </details>
             `).join('') || '<p>No FAQs available for this product.</p>';
 
-            // Compatible devices: printers for ink/toner/drum, typewriters for ribbons
-            if (info.category === 'ribbon') {
-                this.renderCompatibleDevices(info);
-            } else {
-                this.renderCompatiblePrinters(info);
-            }
+            // Compatible devices: printers/typewriters
+            this.renderCompatiblePrinters(info);
 
             // Compatible products for ALL categories
             this.renderRelatedProducts(info);
@@ -674,8 +670,10 @@
 
                 if (printers.length === 0) return;
 
+                const isRibbon = info.category === 'ribbon';
+                const shopPath = isRibbon ? '/html/ribbons' : '/html/shop';
                 const printerLinks = printers.map(p => {
-                    return `<a href="/html/shop?printer_model=${encodeURIComponent(p.name)}" class="printer-link">${Security.escapeHtml(p.name)}</a>`;
+                    return `<a href="${shopPath}?printer_model=${encodeURIComponent(p.name)}" class="printer-link">${Security.escapeHtml(p.name)}</a>`;
                 }).join(', ');
 
                 const html = `

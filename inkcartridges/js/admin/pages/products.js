@@ -1049,62 +1049,6 @@ function bindProductModalActions(modal, product) {
     const skuPrefix = product.sku ? product.sku.replace(/[A-Z]+$/, '') : '';
     const showBulk  = !isRibbon && skuPrefix && skuPrefix !== product.sku;
 
-    // ── Ribbon helpers (only used when isRibbon) ─────────────────────────────
-
-    const _supabaseHeaders = () => ({
-      'apikey': Config.SUPABASE_ANON_KEY,
-      'Authorization': `Bearer ${window.Auth?.session?.access_token}`,
-      'Content-Type': 'application/json',
-      'Prefer': 'return=representation',
-    });
-    const _ribbonBase = `${Config.SUPABASE_URL}/rest/v1/ribbon_compatibility`;
-
-    function _splitBrandModel(fullName) {
-      const brand = _COMPAT_BRANDS.find(b => fullName.toLowerCase().startsWith(b.toLowerCase()));
-      if (!brand) return { brand: fullName.trim(), model: '' };
-      return { brand, model: fullName.slice(brand.length).trim() };
-    }
-
-    async function _loadRibbonEntries() {
-      const resp = await fetch(
-        `${_ribbonBase}?ribbon_id=eq.${product.id}&select=id,device_brand,device_model,device_brand_norm,device_model_norm&order=device_brand.asc,device_model.asc`,
-        { headers: _supabaseHeaders() }
-      );
-      if (!resp.ok) throw new Error('Failed to load ribbon compatibility');
-      return resp.json();
-    }
-
-    async function _insertRibbonEntry(brand, model) {
-      const row = {
-        ribbon_id: product.id,
-        device_brand: brand,
-        device_model: model,
-        device_brand_norm: brand.toLowerCase(),
-        device_model_norm: model.toLowerCase().replace(/\s+/g, '-'),
-        match_type: 'exact',
-        confidence: 100,
-        source_rank: 100,
-        source_name: 'admin-manual',
-      };
-      const resp = await fetch(_ribbonBase, {
-        method: 'POST',
-        headers: _supabaseHeaders(),
-        body: JSON.stringify(row),
-      });
-      if (resp.status === 409) return null; // already exists
-      if (!resp.ok) throw new Error(`Insert failed: ${resp.status}`);
-      const [inserted] = await resp.json();
-      return inserted;
-    }
-
-    async function _deleteRibbonEntry(id) {
-      const resp = await fetch(`${_ribbonBase}?id=eq.${encodeURIComponent(id)}`, {
-        method: 'DELETE',
-        headers: _supabaseHeaders(),
-      });
-      if (!resp.ok) throw new Error(`Delete failed: ${resp.status}`);
-    }
-
     // ── Helpers ─────────────────────────────────────────────────────────────
 
     function printerId(p) {
@@ -1271,13 +1215,13 @@ function bindProductModalActions(modal, product) {
         container.innerHTML = `
           <div style="background:var(--yellow-light,#fffbe6);border:1px solid var(--yellow,#f0a500);border-radius:6px;padding:10px 12px;font-size:0.85em;">
             <strong>No compatible ${isRibbon ? 'devices' : 'printers'} linked</strong><br>
-            <span style="color:var(--text-muted)">Paste a bulk list below and click &ldquo;${isRibbon ? 'Add to Compatibility' : 'Find Printers'}&rdquo;.</span>
+            <span style="color:var(--text-muted)">Paste a bulk list below and click &ldquo;${isRibbon ? 'Find Devices' : 'Find Printers'}&rdquo;.</span>
           </div>`;
         return;
       }
       container.innerHTML = compatPrinters.map(p => {
-        const name = isRibbon ? `${p.device_brand} ${p.device_model}`.trim() : printerName(p);
-        const id   = isRibbon ? p.id : printerId(p);
+        const name = printerName(p);
+        const id   = printerId(p);
         return `<span class="admin-badge">${esc(name)}<button class="compat-remove" data-printer-id="${esc(String(id))}" title="Remove">\u00d7</button></span>`;
       }).join('');
     }
@@ -1290,14 +1234,9 @@ function bindProductModalActions(modal, product) {
       const id = btn.dataset.printerId;
       btn.disabled = true;
       try {
-        if (isRibbon) {
-          await _deleteRibbonEntry(id);
-          compatPrinters = compatPrinters.filter(p => String(p.id) !== id);
-        } else {
-          if (!product.sku) return;
-          await AdminAPI.removeCompatiblePrinter(product.sku, id);
-          compatPrinters = compatPrinters.filter(p => printerId(p) !== id);
-        }
+        if (!product.sku) return;
+        await AdminAPI.removeCompatiblePrinter(product.sku, id);
+        compatPrinters = compatPrinters.filter(p => printerId(p) !== id);
         renderCompatBadges();
       } catch (err) {
         Toast.error(`Remove failed: ${err.message}`);
@@ -1307,8 +1246,7 @@ function bindProductModalActions(modal, product) {
 
     // ── + Add Printer (single search) ────────────────────────────────────────
 
-    if (isRibbon) addBtn?.remove();
-    if (findBtn && isRibbon) findBtn.textContent = 'Add to Compatibility';
+    if (findBtn && isRibbon) findBtn.textContent = 'Find Devices';
 
     addBtn?.addEventListener('click', () => {
       const open = searchWrap.style.display !== 'none';
@@ -1397,57 +1335,8 @@ function bindProductModalActions(modal, product) {
       _sessionMatches = [];
       bulkResults.innerHTML = '';
 
-      if (isRibbon) {
-        // ── Ribbon path: direct insert into ribbon_compatibility ──────────────
-        findBtn.textContent = 'Adding\u2026';
-        let added = 0, skipped = 0;
-        const existingKeys = new Set(
-          compatPrinters.map(p => `${p.device_brand_norm}|${p.device_model_norm}`)
-        );
-        const rows = names.map(n => ({ full: n, ..._splitBrandModel(n) }));
-        const resultHtml = [];
-        for (let i = 0; i < rows.length; i += 5) {
-          const batch = rows.slice(i, i + 5);
-          await Promise.all(batch.map(async ({ full, brand, model }) => {
-            const key = `${brand.toLowerCase()}|${model.toLowerCase().replace(/\s+/g, '-')}`;
-            if (existingKeys.has(key)) {
-              skipped++;
-              resultHtml.push({ full, status: 'already_linked' });
-              return;
-            }
-            try {
-              const row = await _insertRibbonEntry(brand, model);
-              if (row) {
-                compatPrinters.push(row);
-                existingKeys.add(key);
-                added++;
-                resultHtml.push({ full, status: 'added' });
-              } else {
-                skipped++;
-                resultHtml.push({ full, status: 'already_linked' });
-              }
-            } catch (err) {
-              resultHtml.push({ full, status: 'error', err: err.message });
-            }
-          }));
-        }
-        renderCompatBadges();
-        bulkResults.innerHTML = resultHtml.map(({ full, status, err }) => {
-          if (status === 'added') return `<div class="admin-compat-parse-result admin-compat-parse-result--matched">
-            <span>&#10003;</span><span class="result-name">${esc(full)}</span>
-            <span class="compat-status-chip compat-status-chip--added">Added</span></div>`;
-          if (status === 'already_linked') return `<div class="admin-compat-parse-result admin-compat-parse-result--matched">
-            <span>&#10003;</span><span class="result-name">${esc(full)}</span>
-            <span class="compat-status-chip compat-status-chip--linked">Already linked</span></div>`;
-          return `<div class="admin-compat-parse-result admin-compat-parse-result--unmatched">
-            <span>&#8212;</span><span class="result-query">${esc(full)}</span>
-            <span style="font-size:11px;color:var(--danger)">${esc(err || 'Error')}</span></div>`;
-        }).join('');
-        if (added > 0) Toast.success(`Added ${added} device${added !== 1 ? 's' : ''}`);
-        else Toast.info(`All ${skipped} entr${skipped !== 1 ? 'ies' : 'y'} already linked`);
-
-      } else {
-        // ── Regular path: search printer_models, then link ────────────────────
+      {
+        // ── Search printer_models, then link ─────────────────────────────────
         findBtn.textContent = 'Searching\u2026';
         bulkResults.innerHTML = `<div style="color:var(--text-muted);font-size:12px">Searching 0 / ${names.length}\u2026</div>`;
         const results = [];
@@ -1517,7 +1406,7 @@ function bindProductModalActions(modal, product) {
       }
 
       findBtn.disabled = false;
-      findBtn.textContent = isRibbon ? 'Add to Compatibility' : 'Find Printers';
+      findBtn.textContent = isRibbon ? 'Find Devices' : 'Find Printers';
     });
 
     // ── Bulk: Add Matched ────────────────────────────────────────────────────
@@ -1647,11 +1536,7 @@ function bindProductModalActions(modal, product) {
 
     // ── Initial load ─────────────────────────────────────────────────────────
 
-    if (isRibbon) {
-      _loadRibbonEntries()
-        .then(rows => { compatPrinters = rows; renderCompatBadges(); })
-        .catch(() => { compatPrinters = []; renderCompatBadges(); });
-    } else if (product.sku && window.API?.getCompatiblePrinters) {
+    if (product.sku && window.API?.getCompatiblePrinters) {
       const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 10000));
       Promise.race([window.API.getCompatiblePrinters(product.sku), timeout])
         .then(resp => {
@@ -1664,7 +1549,6 @@ function bindProductModalActions(modal, product) {
       renderCompatBadges();
     }
 
-    if (isRibbon) { addMatchedBtn?.remove(); createUnmatchedBtn?.remove(); }
   }
 
   // Bind image error fallbacks
