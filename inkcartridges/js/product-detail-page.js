@@ -313,17 +313,11 @@
                 }
             }
 
-            // Product badge
+            // Product badge — hidden; genuine/compatible is already in the title
             const badge = document.getElementById('product-badge');
-            if (info.category === 'ribbon') {
-                badge.hidden = true;
-            } else if (info.isCompatible) {
-                badge.textContent = 'COMPATIBLE';
-                badge.hidden = false;
+            badge.hidden = true;
+            if (info.isCompatible) {
                 document.querySelector('.product-detail__layout').classList.add('product-detail__layout--compatible');
-            } else {
-                badge.textContent = 'GENUINE';
-                badge.hidden = false;
             }
 
             // Title and SKU
@@ -452,20 +446,12 @@
             if (info.category !== 'ribbon' || !info.description_html) return;
             const productLabel = Security.escapeHtml(info.displayName || info.name || 'This Product');
             const html = `
-                <div class="ribbon-description" id="ribbon-description">
-                    <h2 class="ribbon-description__title">${productLabel} Description</h2>
+                <div class="ribbon-description ribbon-description--inline" id="ribbon-description">
                     <div class="ribbon-description__content">${info.description_html}</div>
                 </div>`;
-            const rightCol = document.getElementById('ribbon-col-right');
-            if (rightCol) {
-                rightCol.insertAdjacentHTML('afterbegin', html);
-                document.getElementById('ribbon-detail-columns').hidden = false;
-            } else {
-                // Fallback: insert after related products (non-ribbon layout)
-                const relatedSection = document.getElementById('related-products');
-                if (relatedSection) {
-                    relatedSection.insertAdjacentHTML('afterend', html);
-                }
+            const skuEl = document.getElementById('product-sku');
+            if (skuEl) {
+                skuEl.insertAdjacentHTML('afterend', html);
             }
         },
 
@@ -475,7 +461,7 @@
                 const productLabel = Security.escapeHtml(info.displayName || info.name || 'This Product');
                 const html = `
                     <div class="product-compat-devices">
-                        <h2 class="product-compat-devices__title">${productLabel} Compatible Products</h2>
+                        <h2 class="product-compat-devices__title">FOR USE IN:</h2>
                         <div class="product-compat-devices__content">${info.compatible_devices_html}</div>
                     </div>`;
                 const leftCol = document.getElementById('ribbon-col-left');
@@ -860,12 +846,12 @@
 
                     let relatedHtml = '';
                     if (sorted.length === 0) {
-                        relatedHtml = `<div class="related-products"><h2 class="ribbon-section__title">${productLabel} Related Products</h2></div>`;
+                        relatedHtml = `<div class="related-products"><h2 class="ribbon-section__title">Products related to ${Security.escapeHtml(info.sku)}</h2></div>`;
                     } else {
                         const grids = `<div class="related-products__grid product-grid">${sorted.map(p => Products.renderCard(p)).join('')}</div>`;
                         relatedHtml = `
                             <div class="related-products">
-                                <h2 class="ribbon-section__title">${productLabel} Related Products</h2>
+                                <h2 class="ribbon-section__title">Products related to ${Security.escapeHtml(info.sku)}</h2>
                                 <div class="related-products__group">
                                     <div class="related-products__type-group">
                                         <h3 class="related-products__group-heading">${heading}</h3>
@@ -888,7 +874,7 @@
                     }
                 } else {
                     container.innerHTML = `
-                        <p class="related-products__title">${productLabel} Related Products</p>
+                        <p class="related-products__title">Related Products</p>
                         ${buildSection(firstGroup, firstLabel)}
                         ${buildSection(secondGroup, secondLabel)}
                     `;
