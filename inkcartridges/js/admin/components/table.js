@@ -174,7 +174,21 @@ class DataTable {
     }
 
     html += `<button class="admin-pagination__btn" data-page="${page + 1}" ${page >= totalPages ? 'disabled' : ''}>Next \u2192</button>`;
-    html += '</div></div>';
+    html += '</div>';
+
+    // Per-page selector
+    if (this.config.onLimitChange) {
+      const perPageOpts = [20, 50, 100, 200, 300];
+      html += '<div class="admin-pagination__per-page">';
+      html += '<select class="admin-pagination__select" data-limit-select>';
+      for (const opt of perPageOpts) {
+        html += `<option value="${opt}"${opt === limit ? ' selected' : ''}>${opt} per page</option>`;
+      }
+      html += '</select>';
+      html += '</div>';
+    }
+
+    html += '</div>';
     return html;
   }
 
@@ -255,6 +269,16 @@ class DataTable {
           if (page > 0) this.config.onPageChange(page);
         });
       });
+    }
+
+    // Per-page limit
+    if (this.config.onLimitChange) {
+      const sel = this.container.querySelector('[data-limit-select]');
+      if (sel) {
+        sel.addEventListener('change', () => {
+          this.config.onLimitChange(parseInt(sel.value, 10));
+        });
+      }
     }
   }
 

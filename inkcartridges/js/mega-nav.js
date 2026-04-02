@@ -139,13 +139,23 @@
     async function loadAndRenderRibbons() {
         if (!ribbonsGrid) return;
         try {
-            const res = await API.getRibbonBrands();
-            const rawBrands = res?.data?.brands || [];
-            // Exclude non-manufacturer labels (generic/compatible tags, not real brands)
-            const EXCLUDED_BRANDS = new Set(['universal']);
-            const brands = rawBrands
-                .filter(name => !EXCLUDED_BRANDS.has(name.toLowerCase()))
-                .map(name => ({ value: name.toLowerCase(), label: name }));
+            // Try new ribbon_brands table first, fall back to legacy API
+            let brands = [];
+            const res = await API.getRibbonBrandsList();
+            const ribbonBrands = res?.data?.brands || [];
+            if (ribbonBrands.length > 0) {
+                brands = ribbonBrands.map(b => ({
+                    value: b.slug || b.name.toLowerCase(),
+                    label: b.name,
+                }));
+            } else {
+                const legacyRes = await API.getRibbonBrands();
+                const rawBrands = legacyRes?.data?.brands || [];
+                const EXCLUDED_BRANDS = new Set(['universal']);
+                brands = rawBrands
+                    .filter(name => !EXCLUDED_BRANDS.has(name.toLowerCase()))
+                    .map(name => ({ value: name.toLowerCase(), label: name }));
+            }
             if (brands.length > 0) {
                 renderRibbons(brands);
             }

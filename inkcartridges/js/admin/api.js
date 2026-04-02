@@ -560,6 +560,190 @@ const AdminAPI = {
     }
   },
 
+  // ---- Ribbon Products (Supabase direct — includes new columns) ----
+  async getRibbonProducts(filters = {}) {
+    try {
+      const sb = this._sb();
+      if (!sb) return null;
+      const selectCols = '*, ribbon_brands(id, name, slug, image_url)';
+      let query = sb.from('products').select(selectCols, { count: 'exact' })
+        .in('product_type', ['printer_ribbon', 'typewriter_ribbon', 'correction_tape']);
+      if (filters.ribbon_brand_id) query = query.eq('ribbon_brand_id', filters.ribbon_brand_id);
+      if (filters.product_type) query = query.eq('product_type', filters.product_type);
+      if (filters.is_active !== undefined && filters.is_active !== '') query = query.eq('is_active', filters.is_active === 'true' || filters.is_active === true);
+      if (filters.search) query = query.or(`name.ilike.%${filters.search}%,sku.ilike.%${filters.search}%`);
+      query = query.order(filters.sort || 'name', { ascending: filters.sortDir !== 'desc' });
+      const limit = filters.limit || 200;
+      const page = filters.page || 1;
+      query = query.range((page - 1) * limit, page * limit - 1);
+      const { data, error, count } = await query;
+      if (error) throw error;
+      return { products: data || [], total: count || 0, page, limit };
+    } catch (e) {
+      adminApiWarn('Failed to load ribbon products', e);
+      return null;
+    }
+  },
+
+  async getRibbonProduct(productId) {
+    try {
+      const sb = this._sb();
+      if (!sb) return null;
+      const { data, error } = await sb.from('products').select('*, ribbon_brands(id, name, slug)')
+        .eq('id', productId).single();
+      if (error) throw error;
+      return data;
+    } catch (e) {
+      adminApiWarn('Failed to load ribbon product', e);
+      return null;
+    }
+  },
+
+  async createRibbonProduct(data) {
+    try {
+      const sb = this._sb();
+      if (!sb) throw new Error('Supabase not available');
+      const { data: product, error } = await sb.from('products').insert(data).select().single();
+      if (error) throw error;
+      return product;
+    } catch (e) {
+      DebugLog.warn('[AdminAPI] createRibbonProduct failed:', e.message);
+      throw e;
+    }
+  },
+
+  async updateRibbonProduct(productId, data) {
+    try {
+      const sb = this._sb();
+      if (!sb) throw new Error('Supabase not available');
+      const { data: product, error } = await sb.from('products').update(data).eq('id', productId).select().single();
+      if (error) throw error;
+      return product;
+    } catch (e) {
+      DebugLog.warn('[AdminAPI] updateRibbonProduct failed:', e.message);
+      throw e;
+    }
+  },
+
+  async deleteRibbonProduct(productId) {
+    try {
+      const sb = this._sb();
+      if (!sb) throw new Error('Supabase not available');
+      const { error } = await sb.from('products').delete().eq('id', productId);
+      if (error) throw error;
+      return true;
+    } catch (e) {
+      DebugLog.warn('[AdminAPI] deleteRibbonProduct failed:', e.message);
+      throw e;
+    }
+  },
+
+  // ---- Ribbon Brands (Supabase direct) ----
+  _sb() {
+    return (typeof Auth !== 'undefined' && Auth.supabase) ? Auth.supabase : null;
+  },
+
+  async getRibbonBrands() {
+    try {
+      const sb = this._sb();
+      if (!sb) return null;
+      const { data, error } = await sb.from('ribbon_brands').select('*').eq('is_active', true).order('sort_order', { ascending: true });
+      if (error) throw error;
+      return data;
+    } catch (e) {
+      adminApiWarn('Failed to load ribbon brands', e);
+      return null;
+    }
+  },
+
+  async getAdminRibbonBrands() {
+    try {
+      const sb = this._sb();
+      if (!sb) return null;
+      const { data, error } = await sb.from('ribbon_brands').select('*').order('sort_order', { ascending: true });
+      if (error) throw error;
+      return data;
+    } catch (e) {
+      adminApiWarn('Failed to load admin ribbon brands', e);
+      return null;
+    }
+  },
+
+  async createRibbonBrand(data) {
+    try {
+      const sb = this._sb();
+      if (!sb) throw new Error('Supabase not available');
+      const { data: brand, error } = await sb.from('ribbon_brands').insert(data).select().single();
+      if (error) throw error;
+      return brand;
+    } catch (e) {
+      DebugLog.warn('[AdminAPI] createRibbonBrand failed:', e.message);
+      throw e;
+    }
+  },
+
+  async updateRibbonBrand(id, data) {
+    try {
+      const sb = this._sb();
+      if (!sb) throw new Error('Supabase not available');
+      const { data: brand, error } = await sb.from('ribbon_brands').update(data).eq('id', id).select().single();
+      if (error) throw error;
+      return brand;
+    } catch (e) {
+      DebugLog.warn('[AdminAPI] updateRibbonBrand failed:', e.message);
+      throw e;
+    }
+  },
+
+  async deleteRibbonBrand(id) {
+    try {
+      const sb = this._sb();
+      if (!sb) throw new Error('Supabase not available');
+      const { error } = await sb.from('ribbon_brands').delete().eq('id', id);
+      if (error) throw error;
+      return true;
+    } catch (e) {
+      DebugLog.warn('[AdminAPI] deleteRibbonBrand failed:', e.message);
+      throw e;
+    }
+  },
+
+  async reorderRibbonBrands(brands) {
+    try {
+      const sb = this._sb();
+      if (!sb) throw new Error('Supabase not available');
+      for (let i = 0; i < brands.length; i++) {
+        const { error } = await sb.from('ribbon_brands').update({ sort_order: (i + 1) * 10 }).eq('id', brands[i].id);
+        if (error) throw error;
+      }
+      return true;
+    } catch (e) {
+      DebugLog.warn('[AdminAPI] reorderRibbonBrands failed:', e.message);
+      throw e;
+    }
+  },
+
+  async uploadRibbonBrandImage(brandId, file) {
+    try {
+      const sb = (typeof Auth !== 'undefined' && Auth.supabase) ? Auth.supabase : null;
+      if (!sb) throw new Error('Supabase client not available');
+      const ext = file.name.split('.').pop() || 'jpg';
+      const path = `ribbon-brands/${brandId}.${ext}`;
+      const { error: upErr } = await sb.storage.from('product-images').upload(path, file, { upsert: true, contentType: file.type });
+      if (upErr) throw upErr;
+      const { data: urlData } = sb.storage.from('product-images').getPublicUrl(path);
+      const publicUrl = urlData?.publicUrl;
+      if (!publicUrl) throw new Error('Failed to get public URL');
+      // Update the ribbon_brands record with the image URL
+      const { error: dbErr } = await sb.from('ribbon_brands').update({ image_url: publicUrl }).eq('id', brandId);
+      if (dbErr) throw dbErr;
+      return { image_url: publicUrl };
+    } catch (e) {
+      DebugLog.warn('[AdminAPI] uploadRibbonBrandImage failed:', e.message);
+      throw e;
+    }
+  },
+
   // ---- Contact Emails ----
   async getContactEmails() {
     try {

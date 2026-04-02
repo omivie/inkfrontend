@@ -362,6 +362,29 @@ const API = {
     },
 
     /**
+     * Get ribbon device brands from ribbon_brands table (Supabase REST direct)
+     * Returns array of { id, name, slug, image_url, sort_order }
+     * Uses direct fetch to avoid Auth timing issues on page load.
+     */
+    async getRibbonBrandsList() {
+        try {
+            const url = `${Config.SUPABASE_URL}/rest/v1/ribbon_brands?is_active=eq.true&order=sort_order.asc&select=id,name,slug,image_url,sort_order`;
+            const resp = await fetch(url, {
+                headers: {
+                    'apikey': Config.SUPABASE_ANON_KEY,
+                    'Accept': 'application/json',
+                },
+            });
+            if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+            const data = await resp.json();
+            return { ok: true, data: { brands: data || [] } };
+        } catch (e) {
+            if (typeof DebugLog !== 'undefined') DebugLog.warn('[API] getRibbonBrandsList failed:', e.message);
+            return { ok: false, data: { brands: [] } };
+        }
+    },
+
+    /**
      * Get distinct ribbon models for filter dropdowns
      * @param {object} params - Optional { brand, type }
      */

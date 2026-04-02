@@ -71,6 +71,8 @@
             </div>
         </div>
 
+        <div id="google-reviews-badge"></div>
+
         <div class="footer-bottom">
             <div class="container">
                 <p class="footer-copyright">
@@ -93,6 +95,43 @@
 
     const yearEl = footer.querySelector('#current-year');
     if (yearEl) yearEl.textContent = new Date().getFullYear();
+
+    // Google Customer Reviews - badge + opt-in survey loader
+    (function () {
+      var originalOptIn = window.renderOptIn;
+
+      window.renderOptIn = function () {
+        // Badge on all pages
+        window.gapi.load('ratingbadge', function () {
+          window.gapi.ratingbadge.render(
+            document.getElementById('google-reviews-badge'),
+            { merchant_id: 5748243992, position: 'BOTTOM_RIGHT' }
+          );
+        });
+        // Opt-in survey on order confirmation page
+        window.gapi.load('surveyoptin', function () {
+          if (window._googleReviewsOptInData) {
+            window.gapi.surveyoptin.render(window._googleReviewsOptInData);
+          }
+        });
+      };
+
+      if (!document.querySelector('script[src*="apis.google.com/js/platform.js"]')) {
+        var s = document.createElement('script');
+        s.src = 'https://apis.google.com/js/platform.js?onload=renderOptIn';
+        s.async = true;
+        s.defer = true;
+        document.head.appendChild(s);
+      } else if (window.gapi) {
+        // platform.js already loaded — render badge directly
+        window.gapi.load('ratingbadge', function () {
+          window.gapi.ratingbadge.render(
+            document.getElementById('google-reviews-badge'),
+            { merchant_id: 5748243992, position: 'BOTTOM_RIGHT' }
+          );
+        });
+      }
+    })();
   }
 
   if (document.readyState === 'loading') {

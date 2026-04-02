@@ -18,180 +18,6 @@
             return String(value).replace(/\s*pages\b/gi, '').trim();
         },
 
-        // Product type templates for descriptions
-        templates: {
-            toner: {
-                description: (p) => `
-                    <div class="product-details-section">
-                        <p class="product-details-meta">
-                            <strong>Model:</strong> ${Security.escapeHtml(p.manufacturer_part_number || p.sku)}
-                            <span style="margin-left: 1.5rem;"><strong>SKU:</strong> ${Security.escapeHtml(p.sku)}</span>
-                        </p>
-                        <p class="product-details-intro">
-                            ${p.isCompatible
-                                ? `Premium quality compatible toner for your ${Security.escapeHtml(p.brandName)} printer. Our compatible toner cartridges deliver professional-quality documents with impressive reliability and page yields at a fraction of the cost of genuine cartridges.`
-                                : `Count on professional-quality documents with dependable performance. Original ${Security.escapeHtml(p.brandName)} toner cartridges provide impressive reliability for dependable performance and page yields, and durable results.`
-                            }
-                        </p>
-                    </div>
-
-                `,
-                features: (p) => [],
-                faqs: (p) => [
-                    {
-                        q: 'How do I install this toner cartridge?',
-                        a: `<p>Installing your ${Security.escapeHtml(p.brandName)} toner is straightforward:</p>
-                            <ol>
-                                <li>Turn off and unplug your printer</li>
-                                <li>Open the front or top cover to access the toner compartment</li>
-                                <li>Remove the old toner cartridge</li>
-                                <li>Unpack the new toner and gently shake it side-to-side to distribute the toner evenly</li>
-                                <li>Remove any protective covers or sealing tape</li>
-                                <li>Insert the new cartridge until it clicks into place</li>
-                                <li>Close the cover and turn on your printer</li>
-                            </ol>`
-                    },
-                    {
-                        q: 'How should I store unused toner cartridges?',
-                        a: `<p>Store unopened toner cartridges in their original packaging in a cool, dry place away from direct sunlight. Avoid extreme temperatures and humidity. Properly stored toner cartridges typically have a shelf life of 2-3 years.</p>`
-                    },
-                    {
-                        q: p.isCompatible ? 'Are compatible toners safe for my printer?' : 'Why is genuine toner more expensive?',
-                        a: p.isCompatible
-                            ? `<p>Yes, our compatible toner cartridges are designed and tested to work safely with your printer. Under New Zealand consumer law, using compatible consumables does not void your printer warranty. Our cartridges meet strict quality standards and come with our satisfaction guarantee.</p>`
-                            : `<p>Genuine ${Security.escapeHtml(p.brandName)} toner cartridges are manufactured to exact specifications using premium materials and undergo rigorous quality testing. They're optimised for your specific printer model to deliver the best possible print quality and reliability while protecting your printer's longevity.</p>`
-                    }
-                ]
-            },
-            ink: {
-                description: (p) => `
-                    <div class="product-details-section">
-                        <p class="product-details-meta">
-                            <strong>Model:</strong> ${Security.escapeHtml(p.manufacturer_part_number || p.sku)}
-                            <span style="margin-left: 1.5rem;"><strong>SKU:</strong> ${Security.escapeHtml(p.sku)}</span>
-                        </p>
-                        <p class="product-details-intro">
-                            ${p.isCompatible
-                                ? `Premium quality compatible ink for your ${Security.escapeHtml(p.brandName)} printer. Our compatible ink cartridges deliver vibrant colours and crisp text with reliable performance at a fraction of the cost of genuine cartridges.`
-                                : `Count on professional-quality vibrant colour documents. Original ${Security.escapeHtml(p.brandName)} ink cartridges provide impressive reliability for dependable performance and page yields, and durable results. Print with individual inks and high-yield cartridge options.`
-                            }
-                        </p>
-                    </div>
-
-                `,
-                features: (p) => [],
-                faqs: (p) => [
-                    {
-                        q: 'How do I install this ink cartridge?',
-                        a: `<p>Installing your ink cartridge is simple:</p>
-                            <ol>
-                                <li>Turn on your printer and open the ink cartridge access door</li>
-                                <li>Wait for the carriage to move to the centre</li>
-                                <li>Press down on the old cartridge and remove it</li>
-                                <li>Remove the new cartridge from packaging and pull off any protective tape</li>
-                                <li>Insert the new cartridge into the correct slot until it clicks</li>
-                                <li>Close the access door and print an alignment page if prompted</li>
-                            </ol>`
-                    },
-                    {
-                        q: 'How long do ink cartridges last?',
-                        a: `<p>Unopened ink cartridges typically have a shelf life of 1-2 years when stored properly. Once installed, we recommend using the cartridge within 6 months for best results. Print regularly (at least once a week) to prevent the print heads from drying out.</p>`
-                    },
-                    {
-                        q: p.isCompatible ? 'Will compatible ink void my warranty?' : 'Can I use compatible cartridges in my printer?',
-                        a: p.isCompatible
-                            ? `<p>Under New Zealand consumer law, using compatible (third-party) cartridges does not automatically void your printer warranty. However, if a compatible cartridge directly causes damage, that specific damage may not be covered. Our compatible cartridges are designed to work safely with your printer.</p>`
-                            : `<p>While you can use compatible cartridges, genuine ${Security.escapeHtml(p.brandName)} ink is designed specifically for your printer model. Genuine supplies ensure optimal print quality, reliability, and are backed by ${Security.escapeHtml(p.brandName)}'s quality guarantee.</p>`
-                    }
-                ]
-            },
-            drum: {
-                description: (p) => `
-                    <div class="product-details-section">
-                        <p class="product-details-meta">
-                            <strong>Model:</strong> ${Security.escapeHtml(p.manufacturer_part_number || p.sku)}
-                            <span style="margin-left: 1.5rem;"><strong>SKU:</strong> ${Security.escapeHtml(p.sku)}</span>
-                        </p>
-                        <p class="product-details-intro">
-                            ${p.isCompatible
-                                ? `Quality compatible drum unit for your ${Security.escapeHtml(p.brandName)} laser printer. The drum unit is an essential component responsible for transferring toner to paper, ensuring consistent high-quality prints.`
-                                : `Original ${Security.escapeHtml(p.brandName)} drum unit for optimal print quality and reliability. The imaging drum is engineered to work perfectly with your printer for consistent, professional results.`
-                            }
-                        </p>
-                    </div>
-
-                `,
-                features: (p) => [],
-                faqs: (p) => [
-                    {
-                        q: 'What is a drum unit and when should I replace it?',
-                        a: `<p>The drum unit (also called an imaging drum) is a cylinder that transfers toner onto paper. It typically lasts 3-4 times longer than a toner cartridge. Replace the drum when you notice persistent print quality issues like vertical lines, spots, or grey backgrounds that don't improve after replacing the toner.</p>`
-                    },
-                    {
-                        q: 'Is the drum unit the same as the toner?',
-                        a: `<p>No, they're different components. The toner cartridge contains the powder that creates the printed image, while the drum unit is the component that transfers the toner to paper. Some printers have them combined in one unit, but many ${Security.escapeHtml(p.brandName)} printers use separate drum and toner units for cost efficiency.</p>`
-                    }
-                ]
-            },
-            ribbon: {
-                description: (p) => `
-                    <div class="product-details-section">
-                        <p class="product-details-meta">
-                            <strong>Model:</strong> ${Security.escapeHtml(p.manufacturer_part_number || p.sku)}
-                            <span style="margin-left: 1.5rem;"><strong>SKU:</strong> ${Security.escapeHtml(p.sku)}</span>
-                        </p>
-                        <p class="product-details-intro">
-                            Quality ${Security.escapeHtml(p.brandName)} printer ribbon for reliable, consistent output. Our ribbons are manufactured to high standards to ensure clean, crisp printing every time.
-                        </p>
-                    </div>
-
-                `,
-                features: (p) => [],
-                faqs: (p) => [
-                    {
-                        q: 'How do I install this ribbon?',
-                        a: `<p>Installing your ribbon is straightforward:</p>
-                            <ol>
-                                <li>Turn off your printer or typewriter</li>
-                                <li>Open the ribbon access cover</li>
-                                <li>Remove the old ribbon cartridge</li>
-                                <li>Insert the new ribbon, ensuring it is properly threaded</li>
-                                <li>Close the cover and test with a few prints</li>
-                            </ol>`
-                    },
-                    {
-                        q: 'How should I store unused ribbons?',
-                        a: `<p>Store unopened ribbons in their original sealed packaging in a cool, dry place away from direct sunlight and heat. Properly stored ribbons typically last 2-3 years. Avoid humidity as it can affect the ink quality.</p>`
-                    },
-                    {
-                        q: 'How do I know when to replace my ribbon?',
-                        a: `<p>Replace your ribbon when print output becomes noticeably lighter or uneven. If you see faded characters, missing dots, or inconsistent print density across the page, it's time for a new ribbon.</p>`
-                    }
-                ]
-            },
-            default: {
-                description: (p) => `
-                    <div class="product-details-section">
-                        <p class="product-details-meta">
-                            <strong>Model:</strong> ${Security.escapeHtml(p.manufacturer_part_number || p.sku)}
-                            <span style="margin-left: 1.5rem;"><strong>SKU:</strong> ${Security.escapeHtml(p.sku)}</span>
-                        </p>
-                        <p class="product-details-intro">
-                            Quality ${Security.escapeHtml(p.brandName)} printing supplies for your printer. ${p.isCompatible ? 'This compatible product offers excellent value while maintaining high quality standards.' : 'Genuine OEM product for optimal performance and reliability.'}
-                        </p>
-                    </div>
-
-                `,
-                features: (p) => [],
-                faqs: (p) => [
-                    {
-                        q: 'How do I know this product is compatible with my printer?',
-                        a: `<p>Check your printer's documentation or the label inside the cartridge access door for the model number. This product is designed to work with specific ${Security.escapeHtml(p.brandName)} printer models. If you're unsure, contact our customer support for assistance.</p>`
-                    }
-                ]
-            }
-        },
-
         async init() {
             const params = new URLSearchParams(window.location.search);
             let sku = params.get('sku');
@@ -230,6 +56,25 @@
                         if (r.retail_price == null && r.sale_price != null) r.retail_price = r.sale_price;
                         if (r.image_url == null && r.image_path) r.image_url = typeof storageUrl === 'function' ? storageUrl(r.image_path) : r.image_path;
                         if (r.active == null) r.active = r.is_active !== false;
+                        // Enrich ribbon data from Supabase (description, compatibility, related products)
+                        try {
+                            let sb = (typeof Auth !== 'undefined' && Auth.supabase) ? Auth.supabase : null;
+                            // Wait briefly for Supabase if not ready yet
+                            if (!sb) {
+                                await new Promise(resolve => setTimeout(resolve, 500));
+                                sb = (typeof Auth !== 'undefined' && Auth.supabase) ? Auth.supabase : null;
+                            }
+                            if (sb) {
+                                const { data: extra } = await sb.from('products')
+                                    .select('description_html, compatible_devices_html, related_product_skus')
+                                    .eq('sku', sku).single();
+                                if (extra) {
+                                    if (r.description_html == null) r.description_html = extra.description_html;
+                                    if (r.compatible_devices_html == null) r.compatible_devices_html = extra.compatible_devices_html;
+                                    if (r.related_product_skus == null) r.related_product_skus = extra.related_product_skus;
+                                }
+                            }
+                        } catch (_) { /* non-critical enrichment */ }
                     }
                 } else {
                     response = await API.getProduct(sku);
@@ -261,7 +106,7 @@
             const category = this.normalizeProductType(p.product_type) || this.normalizeCategory(p.category) || this.detectCategory(name);
             const isRibbonProduct = category === 'ribbon';
             const nameLower = name.toLowerCase();
-            const isCompatible = isRibbonProduct || p.source === 'compatible' || nameLower.includes('compatible');
+            const isCompatible = !isRibbonProduct && (p.source === 'compatible' || nameLower.includes('compatible'));
             const displayName = (!isRibbonProduct && nameLower.startsWith('compatible ')) ? name.substring(11).trim() : name;
             const brandName = p.brand?.name || (typeof p.brand === 'string' ? p.brand : null) || this.extractBrand(name) || 'Unknown';
             const pageYield = p.page_yield || p.yield || null;
@@ -379,7 +224,7 @@
             const canonicalUrl = seo.canonical || `https://www.inkcartridges.co.nz/products/${slug}/${info.sku}`;
 
             // Page title and meta description — prefer API seo fields, fall back to computed
-            const prefix = info.isCompatible ? 'Compatible ' : 'Genuine ';
+            const prefix = (info.category === 'ribbon') ? '' : (info.isCompatible ? 'Compatible ' : 'Genuine ');
             const computedTitle = `${prefix}${info.displayName} NZ | InkCartridges.co.nz`;
             document.title = seo.title || computedTitle;
 
@@ -417,9 +262,6 @@
             } else {
                 this.updateProductSchema(info, price);
             }
-
-            // FAQ JSON-LD from backend SEO response
-            this._injectFaqSchema(info);
 
             // Breadcrumb
             const isRibbon = info.category === 'ribbon';
@@ -473,7 +315,9 @@
 
             // Product badge
             const badge = document.getElementById('product-badge');
-            if (info.isCompatible) {
+            if (info.category === 'ribbon') {
+                badge.hidden = true;
+            } else if (info.isCompatible) {
                 badge.textContent = 'COMPATIBLE';
                 badge.hidden = false;
                 document.querySelector('.product-detail__layout').classList.add('product-detail__layout--compatible');
@@ -568,47 +412,18 @@
                 }
             }
 
-            // Get template based on category
-            const template = this.templates[info.category] || this.templates.default;
-
-            // Description
-            document.getElementById('product-description').innerHTML = template.description(info);
-
-            // Specifications
-            document.getElementById('product-specs').innerHTML = `
-                <tbody>
-                    <tr><th scope="row">Brand</th><td>${Security.escapeHtml(info.brandName)}</td></tr>
-                    <tr><th scope="row">SKU</th><td>${Security.escapeHtml(info.sku)}</td></tr>
-                    ${info.manufacturer_part_number ? `<tr><th scope="row">Model Number</th><td>${Security.escapeHtml(info.manufacturer_part_number)}</td></tr>` : ''}
-                    ${info.color ? `<tr><th scope="row">Colour</th><td>${Security.escapeHtml(info.color)}</td></tr>` : ''}
-                    ${info.pageYield ? `<tr><th scope="row">Page Yield</th><td>Approx. ${ProductPage.formatPageYield(info.pageYield).toLocaleString()} pages</td></tr>` : ''}
-                    <tr><th scope="row">Product Type</th><td>${info.isCompatible ? 'Compatible' : 'Genuine OEM'}</td></tr>
-                    <tr><th scope="row">Category</th><td>${Security.escapeHtml(categoryName)}</td></tr>
-                </tbody>
-            `;
-
-            // FAQs
-            const faqs = template.faqs(info);
-            // faq.q is plain text — escape it. faq.a is trusted HTML from templates
-            // (dynamic values inside faq.a are already escaped at the template level above).
-            document.getElementById('product-faqs').innerHTML = faqs.map(faq => `
-                <details class="faq-item">
-                    <summary class="faq-item__question">${Security.escapeHtml(faq.q)}</summary>
-                    <div class="faq-item__answer">${faq.a}</div>
-                </details>
-            `).join('') || '<p>No FAQs available for this product.</p>';
-
             // Compatible devices: printers/typewriters
             this.renderCompatiblePrinters(info);
 
             // Compatible products for ALL categories
             this.renderRelatedProducts(info);
 
+            // Ribbon description — render below related products
+            this.renderRibbonDescription(info);
+
             // Set up event listeners
             this.setupEventListeners(info);
 
-            // Load reviews (non-blocking)
-            this.loadReviews(info);
         },
 
         renderCompatPreview(printers) {
@@ -633,9 +448,43 @@
             wrap.hidden = false;
         },
 
+        renderRibbonDescription(info) {
+            if (info.category !== 'ribbon' || !info.description_html) return;
+            const productLabel = Security.escapeHtml(info.displayName || info.name || 'This Product');
+            const html = `
+                <div class="ribbon-description" id="ribbon-description">
+                    <h2 class="ribbon-description__title">${productLabel} Description</h2>
+                    <div class="ribbon-description__content">${info.description_html}</div>
+                </div>`;
+            const rightCol = document.getElementById('ribbon-col-right');
+            if (rightCol) {
+                rightCol.insertAdjacentHTML('afterbegin', html);
+                document.getElementById('ribbon-detail-columns').hidden = false;
+            } else {
+                // Fallback: insert after related products (non-ribbon layout)
+                const relatedSection = document.getElementById('related-products');
+                if (relatedSection) {
+                    relatedSection.insertAdjacentHTML('afterend', html);
+                }
+            }
+        },
+
         async renderCompatiblePrinters(info) {
-            const descriptionEl = document.getElementById('product-description');
-            if (!descriptionEl) return;
+            // If ribbon product has admin-provided compatible devices HTML, render into left column
+            if (info.compatible_devices_html && info.category === 'ribbon') {
+                const productLabel = Security.escapeHtml(info.displayName || info.name || 'This Product');
+                const html = `
+                    <div class="product-compat-devices">
+                        <h2 class="product-compat-devices__title">${productLabel} Compatible Products</h2>
+                        <div class="product-compat-devices__content">${info.compatible_devices_html}</div>
+                    </div>`;
+                const leftCol = document.getElementById('ribbon-col-left');
+                if (leftCol) {
+                    leftCol.insertAdjacentHTML('beforeend', html);
+                    document.getElementById('ribbon-detail-columns').hidden = false;
+                }
+                return;
+            }
 
             try {
                 // Try current product SKU first
@@ -688,11 +537,9 @@
                     </div>
                 `;
 
-                const insertTarget = document.querySelector('.related-products') || document.querySelector('.product-tabs');
+                const insertTarget = document.querySelector('.related-products');
                 if (insertTarget) {
                     insertTarget.insertAdjacentHTML('beforebegin', html);
-                } else {
-                    descriptionEl.insertAdjacentHTML('beforeend', html);
                 }
             } catch (error) {
                 // Silently fail — compatible printers are optional
@@ -790,9 +637,9 @@
                     </div>
                 `;
 
-                // For ribbons: place after the Description/Specs/FAQs tabs section
-                const tabTarget = document.querySelector('.product-tabs');
-                if (tabTarget) tabTarget.insertAdjacentHTML('afterend', html);
+                // For ribbons: place before the closing main tag
+                const mainEl = document.querySelector('main');
+                if (mainEl) mainEl.insertAdjacentHTML('beforeend', html);
             } catch (e) {
                 // Compatible devices are optional
             }
@@ -845,37 +692,59 @@
                     }
                 };
 
-                // Primary: use related products endpoint
-                const relatedResponse = await API.getRelatedProducts(info.sku);
-                if (relatedResponse.ok && relatedResponse.data?.related?.length > 0) {
-                    addProducts(relatedResponse.data.related);
-                }
-
-                // Supplement: also search by compatible printer to catch products the related endpoint missed
-                const printers = await this._fetchPrinters(info.sku);
-                if (printers.length > 0) {
-                    const firstPrinter = printers[0].name;
-                    const response = await API.searchByPrinter(firstPrinter, { limit: 50 });
-                    if (response.ok && response.data?.products) {
-                        addProducts(response.data.products);
+                // For ribbons: only show manually curated related products
+                if (info.category === 'ribbon') {
+                    const manualSkus = info.related_product_skus;
+                    if (Array.isArray(manualSkus) && manualSkus.length > 0) {
+                        const sb = (typeof Auth !== 'undefined' && Auth.supabase) ? Auth.supabase : null;
+                        if (sb) {
+                            const { data: manualProducts } = await sb.from('products')
+                                .select('*')
+                                .in('sku', manualSkus)
+                                .eq('is_active', true);
+                            if (manualProducts?.length) {
+                                const bysku = {};
+                                manualProducts.forEach(p => { bysku[p.sku] = p; });
+                                const ordered = manualSkus.map(s => bysku[s]).filter(Boolean);
+                                addProducts(ordered);
+                            }
+                        }
                     }
-                }
+                } else {
+                    // Non-ribbon: use automatic discovery
+                    // Primary: use related products endpoint
+                    const relatedResponse = await API.getRelatedProducts(info.sku);
+                    if (relatedResponse.ok && relatedResponse.data?.related?.length > 0) {
+                        addProducts(relatedResponse.data.related);
+                    }
 
-                // Fallback: search by product code if still empty
-                if (related.length === 0) {
-                    const productCode = this._extractProductCode(info.manufacturer_part_number);
-                    if (productCode) {
-                        const brandName = info.brandName || '';
-                        const params = { search: productCode, limit: 50 };
-                        if (brandName) params.brand = brandName;
-                        const response = await API.getProducts(params);
+                    // Supplement: also search by compatible printer to catch products the related endpoint missed
+                    const printers = await this._fetchPrinters(info.sku);
+                    if (printers.length > 0) {
+                        const firstPrinter = printers[0].name;
+                        const response = await API.searchByPrinter(firstPrinter, { limit: 50 });
                         if (response.ok && response.data?.products) {
                             addProducts(response.data.products);
                         }
                     }
+
+                    // Fallback: search by product code if still empty
+                    if (related.length === 0) {
+                        const productCode = this._extractProductCode(info.manufacturer_part_number);
+                        if (productCode) {
+                            const brandName = info.brandName || '';
+                            const params = { search: productCode, limit: 50 };
+                            if (brandName) params.brand = brandName;
+                            const response = await API.getProducts(params);
+                            if (response.ok && response.data?.products) {
+                                addProducts(response.data.products);
+                            }
+                        }
+                    }
                 }
 
-                if (related.length === 0) return;
+                // For non-ribbons, hide if no related products found
+                if (related.length === 0 && info.category !== 'ribbon') return;
 
                 // Fill in missing image_url by fetching individual products
                 const missingImages = related.filter(p => !p.image_url);
@@ -979,13 +848,51 @@
                     `;
                 };
 
-                const code = info.manufacturer_part_number || info.sku;
+                const productLabel = Security.escapeHtml(info.displayName || info.name || info.sku);
                 const container = section.querySelector('.container');
-                container.innerHTML = `
-                    <p class="related-products__title">PRODUCTS RELATED TO ${Security.escapeHtml(code)}</p>
-                    ${buildSection(firstGroup, firstLabel)}
-                    ${buildSection(secondGroup, secondLabel)}
-                `;
+
+                if (info.category === 'ribbon') {
+                    // Ribbons: render into right column of two-column layout
+                    const brandName = Security.escapeHtml((info.brandName || '').trim());
+                    const heading = `${brandName} Ribbons`.trim();
+                    const sorted = this._sortByColor(related);
+                    const rightCol = document.getElementById('ribbon-col-right');
+
+                    let relatedHtml = '';
+                    if (sorted.length === 0) {
+                        relatedHtml = `<div class="related-products"><h2 class="ribbon-section__title">${productLabel} Related Products</h2></div>`;
+                    } else {
+                        const grids = `<div class="related-products__grid product-grid">${sorted.map(p => Products.renderCard(p)).join('')}</div>`;
+                        relatedHtml = `
+                            <div class="related-products">
+                                <h2 class="ribbon-section__title">${productLabel} Related Products</h2>
+                                <div class="related-products__group">
+                                    <div class="related-products__type-group">
+                                        <h3 class="related-products__group-heading">${heading}</h3>
+                                        ${grids}
+                                    </div>
+                                </div>
+                            </div>
+                        `;
+                    }
+
+                    if (rightCol) {
+                        rightCol.insertAdjacentHTML('beforeend', relatedHtml);
+                        document.getElementById('ribbon-detail-columns').hidden = false;
+                        // Bind events on the right column's grids
+                        rightCol.querySelectorAll('.related-products__grid').forEach(grid => {
+                            Products.bindImageFallbacks(grid);
+                            Products.bindAddToCartEvents(grid);
+                        });
+                        return; // Skip the default section rendering
+                    }
+                } else {
+                    container.innerHTML = `
+                        <p class="related-products__title">${productLabel} Related Products</p>
+                        ${buildSection(firstGroup, firstLabel)}
+                        ${buildSection(secondGroup, secondLabel)}
+                    `;
+                }
 
                 container.querySelectorAll('.related-products__grid').forEach(grid => {
                     Products.bindImageFallbacks(grid);
@@ -1095,25 +1002,6 @@
                 Favourites.updateButtonState(favBtn, isFav);
             }
 
-            // Tab switching
-            document.querySelectorAll('.tabs__button').forEach(btn => {
-                btn.addEventListener('click', () => {
-                    document.querySelectorAll('.tabs__button').forEach(b => {
-                        b.classList.remove('tabs__button--active');
-                        b.setAttribute('aria-selected', 'false');
-                    });
-                    document.querySelectorAll('.tabs__panel').forEach(p => {
-                        p.classList.remove('tabs__panel--active');
-                        p.hidden = true;
-                    });
-
-                    btn.classList.add('tabs__button--active');
-                    btn.setAttribute('aria-selected', 'true');
-                    const panel = document.getElementById(btn.getAttribute('aria-controls'));
-                    panel.classList.add('tabs__panel--active');
-                    panel.hidden = false;
-                });
-            });
         },
 
         // Generate SEO-friendly meta description
@@ -1241,265 +1129,12 @@
             }
         },
 
-        _injectFaqSchema(info) {
-            const faqJsonLd = info.seo?.faqJsonLd;
-            const existing = document.getElementById('faq-schema');
-            if (!faqJsonLd) {
-                if (existing) existing.remove();
-                return;
-            }
-            const el = existing || document.createElement('script');
-            el.type = 'application/ld+json';
-            el.id = 'faq-schema';
-            el.textContent = typeof faqJsonLd === 'string' ? faqJsonLd : JSON.stringify(faqJsonLd);
-            if (!existing) document.head.appendChild(el);
-        },
 
         _isTestProduct(product) {
             const sku = (product.sku || '').toUpperCase();
             return sku.startsWith('TEST-') || product.admin_only === true;
         },
 
-        // ========================================
-        // REVIEWS
-        // ========================================
-
-        _reviewsPage: 1,
-        _reviewsProductId: null,
-
-        async loadReviews(info) {
-            this._reviewsProductId = info.id;
-            try {
-                const [summaryRes, reviewsRes] = await Promise.all([
-                    API.getProductReviewSummary(info.id),
-                    API.getProductReviews(info.id)
-                ]);
-
-                const summary = summaryRes.ok ? summaryRes.data : null;
-                const reviews = reviewsRes.ok ? (reviewsRes.data?.reviews || []) : [];
-                const meta = reviewsRes.meta || null;
-
-                this.renderReviewSummary(summary);
-                this.renderReviewInline(summary);
-                this.renderReviewsList(reviews);
-                this.renderReviewForm(info);
-                if (meta) this.renderReviewsPagination(meta, info);
-
-                // Update tab label with count
-                const tabBtn = document.getElementById('tab-btn-reviews');
-                const count = summary?.review_count || 0;
-                if (tabBtn) tabBtn.textContent = count > 0 ? `Reviews (${count})` : 'Reviews';
-            } catch (e) {
-                // Reviews are non-critical
-            }
-        },
-
-        renderStars(rating, max = 5) {
-            let html = '';
-            for (let i = 1; i <= max; i++) {
-                const filled = i <= Math.round(rating) ? ' review-star--filled' : '';
-                html += `<svg class="review-star${filled}" width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>`;
-            }
-            return html;
-        },
-
-        renderReviewInline(summary) {
-            const el = document.getElementById('product-review-inline');
-            if (!el) return;
-            if (!summary || !summary.review_count) return;
-            el.innerHTML = `
-                <a href="#tab-reviews" class="product-info__reviews-link" id="review-inline-link">
-                    ${this.renderStars(summary.average_rating)}
-                    <span>${summary.average_rating.toFixed(1)} (${summary.review_count} review${summary.review_count !== 1 ? 's' : ''})</span>
-                </a>
-            `;
-            el.hidden = false;
-            el.querySelector('#review-inline-link')?.addEventListener('click', (e) => {
-                e.preventDefault();
-                const tabBtn = document.getElementById('tab-btn-reviews');
-                if (tabBtn) {
-                    tabBtn.click();
-                    tabBtn.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                }
-            });
-        },
-
-        renderReviewSummary(summary) {
-            const el = document.getElementById('reviews-summary');
-            if (!el) return;
-            if (!summary || !summary.review_count) {
-                el.innerHTML = `<div class="reviews-summary__empty">No reviews yet. Be the first to share your experience!</div>`;
-                return;
-            }
-
-            const avg = summary.average_rating || 0;
-            const total = summary.review_count || 0;
-            const dist = summary.distribution || {};
-
-            let barsHtml = '';
-            for (let i = 5; i >= 1; i--) {
-                const count = dist[i] || 0;
-                const pct = total > 0 ? (count / total * 100) : 0;
-                barsHtml += `
-                    <div class="reviews-summary__bar-row">
-                        <span class="reviews-summary__bar-label">${i}</span>
-                        <div class="reviews-summary__bar-track"><div class="reviews-summary__bar-fill" style="width:${pct}%"></div></div>
-                        <span class="reviews-summary__bar-count">${count}</span>
-                    </div>`;
-            }
-
-            el.innerHTML = `
-                <div class="reviews-summary">
-                    <div class="reviews-summary__score">
-                        <span class="reviews-summary__avg">${avg.toFixed(1)}</span>
-                        <div class="reviews-summary__stars">${this.renderStars(avg)}</div>
-                        <span class="reviews-summary__total">${total} review${total !== 1 ? 's' : ''}</span>
-                    </div>
-                    <div class="reviews-summary__distribution">${barsHtml}</div>
-                </div>
-            `;
-        },
-
-        renderReviewsList(reviews) {
-            const el = document.getElementById('reviews-list');
-            if (!el) return;
-            if (!reviews.length) {
-                el.innerHTML = '';
-                return;
-            }
-            el.innerHTML = reviews.map(r => {
-                const date = new Date(r.created_at).toLocaleDateString('en-NZ', { year: 'numeric', month: 'short', day: 'numeric' });
-                const name = Security.escapeHtml(r.user?.first_name || 'Customer');
-                return `
-                    <div class="review-card">
-                        <div class="review-card__header">
-                            <div class="review-card__stars">${this.renderStars(r.rating)}</div>
-                            ${r.title ? `<h4 class="review-card__title">${Security.escapeHtml(r.title)}</h4>` : ''}
-                        </div>
-                        ${r.body ? `<p class="review-card__body">${Security.escapeHtml(r.body)}</p>` : ''}
-                        <div class="review-card__footer">
-                            <span class="review-card__author">${name}</span>
-                            <span class="review-card__verified">Verified Purchase</span>
-                            <span class="review-card__date">${date}</span>
-                        </div>
-                    </div>`;
-            }).join('');
-        },
-
-        renderReviewForm(info) {
-            const el = document.getElementById('review-form-container');
-            if (!el) return;
-            const isAuth = typeof Auth !== 'undefined' && Auth.isAuthenticated();
-            if (!isAuth) {
-                el.innerHTML = `
-                    <div class="review-form__login-prompt">
-                        <p>Have you used this product? <a href="/html/account/index.html">Sign in</a> to leave a review.</p>
-                    </div>`;
-                return;
-            }
-
-            el.innerHTML = `
-                <div class="review-form">
-                    <h3 class="review-form__heading">Write a Review</h3>
-                    <div class="review-form__field">
-                        <label class="review-form__label">Rating</label>
-                        <div class="review-form__stars-input" id="review-stars-input">
-                            ${[1,2,3,4,5].map(i => `<button type="button" class="review-star-btn" data-rating="${i}" aria-label="${i} star${i>1?'s':''}">
-                                <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>
-                            </button>`).join('')}
-                        </div>
-                    </div>
-                    <div class="review-form__field">
-                        <label class="review-form__label" for="review-title">Title (optional)</label>
-                        <input type="text" id="review-title" class="form-input" maxlength="200" placeholder="Summarise your experience">
-                    </div>
-                    <div class="review-form__field">
-                        <label class="review-form__label" for="review-body">Your Review (optional)</label>
-                        <textarea id="review-body" class="form-input" rows="4" maxlength="2000" placeholder="What did you think of this product?"></textarea>
-                    </div>
-                    <button type="button" class="btn btn--primary review-form__submit" id="review-submit-btn" disabled>Submit Review</button>
-                    <p class="review-form__note">You must have purchased this product to leave a review.</p>
-                    <div id="review-form-message" hidden></div>
-                </div>`;
-
-            let selectedRating = 0;
-            const starsInput = document.getElementById('review-stars-input');
-            const submitBtn = document.getElementById('review-submit-btn');
-
-            starsInput.addEventListener('click', (e) => {
-                const btn = e.target.closest('.review-star-btn');
-                if (!btn) return;
-                selectedRating = parseInt(btn.dataset.rating);
-                starsInput.querySelectorAll('.review-star-btn').forEach((b, idx) => {
-                    b.classList.toggle('review-star-btn--active', idx < selectedRating);
-                });
-                submitBtn.disabled = false;
-            });
-
-            submitBtn.addEventListener('click', async () => {
-                if (!selectedRating) return;
-                submitBtn.disabled = true;
-                submitBtn.textContent = 'Submitting...';
-                const msgEl = document.getElementById('review-form-message');
-
-                try {
-                    const data = {
-                        product_id: info.id,
-                        rating: selectedRating,
-                        title: document.getElementById('review-title').value.trim(),
-                        body: document.getElementById('review-body').value.trim()
-                    };
-                    const res = await API.createReview(data);
-                    if (res.ok) {
-                        msgEl.textContent = 'Thank you! Your review has been submitted and is pending approval.';
-                        msgEl.className = 'review-form__message review-form__message--success';
-                        msgEl.hidden = false;
-                        el.querySelector('.review-form').querySelectorAll('input, textarea, .review-star-btn').forEach(f => f.disabled = true);
-                        submitBtn.textContent = 'Submitted';
-                    } else {
-                        const errMsg = res.error?.message || 'Could not submit review. You may need to have purchased this product first.';
-                        msgEl.textContent = errMsg;
-                        msgEl.className = 'review-form__message review-form__message--error';
-                        msgEl.hidden = false;
-                        submitBtn.textContent = 'Submit Review';
-                        submitBtn.disabled = false;
-                    }
-                } catch (err) {
-                    msgEl.textContent = err.message || 'Something went wrong. Please try again.';
-                    msgEl.className = 'review-form__message review-form__message--error';
-                    msgEl.hidden = false;
-                    submitBtn.textContent = 'Submit Review';
-                    submitBtn.disabled = false;
-                }
-            });
-        },
-
-        renderReviewsPagination(meta, info) {
-            const el = document.getElementById('reviews-pagination');
-            if (!el || !meta || meta.total_pages <= 1) return;
-            let html = '<div class="pagination">';
-            for (let i = 1; i <= meta.total_pages; i++) {
-                const cls = i === meta.page ? 'pagination__btn pagination__btn--active' : 'pagination__btn';
-                html += `<button class="${cls}" data-page="${i}">${i}</button>`;
-            }
-            html += '</div>';
-            el.innerHTML = html;
-            el.addEventListener('click', async (e) => {
-                const btn = e.target.closest('[data-page]');
-                if (!btn) return;
-                const page = parseInt(btn.dataset.page);
-                try {
-                    const res = await API.getProductReviews(info.id, { page });
-                    if (res.ok) {
-                        this.renderReviewsList(res.data?.reviews || []);
-                        el.querySelectorAll('.pagination__btn').forEach(b => {
-                            b.classList.toggle('pagination__btn--active', parseInt(b.dataset.page) === page);
-                        });
-                        document.getElementById('reviews-summary')?.scrollIntoView({ behavior: 'smooth' });
-                    }
-                } catch (e) { /* silent */ }
-            });
-        },
 
         showError(message) {
             // Update title
@@ -1511,8 +1146,6 @@
             document.querySelector('.product-info__gst').hidden = true;
             document.getElementById('product-stock').hidden = true;
             document.querySelector('.product-info__actions').hidden = true;
-            document.querySelector('.product-tabs').hidden = true;
-
             // Show error state in image area with retry button
             const imageEl = document.getElementById('product-image');
             imageEl.innerHTML = `

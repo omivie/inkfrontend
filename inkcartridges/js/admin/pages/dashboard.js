@@ -120,6 +120,13 @@ function renderKPIs(kpis, custStats, newOrders24h) {
       prevRaw: prev.revenue,
     },
     {
+      label: 'Profit',
+      value: cur.gross_profit != null ? formatPrice(cur.gross_profit) : null,
+      raw: cur.gross_profit,
+      prevRaw: prev.gross_profit,
+      missingTip: 'Requires supplier cost data on order items',
+    },
+    {
       label: 'Orders',
       value: cur.orders != null ? String(cur.orders) : null,
       raw: cur.orders,
@@ -141,7 +148,7 @@ function renderKPIs(kpis, custStats, newOrders24h) {
     },
   ];
 
-  let html = '<div class="admin-kpi-grid admin-kpi-grid--4 admin-mb-lg">';
+  let html = '<div class="admin-kpi-grid admin-kpi-grid--5 admin-mb-lg">';
   for (const card of cards) {
     html += `<div class="admin-kpi">`;
     html += `<div class="admin-kpi__label">${esc(card.label)}</div>`;
@@ -245,7 +252,7 @@ async function renderOrdersChart(revSeries, rawOrders) {
 
   // Build a date → count map from raw orders (accurate per-day counts)
   const countByDate = {};
-  const orderList = rawOrders?.orders ?? rawOrders ?? [];
+  const orderList = Array.isArray(rawOrders) ? rawOrders : (rawOrders?.orders || rawOrders?.data || []);
   for (const o of orderList) {
     const date = (o.created_at || '').slice(0, 10);
     if (date) countByDate[date] = (countByDate[date] || 0) + 1;

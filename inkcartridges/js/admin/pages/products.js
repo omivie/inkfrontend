@@ -1689,10 +1689,13 @@ function bindProductModalActions(modal, product) {
       }
       invalidateDiagCache();
       Toast.success('Product updated');
-      closeProductModal();
+      const saveBtn = modal.querySelector('[data-action="save"]');
+      if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = 'Save Changes'; }
       loadProducts();
     } catch (e) {
       Toast.error(`Save failed: ${e.message}`);
+      const saveBtn = modal.querySelector('[data-action="save"]');
+      if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = 'Save Changes'; }
     }
   });
 

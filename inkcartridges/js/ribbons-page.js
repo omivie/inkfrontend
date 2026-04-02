@@ -103,13 +103,29 @@ const RibbonsPage = {
         this.showLoadingState('brands', true);
 
         try {
-            const res = await API.getRibbonBrands();
-            const rawBrands = res?.data?.brands || [];
-            // Exclude non-manufacturer labels (generic/compatible tags, not real brands)
-            const EXCLUDED_BRANDS = new Set(['universal']);
-            const brands = rawBrands
-                .filter(name => !EXCLUDED_BRANDS.has(name.toLowerCase()))
-                .map(name => ({ value: name.toLowerCase(), label: name }));
+            // Try new ribbon_brands table first, fall back to legacy API
+            let brands = [];
+            const res = await API.getRibbonBrandsList();
+            const ribbonBrands = res?.data?.brands || [];
+
+            if (ribbonBrands.length > 0) {
+                // New system — ribbon_brands table with images and sort order
+                brands = ribbonBrands.map(b => ({
+                    id: b.id,
+                    value: b.slug || b.name.toLowerCase(),
+                    label: b.name,
+                    image_url: b.image_url || null,
+                    ribbon_brand_id: b.id,
+                }));
+            } else {
+                // Fallback to legacy device-brands API
+                const legacyRes = await API.getRibbonBrands();
+                const rawBrands = legacyRes?.data?.brands || [];
+                const EXCLUDED_BRANDS = new Set(['universal']);
+                brands = rawBrands
+                    .filter(name => !EXCLUDED_BRANDS.has(name.toLowerCase()))
+                    .map(name => ({ value: name.toLowerCase(), label: name }));
+            }
 
             this.showLoadingState('brands', false);
 
@@ -124,7 +140,16 @@ const RibbonsPage = {
                 box.className = 'drilldown-box drilldown-box--ribbon';
                 box.href = `/html/ribbons?printer_brand=${encodeURIComponent(b.value)}`;
                 box.style.animationDelay = `${i * 30}ms`;
-                box.innerHTML = `<span class="drilldown-box__label">${Security.escapeHtml(b.label)}</span>`;
+                // Show image if available, otherwise just the label
+                if (b.image_url) {
+                    box.innerHTML = `
+                        <img class="drilldown-box__image" src="${Security.escapeAttr(b.image_url)}" alt="${Security.escapeAttr(b.label)}" loading="lazy" onerror="this.style.display='none';this.nextElementSibling.style.display=''">
+                        <span class="drilldown-box__label" style="display:none">${Security.escapeHtml(b.label)}</span>
+                        <span class="drilldown-box__label drilldown-box__label--below">${Security.escapeHtml(b.label)}</span>
+                    `;
+                } else {
+                    box.innerHTML = `<span class="drilldown-box__label">${Security.escapeHtml(b.label)}</span>`;
+                }
                 box.addEventListener('click', (e) => {
                     e.preventDefault();
                     this.navigateToBrand(b.value, b.label);
@@ -156,9 +181,17 @@ const RibbonsPage = {
         // Fetch the proper label from device brands for correct casing (e.g., "IBM", "OKI")
         if (!this.state.brand) return;
         try {
-            const res = await API.getRibbonBrands();
-            const rawBrands = res?.data?.brands || [];
-            const brands = rawBrands.map(name => ({ value: name.toLowerCase(), label: name }));
+            // Try new ribbon_brands table first
+            const res = await API.getRibbonBrandsList();
+            const ribbonBrands = res?.data?.brands || [];
+            let brands;
+            if (ribbonBrands.length > 0) {
+                brands = ribbonBrands.map(b => ({ value: b.slug || b.name.toLowerCase(), label: b.name }));
+            } else {
+                const legacyRes = await API.getRibbonBrands();
+                const rawBrands = legacyRes?.data?.brands || [];
+                brands = rawBrands.map(name => ({ value: name.toLowerCase(), label: name }));
+            }
             const match = brands.find(b => b.value === this.state.brand);
             if (match && match.label !== this.state.brandLabel) {
                 this.state.brandLabel = match.label;
@@ -325,7 +358,7 @@ const RibbonsPage = {
                 limit: this.pageLimit,
                 sort: this.state.sort
             };
-            if (this.state.brand) params.brand = this.state.brand;
+            if (this.state.brand) params.printer_brand = this.state.brand;
             if (this.state.model) params.printer_model = this.state.model;
             if (this.state.ribbonBrand) params.brand = this.state.ribbonBrand;
             if (this.state.color) params.color = this.state.color;

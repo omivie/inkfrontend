@@ -47,6 +47,7 @@ const NAV_ITEMS = [
   { key: 'orders', label: 'Orders', icon: 'orders' },
   { key: 'customers', label: 'Customers', icon: 'customers' },
   { key: 'products', label: 'Products & SKUs', icon: 'products' },
+  { key: 'ribbons', label: 'Ribbons', icon: 'products' },
   { key: 'product-review', label: 'Product Review', icon: 'orders' },
   { key: 'refunds', label: 'Refunds & Chargebacks', icon: 'refunds' },
   { divider: true },
