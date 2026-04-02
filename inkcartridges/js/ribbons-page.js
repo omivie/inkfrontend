@@ -476,7 +476,6 @@ const RibbonsPage = {
             <a href="${productUrl}" class="product-card__link">
                 <div class="product-card__image-wrapper">
                     ${imageContent}
-                    ${subtypeLabel ? `<span class="product-card__subtype-badge">${Security.escapeHtml(subtypeLabel)}</span>` : ''}
                 </div>
                 <div class="product-card__content">
                     <h3 class="product-card__title">${Security.escapeHtml(displayName)}</h3>
