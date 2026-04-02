@@ -327,6 +327,8 @@ const RibbonsPage = {
         if (!ribbon.image_url && ribbon.image_path) {
             const p = ribbon.image_path;
             ribbon.image_url = typeof storageUrl === 'function' ? storageUrl(p) : p;
+        } else if (ribbon.image_url && !ribbon.image_url.startsWith('http') && typeof storageUrl === 'function') {
+            ribbon.image_url = storageUrl(ribbon.image_url);
         }
         ribbon.in_stock = true;
         if (ribbon.retail_price == null && ribbon.sale_price != null) {
@@ -670,7 +672,7 @@ const RibbonsPage = {
             { "@type": "ListItem", "position": 2, "name": "Ribbons", "item": ribbonsUrl }
         ];
         let pageUrl = ribbonsUrl;
-        let pageName = 'Typewriter & Printer Ribbons NZ';
+        let pageName = 'Typewriter & Printer Ribbons';
         const activeBrandLabel = this.state.brandLabel || this.state.brand || this.state.ribbonBrand;
         const model = this.state.model;
         if (activeBrandLabel) {
@@ -733,15 +735,15 @@ const RibbonsPage = {
         } else if (model) {
             title.textContent = `Ribbons for ${model}`;
         } else if (activeBrand) {
-            title.textContent = `${activeBrand} Typewriter & Printer Ribbons NZ`;
+            title.textContent = `${activeBrand} Typewriter & Printer Ribbons`;
         } else {
-            title.textContent = 'Typewriter & Printer Ribbons NZ';
+            title.textContent = 'Typewriter & Printer Ribbons';
         }
         title.hidden = false;
 
         // Update document title to match
         const docPrefix = activeBrand ? `${activeBrand} ` : '';
-        document.title = `${docPrefix}Typewriter & Printer Ribbons NZ | InkCartridges.co.nz`;
+        document.title = `${docPrefix}Typewriter & Printer Ribbons | InkCartridges.co.nz`;
     }
 };
 
