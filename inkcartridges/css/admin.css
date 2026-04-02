@@ -1773,3 +1773,35 @@
   outline: none;
 }
 .rte-btn--source { font-size: 11px; font-weight: 700; letter-spacing: -0.02em; }
+
+/* ---- Multi Brand Select ---- */
+.multi-brand-select { position: relative; }
+.mbs-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; min-height: 28px; }
+.mbs-placeholder { color: var(--text-muted); font-size: 13px; line-height: 28px; }
+.mbs-tag {
+  display: inline-flex; align-items: center; gap: 4px;
+  background: var(--cyan-dim); color: var(--cyan-text);
+  padding: 3px 8px; border-radius: var(--radius-sm);
+  font-size: 12px; font-weight: 600; white-space: nowrap;
+}
+.mbs-tag button {
+  background: none; border: none; color: var(--cyan-text); cursor: pointer;
+  font-size: 15px; line-height: 1; padding: 0 2px; opacity: 0.7;
+}
+.mbs-tag button:hover { opacity: 1; }
+.mbs-toggle { width: 100%; text-align: left; }
+.mbs-dropdown {
+  position: absolute; z-index: 20; top: 100%; left: 0; right: 0;
+  max-height: 240px; overflow-y: auto;
+  background: var(--surface-raised); border: 1px solid var(--border-strong);
+  border-radius: var(--radius); padding: 6px 0;
+  box-shadow: var(--shadow);
+}
+.mbs-option {
+  display: flex; align-items: center; gap: 8px;
+  padding: 7px 12px; cursor: pointer; font-size: 13px; color: var(--text);
+}
+.mbs-option:hover { background: var(--surface-hover); }
+.mbs-option input[type="checkbox"] {
+  accent-color: var(--cyan); width: 15px; height: 15px; cursor: pointer;
+}

@@ -565,10 +565,16 @@ const AdminAPI = {
     try {
       const sb = this._sb();
       if (!sb) return null;
-      const selectCols = '*, ribbon_brands(id, name, slug, image_url)';
+      const selectCols = '*, ribbon_brands!products_ribbon_brand_id_fkey(id, name, slug, image_url)';
       let query = sb.from('products').select(selectCols, { count: 'exact' })
         .in('product_type', ['printer_ribbon', 'typewriter_ribbon', 'correction_tape']);
-      if (filters.ribbon_brand_id) query = query.eq('ribbon_brand_id', filters.ribbon_brand_id);
+      if (filters.ribbon_brand_id) {
+        const { data: junctionRows } = await sb.from('product_ribbon_brands')
+          .select('product_id').eq('ribbon_brand_id', filters.ribbon_brand_id);
+        const ids = (junctionRows || []).map(r => r.product_id);
+        if (ids.length === 0) return { products: [], total: 0, page: filters.page || 1, limit: filters.limit || 200 };
+        query = query.in('id', ids);
+      }
       if (filters.product_type) query = query.eq('product_type', filters.product_type);
       if (filters.is_active !== undefined && filters.is_active !== '') query = query.eq('is_active', filters.is_active === 'true' || filters.is_active === true);
       if (filters.search) query = query.or(`name.ilike.%${filters.search}%,sku.ilike.%${filters.search}%`);
@@ -578,7 +584,18 @@ const AdminAPI = {
       query = query.range((page - 1) * limit, page * limit - 1);
       const { data, error, count } = await query;
       if (error) throw error;
-      return { products: data || [], total: count || 0, page, limit };
+      const products = data || [];
+      // Attach junction brand data in a second query
+      if (products.length > 0) {
+        const pIds = products.map(p => p.id);
+        const { data: jRows } = await sb.from('product_ribbon_brands')
+          .select('product_id, ribbon_brand_id, ribbon_brands!product_ribbon_brands_ribbon_brand_id_fkey(id, name, slug)')
+          .in('product_id', pIds);
+        const map = {};
+        for (const r of (jRows || [])) { (map[r.product_id] = map[r.product_id] || []).push(r); }
+        for (const p of products) { p.product_ribbon_brands = map[p.id] || []; }
+      }
+      return { products, total: count || 0, page, limit };
     } catch (e) {
       adminApiWarn('Failed to load ribbon products', e);
       return null;
@@ -589,9 +606,15 @@ const AdminAPI = {
     try {
       const sb = this._sb();
       if (!sb) return null;
-      const { data, error } = await sb.from('products').select('*, ribbon_brands(id, name, slug)')
+      const { data, error } = await sb.from('products').select('*, ribbon_brands!products_ribbon_brand_id_fkey(id, name, slug)')
         .eq('id', productId).single();
       if (error) throw error;
+      if (data) {
+        const { data: jRows } = await sb.from('product_ribbon_brands')
+          .select('ribbon_brand_id, ribbon_brands!product_ribbon_brands_ribbon_brand_id_fkey(id, name, slug)')
+          .eq('product_id', productId);
+        data.product_ribbon_brands = jRows || [];
+      }
       return data;
     } catch (e) {
       adminApiWarn('Failed to load ribbon product', e);
@@ -634,6 +657,43 @@ const AdminAPI = {
       return true;
     } catch (e) {
       DebugLog.warn('[AdminAPI] deleteRibbonProduct failed:', e.message);
+      throw e;
+    }
+  },
+
+  // ---- Product ↔ Ribbon Brand assignments (junction table) ----
+  async getProductRibbonBrands(productId) {
+    try {
+      const sb = this._sb();
+      if (!sb) return [];
+      const { data, error } = await sb.from('product_ribbon_brands')
+        .select('ribbon_brand_id, ribbon_brands!product_ribbon_brands_ribbon_brand_id_fkey(id, name, slug)')
+        .eq('product_id', productId);
+      if (error) throw error;
+      return data || [];
+    } catch (e) {
+      adminApiWarn('Failed to load product ribbon brands', e);
+      return [];
+    }
+  },
+
+  async setProductRibbonBrands(productId, brandIds) {
+    try {
+      const sb = this._sb();
+      if (!sb) throw new Error('Supabase not available');
+      // Delete existing assignments
+      const { error: delErr } = await sb.from('product_ribbon_brands')
+        .delete().eq('product_id', productId);
+      if (delErr) throw delErr;
+      // Insert new assignments
+      if (brandIds.length > 0) {
+        const rows = brandIds.map(bid => ({ product_id: productId, ribbon_brand_id: bid }));
+        const { error: insErr } = await sb.from('product_ribbon_brands').insert(rows);
+        if (insErr) throw insErr;
+      }
+      return true;
+    } catch (e) {
+      DebugLog.warn('[AdminAPI] setProductRibbonBrands failed:', e.message);
       throw e;
     }
   },

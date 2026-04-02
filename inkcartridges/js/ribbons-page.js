@@ -363,7 +363,9 @@ const RibbonsPage = {
             if (this.state.ribbonBrand) params.brand = this.state.ribbonBrand;
             if (this.state.color) params.color = this.state.color;
 
-            const res = await API.getRibbons(params);
+            const res = this.state.brand
+                ? await API.getRibbonsByBrand(this.state.brand)
+                : await API.getRibbons(params);
 
             if (this.navigationVersion !== navVersion) return;
             this.showLoading(false);

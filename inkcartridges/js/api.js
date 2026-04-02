@@ -385,6 +385,30 @@ const API = {
     },
 
     /**
+     * Get ribbons by device brand slug via Supabase RPC (bypasses broken backend filter)
+     */
+    async getRibbonsByBrand(brandSlug) {
+        try {
+            const url = `${Config.SUPABASE_URL}/rest/v1/rpc/get_ribbons_by_brand`;
+            const resp = await fetch(url, {
+                method: 'POST',
+                headers: {
+                    'apikey': Config.SUPABASE_ANON_KEY,
+                    'Content-Type': 'application/json',
+                    'Accept': 'application/json',
+                },
+                body: JSON.stringify({ brand_slug: brandSlug }),
+            });
+            if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+            const data = await resp.json();
+            return { ok: true, data: { products: data || [] } };
+        } catch (e) {
+            if (typeof DebugLog !== 'undefined') DebugLog.warn('[API] getRibbonsByBrand failed:', e.message);
+            return { ok: false, data: { products: [] } };
+        }
+    },
+
+    /**
      * Get distinct ribbon models for filter dropdowns
      * @param {object} params - Optional { brand, type }
      */

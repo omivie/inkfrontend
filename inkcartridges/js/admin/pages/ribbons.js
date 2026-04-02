@@ -61,14 +61,65 @@ function slugify(s) {
   return s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
 }
 
-function brandSelect(currentId) {
-  let html = `<select class="admin-select" id="edit-ribbon-brand"><option value="">Select device brand</option>`;
+function brandMultiSelect(selectedIds) {
+  const set = new Set(selectedIds || []);
+  let checkboxes = '';
   for (const b of _ribbonBrands) {
-    const sel = currentId === b.id ? ' selected' : '';
-    html += `<option value="${esc(b.id)}"${sel}>${esc(b.name)}</option>`;
+    const checked = set.has(b.id) ? ' checked' : '';
+    checkboxes += `<label class="mbs-option"><input type="checkbox" value="${esc(b.id)}"${checked}><span>${esc(b.name)}</span></label>`;
   }
-  html += '</select>';
-  return html;
+  return `
+    <div class="multi-brand-select" id="edit-ribbon-brands-wrap">
+      <div class="mbs-tags" id="edit-ribbon-brands-tags"></div>
+      <button type="button" class="admin-btn admin-btn--ghost admin-btn--sm mbs-toggle" id="edit-ribbon-brands-toggle">+ Add brands</button>
+      <div class="mbs-dropdown" id="edit-ribbon-brands-dropdown" hidden>${checkboxes}</div>
+    </div>`;
+}
+
+function initBrandMultiSelect(modal) {
+  const wrap = modal.querySelector('#edit-ribbon-brands-wrap');
+  if (!wrap) return;
+  const toggle = wrap.querySelector('.mbs-toggle');
+  const dropdown = wrap.querySelector('.mbs-dropdown');
+  const tagsEl = wrap.querySelector('.mbs-tags');
+  modal._selectedBrandIds = modal._selectedBrandIds || new Set();
+
+  function renderTags() {
+    const ids = modal._selectedBrandIds;
+    if (ids.size === 0) { tagsEl.innerHTML = '<span class="mbs-placeholder">No brands selected</span>'; return; }
+    tagsEl.innerHTML = [...ids].map(id => {
+      const b = _ribbonBrands.find(br => br.id === id);
+      return b ? `<span class="mbs-tag">${esc(b.name)}<button type="button" data-remove="${esc(b.id)}">&times;</button></span>` : '';
+    }).filter(Boolean).join('');
+  }
+
+  renderTags();
+
+  toggle.addEventListener('click', (e) => {
+    e.stopPropagation();
+    dropdown.hidden = !dropdown.hidden;
+  });
+
+  dropdown.addEventListener('change', (e) => {
+    if (e.target.type !== 'checkbox') return;
+    if (e.target.checked) modal._selectedBrandIds.add(e.target.value);
+    else modal._selectedBrandIds.delete(e.target.value);
+    renderTags();
+  });
+
+  tagsEl.addEventListener('click', (e) => {
+    const removeBtn = e.target.closest('[data-remove]');
+    if (!removeBtn) return;
+    const id = removeBtn.dataset.remove;
+    modal._selectedBrandIds.delete(id);
+    const cb = dropdown.querySelector(`input[value="${id}"]`);
+    if (cb) cb.checked = false;
+    renderTags();
+  });
+
+  document.addEventListener('click', function closeDrop(e) {
+    if (!wrap.contains(e.target)) { dropdown.hidden = true; }
+  });
 }
 
 // ── Tab Rendering ────────────────────────────────────────────────────────
@@ -361,10 +412,14 @@ function buildProductColumns() {
     { key: 'name', label: 'Name', sortable: true, render: (r) => `<span class="cell-truncate">${esc(r.name || MISSING)}</span>` },
     { key: 'sku', label: 'SKU', render: (r) => `<span class="cell-mono">${esc(r.sku || MISSING)}</span>` },
     {
-      key: 'ribbon_brand', label: 'Device Brand', sortable: false,
+      key: 'ribbon_brand', label: 'Device Brands', sortable: false,
       render: (r) => {
-        const brand = r.ribbon_brands?.name || '';
-        return brand ? `<span class="admin-badge admin-badge--processing">${esc(brand)}</span>` : MISSING;
+        const brands = r.product_ribbon_brands || [];
+        if (brands.length === 0) return MISSING;
+        return brands.map(b => {
+          const name = b.ribbon_brands?.name || '';
+          return name ? `<span class="admin-badge admin-badge--processing">${esc(name)}</span>` : '';
+        }).filter(Boolean).join(' ');
       },
     },
     {
@@ -467,15 +522,21 @@ function openRibbonProductModal(product) {
 
   if (isEdit) {
     // Fetch full product data then build tabs
-    AdminAPI.getRibbonProduct(product.id).then(full => {
+    AdminAPI.getRibbonProduct(product.id).then(async full => {
       if (_activeModal !== modal) return;
       const data = full || product;
+      // Extract brand IDs from junction table join
+      data._selectedBrandIds = (data.product_ribbon_brands || []).map(r => r.ribbon_brand_id);
+      modal._selectedBrandIds = new Set(data._selectedBrandIds);
       buildRibbonSidebar(modal, data);
       buildRibbonTabs(modal, data, isOwner, true);
+      initBrandMultiSelect(modal);
       bindRibbonModalActions(modal, data, isOwner, true);
     });
   } else {
+    modal._selectedBrandIds = new Set();
     buildRibbonTabs(modal, {}, isOwner, false);
+    initBrandMultiSelect(modal);
     bindRibbonModalActions(modal, {}, isOwner, false);
   }
 }
@@ -550,7 +611,7 @@ function buildRibbonTabs(modal, full, isOwner, isEdit) {
     </div>
     <div class="admin-form-row">
       ${formGroup('Product Type', buildSelect('edit-type', RIBBON_TYPES, full.product_type || 'printer_ribbon'))}
-      ${formGroup('Device Brand', brandSelect(full.ribbon_brand_id))}
+      ${formGroup('Device Brands', brandMultiSelect(full._selectedBrandIds || []))}
     </div>
     <div class="admin-form-row">
       ${formGroup('Color', `<input class="admin-input" id="edit-color" value="${esc(full.color || '')}">`)}
@@ -830,11 +891,12 @@ function bindRibbonModalActions(modal, product, isOwner, isEdit) {
 
     const tagsRaw = val('edit-tags');
     const relatedRaw = val('edit-related-skus');
+    const selectedBrandIds = [...(modal._selectedBrandIds || [])];
     const data = {
       sku: val('edit-sku'),
       name: val('edit-name'),
       product_type: val('edit-type') || 'printer_ribbon',
-      ribbon_brand_id: val('edit-ribbon-brand') || null,
+      ribbon_brand_id: selectedBrandIds[0] || null,
       color: val('edit-color') || null,
       source: val('edit-source') || 'compatible',
       retail_price: retailPrice,
@@ -856,13 +918,16 @@ function bindRibbonModalActions(modal, product, isOwner, isEdit) {
     saveBtn.textContent = isEdit ? 'Saving\u2026' : 'Creating\u2026';
 
     try {
+      let productId;
       if (isEdit) {
         await AdminAPI.updateRibbonProduct(product.id, data);
-        Toast.success('Product updated');
+        productId = product.id;
       } else {
-        await AdminAPI.createRibbonProduct(data);
-        Toast.success('Product created');
+        const created = await AdminAPI.createRibbonProduct(data);
+        productId = created.id;
       }
+      await AdminAPI.setProductRibbonBrands(productId, selectedBrandIds);
+      Toast.success(isEdit ? 'Product updated' : 'Product created');
       saveBtn.disabled = false;
       saveBtn.innerHTML = isEdit ? `${icon('orders', 14, 14)} Save Changes` : `${icon('orders', 14, 14)} Create Product`;
       loadRibbonProducts();
