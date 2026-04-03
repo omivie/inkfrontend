@@ -1353,6 +1353,11 @@
 }
 .admin-active-dot--on { background: var(--success); }
 .admin-active-dot--off { background: var(--text-muted); opacity: 0.4; }
+button.admin-active-dot--clickable {
+  border: none; padding: 0; cursor: pointer;
+  transition: transform 0.15s ease, opacity 0.15s ease;
+}
+button.admin-active-dot--clickable:hover { transform: scale(1.4); opacity: 1; }
 
 /* ---- Cohort Heatmap ---- */
 .admin-cohort-table td {

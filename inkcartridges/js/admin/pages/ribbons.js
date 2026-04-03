@@ -393,6 +393,30 @@ function renderProductsTab(container) {
     emptyMessage: 'No ribbon products found',
   });
 
+  // Toggle active status directly from table
+  tableWrap.addEventListener('click', async (e) => {
+    const btn = e.target.closest('[data-toggle-active]');
+    if (!btn) return;
+    e.stopPropagation();
+    const productId = btn.dataset.toggleActive;
+    const row = _productsTable.data.find(r => String(r.id) === productId);
+    if (!row) return;
+    const newActive = row.is_active === false;
+    btn.classList.toggle('admin-active-dot--on', newActive);
+    btn.classList.toggle('admin-active-dot--off', !newActive);
+    btn.dataset.tooltip = newActive ? 'Click to deactivate' : 'Click to activate';
+    try {
+      await AdminAPI.updateRibbonProduct(productId, { is_active: newActive });
+      row.is_active = newActive;
+      Toast.success(newActive ? 'Product activated' : 'Product deactivated');
+    } catch (err) {
+      btn.classList.toggle('admin-active-dot--on', !newActive);
+      btn.classList.toggle('admin-active-dot--off', newActive);
+      btn.dataset.tooltip = !newActive ? 'Click to deactivate' : 'Click to activate';
+      Toast.error('Failed to update status');
+    }
+  });
+
   loadRibbonProducts();
 }
 
@@ -446,7 +470,7 @@ function buildProductColumns() {
     key: 'is_active', label: 'Active', align: 'center',
     render: (r) => {
       const active = r.is_active !== false;
-      return `<span class="admin-active-dot admin-active-dot--${active ? 'on' : 'off'}"></span>`;
+      return `<button class="admin-active-dot admin-active-dot--${active ? 'on' : 'off'} admin-active-dot--clickable" data-toggle-active="${r.id}" data-tooltip="${active ? 'Click to deactivate' : 'Click to activate'}"></button>`;
     },
   });
 
