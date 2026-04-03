@@ -56,25 +56,6 @@
                         if (r.retail_price == null && r.sale_price != null) r.retail_price = r.sale_price;
                         if (r.image_url == null && r.image_path) r.image_url = typeof storageUrl === 'function' ? storageUrl(r.image_path) : r.image_path;
                         if (r.active == null) r.active = r.is_active !== false;
-                        // Enrich ribbon data from Supabase (description, compatibility, related products)
-                        try {
-                            let sb = (typeof Auth !== 'undefined' && Auth.supabase) ? Auth.supabase : null;
-                            // Wait briefly for Supabase if not ready yet
-                            if (!sb) {
-                                await new Promise(resolve => setTimeout(resolve, 500));
-                                sb = (typeof Auth !== 'undefined' && Auth.supabase) ? Auth.supabase : null;
-                            }
-                            if (sb) {
-                                const { data: extra } = await sb.from('products')
-                                    .select('description_html, compatible_devices_html, related_product_skus')
-                                    .eq('sku', sku).single();
-                                if (extra) {
-                                    if (r.description_html == null) r.description_html = extra.description_html;
-                                    if (r.compatible_devices_html == null) r.compatible_devices_html = extra.compatible_devices_html;
-                                    if (r.related_product_skus == null) r.related_product_skus = extra.related_product_skus;
-                                }
-                            }
-                        } catch (_) { /* non-critical enrichment */ }
                     }
                 } else {
                     response = await API.getProduct(sku);
@@ -86,6 +67,29 @@
                 }
 
                 this.product = response.data;
+
+                // Enrich ribbon products from Supabase (description, compatibility, related products)
+                const isRibbon = this._productType === 'ribbon' || this.normalizeProductType(this.product.product_type) === 'ribbon';
+                if (isRibbon) {
+                    try {
+                        const enrichUrl = `${Config.SUPABASE_URL}/rest/v1/products?sku=eq.${encodeURIComponent(sku)}&select=description_html,compatible_devices_html,related_product_skus&limit=1`;
+                        const enrichResp = await fetch(enrichUrl, {
+                            headers: {
+                                'apikey': Config.SUPABASE_ANON_KEY,
+                                'Accept': 'application/json',
+                            },
+                        });
+                        if (enrichResp.ok) {
+                            const rows = await enrichResp.json();
+                            const extra = rows[0];
+                            if (extra) {
+                                if (this.product.description_html == null) this.product.description_html = extra.description_html;
+                                if (this.product.compatible_devices_html == null) this.product.compatible_devices_html = extra.compatible_devices_html;
+                                if (this.product.related_product_skus == null) this.product.related_product_skus = extra.related_product_skus;
+                            }
+                        }
+                    } catch (_) { /* non-critical enrichment */ }
+                }
 
                 // Gate test products — active test products are visible to all; inactive only to super admins
                 if (this._isTestProduct(this.product) && !this.product.active && typeof isCachedSuperAdmin === 'function' && !isCachedSuperAdmin()) {
