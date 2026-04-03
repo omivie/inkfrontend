@@ -22,6 +22,7 @@ let _tab = 'products'; // 'brands' | 'products'
 let _brandsTable = null;
 let _productsTable = null;
 let _ribbonBrands = [];
+let _bulkBar = null;
 
 // Products filters
 let _pSearch = '';
@@ -161,6 +162,7 @@ function renderTab() {
   const body = document.getElementById('ribbon-body');
   if (!body) return;
   body.innerHTML = '';
+  if (_bulkBar) { _bulkBar.remove(); _bulkBar = null; }
   if (_tab === 'brands') renderBrandsTab(body);
   else renderProductsTab(body);
 }
@@ -386,6 +388,8 @@ function renderProductsTab(container) {
   _productsTable = new DataTable(tableWrap, {
     columns: buildProductColumns(),
     rowKey: 'id',
+    selectable: true,
+    onSelectionChange: (sel) => updateRibbonBulkBar(sel),
     onRowClick: (row) => openRibbonProductModal(row),
     onSort: (key, dir) => { _pSort = key; _pSortDir = dir; loadRibbonProducts(); },
     onPageChange: (page) => { _pPage = page; loadRibbonProducts(); },
@@ -418,6 +422,103 @@ function renderProductsTab(container) {
   });
 
   loadRibbonProducts();
+}
+
+// ── Bulk Actions ──────────────────────────────────────────────────────────
+function updateRibbonBulkBar(selected) {
+  const count = selected.size;
+  if (count === 0) {
+    if (_bulkBar) { _bulkBar.remove(); _bulkBar = null; }
+    return;
+  }
+  if (!_bulkBar) {
+    _bulkBar = document.createElement('div');
+    _bulkBar.className = 'admin-bulk-bar';
+    document.body.appendChild(_bulkBar);
+  }
+  _bulkBar.innerHTML = `
+    <span class="admin-bulk-bar__count">${count} selected</span>
+    <div class="admin-bulk-bar__actions">
+      <button class="admin-btn admin-btn--sm admin-btn--danger" data-bulk="deactivate">Deactivate</button>
+      <button class="admin-btn admin-btn--sm admin-btn--primary" data-bulk="activate">Activate</button>
+      <span style="width:1px;height:20px;background:var(--border);margin:0 4px"></span>
+      <button class="admin-btn admin-btn--sm admin-btn--danger" data-bulk="delete">Delete</button>
+      <button class="admin-btn admin-btn--sm admin-btn--ghost" data-bulk="clear">Clear</button>
+    </div>
+  `;
+  _bulkBar.querySelector('[data-bulk="deactivate"]').addEventListener('click', () => bulkSetRibbonActive(false));
+  _bulkBar.querySelector('[data-bulk="activate"]').addEventListener('click', () => bulkSetRibbonActive(true));
+  _bulkBar.querySelector('[data-bulk="delete"]').addEventListener('click', () => bulkDeleteRibbons());
+  _bulkBar.querySelector('[data-bulk="clear"]').addEventListener('click', () => {
+    if (_productsTable) _productsTable.clearSelection();
+    updateRibbonBulkBar(new Set());
+  });
+}
+
+async function bulkSetRibbonActive(activate) {
+  if (!_productsTable) return;
+  const selected = _productsTable.getSelected();
+  const count = selected.size;
+  if (count === 0) return;
+
+  const action = activate ? 'activate' : 'deactivate';
+  Modal.confirm({
+    title: `Bulk ${activate ? 'Activate' : 'Deactivate'} Ribbons`,
+    message: `This will ${action} ${count} ribbon${count > 1 ? 's' : ''}. Proceed?`,
+    confirmLabel: `${activate ? 'Activate' : 'Deactivate'} ${count}`,
+    confirmClass: activate ? 'admin-btn--primary' : 'admin-btn--danger',
+    onConfirm: async () => {
+      const ids = [...selected];
+      let done = 0, failed = 0;
+      Toast.info(`${activate ? 'Activating' : 'Deactivating'} ${count} ribbon${count > 1 ? 's' : ''}…`);
+      for (let i = 0; i < ids.length; i += 5) {
+        const batch = ids.slice(i, i + 5);
+        const results = await Promise.allSettled(
+          batch.map(id => AdminAPI.updateRibbonProduct(id, { is_active: activate }))
+        );
+        for (const r of results) { if (r.status === 'fulfilled') done++; else failed++; }
+      }
+      if (_productsTable) _productsTable.clearSelection();
+      updateRibbonBulkBar(new Set());
+      if (failed > 0) Toast.error(`${done} ${action}d, ${failed} failed`);
+      else Toast.success(`${done} ribbon${done > 1 ? 's' : ''} ${action}d`);
+      loadRibbonProducts();
+    },
+  });
+}
+
+async function bulkDeleteRibbons() {
+  if (!_productsTable) return;
+  const selected = _productsTable.getSelected();
+  const count = selected.size;
+  if (count === 0) return;
+
+  Modal.confirm({
+    title: 'Delete Ribbons',
+    message: `This will permanently delete ${count} ribbon${count > 1 ? 's' : ''}. This action cannot be undone. Proceed?`,
+    confirmLabel: `Delete ${count}`,
+    confirmClass: 'admin-btn--danger',
+    onConfirm: async () => {
+      const ids = [...selected];
+      let done = 0, failed = 0;
+      Toast.info(`Deleting ${count} ribbon${count > 1 ? 's' : ''}…`);
+      for (let i = 0; i < ids.length; i += 5) {
+        const batch = ids.slice(i, i + 5);
+        const results = await Promise.allSettled(
+          batch.map(id => AdminAPI.deleteRibbonProduct(id))
+        );
+        for (const r of results) {
+          if (r.status === 'fulfilled') done++;
+          else { failed++; console.error('[bulkDeleteRibbons] delete failed:', r.reason); }
+        }
+      }
+      if (_productsTable) _productsTable.clearSelection();
+      updateRibbonBulkBar(new Set());
+      if (failed > 0) Toast.error(`${done} deleted, ${failed} failed`);
+      else Toast.success(`${done} ribbon${done > 1 ? 's' : ''} deleted`);
+      loadRibbonProducts();
+    },
+  });
 }
 
 function buildProductColumns() {

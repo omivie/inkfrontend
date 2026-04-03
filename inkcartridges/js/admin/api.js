@@ -652,6 +652,13 @@ const AdminAPI = {
     try {
       const sb = this._sb();
       if (!sb) throw new Error('Supabase not available');
+      // Remove all FK references before deleting the product
+      const fkTables = [
+        'product_ribbon_brands', 'product_compatibility', 'product_images',
+        'product_faqs', 'reviews', 'user_favourites', 'cart_items',
+        'cart_analytics_events', 'page_views', 'order_items',
+      ];
+      await Promise.all(fkTables.map(t => sb.from(t).delete().eq('product_id', productId)));
       const { error } = await sb.from('products').delete().eq('id', productId);
       if (error) throw error;
       return true;
