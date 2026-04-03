@@ -1360,12 +1360,13 @@ button.admin-active-dot--clickable {
 button.admin-active-dot--clickable:hover { transform: scale(1.4); opacity: 1; }
 button.admin-active-dot--clickable::after {
   content: attr(data-label);
-  position: absolute; bottom: calc(100% + 8px); left: 50%;
-  transform: translateX(-50%); white-space: nowrap;
+  position: absolute; top: 50%; right: calc(100% + 8px);
+  transform: translateY(-50%); white-space: nowrap;
   background: var(--bg-dark, #1e293b); color: #fff;
   font-size: 0.7rem; font-weight: 500; padding: 4px 8px;
   border-radius: 4px; pointer-events: none;
   opacity: 0; transition: opacity 0.15s ease;
+  z-index: 10;
 }
 button.admin-active-dot--clickable:hover::after { opacity: 1; }
 
