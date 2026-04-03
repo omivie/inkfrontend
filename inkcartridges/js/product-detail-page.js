@@ -409,12 +409,6 @@
                 }
             }
 
-            // Add bold COMPATIBLE overlay on product image for compatible products
-            if (info.isCompatible) {
-                productImageEl.style.position = 'relative';
-                productImageEl.insertAdjacentHTML('beforeend', '<span class="product-gallery__compatible-overlay">COMPATIBLE</span>');
-            }
-
             // Compatible devices: printers/typewriters
             this.renderCompatiblePrinters(info);
 

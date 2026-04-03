@@ -559,24 +559,6 @@
     transform: scale(1.05);
 }
 
-.product-card__compatible-overlay {
-    position: absolute;
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%);
-    font-size: 1rem;
-    font-weight: 800;
-    letter-spacing: 0.1em;
-    color: #fff;
-    background: rgba(33, 150, 243, 0.85);
-    padding: 4px 14px;
-    border-radius: 4px;
-    text-transform: uppercase;
-    pointer-events: none;
-    z-index: 2;
-    white-space: nowrap;
-}
-
 .product-card__subtype-badge {
     position: absolute;
     top: 8px;
