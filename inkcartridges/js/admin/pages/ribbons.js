@@ -404,7 +404,7 @@ function renderProductsTab(container) {
     const newActive = row.is_active === false;
     btn.classList.toggle('admin-active-dot--on', newActive);
     btn.classList.toggle('admin-active-dot--off', !newActive);
-    btn.dataset.tooltip = newActive ? 'Click to deactivate' : 'Click to activate';
+    btn.dataset.label = newActive ? 'Click to deactivate' : 'Click to activate';
     try {
       await AdminAPI.updateRibbonProduct(productId, { is_active: newActive });
       row.is_active = newActive;
@@ -470,7 +470,7 @@ function buildProductColumns() {
     key: 'is_active', label: 'Active', align: 'center',
     render: (r) => {
       const active = r.is_active !== false;
-      return `<button class="admin-active-dot admin-active-dot--${active ? 'on' : 'off'} admin-active-dot--clickable" data-toggle-active="${r.id}" data-tooltip="${active ? 'Click to deactivate' : 'Click to activate'}"></button>`;
+      return `<button class="admin-active-dot admin-active-dot--${active ? 'on' : 'off'} admin-active-dot--clickable" data-toggle-active="${r.id}" data-label="${active ? 'Click to deactivate' : 'Click to activate'}"></button>`;
     },
   });
 
