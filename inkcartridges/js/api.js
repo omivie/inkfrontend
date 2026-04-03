@@ -52,16 +52,17 @@ const API = {
             });
             clearTimeout(timeoutId);
 
-            // Handle rate limiting — retry with exponential backoff
+            // Handle rate limiting — only retry idempotent GET requests (never retry mutations)
             if (response.status === 429) {
-                if (rateLimitRetry < this.MAX_RATE_LIMIT_RETRIES) {
+                const method = (fetchOptions.method || 'GET').toUpperCase();
+                if (method === 'GET' && rateLimitRetry < this.MAX_RATE_LIMIT_RETRIES) {
                     const retryAfter = response.headers.get('Retry-After');
                     const delay = retryAfter ? parseInt(retryAfter, 10) * 1000 : 1000 * Math.pow(2, rateLimitRetry);
                     DebugLog.warn(`Rate limited on ${url}, retrying in ${delay}ms (attempt ${rateLimitRetry + 1})`);
                     await new Promise(r => setTimeout(r, delay));
                     return this._fetchWithAuth(url, fetchOptions, { ...opts, rateLimitRetry: rateLimitRetry + 1 });
                 }
-                DebugLog.warn(`Rate limited on ${url}, max retries exceeded`);
+                DebugLog.warn(`Rate limited on ${url}${method !== 'GET' ? ' (non-GET, not retrying)' : ', max retries exceeded'}`);
                 throw new Error('Too many requests. Please wait a moment.');
             }
 
@@ -1465,9 +1466,8 @@ function getStockStatus(product) {
     if (!inStock) {
         return { class: 'out-of-stock', text: 'Out of Stock', icon: 'x-circle' };
     }
-    if (product.is_low_stock && product.source !== 'compatible') {
-        return { class: 'low-stock', text: 'Low Stock', icon: 'alert-circle' };
-    }
+    // Business rule: supplier always has stock — show "In Stock" for all available products.
+    // Do NOT show "low stock" urgency; stock_quantity is always 100.
     return { class: 'in-stock', text: 'In Stock', icon: 'check-circle' };
 }
 
@@ -1478,7 +1478,7 @@ function getStockStatus(product) {
  */
 function getSourceBadge(source) {
     if (source === 'genuine') {
-        return { class: 'badge-genuine', text: 'Genuine' };
+        return { class: 'badge-genuine', text: 'Genuine OEM' };
     }
     if (source === 'compatible') {
         return { class: 'badge-compatible', text: 'Compatible' };

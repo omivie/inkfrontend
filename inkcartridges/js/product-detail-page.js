@@ -348,7 +348,6 @@
             const stockEl = document.getElementById('product-stock');
             const stockIcons = {
                 'in-stock': '<polyline points="20 6 9 17 4 12"/>',
-                'low-stock': '<circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>',
                 'out-of-stock': '<circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/>'
             };
             stockEl.innerHTML = `<span class="stock-status stock-status--${stockStatus.class}">
@@ -408,6 +407,12 @@
                 } else {
                     productImageEl.innerHTML = `<img src="/assets/images/placeholder-product.svg" alt="${Security.escapeAttr(info.displayName)}" style="max-width: 100%; height: auto;">`;
                 }
+            }
+
+            // Add bold COMPATIBLE overlay on product image for compatible products
+            if (info.isCompatible) {
+                productImageEl.style.position = 'relative';
+                productImageEl.insertAdjacentHTML('beforeend', '<span class="product-gallery__compatible-overlay">COMPATIBLE</span>');
             }
 
             // Compatible devices: printers/typewriters
@@ -1034,10 +1039,29 @@
             return parts.join(' ');
         },
 
+        // Google product type taxonomy mapping
+        _googleProductType(productType) {
+            const map = {
+                'ink_cartridge': 'Office Supplies > Ink & Toner > Ink Cartridges',
+                'ink_bottle': 'Office Supplies > Ink & Toner > Ink Cartridges',
+                'toner_cartridge': 'Office Supplies > Ink & Toner > Toner Cartridges',
+                'drum_unit': 'Office Supplies > Ink & Toner > Drums & Imaging Units',
+                'printer_ribbon': 'Office Supplies > Ink & Toner > Printer Ribbons',
+                'typewriter_ribbon': 'Office Supplies > Ink & Toner > Printer Ribbons',
+                'correction_tape': 'Office Supplies > Ink & Toner > Printer Ribbons',
+                'label_tape': 'Office Supplies > Labels & Tapes > Label Tapes',
+                'fax_film': 'Office Supplies > Ink & Toner > Fax Supplies',
+                'fax_film_refill': 'Office Supplies > Ink & Toner > Fax Supplies',
+                'photo_paper': 'Office Supplies > Paper > Photo Paper',
+            };
+            return map[productType] || 'Office Supplies > Ink & Toner > Ink Cartridges';
+        },
+
         // Update Schema.org Product structured data
         updateProductSchema(info, price) {
             const slug = info.slug || info.sku.toLowerCase();
             const canonicalUrl = `https://www.inkcartridges.co.nz/products/${slug}/${info.sku}`;
+            const freeShipping = price >= 100;
             const schema = {
                 "@context": "https://schema.org",
                 "@type": "Product",
@@ -1049,18 +1073,13 @@
                     "@type": "Brand",
                     "name": info.brandName
                 },
-                "category": info.category === 'ribbon' ? (
-                    info.product_type === 'typewriter_ribbon' ? 'Typewriter Ribbons' :
-                    info.product_type === 'correction_tape'   ? 'Correction Tape' :
-                    info.product_type === 'printer_ribbon'    ? 'Printer Ribbons' : 'Ribbons'
-                ) :
-                           info.category === 'toner' ? 'Toner Cartridges' :
-                           info.category === 'drum' ? 'Drum Units' : 'Ink Cartridges',
+                "category": this._googleProductType(info.product_type),
                 "offers": {
                     "@type": "Offer",
                     "url": canonicalUrl,
                     "priceCurrency": "NZD",
                     "price": price.toFixed(2),
+                    "itemCondition": "https://schema.org/NewCondition",
                     "availability": "https://schema.org/InStock",
                     "seller": {
                         "@type": "Organization",
@@ -1072,24 +1091,35 @@
                             "@type": "DefinedRegion",
                             "addressCountry": "NZ"
                         },
+                        "shippingRate": {
+                            "@type": "MonetaryAmount",
+                            "value": freeShipping ? "0" : "7",
+                            "currency": "NZD"
+                        },
                         "deliveryTime": {
                             "@type": "ShippingDeliveryTime",
-                            "handlingTime": {
-                                "@type": "QuantitativeValue",
-                                "minValue": 0,
-                                "maxValue": 1,
-                                "unitCode": "DAY"
-                            },
                             "transitTime": {
                                 "@type": "QuantitativeValue",
                                 "minValue": 1,
-                                "maxValue": 5,
+                                "maxValue": 4,
                                 "unitCode": "DAY"
                             }
                         }
+                    },
+                    "hasMerchantReturnPolicy": {
+                        "@type": "MerchantReturnPolicy",
+                        "applicableCountry": "NZ",
+                        "returnPolicyCategory": "https://schema.org/MerchantReturnFiniteReturnWindow",
+                        "merchantReturnDays": 30,
+                        "returnMethod": "https://schema.org/ReturnByMail"
                     }
                 }
             };
+
+            // Add GTIN-13 (barcode) if available
+            if (info.barcode) {
+                schema.gtin13 = info.barcode;
+            }
 
             // Add image if available
             if (info.image_url) {
@@ -1099,6 +1129,24 @@
             // Add color if available
             if (info.color) {
                 schema.color = info.color;
+            }
+
+            // Add compatible printers (isCompatibleWith)
+            if (info.compatible_printers && info.compatible_printers.length > 0) {
+                schema.isCompatibleWith = info.compatible_printers.map(p => ({
+                    "@type": "Product",
+                    "name": p.full_name || p.name || p.model_name
+                }));
+            }
+
+            // Add page yield as additional property
+            const yield_ = info.pageYield || info.page_yield;
+            if (yield_) {
+                schema.additionalProperty = [{
+                    "@type": "PropertyValue",
+                    "name": "Page Yield",
+                    "value": String(yield_)
+                }];
             }
 
             // Add aggregateRating if product has reviews

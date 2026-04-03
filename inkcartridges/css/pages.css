@@ -2060,6 +2060,24 @@
     margin-bottom: 0;
 }
 
+.product-gallery__compatible-overlay {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    font-size: 1.25rem;
+    font-weight: 800;
+    letter-spacing: 0.12em;
+    color: #fff;
+    background: rgba(33, 150, 243, 0.85);
+    padding: 6px 20px;
+    border-radius: 4px;
+    text-transform: uppercase;
+    pointer-events: none;
+    z-index: 2;
+    white-space: nowrap;
+}
+
 .product-gallery__color-block {
     width: 96px;
     height: 96px;
