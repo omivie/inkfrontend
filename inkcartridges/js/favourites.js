@@ -389,18 +389,9 @@ const Favourites = {
         `).join('');
 
         // Bind image error fallbacks
-        grid.querySelectorAll('img[data-fallback]').forEach(img => {
-            img.addEventListener('error', function() {
-                if (this.dataset.fallback === 'color-block') {
-                    this.style.display = 'none';
-                    const sibling = this.nextElementSibling;
-                    if (sibling) sibling.style.display = 'flex';
-                } else if (this.dataset.fallback === 'placeholder') {
-                    this.removeAttribute('data-fallback');
-                    this.src = '/assets/images/placeholder-product.svg';
-                }
-            }, { once: true });
-        });
+        if (typeof Products !== 'undefined' && Products.bindImageFallbacks) {
+            Products.bindImageFallbacks(grid);
+        }
 
         // Bind add to cart buttons
         grid.querySelectorAll('.favourite-item__add-cart').forEach(btn => {

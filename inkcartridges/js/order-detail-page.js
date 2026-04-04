@@ -73,7 +73,7 @@
             // Render items
             const itemsContainer = document.querySelector('.order-items');
             if (itemsContainer) {
-                const esc = typeof Security !== 'undefined' ? Security.escapeHtml : (s) => s;
+                // esc() provided by utils.js
                 const escAttr = typeof Security !== 'undefined' ? Security.escapeAttr : (s) => s;
                 const items = order.order_items || [];
                 itemsContainer.innerHTML = `
@@ -103,12 +103,9 @@
                 `;
 
                 // Bind image error fallbacks
-                itemsContainer.querySelectorAll('img[data-fallback="placeholder"]').forEach(img => {
-                    img.addEventListener('error', function() {
-                        this.removeAttribute('data-fallback');
-                        this.src = '/assets/images/placeholder-product.svg';
-                    }, { once: true });
-                });
+                if (typeof Products !== 'undefined' && Products.bindImageFallbacks) {
+                    Products.bindImageFallbacks(itemsContainer);
+                }
             }
 
             // Render summary
@@ -173,7 +170,7 @@
                     : step.completed
                         ? 'timeline-step timeline-step--completed'
                         : 'timeline-step';
-                const esc = typeof Security !== 'undefined' ? Security.escapeHtml : (s) => s;
+                // esc() provided by utils.js
                 const dateStr = step.date
                     ? new Date(step.date).toLocaleDateString('en-NZ', { day: 'numeric', month: 'short' })
                     : '';

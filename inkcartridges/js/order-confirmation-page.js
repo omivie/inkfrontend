@@ -324,15 +324,14 @@
         getItemImageHtml(item) {
             const colorStyle = typeof ProductColors !== 'undefined' ? ProductColors.getProductStyle(item) : null;
 
-            const esc = typeof Security !== 'undefined' ? Security.escapeAttr : (s) => s;
-
+            // escAttr() provided by utils.js
             if (item.image_url) {
                 if (colorStyle) {
-                    return `<img src="${esc(item.image_url)}" alt="${esc(item.name)}" loading="lazy"
+                    return `<img src="${escAttr(item.image_url)}" alt="${escAttr(item.name)}" loading="lazy"
                                 data-fallback="color-block">
                             <div class="confirmation-item__color-block" style="display: none; ${colorStyle} width: 100%; height: 100%; border-radius: 6px;"></div>`;
                 } else {
-                    return `<img src="${esc(item.image_url)}" alt="${esc(item.name)}" loading="lazy" data-fallback="placeholder-svg">`;
+                    return `<img src="${escAttr(item.image_url)}" alt="${escAttr(item.name)}" loading="lazy" data-fallback="placeholder-svg">`;
                 }
             } else if (colorStyle) {
                 return `<div class="confirmation-item__color-block" style="${colorStyle} width: 100%; height: 100%; border-radius: 6px;"></div>`;

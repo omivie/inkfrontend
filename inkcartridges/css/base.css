@@ -124,6 +124,10 @@
     --color-info: var(--cyan-primary);
     --color-info-bg: var(--cyan-light);
 
+    /* Specific UI state colours */
+    --color-success-green: #16a34a;
+    --color-input-error: #ef4444;
+
     /* ==========================================
        TYPOGRAPHY
        ========================================== */

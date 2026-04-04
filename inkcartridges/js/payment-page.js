@@ -47,8 +47,8 @@
             // Load checkout data
             this.checkoutData = this.loadCheckoutData();
             if (!this.checkoutData) {
-                alert('No checkout data found. Please fill in your details first.');
-                window.location.href = '/html/checkout.html';
+                showToast('No checkout data found. Please fill in your details first.', 'error');
+                setTimeout(() => { window.location.href = '/html/checkout.html'; }, 1500);
                 return;
             }
 
@@ -100,7 +100,7 @@
             if (!this.checkoutData) return;
 
             const d = this.checkoutData;
-            const esc = typeof Security !== 'undefined' ? Security.escapeHtml : (s) => s;
+            // esc() provided by utils.js
 
             if (leftCol) {
                 leftCol.innerHTML = `
@@ -151,8 +151,8 @@
                 }
 
                 if (this.cartItems.length === 0) {
-                    alert('Your cart is empty.');
-                    window.location.href = '/html/cart.html';
+                    showToast('Your cart is empty.', 'error');
+                    setTimeout(() => { window.location.href = '/html/cart.html'; }, 1500);
                     return;
                 }
 
@@ -177,7 +177,7 @@
                 return;
             }
 
-            const esc = typeof Security !== 'undefined' ? Security.escapeHtml : (s) => s;
+            // esc() provided by utils.js
             const escAttr = typeof Security !== 'undefined' ? Security.escapeAttr : (s) => s;
             container.innerHTML = this.cartItems.map(item => `
                 <li class="checkout-summary__item">
@@ -194,12 +194,9 @@
             `).join('');
 
             // Bind image error fallbacks
-            container.querySelectorAll('img[data-fallback="placeholder"]').forEach(img => {
-                img.addEventListener('error', function() {
-                    this.removeAttribute('data-fallback');
-                    this.src = '/assets/images/placeholder-product.svg';
-                }, { once: true });
-            });
+            if (typeof Products !== 'undefined' && Products.bindImageFallbacks) {
+                Products.bindImageFallbacks(container);
+            }
         },
 
         /**
@@ -445,12 +442,12 @@
             if (this.isSubmitting) return;
 
             if (!this.paymentAuthorized) {
-                alert('Please authorize the payment before proceeding.');
+                showToast('Please authorize the payment before proceeding.', 'error');
                 return;
             }
 
             if (!this.paymentElementReady) {
-                alert('Please complete your payment details.');
+                showToast('Please complete your payment details.', 'error');
                 return;
             }
 
@@ -835,7 +832,7 @@
         showError(message) {
             const errorEl = document.getElementById('card-errors');
             if (errorEl) {
-                const esc = typeof Security !== 'undefined' ? Security.escapeHtml : (s) => s;
+                // esc() provided by utils.js
                 errorEl.innerHTML = `
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
                     ${esc(message)}

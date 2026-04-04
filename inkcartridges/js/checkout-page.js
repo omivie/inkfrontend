@@ -11,15 +11,14 @@
         getItemImageHTML(item) {
             const colorStyle = typeof ProductColors !== 'undefined' ? ProductColors.getProductStyle(item) : null;
 
-            const esc = typeof Security !== 'undefined' ? Security.escapeAttr : (s) => s;
-
+            // escAttr() provided by utils.js
             if (item.image) {
                 if (colorStyle) {
-                    return `<img src="${esc(item.image)}" alt="${esc(item.name)}" width="50" height="50" style="object-fit: contain;"
+                    return `<img src="${escAttr(item.image)}" alt="${escAttr(item.name)}" width="50" height="50" style="object-fit: contain;"
                                 data-fallback="color-block">
                             <div style="${colorStyle} width: 50px; height: 50px; border-radius: 4px; display: none;"></div>`;
                 } else {
-                    return `<img src="${esc(item.image)}" alt="${esc(item.name)}" width="50" height="50" style="object-fit: contain;"
+                    return `<img src="${escAttr(item.image)}" alt="${escAttr(item.name)}" width="50" height="50" style="object-fit: contain;"
                                 data-fallback="placeholder">`;
                 }
             } else if (colorStyle) {
@@ -530,18 +529,9 @@
             `).join('');
 
             // Bind image fallback handlers
-            itemsContainer.querySelectorAll('img[data-fallback]').forEach(img => {
-                img.addEventListener('error', function() {
-                    if (this.dataset.fallback === 'color-block') {
-                        this.style.display = 'none';
-                        const sibling = this.nextElementSibling;
-                        if (sibling) sibling.style.display = 'flex';
-                    } else if (this.dataset.fallback === 'placeholder') {
-                        this.removeAttribute('data-fallback');
-                        this.src = '/assets/images/placeholder-product.svg';
-                    }
-                }, { once: true });
-            });
+            if (typeof Products !== 'undefined' && Products.bindImageFallbacks) {
+                Products.bindImageFallbacks(itemsContainer);
+            }
 
             this.updateTotalsDisplay();
         },
@@ -896,7 +886,7 @@
         // Get summary text for a collapsed section
         _getAccordionSummary(data) {
             const { section } = data;
-            const esc = typeof Security !== 'undefined' ? Security.escapeHtml : (s) => s;
+            // esc() provided by utils.js
 
             // Contact Information
             const email = section.querySelector('#email');

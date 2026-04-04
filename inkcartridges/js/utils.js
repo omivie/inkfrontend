@@ -73,7 +73,7 @@ function getStorage(key, defaultValue = null) {
         const item = localStorage.getItem(key);
         return item ? JSON.parse(item) : defaultValue;
     } catch (e) {
-        console.error('Error reading from localStorage:', e);
+        DebugLog.error('Error reading from localStorage:', e);
         return defaultValue;
     }
 }
@@ -87,7 +87,7 @@ function setStorage(key, value) {
     try {
         localStorage.setItem(key, JSON.stringify(value));
     } catch (e) {
-        console.error('Error writing to localStorage:', e);
+        DebugLog.error('Error writing to localStorage:', e);
     }
 }
 
@@ -292,6 +292,21 @@ window.DebugLog = DebugLog;
 
 
 /**
+ * ESCAPING SHORTCUTS
+ * ==================
+ * Safe wrappers around Security.escapeHtml / escapeAttr.
+ * Falls back to identity if Security hasn't loaded (shouldn't happen in production).
+ */
+function esc(s) {
+    return typeof Security !== 'undefined' ? Security.escapeHtml(s) : String(s);
+}
+
+function escAttr(s) {
+    return typeof Security !== 'undefined' ? Security.escapeAttr(s) : String(s);
+}
+
+
+/**
  * Stub — admin role is no longer cached client-side (sessionStorage is user-controlled).
  * Backend re-verifies on every admin request. Always returns false.
  * @returns {boolean}
@@ -307,6 +322,7 @@ if (typeof module !== 'undefined' && module.exports) {
         $, $$, on,
         getStorage, setStorage,
         debounce,
-        storageUrl
+        storageUrl,
+        esc, escAttr
     };
 }

@@ -2892,8 +2892,9 @@
             this.elements.productTypeLabel.hidden = true;
 
             if (this.state.level === 'products' || this.state.level === 'printer-products' || this.state.level === 'printer-model-products' || this.state.level === 'search-results') {
-                // Hide main title on products level
-                this.elements.title.hidden = true;
+                // Hide main title on products level (keep accessible for SEO)
+                this.elements.title.hidden = false;
+                this.elements.title.classList.add('visually-hidden');
 
                 // Show product type inline with breadcrumb
                 let productType = this.getProductTypeLabel();
@@ -2921,10 +2922,12 @@
                 if (titleText) {
                     this.elements.title.textContent = titleText;
                     this.elements.title.hidden = false;
+                    this.elements.title.classList.remove('visually-hidden');
                 } else {
-                    // Brands level — keep H1 in DOM for SEO but visually hide it
+                    // Brands level — visible H1 for SEO and heading hierarchy
                     this.elements.title.textContent = 'Shop Ink Cartridges & Toner NZ';
-                    this.elements.title.hidden = true;
+                    this.elements.title.hidden = false;
+                    this.elements.title.classList.remove('visually-hidden');
                 }
             }
         }

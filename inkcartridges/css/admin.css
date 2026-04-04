@@ -19,19 +19,20 @@
   --input-bg: rgba(255,255,255,0.04);
   --input-border: rgba(255,255,255,0.1);
   --ring: rgba(38,127,181,0.45);
-  --cyan: #267FB5;
+  /* CMYK — inherit from base.css tokens to stay in sync */
+  --cyan: var(--cyan-primary, #267FB5);
   --cyan-hover: #2e91cc;
   --cyan-dim: rgba(38,127,181,0.12);
   --cyan-text: #5cb8e6;
-  --magenta: #C71F6E;
+  --magenta: var(--magenta-primary, #C71F6E);
   --magenta-hover: #d92a7d;
   --magenta-dim: rgba(199,31,110,0.12);
   --magenta-text: #e8609e;
-  --yellow: #F4C430;
+  --yellow: var(--yellow-primary, #F4C430);
   --yellow-hover: #f7d054;
   --yellow-dim: rgba(244,196,48,0.12);
   --yellow-text: #f4c430;
-  --key: #111111;
+  --key: var(--black-primary, #111111);
   --success: #34D399;
   --success-dim: rgba(52,211,153,0.12);
   --danger: #ef4444;

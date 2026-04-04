@@ -667,6 +667,7 @@ function createSmartSearch() {
             + '</div>';
             this._footer.classList.add('is-hidden');
             this._show();
+            if (typeof showToast === 'function') showToast('Search failed. Please try again.', 'error');
         },
 
         _updateFooter(query, total) {

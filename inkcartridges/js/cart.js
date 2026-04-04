@@ -108,9 +108,14 @@ const Cart = {
     },
 
     /**
-     * Bind image error fallback handlers (replaces inline onerror)
+     * Bind image error fallback handlers — delegates to Products if available,
+     * otherwise falls back to inline implementation for pages without products.js.
      */
     bindImageFallbacks(container) {
+        if (typeof Products !== 'undefined' && Products.bindImageFallbacks) {
+            Products.bindImageFallbacks(container);
+            return;
+        }
         container.querySelectorAll('img[data-fallback]').forEach(img => {
             img.addEventListener('error', function() {
                 if (this.dataset.fallback === 'color-block') {
@@ -641,7 +646,7 @@ const Cart = {
             const existing = document.getElementById('price-change-modal');
             if (existing) existing.remove();
 
-            const esc = typeof Security !== 'undefined' ? Security.escapeHtml.bind(Security) : (s) => s;
+            // esc() provided by utils.js
             const fmt = typeof formatPrice === 'function' ? formatPrice : (v) => `$${Number(v).toFixed(2)}`;
 
             const rows = priceChanges.map(pc =>

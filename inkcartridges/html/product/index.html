@@ -292,6 +292,50 @@
             </div>
         </section>
 
+        <section class="product-reviews" id="product-reviews" hidden>
+            <div class="container">
+                <div class="product-reviews__header">
+                    <h2 class="product-reviews__title">Customer Reviews</h2>
+                    <div class="product-reviews__summary" id="reviews-summary"></div>
+                </div>
+                <div class="product-reviews__list" id="reviews-list"></div>
+                <div class="product-reviews__form-wrap" id="review-form-wrap" hidden>
+                    <h3 class="product-reviews__form-title">Write a Review</h3>
+                    <form class="review-form" id="review-form">
+                        <div class="review-form__stars" id="review-stars">
+                            <span class="review-form__stars-label">Your Rating</span>
+                            <div class="review-form__star-btns">
+                                <button type="button" data-rating="1" aria-label="1 star">
+                                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+                                </button>
+                                <button type="button" data-rating="2" aria-label="2 stars">
+                                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+                                </button>
+                                <button type="button" data-rating="3" aria-label="3 stars">
+                                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+                                </button>
+                                <button type="button" data-rating="4" aria-label="4 stars">
+                                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+                                </button>
+                                <button type="button" data-rating="5" aria-label="5 stars">
+                                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+                                </button>
+                            </div>
+                        </div>
+                        <div class="review-form__field">
+                            <label for="review-title">Title</label>
+                            <input type="text" id="review-title" name="title" maxlength="120" placeholder="Summarise your experience" required>
+                        </div>
+                        <div class="review-form__field">
+                            <label for="review-body">Review</label>
+                            <textarea id="review-body" name="body" rows="4" maxlength="2000" placeholder="What did you like or dislike?" required></textarea>
+                        </div>
+                        <button type="submit" class="btn btn--primary" id="review-submit-btn">Submit Review</button>
+                        <p class="review-form__status" id="review-form-status"></p>
+                    </form>
+                </div>
+            </div>
+        </section>
 
 
     </main>

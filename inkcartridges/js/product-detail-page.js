@@ -98,6 +98,7 @@
                 }
 
                 this.renderProduct();
+                this.loadReviews();
             } catch (error) {
                 DebugLog.error('Error loading product:', error);
                 this.showError('Failed to load product');
@@ -1161,6 +1162,178 @@
             }
         },
 
+
+        // ── Reviews ──────────────────────────────────────────
+
+        _renderStars(rating, size = 16) {
+            const full = Math.round(rating);
+            return Array.from({ length: 5 }, (_, i) =>
+                `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="${i < full ? 'currentColor' : 'none'}" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>`
+            ).join('');
+        },
+
+        async loadReviews() {
+            const info = this.product;
+            if (!info || !info.id) return;
+
+            const section = document.getElementById('product-reviews');
+            if (!section) return;
+
+            try {
+                // Fetch reviews and summary in parallel
+                const [reviewsResp, summaryResp] = await Promise.all([
+                    API.getProductReviews(info.id),
+                    API.getProductReviewSummary(info.id)
+                ]);
+
+                const reviews = (reviewsResp.ok && reviewsResp.data?.reviews) ? reviewsResp.data.reviews : [];
+                const summary = (summaryResp.ok && summaryResp.data) ? summaryResp.data : null;
+
+                // Render summary
+                const summaryEl = document.getElementById('reviews-summary');
+                if (summary && summary.count > 0) {
+                    summaryEl.innerHTML = `
+                        <div class="reviews-summary__stars">${this._renderStars(summary.average, 20)}</div>
+                        <span class="reviews-summary__avg">${Number(summary.average).toFixed(1)}</span>
+                        <span class="reviews-summary__count">based on ${summary.count} review${summary.count !== 1 ? 's' : ''}</span>
+                    `;
+                }
+
+                // Render review list
+                const listEl = document.getElementById('reviews-list');
+                if (reviews.length > 0) {
+                    listEl.innerHTML = reviews.map(r => {
+                        const date = r.created_at ? new Date(r.created_at).toLocaleDateString('en-NZ', { year: 'numeric', month: 'short', day: 'numeric' }) : '';
+                        const author = r.user_name || r.author_name || 'Customer';
+                        return `
+                            <div class="product-review-card">
+                                <div class="product-review-card__stars">${this._renderStars(r.rating)}</div>
+                                <h4 class="product-review-card__title">${Security.escapeHtml(r.title || '')}</h4>
+                                <p class="product-review-card__body">${Security.escapeHtml(r.body || '')}</p>
+                                <div class="product-review-card__meta">
+                                    <span class="product-review-card__author">${Security.escapeHtml(author)}</span>
+                                    ${date ? `<span class="product-review-card__date">${Security.escapeHtml(date)}</span>` : ''}
+                                </div>
+                            </div>
+                        `;
+                    }).join('');
+                } else {
+                    listEl.innerHTML = '<p class="product-reviews__empty">No reviews yet. Be the first to share your experience!</p>';
+                }
+
+                // Show section if there are reviews OR user is logged in (can write one)
+                const isLoggedIn = typeof Auth !== 'undefined' && Auth.user;
+                if (reviews.length > 0 || isLoggedIn) {
+                    section.hidden = false;
+                }
+
+                // Show review form for logged-in users
+                this.setupReviewForm(info);
+
+                // Handle ?review=true query param
+                const params = new URLSearchParams(window.location.search);
+                if (params.get('review') === 'true') {
+                    section.hidden = false;
+                    // Small delay to ensure DOM is settled after render
+                    requestAnimationFrame(() => {
+                        const formWrap = document.getElementById('review-form-wrap');
+                        if (formWrap && !formWrap.hidden) {
+                            formWrap.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        } else {
+                            section.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                        }
+                    });
+                }
+            } catch (e) {
+                // Reviews are non-critical
+            }
+        },
+
+        setupReviewForm(info) {
+            const formWrap = document.getElementById('review-form-wrap');
+            const form = document.getElementById('review-form');
+            if (!formWrap || !form) return;
+
+            const isLoggedIn = typeof Auth !== 'undefined' && Auth.user;
+            if (!isLoggedIn) return;
+
+            formWrap.hidden = false;
+            let selectedRating = 0;
+
+            // Star selection
+            const starBtns = form.querySelectorAll('#review-stars button[data-rating]');
+            const updateStarDisplay = (rating) => {
+                starBtns.forEach(btn => {
+                    const val = parseInt(btn.dataset.rating);
+                    const svg = btn.querySelector('svg');
+                    svg.setAttribute('fill', val <= rating ? 'currentColor' : 'none');
+                });
+            };
+
+            starBtns.forEach(btn => {
+                btn.addEventListener('click', () => {
+                    selectedRating = parseInt(btn.dataset.rating);
+                    updateStarDisplay(selectedRating);
+                });
+                btn.addEventListener('mouseenter', () => {
+                    updateStarDisplay(parseInt(btn.dataset.rating));
+                });
+            });
+
+            const starsWrap = document.getElementById('review-stars');
+            starsWrap.addEventListener('mouseleave', () => {
+                updateStarDisplay(selectedRating);
+            });
+
+            // Form submission
+            form.addEventListener('submit', async (e) => {
+                e.preventDefault();
+                const statusEl = document.getElementById('review-form-status');
+                const submitBtn = document.getElementById('review-submit-btn');
+
+                if (selectedRating === 0) {
+                    statusEl.textContent = 'Please select a rating.';
+                    statusEl.className = 'review-form__status review-form__status--error';
+                    return;
+                }
+
+                const title = form.querySelector('#review-title').value.trim();
+                const body = form.querySelector('#review-body').value.trim();
+
+                submitBtn.disabled = true;
+                submitBtn.textContent = 'Submitting...';
+                statusEl.textContent = '';
+
+                try {
+                    const resp = await API.createReview({
+                        product_id: info.id,
+                        rating: selectedRating,
+                        title,
+                        body
+                    });
+
+                    if (resp.ok) {
+                        statusEl.textContent = 'Thank you! Your review has been submitted and will appear after approval.';
+                        statusEl.className = 'review-form__status review-form__status--success';
+                        form.reset();
+                        selectedRating = 0;
+                        updateStarDisplay(0);
+                        submitBtn.textContent = 'Submitted';
+                    } else {
+                        const msg = resp.error?.message || resp.data?.message || 'Could not submit review. You may need to have purchased this product.';
+                        statusEl.textContent = msg;
+                        statusEl.className = 'review-form__status review-form__status--error';
+                        submitBtn.disabled = false;
+                        submitBtn.textContent = 'Submit Review';
+                    }
+                } catch (err) {
+                    statusEl.textContent = 'Something went wrong. Please try again.';
+                    statusEl.className = 'review-form__status review-form__status--error';
+                    submitBtn.disabled = false;
+                    submitBtn.textContent = 'Submit Review';
+                }
+            });
+        },
 
         _isTestProduct(product) {
             const sku = (product.sku || '').toUpperCase();
