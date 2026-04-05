@@ -23,10 +23,17 @@
             }
 
             // If redirected from Stripe with a successful payment, clear cart
+            // Preserve guest session ID — clearCart() removes it, but we need it
+            // for the order API call below
             if (redirectStatus === 'succeeded') {
+                const guestSessionId = typeof API !== 'undefined' ? API.getGuestSessionId() : null;
                 try {
                     if (typeof API !== 'undefined') await API.clearCart();
                 } catch (e) { /* ignore */ }
+                // Restore guest session so the order fetch can authenticate
+                if (guestSessionId && typeof API !== 'undefined') {
+                    API.setGuestSessionId(guestSessionId);
+                }
                 if (typeof Cart !== 'undefined') {
                     Cart.items = [];
                     document.querySelectorAll('.cart-count, .cart-badge, #cart-count').forEach(el => { el.textContent = '0'; });
