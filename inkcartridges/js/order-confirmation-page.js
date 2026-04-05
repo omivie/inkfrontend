@@ -34,24 +34,25 @@
                 localStorage.removeItem('inkcartridges_cart');
             }
 
-            // Pre-fill email from sessionStorage (set by payment page)
+            // Load order data from sessionStorage (set by payment page with full order details)
+            let storedData = null;
             const storedOrder = sessionStorage.getItem('lastOrder');
             if (storedOrder) {
                 try {
-                    const stored = JSON.parse(storedOrder);
+                    storedData = JSON.parse(storedOrder);
                     // Show email immediately while API loads
-                    if (stored.email) {
+                    if (storedData.email) {
                         const emailEl = document.getElementById('confirmation-email');
-                        if (emailEl) emailEl.textContent = stored.email;
+                        if (emailEl) emailEl.textContent = storedData.email;
                     }
                     // Show order number immediately
-                    if (stored.order_number) {
+                    if (storedData.order_number) {
                         const orderNumEl = document.getElementById('order-number');
-                        if (orderNumEl) orderNumEl.textContent = `#${stored.order_number}`;
+                        if (orderNumEl) orderNumEl.textContent = `#${storedData.order_number}`;
                     }
                     // Store payment method from session for fallback
-                    if (stored.payment_method) {
-                        this.detectedPaymentMethod = stored.payment_method;
+                    if (storedData.payment_method) {
+                        this.detectedPaymentMethod = storedData.payment_method;
                     }
                 } catch (e) {
                     DebugLog.error('Failed to parse stored order:', e);
@@ -64,23 +65,33 @@
                 await Auth.readyPromise;
             }
 
-            // Load full order details from API
+            // Load full order details from API, fall back to sessionStorage data
             if (orderNumber) {
-                await this.loadOrderFromAPI(orderNumber);
+                await this.loadOrderFromAPI(orderNumber, storedData);
+            } else if (storedData && storedData.items) {
+                // No order number in URL but we have full data from sessionStorage
+                this.orderData = this.transformAPIOrder(storedData);
+                this.renderOrderDetails();
             }
         },
 
-        async loadOrderFromAPI(orderNumber) {
+        async loadOrderFromAPI(orderNumber, storedData) {
             try {
                 const response = await API.getOrder(orderNumber);
                 if (response.ok && response.data) {
                     this.orderData = this.transformAPIOrder(response.data);
                     this.renderOrderDetails();
-                } else {
-                    this.showFallback(orderNumber);
+                    return;
                 }
             } catch (error) {
-                DebugLog.error('Failed to load order from API:', error);
+                DebugLog.warn('API order fetch failed, using stored data:', error.message);
+            }
+
+            // API failed — use sessionStorage data if available
+            if (storedData && storedData.items && storedData.items.length > 0) {
+                this.orderData = this.transformAPIOrder(storedData);
+                this.renderOrderDetails();
+            } else {
                 this.showFallback(orderNumber);
             }
         },
@@ -299,13 +310,25 @@
         renderGoogleReviewsOptIn(order) {
             if (!order || !order.email || !order.orderNumber) return;
 
-            const data = {
-                merchant_id: 5748243992,
+            // Prefer backend-provided google_customer_reviews data
+            const gcr = order.googleCustomerReviews;
+            const data = gcr ? {
+                merchant_id: gcr.merchant_id || "5748243992",
+                order_id: gcr.order_id || String(order.orderNumber),
+                email: gcr.email || order.email,
+                delivery_country: gcr.delivery_country || 'NZ',
+                estimated_delivery_date: gcr.estimated_delivery_date || this.getEstimatedDeliveryDate(order.shipping),
+                products: gcr.products
+            } : {
+                merchant_id: "5748243992",
                 order_id: String(order.orderNumber),
                 email: order.email,
                 delivery_country: 'NZ',
                 estimated_delivery_date: this.getEstimatedDeliveryDate(order.shipping)
             };
+
+            // Remove undefined keys (products may not exist in fallback)
+            Object.keys(data).forEach(k => data[k] === undefined && delete data[k]);
 
             // Store for renderOptIn callback (fires when platform.js loads)
             window._googleReviewsOptInData = data;

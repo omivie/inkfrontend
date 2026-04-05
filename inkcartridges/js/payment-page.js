@@ -535,11 +535,7 @@
                         btnText.innerHTML = this.getLoadingHTML('Retrying payment...');
 
                         // Store order data before confirmPayment (redirect may happen)
-                        sessionStorage.setItem('lastOrder', JSON.stringify({
-                            order_number: dupOrderNumber,
-                            email: this.checkoutData.email,
-                            payment_method: 'stripe'
-                        }));
+                        sessionStorage.setItem('lastOrder', JSON.stringify(this.buildOrderSnapshot(dupOrderNumber, 'stripe')));
 
                         const { error: stripeError } = await this.stripe.confirmPayment({
                             elements: this.elements,
@@ -593,11 +589,7 @@
                         try {
                             const orderCheck = await API.getOrder(dupOrderNumber);
                             if (orderCheck.ok && orderCheck.data?.status === 'paid') {
-                                sessionStorage.setItem('lastOrder', JSON.stringify({
-                                    order_number: dupOrderNumber,
-                                    email: this.checkoutData.email,
-                                    payment_method: 'stripe'
-                                }));
+                                sessionStorage.setItem('lastOrder', JSON.stringify(this.buildOrderSnapshot(dupOrderNumber, 'stripe')));
                                 sessionStorage.removeItem('checkoutData');
                                 window.location.href = `/html/order-confirmation.html?order=${encodeURIComponent(dupOrderNumber)}`;
                                 return;
@@ -615,11 +607,7 @@
                     }
 
                     // Same payment method (stripe), no client_secret = already paid — redirect
-                    sessionStorage.setItem('lastOrder', JSON.stringify({
-                        order_number: dupOrderNumber,
-                        email: this.checkoutData.email,
-                        payment_method: 'stripe'
-                    }));
+                    sessionStorage.setItem('lastOrder', JSON.stringify(this.buildOrderSnapshot(dupOrderNumber, 'stripe')));
                     sessionStorage.removeItem('checkoutData');
                     window.location.href = `/html/order-confirmation.html?order=${encodeURIComponent(dupOrderNumber)}`;
                     return;
@@ -725,13 +713,10 @@
 
                 const { client_secret, order_id, order_number, total_amount } = orderResponse.data;
 
-                // STEP 3: Store order data before confirmPayment
+                // STEP 3: Store full order data before confirmPayment
                 // confirmPayment may redirect (PayPal, 3DS) before post-payment code runs
-                sessionStorage.setItem('lastOrder', JSON.stringify({
-                    order_number: order_number,
-                    email: this.checkoutData.email,
-                    payment_method: 'stripe'
-                }));
+                // Guest users can't fetch order via API, so store everything needed for confirmation
+                sessionStorage.setItem('lastOrder', JSON.stringify(this.buildOrderSnapshot(order_number, 'stripe')));
 
                 // STEP 4: Confirm payment with Stripe PaymentElement
                 btnText.innerHTML = this.getLoadingHTML('Processing payment...');
@@ -782,6 +767,46 @@
                 payBtn.disabled = false;
                 this.isSubmitting = false;
             }
+        },
+
+        /**
+         * Build a complete order snapshot for sessionStorage.
+         * Guest users can't fetch orders via API, so we store everything
+         * the confirmation page needs to render the full order details.
+         */
+        buildOrderSnapshot(orderNumber, paymentMethod) {
+            const cd = this.checkoutData || {};
+            return {
+                order_number: orderNumber,
+                email: cd.email,
+                payment_method: paymentMethod,
+                total: this.totals?.total || 0,
+                subtotal: this.totals?.subtotal || 0,
+                shipping_cost: this.totals?.shipping || 0,
+                shipping_tier: cd.shippingTier || '',
+                delivery_zone: cd.shippingZone || cd.deliveryZone || '',
+                shipping_address: {
+                    first_name: cd.firstName,
+                    last_name: cd.lastName,
+                    phone: cd.phone || '',
+                    address_line1: cd.address1,
+                    address_line2: cd.address2 || '',
+                    city: cd.city,
+                    region: cd.region,
+                    postal_code: cd.postcode,
+                    country: 'NZ'
+                },
+                items: (this.cartItems || []).map(item => ({
+                    product_name: item.name || item.title,
+                    quantity: item.quantity,
+                    unit_price: item.price,
+                    image_url: item.image_url || item.image || null,
+                    brand: item.brand || null,
+                    source: item.source || null,
+                    sku: item.sku || null
+                })),
+                created_at: new Date().toISOString()
+            };
         },
 
         /**
@@ -1130,11 +1155,7 @@
                             }
                             localStorage.removeItem('inkcartridges_cart');
 
-                            sessionStorage.setItem('lastOrder', JSON.stringify({
-                                order_number: orderNumber,
-                                email: self.checkoutData.email,
-                                payment_method: 'paypal'
-                            }));
+                            sessionStorage.setItem('lastOrder', JSON.stringify(self.buildOrderSnapshot(orderNumber, 'paypal')));
                             sessionStorage.removeItem('checkoutData');
                             window.location.href = `/html/order-confirmation.html?order=${encodeURIComponent(orderNumber)}`;
                         } else {

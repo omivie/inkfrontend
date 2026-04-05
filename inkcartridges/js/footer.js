@@ -175,6 +175,7 @@
 
     // Google Customer Reviews - badge + opt-in survey loader
     (function () {
+      window.___gcfg = { lang: 'en_NZ' };
       var originalOptIn = window.renderOptIn;
 
       window.renderOptIn = function () {

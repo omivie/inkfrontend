@@ -273,17 +273,5 @@
 
     <script defer src="/js/order-confirmation-page.js"></script>
     <script defer src="/js/analytics.js"></script>
-
-    <!-- Google Customer Reviews opt-in survey -->
-    <script>
-        window.___gcfg = { lang: 'en_NZ' };
-        window.renderOptIn = function() {
-            var data = window._googleReviewsOptInData;
-            if (data && window.gapi && window.gapi.surveyoptin) {
-                window.gapi.surveyoptin.render(data);
-            }
-        };
-    </script>
-    <script src="https://apis.google.com/js/platform.js?onload=renderOptIn" async defer></script>
 </body>
 </html>
