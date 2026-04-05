@@ -427,7 +427,8 @@
             const payBtn = document.getElementById('pay-now-btn');
             if (!payBtn) return;
 
-            const canPay = this.paymentElementReady && this.paymentAuthorized;
+            const turnstileOk = !this.isGuestCheckout || !!this.turnstileToken;
+            const canPay = this.paymentElementReady && this.paymentAuthorized && turnstileOk;
             payBtn.disabled = !canPay;
         },
 
@@ -448,6 +449,11 @@
 
             if (!this.paymentElementReady) {
                 showToast('Please complete your payment details.', 'error');
+                return;
+            }
+
+            if (this.isGuestCheckout && !this.turnstileToken) {
+                showToast('Please complete the human verification check.', 'error');
                 return;
             }
 
@@ -935,9 +941,9 @@
             const doRender = () => {
                 self.turnstileWidgetId = turnstile.render('#turnstile-widget', {
                     sitekey: siteKey,
-                    callback: (token) => { self.turnstileToken = token; },
-                    'expired-callback': () => { self.turnstileToken = null; },
-                    'error-callback': () => { self.turnstileToken = null; }
+                    callback: (token) => { self.turnstileToken = token; self.updatePayButton(); },
+                    'expired-callback': () => { self.turnstileToken = null; self.updatePayButton(); },
+                    'error-callback': () => { self.turnstileToken = null; self.updatePayButton(); }
                 });
             };
 
