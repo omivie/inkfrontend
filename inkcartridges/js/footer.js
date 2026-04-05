@@ -28,6 +28,7 @@
                             <li><a href="/html/business/apply.html">Business Accounts</a></li>
                             <li><a href="/html/terms.html">Terms &amp; Conditions</a></li>
                             <li><a href="/html/privacy.html">Privacy Policy</a></li>
+                            <li><a href="/html/returns.html">Returns &amp; Refunds</a></li>
                         </ul>
                     </div>
 
@@ -36,7 +37,7 @@
                         <ul class="footer-links">
                             <li>
                                 <strong>Address:</strong><br>
-                                2 Queen Street, Auckland 1010, New Zealand
+                                37A Archibald Road, Kelston, Auckland 0602, New Zealand
                             </li>
                             <li>
                                 <strong>Phone:</strong><br>
@@ -87,10 +88,10 @@
             "description": "New Zealand's trusted source for genuine and compatible ink cartridges, toner, and printer supplies.",
             "address": {
                 "@type": "PostalAddress",
-                "streetAddress": "2 Queen Street",
-                "addressLocality": "Auckland",
+                "streetAddress": "37A Archibald Road",
+                "addressLocality": "Kelston, Auckland",
                 "addressRegion": "Auckland",
-                "postalCode": "1010",
+                "postalCode": "0602",
                 "addressCountry": "NZ"
             },
             "contactPoint": {
@@ -127,10 +128,10 @@
             "telephone": "+64-27-474-0115",
             "address": {
                 "@type": "PostalAddress",
-                "streetAddress": "2 Queen Street",
-                "addressLocality": "Auckland",
+                "streetAddress": "37A Archibald Road",
+                "addressLocality": "Kelston, Auckland",
                 "addressRegion": "Auckland",
-                "postalCode": "1010",
+                "postalCode": "0602",
                 "addressCountry": "NZ"
             },
             "geo": {
