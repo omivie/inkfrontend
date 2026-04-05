@@ -34,31 +34,8 @@
                 localStorage.removeItem('inkcartridges_cart');
             }
 
-            // Load order data from sessionStorage (set by payment page with full order details)
-            let storedData = null;
-            const storedOrder = sessionStorage.getItem('lastOrder');
-            if (storedOrder) {
-                try {
-                    storedData = JSON.parse(storedOrder);
-                    // Show email immediately while API loads
-                    if (storedData.email) {
-                        const emailEl = document.getElementById('confirmation-email');
-                        if (emailEl) emailEl.textContent = storedData.email;
-                    }
-                    // Show order number immediately
-                    if (storedData.order_number) {
-                        const orderNumEl = document.getElementById('order-number');
-                        if (orderNumEl) orderNumEl.textContent = `#${storedData.order_number}`;
-                    }
-                    // Store payment method from session for fallback
-                    if (storedData.payment_method) {
-                        this.detectedPaymentMethod = storedData.payment_method;
-                    }
-                } catch (e) {
-                    DebugLog.error('Failed to parse stored order:', e);
-                }
-                sessionStorage.removeItem('lastOrder');
-            }
+            // Load order data from sessionStorage or localStorage backup
+            let storedData = this.loadStoredOrderData(orderNumber);
 
             // Wait for Auth so API calls include the auth token
             if (typeof Auth !== 'undefined' && Auth.readyPromise) {
@@ -73,6 +50,62 @@
                 this.orderData = this.transformAPIOrder(storedData);
                 this.renderOrderDetails();
             }
+        },
+
+        /**
+         * Load stored order data from sessionStorage (primary) or localStorage backup.
+         * Saves to localStorage on first load so hard refreshes still show data.
+         */
+        loadStoredOrderData(orderNumber) {
+            let storedData = null;
+            const STORAGE_KEY = 'ink_order_confirmation';
+
+            // Try sessionStorage first (set by payment page)
+            const sessionRaw = sessionStorage.getItem('lastOrder');
+            if (sessionRaw) {
+                try {
+                    storedData = JSON.parse(sessionRaw);
+                    // Back up to localStorage so hard refresh works
+                    localStorage.setItem(STORAGE_KEY, JSON.stringify({
+                        data: storedData,
+                        expires: Date.now() + (60 * 60 * 1000) // 1 hour TTL
+                    }));
+                } catch (e) {
+                    DebugLog.error('Failed to parse stored order:', e);
+                }
+            }
+
+            // Fall back to localStorage backup
+            if (!storedData && orderNumber) {
+                try {
+                    const backupRaw = localStorage.getItem(STORAGE_KEY);
+                    if (backupRaw) {
+                        const backup = JSON.parse(backupRaw);
+                        if (backup.expires > Date.now() && backup.data?.order_number === orderNumber) {
+                            storedData = backup.data;
+                        } else {
+                            localStorage.removeItem(STORAGE_KEY);
+                        }
+                    }
+                } catch (e) { /* ignore */ }
+            }
+
+            // Pre-fill visible fields immediately
+            if (storedData) {
+                if (storedData.email) {
+                    const emailEl = document.getElementById('confirmation-email');
+                    if (emailEl) emailEl.textContent = storedData.email;
+                }
+                if (storedData.order_number) {
+                    const orderNumEl = document.getElementById('order-number');
+                    if (orderNumEl) orderNumEl.textContent = `#${storedData.order_number}`;
+                }
+                if (storedData.payment_method) {
+                    this.detectedPaymentMethod = storedData.payment_method;
+                }
+            }
+
+            return storedData;
         },
 
         async loadOrderFromAPI(orderNumber, storedData) {
