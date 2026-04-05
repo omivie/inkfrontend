@@ -507,6 +507,7 @@
                     customer_notes: this.checkoutData.orderNotes || '',
                     payment_method: 'stripe',
                     idempotency_key: await this.getIdempotencyKey('stripe'),
+                    gclid: typeof getGclid === 'function' ? getGclid() : null,
                     ...(isGuest && { guest_email: this.checkoutData.email }),
                     ...(isGuest && this.checkoutData.phone && { guest_phone: this.checkoutData.phone }),
                     ...(isGuest && this.turnstileToken && { turnstile_token: this.turnstileToken })
@@ -1053,6 +1054,7 @@
                         customer_notes: self.checkoutData.orderNotes || '',
                         payment_method: 'paypal',
                         idempotency_key: await self.getIdempotencyKey('paypal'),
+                        gclid: typeof getGclid === 'function' ? getGclid() : null,
                         ...(isGuest && { guest_email: self.checkoutData.email }),
                         ...(isGuest && self.checkoutData.phone && { guest_phone: self.checkoutData.phone }),
                         ...(isGuest && self.turnstileToken && { turnstile_token: self.turnstileToken })

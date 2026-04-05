@@ -27,7 +27,35 @@ document.addEventListener('DOMContentLoaded', function() {
     initDropdowns();
     initMegaPanels();
     initCartBadgeFromStorage();
+    captureGclid();
 });
+
+/**
+ * Capture Google Ads click ID (gclid) from URL and store in localStorage.
+ * Expires after 90 days. Sent with checkout requests for conversion tracking.
+ */
+function captureGclid() {
+    var params = new URLSearchParams(window.location.search);
+    var gclid = params.get('gclid');
+    if (gclid) {
+        localStorage.setItem('gclid', gclid);
+        localStorage.setItem('gclid_expiry', Date.now() + 90 * 24 * 60 * 60 * 1000);
+    }
+}
+
+/**
+ * Retrieve stored gclid if not expired.
+ * @returns {string|null}
+ */
+function getGclid() {
+    var expiry = localStorage.getItem('gclid_expiry');
+    if (expiry && Date.now() > Number(expiry)) {
+        localStorage.removeItem('gclid');
+        localStorage.removeItem('gclid_expiry');
+        return null;
+    }
+    return localStorage.getItem('gclid');
+}
 
 /**
  * Read localStorage cart count immediately to prevent badge showing "0"

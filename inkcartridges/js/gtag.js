@@ -10,3 +10,4 @@ gtag('consent', 'default', {
 });
 gtag('js', new Date());
 gtag('config', 'G-SDQELG0FGD');
+gtag('config', 'G-YJXTSGLM28');
