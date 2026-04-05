@@ -254,7 +254,7 @@ function buildOrderModalContent(modal, o, events) {
   const custName = o.customer_name || profile.full_name
     || [profile.first_name, profile.last_name].filter(Boolean).join(' ')
     || MISSING;
-  const custEmail = o.customer_email || profile.email || MISSING;
+  const custEmail = o.customer_email || profile.email || o.guest_email || MISSING;
   const orderTotal = o.total_amount ?? o.total;
 
   // Meta grid
@@ -309,7 +309,7 @@ function buildOrderModalContent(modal, o, events) {
       totalPrice += (itemPrice ?? 0) * qty;
       if (showCost) totalCost += (item.supplier_cost_snapshot ?? 0) * qty;
       itemsHtml += `<tr>
-        <td class="cell-truncate">${esc(item.product_name || item.name || item.description || MISSING)}</td>
+        <td class="cell-truncate">${item.sku ? `<a href="${item.slug ? `/products/${esc(item.slug)}/${esc(item.sku)}` : `/html/product/?sku=${encodeURIComponent(item.sku)}`}" target="_blank" style="color:var(--text);text-decoration:underline;text-decoration-color:var(--border);text-underline-offset:2px">${esc(item.product_name || item.name || item.description || MISSING)}</a>` : esc(item.product_name || item.name || item.description || MISSING)}</td>
         <td class="mono">${esc(item.sku || MISSING)}</td>
         <td>${item.qty ?? item.quantity ?? MISSING}</td>
         <td class="mono">${itemPrice != null ? formatPrice(itemPrice) : MISSING}</td>

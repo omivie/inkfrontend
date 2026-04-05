@@ -409,15 +409,45 @@ const RibbonsPage = {
     },
 
     renderProducts(ribbons) {
-        const grid = this.elements.productsGrid;
-        grid.innerHTML = '';
+        const container = this.elements.levelProducts;
+        const pagination = this.elements.pagination;
 
+        // Remove any previously inserted section headings + grids
+        container.querySelectorAll('.ribbon-section-heading, .ribbon-products-grid').forEach(el => el.remove());
+
+        // Group ribbons by product_type
+        const groups = {};
         ribbons.forEach(ribbon => {
-            const card = this.createRibbonCard(ribbon);
-            grid.appendChild(card);
+            const type = ribbon.product_type || 'printer_ribbon';
+            if (!groups[type]) groups[type] = [];
+            groups[type].push(ribbon);
         });
 
-        grid.querySelectorAll('img[data-fallback]').forEach(img => {
+        const sectionOrder = [
+            { key: 'typewriter_ribbon', label: 'Typewriter Ribbons' },
+            { key: 'printer_ribbon',    label: 'Printer Ribbons' },
+            { key: 'correction_tape',   label: 'Correction Tape' },
+        ];
+
+        sectionOrder.forEach(section => {
+            const items = groups[section.key];
+            if (!items || items.length === 0) return;
+
+            const heading = document.createElement('h2');
+            heading.className = 'ribbon-section-heading';
+            heading.textContent = section.label;
+            container.insertBefore(heading, pagination);
+
+            const grid = document.createElement('div');
+            grid.className = 'ribbon-products-grid';
+            items.forEach(ribbon => {
+                grid.appendChild(this.createRibbonCard(ribbon));
+            });
+            container.insertBefore(grid, pagination);
+        });
+
+        // Image fallback listeners
+        container.querySelectorAll('img[data-fallback]').forEach(img => {
             img.addEventListener('error', function() {
                 if (this.dataset.fallback === 'placeholder') {
                     this.removeAttribute('data-fallback');

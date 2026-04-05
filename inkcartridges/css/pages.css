@@ -9137,6 +9137,17 @@
     }
 }
 
+/* Ribbon section headings */
+.ribbon-section-heading {
+    font-size: var(--font-size-xl);
+    font-weight: 600;
+    margin: var(--spacing-lg) 0 var(--spacing-sm);
+}
+
+.ribbon-section-heading:first-of-type {
+    margin-top: 0;
+}
+
 /* Ribbon products skeleton grid */
 .drilldown-skeleton--products .ribbon-products-grid {
     display: grid;
