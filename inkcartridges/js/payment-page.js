@@ -122,16 +122,6 @@
          */
         async loadCart() {
             try {
-                // Validate cart (non-blocking — log warning if it fails)
-                try {
-                    const validateResponse = await API.validateCart();
-                    if (!validateResponse.ok) {
-                        DebugLog.warn('Cart validation warning:', validateResponse.error);
-                    }
-                } catch (valError) {
-                    DebugLog.warn('Cart validation unavailable:', valError.message);
-                }
-
                 // Load cart items — Cart object (localStorage + server) is primary source
                 if (typeof Cart !== 'undefined') {
                     await Cart.init();
@@ -485,28 +475,7 @@
                     }
                 }
 
-                // STEP 1: Validate cart is still valid
-                btnText.innerHTML = this.getLoadingHTML('Validating cart...');
-
-                const validateResponse = await API.validateCart();
-                if (!validateResponse.ok || (validateResponse.data && !validateResponse.data.is_valid)) {
-                    const issues = validateResponse.data?.issues || [];
-                    const issueMsg = issues.length > 0
-                        ? issues.map(i => i.issue).join(', ')
-                        : 'Cart validation failed. Items may have changed.';
-
-                    // If server cart is empty but we have local items, proceed —
-                    // createOrder sends items in the request body for server-side validation
-                    const isEmptyCart = issueMsg.toLowerCase().includes('cart is empty')
-                                    || issueMsg.toLowerCase().includes('empty cart');
-                    if (isEmptyCart && this.cartItems.length > 0) {
-                        DebugLog.warn('Server cart empty but local items exist — proceeding to createOrder');
-                    } else {
-                        throw new Error(issueMsg);
-                    }
-                }
-
-                // STEP 2: Create order on backend
+                // Create order on backend
                 // Backend creates PaymentIntent and validates all prices server-side
                 btnText.innerHTML = this.getLoadingHTML('Creating order...');
 
