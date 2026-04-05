@@ -472,6 +472,19 @@
                     throw new Error(submitError.message);
                 }
 
+                // STEP 0.5: Ensure cart items are on the server before validation
+                // Cross-origin cookie issues or rate limits may leave the server cart empty
+                if (this.cartItems.length > 0) {
+                    btnText.innerHTML = this.getLoadingHTML('Preparing cart...');
+                    for (const item of this.cartItems) {
+                        try {
+                            await API.addToCart(item.id, item.quantity);
+                        } catch (e) {
+                            DebugLog.warn('Cart sync failed for item:', item.id, e.message);
+                        }
+                    }
+                }
+
                 // STEP 1: Validate cart is still valid
                 btnText.innerHTML = this.getLoadingHTML('Validating cart...');
 
@@ -481,7 +494,16 @@
                     const issueMsg = issues.length > 0
                         ? issues.map(i => i.issue).join(', ')
                         : 'Cart validation failed. Items may have changed.';
-                    throw new Error(issueMsg);
+
+                    // If server cart is empty but we have local items, proceed —
+                    // createOrder sends items in the request body for server-side validation
+                    const isEmptyCart = issueMsg.toLowerCase().includes('cart is empty')
+                                    || issueMsg.toLowerCase().includes('empty cart');
+                    if (isEmptyCart && this.cartItems.length > 0) {
+                        DebugLog.warn('Server cart empty but local items exist — proceeding to createOrder');
+                    } else {
+                        throw new Error(issueMsg);
+                    }
                 }
 
                 // STEP 2: Create order on backend
