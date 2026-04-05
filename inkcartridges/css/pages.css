@@ -7676,6 +7676,29 @@
     border-bottom: 1px solid var(--color-border);
 }
 
+.confirmation-card__list {
+    margin: 0;
+    padding: 0;
+}
+
+.confirmation-card__list dd {
+    margin: 0;
+}
+
+.confirmation-card__address {
+    font-style: normal;
+    line-height: 1.6;
+    margin-bottom: var(--spacing-md);
+}
+
+.confirmation-card__shipping-method {
+    margin: 0;
+    padding-top: var(--spacing-md);
+    border-top: 1px solid var(--color-border-light);
+    font-size: var(--font-size-sm);
+    line-height: 1.8;
+}
+
 .confirmation-card__row {
     display: flex;
     justify-content: space-between;
@@ -7773,6 +7796,17 @@
 
 .confirmation-item:last-child {
     border-bottom: none;
+}
+
+.confirmation-item--fallback {
+    padding: 2rem;
+    text-align: center;
+    list-style: none;
+}
+
+.confirmation-item--fallback p {
+    margin: 0;
+    color: var(--color-text-muted);
 }
 
 .confirmation-item__image {
@@ -7904,6 +7938,48 @@
 .confirmation-totals__row--total dd {
     font-weight: var(--font-weight-bold);
     color: var(--color-text);
+}
+
+/* Post-purchase prompt cards */
+.confirmation-card--accent {
+    background: var(--cyan-light, #D4E8F5);
+    border: 1px solid var(--cyan-primary, #267FB5);
+    text-align: center;
+}
+
+.confirmation-card--accent h3 {
+    margin: 0 0 0.5rem;
+    font-size: 1.1rem;
+}
+
+.confirmation-card--accent p {
+    margin: 0 0 1rem;
+    color: var(--steel-600, #475569);
+    font-size: var(--font-size-sm);
+}
+
+.confirmation-card--subtle {
+    background: var(--steel-50, #F8FAFC);
+    border: 1px solid var(--steel-200, #E2E8F0);
+    text-align: center;
+}
+
+.confirmation-card--subtle h3 {
+    margin: 0 0 0.5rem;
+    font-size: 1.1rem;
+}
+
+.confirmation-card--subtle p {
+    margin: 0 0 1rem;
+    color: var(--steel-600, #475569);
+    font-size: var(--font-size-sm);
+}
+
+/* Post-purchase hooks container */
+.confirmation-relationship {
+    display: grid;
+    gap: 1rem;
+    margin-bottom: 2rem;
 }
 
 /* Confirmation Help */

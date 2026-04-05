@@ -94,7 +94,7 @@
                         <div class="confirmation-card">
                             <h2 class="confirmation-card__heading">Shipping Details</h2>
                             <address class="confirmation-card__address" id="shipping-address">
-                                <span style="color: var(--color-text-muted);">Loading shipping details...</span>
+                                <span class="text-muted">Loading shipping details...</span>
                             </address>
                             <p class="confirmation-card__shipping-method">
                                 <strong>Shipping Method:</strong> <span id="shipping-method">Loading...</span><br>
@@ -106,8 +106,8 @@
                     <div class="confirmation-items">
                         <h2 class="confirmation-items__heading">Items Ordered</h2>
                         <ul class="confirmation-items__list" id="order-items">
-                            <li class="confirmation-item" style="justify-content: center; padding: 2rem;">
-                                <p style="color: var(--color-text-muted);">Loading order items...</p>
+                            <li class="confirmation-item--fallback">
+                                <p>Loading order items...</p>
                             </li>
                         </ul>
 
@@ -188,16 +188,16 @@
                         </ol>
                     </div>
 
-                    <div class="confirmation-relationship" id="post-purchase-hooks" style="display: grid; gap: 1rem; margin-bottom: 2rem;">
-                        <div class="confirmation-card" id="create-account-prompt" hidden style="background: var(--cyan-light, #D4E8F5); border: 1px solid var(--cyan-primary, #267FB5); border-radius: 8px; padding: 1.25rem; text-align: center;">
-                            <h3 style="margin: 0 0 0.5rem; font-size: 1.1rem;">Save Your Details for Next Time</h3>
-                            <p style="margin: 0 0 1rem; color: var(--steel-600, #475569); font-size: 0.9375rem;">Create an account to track orders, reorder easily, and get exclusive deals.</p>
+                    <div class="confirmation-relationship" id="post-purchase-hooks">
+                        <div class="confirmation-card confirmation-card--accent" id="create-account-prompt" hidden>
+                            <h3>Save Your Details for Next Time</h3>
+                            <p>Create an account to track orders, reorder easily, and get exclusive deals.</p>
                             <a href="/html/account/login.html" class="btn btn--primary" data-track="cta_click" data-track-cta="Create Account" data-track-location="post_purchase">Create Account</a>
                         </div>
 
-                        <div class="confirmation-card" style="background: var(--steel-50, #F8FAFC); border: 1px solid var(--steel-200, #E2E8F0); border-radius: 8px; padding: 1.25rem; text-align: center;">
-                            <h3 style="margin: 0 0 0.5rem; font-size: 1.1rem;">Running Low? Set a Reminder</h3>
-                            <p style="margin: 0 0 1rem; color: var(--steel-600, #475569); font-size: 0.9375rem;">Most customers reorder every 2-3 months. Save your printer to your account and we'll remind you when it's time.</p>
+                        <div class="confirmation-card confirmation-card--subtle">
+                            <h3>Running Low? Set a Reminder</h3>
+                            <p>Most customers reorder every 2-3 months. Save your printer to your account and we'll remind you when it's time.</p>
                             <a href="/html/account/printers.html" class="btn btn--secondary" data-track="cta_click" data-track-cta="Save Printer" data-track-location="post_purchase">Save My Printer</a>
                         </div>
                     </div>
@@ -273,5 +273,17 @@
 
     <script defer src="/js/order-confirmation-page.js"></script>
     <script defer src="/js/analytics.js"></script>
+
+    <!-- Google Customer Reviews opt-in survey -->
+    <script>
+        window.___gcfg = { lang: 'en_NZ' };
+        window.renderOptIn = function() {
+            var data = window._googleReviewsOptInData;
+            if (data && window.gapi && window.gapi.surveyoptin) {
+                window.gapi.surveyoptin.render(data);
+            }
+        };
+    </script>
+    <script src="https://apis.google.com/js/platform.js?onload=renderOptIn" async defer></script>
 </body>
 </html>

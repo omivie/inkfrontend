@@ -1,6 +1,7 @@
     // Order confirmation page
     const ConfirmationPage = {
         orderData: null,
+        detectedPaymentMethod: null,
 
         async init() {
             // Get order number from URL or sessionStorage
@@ -10,6 +11,11 @@
             // Handle Stripe redirect params (payment_intent, redirect_status)
             const redirectStatus = urlParams.get('redirect_status');
             const paymentIntentId = urlParams.get('payment_intent');
+
+            // Infer payment method from URL context
+            if (paymentIntentId) {
+                this.detectedPaymentMethod = 'stripe';
+            }
 
             if (redirectStatus && redirectStatus !== 'succeeded') {
                 // Payment failed or is pending after Stripe redirect
@@ -42,6 +48,10 @@
                     if (stored.order_number) {
                         const orderNumEl = document.getElementById('order-number');
                         if (orderNumEl) orderNumEl.textContent = `#${stored.order_number}`;
+                    }
+                    // Store payment method from session for fallback
+                    if (stored.payment_method) {
+                        this.detectedPaymentMethod = stored.payment_method;
                     }
                 } catch (e) {
                     DebugLog.error('Failed to parse stored order:', e);
@@ -89,9 +99,15 @@
             const dateEl = document.getElementById('order-date');
             if (dateEl) dateEl.textContent = new Date().toLocaleDateString('en-NZ', { day: 'numeric', month: 'long', year: 'numeric' });
             const addressEl = document.getElementById('shipping-address');
-            if (addressEl) addressEl.innerHTML = '<span style="color: var(--color-text-muted);">Details will be in your confirmation email</span>';
+            if (addressEl) addressEl.innerHTML = '<span class="text-muted">Details will be in your confirmation email</span>';
             const itemsList = document.getElementById('order-items');
-            if (itemsList) itemsList.innerHTML = '<li class="confirmation-item" style="justify-content: center; padding: 2rem;"><p style="color: var(--color-text-muted);">Order details will be in your confirmation email.</p></li>';
+            if (itemsList) itemsList.innerHTML = '<li class="confirmation-item--fallback"><p>Order details will be in your confirmation email.</p></li>';
+            const subtotalEl = document.getElementById('totals-subtotal');
+            if (subtotalEl) subtotalEl.textContent = '--';
+            const shippingCostEl = document.getElementById('totals-shipping');
+            if (shippingCostEl) shippingCostEl.textContent = '--';
+            const totalPaidEl = document.getElementById('totals-total');
+            if (totalPaidEl) totalPaidEl.textContent = '--';
         },
 
         transformAPIOrder(apiOrder) {
@@ -109,7 +125,7 @@
 
             return {
                 orderNumber: apiOrder.order_number || apiOrder.id,
-                email: apiOrder.email || apiOrder.customer_email,
+                email: apiOrder.email || apiOrder.customer_email || apiOrder.guest_email,
                 total: apiOrder.total,
                 subtotal: apiOrder.subtotal,
                 gstAmount: apiOrder.gst_amount || 0,
@@ -133,7 +149,8 @@
                 customerNotes: apiOrder.customer_notes || null,
                 trackingNumber: apiOrder.tracking_number || null,
                 invoiceNumber: apiOrder.invoice?.invoice_number || null,
-                invoiceDate: apiOrder.invoice?.invoice_date || null
+                invoiceDate: apiOrder.invoice?.invoice_date || null,
+                googleCustomerReviews: apiOrder.google_customer_reviews || null
             };
         },
 
@@ -185,9 +202,9 @@
                 });
             }
 
-            // Payment method (support both formats)
+            // Payment method (support both formats, fall back to detected method from URL)
             const paymentEl = document.getElementById('payment-method');
-            const paymentMethod = order.paymentMethod || order.payment_method;
+            const paymentMethod = order.paymentMethod || order.payment_method || this.detectedPaymentMethod;
             if (paymentEl && paymentMethod) {
                 const paymentLabels = {
                     'stripe': 'Credit/Debit Card',
@@ -225,10 +242,10 @@
                     if (parts.length > 1) {
                         addressEl.innerHTML = parts.join('<br>');
                     } else {
-                        addressEl.innerHTML = '<span style="color: var(--color-text-muted);">Address details not available</span>';
+                        addressEl.innerHTML = '<span class="text-muted">Address details not available</span>';
                     }
                 } else {
-                    addressEl.innerHTML = '<span style="color: var(--color-text-muted);">Address details not available</span>';
+                    addressEl.innerHTML = '<span class="text-muted">Address details not available</span>';
                 }
             }
 
@@ -350,8 +367,8 @@
 
                 // Build meta info
                 const metaParts = [];
-                if (item.sku) metaParts.push(`<span>SKU: ${item.sku}</span>`);
-                if (item.brand) metaParts.push(`<span>${item.brand}</span>`);
+                if (item.sku) metaParts.push(`<span>SKU: ${esc(item.sku)}</span>`);
+                if (item.brand) metaParts.push(`<span>${esc(item.brand)}</span>`);
                 if (item.source) metaParts.push(`<span class="badge badge--${item.source === 'genuine' ? 'primary' : 'secondary'}">${item.source === 'genuine' ? 'Genuine' : 'Compatible'}</span>`);
 
                 return `
@@ -360,7 +377,7 @@
                             ${imageHtml}
                         </div>
                         <div class="confirmation-item__details">
-                            <h3 class="confirmation-item__title">${item.name}</h3>
+                            <h3 class="confirmation-item__title">${esc(item.name)}</h3>
                             <p class="confirmation-item__meta">${metaParts.join(' ') || 'N/A'}</p>
                         </div>
                         <div class="confirmation-item__quantity">Qty: ${item.quantity}</div>

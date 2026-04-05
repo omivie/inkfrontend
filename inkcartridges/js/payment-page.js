@@ -537,7 +537,8 @@
                         // Store order data before confirmPayment (redirect may happen)
                         sessionStorage.setItem('lastOrder', JSON.stringify({
                             order_number: dupOrderNumber,
-                            email: this.checkoutData.email
+                            email: this.checkoutData.email,
+                            payment_method: 'stripe'
                         }));
 
                         const { error: stripeError } = await this.stripe.confirmPayment({
@@ -594,7 +595,8 @@
                             if (orderCheck.ok && orderCheck.data?.status === 'paid') {
                                 sessionStorage.setItem('lastOrder', JSON.stringify({
                                     order_number: dupOrderNumber,
-                                    email: this.checkoutData.email
+                                    email: this.checkoutData.email,
+                                    payment_method: 'stripe'
                                 }));
                                 sessionStorage.removeItem('checkoutData');
                                 window.location.href = `/html/order-confirmation.html?order=${encodeURIComponent(dupOrderNumber)}`;
@@ -615,7 +617,8 @@
                     // Same payment method (stripe), no client_secret = already paid — redirect
                     sessionStorage.setItem('lastOrder', JSON.stringify({
                         order_number: dupOrderNumber,
-                        email: this.checkoutData.email
+                        email: this.checkoutData.email,
+                        payment_method: 'stripe'
                     }));
                     sessionStorage.removeItem('checkoutData');
                     window.location.href = `/html/order-confirmation.html?order=${encodeURIComponent(dupOrderNumber)}`;
@@ -726,7 +729,8 @@
                 // confirmPayment may redirect (PayPal, 3DS) before post-payment code runs
                 sessionStorage.setItem('lastOrder', JSON.stringify({
                     order_number: order_number,
-                    email: this.checkoutData.email
+                    email: this.checkoutData.email,
+                    payment_method: 'stripe'
                 }));
 
                 // STEP 4: Confirm payment with Stripe PaymentElement
@@ -1128,7 +1132,8 @@
 
                             sessionStorage.setItem('lastOrder', JSON.stringify({
                                 order_number: orderNumber,
-                                email: self.checkoutData.email
+                                email: self.checkoutData.email,
+                                payment_method: 'paypal'
                             }));
                             sessionStorage.removeItem('checkoutData');
                             window.location.href = `/html/order-confirmation.html?order=${encodeURIComponent(orderNumber)}`;
