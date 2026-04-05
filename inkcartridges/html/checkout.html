@@ -78,7 +78,13 @@
 
                 <div class="checkout-layout">
                     <div class="checkout-form-wrapper">
-                        <form class="checkout-form" id="checkout-form" novalidate>
+                        <!-- Loading state — visible until JS init completes -->
+                        <div class="checkout-loading" id="checkout-loading">
+                            <div class="loading-spinner"></div>
+                            <p>Loading checkout...</p>
+                        </div>
+
+                        <form class="checkout-form checkout-form--loading" id="checkout-form" novalidate>
 
                             <fieldset class="checkout-section">
                                 <legend class="checkout-section__heading">

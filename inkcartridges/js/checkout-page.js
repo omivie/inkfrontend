@@ -54,6 +54,12 @@
             // Check email verification status
             await this.checkEmailVerification();
 
+            // Reveal checkout form (was hidden to prevent interaction before init)
+            const loadingEl = document.getElementById('checkout-loading');
+            if (loadingEl) loadingEl.style.display = 'none';
+            const form = document.getElementById('checkout-form');
+            if (form) form.classList.remove('checkout-form--loading');
+
             // Track checkout started for analytics
             if (typeof CartAnalytics !== 'undefined') {
                 CartAnalytics.trackCheckoutStarted();
