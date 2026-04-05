@@ -101,6 +101,7 @@
     { "source": "/sitemap-:path.xml", "destination": "https://ink-backend-zaeq.onrender.com/sitemap-:path.xml" },
     { "source": "/feeds/google-shopping.xml", "destination": "https://ink-backend-zaeq.onrender.com/feeds/google-shopping.xml" },
     { "source": "/feeds/facebook-catalog.tsv", "destination": "https://ink-backend-zaeq.onrender.com/feeds/facebook-catalog.tsv" },
+    { "source": "/feeds/google-promotions.xml", "destination": "https://ink-backend-zaeq.onrender.com/feeds/google-promotions.xml" },
     { "source": "/robots.txt", "destination": "https://ink-backend-zaeq.onrender.com/robots.txt" }
   ]
 }

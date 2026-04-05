@@ -351,6 +351,14 @@ const API = {
     },
 
     /**
+     * Get frequently bought together products for a given SKU
+     * @param {string} sku - Product SKU
+     */
+    async getBoughtTogether(sku) {
+        return this.get(`/api/products/${encodeURIComponent(sku)}/bought-together`);
+    },
+
+    /**
      * Get auto-generated color packs for a printer
      * @param {string} printerSlug - Printer slug
      * @param {object} [params] - Optional query params (include_unavailable, source)

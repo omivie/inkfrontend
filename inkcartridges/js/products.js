@@ -82,6 +82,8 @@ const Products = {
                         ${product.color ? `<p class="product-card__color">${Security.escapeHtml(product.color)}</p>` : ''}
                         <p class="product-card__price">${product.retail_price == null ? 'Price unavailable' : formatPrice(product.retail_price)}${product.compare_price && product.compare_price > product.retail_price ? `<span class="product-card__compare-price">${formatPrice(product.compare_price)}</span>` : ''}</p>
                         ${product.compare_price && product.compare_price > product.retail_price ? `<p class="product-card__savings">Save ${formatPrice(product.compare_price - product.retail_price)}</p>` : ''}
+                        ${product.average_rating && product.review_count > 0 ? `<div class="product-card__rating">${this._miniStars(Math.round(parseFloat(product.average_rating)))} <span class="product-card__review-count">(${product.review_count})</span></div>` : ''}
+                        ${product.retail_price != null && product.retail_price >= 100 ? '<span class="product-card__free-shipping">FREE SHIPPING</span>' : ''}
                         <p class="product-card__stock stock-${stockInfo.class}">${Security.escapeHtml(stockInfo.text)}</p>
                     </div>
                 </a>
@@ -97,6 +99,31 @@ const Products = {
                 </button>
             </article>
         `;
+    },
+
+    /**
+     * Render mini star icons for product cards
+     */
+    _miniStars(filled) {
+        return Array.from({ length: 5 }, (_, i) =>
+            `<svg class="product-card__star" width="14" height="14" viewBox="0 0 24 24" fill="${i < filled ? 'currentColor' : 'none'}" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>`
+        ).join('');
+    },
+
+    /**
+     * Attach Add to Cart listeners on a container of product cards
+     */
+    attachCardListeners(container) {
+        if (!container) return;
+        container.querySelectorAll('.product-card__add-btn').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                if (typeof Cart !== 'undefined' && Cart.add) {
+                    Cart.add(btn.dataset.productId, 1);
+                }
+            });
+        });
     },
 
     /**

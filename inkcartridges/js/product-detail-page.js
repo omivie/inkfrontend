@@ -258,8 +258,29 @@
             // Canonical URL
             document.getElementById('canonical-url').href = canonicalUrl;
 
-            // Schema.org Product structured data — prefer seo.jsonLd if provided
-            if (seo.jsonLd) {
+            // Schema.org Product structured data — prefer API-provided JSON-LD
+            if (seo.jsonLd && typeof seo.jsonLd === 'object' && seo.jsonLd.product_schema) {
+                // API returns separate schema objects — embed each as its own script tag
+                const schemaEl = document.getElementById('product-schema');
+                if (schemaEl) {
+                    schemaEl.textContent = JSON.stringify(seo.jsonLd.product_schema);
+                }
+                // Embed additional schemas (faq, organization, local_business, website)
+                const extraSchemas = ['faq_schema', 'organization_schema', 'local_business_schema', 'website_schema'];
+                extraSchemas.forEach(key => {
+                    if (seo.jsonLd[key]) {
+                        const script = document.createElement('script');
+                        script.type = 'application/ld+json';
+                        script.textContent = JSON.stringify(seo.jsonLd[key]);
+                        document.head.appendChild(script);
+                    }
+                });
+                // Store FAQ data for visible accordion rendering
+                if (seo.jsonLd.faq_schema) {
+                    this._faqSchema = seo.jsonLd.faq_schema;
+                }
+            } else if (seo.jsonLd) {
+                // Legacy format — single JSON-LD blob
                 const schemaEl = document.getElementById('product-schema');
                 if (schemaEl) {
                     schemaEl.textContent = typeof seo.jsonLd === 'string' ? seo.jsonLd : JSON.stringify(seo.jsonLd);
@@ -413,11 +434,17 @@
             // Compatible devices: printers/typewriters
             this.renderCompatiblePrinters(info);
 
+            // Frequently bought together
+            this.renderBoughtTogether(info);
+
             // Compatible products for ALL categories
             this.renderRelatedProducts(info);
 
             // Ribbon description — render below related products
             this.renderRibbonDescription(info);
+
+            // FAQ accordion from API JSON-LD
+            this.renderFaqAccordion();
 
             // Set up event listeners
             this.setupEventListeners(info);
@@ -511,9 +538,12 @@
                 if (printers.length === 0) return;
 
                 const isRibbon = info.category === 'ribbon';
-                const shopPath = isRibbon ? '/html/ribbons' : '/html/shop';
                 const printerLinks = printers.map(p => {
-                    return `<a href="${shopPath}?printer_model=${encodeURIComponent(p.name)}" class="printer-link">${Security.escapeHtml(p.name)}</a>`;
+                    const slug = (p.name || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+                    const href = isRibbon
+                        ? `/html/ribbons?printer_model=${encodeURIComponent(p.name)}`
+                        : `/printers/${encodeURIComponent(slug)}`;
+                    return `<a href="${href}" class="printer-link">${Security.escapeHtml(p.name)}</a>`;
                 }).join(', ');
 
                 const html = `
@@ -579,7 +609,8 @@
                 if (!list || !tabBtn) return;
 
                 list.innerHTML = printers.map(p => {
-                    return `<li><a href="/html/shop?printer_model=${encodeURIComponent(p.name)}">${Security.escapeHtml(p.name)}</a></li>`;
+                    const slug = (p.name || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+                    return `<li><a href="/printers/${encodeURIComponent(slug)}">${Security.escapeHtml(p.name)}</a></li>`;
                 }).join('');
 
                 tabBtn.hidden = false;
@@ -1189,13 +1220,28 @@
                 const reviews = (reviewsResp.ok && reviewsResp.data?.reviews) ? reviewsResp.data.reviews : [];
                 const summary = (summaryResp.ok && summaryResp.data) ? summaryResp.data : null;
 
-                // Render summary
+                // Render summary with distribution bars
                 const summaryEl = document.getElementById('reviews-summary');
                 if (summary && summary.count > 0) {
+                    const dist = summary.distribution || {};
+                    const maxCount = Math.max(dist['5'] || 0, dist['4'] || 0, dist['3'] || 0, dist['2'] || 0, dist['1'] || 0, 1);
+                    const distBars = [5, 4, 3, 2, 1].map(star => {
+                        const count = dist[String(star)] || 0;
+                        const pct = Math.round((count / maxCount) * 100);
+                        return `<div class="reviews-dist__row">
+                            <span class="reviews-dist__label">${star}★</span>
+                            <div class="reviews-dist__bar"><div class="reviews-dist__fill" style="width:${pct}%"></div></div>
+                            <span class="reviews-dist__count">${count}</span>
+                        </div>`;
+                    }).join('');
+
                     summaryEl.innerHTML = `
-                        <div class="reviews-summary__stars">${this._renderStars(summary.average, 20)}</div>
-                        <span class="reviews-summary__avg">${Number(summary.average).toFixed(1)}</span>
-                        <span class="reviews-summary__count">based on ${summary.count} review${summary.count !== 1 ? 's' : ''}</span>
+                        <div class="reviews-summary__overview">
+                            <div class="reviews-summary__stars">${this._renderStars(summary.average, 20)}</div>
+                            <span class="reviews-summary__avg">${Number(summary.average).toFixed(1)}</span>
+                            <span class="reviews-summary__count">based on ${summary.count} review${summary.count !== 1 ? 's' : ''}</span>
+                        </div>
+                        <div class="reviews-dist">${distBars}</div>
                     `;
                 }
 
@@ -1333,6 +1379,50 @@
                     submitBtn.textContent = 'Submit Review';
                 }
             });
+        },
+
+        // ── FAQ Accordion ─────────────────────────────────────
+        renderFaqAccordion() {
+            const faqSection = document.getElementById('product-faq');
+            if (!faqSection) return;
+            const schema = this._faqSchema;
+            if (!schema || !schema.mainEntity || !schema.mainEntity.length) return;
+
+            const items = schema.mainEntity.map(q => `
+                <details class="faq-accordion__item">
+                    <summary class="faq-accordion__question">${Security.escapeHtml(q.name)}</summary>
+                    <div class="faq-accordion__answer">${Security.escapeHtml(q.acceptedAnswer?.text || '')}</div>
+                </details>
+            `).join('');
+
+            faqSection.innerHTML = `
+                <div class="container">
+                    <h2 class="faq-accordion__title">Frequently Asked Questions</h2>
+                    <div class="faq-accordion">${items}</div>
+                </div>
+            `;
+            faqSection.hidden = false;
+        },
+
+        // ── Bought Together ──────────────────────────────────
+        async renderBoughtTogether(info) {
+            if (!info || !info.sku) return;
+            try {
+                const resp = await API.getBoughtTogether(info.sku);
+                if (!resp.ok || !resp.data || !resp.data.length) return;
+
+                const section = document.getElementById('bought-together');
+                if (!section) return;
+
+                const grid = section.querySelector('.bought-together__grid');
+                if (grid) {
+                    grid.innerHTML = Products.renderCards(resp.data.slice(0, 4));
+                    Products.attachCardListeners(grid);
+                }
+                section.hidden = false;
+            } catch {
+                // Non-critical
+            }
         },
 
         _isTestProduct(product) {

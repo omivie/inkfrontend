@@ -35,8 +35,12 @@
                         <p class="footer-column__heading">Contact</p>
                         <ul class="footer-links">
                             <li>
+                                <strong>Address:</strong><br>
+                                2 Queen Street, Auckland 1010, New Zealand
+                            </li>
+                            <li>
                                 <strong>Phone:</strong><br>
-                                <a href="tel:0274740115">027 474 0115</a>
+                                <a href="tel:+64274740115">027 474 0115</a>
                             </li>
                             <li>
                                 <strong>Email:</strong><br>
@@ -44,7 +48,7 @@
                             </li>
                             <li>
                                 <strong>Hours:</strong><br>
-                                8am - 8pm, 7 days a week
+                                Mon&ndash;Fri, 9am &ndash; 5pm
                             </li>
                         </ul>
                     </div>
@@ -72,6 +76,79 @@
         </div>
 
         <div id="google-reviews-badge"></div>
+
+        <script type="application/ld+json">
+        {
+            "@context": "https://schema.org",
+            "@type": "Organization",
+            "name": "InkCartridges.co.nz",
+            "url": "https://www.inkcartridges.co.nz",
+            "logo": "https://www.inkcartridges.co.nz/logo.png",
+            "description": "New Zealand's trusted source for genuine and compatible ink cartridges, toner, and printer supplies.",
+            "address": {
+                "@type": "PostalAddress",
+                "streetAddress": "2 Queen Street",
+                "addressLocality": "Auckland",
+                "addressRegion": "Auckland",
+                "postalCode": "1010",
+                "addressCountry": "NZ"
+            },
+            "contactPoint": {
+                "@type": "ContactPoint",
+                "telephone": "+64-27-474-0115",
+                "contactType": "customer service",
+                "areaServed": "NZ",
+                "availableLanguage": "English"
+            }
+        }
+        </script>
+        <script type="application/ld+json">
+        {
+            "@context": "https://schema.org",
+            "@type": "WebSite",
+            "name": "InkCartridges.co.nz",
+            "url": "https://www.inkcartridges.co.nz",
+            "potentialAction": {
+                "@type": "SearchAction",
+                "target": {
+                    "@type": "EntryPoint",
+                    "urlTemplate": "https://www.inkcartridges.co.nz/html/shop?search={search_term_string}"
+                },
+                "query-input": "required name=search_term_string"
+            }
+        }
+        </script>
+        <script type="application/ld+json">
+        {
+            "@context": "https://schema.org",
+            "@type": "LocalBusiness",
+            "name": "InkCartridges.co.nz",
+            "url": "https://www.inkcartridges.co.nz",
+            "telephone": "+64-27-474-0115",
+            "address": {
+                "@type": "PostalAddress",
+                "streetAddress": "2 Queen Street",
+                "addressLocality": "Auckland",
+                "addressRegion": "Auckland",
+                "postalCode": "1010",
+                "addressCountry": "NZ"
+            },
+            "geo": {
+                "@type": "GeoCoordinates",
+                "latitude": -36.8485,
+                "longitude": 174.7633
+            },
+            "priceRange": "$$",
+            "currenciesAccepted": "NZD",
+            "areaServed": { "@type": "Country", "name": "New Zealand" },
+            "openingHoursSpecification": {
+                "@type": "OpeningHoursSpecification",
+                "dayOfWeek": ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"],
+                "opens": "09:00",
+                "closes": "17:00"
+            }
+        }
+        </script>
 
         <div class="footer-bottom">
             <div class="container">
