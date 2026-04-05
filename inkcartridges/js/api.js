@@ -12,6 +12,26 @@ const API = {
     REQUEST_TIMEOUT_MS: 15000,
 
     /**
+     * Guest session ID — persisted in localStorage to survive cross-origin cookie blocking.
+     * The backend returns this in response bodies and the X-Guest-Session header.
+     * We send it back via X-Guest-Session on every request.
+     */
+    GUEST_SESSION_KEY: 'ink_guest_session_id',
+
+    getGuestSessionId() {
+        try { return localStorage.getItem(this.GUEST_SESSION_KEY); } catch (e) { return null; }
+    },
+
+    setGuestSessionId(id) {
+        if (!id) return;
+        try { localStorage.setItem(this.GUEST_SESSION_KEY, id); } catch (e) { /* ignore */ }
+    },
+
+    clearGuestSessionId() {
+        try { localStorage.removeItem(this.GUEST_SESSION_KEY); } catch (e) { /* ignore */ }
+    },
+
+    /**
      * Get the current access token from Supabase session
      */
     async getToken() {
@@ -118,8 +138,20 @@ const API = {
             headers['Authorization'] = `Bearer ${token}`;
         }
 
+        // Send guest session ID via header (survives cross-origin cookie blocking)
+        const guestSession = this.getGuestSessionId();
+        if (!token && guestSession) {
+            headers['X-Guest-Session'] = guestSession;
+        }
+
         try {
             const response = await this._fetchWithAuth(url, { ...options, headers });
+
+            // Capture guest session ID from response header
+            const respSessionId = response.headers.get('X-Guest-Session');
+            if (respSessionId) {
+                this.setGuestSessionId(respSessionId);
+            }
 
             // Handle 204 No Content — DELETE endpoints return no body
             if (response.status === 204) {
@@ -201,6 +233,11 @@ const API = {
                     }
                 }
                 throw new Error(fullMsg);
+            }
+
+            // Capture guest session ID from response body (fallback to header)
+            if (data.data && data.data.guest_session_id) {
+                this.setGuestSessionId(data.data.guest_session_id);
             }
 
             return data;
@@ -573,7 +610,9 @@ const API = {
      * Clear entire cart
      */
     async clearCart() {
-        return this.delete('/api/cart');
+        const result = await this.delete('/api/cart');
+        this.clearGuestSessionId();
+        return result;
     },
 
     /**
@@ -587,7 +626,9 @@ const API = {
      * Merge guest cart into user cart (call immediately after sign-in)
      */
     async mergeCart() {
-        return this.post('/api/cart/merge');
+        const result = await this.post('/api/cart/merge');
+        this.clearGuestSessionId();
+        return result;
     },
 
     /**
