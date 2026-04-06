@@ -9336,6 +9336,7 @@
     grid-template-columns: repeat(6, 1fr);
     gap: var(--spacing-md);
     padding: var(--spacing-xs) 0 var(--spacing-sm);
+    align-items: start;
 }
 
 .ribbon-products-grid .product-card {
@@ -9623,7 +9624,7 @@
 .drilldown-box__logo--oki { height: 24px; }
 .drilldown-box__logo--fuji-xerox { height: 29px; }
 .drilldown-box__logo--kyocera { height: 26px; }
-.drilldown-box__logo--dymo { height: 88px; }
+.drilldown-box__logo--dymo { height: 28px; }
 
 .drilldown-box__name {
     font-size: var(--font-size-md);
@@ -9840,6 +9841,7 @@
 .products-row {
     display: flex;
     flex-wrap: wrap;
+    align-items: flex-start;
     gap: var(--spacing-sm);
     padding: var(--spacing-xs) 0 var(--spacing-sm);
 }
@@ -9848,8 +9850,8 @@
 .product-card {
     position: relative;
     flex: 0 0 calc(16.666% - var(--spacing-sm));
-    max-width: 170px;
-    min-width: 130px;
+    max-width: 185px;
+    min-width: 140px;
     display: flex;
     flex-direction: column;
     background: var(--white-primary);
@@ -9867,13 +9869,12 @@
 .product-card__link {
     display: flex;
     flex-direction: column;
-    flex: 1;
     text-decoration: none;
     color: inherit;
 }
 
 .product-card__image-wrapper {
-    aspect-ratio: 4 / 3;
+    aspect-ratio: 3 / 2;
     background: var(--color-background-alt);
     display: flex;
     align-items: center;
@@ -9924,11 +9925,11 @@
 }
 
 .product-card__content {
-    padding: var(--spacing-xs) var(--spacing-sm) var(--spacing-xs);
-    flex: 1;
+    padding: 2px var(--spacing-sm) 2px;
+    padding-right: 0;
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: 1px;
 }
 
 .product-card__title {
@@ -9938,7 +9939,7 @@
     margin: 0;
     line-height: 1.3;
     display: -webkit-box;
-    -webkit-line-clamp: 2;
+    -webkit-line-clamp: 3;
     -webkit-box-orient: vertical;
     overflow: hidden;
 }
@@ -9977,6 +9978,7 @@
     font-size: 11px;
     font-weight: var(--font-weight-medium);
     margin: 0;
+    margin-right: var(--spacing-sm);
 }
 
 .product-card__stock--in {
@@ -9984,7 +9986,6 @@
 }
 
 .product-card__cart-btn {
-    margin: var(--spacing-xs) var(--spacing-sm) var(--spacing-sm);
     font-size: var(--font-size-xs);
     padding: 6px var(--spacing-sm);
 }
@@ -10148,7 +10149,7 @@
     .product-card {
         flex: 0 0 calc(20% - var(--spacing-sm));
         min-width: 120px;
-        max-width: 160px;
+        max-width: 170px;
     }
 
     .product-card__image-wrapper {
@@ -10274,6 +10275,11 @@
 
     .product-card__price {
         font-size: var(--font-size-sm);
+    }
+
+    .product-card__footer-row {
+        flex-direction: column;
+        align-items: flex-start;
     }
 }
 

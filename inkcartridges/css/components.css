@@ -529,9 +529,9 @@
 }
 
 .product-card__link {
-    display: block;
+    display: flex;
+    flex-direction: column;
     color: inherit;
-    flex: 1;
 }
 
 .product-card__link:hover {
@@ -637,6 +637,7 @@
     display: flex;
     flex-direction: column;
     gap: var(--spacing-1);
+    flex-grow: 0;
 }
 
 .product-card__brand {
@@ -654,7 +655,7 @@
     color: var(--color-text);
     margin: 0;
     display: -webkit-box;
-    -webkit-line-clamp: 2;
+    -webkit-line-clamp: 3;
     -webkit-box-orient: vertical;
     overflow: hidden;
 }
@@ -710,30 +711,71 @@
     color: var(--color-error);
 }
 
+/* Footer: color + stock row, then price + button row */
+.product-card__footer {
+    padding-top: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.product-card__footer-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--spacing-2);
+}
+
+.product-card__footer-row .product-card__price {
+    margin: 0;
+    font-size: var(--font-size-sm);
+    font-weight: var(--font-weight-bold);
+}
+
+.product-card__footer-row .product-card__pricing {
+    margin-top: 0;
+}
+
+.product-card__cart-col {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 2px;
+    flex-shrink: 0;
+}
+
+.product-card__cart-col .product-card__stock {
+    margin: 0;
+    font-size: var(--font-size-xs);
+}
+
 .product-card__add-to-cart,
-.product-card__add-btn {
-    margin: var(--spacing-4);
-    margin-top: auto;
+.product-card__add-btn,
+.product-card__footer .product-card__cart-btn {
     background-color: var(--cyan-primary);
     color: var(--white-primary);
     border: none;
-    padding: var(--spacing-3) var(--spacing-4);
+    padding: var(--spacing-2) var(--spacing-3);
     border-radius: var(--radius-md);
     font-weight: var(--font-weight-semibold);
+    font-size: var(--font-size-xs);
     cursor: pointer;
     transition: all 0.2s ease;
-    width: calc(100% - var(--spacing-8));
+    white-space: nowrap;
+    flex-shrink: 0;
 }
 
 .product-card__add-to-cart:hover,
-.product-card__add-btn:hover {
+.product-card__add-btn:hover,
+.product-card__footer .product-card__cart-btn:hover {
     background-color: var(--cyan-dark);
     box-shadow: var(--shadow-cyan);
-    transform: translateY(-2px);
+    transform: translateY(-1px);
 }
 
 .product-card__add-to-cart:disabled,
-.product-card__add-btn:disabled {
+.product-card__add-btn:disabled,
+.product-card__footer .product-card__cart-btn:disabled {
     background-color: var(--color-border);
     color: var(--color-text-muted);
     cursor: not-allowed;

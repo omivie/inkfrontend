@@ -509,11 +509,23 @@ const RibbonsPage = {
                 </div>
                 <div class="product-card__content">
                     <h3 class="product-card__title">${Security.escapeHtml(displayName)}</h3>
-                    ${color ? `<span class="product-card__color">${Security.escapeHtml(color)}</span>` : ''}
-                    <div class="product-card__pricing">
-                        <span class="product-card__price">${formatPrice(price)}</span>
+                    <div class="product-card__footer">
+                        <div class="product-card__footer-row">
+                            ${color ? `<span class="product-card__color">${Security.escapeHtml(color)}</span>` : '<span></span>'}
+                            <span class="product-card__stock product-card__stock--${getStockStatus(ribbon).class}">${Security.escapeHtml(getStockStatus(ribbon).text)}</span>
+                        </div>
+                        <div class="product-card__footer-row">
+                            <div class="product-card__pricing">
+                                <span class="product-card__price">${formatPrice(price)}</span>
+                            </div>
+                            <button class="btn btn--primary btn--sm product-card__cart-btn"
+                                    data-product-id="${ribbonId}"
+                                    aria-label="Add ${Security.escapeAttr(displayName)} to cart"
+                                    ${!inStock ? 'disabled' : ''}>
+                                Add to Cart
+                            </button>
+                        </div>
                     </div>
-                    <span class="product-card__stock product-card__stock--${getStockStatus(ribbon).class}">${Security.escapeHtml(getStockStatus(ribbon).text)}</span>
                 </div>
             </a>
             <button type="button" class="favourite-btn product-card__fav-btn ${isFav ? 'favourite-btn--active' : ''}"
@@ -532,12 +544,6 @@ const RibbonsPage = {
                 <svg class="favourite-btn__icon favourite-btn__icon--filled" width="20" height="20" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="2">
                     <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/>
                 </svg>
-            </button>
-            <button class="btn btn--primary btn--sm product-card__cart-btn"
-                    data-product-id="${ribbonId}"
-                    aria-label="Add ${Security.escapeAttr(displayName)} to cart"
-                    ${!inStock ? 'disabled' : ''}>
-                Add to Cart
             </button>
         `;
 

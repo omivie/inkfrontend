@@ -79,24 +79,30 @@ const Products = {
                     <div class="product-card__content">
                         <p class="product-card__brand">${Security.escapeHtml(product.brand?.name || '')}</p>
                         <h3 class="product-card__title" title="${Security.escapeAttr(product.name)}">${Security.escapeHtml(product.name)}</h3>
-                        ${product.color ? `<p class="product-card__color">${Security.escapeHtml(product.color)}</p>` : ''}
-                        <p class="product-card__price">${product.retail_price == null ? 'Price unavailable' : formatPrice(product.retail_price)}${product.compare_price && product.compare_price > product.retail_price ? `<span class="product-card__compare-price">${formatPrice(product.compare_price)}</span>` : ''}</p>
                         ${product.compare_price && product.compare_price > product.retail_price ? `<p class="product-card__savings">Save ${formatPrice(product.compare_price - product.retail_price)}</p>` : ''}
                         ${product.average_rating && product.review_count > 0 ? `<div class="product-card__rating">${this._miniStars(Math.round(parseFloat(product.average_rating)))} <span class="product-card__review-count">(${product.review_count})</span></div>` : ''}
                         ${product.retail_price != null && product.retail_price >= 100 ? '<span class="product-card__free-shipping">FREE SHIPPING</span>' : ''}
-                        <p class="product-card__stock stock-${stockInfo.class}">${Security.escapeHtml(stockInfo.text)}</p>
+                        <div class="product-card__footer">
+                            <div class="product-card__footer-row">
+                                ${product.color ? `<p class="product-card__color">${Security.escapeHtml(product.color)}</p>` : '<span></span>'}
+                                <p class="product-card__stock stock-${stockInfo.class}">${Security.escapeHtml(stockInfo.text)}</p>
+                            </div>
+                            <div class="product-card__footer-row">
+                                <p class="product-card__price">${product.retail_price == null ? 'Price unavailable' : formatPrice(product.retail_price)}${product.compare_price && product.compare_price > product.retail_price ? ` <span class="product-card__compare-price">${formatPrice(product.compare_price)}</span>` : ''}</p>
+                                <button class="product-card__add-btn btn btn--primary"
+                                    ${product.retail_price == null || stockInfo.class === 'out-of-stock' ? 'disabled' : ''}
+                                    data-product-id="${Security.escapeAttr(product.id)}"
+                                    data-product-sku="${Security.escapeAttr(product.sku)}"
+                                    data-product-name="${Security.escapeAttr(product.name)}"
+                                    data-product-price="${Security.escapeAttr(product.retail_price)}"
+                                    data-product-image="${Security.escapeAttr(resolvedImage)}"
+                                    data-product-color="${Security.escapeAttr(product.color || this.detectColorFromName(product.name) || '')}">
+                                Add to Cart
+                                </button>
+                            </div>
+                        </div>
                     </div>
                 </a>
-                <button class="product-card__add-btn btn btn--primary"
-                        ${product.retail_price == null || stockInfo.class === 'out-of-stock' ? 'disabled' : ''}
-                        data-product-id="${Security.escapeAttr(product.id)}"
-                        data-product-sku="${Security.escapeAttr(product.sku)}"
-                        data-product-name="${Security.escapeAttr(product.name)}"
-                        data-product-price="${Security.escapeAttr(product.retail_price)}"
-                        data-product-image="${Security.escapeAttr(resolvedImage)}"
-                        data-product-color="${Security.escapeAttr(product.color || this.detectColorFromName(product.name) || '')}">
-                    Add to Cart
-                </button>
             </article>
         `;
     },

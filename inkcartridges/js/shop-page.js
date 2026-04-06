@@ -2346,7 +2346,7 @@
                         ? `Original ${typeDisplay}Products`
                         : `${brandDisplay}Original Products for "${searchQuery}"`;
 
-                    await this.displayProductInfo(filteredProducts);
+                    await this.displayProductInfo(filteredProducts, { skipPrinters: true });
 
                     if (navVersion !== undefined && this.navigationVersion !== navVersion) return;
 
@@ -2499,15 +2499,27 @@
                     </div>
                     <div class="product-card__content">
                         <h3 class="product-card__title" title="${Security.escapeAttr(displayName)}">${Security.escapeHtml(displayName)}</h3>
-                        ${color ? `<span class="product-card__color">${Security.escapeHtml(color)}</span>` : ''}
-                        <div class="product-card__pricing">
-                            <span class="product-card__price">${formatPrice(price)}</span>
-                            ${product.compare_price && product.compare_price > price ? `<span class="product-card__compare-price">${formatPrice(product.compare_price)}</span>` : ''}
-                        </div>
                         ${product.compare_price && product.compare_price > price ? `<span class="product-card__savings">Save ${formatPrice(product.compare_price - price)}</span>` : ''}
-                        <span class="product-card__stock product-card__stock--${stockStatus.class}">
-                            ${stockStatus.text}
-                        </span>
+                        <div class="product-card__footer">
+                            <div class="product-card__footer-row">
+                                ${color ? `<span class="product-card__color">${Security.escapeHtml(color)}</span>` : '<span></span>'}
+                                <span class="product-card__stock product-card__stock--${stockStatus.class}">
+                                    ${stockStatus.text}
+                                </span>
+                            </div>
+                            <div class="product-card__footer-row">
+                                <div class="product-card__pricing">
+                                    <span class="product-card__price">${formatPrice(price)}</span>
+                                    ${product.compare_price && product.compare_price > price ? ` <span class="product-card__compare-price">${formatPrice(product.compare_price)}</span>` : ''}
+                                </div>
+                                <button class="btn btn--primary btn--sm product-card__cart-btn"
+                                        data-product-id="${product.id}"
+                                        aria-label="Add ${displayName} to cart"
+                                        ${!inStock ? 'disabled' : ''}>
+                                    Add to Cart
+                                </button>
+                            </div>
+                        </div>
                     </div>
                 </a>
                 <button type="button" class="favourite-btn product-card__fav-btn ${isFav ? 'favourite-btn--active' : ''}"
@@ -2527,18 +2539,13 @@
                         <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/>
                     </svg>
                 </button>
-                <button class="btn btn--primary btn--sm product-card__cart-btn"
-                        data-product-id="${product.id}"
-                        aria-label="Add ${displayName} to cart"
-                        ${!inStock ? 'disabled' : ''}>
-                    Add to Cart
-                </button>
             `;
 
             // Add cart button event listener
             const cartBtn = card.querySelector('.product-card__cart-btn');
             cartBtn.addEventListener('click', async (e) => {
                 e.preventDefault();
+                e.stopPropagation();
                 await this.addToCart(product, cartBtn);
             });
 
@@ -2719,7 +2726,7 @@
         },
 
         // Display compatible printers and yield info, update section titles
-        async displayProductInfo(products) {
+        async displayProductInfo(products, { skipPrinters = false } = {}) {
             // Reset banners
             this.elements.printersBanner.hidden = true;
             this.elements.yieldBanner.hidden = true;
@@ -2751,6 +2758,9 @@
 
             // Paper categories don't have a "For Use In" printer association
             if (this.state.category === 'paper') return;
+
+            // Skip printer banner for search results
+            if (skipPrinters) return;
 
             // Fetch compatible printers from API using first product's SKU
             const firstProduct = products.find(p => p.sku);
