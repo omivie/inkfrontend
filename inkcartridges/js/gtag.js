@@ -11,3 +11,4 @@ gtag('consent', 'default', {
 gtag('js', new Date());
 gtag('config', 'G-SDQELG0FGD');
 gtag('config', 'G-YJXTSGLM28');
+gtag('config', 'AW-18032498762');

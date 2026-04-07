@@ -399,6 +399,17 @@ const AdminAPI = {
     }
   },
 
+  async toggleImportLock(productId) {
+    try {
+      const resp = await window.API.put(`/api/admin/products/${productId}/import-lock`);
+      if (resp && resp.ok === false) throw new Error(resp.error || 'Toggle import lock failed');
+      return resp?.data ?? null;
+    } catch (e) {
+      DebugLog.warn('[AdminAPI] toggleImportLock failed:', e.message);
+      throw e;
+    }
+  },
+
   async createProduct(data) {
     try {
       const resp = await window.API.post('/api/admin/products', data);
@@ -1001,6 +1012,137 @@ const AdminAPI = {
       DebugLog.warn(`[AdminAPI] exportData(${type}, ${format}) failed:`, e.message);
       throw e;
     }
+  },
+
+  // ---- Control Center: Profit & Pricing ----
+  async getPricingHeatmap(source = 'genuine') {
+    try {
+      const resp = await window.API.get(`/api/admin/pricing/heatmap?source=${encodeURIComponent(source)}`);
+      return resp?.data ?? null;
+    } catch (e) { adminApiWarn('Pricing heatmap', e); return null; }
+  },
+
+  async getUnderMarginProducts(source = 'genuine', page = 1, limit = 50) {
+    try {
+      const qs = new URLSearchParams({ source, page, limit });
+      const resp = await window.API.get(`/api/admin/pricing/under-margin?${qs}`);
+      return resp ?? null;
+    } catch (e) { adminApiWarn('Under-margin products', e); return null; }
+  },
+
+  async getGlobalOffset() {
+    try {
+      const resp = await window.API.get('/api/admin/pricing/global-offset');
+      return resp?.data ?? null;
+    } catch (e) { adminApiWarn('Global offset', e); return null; }
+  },
+
+  async updateGlobalOffset(offset, notes) {
+    try {
+      const resp = await window.API.put('/api/admin/pricing/global-offset', { offset, notes });
+      return resp?.data ?? null;
+    } catch (e) {
+      DebugLog.warn('[AdminAPI] updateGlobalOffset failed:', e.message);
+      throw e;
+    }
+  },
+
+  // ---- Control Center: SEO & Trust ----
+  async getSeoIndexingStatus() {
+    try {
+      const resp = await window.API.get('/api/admin/seo/indexing-status');
+      return resp?.data ?? null;
+    } catch (e) { adminApiWarn('SEO indexing status', e); return null; }
+  },
+
+  async getSerpRankings(keyword = '') {
+    try {
+      const params = keyword ? `?keyword=${encodeURIComponent(keyword)}` : '';
+      const resp = await window.API.get(`/api/admin/seo/serp-rankings${params}`);
+      return resp?.data ?? null;
+    } catch (e) { adminApiWarn('SERP rankings', e); return null; }
+  },
+
+  async bulkApproveReviews(minRating, dryRun = true) {
+    try {
+      const resp = await window.API.post('/api/admin/reviews/bulk-approve', {
+        min_rating: minRating,
+        dry_run: dryRun,
+      });
+      return resp?.data ?? null;
+    } catch (e) {
+      DebugLog.warn('[AdminAPI] bulkApproveReviews failed:', e.message);
+      throw e;
+    }
+  },
+
+  // ---- Control Center: Inventory & Supplier ----
+  async getSupplierImportStatus() {
+    try {
+      const resp = await window.API.get('/api/admin/supplier/import-status');
+      return resp?.data ?? null;
+    } catch (e) { adminApiWarn('Import status', e); return null; }
+  },
+
+  async getPriceDiscrepancies(params = {}) {
+    try {
+      const qs = new URLSearchParams({
+        min_change_pct: params.min_change_pct ?? 20,
+        days: params.days ?? 30,
+        page: params.page ?? 1,
+        limit: params.limit ?? 50,
+      });
+      const resp = await window.API.get(`/api/admin/supplier/price-discrepancies?${qs}`);
+      return resp ?? null;
+    } catch (e) { adminApiWarn('Price discrepancies', e); return null; }
+  },
+
+  async triggerReconcile() {
+    try {
+      const resp = await window.API.post('/api/admin/supplier/trigger-reconcile');
+      return resp?.data ?? null;
+    } catch (e) {
+      DebugLog.warn('[AdminAPI] triggerReconcile failed:', e.message);
+      throw e;
+    }
+  },
+
+  // ---- Control Center: Orders & Compliance ----
+  async getPaymentBreakdown(startDate, endDate) {
+    try {
+      const qs = new URLSearchParams();
+      if (startDate) qs.set('start_date', startDate);
+      if (endDate) qs.set('end_date', endDate);
+      const resp = await window.API.get(`/api/admin/audit/payment-breakdown?${qs}`);
+      return resp?.data ?? null;
+    } catch (e) { adminApiWarn('Payment breakdown', e); return null; }
+  },
+
+  async getInvoicePreviewUrl(orderId) {
+    try {
+      const token = window.Auth?.session?.access_token;
+      if (!token) throw new Error('Not authenticated');
+      const resp = await fetch(`${Config.API_URL}/api/admin/audit/invoice-preview/${encodeURIComponent(orderId)}`, {
+        headers: { 'Authorization': `Bearer ${token}` },
+      });
+      if (!resp.ok) throw new Error(`Invoice fetch failed: ${resp.status}`);
+      const blob = await resp.blob();
+      return URL.createObjectURL(blob);
+    } catch (e) {
+      DebugLog.warn('[AdminAPI] getInvoicePreviewUrl failed:', e.message);
+      throw e;
+    }
+  },
+
+  async getAuditLogs(params = {}) {
+    try {
+      const qs = new URLSearchParams();
+      if (params.action) qs.set('action', params.action);
+      qs.set('page', params.page ?? 1);
+      qs.set('limit', params.limit ?? 50);
+      const resp = await window.API.get(`/api/admin/audit/logs?${qs}`);
+      return resp ?? null;
+    } catch (e) { adminApiWarn('Audit logs', e); return null; }
   },
 };
 

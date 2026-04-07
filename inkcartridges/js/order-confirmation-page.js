@@ -121,6 +121,15 @@
                 if (response.ok && response.data) {
                     this.orderData = this.transformAPIOrder(response.data);
                     this.renderOrderDetails();
+                    // Google Ads purchase conversion
+                    if (typeof gtag === 'function') {
+                        gtag('event', 'conversion', {
+                            send_to: 'AW-18032498762/W1laCPGzpJQcEMqwyJZD',
+                            value: this.orderData.total,
+                            currency: 'NZD',
+                            transaction_id: this.orderData.orderNumber
+                        });
+                    }
                     return;
                 }
             } catch (error) {
@@ -131,6 +140,15 @@
             if (storedData && storedData.items && storedData.items.length > 0) {
                 this.orderData = this.transformAPIOrder(storedData);
                 this.renderOrderDetails();
+                // Google Ads purchase conversion (fallback path)
+                if (typeof gtag === 'function') {
+                    gtag('event', 'conversion', {
+                        send_to: 'AW-18032498762/W1laCPGzpJQcEMqwyJZD',
+                        value: this.orderData.total,
+                        currency: 'NZD',
+                        transaction_id: this.orderData.orderNumber
+                    });
+                }
             } else {
                 this.showFallback(orderNumber);
             }

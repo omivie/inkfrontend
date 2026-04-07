@@ -96,6 +96,15 @@ function buildColumns() {
       align: 'center',
     },
     {
+      key: 'import_locked', label: '',
+      render: (r) => {
+        const locked = !!r.import_locked;
+        return `<button class="import-lock-btn${locked ? ' import-lock-btn--active' : ''}" data-product-id="${r.id}" data-locked="${locked}" title="${locked ? 'Import locked \u2014 cron skips this product' : 'Not locked \u2014 cron will update this product'}">${icon(locked ? 'lock' : 'lock-open', 14, 14)}</button>`;
+      },
+      align: 'center',
+      className: 'cell-center',
+    },
+    {
       key: 'compat', label: 'Compat', sortable: false,
       render: (r) => `<span class="admin-text-muted" data-compat-sku="${esc(r.sku || '')}" style="font-size:0.75rem;">—</span>`,
       align: 'center',
@@ -153,7 +162,7 @@ async function loadProducts() {
   const sb = (typeof Auth !== 'undefined' && Auth.supabase) ? Auth.supabase : null;
   if (sb) {
     try {
-      const selectCols = 'id, sku, name, retail_price, cost_price, is_active, image_url, color, source, weight_kg, page_yield, category, product_type, brand_id, description, compare_price, meta_title, meta_description, tags, internal_notes, brands(name, slug)';
+      const selectCols = 'id, sku, name, retail_price, cost_price, is_active, import_locked, image_url, color, source, weight_kg, page_yield, category, product_type, brand_id, description, compare_price, meta_title, meta_description, tags, internal_notes, brands(name, slug)';
       let query = sb.from('products').select(selectCols, { count: 'exact' });
 
       // Brand filter
@@ -318,6 +327,41 @@ async function openProductDrawer(product) {
 
   // Update title with full name
   modal.querySelector('.admin-product-modal__title').textContent = full.name || full.sku || 'Product';
+
+  // Insert import lock toggle in header
+  const lockBtn = document.createElement('button');
+  lockBtn.className = 'import-lock-toggle' + (full.import_locked ? ' import-lock-toggle--active' : '');
+  lockBtn.title = full.import_locked ? 'Import locked' : 'Import unlocked';
+  lockBtn.innerHTML = `${icon(full.import_locked ? 'lock' : 'lock-open', 14, 14)}<span class="import-lock-toggle__label">${full.import_locked ? 'Locked' : 'Unlocked'}</span>`;
+  const headerActions = modal.querySelector('.admin-product-modal__actions');
+  headerActions.parentNode.insertBefore(lockBtn, headerActions);
+
+  lockBtn.addEventListener('click', async () => {
+    lockBtn.disabled = true;
+    try {
+      const result = await AdminAPI.toggleImportLock(full.id);
+      const locked = !!result.import_locked;
+      full.import_locked = locked;
+      lockBtn.className = 'import-lock-toggle' + (locked ? ' import-lock-toggle--active' : '');
+      lockBtn.title = locked ? 'Import locked' : 'Import unlocked';
+      lockBtn.innerHTML = `${icon(locked ? 'lock' : 'lock-open', 14, 14)}<span class="import-lock-toggle__label">${locked ? 'Locked' : 'Unlocked'}</span>`;
+      if (_table) {
+        const row = _table.data.find(r => String(r.id) === String(full.id));
+        if (row) row.import_locked = locked;
+        const tableBtn = document.querySelector(`.import-lock-btn[data-product-id="${full.id}"]`);
+        if (tableBtn) {
+          tableBtn.dataset.locked = String(locked);
+          tableBtn.classList.toggle('import-lock-btn--active', locked);
+          tableBtn.innerHTML = icon(locked ? 'lock' : 'lock-open', 14, 14);
+        }
+      }
+      Toast.success(locked ? 'Import locked' : 'Import unlocked');
+    } catch (err) {
+      Toast.error(`Lock toggle failed: ${err.message}`);
+    } finally {
+      lockBtn.disabled = false;
+    }
+  });
 
   // Build sidebar
   buildProductModalSidebar(modal, full);
@@ -2240,6 +2284,32 @@ export default {
       e.stopPropagation();
       const name = btn.dataset.copy;
       navigator.clipboard.writeText(name).then(() => Toast.success('Copied to clipboard')).catch(() => Toast.error('Copy failed'));
+    });
+
+    // Import lock toggle (event delegation)
+    tableContainer.addEventListener('click', async (e) => {
+      const btn = e.target.closest('.import-lock-btn');
+      if (!btn) return;
+      e.stopPropagation();
+      const productId = btn.dataset.productId;
+      btn.disabled = true;
+      btn.style.opacity = '0.5';
+      try {
+        const result = await AdminAPI.toggleImportLock(productId);
+        const locked = !!result.import_locked;
+        btn.dataset.locked = String(locked);
+        btn.classList.toggle('import-lock-btn--active', locked);
+        btn.innerHTML = icon(locked ? 'lock' : 'lock-open', 14, 14);
+        btn.title = locked ? 'Import locked \u2014 cron skips this product' : 'Not locked \u2014 cron will update this product';
+        const row = _table.data.find(r => String(r.id) === productId);
+        if (row) row.import_locked = locked;
+        Toast.success(locked ? 'Import locked' : 'Import unlocked');
+      } catch (err) {
+        Toast.error(`Lock toggle failed: ${err.message}`);
+      } finally {
+        btn.disabled = false;
+        btn.style.opacity = '';
+      }
     });
 
     // Search
