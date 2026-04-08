@@ -170,16 +170,49 @@ function createSmartSearch() {
             this._show();
 
             try {
-                let result = await this._fetchResults(searchQuery);
+                // Detect printer model early for parallel compatibility fetch
+                const printerDetection = (typeof SearchNormalize !== 'undefined' && SearchNormalize.detectPrinterModel)
+                    ? SearchNormalize.detectPrinterModel(searchQuery)
+                    : null;
+
+                let result, compatResult = null;
+
+                if (printerDetection) {
+                    // Fire API search and printer compatibility in parallel
+                    const [apiSettled, compatSettled] = await Promise.allSettled([
+                        this._fetchResults(searchQuery),
+                        this._fetchByPrinterModel(query)
+                    ]);
+                    result = apiSettled.status === 'fulfilled' ? apiSettled.value : null;
+                    compatResult = compatSettled.status === 'fulfilled' ? compatSettled.value : null;
+                } else {
+                    result = await this._fetchResults(searchQuery);
+                }
                 if (query !== this._currentQuery) return;
 
-                // Step 2: If results found, show them (with normalize banner if changed)
-                if (result && result.products && result.products.length > 0) {
-                    this._setCache(searchQuery, result);
-                    if (normalizeResult && normalizeResult.changed) {
-                        this._showCorrection(query, searchQuery, 'normalize');
+                // Step 2: If results found (from API and/or compatibility), merge and show
+                const hasApiResults = result && result.products && result.products.length > 0;
+                const hasCompatResults = compatResult && compatResult.products && compatResult.products.length > 0;
+
+                if (hasApiResults || hasCompatResults) {
+                    let finalResult;
+                    if (hasApiResults && hasCompatResults) {
+                        finalResult = this._mergeResults(result.products, compatResult.products);
+                        this._setCache(searchQuery, finalResult);
+                        this._showCorrection(query, compatResult.printerName, 'compatibility');
+                    } else if (hasCompatResults) {
+                        finalResult = compatResult;
+                        this._setCache(searchQuery, finalResult);
+                        this._printerModel = compatResult.printerName;
+                        this._showCorrection(query, 'compatible products for ' + compatResult.printerName, 'normalize');
+                    } else {
+                        finalResult = result;
+                        this._setCache(searchQuery, finalResult);
+                        if (normalizeResult && normalizeResult.changed) {
+                            this._showCorrection(query, searchQuery, 'normalize');
+                        }
                     }
-                    this._renderResults(result.products, searchQuery, result.total);
+                    this._renderResults(finalResult.products, searchQuery, finalResult.total);
                     return;
                 }
 
@@ -227,7 +260,17 @@ function createSmartSearch() {
                     }
                 }
 
-                // Step 5: Try printer model lookup — find compatible products
+                // Step 5: Try description search via Supabase
+                const descResult = await this._fetchByDescription(searchQuery);
+                if (query !== this._currentQuery) return;
+                if (descResult && descResult.products.length > 0) {
+                    this._setCache(searchQuery, descResult);
+                    this._showCorrection(query, null, 'description');
+                    this._renderResults(descResult.products, searchQuery, descResult.total);
+                    return;
+                }
+
+                // Step 6: Try printer model lookup — find compatible products
                 const printerResult = await this._fetchByPrinterModel(query);
                 if (query !== this._currentQuery) return;
                 if (printerResult && printerResult.products.length > 0) {
@@ -563,6 +606,74 @@ function createSmartSearch() {
             }
         },
 
+        /**
+         * Search product descriptions via Supabase for words in the query.
+         * Fallback when API search returns no results.
+         */
+        async _fetchByDescription(query) {
+            const sb = (typeof Auth !== 'undefined' && Auth.supabase)
+                ? Auth.supabase
+                : (typeof supabase !== 'undefined' && supabase.createClient && typeof Config !== 'undefined')
+                    ? supabase.createClient(Config.SUPABASE_URL, Config.SUPABASE_ANON_KEY)
+                    : null;
+            if (!sb) return null;
+
+            try {
+                const words = query.trim().split(/\s+/).filter(w => w.length >= 2);
+                if (words.length === 0) return null;
+
+                let dbQuery = sb.from('products')
+                    .select('*, brand:brands(name, slug)')
+                    .eq('is_active', true);
+
+                for (const word of words) {
+                    dbQuery = dbQuery.ilike('description', '%' + word + '%');
+                }
+
+                const { data, error } = await dbQuery.limit(searchConfig.maxResults);
+
+                if (error || !data || data.length === 0) return null;
+
+                const products = data.map(p => ({
+                    ...p,
+                    brand: p.brand || {},
+                    retail_price: p.retail_price ?? p.price,
+                    image_url: typeof storageUrl === 'function' ? storageUrl(p.image_url) : (p.image_url || '')
+                }));
+
+                return { products, total: products.length };
+            } catch (err) {
+                return null;
+            }
+        },
+
+        /**
+         * Merge two product arrays, deduplicating by SKU (or id).
+         * First array takes priority (shown first).
+         */
+        _mergeResults(primaryProducts, secondaryProducts) {
+            const seen = new Set();
+            const merged = [];
+
+            for (const p of primaryProducts) {
+                const key = p.sku || p.id;
+                if (key && !seen.has(key)) {
+                    seen.add(key);
+                    merged.push(p);
+                }
+            }
+
+            for (const p of secondaryProducts) {
+                const key = p.sku || p.id;
+                if (key && !seen.has(key)) {
+                    seen.add(key);
+                    merged.push(p);
+                }
+            }
+
+            return { products: merged, total: merged.length };
+        },
+
         // --- Rendering ---
 
         _renderResults(products, query, total) {
@@ -719,6 +830,16 @@ function createSmartSearch() {
                     + '<strong>' + Security.escapeHtml(corrected) + '</strong></button>?</span>'
                     + '<button type="button" class="smart-search__correction-original">'
                     + 'Search instead for &ldquo;' + Security.escapeHtml(original) + '&rdquo;</button>';
+            } else if (type === 'description') {
+                // Description match — informational, no alternative link
+                this._correctionBanner.innerHTML =
+                    '<span>Showing products matching &ldquo;<strong>' + Security.escapeHtml(original)
+                    + '</strong>&rdquo; in product descriptions</span>';
+            } else if (type === 'compatibility') {
+                // Merged API + compatibility results — informational
+                this._correctionBanner.innerHTML =
+                    '<span>Also showing compatible products for <strong>'
+                    + Security.escapeHtml(corrected) + '</strong></span>';
             } else {
                 // Normalize — informational
                 this._correctionBanner.innerHTML =
