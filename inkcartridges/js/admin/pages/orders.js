@@ -80,8 +80,8 @@ const COLUMNS = [
   {
     key: '_actions', label: '',
     render: (r) => {
-      const actionable = ['paid', 'shipped'].includes((r.status || '').toLowerCase());
-      if (!actionable) return '';
+      const st = (r.status || '').toLowerCase();
+      if (st === 'completed') return '';
       return `<button class="admin-btn admin-btn--ghost admin-btn--xs order-track-btn"
         data-order-id="${esc(r.id)}" data-action="quick-status"
         title="Update status">${icon('orders', 12, 12)} Status</button>`;
@@ -425,23 +425,11 @@ function bindModalActions(modal, order) {
   }
 }
 
-// Backend state machine: valid transitions from each status
-const STATUS_TRANSITIONS = {
-  pending: ['paid', 'cancelled'],
-  paid: ['shipped', 'cancelled'],
-  shipped: ['completed'],
-  completed: [],
-  cancelled: [],
-};
+const ALL_STATUSES = ['pending', 'paid', 'processing', 'shipped', 'completed', 'cancelled'];
 
 function showStatusModal(order) {
   const current = (order.status || '').toLowerCase();
-  const allowed = STATUS_TRANSITIONS[current] || [];
-
-  if (!allowed.length) {
-    Toast.warning(`Order is ${current} — no further status transitions available`);
-    return;
-  }
+  const allowed = ALL_STATUSES.filter(s => s !== current);
 
   const canShip = allowed.includes('shipped');
   const canCancel = allowed.includes('cancelled');

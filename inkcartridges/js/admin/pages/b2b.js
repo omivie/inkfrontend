@@ -79,8 +79,11 @@ const INVOICE_COLUMNS = [
     return `<span class="admin-badge admin-badge--${map[s] || 'pending'}">${esc(r.status || 'unpaid')}</span>`;
   }},
   { key: '_actions', label: '', align: 'right', render: (r) => {
-    return `<button class="admin-btn admin-btn--xs admin-btn--ghost inv-action" data-id="${Security.escapeAttr(r.id)}" data-action="pdf" style="margin-right:4px" title="Generate PDF">${icon('download', 14, 14)}</button>`
-         + `<button class="admin-btn admin-btn--xs admin-btn--ghost inv-action" data-id="${Security.escapeAttr(r.id)}" data-action="email" title="Send Email">${icon('mail', 14, 14)}</button>`;
+    const s = (r.status || 'unpaid').toLowerCase();
+    let btns = `<button class="admin-btn admin-btn--xs admin-btn--ghost inv-action" data-id="${Security.escapeAttr(r.id)}" data-action="pdf" style="margin-right:4px" title="Generate PDF">${icon('download', 14, 14)}</button>`
+             + `<button class="admin-btn admin-btn--xs admin-btn--ghost inv-action" data-id="${Security.escapeAttr(r.id)}" data-action="email" style="margin-right:4px" title="Send Email">${icon('mail', 14, 14)}</button>`;
+    if (s !== 'paid') btns += `<button class="admin-btn admin-btn--xs admin-btn--primary inv-action" data-id="${Security.escapeAttr(r.id)}" data-action="record-payment" title="Record Payment">${icon('finance', 14, 14)}</button>`;
+    return btns;
   }},
 ];
 
@@ -248,6 +251,11 @@ async function handleInvoiceAction(invoiceId, action) {
     } else if (action === 'email') {
       await AdminAPI.sendInvoiceEmail(invoiceId);
       Toast.success('Invoice email sent');
+    } else if (action === 'record-payment') {
+      if (!confirm('Record this invoice as paid?')) return;
+      await AdminAPI.recordInvoicePayment(invoiceId);
+      Toast.success('Payment recorded');
+      loadInvoices();
     }
   } catch (e) {
     Toast.error(`Failed: ${e.message}`);
