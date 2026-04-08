@@ -551,6 +551,89 @@
             padding: 1rem;
         }
 
+        /* Net 30 / B2B payment option */
+        .payment-col-net30 {
+            width: 100%;
+            padding-top: 1.5rem;
+            margin-top: 1.5rem;
+            border-top: 1px solid var(--gray-200);
+        }
+        .payment-col-net30__label {
+            display: block;
+            text-align: center;
+            font-size: 13px;
+            color: var(--gray-500);
+            margin-bottom: 1rem;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .net30-option {
+            background: linear-gradient(135deg, #f0f9ff 0%, #eff6ff 100%);
+            border: 1px solid #bfdbfe;
+            border-radius: 12px;
+            padding: 1.25rem;
+        }
+        .net30-option__header {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-weight: 600;
+            font-size: 15px;
+            color: var(--gray-800, #1e293b);
+            margin-bottom: 6px;
+        }
+        .net30-option__header svg {
+            color: var(--color-primary, #267FB5);
+        }
+        .net30-option__desc {
+            font-size: 13px;
+            color: var(--gray-600, #64748b);
+            margin: 0 0 1rem;
+            line-height: 1.4;
+        }
+        .net30-option__field {
+            margin-bottom: 1rem;
+        }
+        .net30-option__field-label {
+            display: block;
+            font-size: 13px;
+            font-weight: 500;
+            margin-bottom: 4px;
+            color: var(--gray-700, #374151);
+        }
+        .pay-button--net30 {
+            width: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            padding: 14px 24px;
+            background: var(--color-primary, #267FB5);
+            color: #fff;
+            border: none;
+            border-radius: 8px;
+            font-size: 15px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        .pay-button--net30:hover:not(:disabled) {
+            background: #1e6d9e;
+        }
+        .pay-button--net30:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        .net30-option__credit {
+            margin-top: 10px;
+            font-size: 13px;
+            color: var(--gray-600, #64748b);
+            text-align: center;
+        }
+        .net30-option__credit strong {
+            color: #16a34a;
+        }
+
     </style>
 </head>
 <body>
@@ -694,6 +777,28 @@
                                         <span class="payment-col-alt__label">or pay with</span>
                                         <div id="paypal-button-container"></div>
                                         <p class="payment-col-alt__sublabel">Pay securely with your PayPal account</p>
+                                    </div>
+
+                                    <div class="payment-col-net30" id="net30-section" hidden>
+                                        <span class="payment-col-net30__label">or use your business account</span>
+                                        <div class="net30-option">
+                                            <div class="net30-option__header">
+                                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+                                                <span>Net 30 Invoice</span>
+                                            </div>
+                                            <p class="net30-option__desc">Pay within 30 days by invoice to your business account.</p>
+                                            <div class="net30-option__field">
+                                                <label for="po-number" class="net30-option__field-label">PO Number <span style="color:var(--color-text-tertiary);font-weight:normal">(optional)</span></label>
+                                                <input type="text" id="po-number" class="form-input" maxlength="50" placeholder="Your purchase order number">
+                                            </div>
+                                            <button type="button" id="net30-pay-btn" class="pay-button pay-button--net30" disabled>
+                                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                                                <span>Place Order on Account</span>
+                                            </button>
+                                            <div class="net30-option__credit">
+                                                Credit remaining: <strong id="net30-credit-remaining">$0.00</strong>
+                                            </div>
+                                        </div>
                                     </div>
                                 </div>
                             </div>

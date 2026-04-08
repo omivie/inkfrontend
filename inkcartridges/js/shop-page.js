@@ -521,13 +521,25 @@
             if (!grid) return;
 
             // Use cached device brands or fetch from API
+            // Try ribbon_brands table first (same source as navbar dropdown), fall back to legacy API
             if (!this.cache.ribbonDeviceBrands) {
                 try {
-                    const res = await API.getRibbonBrands();
-                    const rawBrands = res?.data?.brands || [];
-                    this.cache.ribbonDeviceBrands = rawBrands
-                        .filter(name => name.toLowerCase() !== 'universal')
-                        .map(name => ({ value: name.toLowerCase(), label: name }));
+                    let brands = [];
+                    const res = await API.getRibbonBrandsList();
+                    const ribbonBrands = res?.data?.brands || [];
+                    if (ribbonBrands.length > 0) {
+                        brands = ribbonBrands.map(b => ({
+                            value: b.slug || b.name.toLowerCase(),
+                            label: b.name,
+                        }));
+                    } else {
+                        const legacyRes = await API.getRibbonBrands();
+                        const rawBrands = legacyRes?.data?.brands || [];
+                        brands = rawBrands
+                            .filter(name => name.toLowerCase() !== 'universal')
+                            .map(name => ({ value: name.toLowerCase(), label: name }));
+                    }
+                    this.cache.ribbonDeviceBrands = brands;
                 } catch (e) {
                     this.cache.ribbonDeviceBrands = [];
                 }

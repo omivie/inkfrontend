@@ -38,6 +38,9 @@ const AccountPage = {
         // Check admin access via backend (shows admin nav on all account pages if authorized)
         this.checkAdminAccess();
 
+        // Check B2B status (shows business nav on all account pages if approved)
+        this.checkBusinessAccess();
+
         // Load data based on current page
         const path = window.location.pathname;
 
@@ -917,6 +920,23 @@ const AccountPage = {
             }
         } catch {
             // Not an admin or backend unavailable — keep hidden
+        }
+    },
+
+    /**
+     * Check B2B status and show business nav item if approved
+     */
+    async checkBusinessAccess() {
+        const bizNavItem = document.getElementById('biz-nav-item');
+        if (!bizNavItem) return;
+
+        try {
+            const res = await API.getBusinessStatus();
+            if (res.ok && res.data?.status === 'approved') {
+                bizNavItem.hidden = false;
+            }
+        } catch {
+            // Not a B2B user or backend unavailable — keep hidden
         }
     },
 

@@ -1022,9 +1022,9 @@ const AdminAPI = {
     } catch (e) { adminApiWarn('Pricing heatmap', e); return null; }
   },
 
-  async getUnderMarginProducts(source = 'genuine', page = 1, limit = 50) {
+  async getUnderMarginProducts(source = 'genuine', page = 1, limit = 50, mode = 'under-margin', sort_by = 'net_margin', sort_order = 'asc') {
     try {
-      const qs = new URLSearchParams({ source, page, limit });
+      const qs = new URLSearchParams({ source, page, limit, mode, sort_by, sort_order });
       const resp = await window.API.get(`/api/admin/pricing/under-margin?${qs}`);
       return resp ?? null;
     } catch (e) { adminApiWarn('Under-margin products', e); return null; }
@@ -1143,6 +1143,212 @@ const AdminAPI = {
       const resp = await window.API.get(`/api/admin/audit/logs?${qs}`);
       return resp ?? null;
     } catch (e) { adminApiWarn('Audit logs', e); return null; }
+  },
+
+  // ---- Order Integrity ----
+  async getOrderBreakdown(orderId) {
+    try {
+      const resp = await window.API.get(`/api/admin/audit/order-breakdown/${encodeURIComponent(orderId)}`);
+      return resp?.data ?? null;
+    } catch (e) { adminApiWarn('Order breakdown', e); return null; }
+  },
+
+  // ---- Pricing: Tier Multipliers ----
+  async getTierMultipliers() {
+    try {
+      const resp = await window.API.get('/api/admin/pricing/tier-multipliers');
+      return resp?.data ?? null;
+    } catch (e) { adminApiWarn('Tier multipliers', e); return null; }
+  },
+
+  async updateTierMultipliers(multipliers) {
+    try {
+      const resp = await window.API.put('/api/admin/pricing/tier-multipliers', multipliers);
+      return resp?.data ?? null;
+    } catch (e) {
+      DebugLog.warn('[AdminAPI] updateTierMultipliers failed:', e.message);
+      throw e;
+    }
+  },
+
+  // ---- Market Intel ----
+  async getMarketIntelReport() {
+    try {
+      const resp = await window.API.get('/api/admin/market-intel/report');
+      return resp?.data ?? null;
+    } catch (e) { adminApiWarn('Market intel report', e); return null; }
+  },
+
+  async getOverpricedProducts(page = 1, limit = 50, brand = '') {
+    try {
+      const qs = new URLSearchParams({ page, limit });
+      if (brand) qs.set('brand', brand);
+      const resp = await window.API.get(`/api/admin/market-intel/overpriced?${qs}`);
+      return resp?.data ?? null;
+    } catch (e) { adminApiWarn('Overpriced products', e); return null; }
+  },
+
+  async getMarketDiscrepancies(minVariance = 15) {
+    try {
+      const qs = new URLSearchParams({ min_variance: minVariance });
+      const resp = await window.API.get(`/api/admin/market-intel/discrepancies?${qs}`);
+      return resp?.data ?? null;
+    } catch (e) { adminApiWarn('Market discrepancies', e); return null; }
+  },
+
+  async matchPrice(sku, targetPrice) {
+    try {
+      const resp = await window.API.post('/api/admin/market-intel/match-price', {
+        sku, target_price: targetPrice,
+      });
+      return resp?.data ?? null;
+    } catch (e) {
+      DebugLog.warn('[AdminAPI] matchPrice failed:', e.message);
+      throw e;
+    }
+  },
+
+  // ---- Tech Monitoring ----
+  async getCronHistory(params = {}) {
+    try {
+      const qs = new URLSearchParams();
+      if (params.job_name) qs.set('job_name', params.job_name);
+      if (params.status) qs.set('status', params.status);
+      qs.set('page', params.page ?? 1);
+      qs.set('limit', params.limit ?? 50);
+      const resp = await window.API.get(`/api/admin/monitoring/cron-history?${qs}`);
+      return resp?.data ?? null;
+    } catch (e) { adminApiWarn('Cron history', e); return null; }
+  },
+
+  async getCronSummary() {
+    try {
+      const resp = await window.API.get('/api/admin/monitoring/cron-summary');
+      return resp?.data ?? null;
+    } catch (e) { adminApiWarn('Cron summary', e); return null; }
+  },
+
+  async getHealthCheck() {
+    try {
+      const resp = await window.API.get('/api/admin/monitoring/health');
+      return resp?.data ?? null;
+    } catch (e) { adminApiWarn('Health check', e); return null; }
+  },
+
+  async getRlsStatus() {
+    try {
+      const resp = await window.API.get('/api/admin/monitoring/rls-status');
+      return resp?.data ?? null;
+    } catch (e) { adminApiWarn('RLS status', e); return null; }
+  },
+
+  // ---- Customer Reviews ----
+  async getReviews(filters = {}, page = 1, limit = 20) {
+    try {
+      const qs = new URLSearchParams({ page, limit });
+      if (filters.status) qs.set('status', filters.status);
+      if (filters.search) qs.set('search', filters.search);
+      if (filters.min_rating) qs.set('min_rating', filters.min_rating);
+      const resp = await window.API.get(`/api/admin/reviews?${qs}`);
+      return resp?.data ?? null;
+    } catch (e) { adminApiWarn('Reviews', e); return null; }
+  },
+
+  async updateReview(reviewId, data) {
+    try {
+      const resp = await window.API.put(`/api/admin/reviews/${encodeURIComponent(reviewId)}`, data);
+      return resp?.data ?? null;
+    } catch (e) {
+      DebugLog.warn('[AdminAPI] updateReview failed:', e.message);
+      throw e;
+    }
+  },
+
+  // ---- B2B Management ----
+  async getBusinessApplications(filters = {}, page = 1, limit = 20) {
+    try {
+      const qs = new URLSearchParams({ page, limit });
+      if (filters.status) qs.set('status', filters.status);
+      if (filters.search) qs.set('search', filters.search);
+      const resp = await window.API.get(`/api/admin/business/applications?${qs}`);
+      return resp?.data ?? null;
+    } catch (e) { adminApiWarn('B2B applications', e); return null; }
+  },
+
+  async getBusinessApplication(id) {
+    try {
+      const resp = await window.API.get(`/api/admin/business/applications/${encodeURIComponent(id)}`);
+      return resp?.data ?? null;
+    } catch (e) { adminApiWarn('B2B application detail', e); return null; }
+  },
+
+  async approveBusinessApplication(id, settings = {}) {
+    try {
+      const resp = await window.API.post(`/api/admin/business/applications/${encodeURIComponent(id)}/approve`, settings);
+      return resp?.data ?? null;
+    } catch (e) {
+      DebugLog.warn('[AdminAPI] approveBusinessApplication failed:', e.message);
+      throw e;
+    }
+  },
+
+  async declineBusinessApplication(id, reason = '') {
+    try {
+      const resp = await window.API.post(`/api/admin/business/applications/${encodeURIComponent(id)}/decline`, { reason });
+      return resp?.data ?? null;
+    } catch (e) {
+      DebugLog.warn('[AdminAPI] declineBusinessApplication failed:', e.message);
+      throw e;
+    }
+  },
+
+  async updateBusinessSettings(id, settings) {
+    try {
+      const resp = await window.API.put(`/api/admin/business/accounts/${encodeURIComponent(id)}`, settings);
+      return resp?.data ?? null;
+    } catch (e) {
+      DebugLog.warn('[AdminAPI] updateBusinessSettings failed:', e.message);
+      throw e;
+    }
+  },
+
+  async getBusinessInvoicesAdmin(filters = {}, page = 1, limit = 20) {
+    try {
+      const qs = new URLSearchParams({ page, limit });
+      if (filters.status) qs.set('status', filters.status);
+      if (filters.company) qs.set('company', filters.company);
+      if (filters.from) qs.set('from', filters.from);
+      if (filters.to) qs.set('to', filters.to);
+      const resp = await window.API.get(`/api/admin/business/invoices?${qs}`);
+      return resp?.data ?? null;
+    } catch (e) { adminApiWarn('B2B invoices', e); return null; }
+  },
+
+  async generateInvoicePdf(invoiceId) {
+    try {
+      const resp = await window.API.post(`/api/admin/business/invoices/${encodeURIComponent(invoiceId)}/generate-pdf`);
+      return resp?.data ?? null;
+    } catch (e) {
+      DebugLog.warn('[AdminAPI] generateInvoicePdf failed:', e.message);
+      throw e;
+    }
+  },
+
+  async sendInvoiceEmail(invoiceId) {
+    try {
+      const resp = await window.API.post(`/api/admin/business/invoices/${encodeURIComponent(invoiceId)}/send-email`);
+      return resp?.data ?? null;
+    } catch (e) {
+      DebugLog.warn('[AdminAPI] sendInvoiceEmail failed:', e.message);
+      throw e;
+    }
+  },
+
+  async getBusinessPendingCount() {
+    try {
+      const resp = await window.API.get('/api/admin/business/applications?status=pending&limit=1');
+      return resp?.data?.total ?? 0;
+    } catch (e) { return 0; }
   },
 };
 

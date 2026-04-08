@@ -230,9 +230,10 @@ async function openOrderModal(order) {
   modal._removeKeyHandler = () => document.removeEventListener('keydown', onKeyDown);
 
   // Fetch full data
-  const [fullOrder, events] = await Promise.all([
+  const [fullOrder, events, breakdown] = await Promise.all([
     AdminAPI.getOrder(order.id),
     AdminAPI.getOrderEvents(order.id),
+    AdminAPI.getOrderBreakdown(order.id),
   ]);
   if (_activeModal !== modal) return; // closed during fetch
 
@@ -242,10 +243,10 @@ async function openOrderModal(order) {
   modal.querySelector('.admin-product-modal__title').textContent = o.order_number || o.id?.slice(0, 8) || 'Order';
 
   // Build single-page content
-  buildOrderModalContent(modal, o, events || []);
+  buildOrderModalContent(modal, o, events || [], breakdown);
 }
 
-function buildOrderModalContent(modal, o, events) {
+function buildOrderModalContent(modal, o, events, breakdown) {
   const showCost = AdminAuth.isOwner();
   const omRow = (label, value) =>
     `<div class="om-meta-row"><span>${label}</span><span>${value}</span></div>`;
@@ -326,6 +327,32 @@ function buildOrderModalContent(modal, o, events) {
     itemsHtml += `<p class="admin-text-muted">${MISSING} No items</p>`;
   }
 
+  // Financial breakdown section (from order-breakdown endpoint)
+  let breakdownHtml = '';
+  if (breakdown) {
+    breakdownHtml += `<div class="om-section-title">Financial Breakdown</div>`;
+    breakdownHtml += `<div class="om-meta-grid">`;
+    let bLeft = '';
+    if (breakdown.subtotal_excl_gst != null) bLeft += omRow('Subtotal (excl. GST)', formatPrice(breakdown.subtotal_excl_gst));
+    if (breakdown.gst_amount != null) bLeft += omRow('GST (15%)', formatPrice(breakdown.gst_amount));
+    if (breakdown.total_incl_gst != null) bLeft += omRow('Total (incl. GST)', `<strong>${formatPrice(breakdown.total_incl_gst)}</strong>`);
+    if (breakdown.shipping_fee != null) bLeft += omRow('Shipping', formatPrice(breakdown.shipping_fee));
+    let bRight = '';
+    if (breakdown.payment_method) {
+      const pm = breakdown.payment_method;
+      if (pm.type === 'card' || pm.card_brand) {
+        bRight += omRow('Payment', `${esc(pm.card_brand || 'Card')} ****${esc(pm.last4 || '????')}`);
+      } else if (pm.type === 'paypal' || pm.paypal_email) {
+        bRight += omRow('Payment', `PayPal${pm.paypal_email ? ' — ' + esc(pm.paypal_email) : ''}`);
+      } else {
+        bRight += omRow('Payment', esc(pm.type || pm.method || 'Unknown'));
+      }
+    }
+    if (breakdown.invoice_number) bRight += omRow('Invoice #', esc(breakdown.invoice_number));
+    if (breakdown.receipt_url) bRight += omRow('Receipt', `<a href="${Security.escapeAttr(breakdown.receipt_url)}" target="_blank" rel="noopener" style="color:var(--cyan);text-decoration:underline">View Receipt</a>`);
+    breakdownHtml += `<div>${bLeft}</div><div>${bRight}</div></div>`;
+  }
+
   // Tracking section (conditional — address is now in the meta grid)
   let shippingHtml = '';
   if (o.carrier || o.tracking_number) {
@@ -365,7 +392,7 @@ function buildOrderModalContent(modal, o, events) {
   modal.querySelector('#om-header-actions').innerHTML =
     `<div class="om-header-btns">${btns.join('')}</div>${statusBadge(o.status)}`;
 
-  modal.querySelector('#om-content').innerHTML = [metaSection, itemsHtml, timelineHtml, shippingHtml]
+  modal.querySelector('#om-content').innerHTML = [metaSection, itemsHtml, breakdownHtml, shippingHtml, timelineHtml]
     .filter(Boolean).join('');
 
   bindModalActions(modal, o);

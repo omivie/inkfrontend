@@ -1469,6 +1469,62 @@ const API = {
      */
     async getBusinessStatus() {
         return this.get('/api/business/status');
+    },
+
+    /**
+     * Get B2B dashboard data (credit limit, amount due, pricing tier)
+     */
+    async getBusinessDashboard() {
+        return this.get('/api/business/dashboard');
+    },
+
+    /**
+     * Get B2B invoices
+     * @param {object} opts - { status: 'unpaid'|'paid', page, limit }
+     */
+    async getBusinessInvoices(opts = {}) {
+        const params = new URLSearchParams();
+        if (opts.status) params.set('status', opts.status);
+        if (opts.page) params.set('page', opts.page);
+        if (opts.limit) params.set('limit', opts.limit);
+        const qs = params.toString();
+        return this.get(`/api/business/invoices${qs ? '?' + qs : ''}`);
+    },
+
+    /**
+     * Get top 5 previously purchased items for quick reorder
+     */
+    async getBusinessReorderItems() {
+        return this.get('/api/business/reorder-items');
+    },
+
+    /**
+     * Upload credit reference document for Net 30 application
+     * @param {File} file - PDF, JPG, or PNG file
+     */
+    async uploadCreditReference(file) {
+        const url = `${Config.API_URL}/api/business/credit-reference`;
+        const token = await this.getToken();
+
+        const formData = new FormData();
+        formData.append('file', file);
+
+        const headers = {};
+        if (token) headers['Authorization'] = `Bearer ${token}`;
+
+        const response = await this._fetchWithAuth(url, {
+            method: 'POST',
+            headers,
+            body: formData
+        }, { timeoutMs: 30000 });
+
+        const data = await response.json();
+        if (!response.ok) {
+            const err = data.error || {};
+            const msg = (typeof err === 'object' && err !== null) ? (err.message || 'File upload failed') : (err || data.message || 'File upload failed');
+            throw new Error(msg);
+        }
+        return data;
     }
 };
 

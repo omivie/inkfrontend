@@ -595,13 +595,13 @@ function createSmartSearch() {
         },
 
         _renderCompactCard(product, index, prefix) {
-            const stockStatus = typeof getStockStatus === 'function' ? getStockStatus(product) : { class: '', text: '' };
+            const stockInfo = typeof getStockStatus === 'function' ? getStockStatus(product) : { class: 'in-stock', text: 'In Stock' };
             const sourceBadge = typeof getSourceBadge === 'function' ? getSourceBadge(product.source) : null;
 
-            const brand = product.brand?.name ?? product.brand ?? '';
             const name = product.name || '';
             const price = product.retail_price;
             const itemId = prefix + index;
+            const color = product.color || '';
 
             // Image: reuse Products.getProductImageHTML if available
             let imageHtml;
@@ -612,19 +612,23 @@ function createSmartSearch() {
                 imageHtml = '<img src="' + Security.escapeAttr(imgUrl) + '" alt="' + Security.escapeAttr(name) + '" loading="lazy" data-fallback="placeholder">';
             }
 
-            const addToCartBtn = '<button type="button" class="smart-search__add-to-cart" data-index="' + index + '">Add to Cart</button>';
-
             return '<div class="product-card product-card--compact" role="option" id="' + itemId + '" aria-selected="false" data-index="' + index + '">'
                 + '<div class="product-card__image-wrap">'
                     + imageHtml
                     + (sourceBadge ? '<span class="product-card__badge ' + sourceBadge.class + '">' + sourceBadge.text + '</span>' : '')
                 + '</div>'
                 + '<div class="product-card__content">'
-                    + '<p class="product-card__brand">' + Security.escapeHtml(brand) + '</p>'
                     + '<h3 class="product-card__title">' + Security.escapeHtml(name) + '</h3>'
-                    + (price != null ? '<p class="product-card__price">' + formatPrice(price) + '</p>' : '')
-                    + '<p class="product-card__stock in-stock">In Stock</p>'
-                    + addToCartBtn
+                    + '<div class="product-card__footer">'
+                        + '<div class="product-card__footer-row">'
+                            + (color ? '<p class="product-card__color">' + Security.escapeHtml(color) + '</p>' : '<span></span>')
+                            + '<p class="product-card__stock stock-' + stockInfo.class + '">' + Security.escapeHtml(stockInfo.text) + '</p>'
+                        + '</div>'
+                        + '<div class="product-card__footer-row">'
+                            + (price != null ? '<p class="product-card__price">' + formatPrice(price) + '</p>' : '')
+                            + '<button type="button" class="smart-search__add-to-cart" data-index="' + index + '">Add to Cart</button>'
+                        + '</div>'
+                    + '</div>'
                 + '</div>'
             + '</div>';
         },

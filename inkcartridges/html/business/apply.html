@@ -207,19 +207,6 @@
                             </div>
 
                             <div class="form-group">
-                                <label class="form-label" for="biz-spend">Estimated Monthly Spend <span class="form-required">*</span></label>
-                                <select id="biz-spend" class="form-input" required>
-                                    <option value="">Select a range</option>
-                                    <option value="Under $200">Under $200</option>
-                                    <option value="$200-$500">$200 - $500</option>
-                                    <option value="$500-$1000">$500 - $1,000</option>
-                                    <option value="$1000-$2500">$1,000 - $2,500</option>
-                                    <option value="$2500-$5000">$2,500 - $5,000</option>
-                                    <option value="Over $5000">Over $5,000</option>
-                                </select>
-                            </div>
-
-                            <div class="form-group">
                                 <label class="form-label" for="biz-industry">Industry <span class="form-required">*</span></label>
                                 <select id="biz-industry" class="form-input" required>
                                     <option value="">Select your industry</option>
@@ -235,8 +222,160 @@
                                 </select>
                             </div>
 
+                            <div class="form-group">
+                                <label class="form-label" for="biz-type">Business Type <span class="form-required">*</span></label>
+                                <select id="biz-type" class="form-input" required>
+                                    <option value="">Select business type</option>
+                                    <option value="sole_trader">Sole Trader</option>
+                                    <option value="partnership">Partnership</option>
+                                    <option value="llc">Limited Liability Company (LLC)</option>
+                                    <option value="trust">Trust</option>
+                                    <option value="government">Government</option>
+                                    <option value="nonprofit">Non-Profit</option>
+                                </select>
+                            </div>
+
+                            <div class="form-group">
+                                <label class="form-label" for="biz-ap-email">Accounts Payable Email <span class="form-hint">(optional)</span></label>
+                                <input type="email" id="biz-ap-email" class="form-input" maxlength="200" placeholder="accounts@example.co.nz">
+                            </div>
+
+                            <fieldset class="business-form__fieldset">
+                                <legend class="business-form__legend">Billing Address <span class="form-required">*</span></legend>
+                                <div class="business-form__address-grid">
+                                    <div class="form-group business-form__address-full">
+                                        <label class="form-label" for="biz-billing-address1">Street Address <span class="form-required">*</span></label>
+                                        <input type="text" id="biz-billing-address1" class="form-input" required maxlength="255" placeholder="Street address" autocomplete="billing address-line1">
+                                    </div>
+                                    <div class="form-group business-form__address-full">
+                                        <label class="form-label" for="biz-billing-address2">Apartment, suite, etc. <span class="form-hint">(optional)</span></label>
+                                        <input type="text" id="biz-billing-address2" class="form-input" maxlength="255" autocomplete="billing address-line2">
+                                    </div>
+                                    <div class="form-group">
+                                        <label class="form-label" for="biz-billing-city">City <span class="form-required">*</span></label>
+                                        <input type="text" id="biz-billing-city" class="form-input" required maxlength="100" autocomplete="billing address-level2">
+                                    </div>
+                                    <div class="form-group">
+                                        <label class="form-label" for="biz-billing-region">Region <span class="form-required">*</span></label>
+                                        <select id="biz-billing-region" class="form-input" required autocomplete="billing address-level1">
+                                            <option value="">Select region</option>
+                                            <option value="northland">Northland</option>
+                                            <option value="auckland">Auckland</option>
+                                            <option value="waikato">Waikato</option>
+                                            <option value="bay-of-plenty">Bay of Plenty</option>
+                                            <option value="gisborne">Gisborne</option>
+                                            <option value="hawkes-bay">Hawke's Bay</option>
+                                            <option value="taranaki">Taranaki</option>
+                                            <option value="manawatu-wanganui">Manawatu-Whanganui</option>
+                                            <option value="wellington">Wellington</option>
+                                            <option value="tasman">Tasman</option>
+                                            <option value="nelson">Nelson</option>
+                                            <option value="marlborough">Marlborough</option>
+                                            <option value="west-coast">West Coast</option>
+                                            <option value="canterbury">Canterbury</option>
+                                            <option value="otago">Otago</option>
+                                            <option value="southland">Southland</option>
+                                        </select>
+                                    </div>
+                                    <div class="form-group">
+                                        <label class="form-label" for="biz-billing-postcode">Postcode <span class="form-required">*</span></label>
+                                        <input type="text" id="biz-billing-postcode" class="form-input" required pattern="[0-9]{4}" maxlength="4" placeholder="0000" autocomplete="billing postal-code">
+                                    </div>
+                                </div>
+                            </fieldset>
+
+                            <fieldset class="business-form__fieldset" id="biz-shipping-fieldset">
+                                <legend class="business-form__legend">Shipping Address</legend>
+                                <div class="form-group form-group--checkbox">
+                                    <label>
+                                        <input type="checkbox" id="biz-same-as-billing" class="form-checkbox" checked>
+                                        Same as billing address
+                                    </label>
+                                </div>
+                                <div id="biz-shipping-fields" hidden>
+                                    <div class="business-form__address-grid">
+                                        <div class="form-group business-form__address-full">
+                                            <label class="form-label" for="biz-shipping-address1">Street Address <span class="form-required">*</span></label>
+                                            <input type="text" id="biz-shipping-address1" class="form-input" maxlength="255" placeholder="Street address" autocomplete="shipping address-line1">
+                                        </div>
+                                        <div class="form-group business-form__address-full">
+                                            <label class="form-label" for="biz-shipping-address2">Apartment, suite, etc. <span class="form-hint">(optional)</span></label>
+                                            <input type="text" id="biz-shipping-address2" class="form-input" maxlength="255" autocomplete="shipping address-line2">
+                                        </div>
+                                        <div class="form-group">
+                                            <label class="form-label" for="biz-shipping-city">City <span class="form-required">*</span></label>
+                                            <input type="text" id="biz-shipping-city" class="form-input" maxlength="100" autocomplete="shipping address-level2">
+                                        </div>
+                                        <div class="form-group">
+                                            <label class="form-label" for="biz-shipping-region">Region <span class="form-required">*</span></label>
+                                            <select id="biz-shipping-region" class="form-input" autocomplete="shipping address-level1">
+                                                <option value="">Select region</option>
+                                                <option value="northland">Northland</option>
+                                                <option value="auckland">Auckland</option>
+                                                <option value="waikato">Waikato</option>
+                                                <option value="bay-of-plenty">Bay of Plenty</option>
+                                                <option value="gisborne">Gisborne</option>
+                                                <option value="hawkes-bay">Hawke's Bay</option>
+                                                <option value="taranaki">Taranaki</option>
+                                                <option value="manawatu-wanganui">Manawatu-Whanganui</option>
+                                                <option value="wellington">Wellington</option>
+                                                <option value="tasman">Tasman</option>
+                                                <option value="nelson">Nelson</option>
+                                                <option value="marlborough">Marlborough</option>
+                                                <option value="west-coast">West Coast</option>
+                                                <option value="canterbury">Canterbury</option>
+                                                <option value="otago">Otago</option>
+                                                <option value="southland">Southland</option>
+                                            </select>
+                                        </div>
+                                        <div class="form-group">
+                                            <label class="form-label" for="biz-shipping-postcode">Postcode <span class="form-required">*</span></label>
+                                            <input type="text" id="biz-shipping-postcode" class="form-input" pattern="[0-9]{4}" maxlength="4" placeholder="0000" autocomplete="shipping postal-code">
+                                        </div>
+                                    </div>
+                                </div>
+                            </fieldset>
+
+                            <fieldset class="business-form__fieldset business-form__net30-section">
+                                <legend class="business-form__legend">Payment Terms</legend>
+                                <div class="form-group form-group--checkbox">
+                                    <label>
+                                        <input type="checkbox" id="biz-net30" class="form-checkbox">
+                                        Apply for Net 30 Payment Terms
+                                    </label>
+                                    <span class="form-hint" style="display: block; margin-top: 4px;">Pay invoices within 30 days of order. Subject to credit approval.</span>
+                                </div>
+                                <div id="biz-net30-fields" hidden>
+                                    <div class="form-group">
+                                        <label class="form-label" for="biz-spend">Estimated Monthly Spend <span class="form-required">*</span></label>
+                                        <select id="biz-spend" class="form-input">
+                                            <option value="">Select a range</option>
+                                            <option value="Under $200">Under $200</option>
+                                            <option value="$200-$500">$200 - $500</option>
+                                            <option value="$500-$1000">$500 - $1,000</option>
+                                            <option value="$1000-$2500">$1,000 - $2,500</option>
+                                            <option value="$2500-$5000">$2,500 - $5,000</option>
+                                            <option value="Over $5000">Over $5,000</option>
+                                        </select>
+                                    </div>
+                                    <div class="form-group">
+                                        <label class="form-label" for="biz-credit-ref">Credit Reference / Company Profile <span class="form-hint">(optional)</span></label>
+                                        <input type="file" id="biz-credit-ref" class="form-input business-form__file-upload" accept=".pdf,.jpg,.jpeg,.png">
+                                        <span class="form-hint">PDF, JPG, or PNG. Max 5 MB.</span>
+                                    </div>
+                                </div>
+                            </fieldset>
+
                             <button type="submit" class="btn btn--primary btn--lg" id="biz-submit-btn">Submit Application</button>
                             <div id="business-form-message" hidden></div>
+
+                            <div id="business-thank-you" class="business-form__thank-you" hidden>
+                                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#16a34a" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+                                <h2>Application Received</h2>
+                                <p>Thank you for applying for a business account with InkCartridges.co.nz.</p>
+                                <p>Your application is now under manual review. Our team will contact you within <strong>24-48 business hours</strong> to confirm your account details.</p>
+                                <a href="/" class="btn btn--primary">Continue Shopping</a>
+                            </div>
                         </form>
                     </div>
                 </div>

@@ -12,6 +12,8 @@
         isGuestCheckout: false,
         turnstileToken: null,
         turnstileWidgetId: undefined,
+        isB2B: false,
+        b2bData: null,
 
 
         // Idempotency key — deterministic SHA-256 hash including payment method
@@ -57,6 +59,9 @@
 
             // Load cart
             await this.loadCart();
+
+            // Check B2B status for Net 30 option
+            await this.checkB2BStatus();
 
             // Initialize Stripe
             this.initStripe();
@@ -766,6 +771,118 @@
 
                 btnText.textContent = originalText;
                 payBtn.disabled = false;
+                this.isSubmitting = false;
+            }
+        },
+
+        /**
+         * Check if user is an approved B2B customer with Net 30 terms
+         */
+        async checkB2BStatus() {
+            if (typeof Auth === 'undefined' || !Auth.isAuthenticated()) return;
+            try {
+                const res = await API.getBusinessStatus();
+                if (res.ok && res.data?.status === 'approved' && res.data?.net30_approved) {
+                    this.isB2B = true;
+                    this.b2bData = res.data;
+                    this.showNet30Option();
+                }
+            } catch (e) {
+                DebugLog.warn('B2B status check failed:', e.message);
+            }
+        },
+
+        /**
+         * Show the Net 30 payment option
+         */
+        showNet30Option() {
+            const section = document.getElementById('net30-section');
+            if (!section) return;
+            section.hidden = false;
+
+            const creditEl = document.getElementById('net30-credit-remaining');
+            if (creditEl && this.b2bData) {
+                const remaining = this.b2bData.credit_remaining ?? this.b2bData.credit_limit ?? 0;
+                creditEl.textContent = typeof formatPrice === 'function' ? formatPrice(remaining) : `$${Number(remaining).toFixed(2)}`;
+            }
+
+            const net30Btn = document.getElementById('net30-pay-btn');
+            if (net30Btn) {
+                // Enable when payment is authorized (uses same auth checkbox)
+                const authCheckbox = document.getElementById('payment-authorize');
+                if (authCheckbox) {
+                    const updateNet30Btn = () => { net30Btn.disabled = !authCheckbox.checked; };
+                    authCheckbox.addEventListener('change', updateNet30Btn);
+                    updateNet30Btn();
+                } else {
+                    net30Btn.disabled = false;
+                }
+                net30Btn.addEventListener('click', () => this.handleNet30Payment());
+            }
+        },
+
+        /**
+         * Handle Net 30 payment - place order on business account
+         */
+        async handleNet30Payment() {
+            if (this.isSubmitting) return;
+            this.isSubmitting = true;
+            const btn = document.getElementById('net30-pay-btn');
+            if (btn) { btn.disabled = true; btn.innerHTML = '<span>Processing...</span>'; }
+
+            try {
+                const cd = this.checkoutData || {};
+                const poNumber = (document.getElementById('po-number')?.value || '').trim();
+
+                const orderData = {
+                    email: cd.email,
+                    phone: cd.phone || '',
+                    firstName: cd.firstName,
+                    lastName: cd.lastName,
+                    address1: cd.address1,
+                    address2: cd.address2 || '',
+                    city: cd.city,
+                    region: cd.region,
+                    postcode: cd.postcode,
+                    deliveryType: cd.deliveryType || 'urban',
+                    estimatedShipping: cd.estimatedShipping ?? null,
+                    payment_method: 'net30',
+                    po_number: poNumber,
+                    idempotency_key: await this.getIdempotencyKey('net30'),
+                };
+
+                if (this.turnstileToken) {
+                    orderData.turnstile_token = this.turnstileToken;
+                }
+
+                const res = await API.createOrder(orderData);
+                if (res.ok && res.data) {
+                    const orderNumber = res.data.order_number;
+
+                    // Store order snapshot
+                    sessionStorage.setItem('lastOrder', JSON.stringify(this.buildOrderSnapshot(orderNumber, 'net30')));
+
+                    // Clear cart
+                    if (typeof Cart !== 'undefined') {
+                        try { Cart.clear(); } catch (e) { /* ignore */ }
+                    }
+
+                    // Track conversion
+                    if (typeof CartAnalytics !== 'undefined') {
+                        CartAnalytics.trackPurchase(orderNumber, this.totals?.total || 0, this.cartItems);
+                    }
+
+                    // Redirect to confirmation
+                    window.location.href = `/html/account/order-confirmation.html?order=${encodeURIComponent(orderNumber)}`;
+                } else {
+                    const errMsg = res.error?.message || 'Could not place order. Please try again.';
+                    showToast(errMsg, 'error');
+                    if (btn) { btn.disabled = false; btn.innerHTML = '<span>Place Order on Account</span>'; }
+                    this.isSubmitting = false;
+                }
+            } catch (err) {
+                showToast(err.message || 'Something went wrong. Please try again.', 'error');
+                if (btn) { btn.disabled = false; btn.innerHTML = '<span>Place Order on Account</span>'; }
                 this.isSubmitting = false;
             }
         },

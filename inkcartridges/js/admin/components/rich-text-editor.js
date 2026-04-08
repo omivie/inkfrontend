@@ -5,6 +5,33 @@
 
 const esc = (s) => typeof Security !== 'undefined' ? Security.escapeHtml(String(s)) : String(s);
 
+/**
+ * Strip all inline styles, classes, and style-only wrapper elements from HTML.
+ * Keeps structural elements (b, strong, em, i, u, ol, ul, li, a, p, br, div).
+ */
+function sanitizeHTML(html) {
+  const tmp = document.createElement('div');
+  tmp.innerHTML = html;
+
+  // Remove all style and class attributes
+  tmp.querySelectorAll('[style]').forEach(el => el.removeAttribute('style'));
+  tmp.querySelectorAll('[class]').forEach(el => el.removeAttribute('class'));
+
+  // Unwrap <font> elements (legacy Word/browser formatting)
+  tmp.querySelectorAll('font').forEach(el => {
+    el.replaceWith(...el.childNodes);
+  });
+
+  // Unwrap <span> elements that have no meaningful attributes left
+  tmp.querySelectorAll('span').forEach(el => {
+    if (!el.attributes.length) {
+      el.replaceWith(...el.childNodes);
+    }
+  });
+
+  return tmp.innerHTML;
+}
+
 class RichTextEditor {
   /**
    * @param {HTMLElement} container - Element to render the editor into
@@ -99,9 +126,19 @@ class RichTextEditor {
     // Source textarea changes
     this._source.addEventListener('input', () => this._fireChange());
 
-    // Paste — allow HTML paste in editor
-    this._editor.addEventListener('paste', () => {
-      setTimeout(() => this._fireChange(), 0);
+    // Paste — strip inline styles from pasted content
+    this._editor.addEventListener('paste', (e) => {
+      e.preventDefault();
+      const html = e.clipboardData.getData('text/html');
+      const text = e.clipboardData.getData('text/plain');
+
+      if (html) {
+        const clean = sanitizeHTML(html);
+        document.execCommand('insertHTML', false, clean);
+      } else if (text) {
+        document.execCommand('insertText', false, text);
+      }
+      this._fireChange();
     });
   }
 
@@ -138,7 +175,8 @@ class RichTextEditor {
     html = html.trim();
     // Treat empty-looking content as empty string
     if (!html || html === '<br>' || html === '<div><br></div>') return '';
-    return html;
+    // Sanitize: strip any inline styles that snuck in
+    return sanitizeHTML(html);
   }
 
   setValue(html) {

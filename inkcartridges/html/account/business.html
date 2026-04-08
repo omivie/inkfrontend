@@ -3,10 +3,10 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="description" content="View order details">
+    <meta name="description" content="Manage your business account">
     <meta name="robots" content="noindex, nofollow">
     <link rel="icon" type="image/svg+xml" href="/assets/icons/favicon.svg">
-    <title>Order Details | InkCartridges.co.nz</title>
+    <title>Business Account | InkCartridges.co.nz</title>
     <script async src="https://www.googletagmanager.com/gtag/js?id=G-SDQELG0FGD"></script>
     <script src="/js/gtag.js"></script>
 
@@ -69,25 +69,16 @@
                 </button>
 
                 <ul id="nav-menu" class="nav-menu">
-                    <li class="nav-menu__item">
-                        <a href="/" class="nav-menu__link">Home</a>
-                    </li>
-                    <li class="nav-menu__item">
-                        <a href="/html/shop.html" class="nav-menu__link">Shop</a>
-                    </li>
+                    <li class="nav-menu__item"><a href="/" class="nav-menu__link">Home</a></li>
+                    <li class="nav-menu__item"><a href="/html/shop.html" class="nav-menu__link">Shop</a></li>
                     <li class="nav-menu__item nav-menu__item--mega">
-                        <button class="nav-menu__link nav-mega-toggle" type="button"
-                                aria-haspopup="true" aria-expanded="false" aria-controls="brands-mega">
+                        <button class="nav-menu__link nav-mega-toggle" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="brands-mega">
                             Ink Cartridge Brands
                             <svg class="nav-menu__arrow" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
                         </button>
                     </li>
                     <li class="nav-menu__item nav-menu__item--mega">
-                        <button class="nav-menu__link nav-ribbons-toggle"
-                                type="button"
-                                aria-haspopup="true"
-                                aria-expanded="false"
-                                aria-controls="ribbons-mega">
+                        <button class="nav-menu__link nav-ribbons-toggle" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="ribbons-mega">
                             Typewriter &amp; Printer Ribbons
                             <svg class="nav-menu__arrow" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
                         </button>
@@ -96,15 +87,7 @@
 
                 <form class="search-form search-form--nav" action="/html/shop.html" method="GET" role="search">
                     <label for="search-input" class="visually-hidden">Search for products</label>
-                    <input
-                        type="search"
-                        id="search-input"
-                        name="q"
-                        class="search-form__input"
-                        placeholder="Search..."
-                        autocomplete="off"
-                        maxlength="200"
-                    >
+                    <input type="search" id="search-input" name="q" class="search-form__input" placeholder="Search..." autocomplete="off" maxlength="200">
                     <button type="submit" class="search-form__button" aria-label="Search">
                         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
                     </button>
@@ -115,31 +98,25 @@
         <div class="brands-mega" id="brands-mega" hidden role="region" aria-label="Browse brands">
             <div class="container">
                 <div class="brands-mega__cards"></div>
-                <a href="/html/shop.html" class="brands-mega__view-all">
-                    View All Brands
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
-                </a>
+                <a href="/html/shop.html" class="brands-mega__view-all">View All Brands <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg></a>
             </div>
         </div>
 
         <div class="ribbons-mega" id="ribbons-mega" hidden role="region" aria-label="Browse ribbon brands">
             <div class="container">
                 <div class="ribbons-mega__grid"></div>
-                <a href="/html/ribbons.html" class="ribbons-mega__view-all">
-                    View All Ribbons
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
-                </a>
+                <a href="/html/ribbons.html" class="ribbons-mega__view-all">View All Ribbons <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg></a>
             </div>
         </div>
     </header>
+
     <main id="main-content" class="site-main">
         <nav class="breadcrumb" aria-label="Breadcrumb">
             <div class="container">
                 <ol class="breadcrumb__list">
                     <li class="breadcrumb__item"><a href="/">Home</a></li>
                     <li class="breadcrumb__item"><a href="/html/account/index.html">My Account</a></li>
-                    <li class="breadcrumb__item"><a href="/html/account/orders.html">Orders</a></li>
-                    <li class="breadcrumb__item breadcrumb__item--current" aria-current="page">Order Details</li>
+                    <li class="breadcrumb__item breadcrumb__item--current" aria-current="page">Business Account</li>
                 </ol>
             </div>
         </nav>
@@ -187,7 +164,7 @@
                     </a>
                 </li>
                 <li class="account-nav__divider" aria-hidden="true">Orders</li>
-                <li class="account-nav__item account-nav__item--active">
+                <li class="account-nav__item">
                     <a href="/html/account/orders.html">
                         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="8" height="4" rx="1" ry="1"/></svg>
                         Order History
@@ -205,7 +182,7 @@
                         My Printers
                     </a>
                 </li>
-                <li class="account-nav__item" id="biz-nav-item" hidden>
+                <li class="account-nav__item account-nav__item--active" id="biz-nav-item">
                     <a href="/html/account/business.html">
                         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M20 7h-4V4c0-1.1-.9-2-2-2h-4c-1.1 0-2 .9-2 2v3H4c-1.1 0-2 .9-2 2v11c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V9c0-1.1-.9-2-2-2zM10 4h4v3h-4V4z"/></svg>
                         Business Account
@@ -237,49 +214,20 @@
             </div>
             <div class="account-sidebar__trust-item">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
-                Human support 8am–8pm
+                Human support 8am-8pm
             </div>
         </div>
     </aside>
                     <div class="account-content">
-                        <div class="account-content__header">
-                            <h1 class="account-content__heading">Order #INK-78542</h1>
-                            <span class="order-status order-status--delivered">Delivered</span>
-                        </div>
-                        <p class="order-date">Placed on 20 January 2025</p>
-                        <div class="order-detail-grid">
-                            <div class="order-main">
-                                <div class="order-items">
-                                    <h2>Items Ordered</h2>
-                                    <div class="order-items-list">
-                                    </div>
-                                </div>
-                                <div class="order-shipping">
-                                    <h2>Shipping Address</h2>
-                                    <address>Loading...</address>
-                                </div>
-                            </div>
-                            <aside class="order-sidebar">
-                                <div class="order-summary">
-                                    <h2>Order Summary</h2>
-                                    <dl class="order-summary__list">
-                                        <dt>Subtotal</dt><dd>--</dd>
-                                        <dt>Shipping</dt><dd>--</dd>
-                                        <dt>GST (15%)</dt><dd>Included</dd>
-                                        <dt class="order-summary__total">Total</dt><dd class="order-summary__total">--</dd>
-                                    </dl>
-                                </div>
-                                <div class="order-actions">
-                                    <a href="/html/account/orders.html" class="btn btn--secondary btn--full">Back to Orders</a>
-                                </div>
-                            </aside>
-                        </div>
+                        <div id="business-dashboard"></div>
                     </div>
                 </div>
             </div>
         </section>
     </main>
+
     <footer class="site-footer"></footer>
+
     <script defer src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.98.0" integrity="sha384-Sm2s7OXxsAMTyJ4iIyRBgVpeGUvMPk2lRQnnZhE78Wej7oggIoolKt+SCt0XJbUB" crossorigin="anonymous"></script>
     <script defer src="/js/config.js"></script>
     <script defer src="/js/security.js"></script>
@@ -294,9 +242,7 @@
     <script defer src="/js/mega-nav.js"></script>
     <script defer src="/js/modern-effects.js"></script>
     <script defer src="/js/cart.js"></script>
-    <script defer src="/js/printer-data.js"></script>
     <script defer src="/js/account.js"></script>
-    <script defer src="/js/order-detail-page.js"></script>
-    <script defer src="/js/analytics.js"></script>
+    <script defer src="/js/business-dashboard-page.js"></script>
 </body>
 </html>

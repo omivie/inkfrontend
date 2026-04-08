@@ -2719,7 +2719,7 @@
 .related-products__grid {
     display: grid;
     grid-template-columns: repeat(6, 1fr);
-    gap: var(--spacing-sm);
+    gap: var(--spacing-md);
 }
 
 .related-products__grid .product-card__image-wrapper {
@@ -9755,6 +9755,13 @@
     line-height: 1.7;
     color: var(--color-text);
 }
+/* Override any inline font styles from pasted rich text */
+.ribbon-description__content *,
+.product-compat-devices__content * {
+    font-family: inherit !important;
+    font-size: inherit !important;
+    color: inherit !important;
+}
 
 /* Product Info Banner (printers & yield) */
 /* Compatible Printers Banner */
@@ -10436,10 +10443,185 @@
     font-size: var(--font-size-sm);
 }
 
+/* Business form fieldsets & address grid */
+.business-form__fieldset {
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-lg);
+    padding: var(--spacing-lg);
+    margin-bottom: var(--spacing-lg);
+}
+.business-form__legend {
+    font-size: var(--font-size-base);
+    font-weight: var(--font-weight-semibold);
+    color: var(--color-text-heading);
+    padding: 0 var(--spacing-xs);
+}
+.business-form__address-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--spacing-sm) var(--spacing-md);
+}
+.business-form__address-full {
+    grid-column: 1 / -1;
+}
+.business-form__net30-section {
+    background: var(--color-surface-secondary);
+}
+.business-form__file-upload {
+    padding: var(--spacing-sm);
+    cursor: pointer;
+}
+.business-form__thank-you {
+    text-align: center;
+    padding: var(--spacing-2xl) var(--spacing-xl);
+    background: var(--color-surface-secondary);
+    border-radius: var(--radius-lg);
+}
+.business-form__thank-you svg {
+    margin-bottom: var(--spacing-md);
+}
+.business-form__thank-you h2 {
+    font-size: 1.5rem;
+    color: var(--color-text-heading);
+    margin: 0 0 var(--spacing-md);
+}
+.business-form__thank-you p {
+    color: var(--color-text-secondary);
+    line-height: 1.6;
+    margin: 0 0 var(--spacing-sm);
+    max-width: 480px;
+    margin-left: auto;
+    margin-right: auto;
+}
+.business-form__thank-you .btn {
+    margin-top: var(--spacing-lg);
+}
+
+/* B2B Dashboard */
+.biz-dashboard__cards {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: var(--spacing-md);
+    margin-bottom: var(--spacing-2xl);
+}
+.biz-dashboard__card {
+    background: var(--color-surface-secondary);
+    border-radius: var(--radius-lg);
+    padding: var(--spacing-lg);
+    text-align: center;
+}
+.biz-dashboard__card-label {
+    font-size: var(--font-size-sm);
+    color: var(--color-text-secondary);
+    margin-bottom: var(--spacing-xs);
+}
+.biz-dashboard__card-value {
+    font-size: 1.5rem;
+    font-weight: var(--font-weight-bold);
+    color: var(--color-text-heading);
+}
+.biz-dashboard__card-value--due {
+    color: #dc2626;
+}
+.biz-dashboard__tier {
+    display: inline-block;
+    padding: 4px 16px;
+    border-radius: 999px;
+    font-size: var(--font-size-sm);
+    font-weight: var(--font-weight-semibold);
+}
+.biz-dashboard__section {
+    margin-bottom: var(--spacing-2xl);
+}
+.biz-dashboard__section-title {
+    font-size: 1.1rem;
+    font-weight: var(--font-weight-semibold);
+    color: var(--color-text-heading);
+    margin: 0 0 var(--spacing-md);
+}
+.biz-dashboard__tabs {
+    display: flex;
+    gap: var(--spacing-xs);
+    margin-bottom: var(--spacing-md);
+    border-bottom: 2px solid var(--color-border);
+}
+.biz-dashboard__tab {
+    padding: var(--spacing-sm) var(--spacing-md);
+    background: none;
+    border: none;
+    font-size: var(--font-size-sm);
+    font-weight: var(--font-weight-medium);
+    color: var(--color-text-secondary);
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -2px;
+    transition: color 0.2s, border-color 0.2s;
+}
+.biz-dashboard__tab.active {
+    color: var(--color-primary);
+    border-bottom-color: var(--color-primary);
+}
+.biz-dashboard__reorder-grid {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: var(--spacing-md);
+}
+.biz-reorder-card {
+    background: var(--color-surface-secondary);
+    border-radius: var(--radius-lg);
+    padding: var(--spacing-md);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+}
+.biz-reorder-card__image {
+    width: 80px;
+    height: 80px;
+    object-fit: contain;
+    margin-bottom: var(--spacing-sm);
+}
+.biz-reorder-card__info {
+    flex: 1;
+    margin-bottom: var(--spacing-sm);
+}
+.biz-reorder-card__name {
+    display: block;
+    font-size: var(--font-size-sm);
+    color: var(--color-text-body);
+    text-decoration: none;
+    line-height: 1.3;
+    margin-bottom: 4px;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+.biz-reorder-card__name:hover {
+    color: var(--color-primary);
+}
+.biz-reorder-card__price {
+    font-weight: var(--font-weight-semibold);
+    color: var(--color-text-heading);
+    font-size: var(--font-size-sm);
+}
+
+@media (max-width: 768px) {
+    .biz-dashboard__cards {
+        grid-template-columns: repeat(2, 1fr);
+    }
+    .biz-dashboard__reorder-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+}
+
 @media (max-width: 768px) {
     .business-apply__layout {
         grid-template-columns: 1fr;
         gap: var(--spacing-xl);
+    }
+    .business-form__address-grid {
+        grid-template-columns: 1fr;
     }
 }
 

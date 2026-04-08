@@ -1,7 +1,6 @@
 (function() {
     const BusinessApplyPage = {
         async init() {
-            // Wait for auth
             if (typeof Auth !== 'undefined' && Auth.readyPromise) {
                 await Auth.readyPromise;
             }
@@ -9,7 +8,6 @@
             const isAuth = typeof Auth !== 'undefined' && Auth.isAuthenticated();
             const form = document.getElementById('business-form');
             const loginPrompt = document.getElementById('business-login-prompt');
-            const statusSection = document.getElementById('business-status-section');
 
             if (!isAuth) {
                 if (loginPrompt) loginPrompt.hidden = false;
@@ -48,6 +46,47 @@
                 form.hidden = false;
                 form.addEventListener('submit', (e) => this.handleSubmit(e));
             }
+
+            // Setup toggles
+            this.setupToggles();
+        },
+
+        setupToggles() {
+            const sameAsBilling = document.getElementById('biz-same-as-billing');
+            const net30Checkbox = document.getElementById('biz-net30');
+
+            if (sameAsBilling) {
+                sameAsBilling.addEventListener('change', () => {
+                    this.toggleShippingFields(!sameAsBilling.checked);
+                });
+            }
+
+            if (net30Checkbox) {
+                net30Checkbox.addEventListener('change', () => {
+                    this.toggleNet30Section(net30Checkbox.checked);
+                });
+            }
+        },
+
+        toggleShippingFields(show) {
+            const fields = document.getElementById('biz-shipping-fields');
+            if (!fields) return;
+            fields.hidden = !show;
+            // Toggle required on shipping fields
+            fields.querySelectorAll('[id^="biz-shipping-"]').forEach(el => {
+                if (el.tagName === 'INPUT' || el.tagName === 'SELECT') {
+                    if (el.id === 'biz-shipping-address2') return; // always optional
+                    el.required = show;
+                }
+            });
+        },
+
+        toggleNet30Section(show) {
+            const fields = document.getElementById('biz-net30-fields');
+            if (!fields) return;
+            fields.hidden = !show;
+            const spendEl = document.getElementById('biz-spend');
+            if (spendEl) spendEl.required = show;
         },
 
         showStatus(data) {
@@ -82,6 +121,16 @@
             section.hidden = false;
         },
 
+        gatherAddressFields(prefix) {
+            return {
+                address1: (document.getElementById(`biz-${prefix}-address1`)?.value || '').trim(),
+                address2: (document.getElementById(`biz-${prefix}-address2`)?.value || '').trim(),
+                city: (document.getElementById(`biz-${prefix}-city`)?.value || '').trim(),
+                region: (document.getElementById(`biz-${prefix}-region`)?.value || '').trim(),
+                postcode: (document.getElementById(`biz-${prefix}-postcode`)?.value || '').trim()
+            };
+        },
+
         async handleSubmit(e) {
             e.preventDefault();
             const form = e.target;
@@ -89,16 +138,27 @@
             const msgEl = document.getElementById('business-form-message');
 
             // Gather values
-            const company_name = form.querySelector('#biz-company').value.trim();
-            const nzbn = form.querySelector('#biz-nzbn').value.trim();
-            const contact_name = form.querySelector('#biz-contact-name').value.trim();
-            const contact_email = form.querySelector('#biz-email').value.trim();
-            const contact_phone = form.querySelector('#biz-phone').value.trim();
-            const estimated_monthly_spend = form.querySelector('#biz-spend').value;
-            const industry = form.querySelector('#biz-industry').value;
+            const company_name = (document.getElementById('biz-company')?.value || '').trim();
+            const nzbn = (document.getElementById('biz-nzbn')?.value || '').trim();
+            const contact_name = (document.getElementById('biz-contact-name')?.value || '').trim();
+            const contact_email = (document.getElementById('biz-email')?.value || '').trim();
+            const contact_phone = (document.getElementById('biz-phone')?.value || '').trim();
+            const industry = document.getElementById('biz-industry')?.value || '';
+            const business_type = document.getElementById('biz-type')?.value || '';
+            const ap_email = (document.getElementById('biz-ap-email')?.value || '').trim();
 
-            // Client-side validation
-            if (!company_name || !contact_name || !contact_email || !contact_phone || !estimated_monthly_spend || !industry) {
+            // Addresses
+            const billing_address = this.gatherAddressFields('billing');
+            const sameAsBilling = document.getElementById('biz-same-as-billing')?.checked;
+            const shipping_address = sameAsBilling ? { ...billing_address } : this.gatherAddressFields('shipping');
+
+            // Net 30
+            const apply_net30 = document.getElementById('biz-net30')?.checked || false;
+            const estimated_monthly_spend = document.getElementById('biz-spend')?.value || '';
+            const creditRefFile = document.getElementById('biz-credit-ref')?.files?.[0] || null;
+
+            // Validation
+            if (!company_name || !contact_name || !contact_email || !contact_phone || !industry || !business_type) {
                 this.showMessage(msgEl, 'Please fill in all required fields.', 'error');
                 return;
             }
@@ -108,18 +168,76 @@
                 return;
             }
 
+            if (!billing_address.address1 || !billing_address.city || !billing_address.region || !billing_address.postcode) {
+                this.showMessage(msgEl, 'Please fill in all billing address fields.', 'error');
+                return;
+            }
+
+            if (!/^\d{4}$/.test(billing_address.postcode)) {
+                this.showMessage(msgEl, 'Billing postcode must be 4 digits.', 'error');
+                return;
+            }
+
+            if (!sameAsBilling) {
+                if (!shipping_address.address1 || !shipping_address.city || !shipping_address.region || !shipping_address.postcode) {
+                    this.showMessage(msgEl, 'Please fill in all shipping address fields.', 'error');
+                    return;
+                }
+                if (!/^\d{4}$/.test(shipping_address.postcode)) {
+                    this.showMessage(msgEl, 'Shipping postcode must be 4 digits.', 'error');
+                    return;
+                }
+            }
+
+            if (apply_net30 && !estimated_monthly_spend) {
+                this.showMessage(msgEl, 'Please select your estimated monthly spend for Net 30 terms.', 'error');
+                return;
+            }
+
+            if (creditRefFile && creditRefFile.size > 5 * 1024 * 1024) {
+                this.showMessage(msgEl, 'Credit reference file must be under 5 MB.', 'error');
+                return;
+            }
+
             btn.disabled = true;
             btn.textContent = 'Submitting...';
 
-            const payload = { company_name, contact_name, contact_email, contact_phone, estimated_monthly_spend, industry };
-            if (nzbn) payload.nzbn = nzbn;
-
             try {
+                // Upload credit reference file first if provided
+                let credit_reference_url = null;
+                if (apply_net30 && creditRefFile) {
+                    try {
+                        const uploadRes = await API.uploadCreditReference(creditRefFile);
+                        credit_reference_url = uploadRes.url || uploadRes.data?.url || null;
+                    } catch (uploadErr) {
+                        this.showMessage(msgEl, 'Failed to upload credit reference: ' + (uploadErr.message || 'Unknown error'), 'error');
+                        btn.textContent = 'Submit Application';
+                        btn.disabled = false;
+                        return;
+                    }
+                }
+
+                const payload = {
+                    company_name,
+                    contact_name,
+                    contact_email,
+                    contact_phone,
+                    industry,
+                    business_type,
+                    billing_address,
+                    shipping_address,
+                    apply_net30
+                };
+                if (nzbn) payload.nzbn = nzbn;
+                if (ap_email) payload.ap_email = ap_email;
+                if (apply_net30) {
+                    payload.estimated_monthly_spend = estimated_monthly_spend;
+                    if (credit_reference_url) payload.credit_reference_url = credit_reference_url;
+                }
+
                 const res = await API.applyBusiness(payload);
                 if (res.ok) {
-                    this.showMessage(msgEl, 'Application submitted successfully! We\'ll review it and get back to you shortly.', 'success');
-                    form.querySelectorAll('input, select').forEach(f => f.disabled = true);
-                    btn.textContent = 'Submitted';
+                    this.showThankYou();
                 } else {
                     const errMsg = res.error?.message || 'Could not submit application. Please try again.';
                     this.showMessage(msgEl, errMsg, 'error');
@@ -131,6 +249,13 @@
                 btn.textContent = 'Submit Application';
                 btn.disabled = false;
             }
+        },
+
+        showThankYou() {
+            const form = document.getElementById('business-form');
+            const thankYou = document.getElementById('business-thank-you');
+            if (form) form.hidden = true;
+            if (thankYou) thankYou.hidden = false;
         },
 
         showMessage(el, text, type) {

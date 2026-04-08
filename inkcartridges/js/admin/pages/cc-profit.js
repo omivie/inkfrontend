@@ -2,7 +2,7 @@
  * Control Center — Tab 1: Profit & Pricing
  * Margin heatmap, under-margin products, global offset slider
  */
-import { AdminAPI, esc } from '../app.js';
+import { AdminAPI, AdminAuth, esc } from '../app.js';
 import { DataTable } from '../components/table.js';
 import { Modal } from '../components/modal.js';
 import { Toast } from '../components/toast.js';
@@ -15,6 +15,9 @@ let _table = null;
 let _heatmapSource = 'genuine';
 let _tableSource = 'genuine';
 let _tablePage = 1;
+let _tableMode = 'under-margin';
+let _tableSortBy = 'net_margin';
+let _tableSortOrder = 'asc';
 let _savedOffset = null;
 let _sliderTimer = null;
 
@@ -68,11 +71,12 @@ async function loadHeatmap() {
 
 async function loadUnderMargin() {
   if (_table) _table.setLoading(true);
-  const resp = await AdminAPI.getUnderMarginProducts(_tableSource, _tablePage, 50);
+  const limit = _tableMode === 'all' ? 100 : 50;
+  const resp = await AdminAPI.getUnderMarginProducts(_tableSource, _tablePage, limit, _tableMode, _tableSortBy, _tableSortOrder);
   if (!resp) { if (_table) _table.setData([], null); return; }
   const rows = resp.data || [];
   const meta = resp.metadata || {};
-  if (_table) _table.setData(rows, { total: meta.total || rows.length, page: meta.page || _tablePage, limit: 50 });
+  if (_table) _table.setData(rows, { total: meta.total || rows.length, page: meta.page || _tablePage, limit });
 }
 
 async function loadOffset() {
@@ -111,6 +115,98 @@ function renderOffset(data) {
     display.className = `cc-offset-value cc-offset-value--${val > 0 ? 'positive' : val < 0 ? 'negative' : 'zero'}`;
     clearTimeout(_sliderTimer);
     _sliderTimer = setTimeout(() => showOffsetConfirm(val), 500);
+  });
+}
+
+// ---- Tier Multipliers ----
+let _tierData = null;
+
+async function loadTierMultipliers() {
+  const wrap = _el.querySelector('#cc-tier-wrap');
+  wrap.innerHTML = '<div class="admin-skeleton admin-skeleton--kpi" style="height:80px"></div>';
+  const data = await AdminAPI.getTierMultipliers();
+  _tierData = data;
+  renderTierMultipliers(data);
+}
+
+function renderTierMultipliers(data) {
+  const wrap = _el.querySelector('#cc-tier-wrap');
+  if (!data || !Array.isArray(data) || !data.length) {
+    wrap.innerHTML = '<div class="admin-empty"><div class="admin-empty__text">No tier multiplier data available</div></div>';
+    return;
+  }
+  const isOwner = AdminAuth.isOwner();
+  let html = `<table class="admin-table" style="margin:0">
+    <thead><tr>
+      <th>Tier</th>
+      <th style="text-align:right">Multiplier</th>
+      <th style="text-align:right">Effective Markup</th>
+    </tr></thead><tbody>`;
+  for (const tier of data) {
+    const name = tier.tier_name || tier.tier || tier.name || '—';
+    const mult = tier.multiplier ?? 1;
+    const markup = ((mult - 1) * 100).toFixed(1);
+    html += `<tr>
+      <td>${esc(name)}</td>
+      <td style="text-align:right">${isOwner
+        ? `<input type="number" class="admin-input cc-tier-input" data-tier="${Security.escapeAttr(name)}" value="${mult}" step="0.01" min="0.5" max="5" style="width:80px;text-align:right;padding:4px 8px;font-size:13px">`
+        : `<span class="cell-mono">${mult.toFixed(2)}</span>`}</td>
+      <td style="text-align:right"><span class="cell-mono cc-tier-markup" data-tier="${Security.escapeAttr(name)}">${markup}%</span></td>
+    </tr>`;
+  }
+  html += '</tbody></table>';
+  if (isOwner) {
+    html += `<div style="margin-top:12px;text-align:right">
+      <button class="admin-btn admin-btn--primary admin-btn--sm" id="cc-tier-save" disabled>Save Multipliers</button>
+    </div>`;
+  }
+  wrap.innerHTML = html;
+
+  if (isOwner) {
+    // Live markup preview + enable save on change
+    wrap.querySelectorAll('.cc-tier-input').forEach(input => {
+      input.addEventListener('input', () => {
+        const val = parseFloat(input.value) || 1;
+        const markupEl = wrap.querySelector(`.cc-tier-markup[data-tier="${input.dataset.tier}"]`);
+        if (markupEl) markupEl.textContent = ((val - 1) * 100).toFixed(1) + '%';
+        wrap.querySelector('#cc-tier-save').disabled = false;
+      });
+    });
+    wrap.querySelector('#cc-tier-save').addEventListener('click', saveTierMultipliers);
+  }
+}
+
+function saveTierMultipliers() {
+  const inputs = _el.querySelectorAll('.cc-tier-input');
+  const multipliers = {};
+  inputs.forEach(input => { multipliers[input.dataset.tier] = parseFloat(input.value) || 1; });
+
+  const summary = Object.entries(multipliers).map(([t, m]) => `${t}: ${m.toFixed(2)}`).join(', ');
+  const m = Modal.open({
+    title: 'Update Tier Multipliers',
+    body: `<p>Set the following tier multipliers?</p>
+      <p style="font-size:13px;color:var(--text-muted);margin:8px 0">${esc(summary)}</p>
+      <p style="font-size:13px;color:var(--text-muted)">Changes take effect on the next price recalculation.</p>`,
+    footer: `
+      <button class="admin-btn admin-btn--ghost" id="cc-tier-cancel">Cancel</button>
+      <button class="admin-btn admin-btn--primary" id="cc-tier-confirm">Save</button>
+    `,
+  });
+  m.footer.querySelector('#cc-tier-cancel').addEventListener('click', () => m.close());
+  m.footer.querySelector('#cc-tier-confirm').addEventListener('click', async () => {
+    const btn = m.footer.querySelector('#cc-tier-confirm');
+    btn.disabled = true;
+    btn.textContent = 'Saving...';
+    try {
+      await AdminAPI.updateTierMultipliers(multipliers);
+      Toast.success('Tier multipliers updated');
+      m.close();
+      await loadTierMultipliers();
+    } catch (e) {
+      Toast.error('Failed to update multipliers');
+      btn.disabled = false;
+      btn.textContent = 'Save';
+    }
   });
 }
 
@@ -185,10 +281,16 @@ export default {
         <div class="cc-heatmap" id="cc-heatmap-grid"></div>
       </div>
       <div class="cc-section">
-        <div class="cc-section__title">Under-Margin Products</div>
-        <div class="cc-source-toggle" id="cc-table-toggle">
-          <button class="cc-source-toggle__btn active" data-source="genuine">Genuine</button>
-          <button class="cc-source-toggle__btn" data-source="compatible">Compatible</button>
+        <div class="cc-section__title" id="cc-margin-title">Under-Margin Products</div>
+        <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center;margin-bottom:8px">
+          <div class="cc-source-toggle" id="cc-table-toggle">
+            <button class="cc-source-toggle__btn active" data-source="genuine">Genuine</button>
+            <button class="cc-source-toggle__btn" data-source="compatible">Compatible</button>
+          </div>
+          <div class="cc-source-toggle" id="cc-mode-toggle">
+            <button class="cc-source-toggle__btn active" data-mode="under-margin">Under Margin</button>
+            <button class="cc-source-toggle__btn" data-mode="all">All Products</button>
+          </div>
         </div>
         <div id="cc-under-margin-table"></div>
       </div>
@@ -196,6 +298,12 @@ export default {
         <div class="cc-section__title">Global Price Offset</div>
         <div class="admin-card cc-offset-card" id="cc-offset-wrap">
           <div class="admin-skeleton admin-skeleton--kpi"></div>
+        </div>
+      </div>
+      <div class="cc-section" id="cc-tier-section">
+        <div class="cc-section__title">Tier Price Multipliers</div>
+        <div class="admin-card" id="cc-tier-wrap">
+          <div class="admin-skeleton admin-skeleton--kpi" style="height:80px"></div>
         </div>
       </div>
     `;
@@ -221,21 +329,36 @@ export default {
       loadUnderMargin();
     });
 
+    // Mode toggle (under-margin / all)
+    el.querySelector('#cc-mode-toggle').addEventListener('click', (e) => {
+      const btn = e.target.closest('[data-mode]');
+      if (!btn || btn.dataset.mode === _tableMode) return;
+      _tableMode = btn.dataset.mode;
+      _tablePage = 1;
+      el.querySelectorAll('#cc-mode-toggle .cc-source-toggle__btn').forEach(b =>
+        b.classList.toggle('active', b.dataset.mode === _tableMode));
+      el.querySelector('#cc-margin-title').textContent =
+        _tableMode === 'all' ? 'All Products \u2014 Margin View' : 'Under-Margin Products';
+      loadUnderMargin();
+    });
+
     // DataTable
     _table = new DataTable(el.querySelector('#cc-under-margin-table'), {
       columns: COLUMNS,
       rowKey: 'sku',
       emptyMessage: 'No under-margin products found',
       onPageChange: (page) => { _tablePage = page; loadUnderMargin(); },
+      onSort: (key, dir) => { _tableSortBy = key; _tableSortOrder = dir; _tablePage = 1; loadUnderMargin(); },
     });
 
     // Load all sections in parallel
-    await Promise.allSettled([loadHeatmap(), loadUnderMargin(), loadOffset()]);
+    await Promise.allSettled([loadHeatmap(), loadUnderMargin(), loadOffset(), loadTierMultipliers()]);
   },
 
   destroy() {
     clearTimeout(_sliderTimer);
     if (_table) { _table.destroy(); _table = null; }
+    _tierData = null;
     _el = null;
   },
 };

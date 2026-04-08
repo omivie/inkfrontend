@@ -278,7 +278,8 @@
                 const paymentLabels = {
                     'stripe': 'Credit/Debit Card',
                     'card': 'Credit/Debit Card',
-                    'paypal': 'PayPal'
+                    'paypal': 'PayPal',
+                    'net30': 'Net 30 Invoice'
                 };
                 paymentEl.textContent = paymentLabels[paymentMethod] || paymentMethod;
             }

@@ -6,10 +6,12 @@ import { FilterState, esc, icon } from '../app.js';
 import { Charts } from '../components/charts.js';
 
 const TABS = [
-  { id: 'profit',     label: 'Profit & Pricing' },
-  { id: 'seo',        label: 'SEO & Trust' },
-  { id: 'inventory',  label: 'Inventory & Supplier' },
-  { id: 'compliance', label: 'Orders & Compliance' },
+  { id: 'profit',       label: 'Profit & Pricing' },
+  { id: 'market-intel', label: 'Market Intel' },
+  { id: 'seo',          label: 'SEO & Trust' },
+  { id: 'inventory',    label: 'Inventory & Supplier' },
+  { id: 'compliance',   label: 'Orders & Compliance' },
+  { id: 'monitoring',   label: 'Tech & Monitoring' },
 ];
 
 let _container = null;
@@ -21,9 +23,11 @@ async function loadTabModule(tabId) {
   if (_tabModules[tabId]) return _tabModules[tabId];
   const map = {
     profit: './cc-profit.js',
+    'market-intel': './cc-market-intel.js',
     seo: './cc-seo.js',
     inventory: './cc-inventory.js',
     compliance: './cc-compliance.js',
+    monitoring: './cc-monitoring.js',
   };
   const mod = await import(map[tabId]);
   _tabModules[tabId] = mod.default;
