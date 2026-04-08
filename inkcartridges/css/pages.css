@@ -2252,7 +2252,8 @@
 .product-info__pricing {
     display: flex;
     align-items: baseline;
-    gap: var(--spacing-md);
+    flex-wrap: wrap;
+    gap: var(--spacing-xs) var(--spacing-md);
     margin: var(--spacing-sm) 0 var(--spacing-xs);
     padding: var(--spacing-xs) 0;
 }
@@ -2281,7 +2282,6 @@
 .product-info__gst {
     font-size: var(--font-size-sm);
     color: var(--color-text-light);
-    margin-bottom: var(--spacing-sm);
 }
 
 /* Product Actions */
@@ -9938,6 +9938,7 @@
     color: var(--color-text);
     margin: 0;
     line-height: 1.3;
+    min-height: calc(var(--font-size-xs) * 1.3 * 3);
     display: -webkit-box;
     -webkit-line-clamp: 3;
     -webkit-box-orient: vertical;
