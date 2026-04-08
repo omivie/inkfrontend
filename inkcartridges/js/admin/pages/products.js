@@ -1617,13 +1617,40 @@ function bindProductModalActions(modal, product) {
     dropzone.classList.add('uploading');
     dropzone.querySelector('span').textContent = `Uploading ${valid.length} image${valid.length > 1 ? 's' : ''}\u2026`;
     let uploaded = 0;
+    let primaryUrl = null;
     for (const file of valid) {
       try {
-        await uploadImage(product.id, file);
+        const img = await uploadImage(product.id, file);
         uploaded++;
+        if (img && img.is_primary) primaryUrl = img.image_url || img.url || null;
       } catch { /* uploadImage already toasts errors */ }
     }
-    if (uploaded > 0) Toast.success(`${uploaded} image${uploaded > 1 ? 's' : ''} uploaded`);
+    if (uploaded > 0) {
+      Toast.success(`${uploaded} image${uploaded > 1 ? 's' : ''} uploaded`);
+      // Update product list row thumbnail if a primary image was uploaded
+      if (primaryUrl && _table) {
+        const row = _table.data.find(r => String(r.id) === String(product.id));
+        if (row) {
+          row.image_url = primaryUrl;
+          if (!row.images) row.images = [];
+          row.images.unshift({ image_url: primaryUrl, is_primary: true });
+        }
+        // Find the row's thumbnail via the table DOM
+        const tableRows = document.querySelectorAll('.admin-table tbody tr');
+        for (const tr of tableRows) {
+          const lockBtn = tr.querySelector(`.import-lock-btn[data-product-id="${product.id}"]`);
+          if (lockBtn) {
+            const imgCell = tr.querySelector('.cell-image');
+            if (imgCell) {
+              imgCell.innerHTML = `<img class="admin-product-thumb" src="${esc(primaryUrl)}" alt="" loading="lazy">`;
+            }
+            break;
+          }
+        }
+      }
+    }
+    dropzone.classList.remove('uploading');
+    dropzone.querySelector('span').innerHTML = `${icon('download', 20, 20)} Drop images or click to upload`;
   }
 
   if (dropzone && fileInput) {
@@ -1747,10 +1774,57 @@ function bindProductModalActions(modal, product) {
 }
 
 async function uploadImage(productId, file) {
-  await AdminAPI.uploadProductImage(productId, file);
-  // Re-open drawer to refresh gallery
-  const product = await AdminAPI.getProduct(productId);
-  if (product) openProductDrawer(product);
+  const res = await AdminAPI.uploadProductImage(productId, file);
+  const img = res?.data || res;
+  const imageUrl = img.image_url || img.url || '';
+  const imageId = img.id || img.image_id || '';
+
+  // Append to gallery in-place instead of re-opening the drawer
+  const gallery = document.querySelector('#product-gallery');
+  if (gallery) {
+    const empty = gallery.querySelector('.admin-product-gallery__empty');
+    if (empty) empty.remove();
+
+    const item = document.createElement('div');
+    item.className = 'admin-product-gallery__item';
+    item.dataset.imageId = imageId;
+    item.dataset.imageUrl = imageUrl;
+    item.innerHTML = `<img src="${esc(imageUrl)}" alt="" loading="lazy" data-fallback="broken-parent">`
+      + `<button class="admin-product-gallery__delete" data-delete-image="${esc(String(imageId))}" title="Remove image"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg></button>`;
+    gallery.appendChild(item);
+
+    // Wire delete handler on the new item
+    const delBtn = item.querySelector('[data-delete-image]');
+    if (delBtn) {
+      delBtn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        item.style.opacity = '0.4';
+        try {
+          if (imageId) {
+            await AdminAPI.deleteProductImage(productId, imageId);
+          }
+          Toast.success('Image removed');
+          item.remove();
+          if (gallery && !gallery.querySelector('.admin-product-gallery__item')) {
+            gallery.innerHTML = '<div class="admin-product-gallery__empty">No images yet</div>';
+          }
+        } catch (err) {
+          item.style.opacity = '1';
+          Toast.error(`Delete failed: ${err.message}`);
+        }
+      });
+    }
+
+    // Handle broken image
+    const imgEl = item.querySelector('img');
+    if (imgEl) {
+      imgEl.addEventListener('error', function() {
+        this.parentElement.classList.add('admin-product-gallery__item--broken');
+      }, { once: true });
+    }
+  }
+
+  return img;
 }
 
 function renderDiagnostics(container) {
