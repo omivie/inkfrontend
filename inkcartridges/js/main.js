@@ -114,25 +114,6 @@ function initNavigation() {
         }
     });
 
-    // Mobile search toggle
-    const searchToggle = document.getElementById('search-toggle');
-    const navSearchForm = document.querySelector('.search-form--nav');
-    if (searchToggle && navSearchForm) {
-        searchToggle.addEventListener('click', function() {
-            const isOpen = navSearchForm.classList.toggle('is-search-open');
-            searchToggle.setAttribute('aria-expanded', isOpen);
-            if (isOpen) {
-                const input = navSearchForm.querySelector('input[type="search"]');
-                if (input) input.focus();
-            }
-        });
-        document.addEventListener('keydown', function(e) {
-            if (e.key === 'Escape' && navSearchForm.classList.contains('is-search-open')) {
-                navSearchForm.classList.remove('is-search-open');
-                searchToggle.setAttribute('aria-expanded', 'false');
-            }
-        });
-    }
 
     // Handle dropdown navigation for keyboard users
     const dropdownItems = $$('.nav-menu__item--has-dropdown');
