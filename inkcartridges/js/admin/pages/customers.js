@@ -22,6 +22,8 @@ let _page = 1;
 let _search = '';
 let _sort = 'first_name';
 let _sortDir = 'asc';
+let _activeTab = 'all'; // all | reviews | b2b
+let _subTabModule = null;
 
 const COLUMNS = [
   {
@@ -240,6 +242,99 @@ async function renderOwnerIntel(container) {
   }
 }
 
+// ---- Tab: All Customers ----
+async function renderCustomersTab(container) {
+  const header = document.createElement('div');
+  header.className = 'admin-page-header';
+  header.innerHTML = `
+    <h1>Customers</h1>
+    <div class="admin-page-header__actions">
+      <div style="position:relative">
+        <input class="admin-input" type="search" placeholder="Search\u2026" id="customer-search" style="width:220px;padding-left:32px">
+        <span style="position:absolute;left:10px;top:50%;transform:translateY(-50%);color:var(--text-muted)">${icon('search', 14, 14)}</span>
+      </div>
+      ${exportDropdown('export-customers')}
+    </div>
+  `;
+  container.appendChild(header);
+
+  const tableContainer = document.createElement('div');
+  tableContainer.className = 'admin-mb-lg';
+  container.appendChild(tableContainer);
+
+  _table = new DataTable(tableContainer, {
+    columns: COLUMNS,
+    rowKey: 'id',
+    onRowClick: (row) => openCustomerDrawer(row),
+    onSort: (key, dir) => { _sort = key; _sortDir = dir; _page = 1; loadCustomers(); },
+    onPageChange: (page) => { _page = page; loadCustomers(); },
+    emptyMessage: 'No customers found',
+    emptyIcon: icon('customers', 40, 40),
+  });
+
+  const searchInput = header.querySelector('#customer-search');
+  let searchTimer;
+  searchInput.addEventListener('input', () => {
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(() => {
+      _search = searchInput.value.trim();
+      _page = 1;
+      loadCustomers();
+    }, 300);
+  });
+
+  bindExportDropdown(header, 'export-customers', handleExport);
+  await loadCustomers();
+}
+
+function destroyCustomersTab() {
+  Charts.destroyAll();
+  if (_table) _table.destroy();
+  _table = null;
+}
+
+// ---- Tab switching ----
+async function switchCustomerTab(tab) {
+  if (tab === _activeTab) return;
+
+  if (_activeTab === 'all') destroyCustomersTab();
+  if (_subTabModule?.destroy) _subTabModule.destroy();
+  _subTabModule = null;
+
+  _activeTab = tab;
+  _container.querySelectorAll('.admin-tab[data-cust-tab]').forEach(b => {
+    b.classList.toggle('active', b.dataset.custTab === tab);
+  });
+
+  const content = _container.querySelector('#customers-tab-content');
+  content.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;min-height:20vh">
+    <div class="admin-loading__spinner"></div>
+  </div>`;
+
+  if (tab === 'all') {
+    content.innerHTML = '';
+    await renderCustomersTab(content);
+  } else if (tab === 'reviews') {
+    try {
+      const mod = await import('./reviews.js');
+      _subTabModule = mod.default;
+      content.innerHTML = '';
+      await _subTabModule.init(content);
+    } catch (e) {
+      content.innerHTML = `<div class="admin-empty"><div class="admin-empty__title">Failed to load Reviews</div><div class="admin-empty__text">${esc(e.message)}</div></div>`;
+    }
+  } else if (tab === 'b2b') {
+    try {
+      const mod = await import('./b2b.js');
+      _subTabModule = mod.default;
+      content.innerHTML = '';
+      await _subTabModule.init(content);
+    } catch (e) {
+      content.innerHTML = `<div class="admin-empty"><div class="admin-empty__title">Failed to load B2B</div><div class="admin-empty__text">${esc(e.message)}</div></div>`;
+    }
+  }
+}
+
 export default {
   title: 'Customers',
 
@@ -248,74 +343,59 @@ export default {
     FilterState.setVisibleFilters([]);
     _page = 1;
     _search = '';
+    _activeTab = 'all';
+    _subTabModule = null;
 
-    // Header
-    const header = document.createElement('div');
-    header.className = 'admin-page-header';
-    header.innerHTML = `
-      <h1>Customers</h1>
-      <div class="admin-page-header__actions">
-        <div style="position:relative">
-          <input class="admin-input" type="search" placeholder="Search\u2026" id="customer-search" style="width:220px;padding-left:32px">
-          <span style="position:absolute;left:10px;top:50%;transform:translateY(-50%);color:var(--text-muted)">${icon('search', 14, 14)}</span>
-        </div>
-        ${exportDropdown('export-customers')}
-      </div>
+    // Tab bar
+    const tabBar = document.createElement('div');
+    tabBar.className = 'admin-tabs';
+    tabBar.innerHTML = `
+      <button class="admin-tab active" data-cust-tab="all">All Customers</button>
+      <button class="admin-tab" data-cust-tab="reviews">Reviews</button>
+      <button class="admin-tab" data-cust-tab="b2b">B2B Partners</button>
     `;
-    container.appendChild(header);
+    container.appendChild(tabBar);
 
-    // Table container
-    const tableContainer = document.createElement('div');
-    tableContainer.className = 'admin-mb-lg';
-    container.appendChild(tableContainer);
-
-    _table = new DataTable(tableContainer, {
-      columns: COLUMNS,
-      rowKey: 'id',
-      onRowClick: (row) => openCustomerDrawer(row),
-      onSort: (key, dir) => { _sort = key; _sortDir = dir; _page = 1; loadCustomers(); },
-      onPageChange: (page) => { _page = page; loadCustomers(); },
-      emptyMessage: 'No customers found',
-      emptyIcon: icon('customers', 40, 40),
+    tabBar.addEventListener('click', (e) => {
+      const btn = e.target.closest('[data-cust-tab]');
+      if (btn) switchCustomerTab(btn.dataset.custTab);
     });
 
-    // Search
-    const searchInput = header.querySelector('#customer-search');
-    let searchTimer;
-    searchInput.addEventListener('input', () => {
-      clearTimeout(searchTimer);
-      searchTimer = setTimeout(() => {
-        _search = searchInput.value.trim();
-        _page = 1;
-        loadCustomers();
-      }, 300);
-    });
+    const content = document.createElement('div');
+    content.id = 'customers-tab-content';
+    container.appendChild(content);
 
-    // Export
-    bindExportDropdown(header, 'export-customers', handleExport);
-
-    await loadCustomers();
+    await renderCustomersTab(content);
   },
 
   destroy() {
-    Charts.destroyAll();
-    if (_table) _table.destroy();
-    _table = null;
+    if (_activeTab === 'all') destroyCustomersTab();
+    if (_subTabModule?.destroy) _subTabModule.destroy();
+    _subTabModule = null;
     _container = null;
     _search = '';
     _page = 1;
+    _activeTab = 'all';
   },
 
   async onFilterChange() {
     _page = 1;
-    if (_table) await loadCustomers();
+    if (_activeTab === 'all' && _table) {
+      await loadCustomers();
+    } else if (_subTabModule?.onFilterChange) {
+      _subTabModule.onFilterChange();
+    }
   },
 
   onSearch(query) {
     _search = query;
     _page = 1;
-    const input = document.getElementById('customer-search');
-    if (input && input.value !== query) input.value = query;
-    if (_table) loadCustomers();
+    if (_activeTab === 'all') {
+      const input = document.getElementById('customer-search');
+      if (input && input.value !== query) input.value = query;
+      if (_table) loadCustomers();
+    } else if (_subTabModule?.onSearch) {
+      _subTabModule.onSearch(query);
+    }
   },
 };

@@ -311,7 +311,9 @@ async function loadTopProfit(el) {
 }
 
 export default {
-  async render(container) {
+  title: 'Margin Analysis',
+
+  async init(container) {
     if (!AdminAuth.isOwner()) {
       container.innerHTML = '<div class="margin-empty">Margin analysis is only available to owners.</div>';
       return;
@@ -322,6 +324,7 @@ export default {
     await loadTab('overview');
   },
 
+  destroy() { _container = null; },
   onSearch() {},
   onFilterChange() { loadTab(_currentTab); }
 };

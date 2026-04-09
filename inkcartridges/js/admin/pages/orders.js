@@ -18,6 +18,8 @@ let _sort = 'created_at';
 let _sortDir = 'desc';
 let _activeModal = null;
 let _bulkBar = null;
+let _activeTab = 'orders'; // orders | refunds | compliance
+let _subTabModule = null;
 
 function statusBadge(status) {
   const s = String(status || '').toLowerCase();
@@ -772,82 +774,164 @@ async function handleExport(format = 'csv') {
   }
 }
 
+// ---- Tab: Orders (renders the orders table) ----
+async function renderOrdersTab(container) {
+  // Header
+  const header = document.createElement('div');
+  header.className = 'admin-page-header';
+  header.innerHTML = `
+    <h1>Orders</h1>
+    <div class="admin-page-header__actions">
+      <button class="admin-btn admin-btn--primary" id="create-order-btn">${icon('plus', 14, 14)} New Order</button>
+      ${exportDropdown('export-orders')}
+    </div>
+  `;
+  container.appendChild(header);
+
+  const tableContainer = document.createElement('div');
+  container.appendChild(tableContainer);
+
+  _table = new DataTable(tableContainer, {
+    columns: COLUMNS,
+    rowKey: 'id',
+    selectable: true,
+    onSelectionChange: (sel) => updateBulkBar(sel),
+    onRowClick: (row) => openOrderModal(row),
+    onSort: (key, dir) => { _sort = key; _sortDir = dir; _page = 1; loadOrders(); },
+    onPageChange: (page) => { _page = page; loadOrders(); },
+    emptyMessage: 'No orders found',
+    emptyIcon: icon('orders', 40, 40),
+  });
+
+  tableContainer.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-action="quick-status"]');
+    if (!btn) return;
+    e.stopPropagation();
+    const orderId = btn.dataset.orderId;
+    const order = (_table.data || []).find(r => r.id === orderId);
+    if (order) showStatusModal(order);
+  });
+
+  header.querySelector('#create-order-btn').addEventListener('click', openCreateOrderDrawer);
+  bindExportDropdown(header, 'export-orders', handleExport);
+
+  await loadOrders();
+}
+
+function destroyOrdersTab() {
+  if (_table) _table.destroy();
+  _table = null;
+  if (_activeModal) closeOrderModal();
+  if (_bulkBar) { _bulkBar.remove(); _bulkBar = null; }
+}
+
+// ---- Tab switching ----
+async function switchTab(tab) {
+  if (tab === _activeTab) return;
+
+  // Destroy current sub-tab
+  if (_activeTab === 'orders') destroyOrdersTab();
+  if (_subTabModule?.destroy) _subTabModule.destroy();
+  _subTabModule = null;
+
+  _activeTab = tab;
+
+  // Update tab bar UI
+  _container.querySelectorAll('.admin-tab[data-order-tab]').forEach(b => {
+    b.classList.toggle('active', b.dataset.orderTab === tab);
+  });
+
+  const content = _container.querySelector('#orders-tab-content');
+  content.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;min-height:20vh">
+    <div class="admin-loading__spinner"></div>
+  </div>`;
+
+  if (tab === 'orders') {
+    content.innerHTML = '';
+    await renderOrdersTab(content);
+  } else if (tab === 'refunds') {
+    try {
+      const mod = await import('./refunds.js');
+      _subTabModule = mod.default;
+      content.innerHTML = '';
+      await _subTabModule.init(content);
+    } catch (e) {
+      content.innerHTML = `<div class="admin-empty"><div class="admin-empty__title">Failed to load Refunds</div><div class="admin-empty__text">${esc(e.message)}</div></div>`;
+    }
+  } else if (tab === 'compliance') {
+    try {
+      const mod = await import('./cc-compliance.js');
+      _subTabModule = mod.default;
+      content.innerHTML = '';
+      await _subTabModule.init(content);
+    } catch (e) {
+      content.innerHTML = `<div class="admin-empty"><div class="admin-empty__title">Failed to load Compliance</div><div class="admin-empty__text">${esc(e.message)}</div></div>`;
+    }
+  }
+}
+
 export default {
   title: 'Orders',
 
   async init(container) {
     _container = container;
     _page = 1;
+    _activeTab = 'orders';
+    _subTabModule = null;
     FilterState.setVisibleFilters(['statuses']);
 
-    // Header
-    const header = document.createElement('div');
-    header.className = 'admin-page-header';
-    header.innerHTML = `
-      <h1>Orders</h1>
-      <div class="admin-page-header__actions">
-<button class="admin-btn admin-btn--primary" id="create-order-btn">${icon('plus', 14, 14)} New Order</button>
-        ${exportDropdown('export-orders')}
-      </div>
+    // Tab bar
+    const tabBar = document.createElement('div');
+    tabBar.className = 'admin-tabs';
+    tabBar.innerHTML = `
+      <button class="admin-tab active" data-order-tab="orders">Orders</button>
+      <button class="admin-tab" data-order-tab="refunds">Refunds</button>
+      ${AdminAuth.isOwner() ? '<button class="admin-tab" data-order-tab="compliance">Compliance</button>' : ''}
     `;
-    container.appendChild(header);
+    container.appendChild(tabBar);
 
-    // Table container
-    const tableContainer = document.createElement('div');
-    container.appendChild(tableContainer);
-
-    _table = new DataTable(tableContainer, {
-      columns: COLUMNS,
-      rowKey: 'id',
-      selectable: true,
-      onSelectionChange: (sel) => updateBulkBar(sel),
-      onRowClick: (row) => openOrderModal(row),
-      onSort: (key, dir) => { _sort = key; _sortDir = dir; _page = 1; loadOrders(); },
-      onPageChange: (page) => { _page = page; loadOrders(); },
-      emptyMessage: 'No orders found',
-      emptyIcon: icon('orders', 40, 40),
+    tabBar.addEventListener('click', (e) => {
+      const btn = e.target.closest('[data-order-tab]');
+      if (btn) switchTab(btn.dataset.orderTab);
     });
 
-    // Quick-status delegation
-    tableContainer.addEventListener('click', (e) => {
-      const btn = e.target.closest('[data-action="quick-status"]');
-      if (!btn) return;
-      e.stopPropagation();
-      const orderId = btn.dataset.orderId;
-      const order = (_table.data || []).find(r => r.id === orderId);
-      if (order) showStatusModal(order);
-    });
+    // Tab content area
+    const content = document.createElement('div');
+    content.id = 'orders-tab-content';
+    container.appendChild(content);
 
-    // New Order
-    header.querySelector('#create-order-btn').addEventListener('click', openCreateOrderDrawer);
-
-    // Export
-    bindExportDropdown(header, 'export-orders', handleExport);
-
-    await loadOrders();
+    await renderOrdersTab(content);
   },
 
   destroy() {
     FilterState.setVisibleFilters(null);
-    if (_table) _table.destroy();
-    _table = null;
+    if (_activeTab === 'orders') destroyOrdersTab();
+    if (_subTabModule?.destroy) _subTabModule.destroy();
+    _subTabModule = null;
     _container = null;
     _search = '';
     _page = 1;
-    if (_activeModal) closeOrderModal();
-    if (_bulkBar) { _bulkBar.remove(); _bulkBar = null; }
+    _activeTab = 'orders';
   },
 
   async onFilterChange() {
     _page = 1;
-    if (_table) await loadOrders();
+    if (_activeTab === 'orders' && _table) {
+      await loadOrders();
+    } else if (_subTabModule?.onFilterChange) {
+      _subTabModule.onFilterChange();
+    }
   },
 
   onSearch(query) {
     _search = query;
     _page = 1;
-    const input = document.getElementById('order-search');
-    if (input && input.value !== query) input.value = query;
-    if (_table) loadOrders();
+    if (_activeTab === 'orders') {
+      const input = document.getElementById('order-search');
+      if (input && input.value !== query) input.value = query;
+      if (_table) loadOrders();
+    } else if (_subTabModule?.onSearch) {
+      _subTabModule.onSearch(query);
+    }
   },
 };

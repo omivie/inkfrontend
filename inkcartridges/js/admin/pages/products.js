@@ -32,6 +32,8 @@ let _imageFilter = '';
 let _brands = [];
 let _diagnostics = null;
 let _bulkBar = null;
+let _activeProductTab = 'products'; // products | ribbons | review
+let _subProductModule = null;
 const DIAG_CACHE_KEY = 'admin_product_diagnostics';
 
 function invalidateDiagCache() {
@@ -84,7 +86,28 @@ function buildColumns() {
       render: (r) => `<span class="cell-mono cell-right">${r.cost_price != null ? formatPrice(r.cost_price) : MISSING}</span>`,
       align: 'right',
     });
+    cols.push({
+      key: 'margin_pct', label: 'Margin', sortable: false,
+      render: (r) => {
+        if (r.cost_price == null || r.retail_price == null || r.cost_price <= 0) return MISSING;
+        const retailExGst = r.retail_price / 1.15;
+        const margin = ((retailExGst - r.cost_price) / retailExGst) * 100;
+        const cls = margin < 5 ? 'critical' : margin < 15 ? 'warning' : margin < 30 ? 'healthy' : 'excellent';
+        return `<span class="margin-badge margin-badge--${cls}">${margin.toFixed(1)}%</span>`;
+      },
+      align: 'right',
+    });
   }
+
+  cols.push({
+    key: 'source', label: 'Type',
+    render: (r) => {
+      if (!r.source) return MISSING;
+      const sourceMap = { genuine: 'genuine', compatible: 'compatible', remanufactured: 'remanufactured', ribbon: 'ribbon' };
+      const cls = sourceMap[r.source] || 'compatible';
+      return `<span class="source-badge source-badge--${cls}">${esc(r.source)}</span>`;
+    },
+  });
 
   cols.push(
     {
@@ -2278,21 +2301,58 @@ async function bulkDelete() {
   });
 }
 
-export default {
-  title: 'Products & SKUs',
+// ---- Tab switching for Products / Ribbons / Review ----
+async function switchProductTab(tab) {
+  if (tab === _activeProductTab) return;
 
-  async init(container) {
-    _container = container;
-    _page = 1;
-    _search = '';
+  // Destroy current
+  if (_activeProductTab === 'products') destroyProductsContent();
+  if (_subProductModule?.destroy) _subProductModule.destroy();
+  _subProductModule = null;
 
-    // Load brands for filter + edit form
-    const brandsData = await AdminAPI.getBrands();
-    if (_container !== container) return; // destroyed or re-routed during await
-    _brands = brandsData && Array.isArray(brandsData) ? brandsData : [];
+  _activeProductTab = tab;
+  _container.querySelectorAll('.admin-tab[data-prod-tab]').forEach(b => {
+    b.classList.toggle('active', b.dataset.prodTab === tab);
+  });
 
-    // Hide global filter bar — products page uses local toolbar instead
-    FilterState.showBar(false);
+  const content = _container.querySelector('#products-tab-content');
+  content.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;min-height:20vh">
+    <div class="admin-loading__spinner"></div>
+  </div>`;
+
+  if (tab === 'products') {
+    content.innerHTML = '';
+    await renderProductsContent(content);
+  } else if (tab === 'ribbons') {
+    try {
+      const mod = await import('./ribbons.js');
+      _subProductModule = mod.default;
+      content.innerHTML = '';
+      await _subProductModule.init(content);
+    } catch (e) {
+      content.innerHTML = `<div class="admin-empty"><div class="admin-empty__title">Failed to load Ribbons</div><div class="admin-empty__text">${esc(e.message)}</div></div>`;
+    }
+  }
+}
+
+function destroyProductsContent() {
+  if (_table) _table.destroy();
+  if (_bulkBar) { _bulkBar.remove(); _bulkBar = null; }
+  _table = null;
+}
+
+async function renderProductsContent(contentEl) {
+  const container = contentEl;
+  _page = 1;
+  _search = '';
+
+  // Load brands for filter + edit form
+  const brandsData = await AdminAPI.getBrands();
+  if (_container === null) return;
+  _brands = brandsData && Array.isArray(brandsData) ? brandsData : [];
+
+  // Hide global filter bar — products page uses local toolbar instead
+  FilterState.showBar(false);
 
     // Header with two-row layout: title+actions row, then filter toolbar
     const header = document.createElement('div');
@@ -2470,12 +2530,41 @@ export default {
         } catch { /* optional */ }
       })();
     }
+}
+
+export default {
+  title: 'Products',
+
+  async init(container) {
+    _container = container;
+    _activeProductTab = 'products';
+    _subProductModule = null;
+
+    // Tab bar
+    const tabBar = document.createElement('div');
+    tabBar.className = 'admin-tabs';
+    tabBar.innerHTML = `
+      <button class="admin-tab active" data-prod-tab="products">All Products</button>
+      <button class="admin-tab" data-prod-tab="ribbons">Ribbons</button>
+    `;
+    container.appendChild(tabBar);
+
+    tabBar.addEventListener('click', (e) => {
+      const btn = e.target.closest('[data-prod-tab]');
+      if (btn) switchProductTab(btn.dataset.prodTab);
+    });
+
+    const content = document.createElement('div');
+    content.id = 'products-tab-content';
+    container.appendChild(content);
+
+    await renderProductsContent(content);
   },
 
   destroy() {
-    if (_table) _table.destroy();
-    if (_bulkBar) { _bulkBar.remove(); _bulkBar = null; }
-    _table = null;
+    if (_activeProductTab === 'products') destroyProductsContent();
+    if (_subProductModule?.destroy) _subProductModule.destroy();
+    _subProductModule = null;
     _container = null;
     _search = '';
     _page = 1;
@@ -2484,14 +2573,18 @@ export default {
     _imageFilter = '';
     _brands = [];
     _diagnostics = null;
+    _activeProductTab = 'products';
   },
 
   onSearch(query) {
     _search = query;
     _page = 1;
-    // Sync the page-level search input
-    const input = document.getElementById('product-search');
-    if (input && input.value !== query) input.value = query;
-    if (_table) loadProducts();
+    if (_activeProductTab === 'products') {
+      const input = document.getElementById('product-search');
+      if (input && input.value !== query) input.value = query;
+      if (_table) loadProducts();
+    } else if (_subProductModule?.onSearch) {
+      _subProductModule.onSearch(query);
+    }
   },
 };

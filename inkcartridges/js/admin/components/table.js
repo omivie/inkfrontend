@@ -26,6 +26,8 @@ class DataTable {
     this.sortKey = null;
     this.sortDir = 'desc';
     this.selected = new Set();
+    this._focusedRow = -1;
+    this._keyHandler = null;
     this._render();
   }
 
@@ -280,12 +282,57 @@ class DataTable {
         });
       }
     }
+
+    // Keyboard navigation (j/k/Enter/x)
+    if (this._keyHandler) document.removeEventListener('keydown', this._keyHandler);
+    this._keyHandler = (e) => {
+      if (e.target.closest('input, textarea, select, [contenteditable]')) return;
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      if (!this.data.length) return;
+
+      const rows = this.container.querySelectorAll('tbody tr');
+      if (!rows.length) return;
+
+      if (e.key === 'j' || e.key === 'ArrowDown') {
+        e.preventDefault();
+        this._focusedRow = Math.min(this._focusedRow + 1, this.data.length - 1);
+        this._updateFocus(rows);
+      } else if (e.key === 'k' || e.key === 'ArrowUp') {
+        e.preventDefault();
+        this._focusedRow = Math.max(this._focusedRow - 1, 0);
+        this._updateFocus(rows);
+      } else if (e.key === 'Enter' && this._focusedRow >= 0 && this.config.onRowClick) {
+        e.preventDefault();
+        const row = this.data[this._focusedRow];
+        if (row) this.config.onRowClick(row);
+      } else if (e.key === 'x' && this._focusedRow >= 0 && this.config.selectable) {
+        e.preventDefault();
+        const row = this.data[this._focusedRow];
+        const key = String(row[this.config.rowKey]);
+        if (this.selected.has(key)) this.selected.delete(key); else this.selected.add(key);
+        const cb = rows[this._focusedRow]?.querySelector('.dt-select-row');
+        if (cb) cb.checked = this.selected.has(key);
+        rows[this._focusedRow]?.classList.toggle('selected', this.selected.has(key));
+        this._updateSelectAllState();
+        if (this.config.onSelectionChange) this.config.onSelectionChange(this.selected);
+      }
+    };
+    document.addEventListener('keydown', this._keyHandler);
+  }
+
+  _updateFocus(rows) {
+    rows.forEach((tr, i) => tr.classList.toggle('dt-focused', i === this._focusedRow));
+    if (rows[this._focusedRow]) {
+      rows[this._focusedRow].scrollIntoView({ block: 'nearest' });
+    }
   }
 
   destroy() {
+    if (this._keyHandler) document.removeEventListener('keydown', this._keyHandler);
     this.container.innerHTML = '';
     this.data = [];
     this.selected.clear();
+    this._focusedRow = -1;
   }
 }
 

@@ -178,12 +178,12 @@
 .admin-main {
   display: flex; flex-direction: column; min-height: 0; min-width: 0;
   flex: 1;
-  padding: 24px 24px 16px;
-  max-width: 1440px; width: 100%; margin: 0 auto;
+  padding: 16px 20px 12px;
+  max-width: 100%; width: 100%; margin: 0 auto;
 }
 .admin-content {
-  flex: 1; padding: 24px 24px 16px;
-  max-width: 1440px; width: 100%; margin: 0 auto;
+  flex: 1; padding: 16px 20px 12px;
+  max-width: 100%; width: 100%; margin: 0 auto;
 }
 
 /* ---- Sidebar ---- */
@@ -453,7 +453,7 @@
 /* ---- Cards ---- */
 .admin-card {
   background: var(--surface); border: 1px solid var(--border);
-  border-radius: var(--radius-lg); padding: 20px;
+  border-radius: var(--radius-lg); padding: 14px;
   transition: box-shadow 0.2s var(--ease);
 }
 .admin-card:hover { box-shadow: var(--shadow-sm); }
@@ -462,7 +462,7 @@
 .admin-card--yellow { border-top: 2px solid var(--yellow); }
 .admin-card--success { border-top: 2px solid var(--success); }
 .admin-card__title {
-  font-size: 13px; font-weight: 600; margin-bottom: 16px;
+  font-size: 12px; font-weight: 600; margin-bottom: 10px;
   display: flex; align-items: center; justify-content: space-between; gap: 8px;
 }
 .admin-card__title small { font-weight: 400; color: var(--text-muted); font-size: 11px; }
@@ -470,11 +470,11 @@
 /* ---- KPI Grid ---- */
 .admin-kpi-grid {
   display: grid; grid-template-columns: repeat(4, 1fr);
-  gap: 12px; margin-bottom: 24px;
+  gap: 8px; margin-bottom: 14px;
 }
 .admin-kpi {
   background: var(--surface); border: 1px solid var(--border);
-  border-radius: var(--radius-lg); padding: 16px 18px;
+  border-radius: var(--radius-lg); padding: 10px 12px;
   position: relative; overflow: hidden;
   transition: box-shadow 0.2s var(--ease), border-color 0.2s;
   cursor: default;
@@ -488,16 +488,17 @@
 .admin-kpi:nth-child(4n)::before { background: var(--success); }
 .admin-kpi:hover { border-color: var(--border-strong); box-shadow: var(--shadow); }
 .admin-kpi__label {
-  font-size: 11px; font-weight: 600; text-transform: uppercase;
-  letter-spacing: 0.06em; color: var(--text-muted); margin-bottom: 8px;
+  font-size: 9.5px; font-weight: 600; text-transform: uppercase;
+  letter-spacing: 0.06em; color: var(--text-muted); margin-bottom: 4px;
 }
 .admin-kpi__value {
-  font-size: 26px; font-weight: 700; font-family: var(--font-mono);
+  font-size: 20px; font-weight: 700; font-family: var(--font-mono);
   letter-spacing: -0.02em; line-height: 1.1; margin-bottom: 4px;
+  font-variant-numeric: tabular-nums;
 }
 .admin-kpi__value--missing { color: var(--text-muted); font-size: 22px; }
 .admin-kpi__delta {
-  font-size: 12px; font-weight: 500;
+  font-size: 11px; font-weight: 500;
   display: inline-flex; align-items: center; gap: 3px;
 }
 .admin-kpi__delta--up { color: var(--success); }
@@ -548,11 +549,11 @@
 .admin-queue-item__label { font-size: 12px; color: var(--text-secondary); margin-top: 2px; }
 
 /* ---- Data Tables ---- */
-.admin-table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
-.admin-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.admin-table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; max-height: calc(100vh - 220px); overflow-y: auto; }
+.admin-table { width: 100%; border-collapse: collapse; font-size: 12px; }
 .admin-table th {
-  text-align: left; padding: 8px 14px;
-  font-size: 10.5px; font-weight: 600;
+  text-align: left; padding: 6px 10px;
+  font-size: 10px; font-weight: 600;
   text-transform: uppercase; letter-spacing: 0.06em;
   color: var(--text-muted); border-bottom: 1px solid var(--border-strong);
   white-space: nowrap; cursor: default; user-select: none;
@@ -566,14 +567,14 @@
 .admin-table th.sort-asc .sort-arrow,
 .admin-table th.sort-desc .sort-arrow { opacity: 1; color: var(--cyan); }
 .admin-table td {
-  padding: 10px 14px; border-bottom: 1px solid var(--border); vertical-align: middle;
+  padding: 5px 10px; border-bottom: 1px solid var(--border); vertical-align: middle;
 }
 .admin-table tbody tr { transition: background 0.1s; }
 .admin-table tbody tr:hover { background: var(--surface-hover); }
 .admin-table tbody tr.clickable { cursor: pointer; }
-.admin-table .cell-mono { font-family: var(--font-mono); font-size: 12px; }
+.admin-table .cell-mono { font-family: var(--font-mono); font-size: 11px; font-variant-numeric: tabular-nums; }
 .admin-table .cell-truncate {
-  max-width: 200px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  max-width: 180px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .admin-table .cell-right { text-align: right; }
 .admin-table .cell-center { text-align: center; }
@@ -590,7 +591,7 @@
 /* ---- Pagination ---- */
 .admin-pagination {
   display: flex; align-items: center; justify-content: space-between;
-  padding: 12px 0; font-size: 13px;
+  padding: 8px 0; font-size: 12px;
 }
 .admin-pagination__info { color: var(--text-secondary); font-size: 12px; }
 .admin-pagination__btns { display: flex; gap: 4px; }
@@ -2061,3 +2062,151 @@ button.admin-active-dot--clickable:hover::after { opacity: 1; }
 
 .cc-reconcile-wrap { margin-top: 1rem; }
 .cc-reconcile-wrap .admin-btn { min-width: 200px; }
+
+/* ============================================================
+   CEO COMMAND CENTER — Data-Dense Defaults
+   ============================================================ */
+
+/* -- Ultra-wide breakpoints -- */
+@media (min-width: 1800px) {
+  .admin-kpi-grid { grid-template-columns: repeat(6, 1fr); }
+  .admin-grid-2 { grid-template-columns: repeat(3, 1fr); }
+  .admin-table .cell-truncate { max-width: 320px; }
+}
+@media (min-width: 2400px) {
+  .admin-kpi-grid { grid-template-columns: repeat(8, 1fr); }
+  .admin-grid-2 { grid-template-columns: repeat(4, 1fr); }
+  .admin-table .cell-truncate { max-width: 420px; }
+}
+
+/* -- Tabular nums for mono cells globally -- */
+.cell-mono { font-variant-numeric: tabular-nums; }
+
+/* ============================================================
+   Margin & Source Badges (Product Table)
+   ============================================================ */
+.margin-badge {
+  display: inline-block; padding: 2px 7px; border-radius: 4px;
+  font-family: var(--font-mono); font-size: 11px; font-weight: 600;
+  line-height: 1.3; white-space: nowrap;
+}
+.margin-badge--critical { background: var(--danger-dim); color: var(--danger); }
+.margin-badge--warning  { background: var(--yellow-dim); color: var(--yellow-text); }
+.margin-badge--healthy  { background: var(--cyan-dim);   color: var(--cyan-text); }
+.margin-badge--excellent { background: var(--success-dim); color: var(--success); }
+
+.source-badge {
+  display: inline-block; padding: 2px 8px; border-radius: 4px;
+  font-size: 10.5px; font-weight: 600; text-transform: capitalize;
+  letter-spacing: 0.03em; white-space: nowrap;
+}
+.source-badge--genuine       { background: var(--cyan-dim);    color: var(--cyan-text); }
+.source-badge--compatible    { background: var(--magenta-dim); color: var(--magenta-text); }
+.source-badge--remanufactured { background: var(--yellow-dim);  color: var(--yellow-text); }
+.source-badge--ribbon         { background: var(--success-dim); color: var(--success); }
+
+/* ============================================================
+   Table Keyboard Focus
+   ============================================================ */
+.admin-table tbody tr.dt-focused {
+  box-shadow: inset 0 0 0 2px var(--cyan);
+  background: var(--surface-hover);
+}
+.admin-table tbody tr.dt-focused td:first-child {
+  border-left: 2px solid var(--cyan);
+}
+
+/* ============================================================
+   Command Palette
+   ============================================================ */
+.cmd-palette-overlay {
+  position: fixed; inset: 0; z-index: 9999;
+  background: rgba(0,0,0,0.55);
+  display: flex; align-items: flex-start; justify-content: center;
+  padding-top: 15vh;
+  animation: cmd-fade-in 0.12s ease-out;
+}
+@keyframes cmd-fade-in { from { opacity: 0; } to { opacity: 1; } }
+.cmd-palette {
+  width: 520px; max-width: 90vw;
+  background: var(--surface-raised);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-xl);
+  overflow: hidden;
+}
+.cmd-palette__input-wrap {
+  display: flex; align-items: center; gap: 10px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--border);
+}
+.cmd-palette__input-wrap svg { color: var(--text-muted); flex-shrink: 0; }
+.cmd-palette__input {
+  flex: 1; background: none; border: none; outline: none;
+  font-size: 15px; color: var(--text); font-family: var(--font-sans);
+}
+.cmd-palette__input::placeholder { color: var(--text-muted); }
+.cmd-palette__results {
+  max-height: 320px; overflow-y: auto;
+  padding: 6px;
+}
+.cmd-palette__item {
+  display: flex; align-items: center; gap: 10px;
+  padding: 9px 12px; border-radius: var(--radius);
+  cursor: pointer; font-size: 13px; color: var(--text);
+  transition: background 0.08s;
+}
+.cmd-palette__item:hover,
+.cmd-palette__item.active {
+  background: var(--cyan-dim); color: var(--text);
+}
+.cmd-palette__item svg { color: var(--text-muted); flex-shrink: 0; }
+.cmd-palette__item.active svg { color: var(--cyan-text); }
+.cmd-palette__item-label { flex: 1; }
+.cmd-palette__item-hint {
+  font-size: 11px; color: var(--text-muted); font-family: var(--font-mono);
+}
+.cmd-palette__footer {
+  padding: 8px 16px; border-top: 1px solid var(--border);
+  font-size: 11px; color: var(--text-muted);
+  display: flex; gap: 16px;
+}
+.cmd-palette__footer kbd {
+  display: inline-block; padding: 1px 5px; border-radius: 3px;
+  background: var(--input-bg); border: 1px solid var(--border);
+  font-family: var(--font-mono); font-size: 10px;
+}
+
+/* ============================================================
+   Shortcuts Help Overlay
+   ============================================================ */
+.shortcuts-overlay {
+  position: fixed; inset: 0; z-index: 9998;
+  background: rgba(0,0,0,0.55);
+  display: flex; align-items: center; justify-content: center;
+  animation: cmd-fade-in 0.12s ease-out;
+}
+.shortcuts-panel {
+  width: 420px; max-width: 90vw;
+  background: var(--surface-raised);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-xl);
+  padding: 24px;
+}
+.shortcuts-panel h3 {
+  font-size: 15px; font-weight: 700; margin: 0 0 16px;
+  color: var(--text);
+}
+.shortcuts-panel dl {
+  display: grid; grid-template-columns: auto 1fr;
+  gap: 6px 16px; margin: 0;
+}
+.shortcuts-panel dt {
+  font-family: var(--font-mono); font-size: 12px;
+  color: var(--cyan-text); text-align: right;
+}
+.shortcuts-panel dd {
+  font-size: 13px; color: var(--text-secondary); margin: 0;
+}
+

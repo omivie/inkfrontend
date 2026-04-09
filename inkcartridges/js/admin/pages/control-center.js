@@ -6,27 +6,21 @@ import { FilterState, esc, icon } from '../app.js';
 import { Charts } from '../components/charts.js';
 
 const TABS = [
-  { id: 'profit',       label: 'Profit & Pricing' },
-  { id: 'market-intel', label: 'Market Intel' },
-  { id: 'seo',          label: 'SEO & Trust' },
   { id: 'inventory',    label: 'Inventory & Supplier' },
-  { id: 'compliance',   label: 'Orders & Compliance' },
+  { id: 'seo',          label: 'SEO & Trust' },
   { id: 'monitoring',   label: 'Tech & Monitoring' },
 ];
 
 let _container = null;
-let _activeTab = 'profit';
+let _activeTab = 'inventory';
 const _tabModules = {};
 let _currentTabInstance = null;
 
 async function loadTabModule(tabId) {
   if (_tabModules[tabId]) return _tabModules[tabId];
   const map = {
-    profit: './cc-profit.js',
-    'market-intel': './cc-market-intel.js',
     seo: './cc-seo.js',
     inventory: './cc-inventory.js',
-    compliance: './cc-compliance.js',
     monitoring: './cc-monitoring.js',
   };
   const mod = await import(map[tabId]);
@@ -38,7 +32,7 @@ function render() {
   if (!_container) return;
   _container.innerHTML = `
     <div class="admin-page-header">
-      <h1 class="admin-page-title">${icon('lab', 22, 22)} Control Center</h1>
+      <h1 class="admin-page-title">${icon('lab', 22, 22)} Operations</h1>
     </div>
     <div class="admin-tabs cc-tabs" id="cc-tabs">
       ${TABS.map(t => `
@@ -85,11 +79,11 @@ async function switchTab(tabId) {
 }
 
 export default {
-  title: 'Control Center',
+  title: 'Operations',
 
   async init(container) {
     _container = container;
-    _activeTab = 'profit';
+    _activeTab = 'inventory';
     _currentTabInstance = null;
     FilterState.showBar(false);
     render();

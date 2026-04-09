@@ -1,7 +1,7 @@
 /**
  * Admin SPA — Entry point, router, shell
  */
-const APP_VERSION = '2026.04.05a';
+const APP_VERSION = '2026.04.09a';
 
 import { AdminAuth } from './auth.js';
 import { FilterState } from './filters.js';
@@ -44,20 +44,23 @@ function icon(name, w = 18, h = 18) {
 // ---- Navigation config ----
 const NAV_ITEMS = [
   { key: 'dashboard', label: 'Dashboard', icon: 'dashboard' },
-  { key: 'analytics', label: 'Analytics', icon: 'analytics' },
-  { key: 'margin', label: 'Margin Analysis', icon: 'finance', ownerOnly: true },
+  { key: 'analytics', label: 'Profit Center', icon: 'finance', ownerOnly: true },
   { key: 'orders', label: 'Orders', icon: 'orders' },
+  { key: 'products', label: 'Products', icon: 'products' },
   { key: 'customers', label: 'Customers', icon: 'customers' },
-  { key: 'products', label: 'Products & SKUs', icon: 'products' },
-  { key: 'ribbons', label: 'Ribbons', icon: 'products' },
-  { key: 'product-review', label: 'Product Review', icon: 'orders' },
-  { key: 'reviews', label: 'Customer Reviews', icon: 'orders' },
-  { key: 'refunds', label: 'Refunds & Chargebacks', icon: 'refunds' },
-  { key: 'b2b', label: 'B2B Partners', icon: 'customers' },
   { divider: true },
-  { key: 'control-center', label: 'Control Center', icon: 'lab', ownerOnly: true },
-  { key: 'contact-emails', label: 'Notification Recipients', icon: 'mail', ownerOnly: true },
+  { key: 'control-center', label: 'Operations', icon: 'lab', ownerOnly: true },
+  { key: 'contact-emails', label: 'Settings', icon: 'settings', ownerOnly: true },
 ];
+
+// Legacy route redirects — old pages now merged into parent pages
+const ROUTE_REDIRECTS = {
+  'refunds': 'orders',
+  'ribbons': 'products',
+  'reviews': 'customers',
+  'b2b': 'customers',
+  'margin': 'analytics',
+};
 
 // ---- Page module cache ----
 const _pages = {};
@@ -198,6 +201,7 @@ function renderTopbar() {
       document.getElementById('global-search')?.focus();
     }
   });
+
 }
 
 
@@ -223,6 +227,13 @@ function getRouteFromHash() {
 }
 
 async function navigate(pageName) {
+  // Handle legacy route redirects
+  if (ROUTE_REDIRECTS[pageName]) {
+    pageName = ROUTE_REDIRECTS[pageName];
+    window.location.hash = pageName;
+    return;
+  }
+
   // Clear global search on navigation
   const gs = document.getElementById('global-search');
   if (gs) gs.value = '';
@@ -301,23 +312,180 @@ async function navigate(pageName) {
   }
 }
 
-// ---- Review badge ----
-async function updateReviewBadge(count) {
-  try {
-    if (count === undefined) {
-      const data = await AdminAPI.getUnreviewedProducts({}, 1, 1);
-      count = data?.pagination?.total ?? data?.total ?? 0;
-    }
-    const navItem = document.querySelector('[data-nav="product-review"]');
-    if (!navItem) return;
-    const existing = navItem.querySelector('.admin-nav-badge');
-    if (existing) existing.remove();
-    if (count > 0) {
-      navItem.insertAdjacentHTML('beforeend', `<span class="admin-nav-badge">${count > 99 ? '99+' : count}</span>`);
-    }
-  } catch (e) {
-    // Non-critical — silently ignore
+
+// ---- Command Palette ----
+let _cmdPaletteOpen = false;
+
+function openCommandPalette() {
+  if (_cmdPaletteOpen) return;
+  _cmdPaletteOpen = true;
+
+  const isOwner = AdminAuth.isOwner();
+  const commands = NAV_ITEMS
+    .filter(item => !item.divider && !item.section && (!item.ownerOnly || isOwner))
+    .map(item => ({ key: item.key, label: item.label, icon: item.icon, type: 'page' }));
+
+  commands.push(
+    { key: '_theme', label: 'Toggle Theme (Light/Dark)', icon: 'sun', type: 'action' },
+  );
+
+  const overlay = document.createElement('div');
+  overlay.className = 'cmd-palette-overlay';
+  overlay.innerHTML = `
+    <div class="cmd-palette">
+      <div class="cmd-palette__input-wrap">
+        ${icon('search', 18, 18)}
+        <input class="cmd-palette__input" placeholder="Search pages, actions\u2026" autocomplete="off" autofocus>
+      </div>
+      <div class="cmd-palette__results"></div>
+      <div class="cmd-palette__footer">
+        <span><kbd>\u2191\u2193</kbd> Navigate</span>
+        <span><kbd>Enter</kbd> Select</span>
+        <span><kbd>Esc</kbd> Close</span>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+
+  const input = overlay.querySelector('.cmd-palette__input');
+  const results = overlay.querySelector('.cmd-palette__results');
+  let activeIdx = 0;
+  let filtered = [...commands];
+
+  function renderResults() {
+    results.innerHTML = filtered.map((cmd, i) =>
+      `<div class="cmd-palette__item${i === activeIdx ? ' active' : ''}" data-idx="${i}">
+        ${icon(cmd.icon, 16, 16)}
+        <span class="cmd-palette__item-label">${esc(cmd.label)}</span>
+        ${cmd.type === 'page' ? `<span class="cmd-palette__item-hint">#${cmd.key}</span>` : ''}
+      </div>`
+    ).join('') || '<div style="padding:16px;text-align:center;color:var(--text-muted);font-size:13px">No results</div>';
   }
+
+  function execCommand(cmd) {
+    closeCommandPalette();
+    if (cmd.type === 'page') {
+      window.location.hash = cmd.key;
+    } else if (cmd.key === '_theme') {
+      const root = document.querySelector('.admin');
+      const current = root.getAttribute('data-theme');
+      root.setAttribute('data-theme', current === 'light' ? 'dark' : 'light');
+    }
+  }
+
+  function closeCommandPalette() {
+    overlay.remove();
+    _cmdPaletteOpen = false;
+  }
+
+  renderResults();
+  input.focus();
+
+  input.addEventListener('input', () => {
+    const q = input.value.toLowerCase().trim();
+    filtered = q ? commands.filter(c => c.label.toLowerCase().includes(q)) : [...commands];
+    activeIdx = 0;
+    renderResults();
+  });
+
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowDown') { e.preventDefault(); activeIdx = Math.min(activeIdx + 1, filtered.length - 1); renderResults(); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); activeIdx = Math.max(activeIdx - 1, 0); renderResults(); }
+    else if (e.key === 'Enter' && filtered[activeIdx]) { e.preventDefault(); execCommand(filtered[activeIdx]); }
+    else if (e.key === 'Escape') { e.preventDefault(); closeCommandPalette(); }
+  });
+
+  results.addEventListener('click', (e) => {
+    const item = e.target.closest('.cmd-palette__item');
+    if (item) {
+      const idx = parseInt(item.dataset.idx, 10);
+      if (filtered[idx]) execCommand(filtered[idx]);
+    }
+  });
+
+  overlay.addEventListener('click', (e) => {
+    if (e.target === overlay) closeCommandPalette();
+  });
+}
+
+// ---- Shortcuts Help ----
+let _shortcutsOpen = false;
+
+function showShortcutsHelp() {
+  if (_shortcutsOpen) return;
+  _shortcutsOpen = true;
+
+  const overlay = document.createElement('div');
+  overlay.className = 'shortcuts-overlay';
+  overlay.innerHTML = `
+    <div class="shortcuts-panel">
+      <h3>Keyboard Shortcuts</h3>
+      <dl>
+        <dt>Ctrl+K</dt><dd>Command Palette</dd>
+        <dt>/</dt><dd>Focus Search</dd>
+        <dt>Esc</dt><dd>Close / Clear Search</dd>
+        <dt>g d</dt><dd>Go to Dashboard</dd>
+        <dt>g p</dt><dd>Go to Products</dd>
+        <dt>g o</dt><dd>Go to Orders</dd>
+        <dt>g a</dt><dd>Go to Profit Center</dd>
+        <dt>g c</dt><dd>Go to Customers</dd>
+        <dt>j / k</dt><dd>Navigate table rows</dd>
+        <dt>Enter</dt><dd>Open focused row</dd>
+        <dt>x</dt><dd>Toggle row selection</dd>
+        <dt>?</dt><dd>Show this help</dd>
+      </dl>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+
+  function close() { overlay.remove(); _shortcutsOpen = false; }
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+  document.addEventListener('keydown', function handler(e) {
+    if (e.key === 'Escape') { close(); document.removeEventListener('keydown', handler); }
+  });
+}
+
+// ---- Global Keyboard Shortcuts ----
+function initKeyboardShortcuts() {
+  let gPending = false;
+  let gTimer = null;
+
+  document.addEventListener('keydown', (e) => {
+    const inInput = e.target.closest('input, textarea, select, [contenteditable]');
+
+    // Cmd/Ctrl+K — Command Palette
+    if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+      e.preventDefault();
+      openCommandPalette();
+      return;
+    }
+
+    if (inInput) return;
+
+    // ? — Shortcuts help
+    if (e.key === '?' && !e.ctrlKey && !e.metaKey) {
+      e.preventDefault();
+      showShortcutsHelp();
+      return;
+    }
+
+    // g + key — Go to page
+    if (e.key === 'g' && !e.ctrlKey && !e.metaKey && !gPending) {
+      gPending = true;
+      clearTimeout(gTimer);
+      gTimer = setTimeout(() => { gPending = false; }, 500);
+      return;
+    }
+
+    if (gPending) {
+      gPending = false;
+      clearTimeout(gTimer);
+      const goMap = { d: 'dashboard', p: 'products', o: 'orders', a: 'analytics', c: 'customers', s: 'contact-emails' };
+      const target = goMap[e.key];
+      if (target) { e.preventDefault(); window.location.hash = target; }
+      return;
+    }
+  });
 }
 
 // ---- Boot ----
@@ -338,6 +506,9 @@ async function boot() {
       document.getElementById('sidebar').classList.add('admin-sidebar--collapsed');
       document.getElementById('app-shell').style.setProperty('--sidebar-w', '60px');
     }
+
+    // Global keyboard shortcuts
+    initKeyboardShortcuts();
 
     // Init filters
     const filterBar = document.getElementById('filter-bar');
@@ -368,9 +539,6 @@ async function boot() {
     // Initial route
     const route = getRouteFromHash();
     await navigate(route);
-
-    // Fetch unreviewed product count for nav badge
-    updateReviewBadge();
 
     // Hash change listener
     window.addEventListener('hashchange', () => {
@@ -446,4 +614,4 @@ function bindExportDropdown(container, id, exportFn) {
 }
 
 // Export for page modules
-export { AdminAuth, FilterState, AdminAPI, icon, esc, updateReviewBadge, exportDropdown, bindExportDropdown };
+export { AdminAuth, FilterState, AdminAPI, icon, esc, exportDropdown, bindExportDropdown };

@@ -36,16 +36,19 @@ function kpiCard({ label, value, raw, prevRaw, missingTip, sub }) {
 }
 
 const TABS = [
-  { id: 'revenue',    label: 'Revenue' },
-  { id: 'customers',  label: 'Customers' },
-  { id: 'products',   label: 'Products' },
-  { id: 'operations', label: 'Operations' },
-  { id: 'traffic',    label: 'Traffic' },
+  { id: 'revenue',     label: 'Revenue' },
+  { id: 'margins',     label: 'Margins', lazy: true },
+  { id: 'pricing',     label: 'Pricing', lazy: true },
+  { id: 'market-intel', label: 'Market Intel', lazy: true },
+  { id: 'customers',   label: 'Customers' },
+  { id: 'products',    label: 'Products' },
+  { id: 'operations',  label: 'Operations' },
 ];
 
 let _container = null;
 let _activeTab = 'revenue';
 let _data = null;
+let _lazyTabModule = null;
 
 async function loadAnalytics() {
   const params = FilterState.getParams();
@@ -77,7 +80,7 @@ function render() {
   Charts.destroyAll();
 
   _container.innerHTML = `
-    <div class="admin-page-header"><h1>Analytics</h1></div>
+    <div class="admin-page-header"><h1>Profit Center</h1></div>
     <div class="admin-analytics-tabs" id="analytics-tabs">
       ${TABS.map(t => `
         <button class="admin-analytics-tab${t.id === _activeTab ? ' is-active' : ''}" data-tab="${esc(t.id)}">
@@ -93,8 +96,12 @@ function render() {
     if (!btn) return;
     const tabId = btn.dataset.tab;
     if (tabId === _activeTab) return;
+
+    // Destroy lazy tab if active
+    if (_lazyTabModule?.destroy) _lazyTabModule.destroy();
+    _lazyTabModule = null;
+
     _activeTab = tabId;
-    // Update active button
     _container.querySelectorAll('.admin-analytics-tab').forEach(b => {
       b.classList.toggle('is-active', b.dataset.tab === tabId);
     });
@@ -104,10 +111,32 @@ function render() {
   renderTabContent();
 }
 
-function renderTabContent() {
+async function renderTabContent() {
   Charts.destroyAll();
   const el = _container?.querySelector('#analytics-tab-content');
-  if (!el || !_data) return;
+  if (!el) return;
+
+  // Handle lazy-loaded tabs (margins, pricing, market-intel)
+  const tab = TABS.find(t => t.id === _activeTab);
+  if (tab?.lazy) {
+    el.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;min-height:20vh"><div class="admin-loading__spinner"></div></div>`;
+    const moduleMap = {
+      'margins': './margin.js',
+      'pricing': './cc-profit.js',
+      'market-intel': './cc-market-intel.js',
+    };
+    try {
+      const mod = await import(moduleMap[_activeTab]);
+      _lazyTabModule = mod.default;
+      el.innerHTML = '';
+      await _lazyTabModule.init(el);
+    } catch (e) {
+      el.innerHTML = `<div class="admin-empty"><div class="admin-empty__title">Failed to load ${esc(tab.label)}</div><div class="admin-empty__text">${esc(e.message)}</div></div>`;
+    }
+    return;
+  }
+
+  if (!_data) return;
 
   const { kpis, revSeries, brandData, custStats, topProducts, refundData } = _data;
   const cur  = kpis?.current  ?? {};
@@ -429,21 +458,28 @@ async function renderBrandChart(data) {
 // ---- Module export ----
 
 export default {
-  title: 'Analytics',
+  title: 'Profit Center',
 
   async init(container) {
     _container = container;
     _activeTab = 'revenue';
+    _lazyTabModule = null;
     await loadAnalytics();
   },
 
   destroy() {
     Charts.destroyAll();
+    if (_lazyTabModule?.destroy) _lazyTabModule.destroy();
+    _lazyTabModule = null;
     _container = null;
     _data = null;
   },
 
   async onFilterChange() {
-    if (_container) await loadAnalytics();
+    if (_lazyTabModule?.onFilterChange) {
+      _lazyTabModule.onFilterChange();
+    } else if (_container) {
+      await loadAnalytics();
+    }
   },
 };
