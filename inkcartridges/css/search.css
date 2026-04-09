@@ -150,6 +150,13 @@
 .product-card--compact .stock-in-stock { color: var(--color-success); }
 .product-card--compact .stock-out-of-stock { color: var(--color-error, #ef4444); }
 
+.product-card--compact .product-card__free-shipping {
+    font-size: 0.6rem;
+    padding: 1px 6px;
+    margin-top: 2px;
+    margin-bottom: 2px;
+}
+
 .product-card--compact .product-card__price {
     font-size: var(--font-size-md);
     font-weight: var(--font-weight-bold);

@@ -730,6 +730,7 @@ function createSmartSearch() {
                 + '</div>'
                 + '<div class="product-card__content">'
                     + '<h3 class="product-card__title">' + Security.escapeHtml(name) + '</h3>'
+                    + (price != null && price >= 100 ? '<span class="product-card__free-shipping">FREE SHIPPING</span>' : '')
                     + '<div class="product-card__footer">'
                         + '<div class="product-card__footer-row">'
                             + (color ? '<p class="product-card__color">' + Security.escapeHtml(color) + '</p>' : '<span></span>')

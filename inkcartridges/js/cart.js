@@ -174,6 +174,13 @@ const Cart = {
         }
 
         await this.loadCart();
+
+        // Load business settings (non-blocking) — re-render cart page with server threshold
+        if (typeof Config !== 'undefined' && Config.loadSettings) {
+            Config.loadSettings().then(() => {
+                if (document.querySelector('.cart-page')) this.renderCartPage();
+            }).catch(() => {});
+        }
     },
 
     /**
@@ -1525,6 +1532,38 @@ const Cart = {
 
                 if (subtotalClassEl) subtotalClassEl.textContent = formatPrice(subtotal);
                 if (totalClassEl) totalClassEl.textContent = formatPrice(cartTotal);
+            }
+
+            // Free shipping message + progress bar
+            const shippingMsgEl = document.getElementById('cart-shipping-message');
+            const shippingBarEl = document.getElementById('cart-shipping-bar');
+            const barFillEl = document.getElementById('shipping-bar-fill');
+
+            if (shippingMsgEl) {
+                const spendMore = (typeof Shipping !== 'undefined') ? Shipping.getSpendMore(subtotal) : null;
+
+                if (spendMore && spendMore.qualifies) {
+                    shippingMsgEl.querySelector('span').textContent = "You've qualified for FREE shipping!";
+                    shippingMsgEl.className = 'cart-summary__shipping-message cart-summary__shipping-message--success';
+                    shippingMsgEl.hidden = false;
+                    if (shippingBarEl) shippingBarEl.hidden = true;
+                } else if (spendMore) {
+                    const priceStr = (typeof formatPrice === 'function') ? formatPrice(spendMore.needed) : '$' + spendMore.needed.toFixed(2);
+                    shippingMsgEl.querySelector('span').textContent = 'Add ' + priceStr + ' more for free shipping!';
+                    shippingMsgEl.className = 'cart-summary__shipping-message';
+                    shippingMsgEl.hidden = false;
+
+                    if (shippingBarEl && barFillEl) {
+                        const threshold = (typeof Config !== 'undefined') ? Config.getSetting('FREE_SHIPPING_THRESHOLD', 100) : 100;
+                        const pct = Math.min(Math.round((subtotal / threshold) * 100), 100);
+                        barFillEl.style.width = pct + '%';
+                        barFillEl.className = 'shipping-bar__fill' + (pct >= 100 ? ' shipping-bar__fill--complete' : '');
+                        shippingBarEl.hidden = false;
+                    }
+                } else {
+                    shippingMsgEl.hidden = true;
+                    if (shippingBarEl) shippingBarEl.hidden = true;
+                }
             }
 
             // Disable checkout if cart has out-of-stock items

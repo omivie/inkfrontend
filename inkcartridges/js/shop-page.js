@@ -2513,6 +2513,7 @@
                     <div class="product-card__content">
                         <h3 class="product-card__title" title="${Security.escapeAttr(displayName)}">${Security.escapeHtml(displayName)}</h3>
                         ${product.compare_price && product.compare_price > price ? `<span class="product-card__savings">Save ${formatPrice(product.compare_price - price)}</span>` : ''}
+                        ${product.retail_price != null && product.retail_price >= 100 ? '<span class="product-card__free-shipping">FREE SHIPPING</span>' : ''}
                         <div class="product-card__footer">
                             <div class="product-card__footer-row">
                                 ${color ? `<span class="product-card__color">${Security.escapeHtml(color)}</span>` : '<span></span>'}
