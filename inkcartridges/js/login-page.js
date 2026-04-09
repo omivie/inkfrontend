@@ -319,7 +319,7 @@
                     }
 
                     submitBtn.disabled = true;
-                    submitBtn.textContent = 'Creating account...';
+                    submitBtn.innerHTML = '<span class="spinner" style="width:16px;height:16px;border-width:2px;display:inline-block;vertical-align:middle;margin-right:8px"></span>Creating account...';
 
                     // Validate email before sending confirmation (blocks disposable addresses)
                     try {
@@ -342,6 +342,7 @@
                     DebugLog.log('📧 Starting signup for:', email);
                     DebugLog.log('🔗 Redirect URL:', `${window.location.origin}/html/account/login.html?verified=true`);
 
+                    try {
                     // Sign up with Supabase
                     const { data, error } = await Auth.supabase.auth.signUp({
                         email,
@@ -370,16 +371,12 @@
                             emailError.textContent = errorMessage;
                             emailError.hidden = false;
                         }
-                        submitBtn.disabled = false;
-                        submitBtn.textContent = 'Create Account';
                     } else if (data.user && data.user.identities?.length === 0) {
                         // Supabase returns a fake success with empty identities when email is taken
                         if (emailError) {
                             emailError.textContent = 'An account with this email already exists. Please sign in instead.';
                             emailError.hidden = false;
                         }
-                        submitBtn.disabled = false;
-                        submitBtn.textContent = 'Create Account';
                     } else {
                         DebugLog.log('✅ Signup successful!');
 
@@ -401,6 +398,11 @@
 
                         // Redirect to verify email page
                         window.location.href = '/html/account/verify-email.html';
+                        return; // Skip re-enable since we're navigating away
+                    }
+                    } finally {
+                        submitBtn.disabled = false;
+                        submitBtn.textContent = 'Create Account';
                     }
                 });
             }
