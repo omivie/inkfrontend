@@ -3129,10 +3129,15 @@
     }
 
     /* Compact product image on mobile — prioritize purchase info */
-    .product-gallery__main {
+    .product-detail__layout .product-gallery__main {
+        position: relative;
         aspect-ratio: 3 / 2;
-        max-height: 200px;
+        max-height: 220px;
         margin-bottom: var(--spacing-sm);
+    }
+
+    .product-detail__layout .product-gallery {
+        min-height: auto;
     }
 }
 

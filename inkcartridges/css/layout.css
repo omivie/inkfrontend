@@ -1620,21 +1620,24 @@
 
     .primary-nav .container {
         flex-wrap: nowrap;
-        gap: var(--spacing-3);
         justify-content: center;
+        position: relative;
     }
 
     .nav-toggle {
         display: flex;
         align-items: center;
         justify-content: center;
-        flex-shrink: 0;
+        position: absolute;
+        left: 0;
+        top: 50%;
+        transform: translateY(-50%);
     }
 
     .search-form--nav {
-        flex: 1;
-        min-width: 0;
-        max-width: 280px;
+        width: 100%;
+        max-width: 260px;
+        margin: 0 auto;
     }
 
     .nav-menu {
