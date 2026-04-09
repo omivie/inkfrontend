@@ -1621,19 +1621,20 @@
     .primary-nav .container {
         flex-wrap: nowrap;
         gap: var(--spacing-3);
+        justify-content: center;
     }
 
     .nav-toggle {
         display: flex;
         align-items: center;
         justify-content: center;
-        order: 1;
+        flex-shrink: 0;
     }
 
     .search-form--nav {
-        order: 2;
         flex: 1;
         min-width: 0;
+        max-width: 280px;
     }
 
     .nav-menu {

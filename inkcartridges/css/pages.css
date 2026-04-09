@@ -3116,7 +3116,7 @@
     .product-detail__layout--color-only,
     .product-detail__layout--compatible {
         grid-template-columns: 1fr;
-        gap: var(--spacing-lg);
+        gap: var(--spacing-md);
     }
 
     .product-detail__layout--color-only .product-gallery {
@@ -3128,6 +3128,12 @@
         flex-direction: column;
     }
 
+    /* Compact product image on mobile — prioritize purchase info */
+    .product-gallery__main {
+        aspect-ratio: 3 / 2;
+        max-height: 200px;
+        margin-bottom: var(--spacing-sm);
+    }
 }
 
 
