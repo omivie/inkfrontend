@@ -1084,11 +1084,11 @@
 }
 
 .stock-status--contact-us {
-    color: var(--color-error, #ef4444);
+    color: var(--color-success, #16a34a);
 }
 
 .stock-status--contact-us::before {
-    background-color: var(--color-error, #ef4444);
+    background-color: var(--color-success, #16a34a);
 }
 
 /* Product card stock variants */
@@ -1101,7 +1101,7 @@
 }
 
 .product-card__stock.stock-contact-us {
-    color: var(--color-error, #ef4444);
+    color: var(--color-success, #16a34a);
 }
 
 /* Compare price & savings */
