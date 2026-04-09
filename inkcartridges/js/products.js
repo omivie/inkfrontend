@@ -75,6 +75,7 @@ const Products = {
                     <div class="product-card__image-wrapper">
                         ${this.getProductImageHTML(product)}
                         ${sourceBadge ? `<span class="product-card__badge ${sourceBadge.class}">${sourceBadge.text}</span>` : ''}
+                        ${product.is_lowest_in_market ? `<span class="product-card__badge product-card__badge--lowest-price" title="${product.market_position ? Security.escapeAttr(product.market_position.price_diff_percent + '% less than ' + product.market_position.lowest_competitor_name) : ''}">Lowest Price in NZ</span>` : ''}
                     </div>
                     <div class="product-card__content">
                         <p class="product-card__brand">${Security.escapeHtml(product.brand?.name || '')}</p>
@@ -90,14 +91,14 @@ const Products = {
                             <div class="product-card__footer-row">
                                 <p class="product-card__price">${product.retail_price == null ? 'Price unavailable' : formatPrice(product.retail_price)}${product.compare_price && product.compare_price > product.retail_price ? ` <span class="product-card__compare-price">${formatPrice(product.compare_price)}</span>` : ''}</p>
                                 <button class="product-card__add-btn btn btn--primary"
-                                    ${product.retail_price == null || stockInfo.class === 'out-of-stock' ? 'disabled' : ''}
+                                    ${product.retail_price == null || stockInfo.class !== 'in-stock' ? 'disabled' : ''}
                                     data-product-id="${Security.escapeAttr(product.id)}"
                                     data-product-sku="${Security.escapeAttr(product.sku)}"
                                     data-product-name="${Security.escapeAttr(product.name)}"
                                     data-product-price="${Security.escapeAttr(product.retail_price)}"
                                     data-product-image="${Security.escapeAttr(resolvedImage)}"
                                     data-product-color="${Security.escapeAttr(product.color || this.detectColorFromName(product.name) || '')}">
-                                Add to Cart
+                                ${stockInfo.class === 'contact-us' ? 'Contact Us' : 'Add to Cart'}
                                 </button>
                             </div>
                         </div>

@@ -2473,7 +2473,7 @@
             // Use retail_price from backend API
             const price = product.retail_price || 0;
             const stockStatus = getStockStatus(product);
-            const inStock = stockStatus.class !== 'out-of-stock';
+            const inStock = stockStatus.class === 'in-stock';
             const brandName = product.brand?.name || '';
             const color = product.color || '';
 
@@ -2508,6 +2508,7 @@
                 <a href="${product.slug ? `/products/${Security.escapeAttr(product.slug)}/${Security.escapeAttr(product.sku)}` : `/html/product/?sku=${Security.escapeAttr(product.sku)}`}" class="product-card__link">
                     <div class="product-card__image-wrapper">
                         ${imageContent}
+                        ${product.is_lowest_in_market ? `<span class="product-card__badge product-card__badge--lowest-price" title="${product.market_position ? Security.escapeAttr(product.market_position.price_diff_percent + '% less than ' + product.market_position.lowest_competitor_name) : ''}">Lowest Price in NZ</span>` : ''}
                     </div>
                     <div class="product-card__content">
                         <h3 class="product-card__title" title="${Security.escapeAttr(displayName)}">${Security.escapeHtml(displayName)}</h3>
@@ -2528,7 +2529,7 @@
                                         data-product-id="${product.id}"
                                         aria-label="Add ${displayName} to cart"
                                         ${!inStock ? 'disabled' : ''}>
-                                    Add to Cart
+                                    ${stockStatus.class === 'contact-us' ? 'Contact Us' : 'Add to Cart'}
                                 </button>
                             </div>
                         </div>

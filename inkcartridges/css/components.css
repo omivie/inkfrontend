@@ -633,6 +633,15 @@
     color: var(--color-text-inverse);
 }
 
+.product-card__badge--lowest-price {
+    background-color: var(--yellow-primary);
+    color: var(--steel-900);
+    top: var(--spacing-3);
+    right: var(--spacing-3);
+    left: auto;
+    font-size: 9px;
+}
+
 .product-card__content {
     padding: var(--spacing-4);
     display: flex;
@@ -710,6 +719,10 @@
 
 .product-card__stock--out-of-stock {
     color: var(--color-error);
+}
+
+.product-card__stock--contact-us {
+    color: var(--color-warning, #f59e0b);
 }
 
 /* Footer: color + stock row, then price + button row */
@@ -1070,12 +1083,24 @@
     background-color: var(--color-error, #ef4444);
 }
 
+.stock-status--contact-us {
+    color: var(--color-warning, #f59e0b);
+}
+
+.stock-status--contact-us::before {
+    background-color: var(--color-warning, #f59e0b);
+}
+
 /* Product card stock variants */
 .product-card__stock.stock-out {
     color: var(--color-error, #ef4444);
 }
 
 .product-card__stock.stock-low {
+    color: var(--color-warning, #f59e0b);
+}
+
+.product-card__stock.stock-contact-us {
     color: var(--color-warning, #f59e0b);
 }
 

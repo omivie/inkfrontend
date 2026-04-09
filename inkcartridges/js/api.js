@@ -1566,13 +1566,25 @@ function calculateGST(inclusiveAmount) {
  * @returns {object} Status with class and text
  */
 function getStockStatus(product) {
-    // Determine stock: prefer in_stock field, fall back to stock_quantity > 0
-    const inStock = product.in_stock !== undefined ? product.in_stock : (product.stock_quantity > 0);
-    if (!inStock) {
+    // Use stock_status from API if available (in_stock / contact_us / out_of_stock)
+    if (product.stock_status === 'contact_us') {
+        return { class: 'contact-us', text: 'Contact Us for Stock Inquiry', icon: 'phone' };
+    }
+    if (product.stock_status === 'out_of_stock') {
         return { class: 'out-of-stock', text: 'Out of Stock', icon: 'x-circle' };
     }
-    // Business rule: supplier always has stock — show "In Stock" for all available products.
-    // Do NOT show "low stock" urgency; stock_quantity is always 100.
+    if (product.stock_status === 'in_stock') {
+        return { class: 'in-stock', text: 'In Stock', icon: 'check-circle' };
+    }
+    // Fallback for endpoints that don't return stock_status (listing, search)
+    const inStock = product.in_stock !== undefined ? product.in_stock : (product.stock_quantity > 0);
+    if (!inStock) {
+        // Genuine products with 0 stock → contact us (supplier may restock)
+        if (product.source === 'genuine') {
+            return { class: 'contact-us', text: 'Contact Us for Stock Inquiry', icon: 'phone' };
+        }
+        return { class: 'out-of-stock', text: 'Out of Stock', icon: 'x-circle' };
+    }
     return { class: 'in-stock', text: 'In Stock', icon: 'check-circle' };
 }
 
