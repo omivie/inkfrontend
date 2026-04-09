@@ -9848,7 +9848,7 @@
 .products-row {
     display: flex;
     flex-wrap: wrap;
-    align-items: flex-start;
+    align-items: stretch;
     gap: var(--spacing-sm);
     padding: var(--spacing-xs) 0 var(--spacing-sm);
 }
@@ -9878,6 +9878,7 @@
     flex-direction: column;
     text-decoration: none;
     color: inherit;
+    flex-grow: 1;
 }
 
 .product-card__image-wrapper {
@@ -9937,6 +9938,11 @@
     display: flex;
     flex-direction: column;
     gap: 1px;
+    flex-grow: 1;
+}
+
+.product-card__footer {
+    margin-top: auto;
 }
 
 .product-card__title {
