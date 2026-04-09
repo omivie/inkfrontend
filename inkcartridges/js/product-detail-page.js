@@ -379,6 +379,11 @@
             </span>`;
 
             // Disable Add to Cart if out of stock or contact-us
+            const phoneIcon = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/></svg>';
+            const callToOrderLink = `<a href="tel:0274740115" class="btn btn--primary btn--lg product-info__add-to-cart" style="text-decoration:none;display:inline-flex;align-items:center;gap:8px;">
+                        ${phoneIcon}
+                        Call to Order &mdash; 027 474 0115
+                    </a>`;
             if (stockStatus.class === 'out-of-stock') {
                 const addBtn = document.getElementById('add-to-cart-btn');
                 if (addBtn) { addBtn.disabled = true; addBtn.textContent = 'Out of Stock'; }
@@ -387,13 +392,25 @@
             } else if (stockStatus.class === 'contact-us') {
                 const addBtn = document.getElementById('add-to-cart-btn');
                 if (addBtn) {
-                    addBtn.outerHTML = `<a href="tel:0274740115" class="btn btn--primary btn--lg product-info__add-to-cart" style="text-decoration:none;display:inline-flex;align-items:center;gap:8px;">
-                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
-                        Call to Order &mdash; 027 474 0115
-                    </a>`;
+                    addBtn.outerHTML = callToOrderLink;
                 }
                 const qtyInput = document.getElementById('product-quantity');
                 if (qtyInput) qtyInput.disabled = true;
+            }
+
+            // Sync sticky mobile Add-to-Cart bar with stock status
+            const stickyBtn = document.getElementById('sticky-atc-btn');
+            const stickyBar = document.getElementById('sticky-atc');
+            if (stickyBtn && stickyBar) {
+                if (stockStatus.class === 'out-of-stock') {
+                    stickyBtn.disabled = true;
+                    stickyBtn.textContent = 'Out of Stock';
+                } else if (stockStatus.class === 'contact-us') {
+                    stickyBtn.outerHTML = `<a href="tel:0274740115" class="btn btn--primary sticky-atc__btn" style="text-decoration:none;display:inline-flex;align-items:center;gap:8px;">
+                        ${phoneIcon}
+                        Call to Order &mdash; 027 474 0115
+                    </a>`;
+                }
             }
 
             // Product image with color fallback
@@ -1483,13 +1500,14 @@
 
     // Sticky mobile Add-to-Cart bar
     document.addEventListener('DOMContentLoaded', () => {
-        const mainBtn = document.getElementById('add-to-cart-btn');
+        const actionsContainer = document.querySelector('.product-info__actions');
         const stickyBar = document.getElementById('sticky-atc');
         const stickyBtn = document.getElementById('sticky-atc-btn');
         const stickyPrice = document.getElementById('sticky-atc-price');
-        if (!mainBtn || !stickyBar) return;
+        if (!actionsContainer || !stickyBar) return;
 
-        // Show/hide based on main button visibility
+        // Show/hide based on actions container visibility (not the button itself,
+        // which may be replaced via outerHTML for contact-us products)
         const observer = new IntersectionObserver(([entry]) => {
             if (entry.isIntersecting) {
                 stickyBar.classList.remove('is-visible');
@@ -1499,7 +1517,7 @@
                 stickyBar.setAttribute('aria-hidden', 'false');
             }
         }, { threshold: 0 });
-        observer.observe(mainBtn);
+        observer.observe(actionsContainer);
 
         // Mirror price from product info
         const priceEl = document.getElementById('product-price');
@@ -1510,8 +1528,11 @@
             stickyPrice.textContent = priceEl.textContent;
         }
 
-        // Trigger same click as main Add to Cart
+        // Trigger same click as main Add to Cart (re-query to avoid stale reference)
         if (stickyBtn) {
-            stickyBtn.addEventListener('click', () => mainBtn.click());
+            stickyBtn.addEventListener('click', () => {
+                const currentBtn = document.getElementById('add-to-cart-btn');
+                if (currentBtn) currentBtn.click();
+            });
         }
     });

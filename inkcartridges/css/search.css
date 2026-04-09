@@ -14,6 +14,7 @@
     display: none;
     border-top: 3px solid var(--cyan-primary);
     overscroll-behavior: contain;
+    padding-bottom: env(safe-area-inset-bottom, 0px);
 }
 
 .smart-search-dropdown.is-open {
