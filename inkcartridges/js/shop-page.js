@@ -2297,6 +2297,43 @@
                             // Printer search failed — continue with empty results
                         }
                     }
+
+                    // If still no results, search descriptions & compatible devices via Supabase
+                    if (products.length === 0) {
+                        try {
+                            const sb = (typeof Auth !== 'undefined' && Auth.supabase)
+                                ? Auth.supabase
+                                : (typeof supabase !== 'undefined' && supabase.createClient && typeof Config !== 'undefined')
+                                    ? supabase.createClient(Config.SUPABASE_URL, Config.SUPABASE_ANON_KEY)
+                                    : null;
+                            if (sb) {
+                                const words = searchQuery.trim().split(/\s+/).filter(w => w.length >= 2);
+                                if (words.length > 0) {
+                                    let dbQuery = sb.from('products')
+                                        .select('*, brand:brands(name, slug)')
+                                        .eq('is_active', true);
+                                    for (const word of words) {
+                                        const pattern = '%' + word + '%';
+                                        dbQuery = dbQuery.or(
+                                            'description.ilike.' + pattern + ',compatible_devices_html.ilike.' + pattern
+                                        );
+                                    }
+                                    const { data } = await dbQuery.limit(100);
+                                    if (navVersion !== undefined && this.navigationVersion !== navVersion) return;
+                                    if (data && data.length > 0) {
+                                        products = data.map(p => ({
+                                            ...p,
+                                            brand: p.brand || {},
+                                            retail_price: p.retail_price ?? p.price,
+                                            image_url: typeof storageUrl === 'function' ? storageUrl(p.image_url) : (p.image_url || '')
+                                        }));
+                                    }
+                                }
+                            }
+                        } catch (e) {
+                            // Description search failed — continue with empty results
+                        }
+                    }
                 }
 
                 if (products.length > 0) {

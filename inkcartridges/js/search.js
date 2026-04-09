@@ -607,8 +607,9 @@ function createSmartSearch() {
         },
 
         /**
-         * Search product descriptions via Supabase for words in the query.
+         * Search product descriptions and compatible_devices_html via Supabase.
          * Fallback when API search returns no results.
+         * Searches both `description` and `compatible_devices_html` (ribbon "For Use In" text).
          */
         async _fetchByDescription(query) {
             const sb = (typeof Auth !== 'undefined' && Auth.supabase)
@@ -626,8 +627,12 @@ function createSmartSearch() {
                     .select('*, brand:brands(name, slug)')
                     .eq('is_active', true);
 
+                // Each word must appear in description OR compatible_devices_html
                 for (const word of words) {
-                    dbQuery = dbQuery.ilike('description', '%' + word + '%');
+                    const pattern = '%' + word + '%';
+                    dbQuery = dbQuery.or(
+                        'description.ilike.' + pattern + ',compatible_devices_html.ilike.' + pattern
+                    );
                 }
 
                 const { data, error } = await dbQuery.limit(searchConfig.maxResults);
@@ -638,7 +643,8 @@ function createSmartSearch() {
                     ...p,
                     brand: p.brand || {},
                     retail_price: p.retail_price ?? p.price,
-                    image_url: typeof storageUrl === 'function' ? storageUrl(p.image_url) : (p.image_url || '')
+                    image_url: typeof storageUrl === 'function' ? storageUrl(p.image_url) : (p.image_url || ''),
+                    _isRibbon: !!(p.compatible_devices_html || p.product_type === 'ribbon')
                 }));
 
                 return { products, total: products.length };
@@ -832,10 +838,10 @@ function createSmartSearch() {
                     + '<button type="button" class="smart-search__correction-original">'
                     + 'Search instead for &ldquo;' + Security.escapeHtml(original) + '&rdquo;</button>';
             } else if (type === 'description') {
-                // Description match — informational, no alternative link
+                // Description / compatible devices match — informational, no alternative link
                 this._correctionBanner.innerHTML =
                     '<span>Showing products matching &ldquo;<strong>' + Security.escapeHtml(original)
-                    + '</strong>&rdquo; in product descriptions</span>';
+                    + '</strong>&rdquo; in descriptions &amp; compatible devices</span>';
             } else if (type === 'compatibility') {
                 // Merged API + compatibility results — informational
                 this._correctionBanner.innerHTML =
