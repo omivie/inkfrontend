@@ -6,6 +6,7 @@ import { DataTable } from '../components/table.js';
 import { Drawer } from '../components/drawer.js';
 import { Toast } from '../components/toast.js';
 import { Modal } from '../components/modal.js';
+import { RichTextEditor } from '../components/rich-text-editor.js';
 
 const formatPrice = (v) => window.formatPrice ? window.formatPrice(v) : `$${Number(v).toFixed(2)}`;
 const MISSING = '\u2014';
@@ -87,7 +88,7 @@ function buildColumns() {
       align: 'right',
     });
     cols.push({
-      key: 'margin_pct', label: 'Margin', sortable: false,
+      key: 'margin_pct', label: 'Margin', sortable: true,
       render: (r) => {
         if (r.cost_price == null || r.retail_price == null || r.cost_price <= 0) return MISSING;
         const retailExGst = r.retail_price / 1.15;
@@ -185,7 +186,7 @@ async function loadProducts() {
   const sb = (typeof Auth !== 'undefined' && Auth.supabase) ? Auth.supabase : null;
   if (sb) {
     try {
-      const selectCols = 'id, sku, name, retail_price, cost_price, is_active, import_locked, image_url, color, source, weight_kg, page_yield, category, product_type, brand_id, description, compare_price, meta_title, meta_description, tags, internal_notes, brands(name, slug)';
+      const selectCols = 'id, sku, name, retail_price, cost_price, is_active, import_locked, image_url, color, source, weight_kg, page_yield, category, product_type, brand_id, description, description_html, compatible_devices_html, compare_price, meta_title, meta_description, tags, internal_notes, brands(name, slug)';
       let query = sb.from('products').select(selectCols, { count: 'exact' });
 
       // Brand filter
@@ -197,9 +198,9 @@ async function loadProducts() {
       // Active filter
       if (_activeFilter !== '') query = query.eq('is_active', _activeFilter === 'true');
 
-      // Sorting — map column keys to DB columns
+      // Sorting — map column keys to DB columns (margin_pct is handled client-side)
       const sortMap = { brand: 'brand_id' };
-      const sortCol = sortMap[_sort] || _sort || 'name';
+      const sortCol = (_sort === 'margin_pct') ? 'name' : (sortMap[_sort] || _sort || 'name');
       query = query.order(sortCol, { ascending: _sortDir !== 'desc' });
 
       // Image filter requires client-side processing (can't filter by image presence in SQL)
@@ -231,6 +232,47 @@ async function loadProducts() {
         const start = (_page - 1) * PAGE_SIZE;
         const pageRows = filtered.slice(start, start + PAGE_SIZE);
         _table.setData(pageRows, { total: filtered.length, page: _page, limit: PAGE_SIZE });
+        loadCompatCounts();
+        return;
+      }
+
+      // Margin sorting requires client-side compute (not a DB column)
+      if (_sort === 'margin_pct') {
+        const PAGE_SIZE = 100;
+        let all = [];
+        let fetchOffset = 0;
+        while (true) {
+          let mQuery = sb.from('products').select(selectCols);
+          if (_brandFilter) mQuery = mQuery.eq('brand_id', _brandFilter);
+          if (_search) mQuery = mQuery.or(`name.ilike.%${_search}%,sku.ilike.%${_search}%`);
+          if (_activeFilter !== '') mQuery = mQuery.eq('is_active', _activeFilter === 'true');
+          mQuery = mQuery.order('name', { ascending: true }).range(fetchOffset, fetchOffset + 999);
+          const { data: chunk } = await mQuery;
+          if (!_table) return;
+          if (!chunk || !chunk.length) break;
+          all = all.concat(chunk);
+          if (chunk.length < 1000) break;
+          fetchOffset += 1000;
+        }
+        all = all.map(p => {
+          const retailExGst = (p.retail_price != null && p.cost_price != null && p.cost_price > 0) ? p.retail_price / 1.15 : null;
+          const margin = retailExGst ? ((retailExGst - p.cost_price) / retailExGst) * 100 : null;
+          return {
+            ...p,
+            brand_name: p.brands?.name || '',
+            image_url: p.image_url ? storageUrl(p.image_url) : null,
+            _margin: margin,
+          };
+        });
+        all.sort((a, b) => {
+          if (a._margin == null && b._margin == null) return 0;
+          if (a._margin == null) return 1;
+          if (b._margin == null) return -1;
+          return _sortDir === 'asc' ? a._margin - b._margin : b._margin - a._margin;
+        });
+        const start = (_page - 1) * PAGE_SIZE;
+        const pageRows = all.slice(start, start + PAGE_SIZE);
+        _table.setData(pageRows, { total: all.length, page: _page, limit: PAGE_SIZE });
         loadCompatCounts();
         return;
       }
@@ -344,8 +386,10 @@ async function openProductDrawer(product) {
   document.addEventListener('keydown', onKeyDown);
   modal._removeKeyHandler = () => document.removeEventListener('keydown', onKeyDown);
 
-  // Fetch full product data
-  const full = await AdminAPI.getProduct(product.id) || product;
+  // Fetch full product data — merge with list data so Supabase-only fields
+  // (description_html, compatible_devices_html) aren't lost
+  const apiData = await AdminAPI.getProduct(product.id);
+  const full = apiData ? { ...product, ...apiData } : product;
   const isOwner = AdminAuth.isOwner();
 
   // Update title with full name
@@ -448,10 +492,10 @@ function openCreateProductModal() {
   document.addEventListener('keydown', onKeyDown);
   modal._removeKeyHandler = () => document.removeEventListener('keydown', onKeyDown);
 
-  // Build tabs (Basic Info, Pricing, Inventory, SEO, Advanced — no Compatibility/FAQ)
+  // Build tabs (Basic Info, Description, For Use In, Pricing, Inventory, SEO, Advanced — no Compatibility/FAQ)
   const tabsEl = modal.querySelector('#pm-tabs');
   const panelsEl = modal.querySelector('#pm-panels');
-  const tabNames = ['Basic Info', 'Pricing', 'Inventory', 'SEO', 'Advanced'];
+  const tabNames = ['Basic Info', 'Description', 'For Use In', 'Pricing', 'Inventory', 'SEO', 'Advanced'];
   const empty = {};
 
   tabsEl.innerHTML = tabNames.map((t, i) =>
@@ -463,7 +507,6 @@ function openCreateProductModal() {
       <div class="admin-form-group"><label>SKU<span class="required-star">*</span></label><input class="admin-input" id="edit-sku" placeholder="e.g. LC-3317BK"></div>
       <div class="admin-form-group"><label>Name<span class="required-star">*</span></label><input class="admin-input" id="edit-name" placeholder="Product name"></div>
     </div>
-    ${formGroup('Description', `<textarea class="admin-textarea" id="edit-description" rows="4" placeholder="Optional product description\u2026"></textarea>`)}
     <div class="admin-form-row">
       ${formGroup('Brand', buildBrandSelect(null))}
       ${formGroup('Product Type', buildSelect('edit-type', [
@@ -514,15 +557,46 @@ function openCreateProductModal() {
     ${formGroup('Meta Description', `<textarea class="admin-textarea" id="edit-meta-desc" rows="3" placeholder="Brief description for search results\u2026"></textarea>`)}
   `;
 
+  const descHtml = `
+    <div class="admin-form-group">
+      <label>Product Description (Rich Text)</label>
+      <div id="desc-editor-mount"></div>
+    </div>
+  `;
+
+  const forUseInHtml = `
+    <div class="admin-form-group">
+      <label>Compatible Devices / For Use In</label>
+      <p style="font-size:12px;color:var(--text-muted);margin:0 0 8px">Paste text or HTML listing compatible devices. Formatting is preserved as-is on the product page.</p>
+      <div id="compat-editor-mount"></div>
+    </div>
+  `;
+
   const advancedHtml = `
     ${formGroup('Page Yield', `<input class="admin-input" id="edit-page-yield" type="number" min="0" placeholder="e.g. 300">`)}
     ${formGroup('Tags (comma-separated)', `<input class="admin-input" id="edit-tags" placeholder="e.g. black, compatible, brother">`)}
     ${formGroup('Internal Notes', `<textarea class="admin-textarea" id="edit-admin-notes" rows="3" placeholder="Notes visible only to admins\u2026"></textarea>`)}
   `;
 
-  panelsEl.innerHTML = [basicHtml, pricingHtml, inventoryHtml, seoHtml, advancedHtml].map((content, i) =>
+  panelsEl.innerHTML = [basicHtml, descHtml, forUseInHtml, pricingHtml, inventoryHtml, seoHtml, advancedHtml].map((content, i) =>
     `<div class="admin-product-modal__tab-panel${i === 0 ? ' active' : ''}" data-panel="${i}">${content}</div>`
   ).join('');
+
+  // Mount rich text editors for create modal
+  const descMount = modal.querySelector('#desc-editor-mount');
+  if (descMount) {
+    modal._descEditor = new RichTextEditor(descMount, {
+      placeholder: 'Enter product description with formatting\u2026',
+      minHeight: 400,
+    });
+  }
+  const compatMount = modal.querySelector('#compat-editor-mount');
+  if (compatMount) {
+    modal._compatEditor = new RichTextEditor(compatMount, {
+      placeholder: 'Paste or type compatible devices\u2026',
+      minHeight: 400,
+    });
+  }
 
   tabsEl.addEventListener('click', (e) => {
     const btn = e.target.closest('.admin-product-modal__tab');
@@ -568,7 +642,7 @@ function openCreateProductModal() {
     if (requireField('edit-name', 0, 'Product name is required')) return;
     const retailPrice = parseFloat(val('edit-retail-price'));
     if (!retailPrice || retailPrice <= 0) {
-      requireField('edit-retail-price', 1, 'A valid retail price is required');
+      requireField('edit-retail-price', 3, 'A valid retail price is required');
       return;
     }
 
@@ -578,7 +652,6 @@ function openCreateProductModal() {
     const data = {
       sku,
       name,
-      description: val('edit-description') || null,
       brand_id: val('edit-brand') || null,
       product_type: val('edit-type') || null,
       color: val('edit-color') || null,
@@ -587,6 +660,8 @@ function openCreateProductModal() {
       compare_at_price: parseFloat(val('edit-compare-price')) || null,
       weight_kg: parseFloat(val('edit-weight')) || null,
       is_active: chk('edit-active'),
+      description_html: modal._descEditor?.getValue() || null,
+      compatible_devices_html: modal._compatEditor?.getValue() || null,
       meta_title: val('edit-meta-title') || null,
       meta_description: val('edit-meta-desc') || null,
       page_yield: parseInt(val('edit-page-yield'), 10) || null,
@@ -671,7 +746,12 @@ function buildProductModalTabs(modal, full, isOwner) {
   const tabsEl = modal.querySelector('#pm-tabs');
   const panelsEl = modal.querySelector('#pm-panels');
 
-  const tabs = ['Basic Info', 'Pricing', 'Inventory', 'SEO', 'Advanced', 'Compatibility', 'FAQ'];
+  // Determine if this is a manually-compatible product type (ribbons, correction tape)
+  const manualCompatTypes = ['printer_ribbon', 'typewriter_ribbon', 'correction_tape'];
+  const isManualCompat = manualCompatTypes.includes(full.product_type);
+
+  const tabs = ['Basic Info', 'Description', 'For Use In', 'Pricing', 'Inventory', 'SEO', 'Advanced',
+    ...(isManualCompat ? [] : ['Compatibility']), 'FAQ'];
   tabsEl.innerHTML = tabs.map((t, i) =>
     `<button class="admin-product-modal__tab${i === 0 ? ' active' : ''}" data-tab="${i}">${esc(t)}</button>`
   ).join('');
@@ -682,7 +762,6 @@ function buildProductModalTabs(modal, full, isOwner) {
       ${formGroup('SKU', `<input class="admin-input" id="edit-sku" value="${esc(full.sku || '')}">`)}
       ${formGroup('Name', `<input class="admin-input" id="edit-name" value="${esc(full.name || '')}">`, 'name')}
     </div>
-    ${formGroup('Description', `<textarea class="admin-textarea" id="edit-description" rows="4">${esc(full.description || '')}</textarea>`, 'description')}
     <div class="admin-form-row">
       ${formGroup('Brand', buildBrandSelect(full.brand_id || full.brand), 'brand_id')}
       ${formGroup('Product Type', buildSelect('edit-type', [
@@ -808,10 +887,46 @@ function buildProductModalTabs(modal, full, isOwner) {
     </div>
   `;
 
-  const panelContents = [basicHtml, pricingHtml, inventoryHtml, seoHtml, advancedHtml, compatHtml, faqHtml];
+  // Description panel (Rich Text)
+  const descHtml = `
+    <div class="admin-form-group">
+      <label>Product Description (Rich Text)</label>
+      <div id="desc-editor-mount"></div>
+    </div>
+  `;
+
+  // For Use In panel (Rich Text)
+  const forUseInHtml = `
+    <div class="admin-form-group">
+      <label>Compatible Devices / For Use In</label>
+      <p style="font-size:12px;color:var(--text-muted);margin:0 0 8px">Paste text or HTML listing compatible devices. Formatting is preserved as-is on the product page.</p>
+      <div id="compat-editor-mount"></div>
+    </div>
+  `;
+
+  const panelContents = [basicHtml, descHtml, forUseInHtml, pricingHtml, inventoryHtml, seoHtml, advancedHtml,
+    ...(isManualCompat ? [] : [compatHtml]), faqHtml];
   panelsEl.innerHTML = panelContents.map((content, i) =>
     `<div class="admin-product-modal__tab-panel${i === 0 ? ' active' : ''}" data-panel="${i}">${content}</div>`
   ).join('');
+
+  // Mount rich text editors
+  const descMount = modal.querySelector('#desc-editor-mount');
+  if (descMount) {
+    modal._descEditor = new RichTextEditor(descMount, {
+      initialValue: full.description_html || '',
+      placeholder: 'Enter product description with formatting\u2026',
+      minHeight: 400,
+    });
+  }
+  const compatDevMount = modal.querySelector('#compat-editor-mount');
+  if (compatDevMount) {
+    modal._compatEditor = new RichTextEditor(compatDevMount, {
+      initialValue: full.compatible_devices_html || '',
+      placeholder: 'Paste or type compatible devices\u2026',
+      minHeight: 400,
+    });
+  }
 
   // Wire tab switching
   tabsEl.addEventListener('click', (e) => {
@@ -1755,7 +1870,6 @@ function bindProductModalActions(modal, product) {
     const data = {
       sku: val('edit-sku'),
       name: val('edit-name'),
-      description: val('edit-description'),
       brand_id: val('edit-brand') || null,
       product_type: val('edit-type'),
       color: val('edit-color'),
@@ -1763,6 +1877,8 @@ function bindProductModalActions(modal, product) {
       retail_price: numVal('edit-retail-price'),
       compare_at_price: numVal('edit-compare-price'),
       is_active: chk('edit-active'),
+      description_html: modal._descEditor?.getValue() || null,
+      compatible_devices_html: modal._compatEditor?.getValue() || null,
       meta_title: val('edit-meta-title'),
       meta_description: val('edit-meta-desc'),
       page_yield: numVal('edit-page-yield'),

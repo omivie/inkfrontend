@@ -68,28 +68,25 @@
 
                 this.product = response.data;
 
-                // Enrich ribbon products from Supabase (description, compatibility, related products)
-                const isRibbon = this._productType === 'ribbon' || this.normalizeProductType(this.product.product_type) === 'ribbon';
-                if (isRibbon) {
-                    try {
-                        const enrichUrl = `${Config.SUPABASE_URL}/rest/v1/products?sku=eq.${encodeURIComponent(sku)}&select=description_html,compatible_devices_html,related_product_skus&limit=1`;
-                        const enrichResp = await fetch(enrichUrl, {
-                            headers: {
-                                'apikey': Config.SUPABASE_ANON_KEY,
-                                'Accept': 'application/json',
-                            },
-                        });
-                        if (enrichResp.ok) {
-                            const rows = await enrichResp.json();
-                            const extra = rows[0];
-                            if (extra) {
-                                if (this.product.description_html == null) this.product.description_html = extra.description_html;
-                                if (this.product.compatible_devices_html == null) this.product.compatible_devices_html = extra.compatible_devices_html;
-                                if (this.product.related_product_skus == null) this.product.related_product_skus = extra.related_product_skus;
-                            }
+                // Enrich products from Supabase (description, compatibility, related products)
+                try {
+                    const enrichUrl = `${Config.SUPABASE_URL}/rest/v1/products?sku=eq.${encodeURIComponent(sku)}&select=description_html,compatible_devices_html,related_product_skus&limit=1`;
+                    const enrichResp = await fetch(enrichUrl, {
+                        headers: {
+                            'apikey': Config.SUPABASE_ANON_KEY,
+                            'Accept': 'application/json',
+                        },
+                    });
+                    if (enrichResp.ok) {
+                        const rows = await enrichResp.json();
+                        const extra = rows[0];
+                        if (extra) {
+                            if (this.product.description_html == null) this.product.description_html = extra.description_html;
+                            if (this.product.compatible_devices_html == null) this.product.compatible_devices_html = extra.compatible_devices_html;
+                            if (this.product.related_product_skus == null) this.product.related_product_skus = extra.related_product_skus;
                         }
-                    } catch (_) { /* non-critical enrichment */ }
-                }
+                    }
+                } catch (_) { /* non-critical enrichment */ }
 
                 // Gate test products — active test products are visible to all; inactive only to super admins
                 if (this._isTestProduct(this.product) && !this.product.active && typeof isCachedSuperAdmin === 'function' && !isCachedSuperAdmin()) {
@@ -502,7 +499,7 @@
         },
 
         renderRibbonDescription(info) {
-            if (info.category !== 'ribbon' || !info.description_html) return;
+            if (!info.description_html) return;
             const productLabel = Security.escapeHtml(info.displayName || info.name || 'This Product');
             const html = `
                 <div class="ribbon-description ribbon-description--inline" id="ribbon-description">
@@ -515,8 +512,8 @@
         },
 
         async renderCompatiblePrinters(info) {
-            // If ribbon product has admin-provided compatible devices HTML, render into left column
-            if (info.compatible_devices_html && info.category === 'ribbon') {
+            // If product has admin-provided compatible devices HTML, render into left column
+            if (info.compatible_devices_html) {
                 const productLabel = Security.escapeHtml(info.displayName || info.name || 'This Product');
                 const html = `
                     <div class="product-compat-devices">
