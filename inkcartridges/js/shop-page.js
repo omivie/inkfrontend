@@ -2236,11 +2236,17 @@
                     if (products.length > 0 && searchQuery.length <= 6) {
                         const escaped = searchQuery.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
                         const wordBoundary = new RegExp(`(?:^|[\\s\\-\\/])${escaped}(?:[\\s\\-\\/BCMYK,.]|$)`, 'i');
+                        // For numeric queries (e.g. "069"), also match product codes like CART069, CART069HK
+                        const isNumeric = /^\d+$/.test(searchQuery);
+                        const codePattern = isNumeric
+                            ? new RegExp(`[A-Z]${escaped}(?:[A-Z]{0,3}\\b|[\\s\\-,.]|$)`, 'i')
+                            : null;
                         const relevant = products.filter(p => {
                             const name = p.name || '';
                             const sku = p.sku || p.code || p.product_code || '';
                             const mpn = p.manufacturer_part_number || '';
                             return wordBoundary.test(name) || wordBoundary.test(sku) || wordBoundary.test(mpn)
+                                || (codePattern && (codePattern.test(name) || codePattern.test(sku) || codePattern.test(mpn)))
                                 || name.toLowerCase().includes(searchQuery.toLowerCase() + ' ')
                                 || sku.toLowerCase().startsWith(searchQuery.toLowerCase());
                         });
