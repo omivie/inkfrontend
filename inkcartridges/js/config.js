@@ -7,8 +7,10 @@
  */
 
 const Config = {
-    // Backend API URL - Proxied through Vercel rewrites to avoid CORS issues
-    API_URL: '',
+    // Backend API URL - Use Vercel proxy in production, direct URL in local dev
+    API_URL: (location.hostname === 'localhost' || location.hostname === '127.0.0.1')
+        ? 'https://ink-backend-zaeq.onrender.com'
+        : '',
 
     // Supabase configuration
     SUPABASE_URL: 'https://lmdlgldjgcanknsjrcxh.supabase.co',

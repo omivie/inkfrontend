@@ -316,6 +316,13 @@ const Products = {
     bindImageFallbacks(container) {
         container.querySelectorAll('img[data-fallback]').forEach(img => {
             img.addEventListener('error', function() {
+                // Try raw (non-optimized) image URL before falling back to color block/placeholder
+                const rawSrc = this.dataset.rawSrc;
+                if (rawSrc && this.src !== rawSrc) {
+                    this.removeAttribute('srcset');
+                    this.src = rawSrc;
+                    return; // let it try loading the raw URL
+                }
                 if (this.dataset.fallback === 'color-block') {
                     this.style.display = 'none';
                     const sibling = this.nextElementSibling;
@@ -324,7 +331,7 @@ const Products = {
                     this.removeAttribute('data-fallback');
                     this.src = '/assets/images/placeholder-product.svg';
                 }
-            }, { once: true });
+            });
         });
     },
 

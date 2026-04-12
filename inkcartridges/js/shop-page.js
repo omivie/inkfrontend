@@ -2241,13 +2241,18 @@
                         const codePattern = isNumeric
                             ? new RegExp(`[A-Z]${escaped}(?:[A-Z]{0,3}\\b|[\\s\\-,.]|$)`, 'i')
                             : null;
+                        // For numeric queries, require non-digit before the number to avoid
+                        // matching "069" inside "S41069" or "CT351069"
+                        const nameIncludesPattern = isNumeric
+                            ? new RegExp(`(?:^|[^\\d])${escaped}(?:\\s|$)`, 'i')
+                            : null;
                         const relevant = products.filter(p => {
                             const name = p.name || '';
                             const sku = p.sku || p.code || p.product_code || '';
                             const mpn = p.manufacturer_part_number || '';
                             return wordBoundary.test(name) || wordBoundary.test(sku) || wordBoundary.test(mpn)
                                 || (codePattern && (codePattern.test(name) || codePattern.test(sku) || codePattern.test(mpn)))
-                                || name.toLowerCase().includes(searchQuery.toLowerCase() + ' ')
+                                || (nameIncludesPattern ? nameIncludesPattern.test(name) : name.toLowerCase().includes(searchQuery.toLowerCase() + ' '))
                                 || sku.toLowerCase().startsWith(searchQuery.toLowerCase());
                         });
                         if (relevant.length > 0) products = relevant;
@@ -2530,13 +2535,16 @@
             const srcsetAttr = typeof imageSrcset === 'function' && product.image_url ? imageSrcset(product.image_url) : '';
             const sizesAttr = '(max-width: 480px) 200px, (max-width: 768px) 300px, 400px';
             const colorStyle = ProductColors.getProductStyle(product);
+            // Get raw (non-optimized) image URL for fallback when optimization endpoint fails (429/error)
+            const rawImageUrl = product.image_url && typeof storageUrlRaw === 'function' ? storageUrlRaw(product.image_url) : product.image_url;
             if (resolvedImageUrl && resolvedImageUrl !== '/assets/images/placeholder-product.svg') {
                 const srcsetHtml = srcsetAttr ? ` srcset="${Security.escapeAttr(srcsetAttr)}" sizes="${sizesAttr}"` : '';
+                const rawAttr = rawImageUrl && rawImageUrl !== resolvedImageUrl ? ` data-raw-src="${Security.escapeAttr(rawImageUrl)}"` : '';
                 if (colorStyle) {
-                    imageContent = `<img src="${Security.escapeAttr(resolvedImageUrl)}" alt="${Security.escapeAttr(product.name)}"${srcsetHtml} loading="lazy" data-fallback="color-block">
+                    imageContent = `<img src="${Security.escapeAttr(resolvedImageUrl)}" alt="${Security.escapeAttr(product.name)}"${srcsetHtml} loading="lazy" data-fallback="color-block"${rawAttr}>
                         <div class="product-card__color-block" style="${colorStyle}; display: none;"></div>`;
                 } else {
-                    imageContent = `<img src="${Security.escapeAttr(resolvedImageUrl)}" alt="${Security.escapeAttr(product.name)}"${srcsetHtml} loading="lazy" data-fallback="placeholder">`;
+                    imageContent = `<img src="${Security.escapeAttr(resolvedImageUrl)}" alt="${Security.escapeAttr(product.name)}"${srcsetHtml} loading="lazy" data-fallback="placeholder"${rawAttr}>`;
                 }
             } else if (isCompatible) {
                 imageContent = `<div class="product-card__color-block" style="${colorStyle || 'background-color: #1a1a1a;'}"></div>`;
