@@ -1371,6 +1371,45 @@ const AdminAPI = {
       return resp?.data?.total ?? 0;
     } catch (e) { return 0; }
   },
+
+  // ---- Feed Sync Report & Bulk Publish ----
+
+  /**
+   * Get the latest feed sync report with summary and item details.
+   * @param {object} filters - { import_run_id, action, priority, source, has_price_anomaly, page, limit }
+   */
+  async getSyncReport(filters = {}, signal = null) {
+    try {
+      if (signal?.aborted) return null;
+      const params = new URLSearchParams();
+      if (filters.import_run_id) params.set('import_run_id', filters.import_run_id);
+      if (filters.action) params.set('action', filters.action);
+      if (filters.priority) params.set('priority', filters.priority);
+      if (filters.source) params.set('source', filters.source);
+      if (filters.has_price_anomaly !== undefined) params.set('has_price_anomaly', filters.has_price_anomaly);
+      params.set('page', filters.page || 1);
+      params.set('limit', filters.limit || 50);
+      const resp = await window.API.get(`/api/admin/sync-report?${params}`);
+      return resp ?? null;
+    } catch (e) {
+      adminApiWarn('Failed to load sync report', e);
+      return null;
+    }
+  },
+
+  /**
+   * Publish staged new products by SKU list.
+   * @param {string[]} skus - Array of SKUs to publish
+   */
+  async bulkPublish(skus) {
+    try {
+      const resp = await window.API.post('/api/admin/bulk-publish', { skus });
+      return resp?.data ?? null;
+    } catch (e) {
+      DebugLog.warn('[AdminAPI] bulkPublish failed:', e.message);
+      throw e;
+    }
+  },
 };
 
 export { AdminAPI };

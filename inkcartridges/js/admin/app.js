@@ -50,6 +50,7 @@ const NAV_ITEMS = [
   { key: 'customers', label: 'Customers', icon: 'customers' },
   { divider: true },
   { key: 'control-center', label: 'Operations', icon: 'lab', ownerOnly: true },
+  { key: 'sync-report', label: 'Feed Sync', icon: 'products', href: '/html/admin/sync-report.html', ownerOnly: true },
   { key: 'contact-emails', label: 'Settings', icon: 'settings', ownerOnly: true },
 ];
 
@@ -106,9 +107,10 @@ function renderSidebar() {
       html += `<div class="admin-nav-section"><div class="admin-nav-section__label">${esc(item.section)}</div></div>`;
       continue;
     }
+    const navHref = item.href || `#${item.key}`;
     html += `
       <div class="admin-nav-section">
-        <a href="#${item.key}" class="admin-nav-item" data-nav="${item.key}" data-tooltip="${esc(item.label)}">
+        <a href="${esc(navHref)}" class="admin-nav-item" data-nav="${item.key}" data-tooltip="${esc(item.label)}">
           ${icon(item.icon)}
           <span class="admin-nav-label">${esc(item.label)}</span>
         </a>

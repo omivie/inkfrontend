@@ -722,7 +722,30 @@
 }
 
 .product-card__stock--contact-us {
-    color: var(--color-warning, #f59e0b);
+    color: var(--color-success, #16a34a);
+    font-weight: 600;
+}
+
+/* Prominent stock banner for contact-us products */
+.product-card__stock-banner {
+    display: block;
+    font-size: 0.75rem;
+    font-weight: 600;
+    padding: 4px 8px;
+    border-radius: 4px;
+    text-align: center;
+    margin-top: 2px;
+}
+
+.product-card__stock-banner--contact-us {
+    color: var(--color-success, #16a34a);
+    background: rgba(22, 163, 74, 0.08);
+}
+
+/* Contact button in product card */
+.product-card__contact-btn {
+    text-decoration: none;
+    text-align: center;
 }
 
 /* Footer: color + stock row, then price + button row */

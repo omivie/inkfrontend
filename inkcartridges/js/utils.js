@@ -271,6 +271,39 @@ function storageUrl(path) {
     return `${baseUrl}/storage/v1/object/public/public-assets/${path}`;
 }
 
+/**
+ * Route an image through the backend optimization API.
+ * Returns a URL that serves the image as WebP at the requested width,
+ * with immutable caching (1 year) and in-memory server cache.
+ *
+ * @param {string} path  - Relative Supabase path or full URL
+ * @param {number} width - Target width in pixels (1-1200, default 400)
+ * @param {string} format - "webp", "png", or "jpeg" (default "webp")
+ * @returns {string} Optimized image URL via /api/images/optimize
+ */
+function optimizedImageUrl(path, width = 400, format = 'webp') {
+    if (!path) return '/assets/images/placeholder-product.svg';
+    if (path.startsWith('/')) return path; // local asset, skip
+    const apiUrl = typeof Config !== 'undefined' ? Config.API_URL : '';
+    const encoded = encodeURIComponent(path);
+    return `${apiUrl}/api/images/optimize?url=${encoded}&w=${width}&format=${format}`;
+}
+
+/**
+ * Generate an HTML srcset attribute value for responsive images.
+ * Uses the backend image optimization API at multiple widths.
+ *
+ * @param {string} path   - Relative Supabase path or full URL
+ * @param {number[]} widths - Array of widths (default [200, 400, 800])
+ * @returns {string} srcset value, e.g. "url 200w, url 400w, url 800w"
+ */
+function imageSrcset(path, widths = [200, 400, 800]) {
+    if (!path || path.startsWith('/')) return '';
+    return widths
+        .map(w => `${optimizedImageUrl(path, w)} ${w}w`)
+        .join(', ');
+}
+
 
 /**
  * DEBUG LOGGER

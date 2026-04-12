@@ -2445,31 +2445,28 @@
             return false;
         },
 
-        // Sort products: singles by color first, then value packs at the end
+        // Sort products: group by yield (standard → high → super high), then color order
         sortProducts(products) {
-            const packOrder = { single: 0, value_pack: 1, multipack: 2 };
             const colorOrder = ['black', 'photo black', 'matte black', 'cyan', 'light cyan',
                                'magenta', 'light magenta', 'yellow', 'red', 'blue', 'green',
                                'gray', 'grey', 'light gray', 'light grey', 'cmy', 'kcmy', 'cmyk'];
-            const sizeOrder = (name) => {
-                const n = (name || '').toLowerCase();
+            const yieldOrder = (product) => {
+                const n = (product.name || '').toLowerCase();
                 if (n.includes('xxl') || n.includes('super high')) return 2;
                 if (n.includes('xl') || n.includes('high yield') || /\bhy\b/.test(n)) return 1;
+                // SKU-based: Canon CART H-series (e.g. CART069HK, CART069H-CMY)
+                const sku = (product.sku || '').toUpperCase();
+                if (/CART\d{3,}H(?=[A-Z]|-)/.test(sku)) return 1;
                 return 0;
             };
 
             return products.sort((a, b) => {
-                // 1. Pack type: single → value_pack → multipack
-                const pa = packOrder[a.pack_type] ?? (this.isValuePack(a) ? 1 : 0);
-                const pb = packOrder[b.pack_type] ?? (this.isValuePack(b) ? 1 : 0);
-                if (pa !== pb) return pa - pb;
+                // 1. Yield tier: Standard → High Yield → XXL
+                const ya = yieldOrder(a);
+                const yb = yieldOrder(b);
+                if (ya !== yb) return ya - yb;
 
-                // 2. Size variant: Standard → XL → XXL (group by size first)
-                const sa = sizeOrder(a.name);
-                const sb = sizeOrder(b.name);
-                if (sa !== sb) return sa - sb;
-
-                // 3. Color order within same size group
+                // 2. Color order (CMY/KCMY naturally sort after singles)
                 const ca = colorOrder.indexOf((a.color || '').toLowerCase());
                 const cb = colorOrder.indexOf((b.color || '').toLowerCase());
                 const oa = ca === -1 ? 999 : ca;
@@ -2550,25 +2547,33 @@
                     <div class="product-card__content">
                         <h3 class="product-card__title" title="${Security.escapeAttr(displayName)}">${Security.escapeHtml(displayName)}</h3>
                         ${product.compare_price && product.compare_price > price ? `<span class="product-card__savings">Save ${formatPrice(product.compare_price - price)}</span>` : ''}
-                        ${product.retail_price != null && product.retail_price >= 100 ? '<span class="product-card__free-shipping">FREE SHIPPING</span>' : ''}
+                        ${stockStatus.class === 'contact-us'
+                            ? `<span class="product-card__stock-banner product-card__stock-banner--contact-us">Contact Us for Stock Inquiry</span>`
+                            : (product.retail_price != null && product.retail_price >= 100 ? '<span class="product-card__free-shipping">FREE SHIPPING</span>' : '')}
                         <div class="product-card__footer">
                             <div class="product-card__footer-row">
                                 ${color ? `<span class="product-card__color">${Security.escapeHtml(color)}</span>` : '<span></span>'}
-                                <span class="product-card__stock product-card__stock--${stockStatus.class}">
+                                ${stockStatus.class !== 'contact-us' ? `<span class="product-card__stock product-card__stock--${stockStatus.class}">
                                     ${stockStatus.text}
-                                </span>
+                                </span>` : ''}
                             </div>
                             <div class="product-card__footer-row">
                                 <div class="product-card__pricing">
                                     <span class="product-card__price">${formatPrice(price)}</span>
                                     ${product.compare_price && product.compare_price > price ? ` <span class="product-card__compare-price">${formatPrice(product.compare_price)}</span>` : ''}
                                 </div>
+                                ${stockStatus.class === 'contact-us' ? `
+                                <a href="/html/contact/" class="btn btn--primary btn--sm product-card__cart-btn product-card__contact-btn"
+                                   data-product-id="${product.id}"
+                                   aria-label="Contact us about ${Security.escapeAttr(displayName)}">
+                                    Contact Us
+                                </a>` : `
                                 <button class="btn btn--primary btn--sm product-card__cart-btn"
                                         data-product-id="${product.id}"
-                                        aria-label="Add ${displayName} to cart"
+                                        aria-label="Add ${Security.escapeAttr(displayName)} to cart"
                                         ${!inStock ? 'disabled' : ''}>
-                                    ${stockStatus.class === 'contact-us' ? 'Contact Us' : 'Add to Cart'}
-                                </button>
+                                    Add to Cart
+                                </button>`}
                             </div>
                         </div>
                     </div>
@@ -2592,13 +2597,20 @@
                 </button>
             `;
 
-            // Add cart button event listener
+            // Add cart button event listener (skip for contact-us links)
             const cartBtn = card.querySelector('.product-card__cart-btn');
-            cartBtn.addEventListener('click', async (e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                await this.addToCart(product, cartBtn);
-            });
+            if (cartBtn && !cartBtn.classList.contains('product-card__contact-btn')) {
+                cartBtn.addEventListener('click', async (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    await this.addToCart(product, cartBtn);
+                });
+            } else if (cartBtn) {
+                // Contact-us link — stop propagation so the card link doesn't intercept
+                cartBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                });
+            }
 
             return card;
         },

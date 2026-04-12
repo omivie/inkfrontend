@@ -744,7 +744,9 @@ function createSmartSearch() {
                         + '</div>'
                         + '<div class="product-card__footer-row">'
                             + (price != null ? '<p class="product-card__price">' + formatPrice(price) + '</p>' : '')
-                            + '<button type="button" class="smart-search__add-to-cart" data-index="' + index + '"' + (stockInfo.class !== 'in-stock' ? ' disabled' : '') + '>' + (stockInfo.class === 'contact-us' ? 'Contact Us' : 'Add to Cart') + '</button>'
+                            + (stockInfo.class === 'contact-us'
+                                ? '<a href="/html/contact/" class="smart-search__add-to-cart smart-search__contact-btn" data-index="' + index + '">Contact Us</a>'
+                                : '<button type="button" class="smart-search__add-to-cart" data-index="' + index + '"' + (stockInfo.class !== 'in-stock' ? ' disabled' : '') + '>Add to Cart</button>')
                         + '</div>'
                     + '</div>'
                 + '</div>'

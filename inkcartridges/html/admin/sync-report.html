@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="en-NZ">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <meta name="description" content="Feed Sync Report - InkCartridges.co.nz Admin">
+    <meta name="robots" content="noindex, nofollow">
+    <link rel="icon" type="image/svg+xml" href="/assets/icons/favicon.svg">
+    <title>Feed Sync Report | InkCartridges.co.nz Admin</title>
+    <link rel="stylesheet" href="/css/base.css">
+    <link rel="stylesheet" href="/css/layout.css">
+    <link rel="stylesheet" href="/css/components.css">
+    <link rel="stylesheet" href="/css/modern-effects.css">
+    <link rel="stylesheet" href="/css/admin.css">
+    <style>
+        .admin-page-content { padding: var(--spacing-6); width: 100%; box-sizing: border-box; }
+
+        /* Summary Cards */
+        .sync-summary { display: grid; grid-template-columns: repeat(5, 1fr); gap: var(--spacing-4); margin-bottom: var(--spacing-6); }
+        .sync-summary__card { background: var(--color-background); border-radius: var(--radius-lg); border: 1px solid var(--color-border); padding: var(--spacing-5); text-align: center; }
+        .sync-summary__value { font-size: var(--font-size-2xl); font-weight: var(--font-weight-bold); margin-bottom: var(--spacing-1); }
+        .sync-summary__label { font-size: var(--font-size-sm); color: var(--color-text-muted); }
+        .sync-summary__card--added .sync-summary__value { color: #059669; }
+        .sync-summary__card--updated .sync-summary__value { color: #2563EB; }
+        .sync-summary__card--removed .sync-summary__value { color: var(--magenta-primary, #dc2626); }
+        .sync-summary__card--high { border-color: var(--yellow-primary, #f59e0b); }
+        .sync-summary__card--high .sync-summary__value { color: var(--yellow-dark, #b45309); }
+        .sync-summary__card--auto .sync-summary__value { color: #6b7280; }
+
+        /* Filter Bar */
+        .sync-filters { display: flex; gap: var(--spacing-3); margin-bottom: var(--spacing-5); flex-wrap: wrap; align-items: center; }
+        .sync-filters select { padding: var(--spacing-2) var(--spacing-3); border: 1px solid var(--color-border); border-radius: var(--radius-md); background: var(--color-background); font-size: var(--font-size-sm); cursor: pointer; }
+
+        /* Action Bar */
+        .sync-actions { display: flex; gap: var(--spacing-3); margin-bottom: var(--spacing-5); align-items: center; }
+        .sync-actions__count { font-size: var(--font-size-sm); color: var(--color-text-muted); margin-left: auto; }
+
+        /* Table */
+        .sync-table { width: 100%; border-collapse: collapse; background: var(--color-background); border-radius: var(--radius-lg); border: 1px solid var(--color-border); overflow: hidden; }
+        .sync-table th, .sync-table td { padding: var(--spacing-3) var(--spacing-4); text-align: left; border-bottom: 1px solid var(--color-border-light); }
+        .sync-table th { font-size: var(--font-size-xs); font-weight: var(--font-weight-semibold); color: var(--color-text-muted); text-transform: uppercase; letter-spacing: var(--letter-spacing-wide); background: var(--color-background-alt); }
+        .sync-table tbody tr:hover { background: var(--color-background-alt); }
+        .sync-table th:first-child { width: 40px; }
+
+        /* Priority Badges */
+        .priority-badge { display: inline-flex; align-items: center; gap: 4px; padding: 3px 10px; border-radius: var(--radius-full); font-size: var(--font-size-xs); font-weight: var(--font-weight-medium); }
+        .priority-badge--red { background: #FEE2E2; color: #DC2626; }
+        .priority-badge--orange { background: #FFF7ED; color: #EA580C; }
+        .priority-badge--yellow { background: #FFFBEB; color: #B45309; }
+        .priority-badge--gray { background: var(--color-background-alt); color: var(--color-text-muted); }
+        .priority-badge--green { background: #D1FAE5; color: #059669; }
+
+        /* Action Badge */
+        .action-badge { display: inline-flex; padding: 2px 8px; border-radius: var(--radius-sm); font-size: var(--font-size-xs); font-weight: var(--font-weight-semibold); }
+        .action-badge--add { background: #D1FAE5; color: #059669; }
+        .action-badge--update { background: #DBEAFE; color: #2563EB; }
+        .action-badge--remove { background: #FEE2E2; color: #DC2626; }
+
+        /* Diff View */
+        .sync-diff { font-size: var(--font-size-xs); max-width: 300px; }
+        .sync-diff__old { color: #DC2626; text-decoration: line-through; }
+        .sync-diff__new { color: #059669; }
+
+        /* Import Info */
+        .import-info { background: var(--color-background-alt); border-radius: var(--radius-md); padding: var(--spacing-3) var(--spacing-4); margin-bottom: var(--spacing-5); font-size: var(--font-size-sm); display: flex; gap: var(--spacing-4); align-items: center; flex-wrap: wrap; }
+        .import-info__item { display: flex; align-items: center; gap: var(--spacing-2); }
+        .import-info__label { color: var(--color-text-muted); }
+
+        /* Empty State */
+        .sync-empty { text-align: center; padding: var(--spacing-12); color: var(--color-text-muted); }
+        .sync-empty__icon { margin-bottom: var(--spacing-4); opacity: 0.4; }
+        .sync-empty__title { font-size: var(--font-size-lg); font-weight: var(--font-weight-semibold); margin-bottom: var(--spacing-2); }
+
+        /* Pagination */
+        .sync-pagination { display: flex; justify-content: center; gap: var(--spacing-2); margin-top: var(--spacing-5); }
+        .sync-pagination button { padding: var(--spacing-2) var(--spacing-3); border: 1px solid var(--color-border); border-radius: var(--radius-md); background: var(--color-background); font-size: var(--font-size-sm); cursor: pointer; }
+        .sync-pagination button:disabled { opacity: 0.4; cursor: not-allowed; }
+        .sync-pagination button.active { background: var(--cyan-primary); color: white; border-color: var(--cyan-primary); }
+
+        /* Responsive */
+        @media (max-width: 1200px) {
+            .sync-summary { grid-template-columns: repeat(3, 1fr); }
+        }
+        @media (max-width: 768px) {
+            .sync-summary { grid-template-columns: repeat(2, 1fr); }
+            .sync-filters { flex-direction: column; }
+        }
+    </style>
+</head>
+<body class="admin-body">
+    <script defer src="/js/admin-theme-init.js"></script>
+    <aside class="admin-sidebar">
+        <div class="admin-sidebar__logo">
+            <a href="/html/admin/index.html">
+                <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M6 9V2h12v7"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/>
+                </svg>
+                <span>InkCartridges</span>
+            </a>
+        </div>
+        <nav class="admin-nav"></nav>
+        <div class="admin-sidebar__user">
+            <div class="admin-sidebar__avatar" id="admin-avatar">A</div>
+            <div class="admin-sidebar__user-info">
+                <div class="admin-sidebar__user-name" id="admin-name">Admin</div>
+                <div class="admin-sidebar__user-role" id="admin-email">admin@example.com</div>
+            </div>
+        </div>
+        <div class="admin-sidebar__store-link">
+            <a href="/">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+                <span>View Store</span>
+            </a>
+        </div>
+    </aside>
+
+    <main class="admin-main">
+        <header class="admin-header" style="background: var(--color-background); border-bottom: 1px solid var(--color-border); padding: var(--spacing-4) var(--spacing-6); display: flex; justify-content: space-between; align-items: center;">
+            <div>
+                <h1 style="font-size: var(--font-size-xl); font-weight: var(--font-weight-bold); margin: 0;">Feed Sync Report</h1>
+                <p style="font-size: var(--font-size-sm); color: var(--color-text-muted); margin: var(--spacing-1) 0 0;">Review product changes from daily feed imports</p>
+            </div>
+            <button class="btn btn--secondary btn--sm" id="refresh-btn" title="Reload report">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+                Refresh
+            </button>
+        </header>
+
+        <div class="admin-page-content">
+            <!-- Import Run Info -->
+            <div class="import-info" id="import-info" style="display: none;">
+                <div class="import-info__item">
+                    <span class="import-info__label">Last import:</span>
+                    <strong id="import-script"></strong>
+                </div>
+                <div class="import-info__item">
+                    <span class="import-info__label">Status:</span>
+                    <span id="import-status"></span>
+                </div>
+                <div class="import-info__item">
+                    <span class="import-info__label">Finished:</span>
+                    <span id="import-time"></span>
+                </div>
+                <div class="import-info__item">
+                    <span class="import-info__label">Products processed:</span>
+                    <span id="import-counts"></span>
+                </div>
+            </div>
+
+            <!-- Summary Cards -->
+            <div class="sync-summary" id="sync-summary">
+                <div class="sync-summary__card sync-summary__card--added">
+                    <div class="sync-summary__value" id="summary-added">-</div>
+                    <div class="sync-summary__label">Added</div>
+                </div>
+                <div class="sync-summary__card sync-summary__card--updated">
+                    <div class="sync-summary__value" id="summary-updated">-</div>
+                    <div class="sync-summary__label">Updated</div>
+                </div>
+                <div class="sync-summary__card sync-summary__card--removed">
+                    <div class="sync-summary__value" id="summary-removed">-</div>
+                    <div class="sync-summary__label">Removed</div>
+                </div>
+                <div class="sync-summary__card sync-summary__card--high" id="summary-high-card">
+                    <div class="sync-summary__value" id="summary-high">-</div>
+                    <div class="sync-summary__label">High Priority</div>
+                </div>
+                <div class="sync-summary__card sync-summary__card--auto">
+                    <div class="sync-summary__value" id="summary-auto">-</div>
+                    <div class="sync-summary__label">Auto-Approved</div>
+                </div>
+            </div>
+
+            <!-- Filters -->
+            <div class="sync-filters">
+                <select id="filter-action">
+                    <option value="">All Actions</option>
+                    <option value="ADD">Added</option>
+                    <option value="UPDATE">Updated</option>
+                    <option value="REMOVE">Removed</option>
+                </select>
+                <select id="filter-priority">
+                    <option value="">All Priority</option>
+                    <option value="high">High Priority</option>
+                    <option value="normal">Normal</option>
+                </select>
+                <select id="filter-source">
+                    <option value="">All Sources</option>
+                    <option value="genuine">Genuine</option>
+                    <option value="compatible">Compatible</option>
+                </select>
+            </div>
+
+            <!-- Actions -->
+            <div class="sync-actions">
+                <button class="btn btn--primary btn--sm" id="publish-selected-btn" disabled>
+                    Publish Selected (<span id="selected-count">0</span>)
+                </button>
+                <button class="btn btn--secondary btn--sm" id="select-all-normal-btn">
+                    Select All Normal
+                </button>
+                <div class="sync-actions__count" id="items-count"></div>
+            </div>
+
+            <!-- Items Table -->
+            <table class="sync-table" id="sync-table">
+                <thead>
+                    <tr>
+                        <th><input type="checkbox" id="select-all-checkbox" title="Select all"></th>
+                        <th>SKU</th>
+                        <th>Source</th>
+                        <th>Action</th>
+                        <th>Priority</th>
+                        <th>Details</th>
+                        <th>Status</th>
+                    </tr>
+                </thead>
+                <tbody id="sync-tbody">
+                </tbody>
+            </table>
+
+            <!-- Empty State -->
+            <div class="sync-empty" id="sync-empty" style="display: none;">
+                <div class="sync-empty__icon">
+                    <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M9 5H2v7l6.29 6.29c.94.94 2.48.94 3.42 0l3.58-3.58c.94-.94.94-2.48 0-3.42L9 5Z"/><path d="M6 9.01V9"/></svg>
+                </div>
+                <div class="sync-empty__title">No sync items</div>
+                <p>No product changes match the current filters.</p>
+            </div>
+
+            <!-- Pagination -->
+            <div class="sync-pagination" id="sync-pagination" style="display: none;"></div>
+        </div>
+    </main>
+
+    <script defer src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.98.0" integrity="sha384-Sm2s7OXxsAMTyJ4iIyRBgVpeGUvMPk2lRQnnZhE78Wej7oggIoolKt+SCt0XJbUB" crossorigin="anonymous"></script>
+    <script defer src="/js/config.js"></script>
+    <script defer src="/js/utils.js"></script>
+    <script defer src="/js/api.js"></script>
+    <script defer src="/js/auth.js"></script>
+    <script defer src="/js/admin-nav.js"></script>
+    <script defer src="/js/admin.js"></script>
+    <script defer src="/js/admin/sync-report-page.js"></script>
+    <script defer src="/js/modern-effects.js"></script>
+</body>
+</html>

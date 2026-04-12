@@ -742,8 +742,47 @@
                 }
             });
 
+            // Guest prefill: when an unauthenticated user enters their email,
+            // try to autofill their shipping address from previous guest orders.
+            const emailField = document.getElementById('email');
+            if (emailField) {
+                emailField.addEventListener('blur', () => this.tryGuestPrefill(emailField.value));
+            }
+
             // Coupon code handler
             this.setupCouponHandler();
+        },
+
+        /**
+         * For returning guests — fetch saved name/address from shadow_accounts
+         * and fill the shipping form. Non-blocking; fails silently.
+         */
+        async tryGuestPrefill(email) {
+            if (!email || !email.includes('@')) return;
+            // Only for guests — authenticated users already get profile prefill
+            if (typeof Auth !== 'undefined' && Auth.isAuthenticated()) return;
+            // Don't overwrite if user already filled address fields
+            const addr1 = document.getElementById('address1');
+            if (addr1 && addr1.value.trim()) return;
+
+            try {
+                const res = await API.guestPrefill(email);
+                if (!res?.ok || !res?.data) return;
+                const d = res.data;
+                this.fillAddressFields({
+                    first_name: d.first_name,
+                    last_name: d.last_name,
+                    recipient_name: d.recipient_name,
+                    address_line1: d.address_line1,
+                    address_line2: d.address_line2,
+                    city: d.city,
+                    region: d.region,
+                    postal_code: d.postal_code,
+                });
+                DebugLog.log('Guest prefill: address autofilled from previous order');
+            } catch {
+                // Non-blocking — guest fills in manually
+            }
         },
 
         // Accordion: 2 steps (Contact, Shipping). Sections only change on explicit clicks.
@@ -1587,38 +1626,76 @@
                 currentSuggestions = [];
             };
 
-            const fillFromDetails = async (placeId) => {
+            // Fill address fields from a details response (shared by both providers)
+            const applyAddressDetails = (d) => {
+                const setField = (id, value) => {
+                    const el = document.getElementById(id);
+                    if (!el) return;
+                    el.value = value || '';
+                    el.dispatchEvent(new Event('input', { bubbles: true }));
+                    el.dispatchEvent(new Event('change', { bubbles: true }));
+                };
+
+                setField(fieldMap.address1Id, d.address_line1);
+                setField(fieldMap.address2Id, d.address_line2);
+                setField(fieldMap.cityId, d.city);
+                setField(fieldMap.postcodeId, d.postal_code);
+
+                if (fieldMap.regionId && d.region) {
+                    const regionEl = document.getElementById(fieldMap.regionId);
+                    if (regionEl) {
+                        regionEl.value = this._normalizeRegion(d.region);
+                        regionEl.dispatchEvent(new Event('change', { bubbles: true }));
+                    }
+                }
+
+                this.updateShippingCost?.();
+            };
+
+            // Fill from Google Places details
+            const fillFromGoogleDetails = async (placeId) => {
                 try {
                     const res = await fetch(`${Config.API_URL}/api/address/details?place_id=${encodeURIComponent(placeId)}`);
                     const json = await res.json();
-                    if (!json.ok) return;
-                    const d = json.data;
-
-                    const setField = (id, value) => {
-                        const el = document.getElementById(id);
-                        if (!el) return;
-                        el.value = value || '';
-                        el.dispatchEvent(new Event('input', { bubbles: true }));
-                        el.dispatchEvent(new Event('change', { bubbles: true }));
-                    };
-
-                    setField(fieldMap.address1Id, d.address_line1);
-                    setField(fieldMap.address2Id, d.address_line2);
-                    setField(fieldMap.cityId, d.city);
-                    setField(fieldMap.postcodeId, d.postal_code);
-
-                    if (fieldMap.regionId && d.region) {
-                        const regionEl = document.getElementById(fieldMap.regionId);
-                        if (regionEl) {
-                            regionEl.value = this._normalizeRegion(d.region);
-                            regionEl.dispatchEvent(new Event('change', { bubbles: true }));
-                        }
-                    }
-
-                    this.updateShippingCost?.();
+                    if (json.ok && json.data) applyAddressDetails(json.data);
                 } catch (e) {
                     // Silently fail — user can still type manually
                 }
+            };
+
+            // Fill from NZ Post details
+            const fillFromNzpostDetails = async (dpid) => {
+                try {
+                    const res = await API.nzpostDetails(dpid);
+                    if (res.ok && res.data) applyAddressDetails(res.data);
+                } catch (e) {
+                    // Silently fail — user can still type manually
+                }
+            };
+
+            // Render suggestions in the dropdown
+            const renderSuggestions = (suggestions) => {
+                currentSuggestions = suggestions;
+                dropdown.innerHTML = '';
+                suggestions.forEach((suggestion) => {
+                    const li = document.createElement('li');
+                    li.className = 'address-autocomplete__option';
+                    li.setAttribute('role', 'option');
+                    li.setAttribute('tabindex', '-1');
+                    li.textContent = suggestion.label;
+                    li.addEventListener('mousedown', (e) => {
+                        e.preventDefault();
+                        input.value = suggestion.label;
+                        hideSuggestions();
+                        if (suggestion.provider === 'nzpost') {
+                            fillFromNzpostDetails(suggestion.id);
+                        } else {
+                            fillFromGoogleDetails(suggestion.id);
+                        }
+                    });
+                    dropdown.appendChild(li);
+                });
+                dropdown.hidden = false;
             };
 
             input.addEventListener('input', () => {
@@ -1630,29 +1707,39 @@
                 }
                 debounceTimer = setTimeout(async () => {
                     try {
-                        const res = await fetch(`${Config.API_URL}/api/address/autocomplete?q=${encodeURIComponent(q)}`);
-                        const json = await res.json();
-                        if (!json.ok || !json.data?.length) {
+                        // Try NZ Post first (more accurate for NZ addresses)
+                        let suggestions = [];
+                        try {
+                            const nzRes = await API.nzpostSuggest(q);
+                            if (nzRes.ok && nzRes.data?.length) {
+                                suggestions = nzRes.data.map(s => ({
+                                    id: s.dpid,
+                                    label: s.full_address || s.description,
+                                    provider: 'nzpost'
+                                }));
+                            }
+                        } catch {
+                            // NZ Post unavailable — fall through to Google Places
+                        }
+
+                        // Fall back to Google Places if NZ Post returned nothing
+                        if (!suggestions.length) {
+                            const res = await fetch(`${Config.API_URL}/api/address/autocomplete?q=${encodeURIComponent(q)}`);
+                            const json = await res.json();
+                            if (json.ok && json.data?.length) {
+                                suggestions = json.data.map(s => ({
+                                    id: s.place_id,
+                                    label: s.description,
+                                    provider: 'google'
+                                }));
+                            }
+                        }
+
+                        if (!suggestions.length) {
                             hideSuggestions();
                             return;
                         }
-                        currentSuggestions = json.data;
-                        dropdown.innerHTML = '';
-                        json.data.forEach((suggestion) => {
-                            const li = document.createElement('li');
-                            li.className = 'address-autocomplete__option';
-                            li.setAttribute('role', 'option');
-                            li.setAttribute('tabindex', '-1');
-                            li.textContent = suggestion.description;
-                            li.addEventListener('mousedown', (e) => {
-                                e.preventDefault(); // prevent input blur before click registers
-                                input.value = suggestion.description;
-                                hideSuggestions();
-                                fillFromDetails(suggestion.place_id);
-                            });
-                            dropdown.appendChild(li);
-                        });
-                        dropdown.hidden = false;
+                        renderSuggestions(suggestions);
                     } catch (e) {
                         hideSuggestions();
                     }

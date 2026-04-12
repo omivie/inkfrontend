@@ -680,6 +680,45 @@ const API = {
     },
 
     // =========================================================================
+    // CHECKOUT HELPERS
+    // =========================================================================
+
+    /**
+     * Prefill returning guest's name/address from shadow_accounts.
+     * Non-blocking — returns null on failure so checkout continues normally.
+     * @param {string} email - Guest email
+     * @returns {Promise<object|null>} { first_name, last_name, address_line1, city, ... } or null
+     */
+    async guestPrefill(email) {
+        try {
+            return await this.post('/api/checkout/guest-prefill', { email });
+        } catch {
+            return null;
+        }
+    },
+
+    // =========================================================================
+    // ADDRESS AUTOCOMPLETE
+    // =========================================================================
+
+    /**
+     * NZ Post address suggestions (primary for NZ addresses)
+     * @param {string} query - Address search text
+     * @param {number} max - Max results (default 5)
+     */
+    async nzpostSuggest(query, max = 5) {
+        return this.get(`/api/address/nzpost/suggest?q=${encodeURIComponent(query)}&max=${max}`);
+    },
+
+    /**
+     * NZ Post full address details by DPID
+     * @param {string} dpid - NZ Post DPID identifier
+     */
+    async nzpostDetails(dpid) {
+        return this.get(`/api/address/nzpost/details?dpid=${encodeURIComponent(dpid)}`);
+    },
+
+    // =========================================================================
     // ORDERS (requires authentication)
     // =========================================================================
 
