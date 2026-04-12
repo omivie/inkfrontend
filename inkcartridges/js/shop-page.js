@@ -2155,9 +2155,11 @@
 
         async loadSearchResults(navVersion) {
             this.showLoading(true);
+            console.log('[SEARCH-DEBUG] start nv=' + navVersion + ' cur=' + this.navigationVersion);
 
             try {
                 const searchQuery = this.state.search;
+                console.log('[SEARCH-DEBUG] query=' + searchQuery);
 
                 // Detect if this is a product-type keyword (e.g. "ribbon", "toner")
                 const typeDetect = typeof SearchNormalize !== 'undefined'
@@ -2230,6 +2232,7 @@
                     if (navVersion !== undefined && this.navigationVersion !== navVersion) return;
 
                     products = (response.ok && response.data?.products) ? response.data.products : [];
+                    console.log('[SEARCH-DEBUG] smartSearch ok=' + response.ok + ' products=' + products.length + ' nv=' + navVersion + ' cur=' + this.navigationVersion);
 
                     // Filter out irrelevant results where the search term only matches
                     // as a substring of an unrelated word (e.g. "T10" in "Pla-t10-um")
@@ -2255,9 +2258,11 @@
                                 || (nameIncludesPattern ? nameIncludesPattern.test(name) : name.toLowerCase().includes(searchQuery.toLowerCase() + ' '))
                                 || sku.toLowerCase().startsWith(searchQuery.toLowerCase());
                         });
+                        console.log('[SEARCH-DEBUG] filter relevant=' + relevant.length);
                         if (relevant.length > 0) products = relevant;
                     }
 
+                    console.log('[SEARCH-DEBUG] afterFilter products=' + products.length);
                     // If no product results, try searching for printer models
                     if (products.length === 0) {
                         try {
@@ -2347,6 +2352,7 @@
                     }
                 }
 
+                console.log('[SEARCH-DEBUG] preRender products=' + products.length + ' nv=' + navVersion + ' cur=' + this.navigationVersion);
                 if (products.length > 0) {
                     let filteredProducts = products;
 
@@ -2406,10 +2412,13 @@
                         ? `Original ${typeDisplay}Products`
                         : `${brandDisplay}Original Products for "${searchQuery}"`;
 
+                    console.log('[SEARCH-DEBUG] brandDetect=' + detectedBrand + ' filtered=' + filteredProducts.length + ' genuine=' + genuine.length + ' compatible=' + compatible.length);
                     await this.displayProductInfo(filteredProducts, { skipPrinters: true });
 
-                    if (navVersion !== undefined && this.navigationVersion !== navVersion) return;
+                    console.log('[SEARCH-DEBUG] afterDisplayInfo nv=' + navVersion + ' cur=' + this.navigationVersion + ' match=' + (this.navigationVersion === navVersion));
+                    if (navVersion !== undefined && this.navigationVersion !== navVersion) { console.log('[SEARCH-DEBUG] ABORT after displayProductInfo'); return; }
 
+                    console.log('[SEARCH-DEBUG] RENDERING genuine=' + genuine.length + ' compatible=' + compatible.length);
                     this.renderProducts(compatible, this.elements.compatibleProducts, this.elements.compatibleSection, true);
                     this.renderProducts(genuine, this.elements.genuineProducts, this.elements.genuineSection, false);
 
