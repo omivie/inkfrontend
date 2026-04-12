@@ -88,6 +88,7 @@
     { "source": "/([^/]+)-toner-cartridge", "destination": "/html/shop?search=$1", "permanent": true }
   ],
   "rewrites": [
+    { "source": "/api/:path*", "destination": "https://ink-backend-zaeq.onrender.com/api/:path*" },
     { "source": "/business/apply", "destination": "/html/business/apply" },
     { "source": "/ribbon/:sku", "destination": "/html/product" },
     { "source": "/html/product-by-name", "destination": "https://ink-backend-zaeq.onrender.com/html/product-by-name" },

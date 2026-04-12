@@ -7,8 +7,8 @@
  */
 
 const Config = {
-    // Backend API URL - Direct connection (backend has CORS enabled)
-    API_URL: 'https://ink-backend-zaeq.onrender.com',
+    // Backend API URL - Proxied through Vercel rewrites to avoid CORS issues
+    API_URL: '',
 
     // Supabase configuration
     SUPABASE_URL: 'https://lmdlgldjgcanknsjrcxh.supabase.co',
