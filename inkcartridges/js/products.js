@@ -25,6 +25,8 @@ const Products = {
     getProductImageHTML(product) {
         const colorStyle = ProductColors.getProductStyle(product);
         const imageUrl = typeof storageUrl === 'function' ? storageUrl(product.image_url) : product.image_url;
+        const srcsetVal = typeof imageSrcset === 'function' && product.image_url ? imageSrcset(product.image_url) : '';
+        const srcsetHtml = srcsetVal ? ` srcset="${Security.escapeAttr(srcsetVal)}" sizes="(max-width: 480px) 200px, (max-width: 768px) 300px, 400px"` : '';
         if (imageUrl && imageUrl !== '/assets/images/placeholder-product.svg') {
             // Has image URL - use it with error fallback (listeners attached after DOM insertion)
             if (colorStyle) {
@@ -32,7 +34,7 @@ const Products = {
                              alt="${Security.escapeAttr(product.name)}"
                              class="product-card__image"
                              width="200" height="200"
-                             loading="lazy"
+                             loading="lazy"${srcsetHtml}
                              data-fallback="color-block">
                         <div class="product-card__color-block" style="${colorStyle}; display: none;"></div>`;
             } else {
@@ -40,7 +42,7 @@ const Products = {
                              alt="${Security.escapeAttr(product.name)}"
                              class="product-card__image"
                              width="200" height="200"
-                             loading="lazy"
+                             loading="lazy"${srcsetHtml}
                              data-fallback="placeholder">`;
             }
         } else if (colorStyle && product.source === 'compatible') {

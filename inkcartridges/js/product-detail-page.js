@@ -121,7 +121,8 @@
                 category,
                 pageYield,
                 color: p.color || null,
-                image_url: typeof storageUrl === 'function' ? storageUrl(p.image_url) : (p.image_url || '')
+                image_url: typeof storageUrl === 'function' ? storageUrl(p.image_url) : (p.image_url || ''),
+                image_url_raw: p.image_url || ''
             };
         },
 
@@ -413,16 +414,19 @@
             // Product image with color fallback
             const productImageEl = document.getElementById('product-image');
             const colorStyle = ProductColors.getProductStyle(info);
+            // Build srcset for responsive product detail images (400/600/800w)
+            const detailSrcset = typeof imageSrcset === 'function' && info.image_url_raw ? imageSrcset(info.image_url_raw, [400, 600, 800]) : '';
+            const detailSrcsetHtml = detailSrcset ? ` srcset="${Security.escapeAttr(detailSrcset)}" sizes="(max-width: 480px) 400px, (max-width: 768px) 600px, 800px"` : '';
             if (info.image_url) {
                 if (colorStyle) {
                     // Image with color fallback on error
                     productImageEl.innerHTML = `
-                        <img src="${Security.escapeAttr(Security.sanitizeUrl(info.image_url))}" alt="${Security.escapeAttr(info.displayName)}" style="max-width: 100%; height: auto;"
+                        <img src="${Security.escapeAttr(Security.sanitizeUrl(info.image_url))}" alt="${Security.escapeAttr(info.displayName)}"${detailSrcsetHtml} style="max-width: 100%; height: auto;"
                              data-fallback="color-block">
                         <div class="product-gallery__color-block" style="${colorStyle}; display: none;"></div>`;
                 } else {
                     // Image with placeholder fallback
-                    productImageEl.innerHTML = `<img src="${Security.escapeAttr(Security.sanitizeUrl(info.image_url))}" alt="${Security.escapeAttr(info.displayName)}" style="max-width: 100%; height: auto;"
+                    productImageEl.innerHTML = `<img src="${Security.escapeAttr(Security.sanitizeUrl(info.image_url))}" alt="${Security.escapeAttr(info.displayName)}"${detailSrcsetHtml} style="max-width: 100%; height: auto;"
                         data-fallback="placeholder">`;
                 }
 

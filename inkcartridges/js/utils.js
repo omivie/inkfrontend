@@ -255,15 +255,28 @@ function debounce(func, wait = 300) {
 
 /**
  * Resolve a Supabase Storage relative path to a full URL.
- * - Falsy path → placeholder image
- * - Already absolute (http/https) → return as-is
- * - Starts with "/" → local path, return as-is
- * - Otherwise → prepend Supabase Storage public URL
+ * Routes through the backend image optimization API for WebP conversion,
+ * resizing, and immutable caching. Falls back to direct Supabase URL
+ * if Config.API_URL is not available.
  *
  * @param {string} path - Relative or absolute image path
- * @returns {string} Full URL or placeholder
+ * @returns {string} Optimized image URL or placeholder
  */
 function storageUrl(path) {
+    if (!path) return '/assets/images/placeholder-product.svg';
+    if (path.startsWith('/')) return path; // local asset
+    // Route through image optimization API (WebP, cached, resized)
+    return optimizedImageUrl(path, 400);
+}
+
+/**
+ * Get the raw (non-optimized) Supabase Storage URL for an image.
+ * Use this only when you need the original file (e.g. admin image management).
+ *
+ * @param {string} path - Relative or absolute image path
+ * @returns {string} Direct Supabase Storage URL or placeholder
+ */
+function storageUrlRaw(path) {
     if (!path) return '/assets/images/placeholder-product.svg';
     if (path.startsWith('http')) return path;
     if (path.startsWith('/')) return path;
