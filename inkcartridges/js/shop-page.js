@@ -506,14 +506,30 @@
                 box.dataset.brand = brandId;
                 const logoSrc = brand.logo_path || (info && info.logo);
                 const displayName = (info && info.name) || brand.name || brandId;
-                if (logoSrc) {
-                    box.innerHTML = `<img src="${Security.escapeAttr(logoSrc)}" alt="${Security.escapeAttr(displayName)}" class="drilldown-box__logo drilldown-box__logo--${Security.escapeAttr(brandId)}">`;
-                } else {
-                    box.innerHTML = `<span class="drilldown-box__name">${Security.escapeHtml(brand.name || brandId)}</span>`;
-                }
+                const inner = logoSrc
+                    ? `<img src="${Security.escapeAttr(logoSrc)}" alt="${Security.escapeAttr(displayName)}" class="drilldown-box__logo drilldown-box__logo--${Security.escapeAttr(brandId)}">`
+                    : `<span class="drilldown-box__name">${Security.escapeHtml(brand.name || brandId)}</span>`;
+                box.innerHTML = `${inner}<span class="drilldown-box__count" data-count="${Security.escapeAttr(brandId)}" aria-hidden="true"></span>`;
                 box.addEventListener('click', () => this.navigateTo('categories', { brand: brandId }));
                 grid.appendChild(box);
             });
+
+            // Lazy-load product counts per brand (non-blocking, graceful on failure)
+            this._loadBrandCounts(inkBrands);
+        },
+
+        async _loadBrandCounts(brands) {
+            for (const brand of brands) {
+                const brandId = brand.slug || brand.id || '';
+                if (!brandId) continue;
+                try {
+                    const res = await API.getProductCounts({ brand: brandId });
+                    const n = res?.data?.count ?? res?.count;
+                    if (n == null) continue;
+                    const el = this.elements.brandsGrid?.querySelector(`[data-count="${CSS.escape(brandId)}"]`);
+                    if (el) el.textContent = `${n} product${n === 1 ? '' : 's'}`;
+                } catch { /* silent */ }
+            }
         },
 
         async renderRibbonBrands() {
@@ -2463,34 +2479,10 @@
             return false;
         },
 
-        // Sort products: group by yield (standard → high → super high), then color order
+        // Sort products: group by yield (standard → high → super high), then color order.
+        // Delegates to ProductSort (utils.js) so search and shop share one ordering source.
         sortProducts(products) {
-            const colorOrder = ['black', 'photo black', 'matte black', 'cyan', 'light cyan',
-                               'magenta', 'light magenta', 'yellow', 'red', 'blue', 'green',
-                               'gray', 'grey', 'light gray', 'light grey', 'cmy', 'kcmy', 'cmyk'];
-            const yieldOrder = (product) => {
-                const n = (product.name || '').toLowerCase();
-                if (n.includes('xxl') || n.includes('super high')) return 2;
-                if (n.includes('xl') || n.includes('high yield') || /\bhy\b/.test(n)) return 1;
-                // SKU-based: Canon CART H-series (e.g. CART069HK, CART069H-CMY)
-                const sku = (product.sku || '').toUpperCase();
-                if (/CART\d{3,}H(?=[A-Z]|-)/.test(sku)) return 1;
-                return 0;
-            };
-
-            return products.sort((a, b) => {
-                // 1. Yield tier: Standard → High Yield → XXL
-                const ya = yieldOrder(a);
-                const yb = yieldOrder(b);
-                if (ya !== yb) return ya - yb;
-
-                // 2. Color order (CMY/KCMY naturally sort after singles)
-                const ca = colorOrder.indexOf((a.color || '').toLowerCase());
-                const cb = colorOrder.indexOf((b.color || '').toLowerCase());
-                const oa = ca === -1 ? 999 : ca;
-                const ob = cb === -1 ? 999 : cb;
-                return oa - ob;
-            });
+            return ProductSort.byYieldAndColor(products);
         },
 
         renderProducts(products, container, section, isCompatible = false) {

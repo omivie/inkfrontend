@@ -10,8 +10,8 @@
 
 const searchConfig = {
     apiUrl: '/api/search/smart',
-    minChars: 1,
-    debounceMs: 200,
+    minChars: 2,
+    debounceMs: 300,
     maxResults: 100,
     cacheMaxAge: 5 * 60 * 1000,
     cacheMaxSize: 50,
@@ -170,123 +170,195 @@ function createSmartSearch() {
             this._show();
 
             try {
-                // Detect printer model early for parallel compatibility fetch
-                const printerDetection = (typeof SearchNormalize !== 'undefined' && SearchNormalize.detectPrinterModel)
-                    ? SearchNormalize.detectPrinterModel(searchQuery)
-                    : null;
+                // Fire all three sources in parallel so description + printer-compat
+                // ALWAYS participate — not just as zero-result fallbacks.
+                // Gate printer-compat on queries that plausibly name a printer model:
+                // either the detector matches, or the query contains a digit and is ≥ 3 chars.
+                // Prevents generic words ("ink", "toner") from pulling broad compat noise.
+                const detectorHit = (typeof SearchNormalize !== 'undefined' && SearchNormalize.detectPrinterModel)
+                    ? SearchNormalize.detectPrinterModel(searchQuery) : null;
+                const compatLikely = !!detectorHit || (query.length >= 3 && /\d/.test(query));
 
-                let result, compatResult = null;
-
-                if (printerDetection) {
-                    // Fire API search and printer compatibility in parallel
-                    const [apiSettled, compatSettled] = await Promise.allSettled([
-                        this._fetchResults(searchQuery),
-                        this._fetchByPrinterModel(query)
-                    ]);
-                    result = apiSettled.status === 'fulfilled' ? apiSettled.value : null;
-                    compatResult = compatSettled.status === 'fulfilled' ? compatSettled.value : null;
-                } else {
-                    result = await this._fetchResults(searchQuery);
-                }
+                const [apiSettled, descSettled, compatSettled] = await Promise.allSettled([
+                    this._fetchResults(searchQuery),
+                    this._fetchByDescription(searchQuery),
+                    compatLikely ? this._fetchByPrinterModel(query) : Promise.resolve(null)
+                ]);
                 if (query !== this._currentQuery) return;
 
-                // Step 2: If results found (from API and/or compatibility), merge and show
-                const hasApiResults = result && result.products && result.products.length > 0;
-                const hasCompatResults = compatResult && compatResult.products && compatResult.products.length > 0;
+                const apiResult = apiSettled.status === 'fulfilled' ? apiSettled.value : null;
+                const descResult = descSettled.status === 'fulfilled' ? descSettled.value : null;
+                const compatResult = compatSettled.status === 'fulfilled' ? compatSettled.value : null;
 
-                if (hasApiResults || hasCompatResults) {
-                    let finalResult;
-                    if (hasApiResults && hasCompatResults) {
-                        finalResult = this._mergeResults(result.products, compatResult.products);
-                        this._setCache(searchQuery, finalResult);
-                        this._showCorrection(query, compatResult.printerName, 'compatibility');
-                    } else if (hasCompatResults) {
-                        finalResult = compatResult;
-                        this._setCache(searchQuery, finalResult);
+                const sources = [];
+                if (apiResult && apiResult.products && apiResult.products.length) {
+                    sources.push({ tag: 'api', products: apiResult.products });
+                }
+                if (descResult && descResult.products && descResult.products.length) {
+                    sources.push({ tag: 'desc', products: descResult.products });
+                }
+                if (compatResult && compatResult.products && compatResult.products.length) {
+                    sources.push({ tag: 'compat', products: compatResult.products });
+                }
+
+                if (sources.length > 0) {
+                    const merged = this._mergePool(sources);
+                    const scoreMap = this._scorePool(merged.products, merged.sourceMap, searchQuery);
+                    const ordered = (typeof ProductSort !== 'undefined')
+                        ? ProductSort.groupByFamilyScored(merged.products, scoreMap)
+                        : merged.products;
+
+                    const finalResult = { products: ordered, total: apiResult?.total ?? ordered.length };
+                    this._setCache(searchQuery, finalResult);
+
+                    if (compatResult && compatResult.printerName && !(apiResult && apiResult.products.length)) {
                         this._printerModel = compatResult.printerName;
                         this._showCorrection(query, 'compatible products for ' + compatResult.printerName, 'normalize');
-                    } else {
-                        finalResult = result;
-                        this._setCache(searchQuery, finalResult);
-                        if (normalizeResult && normalizeResult.changed) {
-                            this._showCorrection(query, searchQuery, 'normalize');
-                        }
+                    } else if (normalizeResult && normalizeResult.changed) {
+                        this._showCorrection(query, searchQuery, 'normalize');
                     }
                     this._renderResults(finalResult.products, searchQuery, finalResult.total);
                     return;
                 }
 
-                // Step 2b: If normalization changed the query and got 0 results, retry with original
-                if (normalizeResult && normalizeResult.changed) {
-                    result = await this._fetchResults(query);
-                    if (query !== this._currentQuery) return;
+                // --- No-result fallbacks (existing chain) ---
 
-                    if (result && result.products && result.products.length > 0) {
-                        this._setCache(query, result);
-                        this._renderResults(result.products, query, result.total);
+                // Retry with original if normalization changed the query
+                if (normalizeResult && normalizeResult.changed) {
+                    const r = await this._fetchResults(query);
+                    if (query !== this._currentQuery) return;
+                    if (r && r.products && r.products.length > 0) {
+                        const scoreMap = this._scorePool(r.products, new Map(), query);
+                        const ordered = (typeof ProductSort !== 'undefined')
+                            ? ProductSort.groupByFamilyScored(r.products, scoreMap)
+                            : r.products;
+                        const out = { products: ordered, total: r.total };
+                        this._setCache(query, out);
+                        this._renderResults(ordered, query, r.total);
                         return;
                     }
                 }
 
-                // Step 3: No results — try spelling correction
+                // Spelling correction
                 if (typeof SearchNormalize !== 'undefined') {
                     const spellingResult = SearchNormalize.correctSpelling(searchQuery);
                     if (spellingResult.didCorrect) {
-                        result = await this._fetchResults(spellingResult.corrected);
+                        const r = await this._fetchResults(spellingResult.corrected);
                         if (query !== this._currentQuery) return;
-
-                        if (result && result.products && result.products.length > 0) {
+                        if (r && r.products && r.products.length > 0) {
                             this._effectiveQuery = spellingResult.corrected;
-                            this._setCache(spellingResult.corrected, result);
+                            const scoreMap = this._scorePool(r.products, new Map(), spellingResult.corrected);
+                            const ordered = ProductSort.groupByFamilyScored(r.products, scoreMap);
+                            this._setCache(spellingResult.corrected, { products: ordered, total: r.total });
                             this._showCorrection(searchQuery, spellingResult.corrected, 'spelling');
-                            this._renderResults(result.products, spellingResult.corrected, result.total);
+                            this._renderResults(ordered, spellingResult.corrected, r.total);
                             return;
                         }
                     }
 
-                    // Step 4: Try NZ/US spelling alternative
+                    // NZ/US spelling alternative
                     const alt = SearchNormalize.getSpellingAlternative(searchQuery);
                     if (alt) {
-                        result = await this._fetchResults(alt);
+                        const r = await this._fetchResults(alt);
                         if (query !== this._currentQuery) return;
-
-                        if (result && result.products && result.products.length > 0) {
+                        if (r && r.products && r.products.length > 0) {
                             this._effectiveQuery = alt;
-                            this._setCache(alt, result);
+                            const scoreMap = this._scorePool(r.products, new Map(), alt);
+                            const ordered = ProductSort.groupByFamilyScored(r.products, scoreMap);
+                            this._setCache(alt, { products: ordered, total: r.total });
                             this._showCorrection(searchQuery, alt, 'normalize');
-                            this._renderResults(result.products, alt, result.total);
+                            this._renderResults(ordered, alt, r.total);
                             return;
                         }
                     }
                 }
 
-                // Step 5: Try description search via Supabase
-                const descResult = await this._fetchByDescription(searchQuery);
-                if (query !== this._currentQuery) return;
-                if (descResult && descResult.products.length > 0) {
-                    this._setCache(searchQuery, descResult);
-                    this._showCorrection(query, null, 'description');
-                    this._renderResults(descResult.products, searchQuery, descResult.total);
-                    return;
-                }
-
-                // Step 6: Try printer model lookup — find compatible products
-                const printerResult = await this._fetchByPrinterModel(query);
-                if (query !== this._currentQuery) return;
-                if (printerResult && printerResult.products.length > 0) {
-                    this._setCache(query, printerResult);
-                    this._printerModel = printerResult.printerName;
-                    this._showCorrection(query, 'compatible products for ' + printerResult.printerName, 'normalize');
-                    this._renderResults(printerResult.products, query, printerResult.total);
-                    return;
-                }
-
-                // No results from any path
                 this._renderEmpty(query);
             } catch (err) {
                 if (query !== this._currentQuery) return;
                 this._renderError();
             }
+        },
+
+        /**
+         * Merge products from multiple sources (api, description, compat) into one
+         * deduplicated pool. Returns { products, sourceMap } where sourceMap is a
+         * Map<key, Set<sourceTag>> so scoring can weight matches by which field hit.
+         */
+        _mergePool(sources) {
+            const byKey = new Map();
+            const sourceMap = new Map();
+            for (const src of sources) {
+                for (const p of src.products) {
+                    const key = p.sku || p.product_code || p.code || p.id;
+                    if (key == null) continue;
+                    if (!byKey.has(key)) byKey.set(key, p);
+                    if (!sourceMap.has(key)) sourceMap.set(key, new Set());
+                    sourceMap.get(key).add(src.tag);
+                }
+            }
+            return { products: Array.from(byKey.values()), sourceMap };
+        },
+
+        /**
+         * Score each product against the query. Weighted contributions:
+         *   SKU exact = 200, SKU prefix = 120, SKU substring = 80,
+         *   name word-start = 60, name substring = 35,
+         *   brand substring = 10, description substring = 15,
+         *   printer-compat source tag = +25, description source tag = +10,
+         *   in-stock bonus = +5.
+         * Every token contributes independently so "canon 069 magenta" rewards all three.
+         */
+        _scorePool(products, sourceMap, query) {
+            const scores = new Map();
+            const q = (query || '').toLowerCase().trim();
+            if (!q) return scores;
+            const tokens = q.split(/[\s\-_/]+/).filter(t => t.length >= 2);
+            if (tokens.length === 0) tokens.push(q);
+
+            for (const p of products) {
+                const key = p.sku || p.product_code || p.code || p.id;
+                if (key == null) continue;
+                const sku = (p.sku || p.product_code || p.code || '').toLowerCase();
+                const name = (p.name || '').toLowerCase();
+                const brand = (p.brand?.name || p.brand || '').toString().toLowerCase();
+                const desc = (p.description || '').toLowerCase();
+                const compat = (p.compatible_devices_html || '').toLowerCase();
+
+                let score = 0;
+                // Full-query SKU match — strongest signal
+                if (sku && sku === q) score += 200;
+                else if (sku && sku.startsWith(q)) score += 120;
+                else if (sku && sku.includes(q)) score += 80;
+
+                for (const tok of tokens) {
+                    if (!tok) continue;
+                    if (sku) {
+                        if (sku === tok) score += 100;
+                        else if (sku.startsWith(tok)) score += 70;
+                        else if (sku.includes(tok)) score += 45;
+                    }
+                    if (name) {
+                        // word-start match
+                        if (new RegExp('(^|\\s)' + tok.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).test(name)) score += 60;
+                        else if (name.includes(tok)) score += 35;
+                    }
+                    if (brand && brand.includes(tok)) score += 10;
+                    if (desc && desc.includes(tok)) score += 15;
+                    if (compat && compat.includes(tok)) score += 20;
+                }
+
+                const tags = sourceMap.get(key);
+                if (tags) {
+                    if (tags.has('compat')) score += 25;
+                    if (tags.has('desc')) score += 10;
+                    if (tags.has('api')) score += 15;
+                }
+                if (p.in_stock) score += 5;
+
+                scores.set(key, score);
+            }
+            return scores;
         },
 
         async _fetchResults(query) {
@@ -299,7 +371,7 @@ function createSmartSearch() {
                 const response = await API.getProducts({ source: queryLower, limit: searchConfig.maxResults });
                 if (response.ok && response.data) {
                     const data = response.data;
-                    const products = data.products || data || [];
+                    const products = Array.isArray(data.products) ? data.products : [];
                     const total = data.pagination?.total ?? data.total ?? products.length;
                     if (Array.isArray(products) && products.length > 0) {
                         return { products, total };
@@ -320,8 +392,10 @@ function createSmartSearch() {
 
             // Only fetch ribbons for normal searches or ribbon-specific type queries
             const shouldFetchRibbons = !isTypeQuery || typeDetection.fetchRibbons;
+            // GET /api/ribbons does not accept a `search` param per the backend spec;
+            // client-side filter below (lines ~355-361) handles query matching.
             const ribbonParams = shouldFetchRibbons
-                ? (isTypeQuery ? { limit: searchConfig.maxResults } : { search: query, limit: searchConfig.maxResults })
+                ? { limit: searchConfig.maxResults }
                 : null;
 
             // Use smart search for normal text queries (better full-text matching),
@@ -337,7 +411,7 @@ function createSmartSearch() {
             // Collect product results
             if (productRes.status === 'fulfilled' && productRes.value.ok && productRes.value.data) {
                 const data = productRes.value.data;
-                const products = data.products || data || [];
+                const products = Array.isArray(data.products) ? data.products : [];
                 productTotal = data.pagination?.total ?? data.total ?? products.length;
                 if (Array.isArray(products)) allProducts = products;
             }
@@ -406,7 +480,7 @@ function createSmartSearch() {
                         const codeRes = await API.getProducts(codeParams);
                         if (codeRes.ok && codeRes.data) {
                             const data = codeRes.data;
-                            const products = data.products || data || [];
+                            const products = Array.isArray(data.products) ? data.products : [];
                             if (Array.isArray(products) && products.length > 0) {
                                 return { products, total: data.pagination?.total ?? data.total ?? products.length };
                             }
@@ -430,8 +504,7 @@ function createSmartSearch() {
 
                     if (fbProductRes.status === 'fulfilled' && fbProductRes.value.ok && fbProductRes.value.data) {
                         const data = fbProductRes.value.data;
-                        fbProducts = data.products || data || [];
-                        if (!Array.isArray(fbProducts)) fbProducts = [];
+                        fbProducts = Array.isArray(data.products) ? data.products : [];
                     }
 
                     // Merge ribbon results from fallback
@@ -1126,6 +1199,15 @@ function createSmartSearch() {
                     const onScroll = () => this._hide();
                     window.addEventListener('scroll', onScroll, { once: true, passive: true });
                     this._scrollCleanup = () => window.removeEventListener('scroll', onScroll);
+                } else {
+                    // Desktop: lock BOTH html and body overflow. On this site the
+                    // scrolling element is <html>, so locking only body still lets
+                    // wheel events over the backdrop scroll the page.
+                    this._prevHtmlOverflow = document.documentElement.style.overflow;
+                    this._prevBodyOverflow = document.body.style.overflow;
+                    this._lockedScrollY = window.scrollY;
+                    document.documentElement.style.overflow = 'hidden';
+                    document.body.style.overflow = 'hidden';
                 }
             }
         },
@@ -1145,6 +1227,16 @@ function createSmartSearch() {
             if (this._scrollCleanup) {
                 this._scrollCleanup();
                 this._scrollCleanup = null;
+            }
+
+            // Restore html + body scroll if we locked them
+            if (this._prevHtmlOverflow !== undefined) {
+                document.documentElement.style.overflow = this._prevHtmlOverflow;
+                document.body.style.overflow = this._prevBodyOverflow;
+                if (this._lockedScrollY != null) window.scrollTo(0, this._lockedScrollY);
+                this._prevHtmlOverflow = undefined;
+                this._prevBodyOverflow = undefined;
+                this._lockedScrollY = null;
             }
         },
 

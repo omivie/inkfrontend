@@ -718,6 +718,20 @@ const API = {
         return this.get(`/api/address/nzpost/details?dpid=${encodeURIComponent(dpid)}`);
     },
 
+    /**
+     * Google Places address autocomplete (fallback when NZ Post is unavailable)
+     */
+    async addressAutocomplete(query) {
+        return this.get(`/api/address/autocomplete?q=${encodeURIComponent(query)}`);
+    },
+
+    /**
+     * Google Place details by place_id
+     */
+    async addressDetails(placeId) {
+        return this.get(`/api/address/details?place_id=${encodeURIComponent(placeId)}`);
+    },
+
     // =========================================================================
     // ORDERS (requires authentication)
     // =========================================================================
@@ -1346,6 +1360,14 @@ const API = {
     },
 
     /**
+     * Get aggregate review summary for a product (average_rating, review_count, distribution).
+     * Separate endpoint from the list — not embedded in getProductReviews.
+     */
+    async getReviewSummary(productId) {
+        return this.get(`/api/products/${productId}/reviews/summary`);
+    },
+
+    /**
      * Get rating summary for a product
      * @param {string} productId - Product UUID
      */
@@ -1564,6 +1586,35 @@ const API = {
             throw new Error(msg);
         }
         return data;
+    },
+
+    // =========================================================================
+    // Customer P2 wrappers — waitlist, product counts, product series
+    // =========================================================================
+
+    /** Back-in-stock waitlist: subscribe. Auth optional (guest passes {email}). */
+    async waitlistSubscribe(sku, body = {}) {
+        return this.post(`/api/products/${encodeURIComponent(sku)}/waitlist`, body);
+    },
+    async waitlistUnsubscribe(sku) {
+        return this.delete(`/api/products/${encodeURIComponent(sku)}/waitlist`);
+    },
+    async waitlistStatus(sku) {
+        return this.get(`/api/products/${encodeURIComponent(sku)}/waitlist/status`);
+    },
+    async getAccountWaitlist() {
+        return this.get('/api/account/waitlist');
+    },
+
+    /** Filter-badge counts per filter option. Uses same query params as /products. */
+    async getProductCounts(filters = {}) {
+        const qs = new URLSearchParams(filters).toString();
+        return this.get(`/api/products/counts${qs ? '?' + qs : ''}`);
+    },
+
+    /** Other colors / variants sharing a series code. */
+    async getProductSeries(code) {
+        return this.get(`/api/products/series/${encodeURIComponent(code)}`);
     }
 };
 

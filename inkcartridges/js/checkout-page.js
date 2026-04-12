@@ -1056,19 +1056,42 @@
 
                     if (response.ok && response.data) {
                         this.appliedCoupon = response.data.code;
-                        this.totals.discount = response.data.discount_amount || 0;
+                        const serverDiscount = response.data.discount_amount || 0;
+
+                        // POST /cart/coupon returns only coupon info, not the full cart.
+                        // Refetch GET /cart so totals (incl. recalculated shipping) come from
+                        // the server's summary rather than client-side arithmetic.
+                        try {
+                            const cartRes = await API.getCart();
+                            const summary = cartRes?.data?.summary;
+                            if (summary) {
+                                if (summary.subtotal != null) this.totals.subtotal = summary.subtotal;
+                                if (summary.discount != null) this.totals.discount = summary.discount;
+                                else this.totals.discount = serverDiscount;
+                                if (summary.shipping != null) this.totals.shipping = summary.shipping;
+                                if (summary.total != null) this.totals.total = summary.total;
+                            } else {
+                                this.totals.discount = serverDiscount;
+                            }
+                        } catch (e) {
+                            DebugLog.warn('Cart refresh after coupon failed:', e);
+                            this.totals.discount = serverDiscount;
+                        }
 
                         // Update display
                         const discountRow = document.getElementById('checkout-discount-row');
                         const discountEl = document.getElementById('checkout-discount');
                         if (discountRow && discountEl) {
                             discountRow.hidden = false;
-                            discountEl.textContent = `-$${this.totals.discount.toFixed(2)}`;
+                            discountEl.textContent = `-${formatPrice(this.totals.discount)}`;
                         }
-
-                        // Recalculate total
-                        this.totals.total = this.totals.subtotal - this.totals.discount + this.totals.shipping;
-                        document.getElementById('checkout-total').textContent = `$${this.totals.total.toFixed(2)} NZD`;
+                        const subtotalEl = document.getElementById('checkout-subtotal');
+                        if (subtotalEl) subtotalEl.textContent = formatPrice(this.totals.subtotal);
+                        const shippingEl = document.getElementById('checkout-shipping');
+                        if (shippingEl) {
+                            shippingEl.textContent = this.totals.shipping === 0 ? 'FREE' : formatPrice(this.totals.shipping);
+                        }
+                        document.getElementById('checkout-total').textContent = `${formatPrice(this.totals.total)} NZD`;
 
                         // Show success
                         couponInput.value = '';
@@ -1076,7 +1099,7 @@
                         couponBtn.textContent = 'Applied';
                         couponBtn.style.background = '#10b981';
 
-                        alert(response.message || `Coupon applied! You saved $${this.totals.discount.toFixed(2)}`);
+                        alert(response.message || `Coupon applied! You saved ${formatPrice(this.totals.discount)}`);
                     } else if (response.code === 'EMAIL_NOT_VERIFIED') {
                         alert('Please verify your email address before applying coupons. Check your inbox for a verification link.');
                         couponBtn.textContent = 'Apply';
@@ -1655,9 +1678,8 @@
             // Fill from Google Places details
             const fillFromGoogleDetails = async (placeId) => {
                 try {
-                    const res = await fetch(`${Config.API_URL}/api/address/details?place_id=${encodeURIComponent(placeId)}`);
-                    const json = await res.json();
-                    if (json.ok && json.data) applyAddressDetails(json.data);
+                    const res = await API.addressDetails(placeId);
+                    if (res.ok && res.data) applyAddressDetails(res.data);
                 } catch (e) {
                     // Silently fail — user can still type manually
                 }
@@ -1724,10 +1746,9 @@
 
                         // Fall back to Google Places if NZ Post returned nothing
                         if (!suggestions.length) {
-                            const res = await fetch(`${Config.API_URL}/api/address/autocomplete?q=${encodeURIComponent(q)}`);
-                            const json = await res.json();
-                            if (json.ok && json.data?.length) {
-                                suggestions = json.data.map(s => ({
+                            const res = await API.addressAutocomplete(q);
+                            if (res.ok && res.data?.length) {
+                                suggestions = res.data.map(s => ({
                                     id: s.place_id,
                                     label: s.description,
                                     provider: 'google'

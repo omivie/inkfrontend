@@ -386,6 +386,7 @@ function buildOrderModalContent(modal, o, events, breakdown) {
   const btns = [
     `<button class="admin-btn admin-btn--ghost admin-btn--sm" data-action="update-status">${icon('orders', 13, 13)} Update Status</button>`,
     `<button class="admin-btn admin-btn--ghost admin-btn--sm" data-action="add-note">${icon('dashboard', 13, 13)} Add Note</button>`,
+    `<button class="admin-btn admin-btn--ghost admin-btn--sm" data-action="resend-invoice">${icon('mail', 13, 13)} Resend Invoice</button>`,
     `<button class="admin-btn admin-btn--danger admin-btn--sm" data-action="create-refund">${icon('refunds', 13, 13)} Refund</button>`,
   ];
   if (o.status === 'cancelled') {
@@ -404,6 +405,22 @@ function bindModalActions(modal, order) {
   modal.querySelector('[data-action="update-status"]')?.addEventListener('click', () => showStatusModal(order));
   modal.querySelector('[data-action="add-note"]')?.addEventListener('click', () => showNoteModal(order));
   modal.querySelector('[data-action="create-refund"]')?.addEventListener('click', () => showRefundModal(order));
+  modal.querySelector('[data-action="resend-invoice"]')?.addEventListener('click', async (e) => {
+    const btn = e.currentTarget;
+    if (!confirm(`Resend invoice email for ${order.order_number || order.id}?`)) return;
+    btn.disabled = true;
+    const originalText = btn.innerHTML;
+    btn.innerHTML = 'Sending\u2026';
+    try {
+      await AdminAPI.resendInvoice(order.id);
+      Toast.success('Invoice email resent');
+    } catch (err) {
+      Toast.error(`Failed: ${err.message}`);
+    } finally {
+      btn.disabled = false;
+      btn.innerHTML = originalText;
+    }
+  });
 
   if (order.status === 'cancelled') {
     modal.querySelector('[data-action="delete"]')?.addEventListener('click', () => {

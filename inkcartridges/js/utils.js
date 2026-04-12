@@ -362,6 +362,140 @@ function isCachedSuperAdmin() {
 }
 
 
+/**
+ * PRODUCTSORT
+ * ===========
+ * Shared KCMY color/yield ordering + product-family grouping.
+ * Used by shop-page.js and search.js so the two can never drift.
+ *
+ * Color order mirrors the product-page convention:
+ *   K (Black / Photo / Matte) → C / LC → M / LM → Y → R/B/G → grays → multipacks (CMY, KCMY, CMYK).
+ */
+const ProductSort = (function() {
+    const COLOR_ORDER = [
+        'black', 'photo black', 'matte black',
+        'cyan', 'light cyan',
+        'magenta', 'light magenta',
+        'yellow',
+        'red', 'blue', 'green',
+        'gray', 'grey', 'light gray', 'light grey',
+        'cmy', 'kcmy', 'cmyk', 'bcmy'
+    ];
+
+    function yieldTier(product) {
+        const n = (product.name || '').toLowerCase();
+        if (n.includes('xxl') || n.includes('super high')) return 2;
+        if (n.includes('xl') || n.includes('high yield') || /\bhy\b/.test(n)) return 1;
+        const sku = (product.sku || '').toUpperCase();
+        if (/CART\d{3,}H(?=[A-Z]|-|$)/.test(sku)) return 1;
+        return 0;
+    }
+
+    function colorIndex(product) {
+        const i = COLOR_ORDER.indexOf((product.color || '').toLowerCase());
+        return i === -1 ? 999 : i;
+    }
+
+    // Source tier: genuine first, then compatible, then anything else.
+    function sourceTier(product) {
+        const s = (product.source || '').toString().toLowerCase();
+        if (s === 'genuine') return 0;
+        if (s === 'compatible') return 1;
+        return 2;
+    }
+
+    function compareByYieldAndColor(a, b) {
+        // Within a family, group by source (genuine → compatible),
+        // then by yield tier (std → HY → XXL), then by KCMY color order.
+        const sa = sourceTier(a);
+        const sb = sourceTier(b);
+        if (sa !== sb) return sa - sb;
+        const ya = yieldTier(a);
+        const yb = yieldTier(b);
+        if (ya !== yb) return ya - yb;
+        return colorIndex(a) - colorIndex(b);
+    }
+
+    // Extract a brand + base product code as the family key.
+    // Handles real backend SKUs like `G-CAN-CART069HK-TNR-BK`, `GEN-PACK-CAN-CART069-CMY`,
+    // `G-DYM-S0720690-LBL-BK`, `G-EPS-S41069-PPR`, etc. — these don't parse cleanly from
+    // SKU suffixes, so we extract from the name which always contains the product code.
+    //
+    // e.g. "Canon Genuine CART069HK Toner Cartridge Black"  → B:CANON:CART069
+    //      "Canon Genuine CART069 Value Pack CMY 3-Pack"    → B:CANON:CART069
+    //      "Canon Genuine CART069H Value Pack KCMY 4-Pack"  → B:CANON:CART069
+    function familyKey(product) {
+        const name = (product.name || '').toUpperCase();
+        const brand = (product.brand?.name || product.brand || '')
+            .toString().toUpperCase().replace(/\s+/g, '');
+
+        // First token shaped like a product code: letters + digits + optional trailing letters.
+        // Matches CART069, CART069HK, CART069H, S0720690, S41069, CT351069, PG-40, etc.
+        const m = name.match(/\b([A-Z]{1,6})(\d{2,})([A-Z]{0,3})\b/);
+        let base;
+        if (m) {
+            const prefix = m[1];
+            const digits = m[2];
+            let suffix = m[3] || '';
+            // Reduce suffix: strip color letter(s), then yield marker H/HY
+            suffix = suffix.replace(/(BK|CY|MG|YL|PK|MK|LC|LM|GY)$/, '');
+            suffix = suffix.replace(/(K|C|M|Y|R|G|B)$/, '');
+            suffix = suffix.replace(/(HY|H)$/, '');
+            base = prefix + digits + suffix;
+        } else {
+            // Fallback: color-stripped name
+            base = name.toLowerCase()
+                .replace(/\b(photo black|matte black|light cyan|light magenta|tri[- ]?colou?r|black|cyan|magenta|yellow|red|blue|green|gray|grey|cmyk|kcmy|bcmy|cmy|value pack|\d+[- ]?pack)\b/gi, '')
+                .replace(/\s+/g, ' ')
+                .trim();
+        }
+        return (brand ? 'B:' + brand + ':' : '') + base;
+    }
+
+    // Sort in place: yield tier → color order. Returns the same array.
+    function byYieldAndColor(products) {
+        return products.sort(compareByYieldAndColor);
+    }
+
+    // Group products by family, order families by max member score (descending),
+    // and within each family order by yield+color. `scoreMap` is a Map from
+    // product id-or-sku → numeric score. Products with no score sort last.
+    function groupByFamilyScored(products, scoreMap) {
+        const families = new Map();
+        for (const p of products) {
+            const fkey = familyKey(p);
+            if (!families.has(fkey)) families.set(fkey, []);
+            families.get(fkey).push(p);
+        }
+        const keyOf = (p) => (p.sku || p.product_code || p.code || p.id);
+        const scoreOf = (p) => {
+            const k = keyOf(p);
+            return (scoreMap && k != null && scoreMap.has(k)) ? scoreMap.get(k) : 0;
+        };
+        const familyList = [];
+        for (const [, members] of families) {
+            members.sort(compareByYieldAndColor);
+            const topScore = members.reduce((m, p) => Math.max(m, scoreOf(p)), 0);
+            familyList.push({ members, topScore });
+        }
+        familyList.sort((a, b) => b.topScore - a.topScore);
+        const out = [];
+        for (const f of familyList) out.push(...f.members);
+        return out;
+    }
+
+    return {
+        COLOR_ORDER,
+        yieldTier,
+        sourceTier,
+        colorIndex,
+        compareByYieldAndColor,
+        familyKey,
+        byYieldAndColor,
+        groupByFamilyScored
+    };
+})();
+
 // Export for module use (if needed in future)
 if (typeof module !== 'undefined' && module.exports) {
     module.exports = {

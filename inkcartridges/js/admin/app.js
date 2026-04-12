@@ -49,8 +49,14 @@ const NAV_ITEMS = [
   { key: 'products', label: 'Products', icon: 'products' },
   { key: 'customers', label: 'Customers', icon: 'customers' },
   { divider: true },
+  { key: 'promotions', label: 'Promotions', icon: 'finance', ownerOnly: true },
+  { key: 'shipping-rates', label: 'Shipping Rates', icon: 'fulfillment', ownerOnly: true },
+  { key: 'abuse', label: 'Abuse', icon: 'lock', ownerOnly: true },
+  { key: 'segments', label: 'Segments', icon: 'mail', ownerOnly: true },
+  { divider: true },
   { key: 'control-center', label: 'Operations', icon: 'lab', ownerOnly: true },
   { key: 'sync-report', label: 'Feed Sync', icon: 'products', href: '/html/admin/sync-report.html', ownerOnly: true },
+  { key: 'recovery', label: 'Recovery', icon: 'refunds', ownerOnly: true },
   { key: 'contact-emails', label: 'Settings', icon: 'settings', ownerOnly: true },
 ];
 

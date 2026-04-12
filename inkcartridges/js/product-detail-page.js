@@ -387,6 +387,8 @@
                 if (addBtn) { addBtn.disabled = true; addBtn.textContent = 'Out of Stock'; }
                 const qtyInput = document.getElementById('product-quantity');
                 if (qtyInput) qtyInput.disabled = true;
+                // Inject "Notify me when back in stock" button
+                this._injectWaitlistButton(info.sku);
             } else if (stockStatus.class === 'contact-us') {
                 const addBtn = document.getElementById('add-to-cart-btn');
                 if (addBtn) {
@@ -596,6 +598,116 @@
         },
 
         /**
+         * Inject a "Notify me when back in stock" button next to the disabled
+         * Add-to-Cart button. Posts to /api/products/:sku/waitlist.
+         */
+        async _injectWaitlistButton(sku) {
+            const addBtn = document.getElementById('add-to-cart-btn');
+            if (!addBtn || !sku) return;
+            if (document.getElementById('waitlist-btn')) return; // already injected
+
+            const container = document.createElement('div');
+            container.id = 'waitlist-container';
+            container.style.cssText = 'margin-top:12px;display:flex;flex-direction:column;gap:8px;';
+            container.innerHTML = `
+                <button id="waitlist-btn" class="btn btn--secondary btn--lg" style="width:100%">
+                    Notify me when back in stock
+                </button>
+                <div id="waitlist-form" style="display:none;flex-direction:column;gap:8px">
+                    <input id="waitlist-email" type="email" class="form-input" placeholder="your@email.com" autocomplete="email" />
+                    <button id="waitlist-submit" class="btn btn--primary btn--lg">Subscribe</button>
+                </div>
+                <div id="waitlist-msg" role="status" style="font-size:13px;color:var(--color-text-muted)"></div>
+            `;
+            addBtn.parentNode.insertBefore(container, addBtn.nextSibling);
+
+            const toggleBtn = container.querySelector('#waitlist-btn');
+            const form = container.querySelector('#waitlist-form');
+            const emailEl = container.querySelector('#waitlist-email');
+            const submit = container.querySelector('#waitlist-submit');
+            const msg = container.querySelector('#waitlist-msg');
+
+            const isAuthed = typeof Auth !== 'undefined' && Auth.isAuthenticated && Auth.isAuthenticated();
+
+            // If authed, fetch status to reflect existing subscription
+            if (isAuthed) {
+                try {
+                    const statusRes = await API.waitlistStatus(sku);
+                    if (statusRes?.ok && statusRes.data?.subscribed) {
+                        toggleBtn.textContent = 'Unsubscribe from waitlist';
+                        toggleBtn.dataset.subscribed = '1';
+                        if (statusRes.data.position) {
+                            msg.textContent = `You're #${statusRes.data.position} on the waitlist.`;
+                        }
+                    }
+                } catch { /* non-fatal */ }
+            }
+
+            toggleBtn.addEventListener('click', async () => {
+                // Authed user: one-click subscribe/unsubscribe
+                if (isAuthed) {
+                    toggleBtn.disabled = true;
+                    try {
+                        if (toggleBtn.dataset.subscribed === '1') {
+                            const res = await API.waitlistUnsubscribe(sku);
+                            if (res?.ok) {
+                                toggleBtn.textContent = 'Notify me when back in stock';
+                                delete toggleBtn.dataset.subscribed;
+                                msg.textContent = 'Removed from waitlist.';
+                            } else {
+                                msg.textContent = res?.error || 'Failed to unsubscribe.';
+                            }
+                        } else {
+                            const res = await API.waitlistSubscribe(sku);
+                            if (res?.ok) {
+                                toggleBtn.textContent = 'Unsubscribe from waitlist';
+                                toggleBtn.dataset.subscribed = '1';
+                                msg.textContent = "You'll be emailed when stock returns.";
+                            } else {
+                                msg.textContent = res?.error || 'Could not subscribe.';
+                            }
+                        }
+                    } catch (e) {
+                        msg.textContent = e.message || 'Request failed.';
+                    } finally {
+                        toggleBtn.disabled = false;
+                    }
+                    return;
+                }
+
+                // Guest: reveal email form
+                toggleBtn.style.display = 'none';
+                form.style.display = 'flex';
+                emailEl.focus();
+            });
+
+            submit.addEventListener('click', async () => {
+                const email = (emailEl.value || '').trim();
+                if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+                    msg.textContent = 'Please enter a valid email address.';
+                    return;
+                }
+                submit.disabled = true;
+                try {
+                    const res = await API.waitlistSubscribe(sku, { email });
+                    if (res?.ok) {
+                        form.style.display = 'none';
+                        toggleBtn.style.display = 'block';
+                        toggleBtn.disabled = true;
+                        toggleBtn.textContent = 'On the waitlist';
+                        msg.textContent = "We'll email " + email + ' when stock returns.';
+                    } else {
+                        msg.textContent = res?.error || 'Could not subscribe.';
+                    }
+                } catch (e) {
+                    msg.textContent = e.message || 'Request failed.';
+                } finally {
+                    submit.disabled = false;
+                }
+            });
+        },
+
+        /**
          * Fetch compatible printer names for a given SKU via Supabase
          */
         async _fetchPrinters(sku) {
@@ -762,6 +874,21 @@
                     }
                 } else {
                     // Non-ribbon: use automatic discovery
+                    // Priority 0: same-series variants (other colors / XL / standard yield)
+                    const seriesCode = this._extractProductCode(info.manufacturer_part_number);
+                    if (seriesCode) {
+                        try {
+                            const seriesRes = await API.getProductSeries(seriesCode);
+                            const seriesProducts = seriesRes?.data?.products
+                                || (Array.isArray(seriesRes?.data) ? seriesRes.data : null)
+                                || seriesRes?.data?.series
+                                || [];
+                            if (Array.isArray(seriesProducts) && seriesProducts.length > 0) {
+                                addProducts(seriesProducts);
+                            }
+                        } catch { /* fall through to other strategies */ }
+                    }
+
                     // Primary: use related products endpoint
                     const relatedResponse = await API.getRelatedProducts(info.sku);
                     if (relatedResponse.ok && relatedResponse.data?.related?.length > 0) {

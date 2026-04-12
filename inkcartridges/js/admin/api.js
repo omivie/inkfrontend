@@ -1410,6 +1410,131 @@ const AdminAPI = {
       throw e;
     }
   },
+
+  // =========================================================================
+  // Admin P1 — Resend invoice
+  // =========================================================================
+  async resendInvoice(orderId) {
+    const resp = await window.API.post(`/api/admin/orders/${orderId}/resend-invoice`, {});
+    if (resp && resp.ok === false) throw new Error(resp.error || 'Resend failed');
+    return resp?.data ?? null;
+  },
+
+  // =========================================================================
+  // Admin — Shipping rates CRUD
+  // =========================================================================
+  async getShippingRates() {
+    const resp = await window.API.get('/api/admin/shipping/rates');
+    return resp?.data ?? null;
+  },
+  async createShippingRate(payload) {
+    const resp = await window.API.post('/api/admin/shipping/rates', payload);
+    if (resp && resp.ok === false) throw new Error(resp.error || 'Create failed');
+    return resp?.data ?? null;
+  },
+  async updateShippingRate(id, payload) {
+    const resp = await window.API.put(`/api/admin/shipping/rates/${id}`, payload);
+    if (resp && resp.ok === false) throw new Error(resp.error || 'Update failed');
+    return resp?.data ?? null;
+  },
+  async deleteShippingRate(id) {
+    const resp = await window.API.delete(`/api/admin/shipping/rates/${id}`);
+    if (resp && resp.ok === false) throw new Error(resp.error || 'Delete failed');
+    return true;
+  },
+
+  // =========================================================================
+  // Admin — Promotions CRUD (coupon codes)
+  // =========================================================================
+  async getPromotions(params = {}) {
+    const qs = new URLSearchParams(params).toString();
+    const resp = await window.API.get(`/api/admin/promotions${qs ? '?' + qs : ''}`);
+    return resp?.data ?? null;
+  },
+  async createPromotion(payload) {
+    const resp = await window.API.post('/api/admin/promotions', payload);
+    if (resp && resp.ok === false) throw new Error(resp.error || 'Create failed');
+    return resp?.data ?? null;
+  },
+  async updatePromotion(id, payload) {
+    const resp = await window.API.put(`/api/admin/promotions/${id}`, payload);
+    if (resp && resp.ok === false) throw new Error(resp.error || 'Update failed');
+    return resp?.data ?? null;
+  },
+  async deletePromotion(id) {
+    const resp = await window.API.delete(`/api/admin/promotions/${id}`);
+    if (resp && resp.ok === false) throw new Error(resp.error || 'Delete failed');
+    return true;
+  },
+
+  // =========================================================================
+  // Admin — Abuse detection
+  // =========================================================================
+  async getAbuseFlags(params = {}) {
+    const qs = new URLSearchParams(params).toString();
+    const resp = await window.API.get(`/api/admin/abuse/flags${qs ? '?' + qs : ''}`);
+    return resp?.data ?? null;
+  },
+  async resolveAbuseFlag(id, notes = '') {
+    const resp = await window.API.put(`/api/admin/abuse/flags/${id}/resolve`, { notes });
+    if (resp && resp.ok === false) throw new Error(resp.error || 'Resolve failed');
+    return resp?.data ?? null;
+  },
+  async getCouponSignals(params = {}) {
+    const qs = new URLSearchParams(params).toString();
+    const resp = await window.API.get(`/api/admin/abuse/coupon-signals${qs ? '?' + qs : ''}`);
+    return resp?.data ?? null;
+  },
+  async getBlockedDomains() {
+    const resp = await window.API.get('/api/admin/abuse/blocked-domains');
+    return resp?.data ?? null;
+  },
+  async addBlockedDomain(domain, reason = '') {
+    const resp = await window.API.post('/api/admin/abuse/blocked-domains', { domain, reason });
+    if (resp && resp.ok === false) throw new Error(resp.error || 'Block failed');
+    return resp?.data ?? null;
+  },
+  async removeBlockedDomain(id) {
+    const resp = await window.API.delete(`/api/admin/abuse/blocked-domains/${id}`);
+    if (resp && resp.ok === false) throw new Error(resp.error || 'Unblock failed');
+    return true;
+  },
+
+  // =========================================================================
+  // Admin — Customer segments + campaign email
+  // =========================================================================
+  async getSegments() {
+    const resp = await window.API.get('/api/admin/segments');
+    return resp?.data ?? null;
+  },
+  async createSegment(payload) {
+    const resp = await window.API.post('/api/admin/segments', payload);
+    if (resp && resp.ok === false) throw new Error(resp.error || 'Create failed');
+    return resp?.data ?? null;
+  },
+  async assignSegmentUsers(segmentId, userIds) {
+    const resp = await window.API.post(`/api/admin/segments/${segmentId}/users`, { user_ids: userIds });
+    if (resp && resp.ok === false) throw new Error(resp.error || 'Assign failed');
+    return resp?.data ?? null;
+  },
+  async sendAnnouncement(payload) {
+    const resp = await window.API.post('/api/admin/email/send-announcement', payload);
+    if (resp && resp.ok === false) throw new Error(resp.error || 'Send failed');
+    return resp?.data ?? null;
+  },
+
+  // =========================================================================
+  // Admin — Recovery & data-integrity
+  // =========================================================================
+  async getRecoveryHealth() {
+    const resp = await window.API.get('/api/admin/recovery/health-check');
+    return resp?.data ?? null;
+  },
+  async runDataIntegrityAudit() {
+    const resp = await window.API.post('/api/admin/recovery/data-integrity-audit', {});
+    if (resp && resp.ok === false) throw new Error(resp.error || 'Audit failed');
+    return resp?.data ?? null;
+  },
 };
 
 export { AdminAPI };

@@ -806,6 +806,36 @@ const AccountPage = {
     async loadDashboard() {
         // Sync profile to backend (fire-and-forget, non-blocking)
         this.syncProfileToBackend();
+        // Load lifetime savings (non-blocking)
+        this.loadSavingsBanner();
+    },
+
+    /**
+     * Populate the dashboard savings banner from GET /api/user/savings.
+     * Silent no-op if the element isn't on the current page or the call fails.
+     */
+    async loadSavingsBanner() {
+        const banner = document.getElementById('account-savings-banner');
+        if (!banner) return;
+        try {
+            const res = await API.getUserSavings();
+            if (!res?.ok || !res.data) return;
+            const d = res.data;
+            const total = Number(d.total_savings ?? d.lifetime_savings ?? d.savings ?? 0);
+            if (!isFinite(total) || total <= 0) return;
+            const valueEl = document.getElementById('account-savings-value');
+            const subEl = document.getElementById('account-savings-sub');
+            if (valueEl) valueEl.textContent = (typeof formatPrice === 'function') ? formatPrice(total) : ('$' + total.toFixed(2));
+            if (subEl) {
+                const orders = d.order_count ?? d.orders ?? null;
+                const pct = d.savings_percent ?? d.percent_saved ?? null;
+                const parts = [];
+                if (orders) parts.push(`${orders} order${orders === 1 ? '' : 's'}`);
+                if (pct) parts.push(`${Number(pct).toFixed(0)}% off vs genuine`);
+                subEl.textContent = parts.join(' • ');
+            }
+            banner.hidden = false;
+        } catch { /* silent */ }
     },
 
     /**
