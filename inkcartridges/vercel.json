@@ -1,6 +1,6 @@
 {
   "cleanUrls": true,
-  "buildCommand": "node scripts/stamp-versions.js",
+  "buildCommand": "npm run build",
   "outputDirectory": ".",
   "headers": [
     {

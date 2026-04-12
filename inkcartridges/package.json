@@ -1,0 +1,9 @@
+{
+  "name": "inkcartridges-frontend",
+  "version": "1.0.0",
+  "private": true,
+  "description": "InkCartridges.co.nz frontend — vanilla JS, deployed via Vercel",
+  "scripts": {
+    "build": "node scripts/stamp-versions.js"
+  }
+}
