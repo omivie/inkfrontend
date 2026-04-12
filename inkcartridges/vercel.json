@@ -1,5 +1,7 @@
 {
   "cleanUrls": true,
+  "buildCommand": "node scripts/stamp-versions.js",
+  "outputDirectory": ".",
   "headers": [
     {
       "source": "/html/admin/(.*)",
