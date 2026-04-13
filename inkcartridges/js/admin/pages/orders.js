@@ -444,7 +444,7 @@ function bindModalActions(modal, order) {
   }
 }
 
-const ALL_STATUSES = ['pending', 'paid', 'processing', 'shipped', 'completed', 'cancelled'];
+const ALL_STATUSES = ['pending', 'paid', 'processing', 'shipped', 'completed', 'cancelled', 'refunded'];
 
 function showStatusModal(order) {
   const current = (order.status || '').toLowerCase();

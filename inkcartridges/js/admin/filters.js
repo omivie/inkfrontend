@@ -19,7 +19,7 @@ const PERIOD_PRESETS = [
 
 const FilterState = {
   _state: {
-    period: 'all',
+    period: '3m',
     dateFrom: '',
     dateTo: '',
     brands: [],
@@ -122,7 +122,7 @@ const FilterState = {
 
   reset() {
     this._state = {
-      period: 'all', dateFrom: '', dateTo: '',
+      period: '3m', dateFrom: '', dateTo: '',
       brands: [], suppliers: [], statuses: [], categories: [],
     };
     this._writeToURL();
@@ -161,7 +161,7 @@ const FilterState = {
     const hash = window.location.hash;
     const baseHash = hash.split('?')[0] || '#dashboard';
     const parts = [];
-    if (this._state.period !== 'all') parts.push('period=' + this._state.period);
+    if (this._state.period !== '3m') parts.push('period=' + this._state.period);
     if (this._state.dateFrom) parts.push('from=' + this._state.dateFrom);
     if (this._state.dateTo) parts.push('to=' + this._state.dateTo);
     if (this._state.brands.length) parts.push('brands=' + this._state.brands.join(','));
@@ -238,7 +238,7 @@ const FilterState = {
     centerHtml += '</div>';
 
     // Reset button (right)
-    const hasFilters = s.brands.length || s.suppliers.length || s.statuses.length || s.categories.length || s.period !== 'all';
+    const hasFilters = s.brands.length || s.suppliers.length || s.statuses.length || s.categories.length || s.period !== '3m';
     const rightHtml = hasFilters
       ? '<button class="admin-filter-reset" data-action="reset-filters">Clear</button>'
       : '';

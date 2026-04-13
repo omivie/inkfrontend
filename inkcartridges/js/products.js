@@ -75,7 +75,7 @@ const Products = {
 
         return `
             <article class="product-card" data-product-id="${Security.escapeAttr(product.id)}" data-sku="${Security.escapeAttr(product.sku)}">
-                <a href="${product.slug ? `/products/${Security.escapeAttr(product.slug)}/${Security.escapeAttr(product.sku)}` : `/html/product/?sku=${Security.escapeAttr(product.sku)}`}" class="product-card__link">
+                <a href="${product.slug && product.sku ? `/products/${Security.escapeAttr(product.slug)}/${Security.escapeAttr(product.sku)}` : product.sku ? `/html/product/?sku=${Security.escapeAttr(product.sku)}` : product.slug ? `/product/${Security.escapeAttr(product.slug)}` : '#'}" class="product-card__link">
                     <div class="product-card__image-wrapper">
                         ${this.getProductImageHTML(product, { priority })}
                         ${sourceBadge ? `<span class="product-card__badge ${sourceBadge.class}">${sourceBadge.text}</span>` : ''}

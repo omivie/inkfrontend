@@ -89,7 +89,15 @@
     { "source": "/([^/]+)-inkjet-cartridges", "destination": "/html/shop?search=$1", "permanent": true },
     { "source": "/([^/]+)-inkjet-cartridge", "destination": "/html/shop?search=$1", "permanent": true },
     { "source": "/([^/]+)-toner-cartridges", "destination": "/html/shop?search=$1", "permanent": true },
-    { "source": "/([^/]+)-toner-cartridge", "destination": "/html/shop?search=$1", "permanent": true }
+    { "source": "/([^/]+)-toner-cartridge", "destination": "/html/shop?search=$1", "permanent": true },
+
+    { "source": "/brands/:slug/hub", "destination": "/html/shop?brand=:slug", "permanent": true },
+    { "source": "/brands/:slug", "destination": "/html/shop?brand=:slug", "permanent": true },
+    { "source": "/brands", "destination": "/html/shop", "permanent": true },
+    { "source": "/ink-cartridges", "destination": "/html/shop?category=ink", "permanent": true },
+    { "source": "/toner-cartridges", "destination": "/html/shop?category=toner", "permanent": true },
+    { "source": "/printers/:slug", "destination": "/html/shop?search=:slug", "permanent": true },
+    { "source": "/genuine-vs-compatible", "destination": "/", "permanent": true }
   ],
   "rewrites": [
     { "source": "/api/:path*", "destination": "https://ink-backend-zaeq.onrender.com/api/:path*" },
@@ -97,12 +105,7 @@
     { "source": "/ribbon/:sku", "destination": "/html/product" },
     { "source": "/html/product-by-name", "destination": "https://ink-backend-zaeq.onrender.com/html/product-by-name" },
     { "source": "/products/:slug/:sku", "destination": "/html/product?sku=:sku" },
-    { "source": "/brands/:slug/hub", "destination": "/brands/hub.html" },
-    { "source": "/brands/:slug", "destination": "/brands/index.html" },
-    { "source": "/ink-cartridges", "destination": "/categories/ink-cartridges.html" },
-    { "source": "/toner-cartridges", "destination": "/categories/toner-cartridges.html" },
-    { "source": "/genuine-vs-compatible", "destination": "/guides/genuine-vs-compatible.html" },
-    { "source": "/printers/:slug", "destination": "/printers/index.html" },
+    { "source": "/product/:slug", "destination": "/html/product?slug=:slug" },
     { "source": "/sitemap.xml", "destination": "https://ink-backend-zaeq.onrender.com/sitemap.xml" },
     { "source": "/sitemap-:path.xml", "destination": "https://ink-backend-zaeq.onrender.com/sitemap-:path.xml" },
     { "source": "/feeds/google-shopping.xml", "destination": "https://ink-backend-zaeq.onrender.com/feeds/google-shopping.xml" },

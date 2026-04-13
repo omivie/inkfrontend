@@ -1,6 +1,7 @@
 {
   "rewrites": [
     { "source": "ribbon/**", "destination": "/html/product/index.html" },
-    { "source": "products/**", "destination": "/html/product/index.html" }
+    { "source": "products/**", "destination": "/html/product/index.html" },
+    { "source": "product/**", "destination": "/html/product/index.html" }
   ]
 }

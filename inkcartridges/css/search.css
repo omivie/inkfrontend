@@ -476,6 +476,35 @@
     margin-bottom: 8px;
 }
 
+.smart-ac__view-all-wrap {
+    display: flex;
+    justify-content: center;
+    padding: 10px 8px 14px;
+    border-top: 1px solid var(--color-border-light, #e5e7eb);
+    margin-top: 4px;
+    background: #fafbfc;
+    position: sticky;
+    bottom: 0;
+}
+
+.smart-ac__view-all {
+    display: inline-block;
+    padding: 10px 20px;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--cyan-primary, #2563eb);
+    background: #fff;
+    border: 1px solid var(--cyan-primary, #2563eb);
+    border-radius: 999px;
+    text-decoration: none;
+    transition: background 0.15s ease, color 0.15s ease;
+}
+
+.smart-ac__view-all:hover {
+    background: var(--cyan-primary, #2563eb);
+    color: #fff;
+}
+
 @media (max-width: 640px) {
     .smart-ac-dropdown:has(.smart-ac__grid) {
         min-width: 0;

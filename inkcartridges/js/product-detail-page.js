@@ -36,6 +36,27 @@
                 if (productPath) sku = decodeURIComponent(productPath[1]);
             }
 
+            // Legacy slug-only URL: /product/:slug or ?slug=
+            if (!sku) {
+                let slug = params.get('slug');
+                if (!slug) {
+                    const legacy = window.location.pathname.match(/^\/product\/([^/]+)\/?$/);
+                    if (legacy) slug = decodeURIComponent(legacy[1]);
+                }
+                if (slug) {
+                    sku = await this.resolveSkuFromSlug(slug);
+                    if (!sku) {
+                        const q = slug.replace(/-/g, ' ').trim();
+                        window.location.replace('/html/shop?search=' + encodeURIComponent(q));
+                        return;
+                    }
+                    // Canonicalise URL in history so reloads/sharing work.
+                    const cleanSku = encodeURIComponent(sku);
+                    const cleanSlug = encodeURIComponent(slug);
+                    window.history.replaceState({}, '', `/products/${cleanSlug}/${cleanSku}`);
+                }
+            }
+
             if (!sku) {
                 this.showError('No product specified');
                 return;
@@ -329,7 +350,7 @@
                         "@type": "BreadcrumbList",
                         "itemListElement": [
                             { "@type": "ListItem", "position": 1, "name": "Home", "item": "https://www.inkcartridges.co.nz" },
-                            { "@type": "ListItem", "position": 2, "name": `${info.brandName} Ink Cartridges`, "item": `https://www.inkcartridges.co.nz/brands/${brandSlug}` },
+                            { "@type": "ListItem", "position": 2, "name": `${info.brandName} Ink Cartridges`, "item": `https://www.inkcartridges.co.nz/html/shop?brand=${brandSlug}` },
                             { "@type": "ListItem", "position": 3, "name": info.displayName }
                         ]
                     };
@@ -573,7 +594,7 @@
                     const slug = (p.name || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
                     const href = isRibbon
                         ? `/html/ribbons?printer_model=${encodeURIComponent(p.name)}`
-                        : `/printers/${encodeURIComponent(slug)}`;
+                        : `/html/shop?search=${encodeURIComponent(slug)}`;
                     return `<a href="${href}" class="printer-link">${Security.escapeHtml(p.name)}</a>`;
                 }).join(', ');
 
@@ -751,7 +772,7 @@
 
                 list.innerHTML = printers.map(p => {
                     const slug = (p.name || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
-                    return `<li><a href="/printers/${encodeURIComponent(slug)}">${Security.escapeHtml(p.name)}</a></li>`;
+                    return `<li><a href="/html/shop?search=${encodeURIComponent(slug)}">${Security.escapeHtml(p.name)}</a></li>`;
                 }).join('');
 
                 tabBtn.hidden = false;
@@ -873,48 +894,25 @@
                         }
                     }
                 } else {
-                    // Non-ribbon: use automatic discovery
-                    // Priority 0: same-series variants (other colors / XL / standard yield)
-                    const seriesCode = this._extractProductCode(info.manufacturer_part_number);
-                    if (seriesCode) {
-                        try {
-                            const seriesRes = await API.getProductSeries(seriesCode);
-                            const seriesProducts = seriesRes?.data?.products
-                                || (Array.isArray(seriesRes?.data) ? seriesRes.data : null)
-                                || seriesRes?.data?.series
-                                || [];
-                            if (Array.isArray(seriesProducts) && seriesProducts.length > 0) {
-                                addProducts(seriesProducts);
-                            }
-                        } catch { /* fall through to other strategies */ }
-                    }
-
-                    // Primary: use related products endpoint
-                    const relatedResponse = await API.getRelatedProducts(info.sku);
-                    if (relatedResponse.ok && relatedResponse.data?.related?.length > 0) {
-                        addProducts(relatedResponse.data.related);
-                    }
-
-                    // Supplement: also search by compatible printer to catch products the related endpoint missed
-                    const printers = await this._fetchPrinters(info.sku);
-                    if (printers.length > 0) {
-                        const firstPrinter = printers[0].name;
-                        const response = await API.searchByPrinter(firstPrinter, { limit: 50 });
-                        if (response.ok && response.data?.products) {
-                            addProducts(response.data.products);
-                        }
-                    }
-
-                    // Fallback: search by product code if still empty
-                    if (related.length === 0) {
-                        const productCode = this._extractProductCode(info.manufacturer_part_number);
-                        if (productCode) {
-                            const brandName = info.brandName || '';
-                            const params = { search: productCode, limit: 50 };
-                            if (brandName) params.brand = brandName;
-                            const response = await API.getProducts(params);
-                            if (response.ok && response.data?.products) {
-                                addProducts(response.data.products);
+                    // Non-ribbon: mirror the brand+code shop page exactly.
+                    // Use backend's own series list as the source of truth for the code,
+                    // matching by substring against the product's name/MPN/SKU.
+                    const brandSlug = info.brand?.slug || (info.brandName || '').toLowerCase();
+                    const apiCategoryMap = { ink: 'ink', toner: 'toner', drum: 'drums', label_tape: 'label' };
+                    const apiCategory = apiCategoryMap[info.category] || null;
+                    if (brandSlug && apiCategory) {
+                        const seriesRes = await API.getShopData({ brand: brandSlug, category: apiCategory });
+                        const seriesList = seriesRes?.data?.series || [];
+                        const haystack = [(info.name || ''), (info.manufacturer_part_number || ''), (info.sku || '')]
+                            .join(' ').toUpperCase();
+                        const code = seriesList
+                            .map(s => s.code)
+                            .filter(c => c && haystack.includes(c.toUpperCase()))
+                            .sort((a, b) => b.length - a.length)[0];
+                        if (code) {
+                            const res = await API.getShopData({ brand: brandSlug, category: apiCategory, code, limit: 200 });
+                            if (res.ok && res.data?.products) {
+                                addProducts(res.data.products.filter(p => p.sku !== info.sku));
                             }
                         }
                     }
@@ -984,29 +982,7 @@
                                      productType === 'toner' ? 'Toner Cartridges' : 'Ink Cartridges';
                         const heading = `${brandName} ${label}`.trim();
 
-                        // Group items by size/pack variant for separate rows
-                        const sizeOf = (p) => {
-                            const n = (p.name || '').toLowerCase();
-                            if (n.includes('xxl') || n.includes('super high')) return 2;
-                            if (n.includes('xl') || n.includes('high yield') || /\bhy\b/.test(n)) return 1;
-                            return 0;
-                        };
-                        const groupKey = (p) => {
-                            const pt = p.pack_type || 'single';
-                            if (pt === 'value_pack') return 'value_pack';
-                            if (pt === 'multipack') return 'multipack';
-                            return 'single_' + sizeOf(p);
-                        };
-                        const groups = {};
-                        items.forEach(p => {
-                            const k = groupKey(p);
-                            (groups[k] = groups[k] || []).push(p);
-                        });
-                        const groupOrder = ['single_0', 'single_1', 'single_2', 'value_pack', 'multipack'];
-                        const grids = groupOrder
-                            .filter(k => groups[k]?.length)
-                            .map(k => `<div class="related-products__grid product-grid">${groups[k].map(p => Products.renderCard(p)).join('')}</div>`)
-                            .join('');
+                        const grids = `<div class="related-products__grid product-grid">${items.map(p => Products.renderCard(p)).join('')}</div>`;
 
                         return `
                             <div class="related-products__type-group">
@@ -1582,6 +1558,25 @@
             }
         },
 
+        async resolveSkuFromSlug(slug) {
+            // Backend has no by-slug endpoint, so reuse suggest: search the slug
+            // words and pick a suggestion whose slug matches exactly.
+            const q = slug.replace(/-/g, ' ').trim();
+            if (!q) return null;
+            try {
+                const base = (typeof Config !== 'undefined' && Config.API_URL) ? Config.API_URL : '';
+                const res = await fetch(`${base}/api/search/suggest?q=${encodeURIComponent(q)}&limit=24`);
+                const json = await res.json();
+                const list = (json && json.ok && json.data && Array.isArray(json.data.suggestions)) ? json.data.suggestions : [];
+                const exact = list.find(p => p && p.slug === slug && p.sku);
+                if (exact) return exact.sku;
+                const first = list.find(p => p && p.sku);
+                return first ? first.sku : null;
+            } catch (_) {
+                return null;
+            }
+        },
+
         _isTestProduct(product) {
             const sku = (product.sku || '').toUpperCase();
             return sku.startsWith('TEST-') || product.admin_only === true;
@@ -1609,7 +1604,7 @@
                     </svg>
                     <p>${Security.escapeHtml(message)}</p>
                     <button class="btn btn--secondary" data-action="reload">Try Again</button>
-                    <a href="/html/shop.html" class="btn btn--outline">Browse All Products</a>
+                    <a href="/html/shop" class="btn btn--outline">Browse All Products</a>
                 </div>
             `;
 

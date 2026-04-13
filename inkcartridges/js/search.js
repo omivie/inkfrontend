@@ -13,7 +13,7 @@
     const ENDPOINT = '/api/search/suggest';
     const DEBOUNCE_MS = 300;
     const MIN_QUERY_LENGTH = 2;
-    const LIMIT = 10;
+    const LIMIT = 24;
     const SKELETON_DELAY_MS = 150;
     const RECENT_KEY = 'recentSearches';
     const RECENT_MAX = 5;
@@ -78,7 +78,6 @@
         // Spec payload has no SKU; fall back to slug-only when missing.
         const sku = p.sku || '';
         if (slug && sku) return `/products/${encodeURIComponent(slug)}/${encodeURIComponent(sku)}`;
-        if (slug) return `/products/${encodeURIComponent(slug)}`;
         if (sku) return `/html/product/?sku=${encodeURIComponent(sku)}`;
         return `/html/shop?search=${encodeURIComponent(p.name || '')}`;
     }
@@ -189,7 +188,7 @@
             state.results = [];
             state.list.setAttribute('role', 'listbox');
             let cards = '';
-            for (let i = 0; i < 6; i++) {
+            for (let i = 0; i < 12; i++) {
                 cards += `
                     <div class="product-card product-card--skeleton" aria-hidden="true">
                         <div class="product-card__image-wrapper"><div class="smart-ac__skel smart-ac__skel--thumb"></div></div>
@@ -239,11 +238,21 @@
             }
 
             const bannerHTML = matchedPrinter && matchedPrinter.name
-                ? `<div class="smart-ac__matched-printer">Showing cartridges for <a href="/html/shop.html?printer=${escAttr(matchedPrinter.slug || '')}">${esc(matchedPrinter.name)}</a></div>`
+                ? `<div class="smart-ac__matched-printer">Showing cartridges for <a href="/html/shop?printer=${escAttr(matchedPrinter.slug || '')}">${esc(matchedPrinter.name)}</a></div>`
                 : '';
             const cardsHTML = list.map((p, i) => Products.renderCard(adaptForCard(p), i)).join('');
-            state.list.innerHTML = `${bannerHTML}<div class="product-grid smart-ac__grid">${cardsHTML}</div>`;
+            const q = state.input.value.trim();
+            const viewAllHref = `/html/shop?search=${encodeURIComponent(q)}`;
+            const viewAllHTML = q
+                ? `<div class="smart-ac__view-all-wrap"><a class="smart-ac__view-all" href="${escAttr(viewAllHref)}">View all results for “${esc(q)}” →</a></div>`
+                : '';
+            state.list.innerHTML = `${bannerHTML}<div class="product-grid smart-ac__grid">${cardsHTML}</div>${viewAllHTML}`;
             positionDropdown();
+
+            const viewAllLink = state.list.querySelector('.smart-ac__view-all');
+            if (viewAllLink) {
+                viewAllLink.addEventListener('click', () => saveRecent(q));
+            }
 
             // Tag each card for keyboard navigation + a11y
             state.list.querySelectorAll('.product-card').forEach((card, i) => {

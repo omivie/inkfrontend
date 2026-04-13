@@ -2743,13 +2743,13 @@
 }
 
 @media (max-width: 1024px) {
-    .related-products__grid {
+    .ribbon-detail-columns__right .related-products__grid {
         grid-template-columns: repeat(3, 1fr);
     }
 }
 
 @media (max-width: 600px) {
-    .related-products__grid {
+    .ribbon-detail-columns__right .related-products__grid {
         grid-template-columns: repeat(2, 1fr);
     }
 }

@@ -20,19 +20,6 @@ export default async function middleware(request) {
     const sku = segments[segments.length - 1];
     if (sku) prerenderPath = `/api/prerender/product/${encodeURIComponent(sku)}`;
   }
-  // /brands/:slug → brand
-  else if (path.startsWith('/brands/')) {
-    const slug = path.split('/').filter(Boolean)[1];
-    if (slug) prerenderPath = `/api/prerender/brand/${encodeURIComponent(slug)}`;
-  }
-  // /ink-cartridges → category/ink
-  else if (path === '/ink-cartridges') {
-    prerenderPath = '/api/prerender/category/ink';
-  }
-  // /toner-cartridges → category/toner
-  else if (path === '/toner-cartridges') {
-    prerenderPath = '/api/prerender/category/toner';
-  }
   // /html/ribbons → category/ribbons
   else if (path === '/html/ribbons' || path === '/html/ribbons.html') {
     prerenderPath = '/api/prerender/category/ribbons';
@@ -43,16 +30,6 @@ export default async function middleware(request) {
     const printerSlug = url.searchParams.get('printer_slug');
     if (brand && printerSlug) {
       prerenderPath = `/api/prerender/printer/${encodeURIComponent(brand)}/${encodeURIComponent(printerSlug)}`;
-    }
-  }
-  // /printers/:slug → printer (extract brand from slug prefix)
-  else if (path.startsWith('/printers/')) {
-    const slug = path.split('/').filter(Boolean)[1];
-    if (slug) {
-      // Printer slugs are like "hp-deskjet-2700" — extract brand as first segment
-      const parts = slug.split('-');
-      const brand = parts[0];
-      prerenderPath = `/api/prerender/printer/${encodeURIComponent(brand)}/${encodeURIComponent(slug)}`;
     }
   }
 
@@ -85,13 +62,9 @@ export const config = {
   matcher: [
     '/',
     '/products/:path*',
-    '/brands/:path*',
-    '/ink-cartridges',
-    '/toner-cartridges',
     '/html/ribbons',
     '/html/ribbons.html',
     '/html/shop',
     '/html/shop.html',
-    '/printers/:path*',
   ],
 };
