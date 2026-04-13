@@ -13,7 +13,7 @@
     const ENDPOINT = '/api/search/suggest';
     const DEBOUNCE_MS = 300;
     const MIN_QUERY_LENGTH = 2;
-    const LIMIT = 24;
+    const LIMIT = 10;
     const SKELETON_DELAY_MS = 150;
     const RECENT_KEY = 'recentSearches';
     const RECENT_MAX = 5;
