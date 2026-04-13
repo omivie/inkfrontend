@@ -299,15 +299,14 @@ function initBasicAutocomplete(searchForm, searchInput) {
             if (autocompleteRes.ok && autocompleteRes.data) {
                 const products = autocompleteRes.data.suggestions || autocompleteRes.data || [];
                 products.slice(0, 4).forEach(item => {
-                    if (item.type === 'product' || item.sku) {
-                        suggestions.push({
-                            type: 'product',
-                            id: item.id,
-                            name: item.name,
-                            sku: item.sku,
-                            price: item.retail_price
-                        });
-                    }
+                    suggestions.push({
+                        type: 'product',
+                        id: item.id,
+                        name: item.name,
+                        slug: item.slug,
+                        sku: item.sku || '',
+                        price: item.price != null ? item.price : item.retail_price
+                    });
                 });
             }
 

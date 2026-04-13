@@ -1,7 +1,7 @@
 /**
  * SEARCH.JS — Smart Autocomplete
  * ================================
- * Row-based typeahead dropdown backed by GET /api/search/autocomplete.
+ * Row-based typeahead dropdown backed by GET /api/search/suggest.
  *
  * Public API: window.SmartSearch.init(form, input)
  *   main.js wires this to every .search-form in the DOM.
@@ -10,10 +10,10 @@
 (function () {
     'use strict';
 
-    const ENDPOINT = '/api/search/autocomplete';
+    const ENDPOINT = '/api/search/suggest';
     const DEBOUNCE_MS = 300;
     const MIN_QUERY_LENGTH = 2;
-    const LIMIT = 20;
+    const LIMIT = 24;
     const SKELETON_DELAY_MS = 150;
     const RECENT_KEY = 'recentSearches';
     const RECENT_MAX = 5;
@@ -69,6 +69,7 @@
             sku: p.sku || '',
             source: p.source || (p.is_genuine ? 'genuine' : 'compatible'),
             brand: p.brand || null,
+            category: p.category || null,
         });
     }
 
@@ -82,13 +83,18 @@
         return `/html/shop?search=${encodeURIComponent(p.name || '')}`;
     }
 
-    async function fetchAutocomplete(query, signal) {
+    async function fetchSuggest(query, signal) {
         const base = (typeof Config !== 'undefined' && Config.API_URL) ? Config.API_URL : '';
         const url = `${base}${ENDPOINT}?q=${encodeURIComponent(query)}&limit=${LIMIT}`;
         const res = await fetch(url, { signal });
         const json = await res.json();
         if (!json || !json.ok) throw new Error((json && json.error && json.error.message) || 'Search failed');
-        return (json.data && Array.isArray(json.data.suggestions)) ? json.data.suggestions : [];
+        const data = json.data || {};
+        return {
+            suggestions: Array.isArray(data.suggestions) ? data.suggestions : [],
+            matched_printer: data.matched_printer || null,
+            did_you_mean: data.did_you_mean || null,
+        };
     }
 
     function createInstance() {
@@ -198,15 +204,30 @@
             positionDropdown();
         }
 
-        function renderResults(list) {
+        function renderResults(data) {
+            const list = (data && Array.isArray(data.suggestions)) ? data.suggestions : [];
+            const matchedPrinter = data && data.matched_printer;
+            const didYouMean = data && data.did_you_mean;
             state.mode = list.length ? 'results' : 'no-results';
             state.results = list;
             state.highlightIndex = -1;
             state.list.setAttribute('role', 'listbox');
 
             if (!list.length) {
-                state.list.innerHTML = `<div class="smart-ac__no-results">No products match “${esc(state.input.value.trim())}”. Try a different term or browse the <a href="/html/shop">full catalog</a>.</div>`;
-                setLive('No results found');
+                const q = esc(state.input.value.trim());
+                const dymHTML = didYouMean
+                    ? ` Did you mean <button type="button" class="smart-ac__dym" data-dym="${escAttr(didYouMean)}">${esc(didYouMean)}</button>?`
+                    : ' Try a different term or browse the <a href="/html/shop">full catalog</a>.';
+                state.list.innerHTML = `<div class="smart-ac__no-results">No products match “${q}”.${dymHTML}</div>`;
+                const dymBtn = state.list.querySelector('.smart-ac__dym');
+                if (dymBtn) {
+                    dymBtn.addEventListener('click', () => {
+                        state.input.value = dymBtn.dataset.dym || '';
+                        state.input.dispatchEvent(new Event('input', { bubbles: true }));
+                        state.input.focus();
+                    });
+                }
+                setLive(didYouMean ? `No results. Did you mean ${didYouMean}` : 'No results found');
                 return;
             }
 
@@ -217,8 +238,11 @@
                 return;
             }
 
+            const bannerHTML = matchedPrinter && matchedPrinter.name
+                ? `<div class="smart-ac__matched-printer">Showing cartridges for <a href="/html/shop.html?printer=${escAttr(matchedPrinter.slug || '')}">${esc(matchedPrinter.name)}</a></div>`
+                : '';
             const cardsHTML = list.map((p, i) => Products.renderCard(adaptForCard(p), i)).join('');
-            state.list.innerHTML = `<div class="product-grid smart-ac__grid">${cardsHTML}</div>`;
+            state.list.innerHTML = `${bannerHTML}<div class="product-grid smart-ac__grid">${cardsHTML}</div>`;
             positionDropdown();
 
             // Tag each card for keyboard navigation + a11y
@@ -269,10 +293,10 @@
             }, SKELETON_DELAY_MS);
 
             try {
-                const results = await fetchAutocomplete(query, signal);
+                const data = await fetchSuggest(query, signal);
                 clearTimeout(state.skeletonTimer);
                 if (signal.aborted) return;
-                renderResults(results);
+                renderResults(data);
             } catch (err) {
                 clearTimeout(state.skeletonTimer);
                 if (err && err.name === 'AbortError') return;

@@ -268,6 +268,37 @@
     color: var(--cyan-primary, #2563eb);
 }
 
+.smart-ac__dym {
+    background: none;
+    border: 0;
+    padding: 0;
+    margin: 0;
+    font: inherit;
+    color: var(--cyan-primary, #2563eb);
+    cursor: pointer;
+    text-decoration: underline;
+}
+.smart-ac__dym:hover {
+    text-decoration: none;
+}
+
+.smart-ac__matched-printer {
+    padding: 10px 14px;
+    margin: 0 0 10px;
+    background: var(--color-surface-subtle, #f1f5f9);
+    border-radius: 8px;
+    font-size: 13px;
+    color: var(--color-text, #0f172a);
+}
+.smart-ac__matched-printer a {
+    color: var(--cyan-primary, #2563eb);
+    font-weight: 600;
+    text-decoration: none;
+}
+.smart-ac__matched-printer a:hover {
+    text-decoration: underline;
+}
+
 /* --- Skeleton ------------------------------------------------------------- */
 
 .smart-ac__row--skeleton {

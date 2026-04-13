@@ -564,7 +564,7 @@ const API = {
      */
     async getAutocomplete(query, limit = 8) {
         if (!query || query.length < 2) return { ok: true, data: { suggestions: [] } };
-        return this.get(`/api/search/autocomplete?q=${encodeURIComponent(query)}&limit=${limit}`);
+        return this.get(`/api/search/suggest?q=${encodeURIComponent(query)}&limit=${limit}`);
     },
 
     /**
