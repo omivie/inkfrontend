@@ -111,11 +111,11 @@
                     <div class="biz-dashboard__reorder-grid">
                         ${reorderItems.slice(0, 5).map(item => `
                             <div class="biz-reorder-card">
-                                <a href="/html/product/index.html?sku=${Security.escapeAttr(item.sku || '')}" class="biz-reorder-card__image-link">
+                                <a href="${item.slug ? `/products/${Security.escapeAttr(item.slug)}/${Security.escapeAttr(item.sku || '')}` : `/html/product/?sku=${Security.escapeAttr(item.sku || '')}`}" class="biz-reorder-card__image-link">
                                     <img src="${Security.escapeAttr(item.image_url || item.thumbnail || '/assets/images/placeholder.png')}" alt="${Security.escapeAttr(item.name || '')}" class="biz-reorder-card__image" loading="lazy">
                                 </a>
                                 <div class="biz-reorder-card__info">
-                                    <a href="/html/product/index.html?sku=${Security.escapeAttr(item.sku || '')}" class="biz-reorder-card__name">${Security.escapeHtml(item.name || 'Product')}</a>
+                                    <a href="${item.slug ? `/products/${Security.escapeAttr(item.slug)}/${Security.escapeAttr(item.sku || '')}` : `/html/product/?sku=${Security.escapeAttr(item.sku || '')}`}" class="biz-reorder-card__name">${Security.escapeHtml(item.name || 'Product')}</a>
                                     <span class="biz-reorder-card__price">${Security.escapeHtml(fmtPrice(item.price))}</span>
                                 </div>
                                 <button class="btn btn--primary btn--sm biz-reorder-card__btn" data-sku="${Security.escapeAttr(item.sku || '')}" data-product-id="${Security.escapeAttr(item.product_id || item.id || '')}">Add to Cart</button>

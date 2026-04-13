@@ -1559,19 +1559,12 @@
         },
 
         async resolveSkuFromSlug(slug) {
-            // Backend has no by-slug endpoint, so reuse suggest: search the slug
-            // words and pick a suggestion whose slug matches exactly.
-            const q = slug.replace(/-/g, ' ').trim();
-            if (!q) return null;
             try {
                 const base = (typeof Config !== 'undefined' && Config.API_URL) ? Config.API_URL : '';
-                const res = await fetch(`${base}/api/search/suggest?q=${encodeURIComponent(q)}&limit=24`);
+                const res = await fetch(`${base}/api/products/by-slug/${encodeURIComponent(slug)}`);
+                if (!res.ok) return null;
                 const json = await res.json();
-                const list = (json && json.ok && json.data && Array.isArray(json.data.suggestions)) ? json.data.suggestions : [];
-                const exact = list.find(p => p && p.slug === slug && p.sku);
-                if (exact) return exact.sku;
-                const first = list.find(p => p && p.sku);
-                return first ? first.sku : null;
+                return (json && json.ok && json.data && json.data.sku) ? json.data.sku : null;
             } catch (_) {
                 return null;
             }

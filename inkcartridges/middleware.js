@@ -20,6 +20,12 @@ export default async function middleware(request) {
     const sku = segments[segments.length - 1];
     if (sku) prerenderPath = `/api/prerender/product/${encodeURIComponent(sku)}`;
   }
+  // /product/:slug → legacy product (redirects to by-slug prerender)
+  else if (path.startsWith('/product/')) {
+    const segments = path.split('/').filter(Boolean);
+    const slug = segments[1];
+    if (slug) prerenderPath = `/api/prerender/product-by-slug/${encodeURIComponent(slug)}`;
+  }
   // /html/ribbons → category/ribbons
   else if (path === '/html/ribbons' || path === '/html/ribbons.html') {
     prerenderPath = '/api/prerender/category/ribbons';
@@ -62,6 +68,7 @@ export const config = {
   matcher: [
     '/',
     '/products/:path*',
+    '/product/:path*',
     '/html/ribbons',
     '/html/ribbons.html',
     '/html/shop',
