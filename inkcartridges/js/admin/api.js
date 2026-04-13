@@ -1468,6 +1468,46 @@ const AdminAPI = {
   },
 
   // =========================================================================
+  // Admin — Coupons CRUD (/api/admin/coupons)
+  // =========================================================================
+  async getCoupons(params = {}) {
+    const qs = new URLSearchParams(params).toString();
+    const resp = await window.API.get(`/api/admin/coupons${qs ? '?' + qs : ''}`);
+    return resp?.data ?? null;
+  },
+  async createCoupon(payload) {
+    const resp = await window.API.post('/api/admin/coupons', payload);
+    if (resp && resp.ok === false) {
+      const err = new Error(resp.error?.message || resp.error || 'Create failed');
+      err.code = resp.error?.code;
+      err.details = resp.error?.details;
+      throw err;
+    }
+    return resp?.data ?? null;
+  },
+  async updateCoupon(id, payload) {
+    const resp = await window.API.put(`/api/admin/coupons/${id}`, payload);
+    if (resp && resp.ok === false) {
+      const err = new Error(resp.error?.message || resp.error || 'Update failed');
+      err.code = resp.error?.code;
+      err.details = resp.error?.details;
+      throw err;
+    }
+    return resp?.data ?? null;
+  },
+  async deleteCoupon(id, permanent = false) {
+    const qs = permanent ? '?permanent=true' : '';
+    const resp = await window.API.delete(`/api/admin/coupons/${id}${qs}`);
+    if (resp && resp.ok === false) throw new Error(resp.error?.message || resp.error || 'Delete failed');
+    return true;
+  },
+  async getCouponLogs(params = {}) {
+    const qs = new URLSearchParams(params).toString();
+    const resp = await window.API.get(`/api/admin/coupons/logs${qs ? '?' + qs : ''}`);
+    return resp?.data ?? null;
+  },
+
+  // =========================================================================
   // Admin — Abuse detection
   // =========================================================================
   async getAbuseFlags(params = {}) {

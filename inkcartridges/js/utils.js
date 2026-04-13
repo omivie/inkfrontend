@@ -177,8 +177,12 @@ const ProductColors = {
      * @returns {string|null}
      */
     getProductStyle(obj, fallback = null) {
-        if (obj && obj.color_hex && Array.isArray(obj.color_hex) && obj.color_hex.length > 0) {
-            return this.getStyleFromHex(obj.color_hex);
+        let ch = obj && obj.color_hex;
+        if (typeof ch === 'string') {
+            try { ch = JSON.parse(ch); } catch { ch = null; }
+        }
+        if (Array.isArray(ch) && ch.length > 0) {
+            return this.getStyleFromHex(ch);
         }
         const colorName = obj && (obj.color || this.detectFromName(obj.name));
         if (colorName) return this.getStyle(colorName, fallback);

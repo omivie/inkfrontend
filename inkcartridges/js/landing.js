@@ -144,12 +144,12 @@
 
             const products = response.data.products;
 
-            grid.innerHTML = products.map(p => {
+            grid.innerHTML = products.map((p, i) => {
                 const name = p.name || '';
                 const price = parseFloat(p.retail_price || 0);
                 const brandName = p.brand?.name || (typeof p.brand === 'string' ? p.brand : '') || '';
                 const imageHtml = typeof Products !== 'undefined' && Products.getProductImageHTML
-                    ? Products.getProductImageHTML(p)
+                    ? Products.getProductImageHTML(p, { priority: i < 4 })
                     : `<img src="${Security.escapeAttr(typeof storageUrl === 'function' ? storageUrl(p.image_url) : (p.image_url || '/assets/images/placeholder-product.svg'))}" alt="${Security.escapeAttr(name)}" data-fallback="placeholder">`;
                 return `
                     <a href="${p.slug ? `/products/${Security.escapeAttr(p.slug)}/${Security.escapeAttr(p.sku)}` : `/html/product/?sku=${Security.escapeAttr(p.sku)}`}" class="product-card">

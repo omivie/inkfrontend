@@ -12,7 +12,8 @@
     <meta property="og:description" content="Buy genuine and compatible ink cartridges in NZ. Shop HP, Canon, Epson, Brother and more. Free shipping over $100.">
 
     <link rel="canonical" href="https://www.inkcartridges.co.nz/ink-cartridges">
-    <link rel="icon" type="image/svg+xml" href="/assets/icons/favicon.svg">
+    <link rel="icon" type="image/png" href="https://ink-backend-zaeq.onrender.com/api/images/optimize?url=site/IC.png&format=png&w=64">
+    <link rel="apple-touch-icon" href="https://ink-backend-zaeq.onrender.com/api/images/optimize?url=site/IC.png&format=png&w=180">
     <title>Ink Cartridges NZ — Genuine & Compatible | InkCartridges.co.nz</title>
 
     <script type="application/ld+json">
@@ -389,7 +390,7 @@
         });
 
         function renderGrid(products) {
-            grid.innerHTML = products.map(function(p) { return Products.renderCard(p); }).join('');
+            grid.innerHTML = products.map(function(p, i) { return Products.renderCard(p, i); }).join('');
             Products.bindImageFallbacks(grid);
             Products.bindAddToCartEvents(grid);
             grid.hidden = false;

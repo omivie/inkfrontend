@@ -22,11 +22,12 @@ const Products = {
     /**
      * Get image HTML for a product (with color fallback)
      */
-    getProductImageHTML(product) {
+    getProductImageHTML(product, { priority = false } = {}) {
         const colorStyle = ProductColors.getProductStyle(product);
         const imageUrl = typeof storageUrl === 'function' ? storageUrl(product.image_url) : product.image_url;
         const srcsetVal = typeof imageSrcset === 'function' && product.image_url ? imageSrcset(product.image_url) : '';
         const srcsetHtml = srcsetVal ? ` srcset="${Security.escapeAttr(srcsetVal)}" sizes="(max-width: 480px) 200px, (max-width: 768px) 300px, 400px"` : '';
+        const loadAttrs = priority ? 'fetchpriority="high" decoding="async"' : 'loading="lazy" decoding="async"';
         if (imageUrl && imageUrl !== '/assets/images/placeholder-product.svg') {
             // Has image URL - use it with error fallback (listeners attached after DOM insertion)
             if (colorStyle) {
@@ -34,7 +35,7 @@ const Products = {
                              alt="${Security.escapeAttr(product.name)}"
                              class="product-card__image"
                              width="200" height="200"
-                             loading="lazy"${srcsetHtml}
+                             ${loadAttrs}${srcsetHtml}
                              data-fallback="color-block">
                         <div class="product-card__color-block" style="${colorStyle}; display: none;"></div>`;
             } else {
@@ -42,7 +43,7 @@ const Products = {
                              alt="${Security.escapeAttr(product.name)}"
                              class="product-card__image"
                              width="200" height="200"
-                             loading="lazy"${srcsetHtml}
+                             ${loadAttrs}${srcsetHtml}
                              data-fallback="placeholder">`;
             }
         } else if (colorStyle && product.source === 'compatible') {
@@ -57,7 +58,7 @@ const Products = {
                          alt="${Security.escapeAttr(product.name)}"
                          class="product-card__image"
                          width="200" height="200"
-                         loading="lazy">`;
+                         ${loadAttrs}>`;
         }
     },
 
@@ -66,16 +67,17 @@ const Products = {
      * @param {object} product - Product data from API
      * @returns {string} HTML string
      */
-    renderCard(product) {
+    renderCard(product, index) {
         const sourceBadge = getSourceBadge(product.source);
         const stockInfo = getStockStatus(product);
         const resolvedImage = typeof storageUrl === 'function' ? storageUrl(product.image_url) : (product.image_url || '');
+        const priority = typeof index === 'number' && index < 4;
 
         return `
             <article class="product-card" data-product-id="${Security.escapeAttr(product.id)}" data-sku="${Security.escapeAttr(product.sku)}">
                 <a href="${product.slug ? `/products/${Security.escapeAttr(product.slug)}/${Security.escapeAttr(product.sku)}` : `/html/product/?sku=${Security.escapeAttr(product.sku)}`}" class="product-card__link">
                     <div class="product-card__image-wrapper">
-                        ${this.getProductImageHTML(product)}
+                        ${this.getProductImageHTML(product, { priority })}
                         ${sourceBadge ? `<span class="product-card__badge ${sourceBadge.class}">${sourceBadge.text}</span>` : ''}
                         ${product.is_lowest_in_market ? `<span class="product-card__badge product-card__badge--lowest-price" title="${product.market_position ? Security.escapeAttr(product.market_position.price_diff_percent + '% less than ' + product.market_position.lowest_competitor_name) : ''}">Lowest Price in NZ</span>` : ''}
                     </div>
@@ -140,7 +142,29 @@ const Products = {
      * @param {array} products - Array of products
      * @returns {string} HTML string
      */
+    _preloadLCPImage(product) {
+        if (!product || !product.image_url) return;
+        if (document.querySelector('link[rel="preload"][data-lcp-product]')) return;
+        const url = typeof storageUrl === 'function' ? storageUrl(product.image_url) : product.image_url;
+        if (!url) return;
+        const link = document.createElement('link');
+        link.rel = 'preload';
+        link.as = 'image';
+        link.href = url;
+        link.setAttribute('fetchpriority', 'high');
+        link.setAttribute('data-lcp-product', '1');
+        const srcsetVal = typeof imageSrcset === 'function' ? imageSrcset(product.image_url) : '';
+        if (srcsetVal) {
+            link.setAttribute('imagesrcset', srcsetVal);
+            link.setAttribute('imagesizes', '(max-width: 480px) 200px, (max-width: 768px) 300px, 400px');
+        }
+        document.head.appendChild(link);
+    },
+
     renderCards(products) {
+        if (products && products.length > 0) {
+            this._preloadLCPImage(products[0]);
+        }
         if (!products || products.length === 0) {
             return `
                 <div class="products-empty">
@@ -154,7 +178,7 @@ const Products = {
             `;
         }
 
-        return products.map(p => this.renderCard(p)).join('');
+        return products.map((p, i) => this.renderCard(p, i)).join('');
     },
 
     /**

@@ -206,7 +206,7 @@ const BrandHubPage = {
         const grid = document.getElementById('hub-products-grid');
         if (!section || !grid) return;
 
-        grid.innerHTML = products.map(p => Products.renderCard(p)).join('');
+        grid.innerHTML = products.map((p, i) => Products.renderCard(p, i)).join('');
         Products.bindImageFallbacks(grid);
         Products.bindAddToCartEvents(grid);
         section.hidden = false;

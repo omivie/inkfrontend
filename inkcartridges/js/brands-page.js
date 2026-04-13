@@ -129,7 +129,7 @@ const BrandsPage = {
             noProducts.hidden = false;
         } else {
             noProducts.hidden = true;
-            grid.innerHTML = filtered.map(p => Products.renderCard(p)).join('');
+            grid.innerHTML = filtered.map((p, i) => Products.renderCard(p, i)).join('');
             Products.bindImageFallbacks(grid);
             Products.bindAddToCartEvents(grid);
             grid.hidden = false;
@@ -210,7 +210,7 @@ const BrandsPage = {
             return;
         }
 
-        grid.innerHTML = products.map(p => Products.renderCard(p)).join('');
+        grid.innerHTML = products.map((p, i) => Products.renderCard(p, i)).join('');
         Products.bindImageFallbacks(grid);
         Products.bindAddToCartEvents(grid);
         grid.hidden = false;

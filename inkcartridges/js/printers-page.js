@@ -134,7 +134,7 @@ const PrintersPage = {
             return (ca === -1 ? 999 : ca) - (cb === -1 ? 999 : cb);
         });
 
-        grid.innerHTML = sorted.map(p => Products.renderCard(p)).join('');
+        grid.innerHTML = sorted.map((p, i) => Products.renderCard(p, i)).join('');
         Products.bindImageFallbacks(grid);
         Products.bindAddToCartEvents(grid);
         grid.hidden = false;

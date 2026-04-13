@@ -50,6 +50,7 @@ const NAV_ITEMS = [
   { key: 'customers', label: 'Customers', icon: 'customers' },
   { divider: true },
   { key: 'promotions', label: 'Promotions', icon: 'finance', ownerOnly: true },
+  { key: 'coupons', label: 'Coupons', icon: 'finance', ownerOnly: true },
   { key: 'shipping-rates', label: 'Shipping Rates', icon: 'fulfillment', ownerOnly: true },
   { key: 'abuse', label: 'Abuse', icon: 'lock', ownerOnly: true },
   { key: 'segments', label: 'Segments', icon: 'mail', ownerOnly: true },

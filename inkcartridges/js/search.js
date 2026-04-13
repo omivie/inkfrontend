@@ -1,1278 +1,429 @@
 /**
- * SEARCH.JS
- * =========
- * Smart search autocomplete dropdown with product card grid.
- * Replaces the basic text-list autocomplete from main.js.
+ * SEARCH.JS — Smart Autocomplete
+ * ================================
+ * Row-based typeahead dropdown backed by GET /api/search/autocomplete.
  *
- * Factory pattern: SmartSearch.init(form, input) creates independent instances,
- * each with its own dropdown, cache, and keyboard nav state.
+ * Public API: window.SmartSearch.init(form, input)
+ *   main.js wires this to every .search-form in the DOM.
  */
 
-const searchConfig = {
-    apiUrl: '/api/search/smart',
-    minChars: 2,
-    debounceMs: 300,
-    maxResults: 100,
-    cacheMaxAge: 5 * 60 * 1000,
-    cacheMaxSize: 50,
-    skeletonCount: 6,
+(function () {
+    'use strict';
 
-    buildShopUrl(product, query) {
-        const params = new URLSearchParams();
-        if (query) params.set('search', query);
+    const ENDPOINT = '/api/search/autocomplete';
+    const DEBOUNCE_MS = 300;
+    const MIN_QUERY_LENGTH = 2;
+    const LIMIT = 20;
+    const SKELETON_DELAY_MS = 150;
+    const RECENT_KEY = 'recentSearches';
+    const RECENT_MAX = 5;
+    const PLACEHOLDER_IMG = '/assets/images/placeholder-product.svg';
 
-        const brand = product.brand?.name ?? product.brand ?? '';
-        if (brand) params.set('brand', String(brand));
+    const TRENDING_MODELS = [
+        'Brother MFC-L2750DW',
+        'HP OfficeJet Pro 9720',
+        'Canon PIXMA TS3560',
+        'Epson EcoTank ET-2850',
+        'Brother HL-L2460DW',
+    ];
 
-        const code = product.sku ?? product.code ?? product.product_code ?? '';
-        if (code) params.set('code', String(code));
+    let _instanceId = 0;
 
-        const category = product.category?.name ?? product.category ?? '';
-        if (category) params.set('category', String(category));
-
-        return '/html/shop?' + params.toString();
+    function esc(s) {
+        return (typeof Security !== 'undefined' && Security.escapeHtml)
+            ? Security.escapeHtml(s == null ? '' : String(s))
+            : String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
     }
-};
+    function escAttr(s) {
+        return (typeof Security !== 'undefined' && Security.escapeAttr)
+            ? Security.escapeAttr(s == null ? '' : String(s))
+            : esc(s);
+    }
+    function priceNZD(n) {
+        if (typeof formatPrice === 'function') return formatPrice(n);
+        const v = Number(n);
+        if (!isFinite(v)) return '';
+        try { return new Intl.NumberFormat('en-NZ', { style: 'currency', currency: 'NZD' }).format(v); }
+        catch (_) { return '$' + v.toFixed(2); }
+    }
 
-let _smartSearchInstanceId = 0;
+    function getRecent() {
+        try { return JSON.parse(localStorage.getItem(RECENT_KEY) || '[]'); }
+        catch (_) { return []; }
+    }
+    function saveRecent(query) {
+        const q = (query || '').trim();
+        if (q.length < MIN_QUERY_LENGTH) return;
+        try {
+            const current = getRecent().filter(x => x !== q);
+            const next = [q, ...current].slice(0, RECENT_MAX);
+            localStorage.setItem(RECENT_KEY, JSON.stringify(next));
+        } catch (_) { /* ignore quota */ }
+    }
 
-function createSmartSearch() {
-    const instanceId = _smartSearchInstanceId++;
+    function adaptForCard(p) {
+        // Autocomplete payload uses `price`; product-card template expects `retail_price`.
+        // Also supply sensible defaults for fields the card reads but autocomplete omits.
+        return Object.assign({}, p, {
+            retail_price: p.retail_price != null ? p.retail_price : p.price,
+            sku: p.sku || '',
+            source: p.source || (p.is_genuine ? 'genuine' : 'compatible'),
+            brand: p.brand || null,
+        });
+    }
 
-    const instance = {
-        _form: null,
-        _input: null,
-        _dropdown: null,
-        _grid: null,
-        _footer: null,
-        _correctionBanner: null,
-        _activeCorrection: null,
-        _cache: new Map(),
-        _debounceTimer: null,
-        _selectedIndex: -1,
-        _results: [],
-        _currentQuery: '',
-        _effectiveQuery: '',
-        _printerModel: null,
-        _isVisible: false,
-        _scrollCleanup: null,
-        _instanceId: instanceId,
+    function productHref(p) {
+        const slug = p.slug || '';
+        // Spec payload has no SKU; fall back to slug-only when missing.
+        const sku = p.sku || '';
+        if (slug && sku) return `/products/${encodeURIComponent(slug)}/${encodeURIComponent(sku)}`;
+        if (slug) return `/products/${encodeURIComponent(slug)}`;
+        if (sku) return `/html/product/?sku=${encodeURIComponent(sku)}`;
+        return `/html/shop?search=${encodeURIComponent(p.name || '')}`;
+    }
 
-        _init(searchForm, searchInput) {
-            this._form = searchForm;
-            this._input = searchInput;
+    async function fetchAutocomplete(query, signal) {
+        const base = (typeof Config !== 'undefined' && Config.API_URL) ? Config.API_URL : '';
+        const url = `${base}${ENDPOINT}?q=${encodeURIComponent(query)}&limit=${LIMIT}`;
+        const res = await fetch(url, { signal });
+        const json = await res.json();
+        if (!json || !json.ok) throw new Error((json && json.error && json.error.message) || 'Search failed');
+        return (json.data && Array.isArray(json.data.suggestions)) ? json.data.suggestions : [];
+    }
 
-            // Remove old autocomplete dropdown if present
-            const old = searchForm.querySelector('.search-autocomplete');
-            if (old) old.remove();
+    function createInstance() {
+        const id = _instanceId++;
+        const listboxId = `smart-ac-listbox-${id}`;
 
-            // Ensure form is a positioning context
-            const formPos = window.getComputedStyle(searchForm).position;
-            if (formPos === 'static') {
-                searchForm.style.position = 'relative';
-            }
+        const state = {
+            form: null,
+            input: null,
+            dropdown: null,
+            list: null,
+            live: null,
+            debounceTimer: null,
+            skeletonTimer: null,
+            abort: null,
+            results: [],
+            highlightIndex: -1,
+            isOpen: false,
+            mode: 'empty', // 'empty' | 'skeleton' | 'results' | 'no-results' | 'error'
+            _outsideHandler: null,
+        };
 
-            this._createDropdown();
-            this._setupARIA();
-            this._bindEvents();
-        },
+        function positionDropdown() {
+            if (!state.input || !state.dropdown) return;
+            const formRect = state.form.getBoundingClientRect();
+            const inputRect = state.input.getBoundingClientRect();
+            state.dropdown.style.setProperty('--smart-ac-top', `${Math.round(inputRect.bottom + 6)}px`);
+            state.dropdown.style.setProperty('--smart-ac-left', `${Math.round(formRect.left)}px`);
+            state.dropdown.style.setProperty('--smart-ac-width', `${Math.round(formRect.width)}px`);
+        }
 
-        _createDropdown() {
-            const listboxId = 'smart-search-listbox-' + this._instanceId;
+        function open() {
+            if (state.isOpen) return;
+            state.isOpen = true;
+            state.dropdown.classList.add('is-open');
+            state.input.setAttribute('aria-expanded', 'true');
+            positionDropdown();
+        }
+        function close() {
+            if (!state.isOpen) return;
+            state.isOpen = false;
+            state.dropdown.classList.remove('is-open');
+            state.input.setAttribute('aria-expanded', 'false');
+            state.input.removeAttribute('aria-activedescendant');
+            state.highlightIndex = -1;
+        }
 
-            this._dropdown = document.createElement('div');
-            this._dropdown.className = 'smart-search-dropdown';
-            this._dropdown.id = listboxId;
-            this._dropdown.setAttribute('role', 'listbox');
-            this._dropdown.setAttribute('aria-label', 'Search results');
-
-            this._correctionBanner = document.createElement('div');
-            this._correctionBanner.className = 'smart-search__correction is-hidden';
-
-            this._grid = document.createElement('div');
-            this._grid.className = 'smart-search__grid';
-
-            this._footer = document.createElement('div');
-            this._footer.className = 'smart-search__footer is-hidden';
-
-            this._dropdown.appendChild(this._correctionBanner);
-            this._dropdown.appendChild(this._grid);
-            this._dropdown.appendChild(this._footer);
-            this._form.appendChild(this._dropdown);
-        },
-
-        _setupARIA() {
-            const listboxId = 'smart-search-listbox-' + this._instanceId;
-            this._input.setAttribute('role', 'combobox');
-            this._input.setAttribute('aria-expanded', 'false');
-            this._input.setAttribute('aria-controls', listboxId);
-            this._input.setAttribute('aria-autocomplete', 'list');
-            this._input.setAttribute('aria-haspopup', 'listbox');
-        },
-
-        _bindEvents() {
-            this._input.addEventListener('input', () => this._onInput());
-            this._input.addEventListener('keydown', (e) => this._onKeydown(e));
-            this._grid.addEventListener('click', (e) => this._onCardClick(e));
-
-            document.addEventListener('click', (e) => {
-                if (this._isVisible && !this._form.contains(e.target)) {
-                    this._hide();
-                }
+        function setActive(i) {
+            state.highlightIndex = i;
+            const cards = state.list.querySelectorAll('.product-card[data-index]');
+            cards.forEach((c, idx) => {
+                const on = idx === i;
+                c.classList.toggle('is-highlighted', on);
+                c.setAttribute('aria-selected', on ? 'true' : 'false');
             });
-
-            this._input.addEventListener('focus', () => {
-                if (this._results.length > 0 && this._input.value.trim().length >= searchConfig.minChars) {
-                    this._show();
-                }
-            });
-        },
-
-        // --- Input handling ---
-
-        _onInput() {
-            const query = this._input.value.trim();
-            clearTimeout(this._debounceTimer);
-
-            if (query.length < searchConfig.minChars) {
-                this._hide();
-                this._currentQuery = '';
-                return;
-            }
-
-            this._debounceTimer = setTimeout(() => this._executeSearch(query), searchConfig.debounceMs);
-        },
-
-        async _executeSearch(query) {
-            this._currentQuery = query;
-            this._hideCorrection();
-            this._printerModel = null;
-
-            // Step 1: Normalize the query (silent, always runs)
-            let searchQuery = query;
-            let normalizeResult = null;
-            if (typeof SearchNormalize !== 'undefined') {
-                normalizeResult = SearchNormalize.normalize(query);
-                searchQuery = normalizeResult.normalized;
-            }
-            this._effectiveQuery = searchQuery;
-
-            const cached = this._getCached(searchQuery);
-            if (cached) {
-                if (normalizeResult && normalizeResult.changed) {
-                    this._showCorrection(query, searchQuery, 'normalize');
-                }
-                this._renderResults(cached.products, searchQuery, cached.total);
-                return;
-            }
-
-            this._renderSkeletons();
-            this._show();
-
-            try {
-                // Fire all three sources in parallel so description + printer-compat
-                // ALWAYS participate — not just as zero-result fallbacks.
-                // Gate printer-compat on queries that plausibly name a printer model:
-                // either the detector matches, or the query contains a digit and is ≥ 3 chars.
-                // Prevents generic words ("ink", "toner") from pulling broad compat noise.
-                const detectorHit = (typeof SearchNormalize !== 'undefined' && SearchNormalize.detectPrinterModel)
-                    ? SearchNormalize.detectPrinterModel(searchQuery) : null;
-                const compatLikely = !!detectorHit || (query.length >= 3 && /\d/.test(query));
-
-                const [apiSettled, descSettled, compatSettled] = await Promise.allSettled([
-                    this._fetchResults(searchQuery),
-                    this._fetchByDescription(searchQuery),
-                    compatLikely ? this._fetchByPrinterModel(query) : Promise.resolve(null)
-                ]);
-                if (query !== this._currentQuery) return;
-
-                const apiResult = apiSettled.status === 'fulfilled' ? apiSettled.value : null;
-                const descResult = descSettled.status === 'fulfilled' ? descSettled.value : null;
-                const compatResult = compatSettled.status === 'fulfilled' ? compatSettled.value : null;
-
-                const sources = [];
-                if (apiResult && apiResult.products && apiResult.products.length) {
-                    sources.push({ tag: 'api', products: apiResult.products });
-                }
-                if (descResult && descResult.products && descResult.products.length) {
-                    sources.push({ tag: 'desc', products: descResult.products });
-                }
-                if (compatResult && compatResult.products && compatResult.products.length) {
-                    sources.push({ tag: 'compat', products: compatResult.products });
-                }
-
-                if (sources.length > 0) {
-                    const merged = this._mergePool(sources);
-                    const scoreMap = this._scorePool(merged.products, merged.sourceMap, searchQuery);
-                    const ordered = (typeof ProductSort !== 'undefined')
-                        ? ProductSort.groupByFamilyScored(merged.products, scoreMap)
-                        : merged.products;
-
-                    const finalResult = { products: ordered, total: apiResult?.total ?? ordered.length };
-                    this._setCache(searchQuery, finalResult);
-
-                    if (compatResult && compatResult.printerName && !(apiResult && apiResult.products.length)) {
-                        this._printerModel = compatResult.printerName;
-                        this._showCorrection(query, 'compatible products for ' + compatResult.printerName, 'normalize');
-                    } else if (normalizeResult && normalizeResult.changed) {
-                        this._showCorrection(query, searchQuery, 'normalize');
-                    }
-                    this._renderResults(finalResult.products, searchQuery, finalResult.total);
-                    return;
-                }
-
-                // --- No-result fallbacks (existing chain) ---
-
-                // Retry with original if normalization changed the query
-                if (normalizeResult && normalizeResult.changed) {
-                    const r = await this._fetchResults(query);
-                    if (query !== this._currentQuery) return;
-                    if (r && r.products && r.products.length > 0) {
-                        const scoreMap = this._scorePool(r.products, new Map(), query);
-                        const ordered = (typeof ProductSort !== 'undefined')
-                            ? ProductSort.groupByFamilyScored(r.products, scoreMap)
-                            : r.products;
-                        const out = { products: ordered, total: r.total };
-                        this._setCache(query, out);
-                        this._renderResults(ordered, query, r.total);
-                        return;
-                    }
-                }
-
-                // Spelling correction
-                if (typeof SearchNormalize !== 'undefined') {
-                    const spellingResult = SearchNormalize.correctSpelling(searchQuery);
-                    if (spellingResult.didCorrect) {
-                        const r = await this._fetchResults(spellingResult.corrected);
-                        if (query !== this._currentQuery) return;
-                        if (r && r.products && r.products.length > 0) {
-                            this._effectiveQuery = spellingResult.corrected;
-                            const scoreMap = this._scorePool(r.products, new Map(), spellingResult.corrected);
-                            const ordered = ProductSort.groupByFamilyScored(r.products, scoreMap);
-                            this._setCache(spellingResult.corrected, { products: ordered, total: r.total });
-                            this._showCorrection(searchQuery, spellingResult.corrected, 'spelling');
-                            this._renderResults(ordered, spellingResult.corrected, r.total);
-                            return;
-                        }
-                    }
-
-                    // NZ/US spelling alternative
-                    const alt = SearchNormalize.getSpellingAlternative(searchQuery);
-                    if (alt) {
-                        const r = await this._fetchResults(alt);
-                        if (query !== this._currentQuery) return;
-                        if (r && r.products && r.products.length > 0) {
-                            this._effectiveQuery = alt;
-                            const scoreMap = this._scorePool(r.products, new Map(), alt);
-                            const ordered = ProductSort.groupByFamilyScored(r.products, scoreMap);
-                            this._setCache(alt, { products: ordered, total: r.total });
-                            this._showCorrection(searchQuery, alt, 'normalize');
-                            this._renderResults(ordered, alt, r.total);
-                            return;
-                        }
-                    }
-                }
-
-                this._renderEmpty(query);
-            } catch (err) {
-                if (query !== this._currentQuery) return;
-                this._renderError();
-            }
-        },
-
-        /**
-         * Merge products from multiple sources (api, description, compat) into one
-         * deduplicated pool. Returns { products, sourceMap } where sourceMap is a
-         * Map<key, Set<sourceTag>> so scoring can weight matches by which field hit.
-         */
-        _mergePool(sources) {
-            const byKey = new Map();
-            const sourceMap = new Map();
-            for (const src of sources) {
-                for (const p of src.products) {
-                    const key = p.sku || p.product_code || p.code || p.id;
-                    if (key == null) continue;
-                    if (!byKey.has(key)) byKey.set(key, p);
-                    if (!sourceMap.has(key)) sourceMap.set(key, new Set());
-                    sourceMap.get(key).add(src.tag);
-                }
-            }
-            return { products: Array.from(byKey.values()), sourceMap };
-        },
-
-        /**
-         * Score each product against the query. Weighted contributions:
-         *   SKU exact = 200, SKU prefix = 120, SKU substring = 80,
-         *   name word-start = 60, name substring = 35,
-         *   brand substring = 10, description substring = 15,
-         *   printer-compat source tag = +25, description source tag = +10,
-         *   in-stock bonus = +5.
-         * Every token contributes independently so "canon 069 magenta" rewards all three.
-         */
-        _scorePool(products, sourceMap, query) {
-            const scores = new Map();
-            const q = (query || '').toLowerCase().trim();
-            if (!q) return scores;
-            const tokens = q.split(/[\s\-_/]+/).filter(t => t.length >= 2);
-            if (tokens.length === 0) tokens.push(q);
-
-            for (const p of products) {
-                const key = p.sku || p.product_code || p.code || p.id;
-                if (key == null) continue;
-                const sku = (p.sku || p.product_code || p.code || '').toLowerCase();
-                const name = (p.name || '').toLowerCase();
-                const brand = (p.brand?.name || p.brand || '').toString().toLowerCase();
-                const desc = (p.description || '').toLowerCase();
-                const compat = (p.compatible_devices_html || '').toLowerCase();
-
-                let score = 0;
-                // Full-query SKU match — strongest signal
-                if (sku && sku === q) score += 200;
-                else if (sku && sku.startsWith(q)) score += 120;
-                else if (sku && sku.includes(q)) score += 80;
-
-                for (const tok of tokens) {
-                    if (!tok) continue;
-                    if (sku) {
-                        if (sku === tok) score += 100;
-                        else if (sku.startsWith(tok)) score += 70;
-                        else if (sku.includes(tok)) score += 45;
-                    }
-                    if (name) {
-                        // word-start match
-                        if (new RegExp('(^|\\s)' + tok.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).test(name)) score += 60;
-                        else if (name.includes(tok)) score += 35;
-                    }
-                    if (brand && brand.includes(tok)) score += 10;
-                    if (desc && desc.includes(tok)) score += 15;
-                    if (compat && compat.includes(tok)) score += 20;
-                }
-
-                const tags = sourceMap.get(key);
-                if (tags) {
-                    if (tags.has('compat')) score += 25;
-                    if (tags.has('desc')) score += 10;
-                    if (tags.has('api')) score += 15;
-                }
-                if (p.in_stock) score += 5;
-
-                scores.set(key, score);
-            }
-            return scores;
-        },
-
-        async _fetchResults(query) {
-            let allProducts = [];
-            let productTotal = 0;
-
-            // Source filter shortcut: "genuine" / "compatible" → use source API param
-            const queryLower = query.toLowerCase();
-            if (queryLower === 'genuine' || queryLower === 'compatible') {
-                const response = await API.getProducts({ source: queryLower, limit: searchConfig.maxResults });
-                if (response.ok && response.data) {
-                    const data = response.data;
-                    const products = Array.isArray(data.products) ? data.products : [];
-                    const total = data.pagination?.total ?? data.total ?? products.length;
-                    if (Array.isArray(products) && products.length > 0) {
-                        return { products, total };
-                    }
-                }
-                return null;
-            }
-
-            // Detect product-type keywords (e.g. "ribbon", "toner") — fetch ALL of that type
-            const typeDetection = (typeof SearchNormalize !== 'undefined' && SearchNormalize.detectProductType)
-                ? SearchNormalize.detectProductType(query) : null;
-            const isTypeQuery = typeDetection !== null;
-
-            // Build API params — type queries use category/type filters, normal queries use search
-            const productParams = isTypeQuery
-                ? { ...typeDetection.productParams, limit: searchConfig.maxResults }
-                : { search: query, limit: searchConfig.maxResults };
-
-            // Only fetch ribbons for normal searches or ribbon-specific type queries
-            const shouldFetchRibbons = !isTypeQuery || typeDetection.fetchRibbons;
-            // GET /api/ribbons does not accept a `search` param per the backend spec;
-            // client-side filter below (lines ~355-361) handles query matching.
-            const ribbonParams = shouldFetchRibbons
-                ? { limit: searchConfig.maxResults }
-                : null;
-
-            // Use smart search for normal text queries (better full-text matching),
-            // fall back to getProducts for type-specific queries (category/type filters)
-            const useSmartSearch = !isTypeQuery && typeof API.smartSearch === 'function';
-            const fetchPromises = useSmartSearch
-                ? [API.smartSearch(query, searchConfig.maxResults)]
-                : [API.getProducts(productParams)];
-            if (ribbonParams) fetchPromises.push(API.getRibbons(ribbonParams));
-
-            const [productRes, ribbonRes] = await Promise.allSettled(fetchPromises);
-
-            // Collect product results
-            if (productRes.status === 'fulfilled' && productRes.value.ok && productRes.value.data) {
-                const data = productRes.value.data;
-                const products = Array.isArray(data.products) ? data.products : [];
-                productTotal = data.pagination?.total ?? data.total ?? products.length;
-                if (Array.isArray(products)) allProducts = products;
-            }
-
-            // Merge ribbon results (deduplicate by SKU)
-            let ribbonTotal = 0;
-            if (ribbonRes && ribbonRes.status === 'fulfilled' && ribbonRes.value.ok && ribbonRes.value.data) {
-                const data = ribbonRes.value.data;
-                let ribbons = data.ribbons || data.products || (Array.isArray(data) ? data : []);
-                if (!Array.isArray(ribbons)) ribbons = [];
-                ribbonTotal = data.pagination?.total ?? data.total ?? ribbons.length;
-
-                // Client-side filter: only keep ribbons whose name/sku match the query
-                // Skip for type queries — we already fetched ALL ribbons intentionally
-                if (!isTypeQuery) {
-                    const qWords = query.toLowerCase().split(/\s+/).filter(Boolean);
-                    ribbons = ribbons.filter(r => {
-                        const name = (r.name || '').toLowerCase();
-                        const sku = (r.sku || '').toLowerCase();
-                        return qWords.every(w => name.includes(w) || sku.includes(w));
-                    });
-                }
-
-                // Normalize ribbon fields to match product schema
-                for (const ribbon of ribbons) {
-                    ribbon._isRibbon = true;
-                    if (!ribbon.image_url && ribbon.image_path) {
-                        ribbon.image_url = typeof storageUrl === 'function' ? storageUrl(ribbon.image_path) : ribbon.image_path;
-                    }
-                    if (ribbon.retail_price == null && ribbon.sale_price != null) {
-                        ribbon.retail_price = ribbon.sale_price;
-                    }
-                    ribbon.in_stock = true;
-                    if (typeof ribbon.brand === 'string') {
-                        ribbon.brand = { name: ribbon.brand };
-                    }
-                }
-
-                const existingSkus = new Set(allProducts.map(p => p.sku));
-                for (const ribbon of ribbons) {
-                    if (ribbon.sku && !existingSkus.has(ribbon.sku)) {
-                        existingSkus.add(ribbon.sku);
-                        allProducts.push(ribbon);
-                    }
-                }
-            }
-
-            if (allProducts.length > 0) {
-                const total = isTypeQuery
-                    ? Math.max(allProducts.length, productTotal, ribbonTotal)
-                    : productTotal + ribbonTotal;
-                return { products: allProducts, total };
-            }
-
-            // 2-word noise-stripping fallback: if one word is a generic category term
-            // (e.g. "ink LC-37"), retry with just the specific product code
-            if (!isTypeQuery) {
-                const twoWords = query.split(/\s+/).filter(Boolean);
-                if (twoWords.length === 2) {
-                    const NOISE = new Set(['ink', 'inks', 'toner', 'toners', 'cartridge', 'cartridges',
-                        'drum', 'drums', 'printer', 'printers', 'ribbon', 'ribbons', 'label', 'tape']);
-                    const specific = twoWords.filter(w => !NOISE.has(w.toLowerCase()));
-                    if (specific.length === 1) {
-                        const codeQuery = specific[0];
-                        const codeParams = { search: codeQuery, limit: searchConfig.maxResults };
-                        const codeRes = await API.getProducts(codeParams);
-                        if (codeRes.ok && codeRes.data) {
-                            const data = codeRes.data;
-                            const products = Array.isArray(data.products) ? data.products : [];
-                            if (Array.isArray(products) && products.length > 0) {
-                                return { products, total: data.pagination?.total ?? data.total ?? products.length };
-                            }
-                        }
-                    }
-                }
-            }
-
-            // Multi-word fallback: if no results and query has 3+ words,
-            // retry with first 2 words then filter client-side for all words
-            if (!isTypeQuery) {
-                const queryWords = query.toLowerCase().split(/\s+/).filter(Boolean);
-                if (queryWords.length >= 3) {
-                    const shorterQuery = queryWords.slice(0, 2).join(' ');
-                    const fbParams = { search: shorterQuery, limit: searchConfig.maxResults };
-                    const fbPromises = [API.getProducts(fbParams)];
-                    if (shouldFetchRibbons) fbPromises.push(API.getRibbons({ search: shorterQuery, limit: searchConfig.maxResults }));
-
-                    const [fbProductRes, fbRibbonRes] = await Promise.allSettled(fbPromises);
-                    let fbProducts = [];
-
-                    if (fbProductRes.status === 'fulfilled' && fbProductRes.value.ok && fbProductRes.value.data) {
-                        const data = fbProductRes.value.data;
-                        fbProducts = Array.isArray(data.products) ? data.products : [];
-                    }
-
-                    // Merge ribbon results from fallback
-                    if (fbRibbonRes && fbRibbonRes.status === 'fulfilled' && fbRibbonRes.value.ok && fbRibbonRes.value.data) {
-                        const data = fbRibbonRes.value.data;
-                        let fbRibbons = data.ribbons || data.products || (Array.isArray(data) ? data : []);
-                        if (!Array.isArray(fbRibbons)) fbRibbons = [];
-
-                        for (const ribbon of fbRibbons) {
-                            ribbon._isRibbon = true;
-                            if (!ribbon.image_url && ribbon.image_path) {
-                                ribbon.image_url = typeof storageUrl === 'function' ? storageUrl(ribbon.image_path) : ribbon.image_path;
-                            }
-                            if (ribbon.retail_price == null && ribbon.sale_price != null) {
-                                ribbon.retail_price = ribbon.sale_price;
-                            }
-                            if (ribbon.in_stock == null && ribbon.stock_quantity != null) {
-                                ribbon.in_stock = ribbon.stock_quantity > 0;
-                            }
-                            if (typeof ribbon.brand === 'string') {
-                                ribbon.brand = { name: ribbon.brand };
-                            }
-                        }
-
-                        const existingSkus = new Set(fbProducts.map(p => p.sku));
-                        for (const ribbon of fbRibbons) {
-                            if (ribbon.sku && !existingSkus.has(ribbon.sku)) {
-                                existingSkus.add(ribbon.sku);
-                                fbProducts.push(ribbon);
-                            }
-                        }
-                    }
-
-                    // Filter: keep only items where ALL original words appear in name or SKU
-                    const matched = fbProducts.filter(p => {
-                        const name = (p.name || '').toLowerCase();
-                        const sku = (p.sku || '').toLowerCase();
-                        return queryWords.every(w => name.includes(w) || sku.includes(w));
-                    });
-
-                    if (matched.length > 0) {
-                        return { products: matched, total: matched.length };
-                    }
-                }
-            }
-
-            // Fallback: fuzzy smart search (typo-tolerant, for when standard search has no results)
-            try {
-                const url = searchConfig.apiUrl + '?q=' + encodeURIComponent(query) + '&limit=' + searchConfig.maxResults;
-                const res = await API.get(url);
-
-                if (res.ok && res.data) {
-                    const products = res.data.products || res.data || [];
-                    const total = res.data.total ?? res.data.pagination?.total ?? null;
-                    return { products: Array.isArray(products) ? products : [], total };
-                }
-            } catch (_) {
-                // Fallback failed too
-            }
-
-            return { products: [], total: null };
-        },
-
-        /**
-         * Look up a printer model in the database and return compatible products.
-         * Uses Supabase to query printer_models → product_compatibility → products.
-         */
-        async _fetchByPrinterModel(query) {
-            // Need Supabase client
-            const sb = (typeof Auth !== 'undefined' && Auth.supabase)
-                ? Auth.supabase
-                : (typeof supabase !== 'undefined' && supabase.createClient && typeof Config !== 'undefined')
-                    ? supabase.createClient(Config.SUPABASE_URL, Config.SUPABASE_ANON_KEY)
-                    : null;
-            if (!sb) return null;
-
-            try {
-                let printerData = null;
-
-                // Try exact match on full_name
-                const exact = await sb.from('printer_models')
-                    .select('id, full_name, model_name')
-                    .ilike('full_name', query)
-                    .single();
-
-                if (exact.data) {
-                    printerData = exact.data;
-                } else {
-                    // Try partial match
-                    const partial = await sb.from('printer_models')
-                        .select('id, full_name, model_name')
-                        .ilike('full_name', '%' + query + '%')
-                        .limit(1);
-
-                    if (partial.data && partial.data.length > 0) {
-                        printerData = partial.data[0];
-                    } else {
-                        // Try model_name only (strip brand prefix)
-                        const modelOnly = query.replace(/^(BROTHER|CANON|EPSON|HP|SAMSUNG|LEXMARK|OKI|FUJI\s*XEROX|KYOCERA)\s+/i, '');
-                        if (modelOnly !== query) {
-                            // Try partial match on model_name with just the model number
-                            const modelResult = await sb.from('printer_models')
-                                .select('id, full_name, model_name')
-                                .ilike('model_name', '%' + modelOnly + '%')
-                                .limit(1);
-
-                            if (modelResult.data && modelResult.data.length > 0) {
-                                printerData = modelResult.data[0];
-                            }
-
-                            // Try partial match on full_name with just the model number
-                            if (!printerData) {
-                                const fullNamePartial = await sb.from('printer_models')
-                                    .select('id, full_name, model_name')
-                                    .ilike('full_name', '%' + modelOnly + '%')
-                                    .limit(1);
-
-                                if (fullNamePartial.data && fullNamePartial.data.length > 0) {
-                                    printerData = fullNamePartial.data[0];
-                                }
-                            }
-                        }
-
-                        // Also try with model_name matching the raw query
-                        if (!printerData) {
-                            const rawModel = await sb.from('printer_models')
-                                .select('id, full_name, model_name')
-                                .ilike('model_name', '%' + query + '%')
-                                .limit(1);
-
-                            if (rawModel.data && rawModel.data.length > 0) {
-                                printerData = rawModel.data[0];
-                            }
-                        }
-                    }
-                }
-
-                if (!printerData) return null;
-
-                // Get compatible product IDs
-                const { data: compatData } = await sb.from('product_compatibility')
-                    .select('product_id')
-                    .eq('printer_model_id', printerData.id);
-
-                if (!compatData || compatData.length === 0) return null;
-
-                const productIds = compatData.map(c => c.product_id);
-
-                // Fetch those products
-                const { data: productsData } = await sb.from('products')
-                    .select('*, brand:brands(name, slug)')
-                    .in('id', productIds)
-                    .eq('is_active', true);
-
-                if (!productsData || productsData.length === 0) return null;
-
-                // Normalize to match expected product schema
-                const products = productsData.map(p => ({
-                    ...p,
-                    brand: p.brand || {},
-                    retail_price: p.retail_price ?? p.price,
-                    image_url: typeof storageUrl === 'function' ? storageUrl(p.image_url) : (p.image_url || '')
-                }));
-
-                return {
-                    products,
-                    total: products.length,
-                    printerName: printerData.full_name || printerData.model_name
-                };
-            } catch (err) {
-                return null;
-            }
-        },
-
-        /**
-         * Search product descriptions and compatible_devices_html via Supabase.
-         * Fallback when API search returns no results.
-         * Searches both `description` and `compatible_devices_html` (ribbon "For Use In" text).
-         */
-        async _fetchByDescription(query) {
-            const sb = (typeof Auth !== 'undefined' && Auth.supabase)
-                ? Auth.supabase
-                : (typeof supabase !== 'undefined' && supabase.createClient && typeof Config !== 'undefined')
-                    ? supabase.createClient(Config.SUPABASE_URL, Config.SUPABASE_ANON_KEY)
-                    : null;
-            if (!sb) return null;
-
-            try {
-                const words = query.trim().split(/\s+/).filter(w => w.length >= 2);
-                if (words.length === 0) return null;
-
-                let dbQuery = sb.from('products')
-                    .select('*, brand:brands(name, slug)')
-                    .eq('is_active', true);
-
-                // Each word must appear in description OR compatible_devices_html
-                for (const word of words) {
-                    const pattern = '%' + word + '%';
-                    dbQuery = dbQuery.or(
-                        'description.ilike.' + pattern + ',compatible_devices_html.ilike.' + pattern
-                    );
-                }
-
-                const { data, error } = await dbQuery.limit(searchConfig.maxResults);
-
-                if (error || !data || data.length === 0) return null;
-
-                const products = data.map(p => ({
-                    ...p,
-                    brand: p.brand || {},
-                    retail_price: p.retail_price ?? p.price,
-                    image_url: typeof storageUrl === 'function' ? storageUrl(p.image_url) : (p.image_url || ''),
-                    _isRibbon: !!(p.compatible_devices_html || p.product_type === 'ribbon')
-                }));
-
-                return { products, total: products.length };
-            } catch (err) {
-                return null;
-            }
-        },
-
-        /**
-         * Merge two product arrays, deduplicating by SKU (or id).
-         * First array takes priority (shown first).
-         */
-        _mergeResults(primaryProducts, secondaryProducts) {
-            const seen = new Set();
-            const merged = [];
-
-            for (const p of primaryProducts) {
-                const key = p.sku || p.id;
-                if (key && !seen.has(key)) {
-                    seen.add(key);
-                    merged.push(p);
-                }
-            }
-
-            for (const p of secondaryProducts) {
-                const key = p.sku || p.id;
-                if (key && !seen.has(key)) {
-                    seen.add(key);
-                    merged.push(p);
-                }
-            }
-
-            return { products: merged, total: merged.length };
-        },
-
-        // --- Rendering ---
-
-        _renderResults(products, query, total) {
-            this._results = products;
-            this._selectedIndex = -1;
-
-            const prefix = 'smart-search-opt-' + this._instanceId + '-';
-            this._grid.innerHTML = products.map((p, i) => this._renderCompactCard(p, i, prefix)).join('');
-            // Bind image error fallbacks (replaces inline onerror)
-            this._grid.querySelectorAll('img[data-fallback]').forEach(img => {
-                img.addEventListener('error', function() {
-                    if (this.dataset.fallback === 'color-block') {
-                        this.style.display = 'none';
-                        const sibling = this.nextElementSibling;
-                        if (sibling) sibling.style.display = 'flex';
-                    } else if (this.dataset.fallback === 'placeholder') {
-                        this.removeAttribute('data-fallback');
-                        this.src = '/assets/images/placeholder-product.svg';
-                    }
-                }, { once: true });
-            });
-            // Fallback for images without data-fallback (e.g. from Products.getProductImageHTML)
-            this._grid.querySelectorAll('img:not([data-fallback])').forEach(img => {
-                img.addEventListener('error', function() {
-                    this.src = '/assets/images/placeholder-product.svg';
-                }, { once: true });
-            });
-            this._updateFooter(query, total);
-            this._show();
-        },
-
-        _renderCompactCard(product, index, prefix) {
-            const stockInfo = typeof getStockStatus === 'function' ? getStockStatus(product) : { class: 'in-stock', text: 'In Stock' };
-            const sourceBadge = typeof getSourceBadge === 'function' ? getSourceBadge(product.source) : null;
-
-            const name = product.name || '';
-            const price = product.retail_price;
-            const itemId = prefix + index;
-            const color = product.color || '';
-
-            // Image: reuse Products.getProductImageHTML if available
-            let imageHtml;
-            if (typeof Products !== 'undefined' && Products.getProductImageHTML) {
-                imageHtml = Products.getProductImageHTML(product);
+            if (i >= 0 && cards[i]) {
+                state.input.setAttribute('aria-activedescendant', `smart-ac-option-${id}-${i}`);
+                cards[i].scrollIntoView({ block: 'nearest' });
             } else {
-                const imgUrl = typeof storageUrl === 'function' ? storageUrl(product.image_url) : (product.image_url || '/assets/images/placeholder-product.svg');
-                imageHtml = '<img src="' + Security.escapeAttr(imgUrl) + '" alt="' + Security.escapeAttr(name) + '" loading="lazy" data-fallback="placeholder">';
-            }
-
-            return '<div class="product-card product-card--compact" role="option" id="' + itemId + '" aria-selected="false" data-index="' + index + '">'
-                + '<div class="product-card__image-wrap">'
-                    + imageHtml
-                    + (sourceBadge ? '<span class="product-card__badge ' + sourceBadge.class + '">' + sourceBadge.text + '</span>' : '')
-                + '</div>'
-                + '<div class="product-card__content">'
-                    + '<h3 class="product-card__title">' + Security.escapeHtml(name) + '</h3>'
-                    + (price != null && price >= 100 ? '<span class="product-card__free-shipping">FREE SHIPPING</span>' : '')
-                    + '<div class="product-card__footer">'
-                        + '<div class="product-card__footer-row">'
-                            + (color ? '<p class="product-card__color">' + Security.escapeHtml(color) + '</p>' : '<span></span>')
-                            + '<p class="product-card__stock stock-' + stockInfo.class + '">' + Security.escapeHtml(stockInfo.text) + '</p>'
-                        + '</div>'
-                        + '<div class="product-card__footer-row">'
-                            + (price != null ? '<p class="product-card__price">' + formatPrice(price) + '</p>' : '')
-                            + (stockInfo.class === 'contact-us'
-                                ? '<a href="/html/contact/" class="smart-search__add-to-cart smart-search__contact-btn" data-index="' + index + '">Contact Us</a>'
-                                : '<button type="button" class="smart-search__add-to-cart" data-index="' + index + '"' + (stockInfo.class !== 'in-stock' ? ' disabled' : '') + '>Add to Cart</button>')
-                        + '</div>'
-                    + '</div>'
-                + '</div>'
-            + '</div>';
-        },
-
-        _renderSkeletons() {
-            let html = '';
-            for (let i = 0; i < searchConfig.skeletonCount; i++) {
-                html += '<div class="product-card product-card--compact product-card--skeleton">'
-                    + '<div class="product-card__image-wrap"><div class="skeleton-block skeleton-block--image"></div></div>'
-                    + '<div class="product-card__content">'
-                        + '<div class="skeleton-block skeleton-block--text-sm"></div>'
-                        + '<div class="skeleton-block skeleton-block--text"></div>'
-                        + '<div class="skeleton-block skeleton-block--text-sm" style="width:60%"></div>'
-                    + '</div>'
-                + '</div>';
-            }
-            this._grid.innerHTML = html;
-            this._footer.classList.add('is-hidden');
-        },
-
-        _renderEmpty(query) {
-            this._results = [];
-            this._selectedIndex = -1;
-
-            this._grid.innerHTML = '<div class="smart-search__empty">'
-                + '<svg class="smart-search__empty-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>'
-                + '<p>No results for "' + Security.escapeHtml(query) + '"</p>'
-                + '<p class="smart-search__empty-hint">Try checking your spelling or using different keywords</p>'
-            + '</div>';
-            this._footer.classList.add('is-hidden');
-            this._show();
-        },
-
-        _renderError() {
-            this._results = [];
-            this._selectedIndex = -1;
-
-            this._grid.innerHTML = '<div class="smart-search__error">'
-                + '<p>Something went wrong. Please try again.</p>'
-            + '</div>';
-            this._footer.classList.add('is-hidden');
-            this._show();
-            if (typeof showToast === 'function') showToast('Search failed. Please try again.', 'error');
-        },
-
-        _updateFooter(query, total) {
-            if (!query) {
-                this._footer.classList.add('is-hidden');
-                return;
-            }
-
-            // Use the effective (corrected/normalized) query for the "View all" link
-            const footerQuery = this._effectiveQuery || query;
-
-            const label = (total != null && typeof total === 'number' && total > 0)
-                ? 'View all ' + total + ' results'
-                : 'View all results';
-
-            let href;
-            if (this._printerModel) {
-                href = '/html/shop?printer_model=' + encodeURIComponent(this._printerModel);
-            } else {
-                href = '/html/shop?search=' + encodeURIComponent(footerQuery);
-            }
-
-            this._footer.innerHTML = '<a class="smart-search__view-all" href="' + Security.escapeAttr(href) + '">'
-                + Security.escapeHtml(label)
-                + ' <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>'
-            + '</a>';
-            this._footer.classList.remove('is-hidden');
-        },
-
-        // --- Correction banner ---
-
-        /**
-         * Show a correction banner in the dropdown.
-         * @param {string} original - What the user typed
-         * @param {string} corrected - What we searched for
-         * @param {'normalize'|'spelling'} type
-         */
-        _showCorrection(original, corrected, type) {
-            this._activeCorrection = { original, corrected, type };
-
-            if (type === 'spelling') {
-                // "Did you mean" — clickable, with option to search original
-                this._correctionBanner.innerHTML =
-                    '<span>Did you mean <button type="button" class="smart-search__correction-link">'
-                    + '<strong>' + Security.escapeHtml(corrected) + '</strong></button>?</span>'
-                    + '<button type="button" class="smart-search__correction-original">'
-                    + 'Search instead for &ldquo;' + Security.escapeHtml(original) + '&rdquo;</button>';
-            } else if (type === 'description') {
-                // Description / compatible devices match — informational, no alternative link
-                this._correctionBanner.innerHTML =
-                    '<span>Showing products matching &ldquo;<strong>' + Security.escapeHtml(original)
-                    + '</strong>&rdquo; in descriptions &amp; compatible devices</span>';
-            } else if (type === 'compatibility') {
-                // Merged API + compatibility results — informational
-                this._correctionBanner.innerHTML =
-                    '<span>Also showing compatible products for <strong>'
-                    + Security.escapeHtml(corrected) + '</strong></span>';
-            } else {
-                // Normalize — informational
-                this._correctionBanner.innerHTML =
-                    '<span>Showing results for <strong>' + Security.escapeHtml(corrected) + '</strong></span>'
-                    + '<button type="button" class="smart-search__correction-original">'
-                    + 'Search instead for &ldquo;' + Security.escapeHtml(original) + '&rdquo;</button>';
-            }
-
-            // Bind click handlers
-            const corrLink = this._correctionBanner.querySelector('.smart-search__correction-link');
-            if (corrLink) {
-                corrLink.addEventListener('click', (e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    // Just update the input text and hide banner — results already showing
-                    this._input.value = corrected;
-                    this._currentQuery = corrected;
-                    this._effectiveQuery = corrected;
-                    this._hideCorrection();
-                    this._updateFooter(corrected, this._results.length);
-                    this._input.focus();
-                });
-            }
-
-            const origLink = this._correctionBanner.querySelector('.smart-search__correction-original');
-            if (origLink) {
-                origLink.addEventListener('click', (e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    this._hideCorrection();
-                    this._input.value = original;
-                    this._input.focus();
-                    // Search with raw original, skip normalization by calling fetch directly
-                    this._currentQuery = original;
-                    this._effectiveQuery = original;
-                    this._renderSkeletons();
-                    this._fetchResults(original).then(result => {
-                        if (original !== this._currentQuery) return;
-                        if (result && result.products && result.products.length > 0) {
-                            this._renderResults(result.products, original, result.total);
-                        } else {
-                            this._renderEmpty(original);
-                        }
-                    }).catch(() => this._renderError());
-                });
-            }
-
-            this._correctionBanner.classList.remove('is-hidden');
-        },
-
-        _hideCorrection() {
-            this._activeCorrection = null;
-            this._correctionBanner.classList.add('is-hidden');
-            this._correctionBanner.innerHTML = '';
-        },
-
-        // --- Keyboard navigation ---
-
-        _onKeydown(e) {
-            if (!this._isVisible) return;
-
-            const cards = this._grid.querySelectorAll('.product-card--compact:not(.product-card--skeleton)');
-            const count = cards.length;
-            if (count === 0 && e.key !== 'Escape') return;
-
-            const cols = this._getVisibleColumns();
-
-            switch (e.key) {
-                case 'ArrowDown':
-                    e.preventDefault();
-                    if (this._selectedIndex === -1) {
-                        this._selectedIndex = 0;
-                    } else {
-                        this._selectedIndex = Math.min(this._selectedIndex + cols, count - 1);
-                    }
-                    this._highlightCard(cards);
-                    break;
-
-                case 'ArrowUp':
-                    e.preventDefault();
-                    if (this._selectedIndex <= 0) {
-                        this._selectedIndex = -1;
-                        this._clearHighlight(cards);
-                        this._input.setAttribute('aria-activedescendant', '');
-                    } else {
-                        this._selectedIndex = Math.max(this._selectedIndex - cols, 0);
-                        this._highlightCard(cards);
-                    }
-                    break;
-
-                case 'ArrowRight':
-                    if (this._selectedIndex >= 0) {
-                        e.preventDefault();
-                        this._selectedIndex = Math.min(this._selectedIndex + 1, count - 1);
-                        this._highlightCard(cards);
-                    }
-                    break;
-
-                case 'ArrowLeft':
-                    if (this._selectedIndex >= 0) {
-                        e.preventDefault();
-                        this._selectedIndex = Math.max(this._selectedIndex - 1, 0);
-                        this._highlightCard(cards);
-                    }
-                    break;
-
-                case 'Enter':
-                    if (this._selectedIndex >= 0 && this._results[this._selectedIndex]) {
-                        e.preventDefault();
-                        this._navigateToProduct(this._results[this._selectedIndex]);
-                    }
-                    break;
-
-                case 'Tab':
-                    if (this._selectedIndex >= 0 && this._results[this._selectedIndex]) {
-                        e.preventDefault();
-                        this._navigateToProduct(this._results[this._selectedIndex]);
-                    }
-                    break;
-
-                case 'Escape':
-                    this._hide();
-                    this._input.focus();
-                    break;
-            }
-        },
-
-        _onCardClick(e) {
-            // If the add-to-cart button was clicked, handle that instead
-            const addBtn = e.target.closest('.smart-search__add-to-cart');
-            if (addBtn) {
-                e.preventDefault();
-                e.stopPropagation();
-                this._onAddToCart(addBtn);
-                return;
-            }
-
-            const card = e.target.closest('.product-card--compact:not(.product-card--skeleton)');
-            if (!card) return;
-
-            const index = parseInt(card.dataset.index, 10);
-            if (isNaN(index) || !this._results[index]) return;
-
-            this._navigateToProduct(this._results[index]);
-        },
-
-        async _onAddToCart(btn) {
-            const index = parseInt(btn.dataset.index, 10);
-            const product = this._results[index];
-            if (!product || typeof Cart === 'undefined') return;
-
-            btn.disabled = true;
-            btn.textContent = 'Adding...';
-
-            try {
-                await Cart.addItem({
-                    id: product.id,
-                    name: product.name,
-                    price: product.retail_price ?? product.price,
-                    image: product.image_url || '',
-                    sku: product.sku || '',
-                    brand: product.brand?.name ?? product.brand ?? '',
-                    color: product.color || '',
-                    quantity: 1,
-                    source: product._isRibbon ? 'ribbon' : 'core',
-                    slug: product.slug || ''
-                });
-
-                btn.textContent = 'Added!';
-                btn.classList.add('is-added');
-                setTimeout(() => {
-                    btn.textContent = 'Add to Cart';
-                    btn.classList.remove('is-added');
-                    btn.disabled = false;
-                }, 1500);
-            } catch (err) {
-                btn.textContent = 'Add to Cart';
-                btn.disabled = false;
-                if (typeof showToast === 'function') {
-                    showToast('Failed to add to cart', 'error');
-                }
-            }
-        },
-
-        _navigateToProduct(product) {
-            const sku = product.sku || product.code || product.product_code || '';
-            let url;
-            if (sku && product._isRibbon) {
-                url = '/ribbon/' + encodeURIComponent(sku);
-            } else if (sku) {
-                url = product.slug
-                    ? '/products/' + encodeURIComponent(product.slug) + '/' + encodeURIComponent(sku)
-                    : '/html/product/?sku=' + encodeURIComponent(sku);
-            } else {
-                const name = product.name || product.title || '';
-                url = name
-                    ? '/html/product-by-name?name=' + encodeURIComponent(name)
-                    : searchConfig.buildShopUrl(product, this._currentQuery);
-            }
-            this._hide();
-            window.location.href = url;
-        },
-
-        _highlightCard(cards) {
-            this._clearHighlight(cards);
-
-            if (this._selectedIndex >= 0 && cards[this._selectedIndex]) {
-                cards[this._selectedIndex].classList.add('is-selected');
-                cards[this._selectedIndex].setAttribute('aria-selected', 'true');
-                cards[this._selectedIndex].scrollIntoView({ block: 'nearest' });
-                this._input.setAttribute('aria-activedescendant', cards[this._selectedIndex].id);
-            }
-        },
-
-        _clearHighlight(cards) {
-            for (let i = 0; i < cards.length; i++) {
-                cards[i].classList.remove('is-selected');
-                cards[i].setAttribute('aria-selected', 'false');
-            }
-        },
-
-        _getVisibleColumns() {
-            if (!this._grid || !this._grid.children.length) return 1;
-            const style = window.getComputedStyle(this._grid);
-            const cols = style.getPropertyValue('grid-template-columns').split(' ').length;
-            return cols || 1;
-        },
-
-        // --- Visibility ---
-
-        _repositionDropdown() {
-            const formRect = this._form.getBoundingClientRect();
-            this._dropdown.style.top = Math.round(formRect.bottom) + 'px';
-            this._dropdown.style.left = Math.round(formRect.left) + 'px';
-            this._dropdown.style.width = Math.round(formRect.width) + 'px';
-        },
-
-        _startRepositionWatch() {
-            // Poll form width until it stabilizes (handles CSS transitions)
-            if (this._repositionRaf) cancelAnimationFrame(this._repositionRaf);
-            let lastWidth = 0;
-            let stableFrames = 0;
-            const check = () => {
-                if (!this._isVisible) return;
-                const w = this._form.getBoundingClientRect().width;
-                if (Math.abs(w - lastWidth) < 1) {
-                    stableFrames++;
-                } else {
-                    stableFrames = 0;
-                    this._repositionDropdown();
-                }
-                lastWidth = w;
-                // Stop after width is stable for ~20 frames (~330ms)
-                if (stableFrames < 20) {
-                    this._repositionRaf = requestAnimationFrame(check);
-                }
-            };
-            this._repositionRaf = requestAnimationFrame(check);
-        },
-
-        _show() {
-            // Always reposition to catch form expansion/resize
-            this._repositionDropdown();
-
-            if (!this._isVisible) {
-                this._dropdown.classList.add('is-open');
-                this._input.setAttribute('aria-expanded', 'true');
-                this._isVisible = true;
-
-                // Watch for form width changes during expand transition
-                this._startRepositionWatch();
-
-                // Mobile: close on scroll
-                if (window.innerWidth <= 768) {
-                    const onScroll = () => this._hide();
-                    window.addEventListener('scroll', onScroll, { once: true, passive: true });
-                    this._scrollCleanup = () => window.removeEventListener('scroll', onScroll);
-                } else {
-                    // Desktop: lock BOTH html and body overflow. On this site the
-                    // scrolling element is <html>, so locking only body still lets
-                    // wheel events over the backdrop scroll the page.
-                    this._prevHtmlOverflow = document.documentElement.style.overflow;
-                    this._prevBodyOverflow = document.body.style.overflow;
-                    this._lockedScrollY = window.scrollY;
-                    document.documentElement.style.overflow = 'hidden';
-                    document.body.style.overflow = 'hidden';
-                }
-            }
-        },
-
-        _hide() {
-            this._dropdown.classList.remove('is-open');
-            this._input.setAttribute('aria-expanded', 'false');
-            this._input.setAttribute('aria-activedescendant', '');
-            this._selectedIndex = -1;
-            this._isVisible = false;
-
-            if (this._repositionRaf) {
-                cancelAnimationFrame(this._repositionRaf);
-                this._repositionRaf = null;
-            }
-
-            if (this._scrollCleanup) {
-                this._scrollCleanup();
-                this._scrollCleanup = null;
-            }
-
-            // Restore html + body scroll if we locked them
-            if (this._prevHtmlOverflow !== undefined) {
-                document.documentElement.style.overflow = this._prevHtmlOverflow;
-                document.body.style.overflow = this._prevBodyOverflow;
-                if (this._lockedScrollY != null) window.scrollTo(0, this._lockedScrollY);
-                this._prevHtmlOverflow = undefined;
-                this._prevBodyOverflow = undefined;
-                this._lockedScrollY = null;
-            }
-        },
-
-        // --- Cache ---
-
-        _getCached(query) {
-            const key = query.toLowerCase();
-            const entry = this._cache.get(key);
-            if (!entry) return null;
-            if (Date.now() - entry.ts > searchConfig.cacheMaxAge) {
-                this._cache.delete(key);
-                return null;
-            }
-            return entry.data;
-        },
-
-        _setCache(query, data) {
-            const key = query.toLowerCase();
-            this._cache.set(key, { data, ts: Date.now() });
-
-            if (this._cache.size > searchConfig.cacheMaxSize) {
-                const oldest = this._cache.keys().next().value;
-                this._cache.delete(oldest);
+                state.input.removeAttribute('aria-activedescendant');
             }
         }
-    };
 
-    return instance;
-}
+        function renderEmpty() {
+            state.mode = 'empty';
+            state.results = [];
+            state.highlightIndex = -1;
+            const recent = getRecent();
 
-const SmartSearch = {
-    init(searchForm, searchInput) {
-        const instance = createSmartSearch();
-        instance._init(searchForm, searchInput);
-        return instance;
+            const chip = (q) => `<button type="button" class="smart-ac__chip" data-chip="${escAttr(q)}">${esc(q)}</button>`;
+
+            const recentSection = recent.length
+                ? `<div class="smart-ac__empty-section">
+                       <h4 class="smart-ac__empty-title">Recent searches</h4>
+                       <div class="smart-ac__chips">${recent.map(chip).join('')}</div>
+                   </div>`
+                : '';
+
+            const trendingSection = `
+                <div class="smart-ac__empty-section">
+                    <h4 class="smart-ac__empty-title">Trending printers</h4>
+                    <div class="smart-ac__chips">${TRENDING_MODELS.map(chip).join('')}</div>
+                </div>`;
+
+            state.list.innerHTML = `<div class="smart-ac__empty">${recentSection}${trendingSection}</div>`;
+            state.list.setAttribute('role', 'group');
+            setLive('');
+        }
+
+        function renderSkeleton() {
+            state.mode = 'skeleton';
+            state.results = [];
+            state.list.setAttribute('role', 'listbox');
+            let cards = '';
+            for (let i = 0; i < 6; i++) {
+                cards += `
+                    <div class="product-card product-card--skeleton" aria-hidden="true">
+                        <div class="product-card__image-wrapper"><div class="smart-ac__skel smart-ac__skel--thumb"></div></div>
+                        <div class="product-card__content">
+                            <div class="smart-ac__skel smart-ac__skel--line"></div>
+                            <div class="smart-ac__skel smart-ac__skel--line smart-ac__skel--short"></div>
+                            <div class="smart-ac__skel smart-ac__skel--btn"></div>
+                        </div>
+                    </div>`;
+            }
+            state.list.innerHTML = `<div class="product-grid smart-ac__grid">${cards}</div>`;
+            positionDropdown();
+        }
+
+        function renderResults(list) {
+            state.mode = list.length ? 'results' : 'no-results';
+            state.results = list;
+            state.highlightIndex = -1;
+            state.list.setAttribute('role', 'listbox');
+
+            if (!list.length) {
+                state.list.innerHTML = `<div class="smart-ac__no-results">No products match “${esc(state.input.value.trim())}”. Try a different term or browse the <a href="/html/shop">full catalog</a>.</div>`;
+                setLive('No results found');
+                return;
+            }
+
+            if (typeof Products === 'undefined' || typeof Products.renderCard !== 'function') {
+                console.error('[SmartSearch] Products.renderCard not available — ensure /js/products.js is loaded before /js/search.js');
+                state.list.innerHTML = `<div class="smart-ac__error">Search is temporarily unavailable. Please try again.</div>`;
+                setLive('Search error');
+                return;
+            }
+
+            const cardsHTML = list.map((p, i) => Products.renderCard(adaptForCard(p), i)).join('');
+            state.list.innerHTML = `<div class="product-grid smart-ac__grid">${cardsHTML}</div>`;
+            positionDropdown();
+
+            // Tag each card for keyboard navigation + a11y
+            state.list.querySelectorAll('.product-card').forEach((card, i) => {
+                card.setAttribute('role', 'option');
+                card.setAttribute('aria-selected', 'false');
+                card.setAttribute('data-index', String(i));
+                card.id = `smart-ac-option-${id}-${i}`;
+            });
+
+            if (typeof Products.bindAddToCartEvents === 'function') {
+                Products.bindAddToCartEvents(state.list);
+            } else if (typeof Products.attachCardListeners === 'function') {
+                Products.attachCardListeners(state.list);
+            }
+
+            // Toast feedback when an Add-to-Cart button is clicked inside the dropdown
+            state.list.querySelectorAll('.product-card__add-btn').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    if (typeof showToast === 'function') {
+                        const name = btn.dataset.productName || 'Item';
+                        showToast(`${name} added to cart`, 'success', 2500);
+                    }
+                }, { capture: false });
+            });
+
+            setLive(`${list.length} result${list.length === 1 ? '' : 's'} found`);
+        }
+
+        function renderError() {
+            state.mode = 'error';
+            state.list.innerHTML = `<div class="smart-ac__error">Search is temporarily unavailable. Please try again.</div>`;
+            setLive('Search error');
+        }
+
+        function setLive(msg) {
+            if (state.live) state.live.textContent = msg;
+        }
+
+        async function runSearch(query) {
+            if (state.abort) state.abort.abort();
+            state.abort = new AbortController();
+            const signal = state.abort.signal;
+
+            clearTimeout(state.skeletonTimer);
+            state.skeletonTimer = setTimeout(() => {
+                if (!signal.aborted) renderSkeleton();
+            }, SKELETON_DELAY_MS);
+
+            try {
+                const results = await fetchAutocomplete(query, signal);
+                clearTimeout(state.skeletonTimer);
+                if (signal.aborted) return;
+                renderResults(results);
+            } catch (err) {
+                clearTimeout(state.skeletonTimer);
+                if (err && err.name === 'AbortError') return;
+                console.error('[SmartSearch]', err);
+                renderError();
+            }
+        }
+
+        function onInput() {
+            const query = state.input.value.trim();
+            clearTimeout(state.debounceTimer);
+            if (state.abort) state.abort.abort();
+            clearTimeout(state.skeletonTimer);
+
+            open();
+
+            if (query.length < MIN_QUERY_LENGTH) {
+                renderEmpty();
+                return;
+            }
+            state.debounceTimer = setTimeout(() => runSearch(query), DEBOUNCE_MS);
+        }
+
+        function onKeyDown(e) {
+            if (!state.isOpen) {
+                if (e.key === 'ArrowDown') { open(); onInput(); }
+                return;
+            }
+            const count = state.results.length;
+            switch (e.key) {
+                case 'ArrowDown':
+                    if (!count) return;
+                    e.preventDefault();
+                    setActive((state.highlightIndex + 1) % count);
+                    break;
+                case 'ArrowUp':
+                    if (!count) return;
+                    e.preventDefault();
+                    setActive(state.highlightIndex <= 0 ? count - 1 : state.highlightIndex - 1);
+                    break;
+                case 'Enter':
+                    if (state.highlightIndex >= 0 && state.results[state.highlightIndex]) {
+                        e.preventDefault();
+                        const p = state.results[state.highlightIndex];
+                        saveRecent(state.input.value.trim());
+                        window.location.href = productHref(p);
+                    }
+                    // else: let form submit handler in main.js run
+                    break;
+                case 'Escape':
+                    e.preventDefault();
+                    close();
+                    state.input.blur();
+                    break;
+                case 'Tab':
+                    close();
+                    break;
+            }
+        }
+
+        function onListClick(e) {
+            // Add-to-Cart on product cards is handled by Products.attachCardListeners.
+            const chip = e.target.closest('.smart-ac__chip');
+            if (chip) {
+                e.preventDefault();
+                const q = chip.getAttribute('data-chip') || '';
+                state.input.value = q;
+                state.input.focus();
+                runSearch(q);
+                return;
+            }
+            const card = e.target.closest('.product-card');
+            if (card && !card.classList.contains('product-card--skeleton')) {
+                saveRecent(state.input.value.trim());
+                // let the <a class="product-card__link"> navigate naturally
+            }
+        }
+
+        function bind() {
+            state.input.addEventListener('input', onInput);
+            state.input.addEventListener('keydown', onKeyDown);
+            state.input.addEventListener('focus', () => {
+                const q = state.input.value.trim();
+                open();
+                if (q.length < MIN_QUERY_LENGTH) renderEmpty();
+            });
+
+            state.list.addEventListener('mousedown', (e) => {
+                // prevent input blur before click fires
+                if (e.target.closest('.product-card, .smart-ac__chip, .product-card__add-btn, .product-card__link')) {
+                    e.preventDefault();
+                }
+            });
+            state.list.addEventListener('click', onListClick);
+
+            // Save recent on form submit (free-text search)
+            state.form.addEventListener('submit', () => {
+                saveRecent(state.input.value.trim());
+            });
+
+            state._outsideHandler = (e) => {
+                if (!state.form.contains(e.target)) close();
+            };
+            document.addEventListener('click', state._outsideHandler);
+
+            window.addEventListener('resize', () => { if (state.isOpen) positionDropdown(); });
+            window.addEventListener('scroll', () => { if (state.isOpen) positionDropdown(); }, { passive: true });
+        }
+
+        function createDom() {
+            const existing = state.form.querySelector('.smart-search-dropdown, .search-autocomplete, .smart-ac-dropdown');
+            if (existing) existing.remove();
+
+            const formPos = window.getComputedStyle(state.form).position;
+            if (formPos === 'static') state.form.style.position = 'relative';
+
+            const wrap = document.createElement('div');
+            wrap.className = 'smart-ac-dropdown';
+            wrap.id = listboxId;
+            wrap.innerHTML = `
+                <div class="smart-ac__list" role="listbox" aria-label="Search suggestions"></div>
+                <div class="smart-ac__live" aria-live="polite" aria-atomic="true"></div>
+            `;
+            state.form.appendChild(wrap);
+            state.dropdown = wrap;
+            state.list = wrap.querySelector('.smart-ac__list');
+            state.live = wrap.querySelector('.smart-ac__live');
+
+            state.input.setAttribute('role', 'combobox');
+            state.input.setAttribute('aria-expanded', 'false');
+            state.input.setAttribute('aria-controls', listboxId);
+            state.input.setAttribute('aria-autocomplete', 'list');
+            state.input.setAttribute('autocomplete', 'off');
+        }
+
+        return {
+            init(form, input) {
+                state.form = form;
+                state.input = input;
+                createDom();
+                bind();
+            }
+        };
     }
-};
 
-window.SmartSearch = SmartSearch;
+    window.SmartSearch = {
+        init(form, input) {
+            if (!form || !input) return null;
+            const instance = createInstance();
+            instance.init(form, input);
+            return instance;
+        }
+    };
+})();

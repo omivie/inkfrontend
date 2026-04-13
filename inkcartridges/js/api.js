@@ -64,11 +64,13 @@ const API = {
         const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
         try {
+            const method = (fetchOptions.method || 'GET').toUpperCase();
+            const cacheMode = method === 'GET' ? 'default' : 'no-store';
             const response = await fetch(url, {
                 ...fetchOptions,
                 signal: controller.signal,
                 credentials: 'include',
-                cache: 'no-store'
+                cache: cacheMode
             });
             clearTimeout(timeoutId);
 
@@ -282,6 +284,66 @@ const API = {
     },
 
     // =========================================================================
+    // SWR (stale-while-revalidate) in-memory cache for catalog GETs
+    // =========================================================================
+
+    _swrCache: new Map(),
+    _swrInflight: new Map(),
+    SWR_TTL_MS: 60000,
+
+    /**
+     * Fetch an endpoint with stale-while-revalidate semantics.
+     * - Fresh cache hit (< ttl): returns cached data synchronously (via resolved promise).
+     * - Stale cache hit: returns cached data AND kicks off a background refresh.
+     * - Miss: awaits the network, caches, returns.
+     * Mutations (POST/PUT/etc.) do not use this — only use for idempotent GET endpoints.
+     */
+    _swrClone(data) {
+        try { return typeof structuredClone === 'function' ? structuredClone(data) : JSON.parse(JSON.stringify(data)); }
+        catch (e) { return data; }
+    },
+
+    async getWithSWR(endpoint, { ttl = this.SWR_TTL_MS } = {}) {
+        const now = Date.now();
+        const cached = this._swrCache.get(endpoint);
+
+        if (cached && (now - cached.timestamp) < ttl) {
+            return this._swrClone(cached.data);
+        }
+
+        if (cached) {
+            // Stale — return stale immediately, revalidate in background (dedupe concurrent).
+            if (!this._swrInflight.has(endpoint)) {
+                const p = this.get(endpoint)
+                    .then(fresh => {
+                        this._swrCache.set(endpoint, { data: fresh, timestamp: Date.now() });
+                        try {
+                            window.dispatchEvent(new CustomEvent('swr:update', { detail: { endpoint, data: fresh } }));
+                        } catch (e) { /* ignore */ }
+                        return fresh;
+                    })
+                    .catch(() => { /* keep stale on failure */ })
+                    .finally(() => this._swrInflight.delete(endpoint));
+                this._swrInflight.set(endpoint, p);
+            }
+            return this._swrClone(cached.data);
+        }
+
+        // Miss — dedupe concurrent misses too.
+        let inflight = this._swrInflight.get(endpoint);
+        if (!inflight) {
+            inflight = this.get(endpoint)
+                .then(data => {
+                    this._swrCache.set(endpoint, { data, timestamp: Date.now() });
+                    return data;
+                })
+                .finally(() => this._swrInflight.delete(endpoint));
+            this._swrInflight.set(endpoint, inflight);
+        }
+        return inflight;
+    },
+
+    // =========================================================================
     // PRODUCTS
     // =========================================================================
 
@@ -305,7 +367,7 @@ const API = {
         const queryString = params.toString();
         const endpoint = `/api/products${queryString ? '?' + queryString : ''}`;
 
-        return this.get(endpoint);
+        return this.getWithSWR(endpoint);
     },
 
     /**
@@ -323,7 +385,7 @@ const API = {
         if (params.code) qs.append('code', params.code);
         if (params.color) qs.append('color', params.color);
         if (params.sort) qs.append('sort', params.sort);
-        return this.get(`/api/shop?${qs.toString()}`);
+        return this.getWithSWR(`/api/shop?${qs.toString()}`);
     },
 
     /**
