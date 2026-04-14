@@ -549,7 +549,7 @@
 .admin-queue-item__label { font-size: 12px; color: var(--text-secondary); margin-top: 2px; }
 
 /* ---- Data Tables ---- */
-.admin-table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; max-height: calc(100vh - 220px); overflow-y: auto; }
+.admin-table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
 .admin-table { width: 100%; border-collapse: collapse; font-size: 12px; }
 .admin-table th {
   text-align: left; padding: 6px 10px;

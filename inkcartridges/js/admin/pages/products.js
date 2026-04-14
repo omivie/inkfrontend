@@ -7,6 +7,7 @@ import { Drawer } from '../components/drawer.js';
 import { Toast } from '../components/toast.js';
 import { Modal } from '../components/modal.js';
 import { RichTextEditor } from '../components/rich-text-editor.js';
+import { computeProfitability, marginBadge, markupBadge, formatProfitDollars } from '../utils/profitability.js';
 
 const formatPrice = (v) => window.formatPrice ? window.formatPrice(v) : `$${Number(v).toFixed(2)}`;
 const MISSING = '\u2014';
@@ -61,7 +62,7 @@ function buildColumns() {
       render: (r) => `<button class="copy-name-btn" data-copy="${esc(r.name || '')}" title="Copy name">${icon('copy', 15, 15)}</button><span class="cell-truncate">${esc(r.name || MISSING)}</span>`,
     },
     {
-      key: 'sku', label: 'SKU',
+      key: 'sku', label: 'SKU', sortable: true,
       render: (r) => `<span class="cell-mono">${esc(r.sku || MISSING)}</span>`,
     },
     {
@@ -88,20 +89,33 @@ function buildColumns() {
       align: 'right',
     });
     cols.push({
-      key: 'margin_pct', label: 'Margin', sortable: true,
+      key: 'margin_pct', label: 'Margin %', sortable: true,
       render: (r) => {
-        if (r.cost_price == null || r.retail_price == null || r.cost_price <= 0) return MISSING;
-        const retailExGst = r.retail_price / 1.15;
-        const margin = ((retailExGst - r.cost_price) / retailExGst) * 100;
-        const cls = margin < 5 ? 'critical' : margin < 15 ? 'warning' : margin < 30 ? 'healthy' : 'excellent';
-        return `<span class="margin-badge margin-badge--${cls}">${margin.toFixed(1)}%</span>`;
+        const { marginPct } = computeProfitability(r);
+        return marginPct == null ? MISSING : marginBadge(marginPct);
+      },
+      align: 'right',
+    });
+    cols.push({
+      key: 'markup_pct', label: 'Markup %', sortable: true,
+      render: (r) => {
+        const { markupPct } = computeProfitability(r);
+        return markupPct == null ? MISSING : markupBadge(markupPct);
+      },
+      align: 'right',
+    });
+    cols.push({
+      key: 'profit_ex_gst', label: 'Profit $', sortable: true,
+      render: (r) => {
+        const { profitDollars } = computeProfitability(r);
+        return `<span class="cell-mono cell-right">${formatProfitDollars(profitDollars)}</span>`;
       },
       align: 'right',
     });
   }
 
   cols.push({
-    key: 'source', label: 'Type',
+    key: 'source', label: 'Type', sortable: true,
     render: (r) => {
       if (!r.source) return MISSING;
       const sourceMap = { genuine: 'genuine', compatible: 'compatible', remanufactured: 'remanufactured', ribbon: 'ribbon' };
@@ -112,7 +126,7 @@ function buildColumns() {
 
   cols.push(
     {
-      key: 'is_active', label: 'Active',
+      key: 'is_active', label: 'Active', sortable: true,
       render: (r) => {
         const active = r.is_active !== false;
         return `<span class="admin-active-dot admin-active-dot--${active ? 'on' : 'off'}" data-tooltip="${active ? 'Active' : 'Inactive'}"></span>`;
@@ -120,7 +134,7 @@ function buildColumns() {
       align: 'center',
     },
     {
-      key: 'import_locked', label: '',
+      key: 'import_locked', label: 'Lock', sortable: true,
       render: (r) => {
         const locked = !!r.import_locked;
         return `<button class="import-lock-btn${locked ? ' import-lock-btn--active' : ''}" data-product-id="${r.id}" data-locked="${locked}" title="${locked ? 'Import locked \u2014 cron skips this product' : 'Not locked \u2014 cron will update this product'}">${icon(locked ? 'lock' : 'lock-open', 14, 14)}</button>`;
@@ -180,7 +194,7 @@ function productHasImage(p) {
 
 async function loadProducts() {
   _table.setLoading(true);
-  const LIMIT = 200;
+  const LIMIT = 100;
 
   // Try direct Supabase query first (faster — skips Render backend hop)
   const sb = (typeof Auth !== 'undefined' && Auth.supabase) ? Auth.supabase : null;
@@ -237,7 +251,7 @@ async function loadProducts() {
       }
 
       // Margin sorting requires client-side compute (not a DB column)
-      if (_sort === 'margin_pct') {
+      if (_sort === 'margin_pct' || _sort === 'markup_pct' || _sort === 'profit_ex_gst') {
         const PAGE_SIZE = 100;
         let all = [];
         let fetchOffset = 0;
@@ -254,21 +268,22 @@ async function loadProducts() {
           if (chunk.length < 1000) break;
           fetchOffset += 1000;
         }
+        const sortKeyMap = { margin_pct: 'marginPct', markup_pct: 'markupPct', profit_ex_gst: 'profitDollars' };
+        const sortKey = sortKeyMap[_sort];
         all = all.map(p => {
-          const retailExGst = (p.retail_price != null && p.cost_price != null && p.cost_price > 0) ? p.retail_price / 1.15 : null;
-          const margin = retailExGst ? ((retailExGst - p.cost_price) / retailExGst) * 100 : null;
+          const prof = computeProfitability(p);
           return {
             ...p,
             brand_name: p.brands?.name || '',
             image_url: p.image_url ? storageUrl(p.image_url) : null,
-            _margin: margin,
+            _sortVal: prof[sortKey],
           };
         });
         all.sort((a, b) => {
-          if (a._margin == null && b._margin == null) return 0;
-          if (a._margin == null) return 1;
-          if (b._margin == null) return -1;
-          return _sortDir === 'asc' ? a._margin - b._margin : b._margin - a._margin;
+          if (a._sortVal == null && b._sortVal == null) return 0;
+          if (a._sortVal == null) return 1;
+          if (b._sortVal == null) return -1;
+          return _sortDir === 'asc' ? a._sortVal - b._sortVal : b._sortVal - a._sortVal;
         });
         const start = (_page - 1) * PAGE_SIZE;
         const pageRows = all.slice(start, start + PAGE_SIZE);
@@ -1968,19 +1983,11 @@ async function uploadImage(productId, file) {
 
 function renderDiagnostics(container) {
   if (!_container || !AdminAuth.isOwner()) return;
+  const panel = container.querySelector('#diag-panel');
+  if (!panel) return;
   const d = _diagnostics;
   const isLoading = !d;
-
-  const section = document.createElement('div');
-  section.className = 'admin-section';
-  section.innerHTML = `
-    <div class="admin-section__header">
-      <h2 class="admin-section__title">Product Diagnostics</h2>
-      <div style="display:flex;gap:8px">
-        <button class="admin-btn admin-btn--ghost admin-btn--sm" id="bulk-seo-btn">${icon('search', 14, 14)} Generate SEO</button>
-        <button class="admin-btn admin-btn--ghost admin-btn--sm" id="bulk-activate-btn">${icon('products', 14, 14)} Bulk Activate</button>
-      </div>
-    </div>
+  panel.innerHTML = `
     <div class="admin-kpi-grid${isLoading ? ' admin-kpi-grid--loading' : ''}" style="grid-template-columns:repeat(4,1fr)">
       ${diagKpi('Total Products',        d?.total ?? d?.total_products ?? MISSING)}
       ${diagKpi('Active',                d?.active ?? d?.active_count ?? MISSING)}
@@ -1990,36 +1997,6 @@ function renderDiagnostics(container) {
       ${diagKpi('Missing Compatibility', d?.missing_compatibility ?? (d ? 'N/A' : MISSING))}
     </div>
   `;
-  // Remove any existing diagnostics section before inserting updated one
-  container.querySelector(':scope > .admin-section.diag-section')?.remove();
-  section.classList.add('diag-section');
-
-  const ref = container.querySelector(':scope > .admin-mb-lg');
-  if (ref) container.insertBefore(section, ref);
-  else container.appendChild(section);
-
-  section.querySelector('#bulk-seo-btn')?.addEventListener('click', () => bulkGenerateSEO());
-
-  section.querySelector('#bulk-activate-btn')?.addEventListener('click', async () => {
-    try {
-      const preview = await AdminAPI.bulkActivate({ dry_run: true });
-      const count = preview?.count ?? preview?.affected ?? '?';
-      Modal.confirm({
-        title: 'Bulk Activate Products',
-        message: `This will activate ${count} eligible products. Proceed?`,
-        confirmLabel: 'Activate All',
-        confirmClass: 'admin-btn--primary',
-        onConfirm: async () => {
-          await AdminAPI.bulkActivate({ dry_run: false });
-          invalidateDiagCache();
-          Toast.success('Products activated');
-          loadProducts();
-        },
-      });
-    } catch (e) {
-      Toast.error(`Bulk activate failed: ${e.message}`);
-    }
-  });
 }
 
 function diagKpi(label, value, variant = null) {
@@ -2133,16 +2110,28 @@ async function exportProductsPDF() {
     doc.setTextColor(0);
 
     // Table columns
-    const head = ['Name', 'SKU', 'Brand', 'Price', ...(isOwner ? ['Cost'] : []), 'Active'];
+    const head = [
+      'Name', 'SKU', 'Brand', 'Price',
+      ...(isOwner ? ['Cost', 'Margin %', 'Markup %', 'Profit $'] : []),
+      'Active',
+    ];
     const body = all.map(p => {
       const brand = extractBrandName(p) || MISSING;
       const price = p.retail_price ?? p.cost_price;
+      const prof = isOwner ? computeProfitability(p) : null;
+      const pctCell = (v) => (v == null ? MISSING : `${v.toFixed(1)}%`);
+      const dollarCell = (v) => (v == null ? MISSING : formatPrice(v));
       return [
         p.name || MISSING,
         p.sku || MISSING,
         brand,
         price != null ? formatPrice(price) : MISSING,
-        ...(isOwner ? [p.cost_price != null ? formatPrice(p.cost_price) : MISSING] : []),
+        ...(isOwner ? [
+          p.cost_price != null ? formatPrice(p.cost_price) : MISSING,
+          pctCell(prof.marginPct),
+          pctCell(prof.markupPct),
+          dollarCell(prof.profitDollars),
+        ] : []),
         p.is_active !== false ? 'Yes' : 'No',
       ];
     });
@@ -2470,7 +2459,7 @@ async function renderProductsContent(contentEl) {
   // Hide global filter bar — products page uses local toolbar instead
   FilterState.showBar(false);
 
-    // Header with two-row layout: title+actions row, then filter toolbar
+    // Compact single-row toolbar: filters on left, actions + diagnostics on right
     const header = document.createElement('div');
     header.className = 'admin-page-header admin-page-header--with-toolbar';
     let brandOpts = '<option value="">All Brands</option>';
@@ -2479,14 +2468,16 @@ async function renderProductsContent(contentEl) {
       const val = (typeof b === 'object' && b.id) ? b.id : name;
       brandOpts += `<option value="${esc(val)}">${esc(name)}</option>`;
     }
+    const isOwner = AdminAuth.isOwner();
+    const ownerControls = isOwner ? `
+      <button class="admin-btn admin-btn--ghost admin-btn--sm" id="diag-trigger" aria-expanded="false" title="Toggle product diagnostics">
+        <span class="diag-chevron" style="display:inline-flex;transition:transform .15s"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 6 15 12 9 18"/></svg></span>
+        Diagnostics
+      </button>
+      <button class="admin-btn admin-btn--ghost admin-btn--sm" id="bulk-seo-btn">${icon('search', 14, 14)} Generate SEO</button>
+      <button class="admin-btn admin-btn--ghost admin-btn--sm" id="bulk-activate-btn">${icon('products', 14, 14)} Bulk Activate</button>
+    ` : '';
     header.innerHTML = `
-      <div class="admin-page-header__top">
-        <h1>Products &amp; SKUs</h1>
-        <div class="admin-page-header__actions">
-          <button class="admin-btn admin-btn--primary admin-btn--sm" id="add-product-btn">${icon('products', 14, 14)} Add Product</button>
-          ${exportDropdown('export-products')}
-        </div>
-      </div>
       <div class="admin-toolbar">
         <div class="admin-search" id="product-search-wrap">
           <span class="admin-search__icon">${icon('search', 14, 14)}</span>
@@ -2503,9 +2494,56 @@ async function renderProductsContent(contentEl) {
           <option value="no-images">No Images</option>
           <option value="has-images">Has Images</option>
         </select>
+        <span style="flex:1 1 auto"></span>
+        ${ownerControls}
+        <button class="admin-btn admin-btn--primary admin-btn--sm" id="add-product-btn">${icon('products', 14, 14)} Add Product</button>
+        ${exportDropdown('export-products')}
       </div>
+      <div id="diag-panel" hidden style="margin-top:12px"></div>
     `;
     container.appendChild(header);
+
+    // Diagnostics toggle (owner only)
+    if (isOwner) {
+      const trigger = header.querySelector('#diag-trigger');
+      const panel = header.querySelector('#diag-panel');
+      const chevron = trigger?.querySelector('.diag-chevron');
+      trigger?.addEventListener('click', () => {
+        const open = panel.hasAttribute('hidden');
+        if (open) {
+          panel.removeAttribute('hidden');
+          if (chevron) chevron.style.transform = 'rotate(90deg)';
+          trigger.setAttribute('aria-expanded', 'true');
+        } else {
+          panel.setAttribute('hidden', '');
+          if (chevron) chevron.style.transform = '';
+          trigger.setAttribute('aria-expanded', 'false');
+        }
+      });
+
+      header.querySelector('#bulk-seo-btn')?.addEventListener('click', () => bulkGenerateSEO());
+
+      header.querySelector('#bulk-activate-btn')?.addEventListener('click', async () => {
+        try {
+          const preview = await AdminAPI.bulkActivate({ dry_run: true });
+          const count = preview?.count ?? preview?.affected ?? '?';
+          Modal.confirm({
+            title: 'Bulk Activate Products',
+            message: `This will activate ${count} eligible products. Proceed?`,
+            confirmLabel: 'Activate All',
+            confirmClass: 'admin-btn--primary',
+            onConfirm: async () => {
+              await AdminAPI.bulkActivate({ dry_run: false });
+              invalidateDiagCache();
+              Toast.success('Products activated');
+              loadProducts();
+            },
+          });
+        } catch (e) {
+          Toast.error(`Bulk activate failed: ${e.message}`);
+        }
+      });
+    }
 
     // Table
     const tableContainer = document.createElement('div');
@@ -2521,7 +2559,12 @@ async function renderProductsContent(contentEl) {
       selectable: true,
       onSelectionChange: (sel) => updateBulkBar(sel),
       onRowClick: (row) => openProductDrawer(row),
-      onSort: (key, dir) => { _sort = key; _sortDir = dir; _page = 1; loadProducts(); },
+      onSort: (key, dir) => {
+        if (key === null) { _sort = 'name'; _sortDir = 'asc'; }
+        else { _sort = key; _sortDir = dir; }
+        _page = 1;
+        loadProducts();
+      },
       onPageChange: (page) => { _page = page; loadProducts(); },
       emptyMessage: 'No products found',
       emptyIcon: icon('products', 40, 40),

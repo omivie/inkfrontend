@@ -130,7 +130,7 @@
             const isRibbonProduct = category === 'ribbon';
             const nameLower = name.toLowerCase();
             const isCompatible = !isRibbonProduct && (p.source === 'compatible' || nameLower.includes('compatible'));
-            const displayName = (!isRibbonProduct && nameLower.startsWith('compatible ')) ? name.substring(11).trim() : name;
+            const displayName = name;
             const brandName = p.brand?.name || (typeof p.brand === 'string' ? p.brand : null) || this.extractBrand(name) || 'Unknown';
             const pageYield = p.page_yield || p.yield || null;
 
@@ -248,8 +248,8 @@
             const canonicalUrl = seo.canonical || `https://www.inkcartridges.co.nz/products/${slug}/${info.sku}`;
 
             // Page title and meta description — prefer API seo fields, fall back to computed
-            const prefix = (info.category === 'ribbon') ? '' : (info.isCompatible ? 'Compatible ' : 'Genuine ');
-            const computedTitle = `${prefix}${info.displayName} NZ | InkCartridges.co.nz`;
+            const genuinePrefix = (info.category !== 'ribbon' && !info.isCompatible) ? 'Genuine ' : '';
+            const computedTitle = `${genuinePrefix}${info.displayName} NZ | InkCartridges.co.nz`;
             document.title = seo.title || computedTitle;
 
             const metaDescription = seo.description || this.generateMetaDescription(info);
@@ -366,8 +366,7 @@
             }
 
             // Title and SKU
-            const h1Prefix = info.isCompatible ? 'Compatible ' : '';
-            document.getElementById('product-title').textContent = `${h1Prefix}${info.displayName}`;
+            document.getElementById('product-title').textContent = info.displayName;
             document.getElementById('product-sku').textContent = `SKU: ${info.sku}${info.manufacturer_part_number ? ' | Model: ' + info.manufacturer_part_number : ''}`;
 
             // Price - use formatPrice() for consistent locale-aware currency display

@@ -39,10 +39,14 @@
             this.bindInfoModal();
 
             try {
-                const [cardRes, couponsRes] = await Promise.all([
+                const [cardSettled, loyaltySettled, personalSettled] = await Promise.allSettled([
                     API.getStampCard(),
-                    API.getLoyaltyCoupons()
+                    API.getLoyaltyCoupons(),
+                    API.getPersonalCoupons()
                 ]);
+
+                if (cardSettled.status !== 'fulfilled') throw cardSettled.reason;
+                const cardRes = cardSettled.value;
 
                 const data = cardRes?.data || {};
                 this.card = data.card || { total_slots: 6, stamps_collected: 0, cycle_number: 1, is_virtual: true };
@@ -52,11 +56,16 @@
                 this.nextRewardAt = data.next_reward_at;
                 this.completedCycles = data.completed_cycles || 0;
 
-                const coupons = Array.isArray(couponsRes?.data) ? couponsRes.data : [];
+                const loyaltyRows = (loyaltySettled.status === 'fulfilled' && Array.isArray(loyaltySettled.value?.data))
+                    ? loyaltySettled.value.data.map((r) => ({ ...r, source: 'loyalty' }))
+                    : [];
+                const personalRows = (personalSettled.status === 'fulfilled' && Array.isArray(personalSettled.value?.data))
+                    ? personalSettled.value.data.map((c) => ({ coupon: c, source: 'personal', status: 'active' }))
+                    : [];
 
                 document.getElementById('loyalty-loading').hidden = true;
                 this.renderCard();
-                this.renderRewards(coupons);
+                this.renderRewards([...loyaltyRows, ...personalRows]);
 
                 if (this.tooltip) {
                     document.getElementById('loyalty-info-text').textContent = this.tooltip;
@@ -168,24 +177,41 @@
 
             list.innerHTML = coupons.map((row) => {
                 const c = row.coupon || {};
-                const tier = rewardTier(row.slot_number);
+                const isPersonal = row.source === 'personal';
+                const status = row.status || 'active';
+                const canCopy = status === 'active';
                 const conditions = [];
                 if (c.minimum_order_amount) conditions.push(`Valid on orders over ${fmtMoney(c.minimum_order_amount)}`);
                 if (c.exclude_genuine) conditions.push('Compatible products only');
                 if (c.expires_at) conditions.push(`Expires ${fmtDate(c.expires_at)}`);
-                conditions.push('Single use');
 
-                const status = row.status || 'active';
-                const canCopy = status === 'active';
+                let modifier;
+                let headerLeft;
+                let headerBadgeLabel;
+                if (isPersonal) {
+                    modifier = 'personal';
+                    headerLeft = `<span class="loyalty-reward__tier">Personal Coupon</span>`;
+                    headerBadgeLabel = 'Personal';
+                    const limit = Number(c.per_user_limit) || 1;
+                    conditions.push(limit === 1 ? '1 use per customer' : `${limit} uses per customer`);
+                } else {
+                    const tier = rewardTier(row.slot_number);
+                    modifier = tier;
+                    headerLeft = `
+                        <span class="loyalty-reward__tier">${tier === 'gold' ? 'Gold' : 'Silver'} Reward</span>
+                        <span class="loyalty-reward__cycle">Cycle ${esc(row.cycle_number)}</span>
+                    `;
+                    headerBadgeLabel = statusLabel[status] || status;
+                    conditions.push('Single use');
+                }
+
+                const badgeClass = isPersonal ? 'personal' : status;
 
                 return `
-                    <article class="loyalty-reward loyalty-reward--${esc(tier)} loyalty-reward--${esc(status)}">
+                    <article class="loyalty-reward loyalty-reward--${esc(modifier)} loyalty-reward--${esc(status)}">
                         <header class="loyalty-reward__head">
-                            <div>
-                                <span class="loyalty-reward__tier">${tier === 'gold' ? 'Gold' : 'Silver'} Reward</span>
-                                <span class="loyalty-reward__cycle">Cycle ${esc(row.cycle_number)}</span>
-                            </div>
-                            <span class="loyalty-reward__status loyalty-reward__status--${esc(status)}">${esc(statusLabel[status] || status)}</span>
+                            <div>${headerLeft}</div>
+                            <span class="loyalty-reward__status loyalty-reward__status--${esc(badgeClass)}">${esc(headerBadgeLabel)}</span>
                         </header>
                         <div class="loyalty-reward__code-row">
                             <code class="loyalty-reward__code">${esc(c.code || '')}</code>

@@ -140,7 +140,7 @@ function renderTierMultipliers(data) {
     <thead><tr>
       <th>Tier</th>
       <th style="text-align:right">Multiplier</th>
-      <th style="text-align:right">Effective Markup</th>
+      <th style="text-align:right" title="Tier price uplift: (multiplier - 1) × 100. Not the same as product-level Markup % on the Products page.">Tier Multiplier Markup</th>
     </tr></thead><tbody>`;
   for (const tier of data) {
     const name = tier.tier_name || tier.tier || tier.name || '—';

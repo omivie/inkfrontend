@@ -201,7 +201,12 @@ class DataTable {
         th.addEventListener('click', () => {
           const key = th.dataset.sortKey;
           if (this.sortKey === key) {
-            this.sortDir = this.sortDir === 'asc' ? 'desc' : 'asc';
+            if (this.sortDir === 'desc') {
+              this.sortDir = 'asc';
+            } else {
+              this.sortKey = null;
+              this.sortDir = null;
+            }
           } else {
             this.sortKey = key;
             this.sortDir = 'desc';

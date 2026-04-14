@@ -755,6 +755,14 @@ const API = {
         return this.get('/api/user/loyalty-coupons');
     },
 
+    /**
+     * Get admin-granted personal coupons for the logged-in user
+     * (coupons where email_restrictions includes the user's email)
+     */
+    async getPersonalCoupons() {
+        return this.get('/api/user/coupons');
+    },
+
     // =========================================================================
     // CHECKOUT HELPERS
     // =========================================================================

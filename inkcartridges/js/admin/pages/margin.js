@@ -2,16 +2,15 @@
  * Margin Analysis Page — Pricing health, cost changes, profit analysis
  */
 import { AdminAuth, AdminAPI, esc } from '../app.js';
+import { computeProfitability, marginBadge, markupBadge, formatProfitDollars } from '../utils/profitability.js';
 
 const formatPrice = (v) => window.formatPrice ? window.formatPrice(v) : `$${Number(v).toFixed(2)}`;
 const MISSING = '\u2014';
 
-function marginBadge(pct) {
-  if (pct == null) return `<span class="margin-badge margin-badge--unknown">${MISSING}</span>`;
-  const num = Number(pct);
-  if (num < 15) return `<span class="margin-badge margin-badge--low" title="Low Margin">\u26A0 ${num.toFixed(1)}%</span>`;
-  if (num <= 30) return `<span class="margin-badge margin-badge--healthy" title="Healthy">\u2713 ${num.toFixed(1)}%</span>`;
-  return `<span class="margin-badge margin-badge--high" title="High Profit">\u2197 ${num.toFixed(1)}%</span>`;
+/** Fallback markup computation when backend hasn't provided markup_pct yet. */
+function deriveMarkupPct(row) {
+  if (row?.markup_pct != null) return Number(row.markup_pct);
+  return computeProfitability(row).markupPct;
 }
 
 function changeBadge(pct) {
@@ -131,12 +130,22 @@ async function loadOverview(el) {
         <div class="margin-card__label">Avg Compatible Margin</div>
         <div class="margin-card__value">${avgC != null ? marginBadge(avgC) : MISSING}</div>
       </div>
+      <div class="margin-card">
+        <div class="margin-card__label">Avg Genuine Markup</div>
+        <div class="margin-card__value">${d.average_markup_by_source?.genuine != null ? markupBadge(d.average_markup_by_source.genuine) : MISSING}</div>
+        <div class="margin-card__sub">Profit as multiple of cost</div>
+      </div>
+      <div class="margin-card">
+        <div class="margin-card__label">Avg Compatible Markup</div>
+        <div class="margin-card__value">${d.average_markup_by_source?.compatible != null ? markupBadge(d.average_markup_by_source.compatible) : MISSING}</div>
+        <div class="margin-card__sub">Profit as multiple of cost</div>
+      </div>
     </div>
     ${d.top_profit_products?.length ? `
       <h3 style="margin:1.5rem 0 0.75rem;font-size:1rem">Top Profit Products</h3>
       <table class="margin-table">
         <thead><tr>
-          <th>SKU</th><th>Source</th><th>Cost</th><th>Retail</th><th>Profit (ex GST)</th><th>Margin</th>
+          <th>SKU</th><th>Source</th><th>Cost</th><th>Retail</th><th>Profit (ex GST)</th><th>Margin %</th><th>Markup %</th>
         </tr></thead>
         <tbody>
           ${d.top_profit_products.map(p => `<tr>
@@ -146,6 +155,7 @@ async function loadOverview(el) {
             <td>${formatPrice(p.retail_price)}</td>
             <td>${formatPrice(p.profit_ex_gst)}</td>
             <td>${marginBadge(p.margin_pct)}</td>
+            <td>${markupBadge(deriveMarkupPct(p))}</td>
           </tr>`).join('')}
         </tbody>
       </table>
@@ -162,21 +172,25 @@ async function loadRecommended(el) {
   el.innerHTML = `
     <table class="margin-table">
       <thead><tr>
-        <th>SKU</th><th>Name</th><th>Source</th><th>Current</th><th>Recommended</th><th>Current Margin</th><th>Gap</th><th>Action</th>
+        <th>SKU</th><th>Name</th><th>Source</th><th>Current</th><th>Recommended</th><th>Current Margin %</th><th>Current Markup %</th><th title="Gap vs 30% target margin">Margin Gap</th><th>Action</th>
       </tr></thead>
       <tbody>
-        ${items.map(p => `<tr data-product-id="${esc(p.product_id)}">
+        ${items.map(p => {
+          const curMarkup = deriveMarkupPct({ retail_price: p.current_retail, cost_price: p.cost_price, markup_pct: p.current_markup_pct });
+          return `<tr data-product-id="${esc(p.product_id)}">
           <td>${esc(p.sku)}</td>
           <td title="${esc(p.name)}">${esc((p.name || '').substring(0, 40))}${(p.name || '').length > 40 ? '...' : ''}</td>
           <td><span class="margin-source-badge margin-source-badge--${esc(p.source)}">${esc(p.source)}</span></td>
           <td>${formatPrice(p.current_retail)}</td>
           <td style="font-weight:600">${formatPrice(p.recommended_retail)}</td>
           <td>${marginBadge(p.current_margin_pct)}</td>
+          <td>${markupBadge(curMarkup)}</td>
           <td style="color:${(p.gap || 0) > 0 ? '#ef4444' : '#22c55e'};font-weight:600">${p.gap > 0 ? '+' : ''}${(p.gap || 0).toFixed(1)}%</td>
           <td class="margin-table__actions">
             <button data-action="update-price" data-id="${esc(p.product_id)}" data-price="${p.recommended_retail}">Apply</button>
           </td>
-        </tr>`).join('')}
+        </tr>`;
+        }).join('')}
       </tbody>
     </table>
   `;
@@ -216,10 +230,17 @@ async function loadChanges(el) {
   el.innerHTML = `
     <table class="margin-table">
       <thead><tr>
-        <th>SKU</th><th>Name</th><th>Source</th><th>Previous Cost</th><th>Current Cost</th><th>Change</th><th>Current Margin</th><th>Detected</th>
+        <th>SKU</th><th>Name</th><th>Source</th><th>Previous Cost</th><th>Current Cost</th><th>Cost Change</th><th>Current Margin %</th><th>Markup: Before → After</th><th>Detected</th>
       </tr></thead>
       <tbody>
-        ${items.map(p => `<tr>
+        ${items.map(p => {
+          const markupBefore = p.markup_before != null
+            ? Number(p.markup_before)
+            : computeProfitability({ retail_price: p.retail_price, cost_price: p.previous_cost }).markupPct;
+          const markupAfter = p.markup_after != null
+            ? Number(p.markup_after)
+            : computeProfitability({ retail_price: p.retail_price, cost_price: p.current_cost }).markupPct;
+          return `<tr>
           <td>${esc(p.sku)}</td>
           <td title="${esc(p.name)}">${esc((p.name || '').substring(0, 40))}${(p.name || '').length > 40 ? '...' : ''}</td>
           <td><span class="margin-source-badge margin-source-badge--${esc(p.source)}">${esc(p.source)}</span></td>
@@ -227,8 +248,10 @@ async function loadChanges(el) {
           <td>${formatPrice(p.current_cost)}</td>
           <td>${changeBadge(p.change_pct)}</td>
           <td>${marginBadge(p.current_margin_pct)}</td>
+          <td>${markupBadge(markupBefore)} <span style="color:#6b7280">\u2192</span> ${markupBadge(markupAfter)}</td>
           <td>${p.detected_at ? new Date(p.detected_at).toLocaleDateString('en-NZ') : MISSING}</td>
-        </tr>`).join('')}
+        </tr>`;
+        }).join('')}
       </tbody>
     </table>
   `;
@@ -293,7 +316,7 @@ async function loadTopProfit(el) {
     </div>
     <table class="margin-table">
       <thead><tr>
-        <th>SKU</th><th>Name</th><th>Source</th><th>Cost</th><th>Retail</th><th>Profit (ex GST)</th><th>Margin</th>
+        <th>SKU</th><th>Name</th><th>Source</th><th>Cost</th><th>Retail</th><th>Profit $ (ex GST)</th><th>Margin %</th><th>Markup %</th>
       </tr></thead>
       <tbody>
         ${items.map(p => `<tr>
@@ -304,6 +327,7 @@ async function loadTopProfit(el) {
           <td>${formatPrice(p.retail_price)}</td>
           <td style="font-weight:600;color:#22c55e">${formatPrice(p.profit_ex_gst)}</td>
           <td>${marginBadge(p.margin_pct)}</td>
+          <td>${markupBadge(deriveMarkupPct(p))}</td>
         </tr>`).join('')}
       </tbody>
     </table>
