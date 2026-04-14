@@ -646,11 +646,15 @@ const AdminAPI = {
 
   async createRibbonProduct(data) {
     try {
-      const sb = this._sb();
-      if (!sb) throw new Error('Supabase not available');
-      const { data: product, error } = await sb.from('products').insert(data).select().single();
-      if (error) throw error;
-      return product;
+      // Route through backend so compatible_devices auto-parsing from description fires.
+      const payload = { ...data };
+      if (payload.description_html != null && payload.description == null) payload.description = payload.description_html;
+      const resp = await window.API.request('/api/admin/ribbons', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      });
+      if (resp && resp.ok === false) throw new Error(resp.error || 'Create failed');
+      return resp?.data || resp;
     } catch (e) {
       DebugLog.warn('[AdminAPI] createRibbonProduct failed:', e.message);
       throw e;
@@ -659,11 +663,14 @@ const AdminAPI = {
 
   async updateRibbonProduct(productId, data) {
     try {
-      const sb = this._sb();
-      if (!sb) throw new Error('Supabase not available');
-      const { data: product, error } = await sb.from('products').update(data).eq('id', productId).select().single();
-      if (error) throw error;
-      return product;
+      const payload = { ...data };
+      if (payload.description_html != null && payload.description == null) payload.description = payload.description_html;
+      const resp = await window.API.request(`/api/admin/ribbons/${encodeURIComponent(productId)}`, {
+        method: 'PUT',
+        body: JSON.stringify(payload),
+      });
+      if (resp && resp.ok === false) throw new Error(resp.error || 'Update failed');
+      return resp?.data || resp;
     } catch (e) {
       DebugLog.warn('[AdminAPI] updateRibbonProduct failed:', e.message);
       throw e;

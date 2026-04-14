@@ -17,7 +17,7 @@
         async loadOrder(orderNumber) {
             let order = null;
 
-            // Try API first
+            // Try the detail endpoint first
             try {
                 const response = await API.getOrder(orderNumber);
                 if (response.ok && response.data) {
@@ -26,6 +26,25 @@
                 }
             } catch (error) {
                 DebugLog.log('Could not load from API:', error.message);
+            }
+
+            // Fallback: backend detail endpoint rejects legacy order numbers whose
+            // characters don't match its stricter regex (e.g. ORD-...I-...). The
+            // list endpoint is more permissive, so scan recent orders for a match.
+            if (!order) {
+                try {
+                    const listResponse = await API.getOrders({ limit: 100 });
+                    const list = listResponse?.data?.orders || listResponse?.data || [];
+                    const match = Array.isArray(list)
+                        ? list.find(o => o && o.order_number === orderNumber)
+                        : null;
+                    if (match) {
+                        order = match;
+                        DebugLog.log('Order loaded via list fallback');
+                    }
+                } catch (error) {
+                    DebugLog.log('List fallback failed:', error.message);
+                }
             }
 
             if (order) {

@@ -219,6 +219,37 @@
     gap: 14px;
 }
 
+.smart-ac__empty-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 8px;
+}
+
+.smart-ac__empty-header .smart-ac__empty-title {
+    margin: 0;
+}
+
+.smart-ac__clear-recent {
+    background: transparent;
+    border: none;
+    padding: 2px 6px;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--color-text-muted, #64748b);
+    cursor: pointer;
+    border-radius: 4px;
+    transition: color 0.12s ease, background 0.12s ease;
+}
+
+.smart-ac__clear-recent:hover {
+    color: #dc2626;
+    background: #fef2f2;
+}
+
 .smart-ac__empty-title {
     margin: 0 0 8px 0;
     font-size: 11px;

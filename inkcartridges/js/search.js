@@ -167,7 +167,10 @@
 
             const recentSection = recent.length
                 ? `<div class="smart-ac__empty-section">
-                       <h4 class="smart-ac__empty-title">Recent searches</h4>
+                       <div class="smart-ac__empty-header">
+                           <h4 class="smart-ac__empty-title">Recent searches</h4>
+                           <button type="button" class="smart-ac__clear-recent" data-clear-recent aria-label="Clear recent searches">Clear</button>
+                       </div>
                        <div class="smart-ac__chips">${recent.map(chip).join('')}</div>
                    </div>`
                 : '';
@@ -217,7 +220,10 @@
                 const dymHTML = didYouMean
                     ? ` Did you mean <button type="button" class="smart-ac__dym" data-dym="${escAttr(didYouMean)}">${esc(didYouMean)}</button>?`
                     : ' Try a different term or browse the <a href="/html/shop">full catalog</a>.';
-                state.list.innerHTML = `<div class="smart-ac__no-results">No products match “${q}”.${dymHTML}</div>`;
+                const printerBannerHTML = matchedPrinter && matchedPrinter.name
+                    ? `<div class="smart-ac__matched-printer">Matched printer: <strong>${esc(matchedPrinter.name)}</strong> — <a href="/html/shop?printer=${escAttr(matchedPrinter.slug || '')}">view all compatible cartridges →</a></div>`
+                    : '';
+                state.list.innerHTML = `${printerBannerHTML}<div class="smart-ac__no-results">No products match “${q}”.${dymHTML}</div>`;
                 const dymBtn = state.list.querySelector('.smart-ac__dym');
                 if (dymBtn) {
                     dymBtn.addEventListener('click', () => {
@@ -238,7 +244,7 @@
             }
 
             const bannerHTML = matchedPrinter && matchedPrinter.name
-                ? `<div class="smart-ac__matched-printer">Showing cartridges for <a href="/html/shop?printer=${escAttr(matchedPrinter.slug || '')}">${esc(matchedPrinter.name)}</a></div>`
+                ? `<div class="smart-ac__matched-printer">Showing results for printer: <strong>${esc(matchedPrinter.name)}</strong> — <a href="/html/shop?printer=${escAttr(matchedPrinter.slug || '')}">view all compatible cartridges →</a></div>`
                 : '';
             const cardsHTML = list.map((p, i) => Products.renderCard(adaptForCard(p), i)).join('');
             const q = state.input.value.trim();
@@ -278,7 +284,10 @@
                 }, { capture: false });
             });
 
-            setLive(`${list.length} result${list.length === 1 ? '' : 's'} found`);
+            const liveMsg = matchedPrinter && matchedPrinter.name
+                ? `${list.length} result${list.length === 1 ? '' : 's'} found for printer ${matchedPrinter.name}`
+                : `${list.length} result${list.length === 1 ? '' : 's'} found`;
+            setLive(liveMsg);
         }
 
         function renderError() {
@@ -368,6 +377,15 @@
 
         function onListClick(e) {
             // Add-to-Cart on product cards is handled by Products.attachCardListeners.
+            const clearBtn = e.target.closest('[data-clear-recent]');
+            if (clearBtn) {
+                e.preventDefault();
+                e.stopPropagation();
+                try { localStorage.removeItem(RECENT_KEY); } catch (_) {}
+                const section = clearBtn.closest('.smart-ac__empty-section');
+                if (section) section.remove();
+                return;
+            }
             const chip = e.target.closest('.smart-ac__chip');
             if (chip) {
                 e.preventDefault();
@@ -395,7 +413,7 @@
 
             state.list.addEventListener('mousedown', (e) => {
                 // prevent input blur before click fires
-                if (e.target.closest('.product-card, .smart-ac__chip, .product-card__add-btn, .product-card__link')) {
+                if (e.target.closest('.product-card, .smart-ac__chip, .product-card__add-btn, .product-card__link, [data-clear-recent]')) {
                     e.preventDefault();
                 }
             });

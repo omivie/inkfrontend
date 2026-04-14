@@ -511,6 +511,16 @@
                     : `<span class="drilldown-box__name">${Security.escapeHtml(brand.name || brandId)}</span>`;
                 box.innerHTML = `${inner}<span class="drilldown-box__count" data-count="${Security.escapeAttr(brandId)}" aria-hidden="true"></span>`;
                 box.addEventListener('click', () => this.navigateTo('categories', { brand: brandId }));
+                const prefetch = () => {
+                    if (!this._prefetchedBrands) this._prefetchedBrands = new Set();
+                    if (this._prefetchedBrands.has(brandId)) return;
+                    this._prefetchedBrands.add(brandId);
+                    API.getShopData({ brand: brandId }).catch(() => {
+                        this._prefetchedBrands.delete(brandId);
+                    });
+                };
+                box.addEventListener('mouseenter', prefetch);
+                box.addEventListener('focus', prefetch);
                 grid.appendChild(box);
             });
 
@@ -593,8 +603,16 @@
 
             if (!categoryCounts) {
                 try {
+                    // Fire shop (counts) and ribbons count in parallel — ribbons aren't in /api/shop
+                    const shopPromise = this._shopEndpointAvailable
+                        ? API.getShopData({ brand: this.state.brand })
+                        : Promise.resolve(null);
+                    const ribbonPromise = this.state.brand
+                        ? API.getRibbons({ printer_brand: this.state.brand, limit: 1 }).catch(() => null)
+                        : Promise.resolve(null);
+
                     if (this._shopEndpointAvailable) {
-                        const response = await API.getShopData({ brand: this.state.brand });
+                        const response = await shopPromise;
                         if (navVersion !== undefined && this.navigationVersion !== navVersion) return;
 
                         if (response.ok && response.data?.counts) {
@@ -673,16 +691,12 @@
                         categoryCounts['ribbons'] = 0;
                     }
 
-                    // Also check if this brand has ribbon products
+                    // Resolve the parallel ribbons count (fired alongside the shop call above)
                     if (categoryCounts && this.state.brand) {
-                        try {
-                            const ribbonRes = await API.getRibbons({ printer_brand: this.state.brand, limit: 1 });
-                            if (navVersion !== undefined && this.navigationVersion !== navVersion) return;
-                            const ribbonTotal = ribbonRes?.meta?.total_items || ribbonRes?.data?.pagination?.total || 0;
-                            categoryCounts.ribbons = ribbonTotal;
-                        } catch (e) {
-                            categoryCounts.ribbons = 0;
-                        }
+                        const ribbonRes = await ribbonPromise;
+                        if (navVersion !== undefined && this.navigationVersion !== navVersion) return;
+                        const ribbonTotal = ribbonRes?.meta?.total_items || ribbonRes?.data?.pagination?.total || 0;
+                        categoryCounts.ribbons = ribbonTotal;
                     }
 
                     this.cache.products[cacheKey] = categoryCounts;
