@@ -1,13 +1,18 @@
     // Simple notification function
-    function showNotification(message, type = 'info') {
+    function showNotification(message, type = 'info', action = null) {
         // Remove any existing notification
         const existing = document.querySelector('.settings-notification');
         if (existing) existing.remove();
 
         const notification = document.createElement('div');
         notification.className = `settings-notification settings-notification--${type}`;
+        const safeMsg = (window.Security && Security.escapeHtml) ? Security.escapeHtml(message) : message;
+        const actionHtml = action
+            ? `<button type="button" data-action="custom" style="background:rgba(255,255,255,0.2);border:1px solid rgba(255,255,255,0.5);color:white;padding:4px 12px;border-radius:6px;cursor:pointer;font-size:13px;font-weight:600;">${Security.escapeHtml(action.label)}</button>`
+            : '';
         notification.innerHTML = `
-            <span>${message}</span>
+            <span>${safeMsg}</span>
+            ${actionHtml}
             <button type="button" data-action="dismiss">&times;</button>
         `;
         notification.style.cssText = `
@@ -25,7 +30,7 @@
             box-shadow: 0 4px 12px rgba(0,0,0,0.15);
             animation: slideIn 0.3s ease;
         `;
-        const dismissBtn = notification.querySelector('button');
+        const dismissBtn = notification.querySelector('[data-action="dismiss"]');
         dismissBtn.style.cssText = `
             background: none;
             border: none;
@@ -41,16 +46,42 @@
             notification.remove();
         });
 
+        if (action) {
+            const actionBtn = notification.querySelector('[data-action="custom"]');
+            actionBtn.addEventListener('click', async () => {
+                try { await action.onClick(); } finally { notification.remove(); }
+            });
+        }
+
         document.body.appendChild(notification);
 
-        // Auto remove after 5 seconds
-        setTimeout(() => notification.remove(), 5000);
+        // Auto remove (longer window when there's an action to interact with)
+        setTimeout(() => notification.remove(), action ? 10000 : 5000);
     }
+
+    const UNSUB_TYPE_LABELS = {
+        cart_recovery: 'cart recovery',
+        marketing: 'marketing',
+        order_updates: 'order updates',
+        refill_reminder: 'refill reminders',
+        review_request: 'review requests'
+    };
 
     const SettingsPage = {
         async init() {
             // Always setup form handlers first
             this.setupFormSubmit();
+
+            // Handle ?unsubscribed=<type> redirect from email links
+            const params = new URLSearchParams(window.location.search);
+            const unsubType = params.get('unsubscribed');
+            if (unsubType) {
+                params.delete('unsubscribed');
+                const qs = params.toString();
+                const clean = window.location.pathname + (qs ? '?' + qs : '') + window.location.hash;
+                window.history.replaceState({}, '', clean);
+                this.handleUnsubscribeRedirect(unsubType);
+            }
 
             // Wait a moment for AccountPage to initialize auth
             await new Promise(resolve => setTimeout(resolve, 500));
@@ -59,6 +90,31 @@
             if (Auth.isAuthenticated()) {
                 this.loadUserData();
             }
+        },
+
+        handleUnsubscribeRedirect(type) {
+            const prettyType = UNSUB_TYPE_LABELS[type] || type.replace(/_/g, ' ');
+            showNotification('You have been successfully unsubscribed. Made a mistake?', 'success', {
+                label: 'Undo',
+                onClick: async () => {
+                    if (!Auth.isAuthenticated()) {
+                        showNotification('Please log in to undo this change', 'info');
+                        return;
+                    }
+                    try {
+                        const response = await API.resubscribeEmail(type);
+                        if (response && response.ok) {
+                            await this.loadEmailPreferences();
+                            showNotification(`Resubscribed to ${prettyType}`, 'success');
+                        } else {
+                            showNotification('Could not undo. Please try again.', 'error');
+                        }
+                    } catch (err) {
+                        DebugLog.warn('Resubscribe failed:', err && err.message);
+                        showNotification('Could not undo. Please try again.', 'error');
+                    }
+                }
+            });
         },
 
         // Helper to parse phone with country code

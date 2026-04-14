@@ -58,6 +58,16 @@ function getGclid() {
 }
 
 /**
+ * Read GA4 client ID from the _ga cookie (format: GA1.1.<client_id>).
+ * Sent with checkout requests so backend can attribute orders via GA4 Measurement Protocol.
+ * @returns {string|null}
+ */
+function getGaClientId() {
+    var match = document.cookie.match(/_ga=GA\d+\.\d+\.(.+?)(?:;|$)/);
+    return match ? match[1] : null;
+}
+
+/**
  * Read localStorage cart count immediately to prevent badge showing "0"
  * before Cart.init() completes (which may involve async server calls).
  */

@@ -741,6 +741,20 @@ const API = {
         return this.get('/api/cart/coupon');
     },
 
+    /**
+     * Get the user's loyalty stamp card (current cycle)
+     */
+    async getStampCard() {
+        return this.get('/api/user/stamp-card');
+    },
+
+    /**
+     * Get all earned loyalty coupons across cycles
+     */
+    async getLoyaltyCoupons() {
+        return this.get('/api/user/loyalty-coupons');
+    },
+
     // =========================================================================
     // CHECKOUT HELPERS
     // =========================================================================
@@ -888,6 +902,10 @@ const API = {
 
     async updateEmailPreferences(prefs) {
         return this.put('/api/user/email-preferences', prefs);
+    },
+
+    async resubscribeEmail(type) {
+        return this.post('/api/user/email-preferences/resubscribe', { type });
     },
 
     /**

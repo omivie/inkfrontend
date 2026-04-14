@@ -513,6 +513,7 @@
                     payment_method: 'stripe',
                     idempotency_key: await this.getIdempotencyKey('stripe'),
                     gclid: typeof getGclid === 'function' ? getGclid() : null,
+                    ga_client_id: typeof getGaClientId === 'function' ? getGaClientId() : null,
                     ...(isGuest && { guest_email: this.checkoutData.email }),
                     ...(isGuest && this.checkoutData.phone && { guest_phone: this.checkoutData.phone }),
                     ...(isGuest && this.turnstileToken && { turnstile_token: this.turnstileToken })
@@ -849,6 +850,8 @@
                     payment_method: 'net30',
                     po_number: poNumber,
                     idempotency_key: await this.getIdempotencyKey('net30'),
+                    gclid: typeof getGclid === 'function' ? getGclid() : null,
+                    ga_client_id: typeof getGaClientId === 'function' ? getGaClientId() : null,
                 };
 
                 if (this.turnstileToken) {
@@ -1172,6 +1175,7 @@
                         payment_method: 'paypal',
                         idempotency_key: await self.getIdempotencyKey('paypal'),
                         gclid: typeof getGclid === 'function' ? getGclid() : null,
+                        ga_client_id: typeof getGaClientId === 'function' ? getGaClientId() : null,
                         ...(isGuest && { guest_email: self.checkoutData.email }),
                         ...(isGuest && self.checkoutData.phone && { guest_phone: self.checkoutData.phone }),
                         ...(isGuest && self.turnstileToken && { turnstile_token: self.turnstileToken })
