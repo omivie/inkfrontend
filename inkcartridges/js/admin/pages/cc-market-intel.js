@@ -25,6 +25,10 @@ async function loadReport() {
     grid.innerHTML = '<div class="admin-empty"><div class="admin-empty__text">Could not load market report</div></div>';
     return;
   }
+  if (data._empty) {
+    grid.innerHTML = `<div class="admin-empty"><div class="admin-empty__text">${esc(data._hint)}</div></div>`;
+    return;
+  }
   const kpi = (label, value, color) =>
     `<div class="admin-kpi"><div class="admin-kpi__label">${esc(label)}</div><div class="admin-kpi__value" style="${color ? `color:${color}` : ''}">${value}</div></div>`;
 

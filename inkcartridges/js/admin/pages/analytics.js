@@ -302,19 +302,41 @@ function renderTopProducts(data) {
 }
 
 function renderRefundTable(data) {
-  if (!data?.reasons?.length) {
-    return `<div class="admin-empty"><div class="admin-empty__text" data-tooltip="Requires analytics_refunds_series RPC">Refund data unavailable</div></div>`;
+  // Preferred shape (when backend ships reason breakdown): { reasons: [{reason, count, amount}] }
+  if (data?.reasons?.length) {
+    const total = data.reasons.reduce((s, r) => s + (r.count || 0), 0) || 1;
+    let html = `<div class="admin-table-wrap"><table class="admin-table"><thead><tr>
+      <th>Reason</th><th class="cell-right">Count</th><th class="cell-right">Amount</th><th class="cell-right">Share</th>
+    </tr></thead><tbody>`;
+    for (const r of data.reasons) {
+      html += `<tr>
+        <td>${esc(r.reason || r.reason_code || 'Unknown')}</td>
+        <td class="cell-right cell-mono">${r.count ?? MISSING}</td>
+        <td class="cell-right cell-mono">${r.amount != null ? formatPrice(r.amount) : MISSING}</td>
+        <td class="cell-right cell-mono">${((r.count / total) * 100).toFixed(1)}%</td>
+      </tr>`;
+    }
+    return html + `</tbody></table></div>`;
   }
-  const total = data.reasons.reduce((s, r) => s + (r.count || 0), 0) || 1;
-  let html = `<div class="admin-table-wrap"><table class="admin-table"><thead><tr>
-    <th>Reason</th><th class="cell-right">Count</th><th class="cell-right">Amount</th><th class="cell-right">Share</th>
+
+  // Fallback: use the daily series returned by analytics_refunds_series RPC
+  const series = Array.isArray(data?.series) ? data.series : [];
+  const totalCount = series.reduce((s, r) => s + (r.refund_count || 0), 0);
+  const totalAmount = series.reduce((s, r) => s + (r.total_amount || 0), 0);
+  if (!series.length || totalCount === 0) {
+    return `<div class="admin-empty"><div class="admin-empty__text">No refunds in this period</div></div>`;
+  }
+  const rows = series.filter(r => (r.refund_count || 0) > 0);
+  let html = `<div style="font-size:12px;color:var(--text-muted);margin-bottom:8px">${totalCount} refund${totalCount === 1 ? '' : 's'} totalling ${formatPrice(totalAmount)}</div>`;
+  html += `<div class="admin-table-wrap"><table class="admin-table"><thead><tr>
+    <th>Date</th><th class="cell-right">Refunds</th><th class="cell-right">Orders</th><th class="cell-right">Amount</th>
   </tr></thead><tbody>`;
-  for (const r of data.reasons) {
+  for (const r of rows) {
     html += `<tr>
-      <td>${esc(r.reason || r.reason_code || 'Unknown')}</td>
-      <td class="cell-right cell-mono">${r.count ?? MISSING}</td>
-      <td class="cell-right cell-mono">${r.amount != null ? formatPrice(r.amount) : MISSING}</td>
-      <td class="cell-right cell-mono">${((r.count / total) * 100).toFixed(1)}%</td>
+      <td>${esc(r.date || MISSING)}</td>
+      <td class="cell-right cell-mono">${r.refund_count ?? MISSING}</td>
+      <td class="cell-right cell-mono">${r.total_orders ?? MISSING}</td>
+      <td class="cell-right cell-mono">${r.total_amount != null ? formatPrice(r.total_amount) : MISSING}</td>
     </tr>`;
   }
   return html + `</tbody></table></div>`;

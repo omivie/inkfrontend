@@ -1214,7 +1214,14 @@ const AdminAPI = {
     try {
       const resp = await window.API.get('/api/admin/market-intel/report');
       return resp?.data ?? null;
-    } catch (e) { adminApiWarn('Market intel report', e); return null; }
+    } catch (e) {
+      // Distinguish "no report yet" (expected) from real errors
+      if (e.status === 404 || /NOT_FOUND|No reconciliation report/i.test(e.message || '')) {
+        return { _empty: true, _hint: 'No report yet — run a competitive price check to generate one.' };
+      }
+      adminApiWarn('Market intel report', e);
+      return null;
+    }
   },
 
   async getOverpricedProducts(page = 1, limit = 50, brand = '') {
