@@ -324,9 +324,14 @@ const AdminAPI = {
       params.set('limit', limit);
       if (filters.brand) params.set('brand', filters.brand);
       if (filters.search) params.set('search', filters.search);
-      if (filters.active !== undefined) params.set('is_active', filters.active);
+      if (filters.active !== undefined && filters.active !== '') params.set('is_active', filters.active);
       if (filters.sort) params.set('sort', filters.sort);
       if (filters.order) params.set('order', filters.order);
+      if (filters.source) params.set('source', filters.source);
+      if (filters.product_type) params.set('product_type', filters.product_type);
+      if (filters.category) params.set('category', filters.category);
+      if (filters.has_images !== undefined && filters.has_images !== '') params.set('has_images', filters.has_images);
+      if (filters.stock_status) params.set('stock_status', filters.stock_status);
       const resp = await window.API.get(`/api/admin/products?${params}`);
       return resp?.data ?? null;
     } catch (e) {
@@ -494,6 +499,15 @@ const AdminAPI = {
       return await window.API.bulkActivateProducts(data);
     } catch (e) {
       DebugLog.warn('[AdminAPI] bulkActivate failed:', e.message);
+      throw e;
+    }
+  },
+
+  async bulkDeactivate(data) {
+    try {
+      return await window.API.bulkDeactivateProducts(data);
+    } catch (e) {
+      DebugLog.warn('[AdminAPI] bulkDeactivate failed:', e.message);
       throw e;
     }
   },
@@ -1654,6 +1668,55 @@ const AdminAPI = {
       a.remove();
       setTimeout(() => URL.revokeObjectURL(a.href), 1000);
     },
+  },
+
+  // ---- Financial Health Analytics ----
+  async getAdminAnalyticsOverview(timeRange = 30) {
+    try {
+      const resp = await window.API.get(`/api/admin/analytics/overview?timeRange=${timeRange}`);
+      return resp?.data ?? null;
+    } catch (e) { adminApiWarn('analytics/overview', e); return null; }
+  },
+  async getAdminAnalyticsPnL(days = 30) {
+    try {
+      const resp = await window.API.get(`/api/admin/analytics/pnl?days=${days}`);
+      return resp?.data ?? null;
+    } catch (e) { adminApiWarn('analytics/pnl', e); return null; }
+  },
+  async getAdminAnalyticsCashflow(months = 12) {
+    try {
+      const resp = await window.API.get(`/api/admin/analytics/cashflow?months=${months}`);
+      return resp?.data ?? null;
+    } catch (e) { adminApiWarn('analytics/cashflow', e); return null; }
+  },
+  async getAdminAnalyticsBurnRunway() {
+    try {
+      const resp = await window.API.get('/api/admin/analytics/burn-runway');
+      return resp?.data ?? null;
+    } catch (e) { adminApiWarn('analytics/burn-runway', e); return null; }
+  },
+  async getAdminAnalyticsForecasts() {
+    try {
+      const resp = await window.API.get('/api/admin/analytics/forecasts');
+      return resp?.data ?? null;
+    } catch (e) { adminApiWarn('analytics/forecasts', e); return null; }
+  },
+  async getAdminAnalyticsDailyRevenue(days = 365) {
+    try {
+      const resp = await window.API.get(`/api/admin/analytics/daily-revenue?days=${days}`);
+      return resp?.data ?? null;
+    } catch (e) { adminApiWarn('analytics/daily-revenue', e); return null; }
+  },
+  async getAdminAnalyticsExpenses(limit = 50) {
+    try {
+      const resp = await window.API.get(`/api/admin/analytics/expenses?limit=${limit}`);
+      return resp?.data ?? null;
+    } catch (e) { adminApiWarn('analytics/expenses', e); return null; }
+  },
+  async addAdminAnalyticsExpense(expense) {
+    const resp = await window.API.post('/api/admin/analytics/expenses', expense);
+    if (resp && resp.ok === false) throw new Error(resp.error?.message || resp.error || 'Save failed');
+    return resp?.data ?? null;
   },
 };
 

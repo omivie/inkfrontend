@@ -102,6 +102,37 @@
     let brandsOpen = false;
     let ribbonsOpen = false;
 
+    // Remember each panel's original DOM location so we can restore it when
+    // leaving mobile / closing. On mobile we relocate the panel inside the
+    // nav-menu so it scrolls with the (absolutely-positioned) menu instead of
+    // being clipped behind it.
+    const MOBILE_BREAKPOINT = 768;
+    const isMobile = () => window.matchMedia(`(max-width: ${MOBILE_BREAKPOINT}px)`).matches;
+    const panelOrigins = new WeakMap();
+    function rememberOrigin(panel) {
+        if (panel && !panelOrigins.has(panel)) {
+            panelOrigins.set(panel, { parent: panel.parentNode, next: panel.nextSibling });
+        }
+    }
+    function restoreOrigin(panel) {
+        const origin = panelOrigins.get(panel);
+        if (!origin || !origin.parent) return;
+        if (panel.parentNode === origin.parent) return;
+        origin.parent.insertBefore(panel, origin.next || null);
+    }
+    function moveIntoNav(panel, triggerBtn) {
+        if (!panel || !triggerBtn) return;
+        rememberOrigin(panel);
+        const navItem = triggerBtn.closest('.nav-menu__item');
+        const navMenu = triggerBtn.closest('.nav-menu');
+        if (!navItem || !navMenu) return;
+        if (panel.parentNode !== navMenu.parentNode && navItem.nextSibling !== panel) {
+            navItem.parentNode.insertBefore(panel, navItem.nextSibling);
+        }
+    }
+    rememberOrigin(brandsPanel);
+    if (ribbonsPanel) rememberOrigin(ribbonsPanel);
+
     // ============================================
     // RENDER BRAND CARDS (Ink/Toner)
     // ============================================
@@ -169,6 +200,8 @@
     // ============================================
     function openBrands() {
         closeRibbons();
+        if (isMobile()) moveIntoNav(brandsPanel, brandsTrigger);
+        else restoreOrigin(brandsPanel);
         brandsPanel.hidden = false;
         brandsTrigger.setAttribute('aria-expanded', 'true');
         brandsOpen = true;
@@ -178,6 +211,7 @@
         brandsPanel.hidden = true;
         brandsTrigger.setAttribute('aria-expanded', 'false');
         brandsOpen = false;
+        restoreOrigin(brandsPanel);
     }
 
     function toggleBrands() {
@@ -194,6 +228,8 @@
     function openRibbons() {
         if (!ribbonsPanel || !ribbonsTrigger) return;
         closeBrands();
+        if (isMobile()) moveIntoNav(ribbonsPanel, ribbonsTrigger);
+        else restoreOrigin(ribbonsPanel);
         ribbonsPanel.hidden = false;
         ribbonsTrigger.setAttribute('aria-expanded', 'true');
         ribbonsOpen = true;
@@ -204,6 +240,7 @@
         ribbonsPanel.hidden = true;
         ribbonsTrigger.setAttribute('aria-expanded', 'false');
         ribbonsOpen = false;
+        restoreOrigin(ribbonsPanel);
     }
 
     function toggleRibbons() {
@@ -253,6 +290,19 @@
                 closeRibbons();
                 ribbonsTrigger.focus();
             }
+        }
+    });
+
+    // Re-place panels on viewport resize so an open panel moves between
+    // in-nav (mobile) and in-flow (desktop) positions correctly.
+    window.addEventListener('resize', () => {
+        if (brandsOpen) {
+            if (isMobile()) moveIntoNav(brandsPanel, brandsTrigger);
+            else restoreOrigin(brandsPanel);
+        }
+        if (ribbonsOpen && ribbonsPanel && ribbonsTrigger) {
+            if (isMobile()) moveIntoNav(ribbonsPanel, ribbonsTrigger);
+            else restoreOrigin(ribbonsPanel);
         }
     });
 

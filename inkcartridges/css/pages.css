@@ -2725,6 +2725,25 @@
     gap: var(--spacing-md);
 }
 
+@media (max-width: 1024px) {
+    .related-products__grid {
+        grid-template-columns: repeat(4, 1fr);
+    }
+}
+
+@media (max-width: 768px) {
+    .related-products__grid {
+        grid-template-columns: repeat(3, 1fr);
+    }
+}
+
+@media (max-width: 600px) {
+    .related-products__grid {
+        grid-template-columns: repeat(2, 1fr);
+        gap: var(--spacing-sm);
+    }
+}
+
 .related-products__grid .product-card__image-wrapper {
     aspect-ratio: 4 / 3;
 }
@@ -3202,15 +3221,20 @@
     }
 
     .product-info__pricing {
-        flex-direction: column;
-        align-items: flex-start;
-        gap: var(--spacing-xs);
+        flex-direction: row;
+        align-items: baseline;
+        flex-wrap: wrap;
+        gap: var(--spacing-xs) var(--spacing-md);
     }
 
     .product-info__actions {
-        flex-wrap: wrap;
+        flex-wrap: nowrap;
     }
-    .product-info__add-to-cart,
+    .product-info__add-to-cart {
+        flex: 1 1 auto;
+        min-width: 0;
+        justify-content: center;
+    }
     .product-info__actions > a.btn {
         flex: 1 1 100%;
         justify-content: center;
@@ -10853,6 +10877,39 @@
     }
     .color-packs-grid {
         grid-template-columns: 1fr;
+    }
+}
+
+/* Mobile: tighten the wrapping section-card so inner product grids
+   (related-products, shop-products, drilldown codes) use the full viewport
+   width instead of being crushed by the large desktop padding. Also lift
+   the desktop max-width cap on .product-card so grid tracks fill the row. */
+@media (max-width: 600px) {
+    .shop-section-card {
+        padding: var(--spacing-md) var(--spacing-sm);
+        border-radius: var(--radius-lg);
+    }
+
+    .shop-section-card .shop-products__grid,
+    .shop-section-card .related-products__grid,
+    .shop-section-card .color-packs-grid,
+    .shop-section-card .ribbon-products-grid {
+        grid-template-columns: repeat(2, 1fr);
+        gap: var(--spacing-sm);
+    }
+
+    /* The desktop product-card has max-width: 185px which leaves grid tracks
+       half-empty on phones. Let the card stretch to fill its grid track. */
+    .product-card {
+        max-width: none;
+        min-width: 0;
+        width: 100%;
+        flex: 1 1 auto;
+    }
+
+    .shop-section-card .color-pack-card {
+        min-width: 0;
+        padding: var(--spacing-sm);
     }
 }
 

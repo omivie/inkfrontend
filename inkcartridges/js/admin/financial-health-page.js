@@ -1,266 +1,239 @@
+    const pick = (obj, ...keys) => {
+        if (!obj) return undefined;
+        for (const k of keys) if (obj[k] !== undefined && obj[k] !== null) return obj[k];
+        return undefined;
+    };
+    const num = (v, d = 0) => {
+        const n = typeof v === 'string' ? parseFloat(v) : v;
+        return Number.isFinite(n) ? n : d;
+    };
+
     const FinancialHealthPage = {
         charts: {},
-        data: {
-            cashFlow: [],
-            pnl: {},
-            expenses: []
-        },
+        data: {},
+        currentDays: 30,
 
         async init() {
             this.bindEvents();
             await this.loadData();
-            this.checkAlerts();
         },
 
         bindEvents() {
-            // Period filter buttons
             document.querySelectorAll('.admin-chart__period-btn').forEach(btn => {
                 btn.addEventListener('click', (e) => {
                     document.querySelectorAll('.admin-chart__period-btn').forEach(b =>
                         b.classList.remove('admin-chart__period-btn--active'));
                     e.target.classList.add('admin-chart__period-btn--active');
-                    this.currentPeriod = e.target.dataset.period;
+                    this.currentDays = this.periodToDays(e.target.dataset.period);
                     this.loadData();
                 });
             });
 
-            // Add expense button
-            document.getElementById('add-expense-btn').addEventListener('click', () => {
+            document.getElementById('add-expense-btn')?.addEventListener('click', () => {
                 document.getElementById('expense-form-card').style.display = 'block';
                 document.getElementById('expense-date').valueAsDate = new Date();
             });
-
-            // Close expense form
-            document.getElementById('close-expense-form').addEventListener('click', () => {
+            document.getElementById('close-expense-form')?.addEventListener('click', () => {
                 document.getElementById('expense-form-card').style.display = 'none';
             });
-
-            document.getElementById('cancel-expense').addEventListener('click', () => {
+            document.getElementById('cancel-expense')?.addEventListener('click', () => {
                 document.getElementById('expense-form-card').style.display = 'none';
             });
-
-            // Expense form submission
-            document.getElementById('expense-form').addEventListener('submit', async (e) => {
+            document.getElementById('expense-form')?.addEventListener('submit', async (e) => {
                 e.preventDefault();
                 await this.saveExpense();
             });
 
-            // Period selectors
-            document.getElementById('cashflow-period').addEventListener('change', (e) => {
-                this.loadCashFlowChart(parseInt(e.target.value));
+            document.getElementById('cashflow-period')?.addEventListener('change', (e) => {
+                this.loadCashflow(parseInt(e.target.value));
             });
-
-            document.getElementById('profit-period').addEventListener('change', (e) => {
+            document.getElementById('profit-period')?.addEventListener('change', (e) => {
                 this.loadProfitChart(parseInt(e.target.value));
             });
-
-            document.getElementById('pnl-period').addEventListener('change', (e) => {
-                this.loadPnL(e.target.value);
+            document.getElementById('pnl-period')?.addEventListener('change', (e) => {
+                const map = { current: 30, last: 30, quarter: 90, year: 365 };
+                this.loadPnL(map[e.target.value] || 90);
             });
+        },
+
+        periodToDays(p) {
+            return ({ '1h': 1, '12h': 1, '24h': 1, '7d': 7, '1m': 30, '3m': 90, '6m': 180, '1y': 365, '2y': 730 })[p] || 30;
         },
 
         async loadData() {
             try {
-                // Load orders for revenue calculations
-                const ordersResponse = await AdminAPI.getOrders({}, 1, 500);
-                const orders = ordersResponse?.orders || [];
+                const [overview, burnRunway, forecasts] = await Promise.all([
+                    AdminAPI.getAdminAnalyticsOverview(this.currentDays),
+                    AdminAPI.getAdminAnalyticsBurnRunway(),
+                    AdminAPI.getAdminAnalyticsForecasts(),
+                ]);
+                this.data.overview = overview;
+                this.data.burnRunway = burnRunway;
+                this.data.forecasts = forecasts;
 
-                // Calculate financial metrics from orders
-                this.calculateMetrics(orders);
-                this.data.orders = orders;
-                this.loadProfitChart(12);
+                this.renderKPIs();
+                this.renderForecasts();
+                this.renderBreakEven();
+                this.checkRunwayAlert();
 
-                // Load cash flow chart
-                this.loadCashFlowChart(12);
-
-                // Load P&L
-                this.loadPnL('quarter');
-
+                await Promise.all([
+                    this.loadCashflow(12),
+                    this.loadProfitChart(12),
+                    this.loadPnL(90),
+                    this.loadExpenses(),
+                ]);
             } catch (error) {
-                DebugLog.error('Error loading financial data:', error);
+                if (typeof DebugLog !== 'undefined') DebugLog.error('Financial data load failed:', error);
             }
         },
 
-        calculateMetrics(orders) {
-            // Calculate totals
-            const now = new Date();
-            const thisMonth = orders.filter(o => {
-                const orderDate = new Date(o.created_at);
-                return orderDate.getMonth() === now.getMonth() &&
-                       orderDate.getFullYear() === now.getFullYear() &&
-                       o.status !== 'cancelled' && o.status !== 'refunded';
-            });
+        renderKPIs() {
+            const ov = this.data.overview || {};
+            const br = this.data.burnRunway || {};
 
-            const lastMonth = orders.filter(o => {
-                const orderDate = new Date(o.created_at);
-                const lastMonthDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-                return orderDate.getMonth() === lastMonthDate.getMonth() &&
-                       orderDate.getFullYear() === lastMonthDate.getFullYear() &&
-                       o.status !== 'cancelled' && o.status !== 'refunded';
-            });
+            const cashBalance = num(pick(br, 'cashBalance', 'cash_balance', 'balance'));
+            const grossMargin = num(pick(ov, 'grossMargin', 'gross_margin'));
+            const prevGrossMargin = num(pick(ov, 'prevGrossMargin', 'previousGrossMargin', 'prev_gross_margin'));
+            const monthlyBurn = num(pick(br, 'monthlyBurn', 'monthly_burn', 'burnRate', 'burn_rate'));
+            const runwayMonths = pick(br, 'runwayMonths', 'runway_months', 'runway');
 
-            const thisMonthRevenue = thisMonth.reduce((sum, o) => sum + ((o.total_amount ?? o.total) || 0), 0);
-            const lastMonthRevenue = lastMonth.reduce((sum, o) => sum + ((o.total_amount ?? o.total) || 0), 0);
-
-            // Estimate COGS at 60% (typical for ink cartridges)
-            const cogsRate = 0.60;
-            const thisMonthCogs = thisMonthRevenue * cogsRate;
-            const grossProfit = thisMonthRevenue - thisMonthCogs;
-            const grossMargin = thisMonthRevenue > 0 ? (grossProfit / thisMonthRevenue) * 100 : 0;
-
-            // Estimate expenses (placeholder - would come from expenses table)
-            const monthlyExpenses = 2000; // Placeholder
-            const netProfit = grossProfit - monthlyExpenses;
-
-            // Calculate burn rate (if not profitable)
-            const monthlyBurn = Math.max(0, monthlyExpenses - grossProfit);
-
-            // Estimate cash balance (placeholder - would come from actual banking data)
-            const estimatedCash = 50000; // Placeholder
-
-            // Calculate runway
-            const runway = monthlyBurn > 0 ? estimatedCash / monthlyBurn : Infinity;
-
-            // Update KPIs
-            document.getElementById('cash-balance').textContent = formatPrice(estimatedCash);
+            document.getElementById('cash-balance').textContent = formatPrice(cashBalance);
             document.getElementById('gross-margin').textContent = grossMargin.toFixed(1) + '%';
-            document.getElementById('monthly-burn').textContent = monthlyBurn > 0 ? formatPrice(monthlyBurn) : '$0 (profitable)';
 
-            if (runway === Infinity) {
-                document.getElementById('runway-months').textContent = '∞';
-                document.getElementById('runway-days').textContent = 'Business is profitable';
-            } else {
-                document.getElementById('runway-months').textContent = runway.toFixed(1) + ' mo';
-                document.getElementById('runway-days').textContent = `~${Math.round(runway * 30)} days at current burn`;
+            const marginTrend = document.getElementById('margin-trend');
+            if (marginTrend && prevGrossMargin !== undefined) {
+                const diff = grossMargin - prevGrossMargin;
+                const dir = diff >= 0 ? 'up' : 'down';
+                marginTrend.className = `kpi-card__trend kpi-card__trend--${dir}`;
+                marginTrend.innerHTML = `<span>${diff >= 0 ? '+' : ''}${diff.toFixed(1)} pts</span>`;
             }
 
-            // Update forecasts (simple linear projection)
-            const avgDailyRevenue = thisMonthRevenue / new Date().getDate();
-            document.getElementById('forecast-30').textContent = formatPrice(avgDailyRevenue * 30);
-            document.getElementById('forecast-60').textContent = formatPrice(avgDailyRevenue * 60);
-            document.getElementById('forecast-90').textContent = formatPrice(avgDailyRevenue * 90);
+            const burnEl = document.getElementById('monthly-burn');
+            burnEl.textContent = monthlyBurn > 0 ? formatPrice(monthlyBurn) : '$0 (profitable)';
 
-            // Update break-even status
-            if (netProfit >= 0) {
-                document.getElementById('breakeven-indicator').style.background = '#10b981';
-                document.getElementById('breakeven-status').textContent = 'Profitable';
-                document.getElementById('breakeven-gap').textContent = `Net profit: ${formatPrice(netProfit)}/month`;
+            const runwayEl = document.getElementById('runway-months');
+            const runwayDays = document.getElementById('runway-days');
+            if (runwayMonths === null || runwayMonths === undefined || runwayMonths === Infinity || runwayMonths > 999) {
+                runwayEl.textContent = '∞';
+                runwayDays.textContent = 'Business is profitable';
             } else {
-                document.getElementById('breakeven-indicator').style.background = 'var(--magenta-primary)';
-                document.getElementById('breakeven-status').textContent = 'Below Break-Even';
-                document.getElementById('breakeven-gap').textContent = `Need ${formatPrice(Math.abs(netProfit))} more revenue/month`;
+                const r = num(runwayMonths);
+                runwayEl.textContent = r.toFixed(1) + ' mo';
+                runwayDays.textContent = `~${Math.round(r * 30)} days at current burn`;
             }
-
-            // Store for P&L
-            this.data.thisMonthRevenue = thisMonthRevenue;
-            this.data.lastMonthRevenue = lastMonthRevenue;
-            this.data.thisMonthCogs = thisMonthCogs;
-            this.data.grossProfit = grossProfit;
-            this.data.monthlyExpenses = monthlyExpenses;
-            this.data.netProfit = netProfit;
-            this.data.runway = runway;
         },
 
-        loadCashFlowChart(months) {
+        renderForecasts() {
+            const f = this.data.forecasts || {};
+            const f30 = num(pick(f, 'forecast30', 'days30', 'd30', 'next30'));
+            const f60 = num(pick(f, 'forecast60', 'days60', 'd60', 'next60'));
+            const f90 = num(pick(f, 'forecast90', 'days90', 'd90', 'next90'));
+            document.getElementById('forecast-30').textContent = formatPrice(f30);
+            document.getElementById('forecast-60').textContent = formatPrice(f60);
+            document.getElementById('forecast-90').textContent = formatPrice(f90);
+        },
+
+        renderBreakEven() {
+            const ov = this.data.overview || {};
+            const netProfit = num(pick(ov, 'netProfit', 'net_profit'));
+            const indicator = document.getElementById('breakeven-indicator');
+            const status = document.getElementById('breakeven-status');
+            const gap = document.getElementById('breakeven-gap');
+            if (netProfit >= 0) {
+                indicator.style.background = '#10b981';
+                status.textContent = 'Profitable';
+                gap.textContent = `Net profit: ${formatPrice(netProfit)} this period`;
+            } else {
+                indicator.style.background = 'var(--magenta-primary)';
+                status.textContent = 'Below Break-Even';
+                gap.textContent = `Need ${formatPrice(Math.abs(netProfit))} more revenue`;
+            }
+        },
+
+        checkRunwayAlert() {
+            const r = num(pick(this.data.burnRunway || {}, 'runwayMonths', 'runway_months', 'runway'), Infinity);
+            if (r >= 90 || !Number.isFinite(r)) return;
+            const banner = document.getElementById('runway-alert');
+            if (!banner) return;
+            banner.style.display = 'flex';
+            if (r < 3) {
+                banner.className = 'alert-banner alert-banner--critical';
+                document.getElementById('alert-title').textContent = 'Critical: Low Cash Runway';
+                document.getElementById('alert-text').textContent = `Only ${r.toFixed(1)} months of runway remaining. Immediate action required.`;
+            } else {
+                banner.className = 'alert-banner alert-banner--warning';
+                document.getElementById('alert-title').textContent = 'Warning: Cash Runway Below Target';
+                document.getElementById('alert-text').textContent = `${r.toFixed(1)} months runway. Target is 6+ months.`;
+            }
+        },
+
+        async loadCashflow(months) {
             const ctx = document.getElementById('cashflow-chart');
             if (!ctx) return;
+            const data = await AdminAPI.getAdminAnalyticsCashflow(months);
+            const series = Array.isArray(data) ? data : (data?.months || data?.series || []);
 
-            if (this.charts.cashflow) this.charts.cashflow.destroy();
-
-            // Generate month labels
-            const labels = [];
-            const inflows = [];
-            const outflows = [];
-            const netFlow = [];
-
-            for (let i = months - 1; i >= 0; i--) {
-                const d = new Date();
-                d.setMonth(d.getMonth() - i);
-                labels.push(d.toLocaleDateString('en-NZ', { month: 'short', year: '2-digit' }));
-
-                // Data comes from API - shows 0 until backend provides cash flow data
-                inflows.push(0);
-                outflows.push(0);
-                netFlow.push(0);
+            const labels = [], inflows = [], outflows = [], netFlow = [];
+            for (const row of series.slice(-months)) {
+                const label = pick(row, 'monthLabel', 'label', 'month', 'period');
+                const d = label ? new Date(label) : null;
+                labels.push(d && !isNaN(d) ? d.toLocaleDateString('en-NZ', { month: 'short', year: '2-digit' }) : (label || ''));
+                const inflow = num(pick(row, 'inflow', 'inflows', 'revenue', 'income'));
+                const outflow = num(pick(row, 'outflow', 'outflows', 'expenses', 'costs'));
+                inflows.push(inflow);
+                outflows.push(outflow);
+                netFlow.push(num(pick(row, 'net', 'netFlow', 'net_cashflow'), inflow - outflow));
             }
 
+            if (this.charts.cashflow) this.charts.cashflow.destroy();
             this.charts.cashflow = new Chart(ctx, {
                 type: 'bar',
-                data: {
-                    labels,
-                    datasets: [
-                        {
-                            label: 'Inflows',
-                            data: inflows,
-                            backgroundColor: '#10b981',
-                            borderRadius: 4
-                        },
-                        {
-                            label: 'Outflows',
-                            data: outflows.map(v => -v),
-                            backgroundColor: '#C71F6E',
-                            borderRadius: 4
-                        },
-                        {
-                            label: 'Net Cash Flow',
-                            data: netFlow,
-                            type: 'line',
-                            borderColor: '#267FB5',
-                            backgroundColor: 'transparent',
-                            borderWidth: 3,
-                            pointRadius: 4,
-                            pointBackgroundColor: '#267FB5'
-                        }
-                    ]
-                },
+                data: { labels, datasets: [
+                    { label: 'Inflows', data: inflows, backgroundColor: '#10b981', borderRadius: 4 },
+                    { label: 'Outflows', data: outflows.map(v => -Math.abs(v)), backgroundColor: '#C71F6E', borderRadius: 4 },
+                    { label: 'Net Cash Flow', data: netFlow, type: 'line', borderColor: '#267FB5', backgroundColor: 'transparent', borderWidth: 3, pointRadius: 4, pointBackgroundColor: '#267FB5' },
+                ]},
                 options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    plugins: {
-                        legend: { position: 'top' }
-                    },
-                    scales: {
-                        x: { stacked: false },
-                        y: {
-                            beginAtZero: true,
-                            ticks: { callback: v => '$' + (v / 1000).toFixed(0) + 'k' }
-                        }
-                    }
+                    responsive: true, maintainAspectRatio: false,
+                    plugins: { legend: { position: 'top' } },
+                    scales: { x: { stacked: false }, y: { beginAtZero: true, ticks: { callback: v => '$' + (v/1000).toFixed(0) + 'k' } } }
                 }
             });
         },
 
-        loadProfitChart(months) {
+        async loadProfitChart(months) {
             const ctx = document.getElementById('profit-chart');
             if (!ctx) return;
-            if (this.charts.profit) this.charts.profit.destroy();
 
-            const orders = this.data.orders || [];
-            const cogsRate = 0.60;
-            const monthlyExpenses = this.data.monthlyExpenses || 2000;
+            const daysBack = months * 31;
+            const daily = await AdminAPI.getAdminAnalyticsDailyRevenue(daysBack);
+            const rows = Array.isArray(daily) ? daily : (daily?.days || daily?.series || []);
 
-            const labels = [];
-            const grossProfits = [];
-            const netProfits = [];
+            const grossMargin = num(pick(this.data.overview || {}, 'grossMargin', 'gross_margin')) / 100;
+            const monthlyExpenses = num(pick(this.data.burnRunway || {}, 'monthlyExpenses', 'monthly_expenses'));
 
+            const buckets = new Map();
             for (let i = months - 1; i >= 0; i--) {
-                const d = new Date();
-                d.setDate(1);
-                d.setMonth(d.getMonth() - i);
-                labels.push(d.toLocaleDateString('en-NZ', { month: 'short', year: '2-digit' }));
+                const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() - i);
+                const key = `${d.getFullYear()}-${d.getMonth()}`;
+                buckets.set(key, { label: d.toLocaleDateString('en-NZ', { month: 'short', year: '2-digit' }), revenue: 0 });
+            }
+            for (const r of rows) {
+                const dateStr = pick(r, 'date', 'day', 'period');
+                if (!dateStr) continue;
+                const d = new Date(dateStr);
+                if (isNaN(d)) continue;
+                const key = `${d.getFullYear()}-${d.getMonth()}`;
+                const b = buckets.get(key);
+                if (b) b.revenue += num(pick(r, 'revenue', 'total', 'sales'));
+            }
 
-                const monthOrders = orders.filter(o => {
-                    const od = new Date(o.created_at);
-                    return od.getMonth() === d.getMonth() &&
-                           od.getFullYear() === d.getFullYear() &&
-                           o.status !== 'cancelled' && o.status !== 'refunded';
-                });
-
-                const revenue = monthOrders.reduce((sum, o) => sum + ((o.total_amount ?? o.total) || 0), 0);
-                const gross = revenue * (1 - cogsRate);
-                const net = gross - monthlyExpenses;
+            const labels = [], grossProfits = [], netProfits = [];
+            for (const b of buckets.values()) {
+                labels.push(b.label);
+                const gross = b.revenue * grossMargin;
                 grossProfits.push(parseFloat(gross.toFixed(2)));
-                netProfits.push(parseFloat(net.toFixed(2)));
+                netProfits.push(parseFloat((gross - monthlyExpenses).toFixed(2)));
             }
 
             const totalGross = grossProfits.reduce((a, b) => a + b, 0);
@@ -273,113 +246,126 @@
                     `<span style="color:${netColor};">Net <strong>${formatPrice(totalNet)}</strong></span>`;
             }
 
+            if (this.charts.profit) this.charts.profit.destroy();
             this.charts.profit = new Chart(ctx, {
                 type: 'line',
-                data: {
-                    labels,
-                    datasets: [
-                        {
-                            label: 'Gross Profit',
-                            data: grossProfits,
-                            borderColor: '#10b981',
-                            backgroundColor: 'rgba(16,185,129,0.08)',
-                            borderWidth: 2,
-                            pointRadius: 4,
-                            pointBackgroundColor: '#10b981',
-                            fill: true,
-                            tension: 0.3
-                        },
-                        {
-                            label: 'Net Profit',
-                            data: netProfits,
-                            borderColor: '#267FB5',
-                            backgroundColor: 'rgba(38,127,181,0.08)',
-                            borderWidth: 2,
-                            pointRadius: 4,
-                            pointBackgroundColor: '#267FB5',
-                            fill: true,
-                            tension: 0.3
-                        }
-                    ]
-                },
+                data: { labels, datasets: [
+                    { label: 'Gross Profit', data: grossProfits, borderColor: '#10b981', backgroundColor: 'rgba(16,185,129,0.08)', borderWidth: 2, pointRadius: 4, pointBackgroundColor: '#10b981', fill: true, tension: 0.3 },
+                    { label: 'Net Profit', data: netProfits, borderColor: '#267FB5', backgroundColor: 'rgba(38,127,181,0.08)', borderWidth: 2, pointRadius: 4, pointBackgroundColor: '#267FB5', fill: true, tension: 0.3 },
+                ]},
                 options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    plugins: {
-                        legend: { position: 'top' },
-                        tooltip: {
-                            callbacks: {
-                                label: ctx => ` ${ctx.dataset.label}: ${formatPrice(ctx.parsed.y)}`
-                            }
-                        }
-                    },
-                    scales: {
-                        x: { grid: { display: false } },
-                        y: {
-                            ticks: { callback: v => '$' + (v / 1000).toFixed(0) + 'k' },
-                            grid: { color: 'rgba(0,0,0,0.05)' }
-                        }
-                    }
+                    responsive: true, maintainAspectRatio: false,
+                    plugins: { legend: { position: 'top' }, tooltip: { callbacks: { label: ctx => ` ${ctx.dataset.label}: ${formatPrice(ctx.parsed.y)}` } } },
+                    scales: { x: { grid: { display: false } }, y: { ticks: { callback: v => '$' + (v/1000).toFixed(0) + 'k' }, grid: { color: 'rgba(0,0,0,0.05)' } } }
                 }
             });
         },
 
-        loadPnL(period) {
-            // Update P&L table with calculated values
-            // This would typically fetch from the backend based on period
+        async loadPnL(days) {
+            const pnl = await AdminAPI.getAdminAnalyticsPnL(days);
+            if (!pnl) return;
 
-            const revenue = this.data.thisMonthRevenue || 0;
-            const prevRevenue = this.data.lastMonthRevenue || 0;
-            const cogs = this.data.thisMonthCogs || 0;
-            const grossProfit = this.data.grossProfit || 0;
-            const expenses = this.data.monthlyExpenses || 0;
-            const netProfit = this.data.netProfit || 0;
+            const grossSales = num(pick(pnl, 'grossSales', 'gross_sales', 'revenue'));
+            const prevGrossSales = num(pick(pnl, 'prevGrossSales', 'prev_gross_sales', 'previousRevenue'));
+            const discounts = num(pick(pnl, 'discounts', 'returns', 'discountsAndReturns'));
+            const prevDiscounts = num(pick(pnl, 'prevDiscounts', 'prev_discounts'));
+            const netRevenue = num(pick(pnl, 'netRevenue', 'net_revenue'), grossSales - discounts);
+            const prevNetRevenue = num(pick(pnl, 'prevNetRevenue', 'prev_net_revenue'), prevGrossSales - prevDiscounts);
+            const cogs = num(pick(pnl, 'cogs', 'productCosts'));
+            const prevCogs = num(pick(pnl, 'prevCogs', 'prev_cogs'));
+            const shipping = num(pick(pnl, 'shippingCosts', 'shipping'));
+            const prevShipping = num(pick(pnl, 'prevShippingCosts', 'prev_shipping'));
+            const grossProfit = num(pick(pnl, 'grossProfit', 'gross_profit'), netRevenue - cogs - shipping);
+            const prevGrossProfit = num(pick(pnl, 'prevGrossProfit', 'prev_gross_profit'));
+            const marketing = num(pick(pnl, 'marketing', 'marketingExpense'));
+            const prevMarketing = num(pick(pnl, 'prevMarketing', 'prev_marketing'));
+            const platform = num(pick(pnl, 'platform', 'platformFees'));
+            const prevPlatform = num(pick(pnl, 'prevPlatform', 'prev_platform'));
+            const otherOps = num(pick(pnl, 'otherOperating', 'other_operating', 'other'));
+            const prevOtherOps = num(pick(pnl, 'prevOtherOperating', 'prev_other_operating'));
+            const netProfit = num(pick(pnl, 'netProfit', 'net_profit'), grossProfit - marketing - platform - otherOps);
+            const prevNetProfit = num(pick(pnl, 'prevNetProfit', 'prev_net_profit'));
+            const netMargin = grossSales > 0 ? (netProfit / grossSales * 100) : 0;
+            const prevNetMargin = prevGrossSales > 0 ? (prevNetProfit / prevGrossSales * 100) : 0;
 
-            // Update table cells
-            document.getElementById('pnl-gross-sales').textContent = formatPrice(revenue);
-            document.getElementById('pnl-gross-sales-prev').textContent = formatPrice(prevRevenue);
-            document.getElementById('pnl-gross-sales-change').textContent = this.calculateChange(revenue, prevRevenue);
+            const set = (id, txt) => { const el = document.getElementById(id); if (el) el.textContent = txt; };
+            const setNeg = (id, val) => set(id, '-' + formatPrice(Math.abs(val)));
 
-            document.getElementById('pnl-net-revenue').textContent = formatPrice(revenue * 0.98); // After discounts
-            document.getElementById('pnl-net-revenue-prev').textContent = formatPrice(prevRevenue * 0.98);
+            set('pnl-gross-sales', formatPrice(grossSales));
+            set('pnl-gross-sales-prev', formatPrice(prevGrossSales));
+            set('pnl-gross-sales-change', this.calculateChange(grossSales, prevGrossSales));
 
-            document.getElementById('pnl-cogs').textContent = '-' + formatPrice(cogs);
-            document.getElementById('pnl-cogs-prev').textContent = '-' + formatPrice(prevRevenue * 0.6);
+            setNeg('pnl-discounts', discounts);
+            setNeg('pnl-discounts-prev', prevDiscounts);
+            set('pnl-discounts-change', this.calculateChange(discounts, prevDiscounts));
 
-            document.getElementById('pnl-gross-profit').textContent = formatPrice(grossProfit);
-            document.getElementById('pnl-gross-profit-prev').textContent = formatPrice(prevRevenue * 0.4);
+            set('pnl-net-revenue', formatPrice(netRevenue));
+            set('pnl-net-revenue-prev', formatPrice(prevNetRevenue));
+            set('pnl-net-revenue-change', this.calculateChange(netRevenue, prevNetRevenue));
 
-            document.getElementById('pnl-net-profit').innerHTML = '<strong>' + formatPrice(netProfit) + '</strong>';
-            document.getElementById('pnl-net-margin').textContent = revenue > 0 ? (netProfit / revenue * 100).toFixed(1) + '%' : '0%';
+            setNeg('pnl-cogs', cogs);
+            setNeg('pnl-cogs-prev', prevCogs);
+            set('pnl-cogs-change', this.calculateChange(cogs, prevCogs));
 
-            // Update color classes
-            const netProfitCell = document.getElementById('pnl-net-profit');
-            netProfitCell.className = netProfit >= 0 ? 'pnl-table__positive' : 'pnl-table__negative';
+            setNeg('pnl-shipping', shipping);
+            setNeg('pnl-shipping-prev', prevShipping);
+            set('pnl-shipping-change', this.calculateChange(shipping, prevShipping));
+
+            set('pnl-gross-profit', formatPrice(grossProfit));
+            set('pnl-gross-profit-prev', formatPrice(prevGrossProfit));
+            set('pnl-gross-profit-change', this.calculateChange(grossProfit, prevGrossProfit));
+
+            setNeg('pnl-marketing', marketing);
+            setNeg('pnl-marketing-prev', prevMarketing);
+            set('pnl-marketing-change', this.calculateChange(marketing, prevMarketing));
+
+            setNeg('pnl-platform', platform);
+            setNeg('pnl-platform-prev', prevPlatform);
+            set('pnl-platform-change', this.calculateChange(platform, prevPlatform));
+
+            setNeg('pnl-other', otherOps);
+            setNeg('pnl-other-prev', prevOtherOps);
+            set('pnl-other-change', this.calculateChange(otherOps, prevOtherOps));
+
+            const npEl = document.getElementById('pnl-net-profit');
+            const npPrevEl = document.getElementById('pnl-net-profit-prev');
+            const npChEl = document.getElementById('pnl-net-profit-change');
+            if (npEl) {
+                npEl.innerHTML = '<strong>' + formatPrice(netProfit) + '</strong>';
+                npEl.className = (netProfit >= 0 ? 'pnl-table__positive' : 'pnl-table__negative') + ' pnl-table__total';
+            }
+            if (npPrevEl) npPrevEl.innerHTML = '<strong>' + formatPrice(prevNetProfit) + '</strong>';
+            if (npChEl) npChEl.innerHTML = '<strong>' + this.calculateChange(netProfit, prevNetProfit) + '</strong>';
+
+            set('pnl-net-margin', netMargin.toFixed(1) + '%');
+            set('pnl-net-margin-prev', prevNetMargin.toFixed(1) + '%');
+            set('pnl-net-margin-change', (netMargin - prevNetMargin >= 0 ? '+' : '') + (netMargin - prevNetMargin).toFixed(1) + ' pts');
+        },
+
+        async loadExpenses() {
+            const tbody = document.getElementById('recent-expenses-tbody');
+            if (!tbody) return;
+            const data = await AdminAPI.getAdminAnalyticsExpenses(20);
+            const rows = Array.isArray(data) ? data : (data?.expenses || []);
+            if (!rows.length) {
+                tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;padding:var(--spacing-6);color:var(--color-text-muted);">No expenses recorded yet. Click "Add Expense" to get started.</td></tr>';
+                return;
+            }
+            const esc = window.Security?.escapeHtml || (s => String(s ?? ''));
+            tbody.innerHTML = rows.map(r => {
+                const date = pick(r, 'date', 'expense_date', 'created_at') || '';
+                const dateStr = date ? new Date(date).toLocaleDateString('en-NZ') : '';
+                const cat = pick(r, 'category', 'category_name') || '';
+                const vendor = pick(r, 'vendor', 'description') || '';
+                const amount = num(pick(r, 'amount', 'total'));
+                return `<tr><td>${esc(dateStr)}</td><td>${esc(cat)}</td><td>${esc(vendor)}</td><td class="pnl-table__negative">-${formatPrice(amount)}</td></tr>`;
+            }).join('');
         },
 
         calculateChange(current, previous) {
-            if (previous === 0) return current > 0 ? '+∞' : '0%';
+            if (!previous) return current > 0 ? '+∞' : '0%';
             const change = ((current - previous) / previous) * 100;
             return (change >= 0 ? '+' : '') + change.toFixed(1) + '%';
-        },
-
-        checkAlerts() {
-            const runway = this.data.runway;
-
-            if (runway !== undefined && runway < 90 && runway !== Infinity) {
-                const alertBanner = document.getElementById('runway-alert');
-                alertBanner.style.display = 'flex';
-
-                if (runway < 45) {
-                    alertBanner.className = 'alert-banner alert-banner--critical';
-                    document.getElementById('alert-title').textContent = 'Critical: Low Cash Runway';
-                    document.getElementById('alert-text').textContent = `Only ${Math.round(runway)} months of runway remaining. Immediate action required.`;
-                } else {
-                    alertBanner.className = 'alert-banner alert-banner--warning';
-                    document.getElementById('alert-title').textContent = 'Warning: Cash Runway Below Target';
-                    document.getElementById('alert-text').textContent = `${Math.round(runway)} months runway. Target is 6+ months.`;
-                }
-            }
         },
 
         async saveExpense() {
@@ -392,22 +378,14 @@
                 alert('Please fill in all required fields');
                 return;
             }
-
             try {
-                // In production, this would call the API
-                // await AnalyticsAPI.addExpense({ category, amount, date, vendor });
-
-                // For now, show success and reset form
-                alert('Expense saved successfully!');
+                await AdminAPI.addAdminAnalyticsExpense({ category, amount, date, vendor });
                 document.getElementById('expense-form').reset();
                 document.getElementById('expense-form-card').style.display = 'none';
-
-                // Reload data
                 await this.loadData();
-
             } catch (error) {
-                DebugLog.error('Error saving expense:', error);
-                alert('Failed to save expense. Please try again.');
+                if (typeof DebugLog !== 'undefined') DebugLog.error('Error saving expense:', error);
+                alert('Failed to save expense: ' + (error.message || 'Please try again.'));
             }
         }
     };

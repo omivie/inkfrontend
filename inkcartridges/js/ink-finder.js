@@ -596,13 +596,14 @@
     function findProducts() {
         if (!selectedPrinterName || !selectedBrand) return;
 
-        // Redirect to shop page with printer model
-        // The shop page will find ALL compatible products (genuine + compatible)
-        // Brand is included for display purposes but doesn't limit the search
-        const searchTerm = selectedPrinterName;
-        let url = `/html/shop?printer_model=${encodeURIComponent(searchTerm)}&printer_brand=${encodeURIComponent(selectedBrand)}`;
+        // Prefer the strict printer-products route (?printer=<slug>) which filters
+        // via product_compatibility — no fuzzy name matching, no noise.
+        // Fall back to ?printer_model= only when we don't have a slug.
+        let url;
         if (selectedModel) {
-            url += `&printer_slug=${encodeURIComponent(selectedModel)}`;
+            url = `/html/shop?printer=${encodeURIComponent(selectedModel)}`;
+        } else {
+            url = `/html/shop?printer_model=${encodeURIComponent(selectedPrinterName)}&printer_brand=${encodeURIComponent(selectedBrand)}`;
         }
         window.location.href = url;
     }

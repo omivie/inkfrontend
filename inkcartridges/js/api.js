@@ -1577,6 +1577,14 @@ const API = {
     },
 
     /**
+     * Bulk deactivate products (admin - super_admin/stock_manager only)
+     * @param {object} data - { product_ids, deactivate_all, dry_run }
+     */
+    async bulkDeactivateProducts(data) {
+        return this.post('/api/admin/products/bulk-deactivate', data);
+    },
+
+    /**
      * Update product by SKU (admin - super_admin/stock_manager only)
      * @param {string} sku - Product SKU
      * @param {object} data - { retail_price, stock_quantity, is_active }

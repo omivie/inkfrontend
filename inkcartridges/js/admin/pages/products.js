@@ -203,6 +203,27 @@ async function loadProducts() {
   _table.setLoading(true);
   const LIMIT = 100;
 
+  // Backend route: server handles margin/markup/profit sort and has_images filter
+  // (avoids fetching the entire products table to JS just to sort/filter in memory).
+  const needsBackend =
+    _sort === 'margin_pct' || _sort === 'markup_pct' || _sort === 'profit_ex_gst' ||
+    !!_imageFilter;
+  if (needsBackend) {
+    const filters = { search: _search, sort: _sort, order: _sortDir };
+    if (_brandFilter) filters.brand = _brandFilter;
+    if (_activeFilter !== '') filters.active = _activeFilter;
+    if (_imageFilter === 'has-images') filters.has_images = 'true';
+    else if (_imageFilter === 'no-images') filters.has_images = 'false';
+    const data = await AdminAPI.getProducts(filters, _page, LIMIT);
+    if (!_table) return;
+    if (!data) { _table.setData([], null); return; }
+    const rows = Array.isArray(data) ? data : (data.products || data.data || []);
+    const pagination = data.pagination || { total: data.total || rows.length, page: _page, limit: LIMIT };
+    _table.setData(rows, pagination);
+    loadCompatCounts();
+    return;
+  }
+
   // Try direct Supabase query first (faster — skips Render backend hop)
   const sb = (typeof Auth !== 'undefined' && Auth.supabase) ? Auth.supabase : null;
   if (sb) {
@@ -219,85 +240,12 @@ async function loadProducts() {
       // Active filter
       if (_activeFilter !== '') query = query.eq('is_active', _activeFilter === 'true');
 
-      // Sorting — map column keys to DB columns (margin_pct is handled client-side)
+      // Sorting — map column keys to DB columns. Margin/markup/profit and image
+      // filters are routed to the backend earlier (see needsBackend), so we don't
+      // handle them here.
       const sortMap = { brand: 'brand_id' };
-      const sortCol = (_sort === 'margin_pct') ? 'name' : (sortMap[_sort] || _sort || 'name');
+      const sortCol = sortMap[_sort] || _sort || 'name';
       query = query.order(sortCol, { ascending: _sortDir !== 'desc' });
-
-      // Image filter requires client-side processing (can't filter by image presence in SQL)
-      if (_imageFilter) {
-        const PAGE_SIZE = 100;
-        let all = [];
-        let offset = 0;
-        while (true) {
-          let imgQuery = sb.from('products').select(selectCols);
-          if (_brandFilter) imgQuery = imgQuery.eq('brand_id', _brandFilter);
-          if (_search) imgQuery = imgQuery.or(`name.ilike.%${_search}%,sku.ilike.%${_search}%`);
-          if (_activeFilter !== '') imgQuery = imgQuery.eq('is_active', _activeFilter === 'true');
-          imgQuery = imgQuery.order(sortCol, { ascending: _sortDir !== 'desc' }).range(offset, offset + 999);
-          const { data: chunk } = await imgQuery;
-          if (!_table) return;
-          if (!chunk || !chunk.length) break;
-          all = all.concat(chunk);
-          if (chunk.length < 1000) break;
-          offset += 1000;
-        }
-        all = all.map(p => ({
-          ...p,
-          brand_name: p.brands?.name || '',
-          image_url: p.image_url ? storageUrl(p.image_url) : null,
-        }));
-        const filtered = all.filter(p =>
-          _imageFilter === 'no-images' ? !productHasImage(p) : productHasImage(p)
-        );
-        const start = (_page - 1) * PAGE_SIZE;
-        const pageRows = filtered.slice(start, start + PAGE_SIZE);
-        _table.setData(pageRows, { total: filtered.length, page: _page, limit: PAGE_SIZE });
-        loadCompatCounts();
-        return;
-      }
-
-      // Margin sorting requires client-side compute (not a DB column)
-      if (_sort === 'margin_pct' || _sort === 'markup_pct' || _sort === 'profit_ex_gst') {
-        const PAGE_SIZE = 100;
-        let all = [];
-        let fetchOffset = 0;
-        while (true) {
-          let mQuery = sb.from('products').select(selectCols);
-          if (_brandFilter) mQuery = mQuery.eq('brand_id', _brandFilter);
-          if (_search) mQuery = mQuery.or(`name.ilike.%${_search}%,sku.ilike.%${_search}%`);
-          if (_activeFilter !== '') mQuery = mQuery.eq('is_active', _activeFilter === 'true');
-          mQuery = mQuery.order('name', { ascending: true }).range(fetchOffset, fetchOffset + 999);
-          const { data: chunk } = await mQuery;
-          if (!_table) return;
-          if (!chunk || !chunk.length) break;
-          all = all.concat(chunk);
-          if (chunk.length < 1000) break;
-          fetchOffset += 1000;
-        }
-        const sortKeyMap = { margin_pct: 'marginPct', markup_pct: 'markupPct', profit_ex_gst: 'profitDollars' };
-        const sortKey = sortKeyMap[_sort];
-        all = all.map(p => {
-          const prof = computeProfitability(p);
-          return {
-            ...p,
-            brand_name: p.brands?.name || '',
-            image_url: p.image_url ? storageUrl(p.image_url) : null,
-            _sortVal: prof[sortKey],
-          };
-        });
-        all.sort((a, b) => {
-          if (a._sortVal == null && b._sortVal == null) return 0;
-          if (a._sortVal == null) return 1;
-          if (b._sortVal == null) return -1;
-          return _sortDir === 'asc' ? a._sortVal - b._sortVal : b._sortVal - a._sortVal;
-        });
-        const start = (_page - 1) * PAGE_SIZE;
-        const pageRows = all.slice(start, start + PAGE_SIZE);
-        _table.setData(pageRows, { total: all.length, page: _page, limit: PAGE_SIZE });
-        loadCompatCounts();
-        return;
-      }
 
       // Pagination
       const offset = (_page - 1) * LIMIT;
@@ -2492,6 +2440,7 @@ async function renderProductsContent(contentEl) {
       </button>
       <button class="admin-btn admin-btn--ghost admin-btn--sm" id="bulk-seo-btn">${icon('search', 14, 14)} Generate SEO</button>
       <button class="admin-btn admin-btn--ghost admin-btn--sm" id="bulk-activate-btn">${icon('products', 14, 14)} Bulk Activate</button>
+      <button class="admin-btn admin-btn--ghost admin-btn--sm" id="bulk-deactivate-btn">${icon('products', 14, 14)} Bulk Deactivate</button>
     ` : '';
     header.innerHTML = `
       <div class="admin-toolbar">
@@ -2557,6 +2506,27 @@ async function renderProductsContent(contentEl) {
           });
         } catch (e) {
           Toast.error(`Bulk activate failed: ${e.message}`);
+        }
+      });
+
+      header.querySelector('#bulk-deactivate-btn')?.addEventListener('click', async () => {
+        try {
+          const preview = await AdminAPI.bulkDeactivate({ dry_run: true, deactivate_all: true });
+          const count = preview?.count ?? preview?.affected ?? '?';
+          Modal.confirm({
+            title: 'Bulk Deactivate Products',
+            message: `This will deactivate ${count} eligible products. Proceed?`,
+            confirmLabel: 'Deactivate All',
+            confirmClass: 'admin-btn--danger',
+            onConfirm: async () => {
+              await AdminAPI.bulkDeactivate({ dry_run: false, deactivate_all: true });
+              invalidateDiagCache();
+              Toast.success('Products deactivated');
+              loadProducts();
+            },
+          });
+        } catch (e) {
+          Toast.error(`Bulk deactivate failed: ${e.message}`);
         }
       });
     }

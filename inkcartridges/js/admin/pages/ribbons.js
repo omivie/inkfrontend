@@ -2,11 +2,12 @@
  * Ribbons Page — Manage ribbon brands & products
  * Two-tab layout: Brands | Products
  */
-import { AdminAuth, FilterState, AdminAPI, icon, esc } from '../app.js';
+import { AdminAuth, FilterState, AdminAPI, icon, esc, exportDropdown, bindExportDropdown } from '../app.js';
 import { DataTable } from '../components/table.js';
 import { Modal } from '../components/modal.js';
 import { Toast } from '../components/toast.js';
 import { RichTextEditor } from '../components/rich-text-editor.js';
+import { computeProfitability, marginBadge, markupBadge, formatProfitDollars } from '../utils/profitability.js';
 
 const formatPrice = (v) => window.formatPrice ? window.formatPrice(v) : `$${Number(v).toFixed(2)}`;
 const MISSING = '\u2014';
@@ -340,6 +341,7 @@ function openBrandModal(brand) {
 //  PRODUCTS TAB
 // ══════════════════════════════════════════════════════════════════════════
 function renderProductsTab(container) {
+  const isOwner = AdminAuth.isOwner();
   // Toolbar
   const toolbar = document.createElement('div');
   toolbar.className = 'admin-toolbar';
@@ -371,9 +373,24 @@ function renderProductsTab(container) {
       <option value="no-images">No Images</option>
       <option value="has-images">Has Images</option>
     </select>
+    <span style="flex:1 1 auto"></span>
+    ${isOwner ? `
+      <button class="admin-btn admin-btn--ghost admin-btn--sm" id="ribbon-diag-trigger" aria-expanded="false" title="Toggle ribbon diagnostics">
+        <span class="diag-chevron" style="display:inline-flex;transition:transform .15s"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 6 15 12 9 18"/></svg></span>
+        Diagnostics
+      </button>
+      <button class="admin-btn admin-btn--ghost admin-btn--sm" id="ribbon-bulk-seo-btn">${icon('search', 14, 14)} Generate SEO</button>
+      <button class="admin-btn admin-btn--ghost admin-btn--sm" id="ribbon-bulk-activate-btn">${icon('products', 14, 14)} Bulk Activate</button>
+    ` : ''}
     <button class="admin-btn admin-btn--primary admin-btn--sm" id="add-ribbon-btn">${icon('plus', 14, 14)} Add Ribbon</button>
+    ${exportDropdown('export-ribbons')}
   `;
   container.appendChild(toolbar);
+  const diagPanel = document.createElement('div');
+  diagPanel.id = 'ribbon-diag-panel';
+  diagPanel.hidden = true;
+  diagPanel.style.marginTop = '12px';
+  container.appendChild(diagPanel);
 
   // Bind filters
   const searchInput = toolbar.querySelector('#ribbon-product-search');
@@ -387,6 +404,76 @@ function renderProductsTab(container) {
   toolbar.querySelector('#ribbon-active-filter').addEventListener('change', (e) => { _pActiveFilter = e.target.value; _pPage = 1; loadRibbonProducts(); });
   toolbar.querySelector('#ribbon-image-filter').addEventListener('change', (e) => { _pImageFilter = e.target.value; _pPage = 1; loadRibbonProducts(); });
   toolbar.querySelector('#add-ribbon-btn').addEventListener('click', () => openRibbonProductModal(null));
+
+  bindExportDropdown(toolbar, 'export-ribbons', async (format = 'csv') => {
+    try {
+      await AdminAPI.exportData('products', format, {
+        search: _pSearch,
+        ribbon_brand_id: _pBrandFilter,
+        product_type: _pTypeFilter || 'printer_ribbon,typewriter_ribbon,correction_tape',
+        is_active: _pActiveFilter,
+      });
+    } catch (e) {
+      Toast.error(`Export failed: ${e.message}`);
+    }
+  });
+
+  if (isOwner) {
+    const trigger = toolbar.querySelector('#ribbon-diag-trigger');
+    const chevron = trigger?.querySelector('.diag-chevron');
+    trigger?.addEventListener('click', async () => {
+      const open = diagPanel.hasAttribute('hidden');
+      if (open) {
+        diagPanel.removeAttribute('hidden');
+        if (chevron) chevron.style.transform = 'rotate(90deg)';
+        trigger.setAttribute('aria-expanded', 'true');
+        await renderRibbonDiagnostics(diagPanel);
+      } else {
+        diagPanel.setAttribute('hidden', '');
+        if (chevron) chevron.style.transform = '';
+        trigger.setAttribute('aria-expanded', 'false');
+      }
+    });
+
+    toolbar.querySelector('#ribbon-bulk-seo-btn')?.addEventListener('click', async () => {
+      Modal.confirm({
+        title: 'Generate SEO Metadata',
+        message: 'Generate AI SEO metadata for ribbon products missing meta_title or meta_description?',
+        confirmLabel: 'Generate SEO',
+        confirmClass: 'admin-btn--primary',
+        onConfirm: async () => {
+          try {
+            Toast.info('Generating SEO metadata…');
+            await AdminAPI.bulkGenerateAllSeo();
+            Toast.success('SEO generation queued');
+            loadRibbonProducts();
+          } catch (e) {
+            Toast.error(`SEO generation failed: ${e.message}`);
+          }
+        },
+      });
+    });
+
+    toolbar.querySelector('#ribbon-bulk-activate-btn')?.addEventListener('click', async () => {
+      try {
+        const preview = await AdminAPI.bulkActivate({ dry_run: true });
+        const count = preview?.count ?? preview?.affected ?? '?';
+        Modal.confirm({
+          title: 'Bulk Activate Products',
+          message: `This will activate ${count} eligible products (across all types). Proceed?`,
+          confirmLabel: 'Activate All',
+          confirmClass: 'admin-btn--primary',
+          onConfirm: async () => {
+            await AdminAPI.bulkActivate({ dry_run: false });
+            Toast.success('Products activated');
+            loadRibbonProducts();
+          },
+        });
+      } catch (e) {
+        Toast.error(`Bulk activate failed: ${e.message}`);
+      }
+    });
+  }
 
   // Table
   const tableWrap = document.createElement('div');
@@ -402,6 +489,32 @@ function renderProductsTab(container) {
     onPageChange: (page) => { _pPage = page; loadRibbonProducts(); },
     onLimitChange: (limit) => { _pLimit = limit; _pPage = 1; loadRibbonProducts(); },
     emptyMessage: 'No ribbon products found',
+  });
+
+  // Import lock toggle
+  tableWrap.addEventListener('click', async (e) => {
+    const btn = e.target.closest('.import-lock-btn');
+    if (!btn) return;
+    e.stopPropagation();
+    const productId = btn.dataset.productId;
+    btn.disabled = true;
+    btn.style.opacity = '0.5';
+    try {
+      const result = await AdminAPI.toggleImportLock(productId);
+      const locked = !!result.import_locked;
+      btn.dataset.locked = String(locked);
+      btn.classList.toggle('import-lock-btn--active', locked);
+      btn.innerHTML = icon(locked ? 'lock' : 'lock-open', 14, 14);
+      btn.title = locked ? 'Locked — import skips this product entirely' : 'Not locked — import will update this product';
+      const row = _productsTable?.data.find(r => String(r.id) === productId);
+      if (row) row.import_locked = locked;
+      Toast.success(locked ? 'Import locked' : 'Import unlocked');
+    } catch (err) {
+      Toast.error(`Lock toggle failed: ${err.message}`);
+    } finally {
+      btn.disabled = false;
+      btn.style.opacity = '';
+    }
   });
 
   // Toggle active status directly from table
@@ -541,24 +654,26 @@ function buildProductColumns() {
           : `<div class="admin-product-thumb admin-product-thumb--empty">${icon('products', 16, 16)}</div>`;
       },
     },
-    { key: 'name', label: 'Name', sortable: true, render: (r) => `<span class="cell-truncate">${esc(r.name || MISSING)}</span>` },
-    { key: 'sku', label: 'SKU', render: (r) => `<span class="cell-mono">${esc(r.sku || MISSING)}</span>` },
+    { key: 'name', label: 'Name', sortable: true, render: (r) => `<span class="cell-truncate" style="display:inline-block;max-width:340px;vertical-align:middle">${esc(r.name || MISSING)}</span>` },
+    { key: 'sku', label: 'SKU', className: 'cell-nowrap', render: (r) => `<span class="cell-mono">${esc(r.sku || MISSING)}</span>` },
     {
-      key: 'ribbon_brand', label: 'Device Brands', sortable: false,
+      key: 'ribbon_brand', label: 'Brand', sortable: false,
       render: (r) => {
         const brands = r.product_ribbon_brands || [];
         if (brands.length === 0) return MISSING;
-        return brands.map(b => {
-          const name = b.ribbon_brands?.name || '';
-          return name ? `<span class="admin-badge admin-badge--processing">${esc(name)}</span>` : '';
-        }).filter(Boolean).join(' ');
+        const names = brands.map(b => b.ribbon_brands?.name).filter(Boolean);
+        if (names.length === 0) return MISSING;
+        const first = names[0];
+        const extra = names.length > 1 ? ` <span class="admin-text-muted" title="${esc(names.slice(1).join(', '))}">+${names.length - 1}</span>` : '';
+        return `<span class="admin-badge admin-badge--processing">${esc(first)}</span>${extra}`;
       },
     },
     {
       key: 'product_type', label: 'Type',
       render: (r) => {
-        const t = RIBBON_TYPES.find(t => t.value === r.product_type);
-        return t ? `<span class="admin-badge admin-badge--info">${esc(t.label)}</span>` : esc(r.product_type || MISSING);
+        const shortLabel = { printer_ribbon: 'printer', typewriter_ribbon: 'typewriter', correction_tape: 'correction' };
+        const lbl = shortLabel[r.product_type] || r.product_type;
+        return lbl ? `<span class="source-badge source-badge--ribbon">${esc(lbl)}</span>` : MISSING;
       },
     },
     {
@@ -572,6 +687,27 @@ function buildProductColumns() {
       key: 'cost_price', label: 'Cost', sortable: true, align: 'right',
       render: (r) => `<span class="cell-mono cell-right">${r.cost_price != null ? formatPrice(r.cost_price) : MISSING}</span>`,
     });
+    cols.push({
+      key: 'margin_pct', label: 'Margin %', sortable: true, align: 'right',
+      render: (r) => {
+        const { marginPct } = computeProfitability(r);
+        return marginPct == null ? MISSING : marginBadge(marginPct);
+      },
+    });
+    cols.push({
+      key: 'markup_pct', label: 'Markup %', sortable: true, align: 'right',
+      render: (r) => {
+        const { markupPct } = computeProfitability(r);
+        return markupPct == null ? MISSING : markupBadge(markupPct);
+      },
+    });
+    cols.push({
+      key: 'profit_ex_gst', label: 'Profit $', sortable: true, align: 'right',
+      render: (r) => {
+        const { profitDollars } = computeProfitability(r);
+        return `<span class="cell-mono cell-right">${formatProfitDollars(profitDollars)}</span>`;
+      },
+    });
   }
 
   cols.push({
@@ -582,7 +718,84 @@ function buildProductColumns() {
     },
   });
 
+  cols.push({
+    key: 'import_locked', label: 'Lock', sortable: true, align: 'center', className: 'cell-center',
+    render: (r) => {
+      const locked = !!r.import_locked;
+      const lockedTitle = 'Locked \u2014 import skips this product entirely';
+      const unlockedTitle = 'Not locked \u2014 import will update this product';
+      return `<button class="import-lock-btn${locked ? ' import-lock-btn--active' : ''}" data-product-id="${r.id}" data-locked="${locked}" data-ribbon="true" title="${locked ? lockedTitle : unlockedTitle}">${icon(locked ? 'lock' : 'lock-open', 14, 14)}</button>`;
+    },
+  });
+
+  cols.push({
+    key: 'compat', label: 'Compat', sortable: false, align: 'center',
+    render: (r) => `<span class="admin-text-muted" data-compat-sku="${esc(r.sku || '')}" style="font-size:0.75rem;">—</span>`,
+  });
+
   return cols;
+}
+
+let _ribbonCompatController = null;
+async function loadRibbonCompatCounts() {
+  if (_ribbonCompatController) _ribbonCompatController.abort();
+  _ribbonCompatController = new AbortController();
+  const signal = _ribbonCompatController.signal;
+  const cells = document.querySelectorAll('[data-compat-sku]');
+  if (!cells.length) return;
+  const arr = Array.from(cells);
+  for (let i = 0; i < arr.length; i += 5) {
+    if (signal.aborted) return;
+    const slice = arr.slice(i, i + 5);
+    await Promise.all(slice.map(async (cell) => {
+      if (signal.aborted) return;
+      const sku = cell.dataset.compatSku;
+      if (!sku) return;
+      try {
+        const res = await window.API.getCompatiblePrinters(sku);
+        if (signal.aborted) return;
+        const printers = res?.data?.compatible_printers || res?.data?.printers || [];
+        const count = Array.isArray(printers) ? printers.length : 0;
+        if (count > 0) {
+          cell.outerHTML = `<span class="admin-badge admin-badge--delivered" style="font-size:0.72rem;">${count} printer${count !== 1 ? 's' : ''}</span>`;
+        } else {
+          cell.outerHTML = `<span class="admin-badge admin-badge--pending" style="font-size:0.72rem;">⚠ None</span>`;
+        }
+      } catch {
+        if (!signal.aborted) cell.outerHTML = `<span class="admin-text-muted" style="font-size:0.72rem;">—</span>`;
+      }
+    }));
+    if (i + 5 < arr.length && !signal.aborted) await new Promise(r => setTimeout(r, 300));
+  }
+}
+
+async function renderRibbonDiagnostics(panel) {
+  panel.innerHTML = '<div class="admin-text-muted" style="padding:12px">Loading diagnostics…</div>';
+  const sb = (typeof Auth !== 'undefined' && Auth.supabase) ? Auth.supabase : null;
+  if (!sb) { panel.innerHTML = '<div class="admin-text-muted" style="padding:12px">Diagnostics unavailable</div>'; return; }
+  const types = ['printer_ribbon', 'typewriter_ribbon', 'correction_tape'];
+  try {
+    const base = () => sb.from('products').select('id', { count: 'exact', head: true }).in('product_type', types);
+    const [totalR, activeR, noPriceR, noWeightR, noImageR] = await Promise.all([
+      base(),
+      base().eq('is_active', true),
+      base().is('retail_price', null),
+      base().is('weight_kg', null),
+      base().is('image_url', null),
+    ]);
+    const kpi = (label, value) => `<div class="admin-kpi" style="padding:12px 14px"><div class="admin-kpi__label">${esc(label)}</div><div class="admin-kpi__value" style="font-size:18px">${esc(String(value ?? '—'))}</div></div>`;
+    panel.innerHTML = `
+      <div class="admin-kpi-grid" style="grid-template-columns:repeat(5,1fr)">
+        ${kpi('Total Ribbons', totalR.count)}
+        ${kpi('Active', activeR.count)}
+        ${kpi('Missing Images', noImageR.count)}
+        ${kpi('Missing Prices', noPriceR.count)}
+        ${kpi('Missing Weight', noWeightR.count)}
+      </div>
+    `;
+  } catch (e) {
+    panel.innerHTML = `<div class="admin-text-muted" style="padding:12px">Diagnostics failed: ${esc(e.message)}</div>`;
+  }
 }
 
 async function loadRibbonProducts() {
@@ -603,7 +816,20 @@ async function loadRibbonProducts() {
     const hasImg = (p) => !!(p.image_url && String(p.image_url).trim());
     products = products.filter(p => _pImageFilter === 'no-images' ? !hasImg(p) : hasImg(p));
   }
+  if (_pSort === 'margin_pct' || _pSort === 'markup_pct' || _pSort === 'profit_ex_gst') {
+    const k = { margin_pct: 'marginPct', markup_pct: 'markupPct', profit_ex_gst: 'profitDollars' }[_pSort];
+    const dir = _pSortDir === 'desc' ? -1 : 1;
+    products = [...products].sort((a, b) => {
+      const av = computeProfitability(a)[k];
+      const bv = computeProfitability(b)[k];
+      if (av == null && bv == null) return 0;
+      if (av == null) return 1;
+      if (bv == null) return -1;
+      return (av - bv) * dir;
+    });
+  }
   _productsTable.setData(products, result ? { total: result.total, page: result.page, limit: result.limit } : null);
+  loadRibbonCompatCounts();
 }
 
 // ══════════════════════════════════════════════════════════════════════════

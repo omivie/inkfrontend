@@ -766,8 +766,28 @@
     }
 
     .brands-mega__cards {
-        grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+        grid-template-columns: repeat(2, 1fr);
         gap: var(--spacing-md);
+    }
+
+    /* Centre each brand card's contents so rows visually align on mobile */
+    .brands-mega__card {
+        align-items: center;
+        text-align: center;
+    }
+
+    .brands-mega__logo-wrap {
+        justify-content: center;
+        width: 100%;
+    }
+
+    .brands-mega__brand-logo {
+        object-position: center;
+    }
+
+    .brands-mega__card-links {
+        align-items: center;
+        width: 100%;
     }
 }
 
@@ -864,6 +884,30 @@
     .ribbons-mega__grid {
         grid-template-columns: repeat(2, 1fr);
         gap: var(--spacing-xs);
+        margin-bottom: var(--spacing-md);
+    }
+
+    .ribbons-mega__view-all {
+        display: flex;
+        width: 100%;
+        justify-content: center;
+        padding: var(--spacing-sm) 0;
+    }
+
+    /* When the mega panels are relocated inside an open mobile nav, the
+       nav's dark background clashes with the panel's own. Reset so the
+       panel reads as a natural continuation of the menu. */
+    .nav-menu.is-open > .ribbons-mega,
+    .nav-menu.is-open > .brands-mega {
+        background: var(--color-background);
+        border-bottom: none;
+        width: 100%;
+    }
+    .nav-menu.is-open > .ribbons-mega > .container,
+    .nav-menu.is-open > .brands-mega > .container {
+        padding-left: 0;
+        padding-right: 0;
+        display: block;
     }
 }
 

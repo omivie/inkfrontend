@@ -19,12 +19,16 @@
     const RECENT_MAX = 5;
     const PLACEHOLDER_IMG = '/assets/images/placeholder-product.svg';
 
+    // Trending printer chips. Names are resolved via /api/search/suggest at click
+    // time to obtain the canonical slug, then we navigate to /html/shop?printer=<slug>.
+    // Keep this list to printers the backend currently knows about (verified via
+    // /api/products/printer/<slug> returning ≥1 compatible cartridge).
     const TRENDING_MODELS = [
-        'Brother MFC-L2750DW',
-        'HP OfficeJet Pro 9720',
-        'Canon PIXMA TS3560',
-        'Epson EcoTank ET-2850',
-        'Brother HL-L2460DW',
+        { name: 'Brother MFC-L2750DW',   slug: 'brother-mfc-l2750dw' },
+        { name: 'HP OfficeJet Pro 9720', slug: 'hp-officejet-pro-9720' },
+        { name: 'Canon PIXMA TS3560',    slug: 'canon-pixma-ts3560' },
+        { name: 'Epson EcoTank ET-2850', slug: 'epson-ecotank-et-2850' },
+        { name: 'Brother HL-L2460DW',    slug: 'brother-hl-l2460dw' },
     ];
 
     let _instanceId = 0;
@@ -180,10 +184,11 @@
                    </div>`
                 : '';
 
+            const printerChip = (p) => `<button type="button" class="smart-ac__chip" data-printer-slug="${escAttr(p.slug)}" data-printer-name="${escAttr(p.name)}">${esc(p.name)}</button>`;
             const trendingSection = `
                 <div class="smart-ac__empty-section">
                     <h4 class="smart-ac__empty-title">Trending printers</h4>
-                    <div class="smart-ac__chips">${TRENDING_MODELS.map(chip).join('')}</div>
+                    <div class="smart-ac__chips">${TRENDING_MODELS.map(printerChip).join('')}</div>
                 </div>`;
 
             state.list.innerHTML = `<div class="smart-ac__empty">${recentSection}${trendingSection}</div>`;
@@ -222,13 +227,22 @@
 
             if (!list.length) {
                 const q = esc(state.input.value.trim());
+                // When the backend matched a printer, the useful action is to view
+                // its compatible cartridges — not a "no results / did you mean" copy.
+                if (matchedPrinter && matchedPrinter.name && matchedPrinter.slug) {
+                    const href = `/html/shop?printer=${encodeURIComponent(matchedPrinter.slug)}`;
+                    state.list.innerHTML = `
+                        <div class="smart-ac__matched-printer">
+                            Matched printer: <strong>${esc(matchedPrinter.name)}</strong>
+                            — <a href="${escAttr(href)}">view all compatible cartridges →</a>
+                        </div>`;
+                    setLive(`Matched printer ${matchedPrinter.name}. View compatible cartridges.`);
+                    return;
+                }
                 const dymHTML = didYouMean
                     ? ` Did you mean <button type="button" class="smart-ac__dym" data-dym="${escAttr(didYouMean)}">${esc(didYouMean)}</button>?`
                     : ' Try a different term or browse the <a href="/html/shop">full catalog</a>.';
-                const printerBannerHTML = matchedPrinter && matchedPrinter.name
-                    ? `<div class="smart-ac__matched-printer">Matched printer: <strong>${esc(matchedPrinter.name)}</strong> — <a href="/html/shop?printer=${escAttr(matchedPrinter.slug || '')}">view all compatible cartridges →</a></div>`
-                    : '';
-                state.list.innerHTML = `${printerBannerHTML}<div class="smart-ac__no-results">No products match “${q}”.${dymHTML}</div>`;
+                state.list.innerHTML = `<div class="smart-ac__no-results">No products match “${q}”.${dymHTML}</div>`;
                 const dymBtn = state.list.querySelector('.smart-ac__dym');
                 if (dymBtn) {
                     dymBtn.addEventListener('click', () => {
@@ -394,6 +408,18 @@
             const chip = e.target.closest('.smart-ac__chip');
             if (chip) {
                 e.preventDefault();
+                // Trending-printer chips carry a backend-canonical slug.
+                // Navigate directly to the strict printer-products page —
+                // the backend serves 301 redirects for any legacy slug drift,
+                // so we don't need a suggest round-trip (which can stall on a
+                // cold backend and force a misleading "no products" fallback).
+                const printerSlug = chip.getAttribute('data-printer-slug');
+                if (printerSlug) {
+                    const printerName = chip.getAttribute('data-printer-name') || '';
+                    saveRecent(printerName);
+                    window.location.href = `/html/shop?printer=${encodeURIComponent(printerSlug)}`;
+                    return;
+                }
                 const q = chip.getAttribute('data-chip') || '';
                 state.input.value = q;
                 state.input.focus();

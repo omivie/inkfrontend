@@ -1678,8 +1678,18 @@
             this.showLoading(true);
 
             try {
-                // Fetch compatible products for the printer slug
-                const response = await API.getProductsByPrinter(this.state.printer);
+                // Fetch compatible products for the printer slug.
+                // The backend lives on Render and can cold-start: the first call
+                // may 5xx or time out. Retry once after a short delay before
+                // surfacing a "Failed to load products" error to the user.
+                let response;
+                try {
+                    response = await API.getProductsByPrinter(this.state.printer);
+                } catch (firstErr) {
+                    if (navVersion !== undefined && this.navigationVersion !== navVersion) return;
+                    await new Promise(r => setTimeout(r, 800));
+                    response = await API.getProductsByPrinter(this.state.printer);
+                }
 
                 // Check if navigation changed during fetch
                 if (navVersion !== undefined && this.navigationVersion !== navVersion) return;
@@ -2128,6 +2138,31 @@
 
             try {
                 const searchQuery = this.state.search;
+
+                // If the query is a known printer model, redirect to the strict
+                // printer-products page so users see ONLY compatible cartridges
+                // instead of noisy free-text matches. Retry once because the
+                // backend (Render) can cold-start and fail the first call.
+                let sugg = null;
+                try {
+                    sugg = await API.getAutocomplete(searchQuery, 1);
+                } catch (_) {
+                    try {
+                        await new Promise(r => setTimeout(r, 800));
+                        sugg = await API.getAutocomplete(searchQuery, 1);
+                    } catch (_) { /* give up — fall through to free-text */ }
+                }
+                if (navVersion !== undefined && this.navigationVersion !== navVersion) return;
+                const matched = sugg && sugg.ok && sugg.data && sugg.data.matched_printer;
+                if (matched && matched.slug) {
+                    const newURL = `${window.location.pathname}?printer=${encodeURIComponent(matched.slug)}`;
+                    history.replaceState({}, '', newURL);
+                    this.state.search = null;
+                    this.state.printer = matched.slug;
+                    this.state.level = 'printer-products';
+                    await this.loadPrinterProducts(navVersion);
+                    return;
+                }
 
 
                 // Detect if this is a product-type keyword (e.g. "ribbon", "toner")
