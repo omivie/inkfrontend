@@ -78,6 +78,21 @@
         } catch (_) { /* analytics must never break the page */ }
     }
 
+    function getUtms() {
+        try {
+            const p = new URLSearchParams(location.search);
+            return {
+                utm_source: p.get('utm_source') || null,
+                utm_medium: p.get('utm_medium') || null,
+                utm_campaign: p.get('utm_campaign') || null,
+                utm_term: p.get('utm_term') || null,
+                utm_content: p.get('utm_content') || null,
+                gclid: p.get('gclid') || null,
+                fbclid: p.get('fbclid') || null,
+            };
+        } catch (_) { return {}; }
+    }
+
     function baseEvent(type, extra) {
         return Object.assign({
             session_id: getSessionId(),
@@ -85,6 +100,7 @@
             event_type: type,
             path: location.pathname + location.search,
             referrer: document.referrer || '',
+        }, getUtms(), {
             user_agent: navigator.userAgent || '',
             language: navigator.language || '',
             screen_w: screen.width || 0,

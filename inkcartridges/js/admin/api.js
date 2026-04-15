@@ -1582,6 +1582,79 @@ const AdminAPI = {
     if (resp && resp.ok === false) throw new Error(resp.error || 'Audit failed');
     return resp?.data ?? null;
   },
+
+  // =========================================================================
+  // Admin — Price Monitor
+  // =========================================================================
+  priceMonitor: {
+    async getScrapeStatus() {
+      try {
+        const resp = await window.API.get('/api/admin/price-monitor/scrape-status');
+        return resp?.data ?? null;
+      } catch (e) {
+        adminApiWarn('Load scrape status', e);
+        return null;
+      }
+    },
+    async getProducts({ page = 1, limit = 25, search, brand, source, sort, margin_alert, out_of_stock_cheapest } = {}) {
+      try {
+        const p = new URLSearchParams();
+        p.set('page', page);
+        p.set('limit', Math.min(Number(limit) || 25, 200));
+        if (search) p.set('search', search);
+        if (brand) p.set('brand', brand);
+        if (source) p.set('source', source);
+        if (sort) p.set('sort', sort);
+        if (margin_alert) p.set('margin_alert', 'true');
+        if (out_of_stock_cheapest) p.set('out_of_stock_cheapest', 'true');
+        const resp = await window.API.get(`/api/admin/price-monitor/products?${p}`);
+        return resp ?? null;
+      } catch (e) {
+        adminApiWarn('Load price monitor products', e);
+        return null;
+      }
+    },
+    async bulkAction({ action, product_ids, undercut_amount }) {
+      const payload = { action, product_ids };
+      if (undercut_amount != null) payload.undercut_amount = undercut_amount;
+      const resp = await window.API.post('/api/admin/price-monitor/bulk-action', payload);
+      if (resp && resp.ok === false) throw new Error(resp.error || 'Bulk action failed');
+      return resp?.data ?? null;
+    },
+    async updatePrice(sku, target_price) {
+      const resp = await window.API.post('/api/admin/price-monitor/update-price', { sku, target_price });
+      if (resp && resp.ok === false) throw new Error(resp.error || 'Update failed');
+      return resp?.data ?? null;
+    },
+    async generateExport() {
+      const resp = await window.API.post('/api/admin/price-monitor/exports/generate', {});
+      if (resp && resp.ok === false) throw new Error(resp.error || 'Generate failed');
+      return resp?.data ?? null;
+    },
+    async listExports() {
+      try {
+        const resp = await window.API.get('/api/admin/price-monitor/exports');
+        return resp?.data ?? [];
+      } catch (e) {
+        adminApiWarn('List exports', e);
+        return [];
+      }
+    },
+    async downloadExport(filename) {
+      const token = window.Auth?.session?.access_token;
+      const url = `${Config.API_URL}/api/admin/price-monitor/export/${encodeURIComponent(filename)}`;
+      const resp = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+      if (!resp.ok) throw new Error(`Download failed: ${resp.status}`);
+      const blob = await resp.blob();
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    },
+  },
 };
 
 export { AdminAPI };

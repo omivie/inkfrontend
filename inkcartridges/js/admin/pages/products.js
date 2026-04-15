@@ -137,7 +137,14 @@ function buildColumns() {
       key: 'import_locked', label: 'Lock', sortable: true,
       render: (r) => {
         const locked = !!r.import_locked;
-        return `<button class="import-lock-btn${locked ? ' import-lock-btn--active' : ''}" data-product-id="${r.id}" data-locked="${locked}" title="${locked ? 'Import locked \u2014 cron skips this product' : 'Not locked \u2014 cron will update this product'}">${icon(locked ? 'lock' : 'lock-open', 14, 14)}</button>`;
+        const isRibbon = ['printer_ribbon', 'typewriter_ribbon', 'correction_tape'].includes(r.product_type);
+        const lockedTitle = isRibbon
+          ? 'Locked \u2014 import skips this product entirely'
+          : 'Price locked \u2014 import updates other fields but preserves price';
+        const unlockedTitle = isRibbon
+          ? 'Not locked \u2014 import will update this product'
+          : 'Price unlocked \u2014 import will update all fields including price';
+        return `<button class="import-lock-btn${locked ? ' import-lock-btn--active' : ''}${!isRibbon ? ' import-lock-btn--price' : ''}" data-product-id="${r.id}" data-locked="${locked}" data-ribbon="${isRibbon}" title="${locked ? lockedTitle : unlockedTitle}">${icon(locked ? 'lock' : 'lock-open', 14, 14)}${!isRibbon ? '<span class="import-lock-btn__marker">$</span>' : ''}</button>`;
       },
       align: 'center',
       className: 'cell-center',
@@ -411,10 +418,19 @@ async function openProductDrawer(product) {
   modal.querySelector('.admin-product-modal__title').textContent = full.name || full.sku || 'Product';
 
   // Insert import lock toggle in header
+  const isRibbonProduct = ['printer_ribbon', 'typewriter_ribbon', 'correction_tape'].includes(full.product_type);
+  const lockTitle = (locked) => {
+    if (isRibbonProduct) return locked ? 'Locked \u2014 import skips this product entirely' : 'Not locked \u2014 import will update this product';
+    return locked ? 'Price locked \u2014 import updates other fields but preserves price' : 'Price unlocked \u2014 import will update all fields including price';
+  };
+  const lockLabel = (locked) => {
+    if (isRibbonProduct) return locked ? 'Locked' : 'Unlocked';
+    return locked ? 'Price locked' : 'Price unlocked';
+  };
   const lockBtn = document.createElement('button');
-  lockBtn.className = 'import-lock-toggle' + (full.import_locked ? ' import-lock-toggle--active' : '');
-  lockBtn.title = full.import_locked ? 'Import locked' : 'Import unlocked';
-  lockBtn.innerHTML = `${icon(full.import_locked ? 'lock' : 'lock-open', 14, 14)}<span class="import-lock-toggle__label">${full.import_locked ? 'Locked' : 'Unlocked'}</span>`;
+  lockBtn.className = 'import-lock-toggle' + (full.import_locked ? ' import-lock-toggle--active' : '') + (isRibbonProduct ? '' : ' import-lock-toggle--price');
+  lockBtn.title = lockTitle(full.import_locked);
+  lockBtn.innerHTML = `${icon(full.import_locked ? 'lock' : 'lock-open', 14, 14)}<span class="import-lock-toggle__label">${lockLabel(full.import_locked)}</span>`;
   const headerActions = modal.querySelector('.admin-product-modal__actions');
   headerActions.parentNode.insertBefore(lockBtn, headerActions);
 
@@ -424,9 +440,9 @@ async function openProductDrawer(product) {
       const result = await AdminAPI.toggleImportLock(full.id);
       const locked = !!result.import_locked;
       full.import_locked = locked;
-      lockBtn.className = 'import-lock-toggle' + (locked ? ' import-lock-toggle--active' : '');
-      lockBtn.title = locked ? 'Import locked' : 'Import unlocked';
-      lockBtn.innerHTML = `${icon(locked ? 'lock' : 'lock-open', 14, 14)}<span class="import-lock-toggle__label">${locked ? 'Locked' : 'Unlocked'}</span>`;
+      lockBtn.className = 'import-lock-toggle' + (locked ? ' import-lock-toggle--active' : '') + (isRibbonProduct ? '' : ' import-lock-toggle--price');
+      lockBtn.title = lockTitle(locked);
+      lockBtn.innerHTML = `${icon(locked ? 'lock' : 'lock-open', 14, 14)}<span class="import-lock-toggle__label">${lockLabel(locked)}</span>`;
       if (_table) {
         const row = _table.data.find(r => String(r.id) === String(full.id));
         if (row) row.import_locked = locked;
@@ -434,10 +450,10 @@ async function openProductDrawer(product) {
         if (tableBtn) {
           tableBtn.dataset.locked = String(locked);
           tableBtn.classList.toggle('import-lock-btn--active', locked);
-          tableBtn.innerHTML = icon(locked ? 'lock' : 'lock-open', 14, 14);
+          tableBtn.innerHTML = `${icon(locked ? 'lock' : 'lock-open', 14, 14)}${!isRibbonProduct ? '<span class="import-lock-btn__marker">$</span>' : ''}`;
         }
       }
-      Toast.success(locked ? 'Import locked' : 'Import unlocked');
+      Toast.success(locked ? (isRibbonProduct ? 'Import locked' : 'Price locked') : (isRibbonProduct ? 'Import unlocked' : 'Price unlocked'));
     } catch (err) {
       Toast.error(`Lock toggle failed: ${err.message}`);
     } finally {
@@ -2591,12 +2607,15 @@ async function renderProductsContent(contentEl) {
         const result = await AdminAPI.toggleImportLock(productId);
         const locked = !!result.import_locked;
         btn.dataset.locked = String(locked);
+        const isRibbon = btn.dataset.ribbon === 'true';
         btn.classList.toggle('import-lock-btn--active', locked);
-        btn.innerHTML = icon(locked ? 'lock' : 'lock-open', 14, 14);
-        btn.title = locked ? 'Import locked \u2014 cron skips this product' : 'Not locked \u2014 cron will update this product';
+        btn.innerHTML = `${icon(locked ? 'lock' : 'lock-open', 14, 14)}${!isRibbon ? '<span class="import-lock-btn__marker">$</span>' : ''}`;
+        btn.title = isRibbon
+          ? (locked ? 'Locked \u2014 import skips this product entirely' : 'Not locked \u2014 import will update this product')
+          : (locked ? 'Price locked \u2014 import updates other fields but preserves price' : 'Price unlocked \u2014 import will update all fields including price');
         const row = _table.data.find(r => String(r.id) === productId);
         if (row) row.import_locked = locked;
-        Toast.success(locked ? 'Import locked' : 'Import unlocked');
+        Toast.success(locked ? (isRibbon ? 'Import locked' : 'Price locked') : (isRibbon ? 'Import unlocked' : 'Price unlocked'));
       } catch (err) {
         Toast.error(`Lock toggle failed: ${err.message}`);
       } finally {
