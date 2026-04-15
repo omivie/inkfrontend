@@ -654,10 +654,10 @@ function buildProductColumns() {
           : `<div class="admin-product-thumb admin-product-thumb--empty">${icon('products', 16, 16)}</div>`;
       },
     },
-    { key: 'name', label: 'Name', sortable: true, render: (r) => `<span class="cell-truncate" style="display:inline-block;max-width:340px;vertical-align:middle">${esc(r.name || MISSING)}</span>` },
-    { key: 'sku', label: 'SKU', className: 'cell-nowrap', render: (r) => `<span class="cell-mono">${esc(r.sku || MISSING)}</span>` },
+    { key: 'name', label: 'Name', sortable: true, className: 'col-w-name', render: (r) => `<span class="cell-truncate" style="display:inline-block;max-width:320px;vertical-align:middle">${esc(r.name || MISSING)}</span>` },
+    { key: 'sku', label: 'SKU', className: 'cell-nowrap col-w-sku', render: (r) => `<span class="cell-mono">${esc(r.sku || MISSING)}</span>` },
     {
-      key: 'ribbon_brand', label: 'Brand', sortable: false,
+      key: 'ribbon_brand', label: 'Brand', sortable: false, className: 'col-w-brand',
       render: (r) => {
         const brands = r.product_ribbon_brands || [];
         if (brands.length === 0) return MISSING;
@@ -669,7 +669,7 @@ function buildProductColumns() {
       },
     },
     {
-      key: 'product_type', label: 'Type',
+      key: 'product_type', label: 'Type', className: 'col-w-type',
       render: (r) => {
         const shortLabel = { printer_ribbon: 'printer', typewriter_ribbon: 'typewriter', correction_tape: 'correction' };
         const lbl = shortLabel[r.product_type] || r.product_type;
@@ -677,32 +677,32 @@ function buildProductColumns() {
       },
     },
     {
-      key: 'retail_price', label: 'Price', sortable: true, align: 'right',
+      key: 'retail_price', label: 'Price', sortable: true, align: 'right', className: 'col-w-price',
       render: (r) => `<span class="cell-mono cell-right">${r.retail_price != null ? formatPrice(r.retail_price) : MISSING}</span>`,
     },
   ];
 
   if (isOwner) {
     cols.push({
-      key: 'cost_price', label: 'Cost', sortable: true, align: 'right',
+      key: 'cost_price', label: 'Cost', sortable: true, align: 'right', className: 'col-w-price',
       render: (r) => `<span class="cell-mono cell-right">${r.cost_price != null ? formatPrice(r.cost_price) : MISSING}</span>`,
     });
     cols.push({
-      key: 'margin_pct', label: 'Margin %', sortable: true, align: 'right',
+      key: 'margin_pct', label: 'Margin %', sortable: true, align: 'right', className: 'col-w-pct',
       render: (r) => {
         const { marginPct } = computeProfitability(r);
         return marginPct == null ? MISSING : marginBadge(marginPct);
       },
     });
     cols.push({
-      key: 'markup_pct', label: 'Markup %', sortable: true, align: 'right',
+      key: 'markup_pct', label: 'Markup %', sortable: true, align: 'right', className: 'col-w-pct',
       render: (r) => {
         const { markupPct } = computeProfitability(r);
         return markupPct == null ? MISSING : markupBadge(markupPct);
       },
     });
     cols.push({
-      key: 'profit_ex_gst', label: 'Profit $', sortable: true, align: 'right',
+      key: 'profit_ex_gst', label: 'Profit $', sortable: true, align: 'right', className: 'col-w-pct',
       render: (r) => {
         const { profitDollars } = computeProfitability(r);
         return `<span class="cell-mono cell-right">${formatProfitDollars(profitDollars)}</span>`;
@@ -711,7 +711,7 @@ function buildProductColumns() {
   }
 
   cols.push({
-    key: 'is_active', label: 'Active', align: 'center',
+    key: 'is_active', label: 'Active', align: 'center', className: 'col-w-dot',
     render: (r) => {
       const active = r.is_active !== false;
       return `<button class="admin-active-dot admin-active-dot--${active ? 'on' : 'off'} admin-active-dot--clickable" data-toggle-active="${r.id}" data-label="${active ? 'Click to deactivate' : 'Click to activate'}"></button>`;
@@ -719,7 +719,7 @@ function buildProductColumns() {
   });
 
   cols.push({
-    key: 'import_locked', label: 'Lock', sortable: true, align: 'center', className: 'cell-center',
+    key: 'import_locked', label: 'Lock', sortable: true, align: 'center', className: 'cell-center col-w-dot',
     render: (r) => {
       const locked = !!r.import_locked;
       const lockedTitle = 'Locked \u2014 import skips this product entirely';
@@ -729,7 +729,7 @@ function buildProductColumns() {
   });
 
   cols.push({
-    key: 'compat', label: 'Compat', sortable: false, align: 'center',
+    key: 'compat', label: 'Compat', sortable: false, align: 'center', className: 'col-w-compat',
     render: (r) => `<span class="admin-text-muted" data-compat-sku="${esc(r.sku || '')}" style="font-size:0.75rem;">—</span>`,
   });
 

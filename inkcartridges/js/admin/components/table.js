@@ -118,7 +118,8 @@ class DataTable {
       const activeCls = this.sortKey === col.key ? ` sort-${this.sortDir}` : '';
       const arrow = col.sortable ? `<span class="sort-arrow">${this.sortKey === col.key ? (this.sortDir === 'asc' ? '\u25B2' : '\u25BC') : '\u25BD'}</span>` : '';
       const alignCls = col.align === 'right' ? ' cell-right' : '';
-      html += `<th class="${sortCls}${activeCls}${alignCls}" data-sort-key="${col.key || ''}">${esc(col.label)}${arrow}</th>`;
+      const thExtra = col.className ? ` ${col.className}` : '';
+      html += `<th class="${sortCls}${activeCls}${alignCls}${thExtra}" data-sort-key="${col.key || ''}">${esc(col.label)}${arrow}</th>`;
     }
     html += '</tr></thead><tbody>';
 

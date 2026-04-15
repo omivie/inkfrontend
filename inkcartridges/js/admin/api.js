@@ -1029,6 +1029,9 @@ const AdminAPI = {
       });
       if (!resp.ok) throw new Error(`Export failed: ${resp.status}`);
 
+      const truncated = resp.headers.get('X-Export-Truncated') === 'true';
+      const limit = resp.headers.get('X-Export-Limit');
+
       const ext = { csv: 'csv', excel: 'xlsx', pdf: 'pdf' }[format] || format;
       const blob = await resp.blob();
       const blobUrl = URL.createObjectURL(blob);
@@ -1039,6 +1042,9 @@ const AdminAPI = {
       a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(blobUrl);
+      if (truncated && typeof Toast !== 'undefined') {
+        Toast.warning(`Export truncated${limit ? ` to ${limit} rows` : ''}. Narrow filters for a complete export.`);
+      }
       return true;
     } catch (e) {
       DebugLog.warn(`[AdminAPI] exportData(${type}, ${format}) failed:`, e.message);

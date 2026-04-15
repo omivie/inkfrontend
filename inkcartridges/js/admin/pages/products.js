@@ -31,6 +31,9 @@ let _sortDir = 'asc';
 let _brandFilter = '';
 let _activeFilter = '';
 let _imageFilter = '';
+let _sourceFilter = '';
+let _typeFilter = '';
+let _stockFilter = '';
 let _brands = [];
 let _diagnostics = null;
 let _bulkBar = null;
@@ -58,22 +61,22 @@ function buildColumns() {
       className: 'cell-center cell-image',
     },
     {
-      key: 'name', label: 'Name', sortable: true,
-      render: (r) => `<button class="copy-name-btn" data-copy="${esc(r.name || '')}" title="Copy name">${icon('copy', 15, 15)}</button><span class="cell-truncate">${esc(r.name || MISSING)}</span>`,
+      key: 'name', label: 'Name', sortable: true, className: 'col-w-name',
+      render: (r) => `<button class="copy-name-btn" data-copy="${esc(r.name || '')}" title="Copy name">${icon('copy', 15, 15)}</button><span class="cell-truncate" style="display:inline-block;max-width:300px;vertical-align:middle">${esc(r.name || MISSING)}</span>`,
     },
     {
-      key: 'sku', label: 'SKU', sortable: true,
+      key: 'sku', label: 'SKU', sortable: true, className: 'cell-nowrap col-w-sku',
       render: (r) => `<span class="cell-mono">${esc(r.sku || MISSING)}</span>`,
     },
     {
-      key: 'brand', label: 'Brand', sortable: true,
+      key: 'brand', label: 'Brand', sortable: true, className: 'col-w-brand',
       render: (r) => {
         const brand = extractBrandName(r);
         return brand ? `<span class="admin-badge admin-badge--processing">${esc(brand)}</span>` : MISSING;
       },
     },
     {
-      key: 'retail_price', label: 'Price', sortable: true,
+      key: 'retail_price', label: 'Price', sortable: true, className: 'col-w-price',
       render: (r) => {
         const price = r.retail_price ?? r.cost_price;
         return `<span class="cell-mono cell-right">${price != null ? formatPrice(price) : MISSING}</span>`;
@@ -84,12 +87,12 @@ function buildColumns() {
 
   if (isOwner) {
     cols.push({
-      key: 'cost_price', label: 'Cost', sortable: true,
+      key: 'cost_price', label: 'Cost', sortable: true, className: 'col-w-price',
       render: (r) => `<span class="cell-mono cell-right">${r.cost_price != null ? formatPrice(r.cost_price) : MISSING}</span>`,
       align: 'right',
     });
     cols.push({
-      key: 'margin_pct', label: 'Margin %', sortable: true,
+      key: 'margin_pct', label: 'Margin %', sortable: true, className: 'col-w-pct',
       render: (r) => {
         const { marginPct } = computeProfitability(r);
         return marginPct == null ? MISSING : marginBadge(marginPct);
@@ -97,7 +100,7 @@ function buildColumns() {
       align: 'right',
     });
     cols.push({
-      key: 'markup_pct', label: 'Markup %', sortable: true,
+      key: 'markup_pct', label: 'Markup %', sortable: true, className: 'col-w-pct',
       render: (r) => {
         const { markupPct } = computeProfitability(r);
         return markupPct == null ? MISSING : markupBadge(markupPct);
@@ -105,7 +108,7 @@ function buildColumns() {
       align: 'right',
     });
     cols.push({
-      key: 'profit_ex_gst', label: 'Profit $', sortable: true,
+      key: 'profit_ex_gst', label: 'Profit $', sortable: true, className: 'col-w-pct',
       render: (r) => {
         const { profitDollars } = computeProfitability(r);
         return `<span class="cell-mono cell-right">${formatProfitDollars(profitDollars)}</span>`;
@@ -115,7 +118,7 @@ function buildColumns() {
   }
 
   cols.push({
-    key: 'source', label: 'Type', sortable: true,
+    key: 'source', label: 'Type', sortable: true, className: 'col-w-type',
     render: (r) => {
       if (!r.source) return MISSING;
       const sourceMap = { genuine: 'genuine', compatible: 'compatible', remanufactured: 'remanufactured', ribbon: 'ribbon' };
@@ -126,7 +129,7 @@ function buildColumns() {
 
   cols.push(
     {
-      key: 'is_active', label: 'Active', sortable: true,
+      key: 'is_active', label: 'Active', sortable: true, className: 'col-w-dot',
       render: (r) => {
         const active = r.is_active !== false;
         return `<span class="admin-active-dot admin-active-dot--${active ? 'on' : 'off'}" data-tooltip="${active ? 'Active' : 'Inactive'}"></span>`;
@@ -134,7 +137,7 @@ function buildColumns() {
       align: 'center',
     },
     {
-      key: 'import_locked', label: 'Lock', sortable: true,
+      key: 'import_locked', label: 'Lock', sortable: true, className: 'cell-center col-w-dot',
       render: (r) => {
         const locked = !!r.import_locked;
         const isRibbon = ['printer_ribbon', 'typewriter_ribbon', 'correction_tape'].includes(r.product_type);
@@ -147,10 +150,9 @@ function buildColumns() {
         return `<button class="import-lock-btn${locked ? ' import-lock-btn--active' : ''}${!isRibbon ? ' import-lock-btn--price' : ''}" data-product-id="${r.id}" data-locked="${locked}" data-ribbon="${isRibbon}" title="${locked ? lockedTitle : unlockedTitle}">${icon(locked ? 'lock' : 'lock-open', 14, 14)}${!isRibbon ? '<span class="import-lock-btn__marker">$</span>' : ''}</button>`;
       },
       align: 'center',
-      className: 'cell-center',
     },
     {
-      key: 'compat', label: 'Compat', sortable: false,
+      key: 'compat', label: 'Compat', sortable: false, className: 'col-w-compat',
       render: (r) => `<span class="admin-text-muted" data-compat-sku="${esc(r.sku || '')}" style="font-size:0.75rem;">—</span>`,
       align: 'center',
     },
@@ -207,13 +209,16 @@ async function loadProducts() {
   // (avoids fetching the entire products table to JS just to sort/filter in memory).
   const needsBackend =
     _sort === 'margin_pct' || _sort === 'markup_pct' || _sort === 'profit_ex_gst' ||
-    !!_imageFilter;
+    !!_imageFilter || !!_sourceFilter || !!_typeFilter || !!_stockFilter;
   if (needsBackend) {
     const filters = { search: _search, sort: _sort, order: _sortDir };
     if (_brandFilter) filters.brand = _brandFilter;
     if (_activeFilter !== '') filters.active = _activeFilter;
     if (_imageFilter === 'has-images') filters.has_images = 'true';
     else if (_imageFilter === 'no-images') filters.has_images = 'false';
+    if (_sourceFilter) filters.source = _sourceFilter;
+    if (_typeFilter) filters.product_type = _typeFilter;
+    if (_stockFilter) filters.stock_status = _stockFilter;
     const data = await AdminAPI.getProducts(filters, _page, LIMIT);
     if (!_table) return;
     if (!data) { _table.setData([], null); return; }
@@ -1975,6 +1980,11 @@ function getProductExportParams() {
   if (_search) p.set('search', _search);
   if (_brandFilter) p.set('brand', _brandFilter);
   if (_activeFilter !== '') p.set('active', _activeFilter);
+  if (_imageFilter === 'has-images') p.set('has_images', 'true');
+  else if (_imageFilter === 'no-images') p.set('has_images', 'false');
+  if (_sourceFilter) p.set('source', _sourceFilter);
+  if (_typeFilter) p.set('product_type', _typeFilter);
+  if (_stockFilter) p.set('stock_status', _stockFilter);
   if (_sort) p.set('sort', _sort);
   if (_sortDir) p.set('order', _sortDir);
   return p.toString();
@@ -2459,6 +2469,30 @@ async function renderProductsContent(contentEl) {
           <option value="no-images">No Images</option>
           <option value="has-images">Has Images</option>
         </select>
+        <select class="admin-select" id="source-filter">
+          <option value="">All Sources</option>
+          <option value="genuine">Genuine</option>
+          <option value="compatible">Compatible</option>
+          <option value="remanufactured">Remanufactured</option>
+          <option value="ribbon">Ribbon</option>
+        </select>
+        <select class="admin-select" id="type-filter">
+          <option value="">All Types</option>
+          <option value="ink_cartridge">Ink Cartridge</option>
+          <option value="toner_cartridge">Toner</option>
+          <option value="printer_ribbon">Printer Ribbon</option>
+          <option value="typewriter_ribbon">Typewriter Ribbon</option>
+          <option value="correction_tape">Correction Tape</option>
+          <option value="drum">Drum</option>
+          <option value="maintenance_kit">Maintenance Kit</option>
+          <option value="paper">Paper</option>
+        </select>
+        <select class="admin-select" id="stock-filter">
+          <option value="">All Stock</option>
+          <option value="in_stock">In Stock</option>
+          <option value="low_stock">Low Stock</option>
+          <option value="out_of_stock">Out of Stock</option>
+        </select>
         <span style="flex:1 1 auto"></span>
         ${ownerControls}
         <button class="admin-btn admin-btn--primary admin-btn--sm" id="add-product-btn">${icon('products', 14, 14)} Add Product</button>
@@ -2491,7 +2525,8 @@ async function renderProductsContent(contentEl) {
       header.querySelector('#bulk-activate-btn')?.addEventListener('click', async () => {
         try {
           const preview = await AdminAPI.bulkActivate({ dry_run: true });
-          const count = preview?.count ?? preview?.affected ?? '?';
+          const p = preview?.data ?? preview;
+          const count = p?.count ?? p?.affected ?? p?.eligible ?? p?.total ?? '?';
           Modal.confirm({
             title: 'Bulk Activate Products',
             message: `This will activate ${count} eligible products. Proceed?`,
@@ -2512,7 +2547,8 @@ async function renderProductsContent(contentEl) {
       header.querySelector('#bulk-deactivate-btn')?.addEventListener('click', async () => {
         try {
           const preview = await AdminAPI.bulkDeactivate({ dry_run: true, deactivate_all: true });
-          const count = preview?.count ?? preview?.affected ?? '?';
+          const p = preview?.data ?? preview;
+          const count = p?.count ?? p?.affected ?? p?.eligible ?? p?.total ?? '?';
           Modal.confirm({
             title: 'Bulk Deactivate Products',
             message: `This will deactivate ${count} eligible products. Proceed?`,
@@ -2617,6 +2653,17 @@ async function renderProductsContent(contentEl) {
       _imageFilter = e.target.value; _page = 1; loadProducts();
     });
 
+    // Source / product_type / stock_status filters (backend-only)
+    header.querySelector('#source-filter')?.addEventListener('change', (e) => {
+      _sourceFilter = e.target.value; _page = 1; loadProducts();
+    });
+    header.querySelector('#type-filter')?.addEventListener('change', (e) => {
+      _typeFilter = e.target.value; _page = 1; loadProducts();
+    });
+    header.querySelector('#stock-filter')?.addEventListener('change', (e) => {
+      _stockFilter = e.target.value; _page = 1; loadProducts();
+    });
+
     // Export
     bindExportDropdown(header, 'export-products', handleExport);
     header.querySelector('#add-product-btn')?.addEventListener('click', () => openCreateProductModal());
@@ -2719,6 +2766,9 @@ export default {
     _brandFilter = '';
     _activeFilter = '';
     _imageFilter = '';
+    _sourceFilter = '';
+    _typeFilter = '';
+    _stockFilter = '';
     _brands = [];
     _diagnostics = null;
     _activeProductTab = 'products';
