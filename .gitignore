@@ -25,3 +25,7 @@ archive/
 # Playwright MCP debug files
 .playwright-mcp/
 .vercel
+
+# Audit screenshots — large binaries, ignore everything except the JSON report
+audit-output/*
+!audit-output/report.json
