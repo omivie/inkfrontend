@@ -405,6 +405,19 @@ const API = {
     },
 
     /**
+     * Get products strictly compatible with a printer (via product_compatibility table).
+     * Uses the dedicated printer-products endpoint which returns only products linked
+     * to the exact printer — no fuzzy name matching.
+     * @param {string} printerSlug - Printer slug (e.g. "brother-mfc-j6945dw")
+     * @param {object} [params] - Optional { page, limit, type, source }
+     */
+    async getPrinterProducts(printerSlug, params = {}) {
+        const query = new URLSearchParams(params).toString();
+        const url = `/api/printers/${encodeURIComponent(printerSlug)}/products${query ? `?${query}` : ''}`;
+        return this.get(url);
+    },
+
+    /**
      * Get related products for a given SKU
      * @param {string} sku - Product SKU
      */

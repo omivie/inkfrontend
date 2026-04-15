@@ -607,8 +607,26 @@ document.addEventListener('click', function(e) {
                 });
             }
 
-            // Update URL without scrolling
-            history.pushState(null, null, targetId);
+            // Update URL without scrolling (skip for ink-finder — keeping
+            // the hash would make reloads land scrolled-down on mobile).
+            if (targetId !== '#ink-finder-heading') {
+                history.pushState(null, null, targetId);
+            }
         }
     }
 });
+
+// Don't push the ink-finder hash into the URL — it causes reloads to land
+// scrolled-down, hiding the page header. The click handler still scrolls
+// to the section; we just skip the history update for this anchor.
+// (Also undo any hash present from an older build.)
+if (window.location.hash === '#ink-finder-heading') {
+    history.replaceState(null, '', window.location.pathname + window.location.search);
+    window.scrollTo({ top: 0, behavior: 'auto' });
+}
+
+// Opt out of browser scroll restoration — on the home page it leaves the
+// viewport scrolled to wherever the user last was, hiding the header.
+if ('scrollRestoration' in history) {
+    history.scrollRestoration = 'manual';
+}

@@ -304,8 +304,10 @@
         // SECURITY: Discount comes from backend only
         // Cart object stores server-validated discount amount
         calculateDiscount() {
-            // Use discount from Cart object (which is server-validated)
-            if (typeof Cart !== 'undefined' && Cart.discountAmount) {
+            // Use discount from Cart object (which is server-validated).
+            // Only honour it when a coupon is actually applied — otherwise a
+            // stale discountAmount would show a phantom discount row.
+            if (typeof Cart !== 'undefined' && Cart.appliedCoupon && Cart.discountAmount) {
                 this.totals.discount = Cart.discountAmount;
             } else {
                 this.totals.discount = 0;
@@ -1041,6 +1043,9 @@
                 return;
             }
 
+            // Surface any coupon already applied on the server cart, with a Remove control
+            this.refreshAppliedCouponUI();
+
             couponBtn.addEventListener('click', async () => {
                 const code = couponInput.value.trim();
                 if (!code) {
@@ -1110,6 +1115,41 @@
                     }
                 } catch (error) {
                     DebugLog.error('Coupon error:', error);
+
+                    // Re-sync with backend so the UI reflects the actual cart state
+                    // (e.g. a previously-applied coupon should remain; if none is active,
+                    // the discount row must hide regardless of stale client state).
+                    try {
+                        const cartRes = await API.getCart();
+                        const summary = cartRes?.data?.summary;
+                        const activeCoupon = cartRes?.data?.coupon?.code || null;
+                        this.appliedCoupon = activeCoupon;
+                        this.totals.discount = activeCoupon && summary?.discount ? summary.discount : 0;
+                        if (summary?.subtotal != null) this.totals.subtotal = summary.subtotal;
+                        if (summary?.shipping != null) this.totals.shipping = summary.shipping;
+                        this.totals.total = this.totals.subtotal - this.totals.discount + this.totals.shipping;
+
+                        const discountRow = document.getElementById('checkout-discount-row');
+                        const discountEl = document.getElementById('checkout-discount');
+                        if (discountRow && discountEl) {
+                            if (this.totals.discount > 0) {
+                                discountRow.hidden = false;
+                                discountEl.textContent = `-${formatPrice(this.totals.discount)}`;
+                            } else {
+                                discountRow.hidden = true;
+                                discountEl.textContent = '-$0.00';
+                            }
+                        }
+                        const subtotalEl = document.getElementById('checkout-subtotal');
+                        if (subtotalEl) subtotalEl.textContent = formatPrice(this.totals.subtotal);
+                        const shippingEl = document.getElementById('checkout-shipping');
+                        if (shippingEl) shippingEl.textContent = this.totals.shipping === 0 ? 'FREE' : formatPrice(this.totals.shipping);
+                        const totalEl = document.getElementById('checkout-total');
+                        if (totalEl) totalEl.textContent = `${formatPrice(this.totals.total)} NZD`;
+                    } catch (syncErr) {
+                        DebugLog.warn('Cart resync after coupon failure failed:', syncErr);
+                    }
+
                     alert(error.message || 'Invalid coupon code');
                     couponBtn.textContent = 'Apply';
                     couponBtn.disabled = false;
@@ -1123,6 +1163,109 @@
                     couponBtn.click();
                 }
             });
+        },
+
+        // Re-sync the coupon UI and totals from the authoritative server cart.
+        // If a coupon is applied, show a pill with a Remove button instead of the input.
+        async refreshAppliedCouponUI() {
+            const formEl = document.querySelector('.coupon-form');
+            const wrapper = document.querySelector('.checkout-summary__coupon');
+            if (!formEl || !wrapper) return;
+
+            let cartRes;
+            try { cartRes = await API.getCart(); } catch (e) { return; }
+
+            const summary = cartRes?.data?.summary;
+            const coupon = cartRes?.data?.coupon || summary?.coupon;
+            const discountRow = document.getElementById('checkout-discount-row');
+            const discountEl = document.getElementById('checkout-discount');
+
+            // Drop any existing applied-pill before re-rendering
+            const existingPill = wrapper.querySelector('.coupon-applied');
+            if (existingPill) existingPill.remove();
+
+            if (coupon && coupon.code) {
+                this.appliedCoupon = coupon.code;
+                this.totals.discount = coupon.discount_amount || summary?.discount || 0;
+                if (typeof Cart !== 'undefined') {
+                    Cart.appliedCoupon = coupon.code;
+                    Cart.discountAmount = this.totals.discount;
+                }
+                formEl.style.display = 'none';
+
+                const pill = document.createElement('div');
+                pill.className = 'coupon-applied';
+                pill.innerHTML = `
+                    <span class="coupon-applied__code">${Security.escapeHtml(coupon.code)}</span>
+                    <span class="coupon-applied__saved">Saved ${formatPrice(this.totals.discount)}</span>
+                    <button type="button" class="coupon-applied__remove btn btn--link" aria-label="Remove coupon">Remove</button>
+                `;
+                wrapper.appendChild(pill);
+
+                pill.querySelector('.coupon-applied__remove').addEventListener('click', async () => {
+                    const btn = pill.querySelector('.coupon-applied__remove');
+                    btn.disabled = true;
+                    btn.textContent = 'Removing...';
+                    try {
+                        await API.removeCoupon();
+                        this.appliedCoupon = null;
+                        this.totals.discount = 0;
+                        if (typeof Cart !== 'undefined') {
+                            Cart.appliedCoupon = null;
+                            Cart.discountAmount = 0;
+                        }
+                        pill.remove();
+                        formEl.style.display = '';
+                        const input = formEl.querySelector('.coupon-form__input');
+                        const applyBtn = formEl.querySelector('.coupon-form__btn');
+                        if (input) { input.value = ''; input.placeholder = 'Enter code'; }
+                        if (applyBtn) { applyBtn.textContent = 'Apply'; applyBtn.disabled = false; applyBtn.style.background = ''; }
+
+                        // Resync totals from server
+                        try {
+                            const fresh = await API.getCart();
+                            const s = fresh?.data?.summary;
+                            if (s) {
+                                if (s.subtotal != null) this.totals.subtotal = s.subtotal;
+                                if (s.shipping != null) this.totals.shipping = s.shipping;
+                                this.totals.total = this.totals.subtotal - this.totals.discount + this.totals.shipping;
+                            }
+                        } catch (e) { /* ignore */ }
+
+                        if (discountRow && discountEl) {
+                            discountRow.hidden = true;
+                            discountEl.textContent = '-$0.00';
+                        }
+                        const subtotalEl = document.getElementById('checkout-subtotal');
+                        if (subtotalEl) subtotalEl.textContent = formatPrice(this.totals.subtotal);
+                        const shippingEl = document.getElementById('checkout-shipping');
+                        if (shippingEl) shippingEl.textContent = this.totals.shipping === 0 ? 'FREE' : formatPrice(this.totals.shipping);
+                        const totalEl = document.getElementById('checkout-total');
+                        if (totalEl) totalEl.textContent = `${formatPrice(this.totals.total)} NZD`;
+                    } catch (err) {
+                        DebugLog.error('Remove coupon failed:', err);
+                        btn.disabled = false;
+                        btn.textContent = 'Remove';
+                        alert('Could not remove coupon. Please try again.');
+                    }
+                });
+
+                if (discountRow && discountEl && this.totals.discount > 0) {
+                    discountRow.hidden = false;
+                    discountEl.textContent = `-${formatPrice(this.totals.discount)}`;
+                }
+            } else {
+                this.appliedCoupon = null;
+                this.totals.discount = 0;
+                if (typeof Cart !== 'undefined') {
+                    Cart.appliedCoupon = null;
+                    Cart.discountAmount = 0;
+                }
+                if (discountRow && discountEl) {
+                    discountRow.hidden = true;
+                    discountEl.textContent = '-$0.00';
+                }
+            }
         },
 
         // Clear all validation errors from the form

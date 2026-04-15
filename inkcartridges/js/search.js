@@ -120,9 +120,14 @@
             if (!state.input || !state.dropdown) return;
             const formRect = state.form.getBoundingClientRect();
             const inputRect = state.input.getBoundingClientRect();
+            const isMobile = window.innerWidth <= 640;
+            // On mobile, center the dropdown across the viewport (not the form,
+            // which is a narrow 260px centered box). 16px side margins.
+            const left = isMobile ? 16 : Math.round(formRect.left);
+            const width = isMobile ? (window.innerWidth - 32) : Math.round(formRect.width);
             state.dropdown.style.setProperty('--smart-ac-top', `${Math.round(inputRect.bottom + 6)}px`);
-            state.dropdown.style.setProperty('--smart-ac-left', `${Math.round(formRect.left)}px`);
-            state.dropdown.style.setProperty('--smart-ac-width', `${Math.round(formRect.width)}px`);
+            state.dropdown.style.setProperty('--smart-ac-left', `${left}px`);
+            state.dropdown.style.setProperty('--smart-ac-width', `${width}px`);
         }
 
         function open() {

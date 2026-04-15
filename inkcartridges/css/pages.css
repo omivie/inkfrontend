@@ -8873,10 +8873,6 @@
     }
 
     .search-results {
-        position: fixed;
-        top: auto;
-        left: var(--spacing-md);
-        right: var(--spacing-md);
         max-height: 60vh;
     }
 

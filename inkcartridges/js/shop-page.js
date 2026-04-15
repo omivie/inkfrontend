@@ -1914,37 +1914,36 @@
                     // Supabase client creation failed - will fall back to API search
                 }
 
-                // Strategy 1: Query product_compatibility table via Supabase for compatible products
+                // Strategy 1: Resolve printer slug, then use the dedicated printer-products
+                // endpoint which strictly filters via product_compatibility (no fuzzy name match).
+                let resolvedSlug = null;
                 if (supabaseClient) {
                     try {
                         let printerData = null;
 
-                        // Try exact match first
                         const exactResult = await supabaseClient
                             .from('printer_models')
-                            .select('id, full_name, model_name')
+                            .select('id, full_name, model_name, slug')
                             .ilike('full_name', printerModel)
                             .single();
 
                         if (exactResult.data) {
                             printerData = exactResult.data;
                         } else {
-                            // Try partial match with wildcards
                             const partialResult = await supabaseClient
                                 .from('printer_models')
-                                .select('id, full_name, model_name')
+                                .select('id, full_name, model_name, slug')
                                 .ilike('full_name', `%${printerModel}%`)
                                 .limit(1);
 
                             if (partialResult.data && partialResult.data.length > 0) {
                                 printerData = partialResult.data[0];
                             } else {
-                                // Try searching by model_name only (without brand prefix)
                                 const modelNameOnly = printerModel.replace(/^(BROTHER|CANON|EPSON|HP|SAMSUNG|LEXMARK|OKI|FUJI\s*XEROX|KYOCERA)\s+/i, '');
 
                                 const modelResult = await supabaseClient
                                     .from('printer_models')
-                                    .select('id, full_name, model_name')
+                                    .select('id, full_name, model_name, slug')
                                     .ilike('model_name', `%${modelNameOnly}%`)
                                     .limit(1);
 
@@ -1952,11 +1951,10 @@
                                     printerData = modelResult.data[0];
                                 }
 
-                                // Also try partial match on full_name with just the model number
                                 if (!printerData) {
                                     const fullNamePartial = await supabaseClient
                                         .from('printer_models')
-                                        .select('id, full_name, model_name')
+                                        .select('id, full_name, model_name, slug')
                                         .ilike('full_name', `%${modelNameOnly}%`)
                                         .limit(1);
 
@@ -1967,104 +1965,32 @@
                             }
                         }
 
-                        if (printerData) {
-                            // Get all compatible product IDs
-                            const { data: compatData, error: compatError } = await supabaseClient
-                                .from('product_compatibility')
-                                .select('product_id')
-                                .eq('printer_model_id', printerData.id);
-
-                            if (compatData && compatData.length > 0) {
-                                const productIds = compatData.map(c => c.product_id);
-
-                                // Fetch those products (these are the directly linked products)
-                                const { data: productsData, error: productsError } = await supabaseClient
-                                    .from('products')
-                                    .select('*, brand:brands(name, slug)')
-                                    .in('id', productIds)
-                                    .eq('is_active', true);
-
-                                if (productsData && productsData.length > 0) {
-                                    allProducts = productsData.map(p => ({
-                                        ...p,
-                                        brand_name: p.brand?.name,
-                                        brand_slug: p.brand?.slug
-                                    }));
-
-                                    // Extract ink codes from product names (e.g., "LC37", "PG-540", "LC133")
-                                    // This helps us find compatible versions that aren't directly linked
-                                    const codePattern = /\b([A-Z]{1,3}[-]?\d{2,4}[A-Z]{0,2})\b/gi;
-                                    allProducts.forEach(p => {
-                                        const matches = (p.name || '').match(codePattern);
-                                        if (matches) {
-                                            matches.forEach(code => {
-                                                const upperCode = code.toUpperCase();
-                                                if (!inkCodes.includes(upperCode)) {
-                                                    inkCodes.push(upperCode);
-                                                }
-                                            });
-                                        }
-                                    });
-                                }
-                            }
-                        }
+                        if (printerData?.slug) resolvedSlug = printerData.slug;
                     } catch (e) {
-                        // Supabase query failed - will fall back to API search
+                        // Printer lookup failed - will fall back below
                     }
                 }
 
-                // Strategy 2: Search for compatible products using the extracted ink codes
-                if (inkCodes.length > 0 && supabaseClient) {
+                // Use dedicated endpoint with the resolved slug — strict compatibility filter
+                if (resolvedSlug) {
                     try {
-                        // Search for products containing any of the ink codes
-                        for (const code of inkCodes) {
-                            // Search in product name
-                            const { data: codeProducts, error: codeError } = await supabaseClient
-                                .from('products')
-                                .select('*, brand:brands(name, slug)')
-                                .ilike('name', `%${code}%`)
-                                .eq('is_active', true)
-                                .limit(100);
-
-                            if (codeProducts && codeProducts.length > 0) {
-                                // Add products not already in the list
-                                const existingIds = new Set(allProducts.map(p => p.id));
-                                const newProducts = codeProducts
-                                    .filter(p => !existingIds.has(p.id))
-                                    .map(p => ({
-                                        ...p,
-                                        brand_name: p.brand?.name,
-                                        brand_slug: p.brand?.slug
-                                    }));
-                                allProducts = [...allProducts, ...newProducts];
-                            }
-
-                            // Also search in SKU
-                            const { data: skuProducts } = await supabaseClient
-                                .from('products')
-                                .select('*, brand:brands(name, slug)')
-                                .ilike('sku', `%${code}%`)
-                                .eq('is_active', true)
-                                .limit(50);
-
-                            if (skuProducts && skuProducts.length > 0) {
-                                const existingIds = new Set(allProducts.map(p => p.id));
-                                const newSkuProducts = skuProducts
-                                    .filter(p => !existingIds.has(p.id))
-                                    .map(p => ({
-                                        ...p,
-                                        brand_name: p.brand?.name,
-                                        brand_slug: p.brand?.slug
-                                    }));
-                                allProducts = [...allProducts, ...newSkuProducts];
+                        const resp = await API.getPrinterProducts(resolvedSlug, { limit: 200 });
+                        if (resp.ok && resp.data) {
+                            const list = resp.data.compatible_products || resp.data.products || [];
+                            if (Array.isArray(list) && list.length > 0) {
+                                allProducts = list.map(p => ({
+                                    ...p,
+                                    brand_name: p.brand?.name || p.brand_name,
+                                    brand_slug: p.brand?.slug || p.brand_slug
+                                }));
                             }
                         }
                     } catch (e) {
-                        // Ink code search failed - continue with existing results
+                        // Dedicated endpoint failed - fall through to search fallbacks
                     }
                 }
 
-                // Strategy 3: Fallback - search by printer model via dedicated endpoint
+                // Strategy 2: Fallback - search-by-printer endpoint (also uses product_compatibility)
                 if (allProducts.length === 0) {
                     try {
                         const printerResponse = await API.searchByPrinter(printerModel, { limit: 100 });
@@ -2073,6 +1999,18 @@
                         }
                     } catch (e) {
                         // searchByPrinter failed - continue to generic search
+                    }
+                }
+
+                // Strategy 3: Fallback - smart search (backend now filters by matched_printer)
+                if (allProducts.length === 0) {
+                    try {
+                        const smart = await API.smartSearch(printerModel, 100);
+                        if (smart.ok && smart.data?.matched_printer && Array.isArray(smart.data.products)) {
+                            allProducts = smart.data.products;
+                        }
+                    } catch (e) {
+                        // smartSearch failed - fall through
                     }
                 }
 

@@ -29,6 +29,7 @@ let _pSearch = '';
 let _pBrandFilter = '';
 let _pTypeFilter = '';
 let _pActiveFilter = '';
+let _pImageFilter = '';
 let _pSort = 'name';
 let _pSortDir = 'asc';
 let _pPage = 1;
@@ -365,6 +366,11 @@ function renderProductsTab(container) {
       <option value="true">Active</option>
       <option value="false">Inactive</option>
     </select>
+    <select class="admin-select" id="ribbon-image-filter">
+      <option value="">All Images</option>
+      <option value="no-images">No Images</option>
+      <option value="has-images">Has Images</option>
+    </select>
     <button class="admin-btn admin-btn--primary admin-btn--sm" id="add-ribbon-btn">${icon('plus', 14, 14)} Add Ribbon</button>
   `;
   container.appendChild(toolbar);
@@ -379,6 +385,7 @@ function renderProductsTab(container) {
   toolbar.querySelector('#ribbon-brand-filter').addEventListener('change', (e) => { _pBrandFilter = e.target.value; _pPage = 1; loadRibbonProducts(); });
   toolbar.querySelector('#ribbon-type-filter').addEventListener('change', (e) => { _pTypeFilter = e.target.value; _pPage = 1; loadRibbonProducts(); });
   toolbar.querySelector('#ribbon-active-filter').addEventListener('change', (e) => { _pActiveFilter = e.target.value; _pPage = 1; loadRibbonProducts(); });
+  toolbar.querySelector('#ribbon-image-filter').addEventListener('change', (e) => { _pImageFilter = e.target.value; _pPage = 1; loadRibbonProducts(); });
   toolbar.querySelector('#add-ribbon-btn').addEventListener('click', () => openRibbonProductModal(null));
 
   // Table
@@ -591,7 +598,11 @@ async function loadRibbonProducts() {
     limit: _pLimit,
   });
   if (!_productsTable) return;
-  const products = result?.products || [];
+  let products = result?.products || [];
+  if (_pImageFilter) {
+    const hasImg = (p) => !!(p.image_url && String(p.image_url).trim());
+    products = products.filter(p => _pImageFilter === 'no-images' ? !hasImg(p) : hasImg(p));
+  }
   _productsTable.setData(products, result ? { total: result.total, page: result.page, limit: result.limit } : null);
 }
 
@@ -1085,6 +1096,7 @@ export default {
     _pBrandFilter = '';
     _pTypeFilter = '';
     _pActiveFilter = '';
+    _pImageFilter = '';
     _pSort = 'name';
     _pSortDir = 'asc';
     _pPage = 1;
