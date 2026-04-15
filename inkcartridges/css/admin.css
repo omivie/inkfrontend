@@ -2118,8 +2118,9 @@ button.admin-active-dot--clickable:hover::after { opacity: 1; }
    Shared Column Widths (Products / Ribbons table parity)
    ============================================================ */
 .admin-table td.col-w-name,  .admin-table th.col-w-name  { width: 340px; min-width: 340px; max-width: 340px; }
-.admin-table td.col-w-sku,   .admin-table th.col-w-sku   { width: 140px; min-width: 140px; }
-.admin-table td.col-w-brand, .admin-table th.col-w-brand { width: 110px; min-width: 110px; }
+.admin-table td.col-w-sku,   .admin-table th.col-w-sku   { width: 120px; min-width: 120px; max-width: 120px; word-break: break-all; white-space: normal; }
+.admin-table td.col-w-sku .cell-mono { white-space: normal; word-break: break-all; }
+.admin-table td.col-w-brand, .admin-table th.col-w-brand { width: 90px; min-width: 90px; max-width: 90px; }
 .admin-table td.col-w-price, .admin-table th.col-w-price { width: 80px;  min-width: 80px; }
 .admin-table td.col-w-pct,   .admin-table th.col-w-pct   { width: 90px;  min-width: 90px; }
 .admin-table td.col-w-type,  .admin-table th.col-w-type  { width: 110px; min-width: 110px; }

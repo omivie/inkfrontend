@@ -62,10 +62,10 @@ function buildColumns() {
     },
     {
       key: 'name', label: 'Name', sortable: true, className: 'col-w-name',
-      render: (r) => `<button class="copy-name-btn" data-copy="${esc(r.name || '')}" title="Copy name">${icon('copy', 15, 15)}</button><span class="cell-truncate" style="display:inline-block;max-width:300px;vertical-align:middle">${esc(r.name || MISSING)}</span>`,
+      render: (r) => `<div style="display:flex;align-items:center;gap:6px;min-width:0"><button class="copy-name-btn" data-copy="${esc(r.name || '')}" title="Copy name" style="margin:0;flex-shrink:0">${icon('copy', 15, 15)}</button><span class="cell-truncate" style="display:block;flex:1;min-width:0;max-width:280px">${esc(r.name || MISSING)}</span></div>`,
     },
     {
-      key: 'sku', label: 'SKU', sortable: true, className: 'cell-nowrap col-w-sku',
+      key: 'sku', label: 'SKU', sortable: true, className: 'col-w-sku',
       render: (r) => `<span class="cell-mono">${esc(r.sku || MISSING)}</span>`,
     },
     {

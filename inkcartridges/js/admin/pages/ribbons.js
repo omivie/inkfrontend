@@ -491,6 +491,15 @@ function renderProductsTab(container) {
     emptyMessage: 'No ribbon products found',
   });
 
+  // Copy name buttons
+  tableWrap.addEventListener('click', (e) => {
+    const btn = e.target.closest('.copy-name-btn');
+    if (!btn) return;
+    e.stopPropagation();
+    const name = btn.dataset.copy;
+    navigator.clipboard.writeText(name).then(() => Toast.success('Copied to clipboard')).catch(() => Toast.error('Copy failed'));
+  });
+
   // Import lock toggle
   tableWrap.addEventListener('click', async (e) => {
     const btn = e.target.closest('.import-lock-btn');
@@ -654,8 +663,8 @@ function buildProductColumns() {
           : `<div class="admin-product-thumb admin-product-thumb--empty">${icon('products', 16, 16)}</div>`;
       },
     },
-    { key: 'name', label: 'Name', sortable: true, className: 'col-w-name', render: (r) => `<span class="cell-truncate" style="display:inline-block;max-width:320px;vertical-align:middle">${esc(r.name || MISSING)}</span>` },
-    { key: 'sku', label: 'SKU', className: 'cell-nowrap col-w-sku', render: (r) => `<span class="cell-mono">${esc(r.sku || MISSING)}</span>` },
+    { key: 'name', label: 'Name', sortable: true, className: 'col-w-name', render: (r) => `<div style="display:flex;align-items:center;gap:6px;min-width:0"><button class="copy-name-btn" data-copy="${esc(r.name || '')}" title="Copy name" style="margin:0;flex-shrink:0">${icon('copy', 15, 15)}</button><span class="cell-truncate" style="display:block;flex:1;min-width:0;max-width:280px">${esc(r.name || MISSING)}</span></div>` },
+    { key: 'sku', label: 'SKU', className: 'col-w-sku', render: (r) => `<span class="cell-mono">${esc(r.sku || MISSING)}</span>` },
     {
       key: 'ribbon_brand', label: 'Brand', sortable: false, className: 'col-w-brand',
       render: (r) => {
