@@ -50,10 +50,10 @@ return { total_active_products: count };
 
 ---
 
-## 2. 🔴 MISSING — Supabase RPC `analytics_customer_stats`
+## 2. 🔴 MISSING — Supabase RPC `analytics_customer_stats` (deferred — tab removed from UI)
 
 ### Context
-The admin's Finance → Customers tab relies on a Supabase RPC that **does not exist**. The other five analytics RPCs in the same family work correctly (`analytics_kpi_summary`, `analytics_revenue_series`, `analytics_brand_breakdown`, `analytics_refunds_series`, `analytics_top_products`).
+The admin's Finance → Customers tab was removed from the UI for now because this Supabase RPC **does not exist** and the tab was showing placeholders. When product decides to bring Customer analytics back (either as a tab or a dedicated page), this RPC needs to be created. All other analytics RPCs in the family work correctly (`analytics_kpi_summary`, `analytics_revenue_series`, `analytics_brand_breakdown`, `analytics_refunds_series`, `analytics_top_products`).
 
 ### Reproduction
 ```bash

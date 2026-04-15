@@ -41,9 +41,6 @@ const TABS = [
   { id: 'margins',     label: 'Margins', lazy: true },
   { id: 'pricing',     label: 'Pricing', lazy: true },
   { id: 'market-intel', label: 'Market Intel', lazy: true },
-  { id: 'customers',   label: 'Customers' },
-  { id: 'products',    label: 'Products' },
-  { id: 'operations',  label: 'Operations' },
 ];
 
 let _container = null;
@@ -55,22 +52,16 @@ async function loadAnalytics() {
   const params = FilterState.getParams();
   const signal = FilterState.getAbortSignal();
 
-  const [kpisResult, revSeriesResult, brandResult, custResult, topProductsResult, refundResult] = await Promise.allSettled([
+  const [kpisResult, revSeriesResult, brandResult] = await Promise.allSettled([
     AdminAPI.getDashboardKPIs(params, signal),
     AdminAPI.getRevenueSeries(params, signal),
     AdminAPI.getBrandBreakdown(params, 'revenue', signal),
-    AdminAPI.getCustomerStats(params, signal),
-    AdminAPI.getTopProducts(params, signal),
-    AdminAPI.getRefundAnalytics(params, signal),
   ]);
 
   _data = {
-    kpis:        kpisResult?.value        ?? null,
-    revSeries:   revSeriesResult?.value   ?? null,
-    brandData:   brandResult?.value       ?? null,
-    custStats:   custResult?.value        ?? null,
-    topProducts: topProductsResult?.value ?? null,
-    refundData:  refundResult?.value      ?? null,
+    kpis:      kpisResult?.value      ?? null,
+    revSeries: revSeriesResult?.value ?? null,
+    brandData: brandResult?.value     ?? null,
   };
 
   render();
@@ -140,11 +131,9 @@ async function renderTabContent() {
 
   if (!_data) return;
 
-  const { kpis, revSeries, brandData, custStats, topProducts, refundData } = _data;
+  const { kpis, revSeries, brandData } = _data;
   const cur  = kpis?.current  ?? {};
   const prev = kpis?.previous ?? {};
-  const cc   = custStats?.current  ?? {};
-  const cp   = custStats?.previous ?? {};
 
   switch (_activeTab) {
     case 'revenue': {
@@ -174,173 +163,10 @@ async function renderTabContent() {
       break;
     }
 
-    case 'customers': {
-      el.innerHTML = `
-        <div class="admin-kpi-grid admin-kpi-grid--3 admin-mb-lg">
-          ${kpiCard({ label: 'Total Customers',    value: cc.total_customers     != null ? String(cc.total_customers)     : null, raw: cc.total_customers,     prevRaw: cp.total_customers,     missingTip: 'Requires analytics_customer_stats RPC' })}
-          ${kpiCard({ label: 'New Customers',      value: cc.new_customers       != null ? String(cc.new_customers)       : null, raw: cc.new_customers,       prevRaw: cp.new_customers,       missingTip: 'Requires analytics_customer_stats RPC' })}
-          ${kpiCard({ label: 'Returning Customers',value: cc.returning_customers != null ? String(cc.returning_customers) : null, raw: cc.returning_customers, prevRaw: cp.returning_customers, missingTip: 'Requires analytics_customer_stats RPC' })}
-        </div>
-        <div class="admin-grid-2 admin-mb-lg">
-          <div class="admin-card">
-            <div class="admin-card__title">Retention Rates</div>
-            ${renderRetentionStats(custStats)}
-          </div>
-          <div class="admin-card">
-            <div class="admin-card__title">Customer Breakdown</div>
-            ${renderCustomerStatRows(custStats)}
-          </div>
-        </div>
-      `;
-      break;
-    }
-
-    case 'products': {
-      el.innerHTML = `
-        <div class="admin-card admin-mb-lg">
-          <div class="admin-card__title">Top Products</div>
-          ${renderTopProducts(topProducts)}
-        </div>
-      `;
-      break;
-    }
-
-    case 'operations': {
-      el.innerHTML = `
-        <div class="admin-kpi-grid admin-mb-lg">
-          ${kpiCard({ label: 'Refund Rate',     value: cur.refund_rate     != null ? `${cur.refund_rate.toFixed(1)}%`     : null, raw: cur.refund_rate,     prevRaw: prev.refund_rate })}
-          ${kpiCard({ label: 'Chargeback Rate', value: cur.chargeback_rate != null ? `${cur.chargeback_rate.toFixed(1)}%` : null, raw: cur.chargeback_rate, prevRaw: prev.chargeback_rate })}
-          ${kpiCard({ label: 'Margin Proxy',    value: cur.margin_proxy    != null ? `${cur.margin_proxy.toFixed(1)}%`    : null, raw: cur.margin_proxy,    prevRaw: prev.margin_proxy, sub: 'Based on cost snapshots' })}
-          ${kpiCard({ label: 'Fulfillment SLA', value: cur.sla_48h         != null ? `${cur.sla_48h.toFixed(0)}%`         : null, raw: cur.sla_48h,         prevRaw: prev.sla_48h, sub: 'Shipped within 48h' })}
-        </div>
-        <div class="admin-card admin-mb-lg">
-          <div class="admin-card__title">Refund Analytics</div>
-          ${renderRefundTable(refundData)}
-        </div>
-      `;
-      break;
-    }
-
   }
 }
 
 // ---- Section renderers ----
-
-function renderRetentionStats(custStats) {
-  if (!custStats) {
-    return `<div class="admin-empty"><div class="admin-empty__text" data-tooltip="Requires analytics_customer_stats RPC">Customer analytics unavailable</div></div>`;
-  }
-  const cc = custStats?.current  ?? {};
-  const cp = custStats?.previous ?? {};
-  const rows = [
-    { label: 'Returning %',         value: cc.returning_pct         != null ? `${cc.returning_pct}%`         : null, raw: cc.returning_pct,         prev: cp.returning_pct },
-    { label: 'Returning Revenue %', value: cc.returning_revenue_pct != null ? `${cc.returning_revenue_pct}%` : null, raw: cc.returning_revenue_pct, prev: cp.returning_revenue_pct },
-  ];
-  let html = `<div class="admin-cust-stats">`;
-  for (const row of rows) {
-    html += `<div class="admin-cust-stat">`;
-    html += `<div class="admin-cust-stat__label">${esc(row.label)}</div>`;
-    html += `<div class="admin-cust-stat__right">`;
-    if (row.value != null) {
-      html += `<div class="admin-cust-stat__value">${esc(row.value)}</div>`;
-      html += delta(row.raw, row.prev);
-    } else {
-      html += `<div class="admin-cust-stat__value" style="color:var(--text-muted)">${MISSING}</div>`;
-    }
-    html += `</div></div>`;
-  }
-  return html + `</div>`;
-}
-
-function renderCustomerStatRows(custStats) {
-  if (!custStats) {
-    return `<div class="admin-empty"><div class="admin-empty__text" data-tooltip="Requires analytics_customer_stats RPC">Customer analytics unavailable</div></div>`;
-  }
-  const cc = custStats?.current  ?? {};
-  const cp = custStats?.previous ?? {};
-  const rows = [
-    { label: 'Total Customers',   value: cc.total_customers,     prev: cp.total_customers },
-    { label: 'New Customers',     value: cc.new_customers,       prev: cp.new_customers },
-    { label: 'Returning',         value: cc.returning_customers, prev: cp.returning_customers },
-    { label: 'Returning Revenue', value: cc.returning_revenue != null ? formatPrice(cc.returning_revenue) : null, raw: cc.returning_revenue, prev: cp.returning_revenue },
-  ];
-  let html = `<div class="admin-cust-stats">`;
-  for (const row of rows) {
-    const rawVal = row.raw ?? (typeof row.value === 'number' ? row.value : null);
-    html += `<div class="admin-cust-stat">`;
-    html += `<div class="admin-cust-stat__label">${esc(row.label)}</div>`;
-    html += `<div class="admin-cust-stat__right">`;
-    if (row.value != null) {
-      html += `<div class="admin-cust-stat__value">${esc(String(row.value))}</div>`;
-      html += delta(rawVal, row.prev);
-    } else {
-      html += `<div class="admin-cust-stat__value" style="color:var(--text-muted)">${MISSING}</div>`;
-    }
-    html += `</div></div>`;
-  }
-  return html + `</div>`;
-}
-
-function renderTopProducts(data) {
-  const rows = Array.isArray(data) ? data : (data ? [data] : []);
-  if (!rows.length) {
-    return `<div class="admin-empty"><div class="admin-empty__text" data-tooltip="Requires analytics_top_products RPC">Top products unavailable</div></div>`;
-  }
-  let html = `<div class="admin-table-wrap"><table class="admin-table"><thead><tr>
-    <th>Product</th><th>SKU</th><th class="cell-right">Revenue</th><th class="cell-right">Orders</th><th class="cell-right">Units</th>
-  </tr></thead><tbody>`;
-  for (const row of rows) {
-    html += `<tr>
-      <td style="font-weight:600;font-size:13px">${esc(row.product_name || row.name || MISSING)}</td>
-      <td style="font-size:11px;color:var(--text-muted);font-family:var(--font-mono)">${esc(row.sku || MISSING)}</td>
-      <td class="cell-right cell-mono">${row.revenue != null ? formatPrice(row.revenue) : MISSING}</td>
-      <td class="cell-right cell-mono">${row.orders ?? MISSING}</td>
-      <td class="cell-right cell-mono">${row.units ?? MISSING}</td>
-    </tr>`;
-  }
-  return html + `</tbody></table></div>`;
-}
-
-function renderRefundTable(data) {
-  // Preferred shape (when backend ships reason breakdown): { reasons: [{reason, count, amount}] }
-  if (data?.reasons?.length) {
-    const total = data.reasons.reduce((s, r) => s + (r.count || 0), 0) || 1;
-    let html = `<div class="admin-table-wrap"><table class="admin-table"><thead><tr>
-      <th>Reason</th><th class="cell-right">Count</th><th class="cell-right">Amount</th><th class="cell-right">Share</th>
-    </tr></thead><tbody>`;
-    for (const r of data.reasons) {
-      html += `<tr>
-        <td>${esc(r.reason || r.reason_code || 'Unknown')}</td>
-        <td class="cell-right cell-mono">${r.count ?? MISSING}</td>
-        <td class="cell-right cell-mono">${r.amount != null ? formatPrice(r.amount) : MISSING}</td>
-        <td class="cell-right cell-mono">${((r.count / total) * 100).toFixed(1)}%</td>
-      </tr>`;
-    }
-    return html + `</tbody></table></div>`;
-  }
-
-  // Fallback: use the daily series returned by analytics_refunds_series RPC
-  const series = Array.isArray(data?.series) ? data.series : [];
-  const totalCount = series.reduce((s, r) => s + (r.refund_count || 0), 0);
-  const totalAmount = series.reduce((s, r) => s + (r.total_amount || 0), 0);
-  if (!series.length || totalCount === 0) {
-    return `<div class="admin-empty"><div class="admin-empty__text">No refunds in this period</div></div>`;
-  }
-  const rows = series.filter(r => (r.refund_count || 0) > 0);
-  let html = `<div style="font-size:12px;color:var(--text-muted);margin-bottom:8px">${totalCount} refund${totalCount === 1 ? '' : 's'} totalling ${formatPrice(totalAmount)}</div>`;
-  html += `<div class="admin-table-wrap"><table class="admin-table"><thead><tr>
-    <th>Date</th><th class="cell-right">Refunds</th><th class="cell-right">Orders</th><th class="cell-right">Amount</th>
-  </tr></thead><tbody>`;
-  for (const r of rows) {
-    html += `<tr>
-      <td>${esc(r.date || MISSING)}</td>
-      <td class="cell-right cell-mono">${r.refund_count ?? MISSING}</td>
-      <td class="cell-right cell-mono">${r.total_orders ?? MISSING}</td>
-      <td class="cell-right cell-mono">${r.total_amount != null ? formatPrice(r.total_amount) : MISSING}</td>
-    </tr>`;
-  }
-  return html + `</tbody></table></div>`;
-}
 
 function renderBrandTable(data) {
   if (!data?.brands?.length) {
