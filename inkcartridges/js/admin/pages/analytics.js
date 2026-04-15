@@ -37,6 +37,7 @@ function kpiCard({ label, value, raw, prevRaw, missingTip, sub }) {
 
 const TABS = [
   { id: 'revenue',     label: 'Revenue' },
+  { id: 'health',      label: 'Health', lazy: true },
   { id: 'margins',     label: 'Margins', lazy: true },
   { id: 'pricing',     label: 'Pricing', lazy: true },
   { id: 'market-intel', label: 'Market Intel', lazy: true },
@@ -80,7 +81,7 @@ function render() {
   Charts.destroyAll();
 
   _container.innerHTML = `
-    <div class="admin-page-header"><h1>Profit Center</h1></div>
+    <div class="admin-page-header"><h1>Finance</h1></div>
     <div class="admin-analytics-tabs" id="analytics-tabs">
       ${TABS.map(t => `
         <button class="admin-analytics-tab${t.id === _activeTab ? ' is-active' : ''}" data-tab="${esc(t.id)}">
@@ -121,6 +122,7 @@ async function renderTabContent() {
   if (tab?.lazy) {
     el.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;min-height:20vh"><div class="admin-loading__spinner"></div></div>`;
     const moduleMap = {
+      'health': './financial-health.js',
       'margins': './margin.js',
       'pricing': './cc-profit.js',
       'market-intel': './cc-market-intel.js',
@@ -442,7 +444,7 @@ async function renderBrandChart(data) {
 // ---- Module export ----
 
 export default {
-  title: 'Profit Center',
+  title: 'Finance',
 
   async init(container) {
     _container = container;

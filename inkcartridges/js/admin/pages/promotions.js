@@ -10,6 +10,8 @@ import { Toast } from '../components/toast.js';
 let _container = null;
 let _table = null;
 let _rows = [];
+let _activeTab = 'promotions';
+let _couponsModule = null;
 
 const COLUMNS = [
   { key: 'code', label: 'Code', sortable: true, render: (r) => `<span class="cell-mono">${esc(r.code || '')}</span>` },
@@ -200,6 +202,7 @@ export default {
 
   async init(container) {
     _container = container;
+    _activeTab = 'promotions';
     container.innerHTML = `
       <div class="admin-page-content">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:var(--spacing-4)">
@@ -209,7 +212,16 @@ export default {
           </div>
           <button class="admin-btn admin-btn--primary" id="new-promo-btn">${icon('plus', 14, 14)} New Promotion</button>
         </div>
-        <div id="promo-table"></div>
+
+        <div class="admin-tabs" style="display:flex;gap:4px;border-bottom:1px solid var(--border);margin-bottom:var(--spacing-4)">
+          <button class="admin-tab is-active" data-promo-tab="promotions" style="padding:10px 16px;background:transparent;border:0;border-bottom:2px solid transparent;color:var(--text);font-weight:500;cursor:pointer">Promotions</button>
+          <button class="admin-tab" data-promo-tab="coupons" style="padding:10px 16px;background:transparent;border:0;border-bottom:2px solid transparent;color:var(--text-muted);font-weight:500;cursor:pointer">Coupons</button>
+        </div>
+
+        <div id="promo-tab-promotions">
+          <div id="promo-table"></div>
+        </div>
+        <div id="promo-tab-coupons" style="display:none"></div>
       </div>
     `;
 
@@ -221,14 +233,62 @@ export default {
       emptyMessage: 'No promotions yet. Create your first coupon code.',
     });
 
-    container.querySelector('#new-promo-btn').addEventListener('click', () => openForm(null));
+    container.querySelector('#new-promo-btn').addEventListener('click', () => {
+      if (_activeTab === 'promotions') openForm(null);
+      else _container.querySelector('#new-coupon-btn')?.click();
+    });
+
+    container.querySelectorAll('[data-promo-tab]').forEach((btn) => {
+      btn.addEventListener('click', () => switchPromoTab(btn.dataset.promoTab));
+    });
+
     await loadData();
+  },
+
+  onSearch(query) {
+    if (_activeTab === 'coupons' && _couponsModule?.onSearch) _couponsModule.onSearch(query);
   },
 
   destroy() {
     if (_table) _table.destroy?.();
+    if (_couponsModule?.destroy) _couponsModule.destroy();
     _table = null;
+    _couponsModule = null;
     _container = null;
     _rows = [];
   },
 };
+
+async function switchPromoTab(tab) {
+  if (tab === _activeTab) return;
+  _activeTab = tab;
+  _container.querySelectorAll('[data-promo-tab]').forEach((btn) => {
+    const on = btn.dataset.promoTab === tab;
+    btn.classList.toggle('is-active', on);
+    btn.style.color = on ? 'var(--text)' : 'var(--text-muted)';
+    btn.style.borderBottomColor = on ? 'var(--cyan)' : 'transparent';
+  });
+  const promosEl = _container.querySelector('#promo-tab-promotions');
+  const couponsEl = _container.querySelector('#promo-tab-coupons');
+  promosEl.style.display = tab === 'promotions' ? '' : 'none';
+  couponsEl.style.display = tab === 'coupons' ? '' : 'none';
+
+  const btn = _container.querySelector('#new-promo-btn');
+  btn.innerHTML = tab === 'promotions'
+    ? `${icon('plus', 14, 14)} New Promotion`
+    : `${icon('plus', 14, 14)} New Coupon`;
+
+  if (tab === 'coupons' && !_couponsModule) {
+    couponsEl.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;min-height:20vh"><div class="admin-loading__spinner"></div></div>`;
+    try {
+      const mod = await import('./coupons.js');
+      _couponsModule = mod.default;
+      couponsEl.innerHTML = '';
+      await _couponsModule.init(couponsEl);
+      const headerRow = couponsEl.querySelector('.admin-page-content > div:first-child');
+      if (headerRow) headerRow.style.display = 'none';
+    } catch (e) {
+      couponsEl.innerHTML = `<div class="admin-empty"><div class="admin-empty__title">Failed to load Coupons</div><div class="admin-empty__text">${esc(e.message)}</div></div>`;
+    }
+  }
+}

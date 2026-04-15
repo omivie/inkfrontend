@@ -980,35 +980,35 @@ const AdminAPI = {
   async getMarginSummary(params = {}) {
     try {
       const qs = new URLSearchParams(params).toString();
-      return await window.API._fetchWithAuth(`/api/admin/margin/summary${qs ? '?' + qs : ''}`);
+      return await window.API.get(`/api/admin/margin/summary${qs ? '?' + qs : ''}`);
     } catch (e) { adminApiWarn('Margin summary', e); return null; }
   },
 
   async getRecommendedPrices(params = {}) {
     try {
       const qs = new URLSearchParams(params).toString();
-      return await window.API._fetchWithAuth(`/api/admin/margin/recommended-prices${qs ? '?' + qs : ''}`);
+      return await window.API.get(`/api/admin/margin/recommended-prices${qs ? '?' + qs : ''}`);
     } catch (e) { adminApiWarn('Recommended prices', e); return null; }
   },
 
   async getPriceChanges(params = {}) {
     try {
       const qs = new URLSearchParams(params).toString();
-      return await window.API._fetchWithAuth(`/api/admin/margin/price-changes${qs ? '?' + qs : ''}`);
+      return await window.API.get(`/api/admin/margin/price-changes${qs ? '?' + qs : ''}`);
     } catch (e) { adminApiWarn('Price changes', e); return null; }
   },
 
   async getOutOfStock(params = {}) {
     try {
       const qs = new URLSearchParams(params).toString();
-      return await window.API._fetchWithAuth(`/api/admin/margin/out-of-stock${qs ? '?' + qs : ''}`);
+      return await window.API.get(`/api/admin/margin/out-of-stock${qs ? '?' + qs : ''}`);
     } catch (e) { adminApiWarn('Out of stock', e); return null; }
   },
 
   async getTopProfit(params = {}) {
     try {
       const qs = new URLSearchParams(params).toString();
-      return await window.API._fetchWithAuth(`/api/admin/margin/top-profit${qs ? '?' + qs : ''}`);
+      return await window.API.get(`/api/admin/margin/top-profit${qs ? '?' + qs : ''}`);
     } catch (e) { adminApiWarn('Top profit', e); return null; }
   },
 

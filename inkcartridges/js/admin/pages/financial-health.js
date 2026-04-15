@@ -41,6 +41,7 @@ function render() {
   const ov = _state.overview || {};
   const br = _state.burnRunway || {};
   const f = _state.forecasts || {};
+  const fc = f.forecasts || f;
 
   const grossMargin = num(pick(ov, 'grossMargin', 'gross_margin'));
   const prevGrossMargin = num(pick(ov, 'prevGrossMargin', 'prev_gross_margin'));
@@ -48,9 +49,9 @@ function render() {
   const cashBalance = num(pick(br, 'cashBalance', 'cash_balance', 'balance'));
   const monthlyBurn = num(pick(br, 'monthlyBurn', 'monthly_burn', 'burnRate'));
   const runwayMonths = pick(br, 'runwayMonths', 'runway_months', 'runway');
-  const f30 = num(pick(f, 'forecast30', 'days30', 'd30'));
-  const f60 = num(pick(f, 'forecast60', 'days60', 'd60'));
-  const f90 = num(pick(f, 'forecast90', 'days90', 'd90'));
+  const f30 = num(pick(fc, 'forecast30', 'days30', 'd30', '30_days'));
+  const f60 = num(pick(fc, 'forecast60', 'days60', 'd60', '60_days'));
+  const f90 = num(pick(fc, 'forecast90', 'days90', 'd90', '90_days'));
 
   const marginDelta = grossMargin - prevGrossMargin;
   const marginDeltaHtml = (_state.overview && pick(ov, 'prevGrossMargin', 'prev_gross_margin') !== undefined)
@@ -79,7 +80,6 @@ function render() {
   }
 
   _container.innerHTML = `
-    <div class="admin-page-header"><h1>Financial Health</h1></div>
     ${runwayAlert}
 
     <div class="admin-kpi-grid admin-kpi-grid--4 admin-mb-lg">
@@ -130,7 +130,7 @@ function render() {
     </div>
 
     <div class="admin-card admin-mb-lg">
-      <div class="admin-card__title">Profit & Loss <small>last 90 days vs prior 90</small></div>
+      <div class="admin-card__title">Profit & Loss <small>latest period vs prior</small></div>
       <div style="overflow-x:auto">${renderPnLTable()}</div>
     </div>
 
@@ -153,17 +153,15 @@ function render() {
 
 function renderPnLTable() {
   const pnl = _state.pnl || {};
+  const periods = Array.isArray(pnl.periods) ? pnl.periods : [];
+  const cur = periods[periods.length - 1] || pnl.totals || {};
+  const prev = periods.length >= 2 ? periods[periods.length - 2] : {};
   const rows = [
-    ['Gross Sales', pick(pnl, 'grossSales', 'gross_sales', 'revenue'), pick(pnl, 'prevGrossSales', 'prev_gross_sales')],
-    ['Discounts & Returns', pick(pnl, 'discounts'), pick(pnl, 'prevDiscounts', 'prev_discounts'), true],
-    ['Net Revenue', pick(pnl, 'netRevenue', 'net_revenue'), pick(pnl, 'prevNetRevenue', 'prev_net_revenue')],
-    ['Cost of Goods Sold', pick(pnl, 'cogs'), pick(pnl, 'prevCogs', 'prev_cogs'), true],
-    ['Shipping Costs', pick(pnl, 'shippingCosts', 'shipping'), pick(pnl, 'prevShippingCosts', 'prev_shipping'), true],
-    ['Gross Profit', pick(pnl, 'grossProfit', 'gross_profit'), pick(pnl, 'prevGrossProfit', 'prev_gross_profit')],
-    ['Marketing', pick(pnl, 'marketing'), pick(pnl, 'prevMarketing', 'prev_marketing'), true],
-    ['Platform Fees', pick(pnl, 'platform', 'platformFees'), pick(pnl, 'prevPlatform', 'prev_platform'), true],
-    ['Other Operating', pick(pnl, 'otherOperating', 'other'), pick(pnl, 'prevOtherOperating', 'prev_other'), true],
-    ['Net Profit', pick(pnl, 'netProfit', 'net_profit'), pick(pnl, 'prevNetProfit', 'prev_net_profit'), false, true],
+    ['Revenue', cur.revenue, prev.revenue],
+    ['Cost of Goods Sold', cur.cogs, prev.cogs, true],
+    ['Gross Profit', cur.gross_profit, prev.gross_profit],
+    ['Operating Expenses', cur.operating_expenses, prev.operating_expenses, true],
+    ['Net Profit', cur.net_profit, prev.net_profit, false, true],
   ];
 
   const fmt = (v, neg) => {
@@ -267,34 +265,19 @@ async function renderCashflowChart() {
 }
 
 async function renderProfitChart() {
-  const daily = _state.daily;
-  const rows = Array.isArray(daily) ? daily : (daily?.days || daily?.series || []);
-  const grossMarginPct = num(pick(_state.overview || {}, 'grossMargin', 'gross_margin')) / 100;
-  const monthlyExpenses = num(pick(_state.burnRunway || {}, 'monthlyExpenses', 'monthly_expenses'));
-
-  const months = 12;
-  const buckets = new Map();
-  for (let i = months - 1; i >= 0; i--) {
-    const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() - i);
-    const key = `${d.getFullYear()}-${d.getMonth()}`;
-    buckets.set(key, { label: d.toLocaleDateString('en-NZ', { month: 'short', year: '2-digit' }), revenue: 0 });
-  }
-  for (const r of rows) {
-    const dateStr = pick(r, 'date', 'day', 'period');
-    if (!dateStr) continue;
-    const d = new Date(dateStr);
-    if (isNaN(d)) continue;
-    const key = `${d.getFullYear()}-${d.getMonth()}`;
-    const b = buckets.get(key);
-    if (b) b.revenue += num(pick(r, 'revenue', 'total', 'sales'));
-  }
+  const pnl = _state.pnl || {};
+  const periods = Array.isArray(pnl.periods) ? pnl.periods : [];
 
   const labels = [], gross = [], net = [];
-  for (const b of buckets.values()) {
-    labels.push(b.label);
-    const g = b.revenue * grossMarginPct;
-    gross.push(parseFloat(g.toFixed(2)));
-    net.push(parseFloat((g - monthlyExpenses).toFixed(2)));
+  for (const p of periods) {
+    const ym = String(p.period || '');
+    const [y, m] = ym.split('-');
+    const label = (y && m)
+      ? new Date(Number(y), Number(m) - 1, 1).toLocaleDateString('en-NZ', { month: 'short', year: '2-digit' })
+      : ym;
+    labels.push(label);
+    gross.push(num(p.gross_profit));
+    net.push(num(p.net_profit));
   }
 
   const colors = Charts.getThemeColors();

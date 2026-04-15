@@ -44,15 +44,13 @@ function icon(name, w = 18, h = 18) {
 // ---- Navigation config ----
 const NAV_ITEMS = [
   { key: 'dashboard', label: 'Dashboard', icon: 'dashboard' },
-  { key: 'analytics', label: 'Profit Center', icon: 'finance', ownerOnly: true },
-  { key: 'financial-health', label: 'Financial Health', icon: 'finance', ownerOnly: true },
+  { key: 'analytics', label: 'Finance', icon: 'finance', ownerOnly: true },
   { key: 'website-traffic', label: 'Website Traffic', icon: 'analytics', ownerOnly: true },
   { key: 'orders', label: 'Orders', icon: 'orders' },
   { key: 'products', label: 'Products', icon: 'products' },
   { key: 'customers', label: 'Customers', icon: 'customers' },
   { divider: true },
   { key: 'promotions', label: 'Promotions', icon: 'finance', ownerOnly: true },
-  { key: 'coupons', label: 'Coupons', icon: 'finance', ownerOnly: true },
   { key: 'shipping-rates', label: 'Shipping Rates', icon: 'fulfillment', ownerOnly: true },
   { key: 'abuse', label: 'Abuse', icon: 'lock', ownerOnly: true },
   { key: 'segments', label: 'Segments', icon: 'mail', ownerOnly: true },
@@ -71,6 +69,8 @@ const ROUTE_REDIRECTS = {
   'reviews': 'customers',
   'b2b': 'customers',
   'margin': 'analytics',
+  'financial-health': 'analytics',
+  'coupons': 'promotions',
 };
 
 // ---- Page module cache ----
