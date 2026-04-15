@@ -1,7 +1,7 @@
 /**
  * Financial Health Page — Cash, P&L, runway, expenses
  */
-import { AdminAPI, esc } from '../app.js';
+import { AdminAPI, FilterState, esc } from '../app.js';
 import { Charts } from '../components/charts.js';
 
 const formatPrice = (v) => window.formatPrice ? window.formatPrice(v) : `$${Number(v).toFixed(2)}`;
@@ -20,13 +20,14 @@ let _container = null;
 let _state = {};
 
 async function load() {
+  const days = FilterState.periodToDays();
   const [overview, burnRunway, forecasts, cashflow, daily, pnl, expenses] = await Promise.all([
-    AdminAPI.getAdminAnalyticsOverview(30),
+    AdminAPI.getAdminAnalyticsOverview(days),
     AdminAPI.getAdminAnalyticsBurnRunway(),
     AdminAPI.getAdminAnalyticsForecasts(),
     AdminAPI.getAdminAnalyticsCashflow(12),
     AdminAPI.getAdminAnalyticsDailyRevenue(372),
-    AdminAPI.getAdminAnalyticsPnL(90),
+    AdminAPI.getAdminAnalyticsPnL(days),
     AdminAPI.getAdminAnalyticsExpenses(20),
   ]);
   _state = { overview, burnRunway, forecasts, cashflow, daily, pnl, expenses };
@@ -351,6 +352,7 @@ export default {
 
   async init(container) {
     _container = container;
+    FilterState.setVisibleFilters(['period']);
     container.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;min-height:40vh"><div class="admin-loading__spinner"></div></div>`;
     try {
       await load();
@@ -359,8 +361,13 @@ export default {
     }
   },
 
+  async onFilterChange() {
+    if (_container) await load();
+  },
+
   destroy() {
     Charts.destroyAll();
+    FilterState.setVisibleFilters(null);
     _container = null;
     _state = {};
   },
