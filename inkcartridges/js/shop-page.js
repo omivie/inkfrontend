@@ -711,8 +711,10 @@
             // Check if navigation changed before rendering
             if (navVersion !== undefined && this.navigationVersion !== navVersion) return;
 
-            // Filter categories to only those with products
-            const availableCategories = this.categories.filter(cat => categoryCounts[cat.id] > 0);
+            // Filter categories to only those with products.
+            // Ribbons are intentionally excluded from shop — only reachable via the
+            // "Typewriter & Printer Ribbons" nav dropdown.
+            const availableCategories = this.categories.filter(cat => cat.id !== 'ribbons' && categoryCounts[cat.id] > 0);
 
             this.showLoading(false);
 

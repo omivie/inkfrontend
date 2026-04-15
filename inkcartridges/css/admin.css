@@ -2210,3 +2210,29 @@ button.admin-active-dot--clickable:hover::after { opacity: 1; }
   font-size: 13px; color: var(--text-secondary); margin: 0;
 }
 
+/* Website Traffic page */
+.admin-traffic-bars { display: flex; flex-direction: column; gap: 10px; padding: 4px 0; }
+.admin-traffic-row {
+  display: grid; grid-template-columns: 140px 1fr 140px;
+  gap: 12px; align-items: center; font-size: 13px;
+}
+.admin-traffic-row__label { color: var(--text-secondary); }
+.admin-traffic-row__bar {
+  height: 8px; border-radius: 4px; background: var(--surface-alt, rgba(0,0,0,.06)); overflow: hidden;
+}
+.admin-traffic-row__bar > div {
+  height: 100%; background: linear-gradient(90deg, var(--cyan, #22d3ee), var(--magenta, #e879f9));
+  border-radius: 4px; transition: width .3s ease;
+}
+.admin-traffic-row__value { text-align: right; font-variant-numeric: tabular-nums; }
+.admin-traffic-row__pct { color: var(--text-muted); margin-left: 6px; font-size: 12px; }
+.admin-chip {
+  display: inline-block; padding: 2px 8px; border-radius: 999px;
+  font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .3px;
+}
+.admin-chip--info { background: rgba(34, 211, 238, .12); color: var(--cyan-text, #0891b2); }
+.admin-chip--success { background: rgba(34, 197, 94, .12); color: var(--success, #16a34a); }
+@media (max-width: 640px) {
+  .admin-traffic-row { grid-template-columns: 100px 1fr 110px; }
+}
+

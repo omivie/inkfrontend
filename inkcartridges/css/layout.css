@@ -1618,10 +1618,19 @@
         flex-shrink: 1;
     }
 
+    .search-wrapper {
+        width: 100%;
+        max-width: 260px;
+        min-width: 0;
+        margin: 0 auto;
+    }
+
     .primary-nav .container {
         flex-wrap: nowrap;
         justify-content: center;
         position: relative;
+        padding-top: var(--spacing-2);
+        padding-bottom: var(--spacing-2);
     }
 
     .nav-toggle {
@@ -1638,6 +1647,13 @@
         width: 100%;
         max-width: 260px;
         margin: 0 auto;
+    }
+
+    .search-form--nav .search-form__input,
+    .search-form--nav .search-form__button {
+        padding-top: 0.25rem;
+        padding-bottom: 0.25rem;
+        font-size: var(--font-size-sm);
     }
 
     .nav-menu {
@@ -1700,6 +1716,11 @@
 
     .logo__text {
         font-size: 1.2rem;
+    }
+
+    #google-reviews-badge,
+    #google-reviews-badge iframe {
+        display: none !important;
     }
 
     .logo-block {

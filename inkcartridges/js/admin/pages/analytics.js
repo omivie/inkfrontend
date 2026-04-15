@@ -219,22 +219,6 @@ async function renderTabContent() {
       break;
     }
 
-    case 'traffic': {
-      el.innerHTML = `
-        <div class="admin-card admin-mb-lg">
-          <div class="admin-card__title">Traffic <small style="color:var(--text-muted);font-weight:400">— Google Analytics integration pending</small></div>
-          <div class="admin-traffic-grid">
-            ${['Direct', 'Organic', 'Paid', 'Referral'].map(label => `
-              <div class="admin-traffic-tile">
-                <div class="admin-traffic-tile__label">${esc(label)}</div>
-                <div class="admin-traffic-tile__value">${MISSING}</div>
-              </div>
-            `).join('')}
-          </div>
-        </div>
-      `;
-      break;
-    }
   }
 }
 

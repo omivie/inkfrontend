@@ -632,7 +632,10 @@
 @media (max-width: 768px) {
     .ink-finder__step[data-step="2"] .custom-select__dropdown,
     .ink-finder__step[data-step="3"] .custom-select__dropdown {
-        width: calc(100vw - 48px);
+        width: 100%;
+        max-width: 100%;
+        left: 0;
+        right: 0;
         grid-template-columns: repeat(2, 1fr);
     }
 }
@@ -7447,6 +7450,12 @@
 @media (max-width: 768px) {
     .contact-hero-cards {
         grid-template-columns: repeat(2, 1fr);
+        min-width: 0;
+    }
+
+    .contact-hero-card {
+        min-width: 0;
+        word-break: break-word;
     }
 
     .page-header--contact {

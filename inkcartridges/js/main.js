@@ -586,7 +586,12 @@ document.addEventListener('click', function(e) {
                     const wrapperRect = wrapper.getBoundingClientRect();
                     const wrapperHeight = wrapperRect.height;
                     const windowHeight = window.innerHeight;
-                    const scrollTop = window.pageYOffset + wrapperRect.top - (windowHeight - wrapperHeight) / 2;
+                    const wrapperTop = window.pageYOffset + wrapperRect.top;
+                    // If wrapper is taller than viewport, align to top with small offset.
+                    // Otherwise, center it vertically.
+                    const scrollTop = wrapperHeight >= windowHeight
+                        ? wrapperTop - 16
+                        : wrapperTop - (windowHeight - wrapperHeight) / 2;
 
                     window.scrollTo({
                         top: Math.max(0, scrollTop),
