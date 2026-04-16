@@ -616,13 +616,42 @@ document.addEventListener('click', function(e) {
     }
 });
 
-// Don't push the ink-finder hash into the URL — it causes reloads to land
-// scrolled-down, hiding the page header. The click handler still scrolls
-// to the section; we just skip the history update for this anchor.
-// (Also undo any hash present from an older build.)
+// Stale ink-finder hash cleanup — older builds pushed this into the URL.
+// Never want a reload to land the user mid-page with the header hidden.
 if (window.location.hash === '#ink-finder-heading') {
     history.replaceState(null, '', window.location.pathname + window.location.search);
     window.scrollTo({ top: 0, behavior: 'auto' });
+}
+
+// Cross-page deep-link to the ink-finder via ?scroll=ink-finder.
+// Used by the "Printer Models" nav link when the user is on another page.
+// (A hash would be simpler, but server redirects on clean-URL routes drop
+// the fragment in some setups — a query param survives redirects cleanly.)
+if (new URLSearchParams(window.location.search).get('scroll') === 'ink-finder') {
+    const scrollToFinder = () => {
+        const wrapper = document.querySelector('.ink-finder__wrapper');
+        const target = document.getElementById('ink-finder-heading');
+        if (wrapper) {
+            const rect = wrapper.getBoundingClientRect();
+            const wrapperTop = window.pageYOffset + rect.top;
+            const scrollTop = rect.height >= window.innerHeight
+                ? wrapperTop - 16
+                : wrapperTop - (window.innerHeight - rect.height) / 2;
+            window.scrollTo({ top: Math.max(0, scrollTop), behavior: 'smooth' });
+        } else if (target) {
+            target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+        // Strip the param so a later reload still lands at top.
+        const params = new URLSearchParams(window.location.search);
+        params.delete('scroll');
+        const qs = params.toString();
+        history.replaceState(null, '', window.location.pathname + (qs ? '?' + qs : ''));
+    };
+    if (document.readyState === 'complete') {
+        setTimeout(scrollToFinder, 50);
+    } else {
+        window.addEventListener('load', () => setTimeout(scrollToFinder, 50), { once: true });
+    }
 }
 
 // Opt out of browser scroll restoration — on the home page it leaves the

@@ -522,13 +522,13 @@
     margin-left: 0;
 }
 
-/* When search-form--nav is standalone (no wrapper), limit to 50% */
-/* Use .search-form.search-form--nav to override base .search-form max-width: 500px */
+/* When search-form--nav is standalone (no wrapper): fill the space
+   between the nav menu and the container's right edge naturally. */
 .search-form.search-form--nav {
-    width: 50%;
+    width: auto;
     max-width: 50%;
     margin-left: auto;
-    flex-shrink: 1;
+    flex: 1 1 auto;
     min-width: 200px;
     transition: none;
     z-index: 10;
@@ -577,6 +577,14 @@
     background-color: var(--white-primary);
     color: var(--steel-900);
     transition: none;
+    /* Flex items default to min-width: auto (= content size), which lets
+       them overflow the form. Force them to respect the parent's width. */
+    min-width: 0;
+    flex: 1 1 0;
+}
+
+.search-form--nav .search-form__button {
+    flex: 0 0 auto;
 }
 
 .search-form--nav .search-form__input:focus {
