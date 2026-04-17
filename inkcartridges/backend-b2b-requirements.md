@@ -440,3 +440,22 @@ RLS policies:
 - **To:** AP email (or contact email)
 - **Subject:** "Overdue Invoice [INV-YYYY-NNNN]"
 - **Body:** Reminder with amount due and original due date
+
+
+---
+
+## Rate Limiting — Important
+
+### `POST /api/business/apply`
+The current rate limit is too aggressive and is blocking legitimate first-time submissions. The error "Too many requests. Please wait a moment." appeared on a user's **first-ever** submission attempt.
+
+**Required change:** Rate limit this endpoint **per authenticated user** (not per IP), with a generous window:
+- Max **5 attempts per user per 24 hours** (covers re-submits after fixing validation errors)
+- Or: **3 attempts per user per hour**
+- Do NOT use IP-based rate limiting for authenticated endpoints — shared IPs (offices, NAT) will cause false positives
+
+### `POST /api/business/reapply`
+Apply the same user-scoped rate limit as above.
+
+### General recommendation
+For all authenticated B2B endpoints (`/api/business/*`), use user-ID–scoped rate limits rather than IP-based limits.

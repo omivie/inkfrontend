@@ -1634,6 +1634,10 @@ const API = {
         return this.post('/api/business/apply', data);
     },
 
+    async reapplyBusiness(data) {
+        return this.post('/api/business/reapply', data);
+    },
+
     /**
      * Get business account status
      */
@@ -1666,6 +1670,11 @@ const API = {
      */
     async getBusinessReorderItems() {
         return this.get('/api/business/reorder-items');
+    },
+
+    // Returns { signed_url } — PDFs are in a private bucket, must use signed URL
+    async getInvoicePdfUrl(invoiceId) {
+        return this.get(`/api/business/invoices/${encodeURIComponent(invoiceId)}/pdf`);
     },
 
     /**
@@ -1770,7 +1779,7 @@ function getStockStatus(product) {
         return { class: 'contact-us', text: 'Contact Us for Stock Inquiry', icon: 'phone' };
     }
     if (product.stock_status === 'out_of_stock') {
-        return { class: 'out-of-stock', text: 'Out of Stock', icon: 'x-circle' };
+        return { class: 'contact-us', text: 'Contact Us for Stock Inquiry', icon: 'phone' };
     }
     if (product.stock_status === 'in_stock') {
         return { class: 'in-stock', text: 'In Stock', icon: 'check-circle' };
@@ -1778,11 +1787,7 @@ function getStockStatus(product) {
     // Fallback for endpoints that don't return stock_status (listing, search)
     const inStock = product.in_stock !== undefined ? product.in_stock : (product.stock_quantity > 0);
     if (!inStock) {
-        // Genuine products with 0 stock → contact us (supplier may restock)
-        if (product.source === 'genuine') {
-            return { class: 'contact-us', text: 'Contact Us for Stock Inquiry', icon: 'phone' };
-        }
-        return { class: 'out-of-stock', text: 'Out of Stock', icon: 'x-circle' };
+        return { class: 'contact-us', text: 'Contact Us for Stock Inquiry', icon: 'phone' };
     }
     return { class: 'in-stock', text: 'In Stock', icon: 'check-circle' };
 }

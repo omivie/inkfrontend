@@ -5301,6 +5301,20 @@
     background-color: var(--color-error-bg);
 }
 
+.account-nav__item--b2b-apply a {
+    color: var(--color-primary-dark);
+    font-weight: var(--font-weight-semibold);
+    background: var(--color-primary-bg);
+    border: 1.5px solid var(--color-primary);
+    border-radius: var(--radius-md);
+}
+
+.account-nav__item--b2b-apply a:hover {
+    background: var(--color-primary);
+    color: white;
+    border-color: var(--color-primary);
+}
+
 /* Orders Table */
 .orders-table-wrapper {
     overflow-x: auto;

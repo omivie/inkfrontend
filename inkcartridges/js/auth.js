@@ -39,6 +39,7 @@ const Auth = {
             const { data: { session } } = await this.supabase.auth.getSession();
             this.session = session;
             this.user = session?.user ?? null;
+            if (session) this._setAuthCookie(); else this._clearAuthCookie();
 
             // Listen for auth changes
             this.supabase.auth.onAuthStateChange(async (event, session) => {
@@ -46,6 +47,7 @@ const Auth = {
                 this.session = session;
                 this.user = session?.user ?? null;
                 const isNowAuthenticated = this.isAuthenticated();
+                if (isNowAuthenticated) this._setAuthCookie(); else this._clearAuthCookie();
 
                 // Handle sign in events - sync data
                 if (event === 'SIGNED_IN' || (isNowAuthenticated && !wasAuthenticated)) {
@@ -301,6 +303,14 @@ const Auth = {
         });
 
         return { data, error };
+    },
+
+    _setAuthCookie() {
+        document.cookie = '__ink_auth=1; path=/; SameSite=Strict; max-age=604800';
+    },
+
+    _clearAuthCookie() {
+        document.cookie = '__ink_auth=; path=/; SameSite=Strict; max-age=0';
     },
 
     /**

@@ -1406,6 +1406,23 @@ const AdminAPI = {
     } catch (e) { return 0; }
   },
 
+  async getBusinessStats() {
+    try {
+      const resp = await window.API.get('/api/admin/business/stats');
+      return resp?.data ?? null;
+    } catch (e) { adminApiWarn('B2B stats', e); return null; }
+  },
+
+  async getBusinessAccounts(filters = {}, page = 1, limit = 20) {
+    try {
+      const qs = new URLSearchParams({ page, limit });
+      if (filters.search) qs.set('search', filters.search);
+      if (filters.status) qs.set('status', filters.status);
+      const resp = await window.API.get(`/api/admin/business/accounts?${qs}`);
+      return resp?.data ?? null;
+    } catch (e) { adminApiWarn('B2B accounts', e); return null; }
+  },
+
   // ---- Feed Sync Report & Bulk Publish ----
 
   /**

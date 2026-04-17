@@ -2237,34 +2237,18 @@
 
                     products = (response.ok && response.data?.products) ? response.data.products : [];
 
-
-                    // Filter out irrelevant results where the search term only matches
-                    // as a substring of an unrelated word (e.g. "T10" in "Pla-t10-um")
-                    if (products.length > 0 && searchQuery.length <= 6) {
-                        const escaped = searchQuery.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-                        const wordBoundary = new RegExp(`(?:^|[\\s\\-\\/])${escaped}(?:[\\s\\-\\/BCMYK,.]|$)`, 'i');
-                        // For numeric queries (e.g. "069"), also match product codes like CART069, CART069HK
-                        const isNumeric = /^\d+$/.test(searchQuery);
-                        const codePattern = isNumeric
-                            ? new RegExp(`[A-Z]${escaped}(?:[A-Z]{0,3}\\b|[\\s\\-,.]|$)`, 'i')
-                            : null;
-                        // For numeric queries, require non-digit before the number to avoid
-                        // matching "069" inside "S41069" or "CT351069"
-                        const nameIncludesPattern = isNumeric
-                            ? new RegExp(`(?:^|[^\\d])${escaped}(?:\\s|$)`, 'i')
-                            : null;
-                        const relevant = products.filter(p => {
-                            const name = p.name || '';
-                            const sku = p.sku || p.code || p.product_code || '';
-                            const mpn = p.manufacturer_part_number || '';
-                            return wordBoundary.test(name) || wordBoundary.test(sku) || wordBoundary.test(mpn)
-                                || (codePattern && (codePattern.test(name) || codePattern.test(sku) || codePattern.test(mpn)))
-                                || (nameIncludesPattern ? nameIncludesPattern.test(name) : name.toLowerCase().includes(searchQuery.toLowerCase() + ' '))
-                                || sku.toLowerCase().startsWith(searchQuery.toLowerCase());
-                        });
-
-                        if (relevant.length > 0) products = relevant;
+                    // If smart search returned nothing but backend matched a printer, redirect to it
+                    if (products.length === 0 && response.ok && response.data?.matched_printer?.slug) {
+                        const p2 = response.data.matched_printer;
+                        const newURL = `${window.location.pathname}?printer=${encodeURIComponent(p2.slug)}`;
+                        history.replaceState({}, '', newURL);
+                        this.state.search = null;
+                        this.state.printer = p2.slug;
+                        this.state.level = 'printer-products';
+                        await this.loadPrinterProducts(navVersion);
+                        return;
                     }
+
 
 
                     // If no product results, try searching for printer models

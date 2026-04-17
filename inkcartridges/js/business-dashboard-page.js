@@ -186,6 +186,7 @@
                                 <th scope="col">Amount</th>
                                 <th scope="col">${tab === 'paid' ? 'Paid' : 'Due'}</th>
                                 <th scope="col">Status</th>
+                                <th scope="col"></th>
                             </tr>
                         </thead>
                         <tbody>
@@ -200,12 +201,33 @@
                                         <td>${Security.escapeHtml(fmtPrice(inv.amount))}</td>
                                         <td>${dateField ? new Date(dateField).toLocaleDateString('en-NZ', { day: 'numeric', month: 'short', year: 'numeric' }) : '\u2014'}</td>
                                         <td><span class="order-status order-status--${statusClass}">${Security.escapeHtml(inv.status || 'unpaid')}</span></td>
+                                        <td><button class="biz-pdf-btn" data-invoice-id="${Security.escapeAttr(inv.id)}" title="Download PDF" style="background:none;border:none;cursor:pointer;color:var(--color-primary);padding:4px 6px;border-radius:4px;font-size:12px;font-weight:600;white-space:nowrap">PDF ↓</button></td>
                                     </tr>
                                 `;
                             }).join('')}
                         </tbody>
                     </table>
                 `;
+            // Wire PDF download buttons — PDFs are private, need signed URL
+            tableEl.querySelectorAll('.biz-pdf-btn').forEach(btn => {
+                btn.addEventListener('click', async () => {
+                    const invoiceId = btn.dataset.invoiceId;
+                    const orig = btn.textContent;
+                    btn.textContent = '...';
+                    btn.disabled = true;
+                    try {
+                        const res = await API.getInvoicePdfUrl(invoiceId);
+                        const url = res?.data?.signed_url || res?.data?.url;
+                        if (url) window.open(url, '_blank');
+                        else alert('PDF is not available yet for this invoice.');
+                    } catch (e) {
+                        alert('Could not download PDF. Please try again.');
+                    } finally {
+                        btn.textContent = orig;
+                        btn.disabled = false;
+                    }
+                });
+            });
             } catch (e) {
                 tableEl.innerHTML = '<p style="color:var(--color-text-secondary);text-align:center;padding:20px">Failed to load orders.</p>';
             }

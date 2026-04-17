@@ -962,11 +962,40 @@ const AccountPage = {
 
         try {
             const res = await API.getBusinessStatus();
-            if (res.ok && res.data?.status === 'approved') {
+            const status = res.ok ? res.data?.status : null;
+
+            const setLinkText = (link, text) => {
+                const textNode = [...link.childNodes].find(n => n.nodeType === 3 && n.textContent.trim());
+                if (textNode) textNode.textContent = ` ${text}`;
+            };
+
+            if (status === 'approved') {
                 bizNavItem.hidden = false;
+                const link = bizNavItem.querySelector('a');
+                if (link) {
+                    link.href = '/html/account/business.html';
+                    setLinkText(link, 'Business Account');
+                }
+            } else if (status === 'pending') {
+                bizNavItem.hidden = false;
+                const link = bizNavItem.querySelector('a');
+                if (link) {
+                    link.href = '/html/business/apply.html';
+                    link.style.opacity = '0.7';
+                    setLinkText(link, 'Application Pending');
+                }
+            } else {
+                // No application or declined — show apply CTA
+                bizNavItem.hidden = false;
+                bizNavItem.classList.add('account-nav__item--b2b-apply');
+                const link = bizNavItem.querySelector('a');
+                if (link) {
+                    link.href = '/html/business/apply.html';
+                    setLinkText(link, status === 'declined' ? 'Reapply for Business Account' : 'Apply for Business Account');
+                }
             }
         } catch {
-            // Not a B2B user or backend unavailable — keep hidden
+            // Backend unavailable — keep hidden
         }
     },
 

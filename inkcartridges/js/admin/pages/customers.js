@@ -22,7 +22,7 @@ let _page = 1;
 let _search = '';
 let _sort = 'first_name';
 let _sortDir = 'asc';
-let _activeTab = 'all'; // all | reviews | b2b
+let _activeTab = 'all'; // all | reviews
 let _subTabModule = null;
 
 const COLUMNS = [
@@ -323,15 +323,6 @@ async function switchCustomerTab(tab) {
     } catch (e) {
       content.innerHTML = `<div class="admin-empty"><div class="admin-empty__title">Failed to load Reviews</div><div class="admin-empty__text">${esc(e.message)}</div></div>`;
     }
-  } else if (tab === 'b2b') {
-    try {
-      const mod = await import('./b2b.js');
-      _subTabModule = mod.default;
-      content.innerHTML = '';
-      await _subTabModule.init(content);
-    } catch (e) {
-      content.innerHTML = `<div class="admin-empty"><div class="admin-empty__title">Failed to load B2B</div><div class="admin-empty__text">${esc(e.message)}</div></div>`;
-    }
   }
 }
 
@@ -352,7 +343,6 @@ export default {
     tabBar.innerHTML = `
       <button class="admin-tab active" data-cust-tab="all">All Customers</button>
       <button class="admin-tab" data-cust-tab="reviews">Reviews</button>
-      <button class="admin-tab" data-cust-tab="b2b">B2B Partners</button>
     `;
     container.appendChild(tabBar);
 

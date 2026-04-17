@@ -50,6 +50,7 @@ const NAV_ITEMS = [
   { key: 'orders', label: 'Orders', icon: 'orders' },
   { key: 'products', label: 'Products', icon: 'products' },
   { key: 'customers', label: 'Customers', icon: 'customers' },
+  { key: 'b2b-hub', label: 'B2B Partners', icon: 'customers', ownerOnly: true, badge: true },
   { divider: true },
   { key: 'promotions', label: 'Promotions', icon: 'finance', ownerOnly: true },
   { key: 'shipping-rates', label: 'Shipping Rates', icon: 'fulfillment', ownerOnly: true },
@@ -69,7 +70,7 @@ const ROUTE_REDIRECTS = {
   'refunds': 'orders',
   'ribbons': 'products',
   'reviews': 'customers',
-  'b2b': 'customers',
+  'b2b': 'b2b-hub',
   'margin': 'analytics',
   'financial-health': 'analytics',
   'coupons': 'promotions',
@@ -120,11 +121,12 @@ function renderSidebar() {
       continue;
     }
     const navHref = item.href || `#${item.key}`;
+    const badgeHtml = item.badge ? ` <span class="admin-nav-badge" id="nav-badge-${esc(item.key)}"></span>` : '';
     html += `
       <div class="admin-nav-section">
         <a href="${esc(navHref)}" class="admin-nav-item" data-nav="${item.key}" data-tooltip="${esc(item.label)}">
           ${icon(item.icon)}
-          <span class="admin-nav-label">${esc(item.label)}</span>
+          <span class="admin-nav-label">${esc(item.label)}${badgeHtml}</span>
         </a>
       </div>
     `;
@@ -514,6 +516,15 @@ async function boot() {
     // Render shell
     renderSidebar();
     renderTopbar();
+
+    // Async pending badge for B2B Partners nav
+    AdminAPI.getBusinessPendingCount().then(count => {
+      const badge = document.getElementById('nav-badge-b2b-hub');
+      if (badge && count > 0) {
+        badge.textContent = count > 99 ? '99+' : String(count);
+        badge.style.display = 'inline-flex';
+      }
+    }).catch(() => {});
 
     // Restore sidebar collapse state
     if (localStorage.getItem('admin_sidebar_collapsed') === '1') {

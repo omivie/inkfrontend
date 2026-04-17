@@ -15,7 +15,7 @@
     <meta property="og:image" content="https://www.inkcartridges.co.nz/assets/images/logo.png">
     <link rel="icon" type="image/png" href="/favicon.png">
     <link rel="apple-touch-icon" href="/apple-touch-icon.png">
-    <title>Business Account | InkCartridges.co.nz</title>
+    <title>Business Account Application | InkCartridges.co.nz</title>
 
     <script async src="https://www.googletagmanager.com/gtag/js?id=G-SDQELG0FGD"></script>
     <script src="/js/gtag.js"></script>
@@ -29,6 +29,646 @@
     <link rel="stylesheet" href="/css/modern-effects.css">
     <link rel="stylesheet" href="/css/pages.css">
     <link rel="stylesheet" href="/css/search.css">
+
+    <style>
+    :root {
+        --wiz-primary: #2563eb;
+        --wiz-primary-dark: #1d4ed8;
+        --wiz-success: #16a34a;
+        --wiz-error: #dc2626;
+        --wiz-border: #e2e8f0;
+        --wiz-bg: #f8fafc;
+        --wiz-text: #0f172a;
+        --wiz-muted: #64748b;
+        --wiz-radius: 12px;
+        --wiz-shadow: 0 1px 3px rgba(0,0,0,.06), 0 4px 20px rgba(0,0,0,.07);
+    }
+
+    .apply-page {
+        background: var(--wiz-bg);
+        padding: 0 0 80px;
+        min-height: 60vh;
+    }
+
+    .apply-page__header {
+        text-align: center;
+        padding: 48px 16px 36px;
+    }
+
+    .apply-page__header h1 {
+        font-size: clamp(1.5rem, 4vw, 2rem);
+        font-weight: 700;
+        color: var(--wiz-text);
+        margin-bottom: 8px;
+        letter-spacing: -0.02em;
+    }
+
+    .apply-page__header p {
+        color: var(--wiz-muted);
+        font-size: 1rem;
+    }
+
+    /* Prompt / status cards */
+    .apply-prompt-card {
+        max-width: 520px;
+        margin: 0 auto;
+        background: #fff;
+        border-radius: var(--wiz-radius);
+        box-shadow: var(--wiz-shadow);
+        border: 1px solid var(--wiz-border);
+        padding: 48px 40px;
+        text-align: center;
+    }
+
+    .apply-prompt-card__icon {
+        width: 56px;
+        height: 56px;
+        background: #eff6ff;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        margin: 0 auto 20px;
+        color: var(--wiz-primary);
+    }
+
+    .apply-prompt-card h2 {
+        font-size: 1.25rem;
+        font-weight: 700;
+        color: var(--wiz-text);
+        margin-bottom: 8px;
+    }
+
+    .apply-prompt-card p {
+        color: var(--wiz-muted);
+        font-size: 0.9375rem;
+        margin-bottom: 24px;
+        line-height: 1.6;
+    }
+
+    .apply-prompt-card a.btn-login {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        background: var(--wiz-primary);
+        color: white;
+        padding: 12px 28px;
+        border-radius: 8px;
+        font-size: 0.9375rem;
+        font-weight: 600;
+        text-decoration: none;
+        transition: background 0.15s;
+    }
+
+    .apply-prompt-card a.btn-login:hover { background: var(--wiz-primary-dark); }
+
+    .business-status__badge {
+        display: inline-flex;
+        align-items: center;
+        padding: 4px 14px;
+        border-radius: 20px;
+        font-size: 13px;
+        font-weight: 600;
+        margin-bottom: 16px;
+    }
+
+    .business-status__badge--pending { background: #fef9c3; color: #854d0e; }
+    .business-status__badge--approved { background: #dcfce7; color: #166534; }
+    .business-status__badge--rejected { background: #fee2e2; color: #991b1b; }
+
+    /* Wizard card */
+    .wizard-card {
+        max-width: 680px;
+        margin: 0 auto;
+        background: #fff;
+        border-radius: var(--wiz-radius);
+        box-shadow: var(--wiz-shadow);
+        border: 1px solid var(--wiz-border);
+        overflow: hidden;
+    }
+
+    /* Progress bar */
+    .wizard-progress {
+        padding: 24px 32px 20px;
+        border-bottom: 1px solid var(--wiz-border);
+    }
+
+    .wizard-progress__steps {
+        display: flex;
+        align-items: flex-start;
+    }
+
+    .wizard-step-indicator {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 6px;
+        flex-shrink: 0;
+        width: 60px;
+    }
+
+    .wizard-step-indicator__dot {
+        width: 30px;
+        height: 30px;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 12px;
+        font-weight: 700;
+        background: #f1f5f9;
+        color: #94a3b8;
+        border: 2px solid #e2e8f0;
+        transition: all 0.25s ease;
+        position: relative;
+        z-index: 1;
+    }
+
+    .wizard-step-indicator.active .wizard-step-indicator__dot {
+        background: var(--wiz-primary);
+        border-color: var(--wiz-primary);
+        color: white;
+        box-shadow: 0 0 0 4px rgba(37,99,235,0.12);
+    }
+
+    .wizard-step-indicator.completed .wizard-step-indicator__dot {
+        background: var(--wiz-success);
+        border-color: var(--wiz-success);
+        color: white;
+    }
+
+    .wizard-step-indicator__label {
+        font-size: 10px;
+        font-weight: 600;
+        color: #94a3b8;
+        white-space: nowrap;
+        letter-spacing: 0.03em;
+        text-transform: uppercase;
+        transition: color 0.2s;
+    }
+
+    .wizard-step-indicator.active .wizard-step-indicator__label { color: var(--wiz-primary); }
+    .wizard-step-indicator.completed .wizard-step-indicator__label { color: var(--wiz-success); }
+
+    .wizard-progress__line {
+        flex: 1;
+        height: 2px;
+        background: #e2e8f0;
+        margin: 14px 0 0;
+        transition: background 0.3s;
+        min-width: 12px;
+    }
+
+    .wizard-progress__line.done { background: var(--wiz-success); }
+
+    /* Step body */
+    .wizard-body {
+        padding: 32px 32px 4px;
+    }
+
+    .wizard-step { display: none; }
+    .wizard-step.active {
+        display: block;
+        animation: stepIn 0.22s ease;
+    }
+
+    @keyframes stepIn {
+        from { opacity: 0; transform: translateX(10px); }
+        to { opacity: 1; transform: translateX(0); }
+    }
+
+    .wizard-step__title {
+        font-size: 1.125rem;
+        font-weight: 700;
+        color: var(--wiz-text);
+        margin-bottom: 4px;
+        letter-spacing: -0.01em;
+    }
+
+    .wizard-step__subtitle {
+        color: var(--wiz-muted);
+        font-size: 0.875rem;
+        margin-bottom: 24px;
+        line-height: 1.5;
+    }
+
+    .step-error {
+        background: #fef2f2;
+        border: 1px solid #fecaca;
+        color: #dc2626;
+        padding: 10px 14px;
+        border-radius: 8px;
+        font-size: 0.875rem;
+        font-weight: 500;
+        margin-bottom: 16px;
+    }
+
+    /* Form elements */
+    .wiz-form-group { margin-bottom: 18px; }
+
+    .wiz-label {
+        display: block;
+        font-size: 13px;
+        font-weight: 600;
+        color: var(--wiz-text);
+        margin-bottom: 6px;
+        letter-spacing: 0.01em;
+    }
+
+    .wiz-label .opt {
+        font-weight: 400;
+        color: var(--wiz-muted);
+        font-size: 11px;
+        margin-left: 4px;
+    }
+
+    .wiz-label .req { color: var(--wiz-error); margin-left: 2px; }
+
+    .wiz-input, .wiz-select {
+        width: 100%;
+        height: 44px;
+        padding: 0 14px;
+        border: 1.5px solid var(--wiz-border);
+        border-radius: 8px;
+        font-size: 0.9375rem;
+        color: var(--wiz-text);
+        background: #fff;
+        outline: none;
+        transition: border-color 0.15s, box-shadow 0.15s;
+        -webkit-appearance: none;
+        appearance: none;
+        box-sizing: border-box;
+    }
+
+    .wiz-select {
+        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2364748b' stroke-width='2.5'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+        background-repeat: no-repeat;
+        background-position: right 14px center;
+        padding-right: 38px;
+        cursor: pointer;
+    }
+
+    .wiz-input:focus, .wiz-select:focus {
+        border-color: var(--wiz-primary);
+        box-shadow: 0 0 0 3px rgba(37,99,235,0.1);
+    }
+
+    .wiz-form-row {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 16px;
+    }
+
+    .wiz-form-row-3 {
+        display: grid;
+        grid-template-columns: 1fr 1fr 100px;
+        gap: 16px;
+    }
+
+    .wiz-hint {
+        font-size: 12px;
+        color: var(--wiz-muted);
+        margin-top: 5px;
+    }
+
+    .wiz-section-label {
+        font-size: 11px;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.07em;
+        color: var(--wiz-muted);
+        padding-bottom: 10px;
+        border-bottom: 1px solid var(--wiz-border);
+        margin-bottom: 16px;
+        margin-top: 24px;
+    }
+
+    /* Checkbox */
+    .wiz-checkbox-wrap {
+        display: flex;
+        align-items: flex-start;
+        gap: 10px;
+        padding: 14px 16px;
+        background: #f8fafc;
+        border-radius: 8px;
+        border: 1.5px solid var(--wiz-border);
+        margin-bottom: 20px;
+        cursor: pointer;
+        transition: border-color 0.15s, background 0.15s;
+    }
+
+    .wiz-checkbox-wrap:has(input:checked) {
+        border-color: var(--wiz-primary);
+        background: rgba(37,99,235,0.03);
+    }
+
+    .wiz-checkbox-wrap input[type="checkbox"] {
+        width: 18px;
+        height: 18px;
+        flex-shrink: 0;
+        margin-top: 2px;
+        accent-color: var(--wiz-primary);
+        cursor: pointer;
+    }
+
+    .wiz-checkbox-wrap__body label {
+        font-size: 0.9375rem;
+        font-weight: 500;
+        color: var(--wiz-text);
+        cursor: pointer;
+        display: block;
+    }
+
+    .wiz-checkbox-wrap__body .hint {
+        font-size: 12px;
+        color: var(--wiz-muted);
+        margin-top: 3px;
+        line-height: 1.4;
+    }
+
+    /* Net 30 callout */
+    .net30-callout {
+        background: #eff6ff;
+        border: 1.5px solid #bfdbfe;
+        border-radius: 8px;
+        padding: 14px 16px;
+        margin-bottom: 20px;
+        display: flex;
+        gap: 10px;
+        align-items: flex-start;
+    }
+
+    .net30-callout svg { flex-shrink: 0; color: #3b82f6; margin-top: 1px; }
+
+    .net30-callout p {
+        font-size: 0.875rem;
+        color: #1e40af;
+        margin: 0;
+        line-height: 1.5;
+    }
+
+    /* File input */
+    .wiz-file {
+        width: 100%;
+        padding: 10px 14px;
+        border: 1.5px dashed var(--wiz-border);
+        border-radius: 8px;
+        font-size: 0.875rem;
+        color: var(--wiz-muted);
+        background: #f8fafc;
+        cursor: pointer;
+        transition: border-color 0.15s;
+        box-sizing: border-box;
+    }
+
+    .wiz-file:hover { border-color: var(--wiz-primary); }
+
+    /* Review */
+    .review-section { margin-bottom: 20px; }
+
+    .review-section__title {
+        font-size: 11px;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.07em;
+        color: var(--wiz-muted);
+        padding-bottom: 8px;
+        border-bottom: 1px solid var(--wiz-border);
+        margin-bottom: 4px;
+    }
+
+    .review-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: baseline;
+        padding: 8px 0;
+        border-bottom: 1px solid #f1f5f9;
+        gap: 16px;
+    }
+
+    .review-row:last-child { border-bottom: none; }
+
+    .review-row__label {
+        font-size: 13px;
+        color: var(--wiz-muted);
+        flex-shrink: 0;
+        min-width: 130px;
+    }
+
+    .review-row__value {
+        font-size: 13px;
+        font-weight: 500;
+        color: var(--wiz-text);
+        text-align: right;
+    }
+
+    .review-note {
+        background: #f8fafc;
+        border: 1px solid var(--wiz-border);
+        border-radius: 8px;
+        padding: 12px 16px;
+        font-size: 0.875rem;
+        color: var(--wiz-muted);
+        margin-bottom: 4px;
+        line-height: 1.6;
+    }
+
+    /* Form message */
+    #business-form-message {
+        margin: 0 32px 4px;
+        padding: 12px 16px;
+        border-radius: 8px;
+        font-size: 0.875rem;
+        font-weight: 500;
+    }
+
+    .business-form__message--error {
+        background: #fef2f2;
+        border: 1px solid #fecaca;
+        color: #dc2626;
+    }
+
+    .business-form__message--success {
+        background: #f0fdf4;
+        border: 1px solid #bbf7d0;
+        color: #16a34a;
+    }
+
+    /* Wizard nav */
+    .wizard-nav {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 20px 32px 28px;
+        border-top: 1px solid var(--wiz-border);
+        margin-top: 20px;
+        gap: 12px;
+        flex-wrap: wrap;
+    }
+
+    .wizard-step-count {
+        font-size: 12px;
+        color: var(--wiz-muted);
+        font-weight: 500;
+    }
+
+    .wizard-nav__right { display: flex; gap: 10px; }
+
+    .btn-wiz-back {
+        background: none;
+        border: 1.5px solid var(--wiz-border);
+        color: var(--wiz-muted);
+        padding: 10px 22px;
+        border-radius: 8px;
+        font-size: 0.9375rem;
+        font-weight: 500;
+        cursor: pointer;
+        transition: all 0.15s;
+        line-height: 1;
+    }
+
+    .btn-wiz-back:hover { border-color: #94a3b8; color: var(--wiz-text); }
+    .btn-wiz-back:disabled { opacity: 0.3; cursor: not-allowed; }
+
+    .btn-wiz-next, .btn-wiz-submit {
+        background: var(--wiz-primary);
+        color: white;
+        border: none;
+        padding: 10px 28px;
+        border-radius: 8px;
+        font-size: 0.9375rem;
+        font-weight: 600;
+        cursor: pointer;
+        transition: background 0.15s, transform 0.1s;
+        letter-spacing: -0.01em;
+        line-height: 1;
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+    }
+
+    .btn-wiz-next:hover, .btn-wiz-submit:hover { background: var(--wiz-primary-dark); }
+    .btn-wiz-next:active, .btn-wiz-submit:active { transform: scale(0.98); }
+    .btn-wiz-submit:disabled { opacity: 0.6; cursor: not-allowed; }
+
+    /* Thank you */
+    .apply-thank-you-card {
+        max-width: 560px;
+        margin: 0 auto;
+        background: #fff;
+        border-radius: var(--wiz-radius);
+        box-shadow: var(--wiz-shadow);
+        border: 1px solid var(--wiz-border);
+        padding: 56px 48px;
+        text-align: center;
+    }
+
+    .apply-ty__check {
+        width: 72px;
+        height: 72px;
+        background: #dcfce7;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        margin: 0 auto 24px;
+        animation: checkPop 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+    }
+
+    @keyframes checkPop {
+        from { transform: scale(0); opacity: 0; }
+        to { transform: scale(1); opacity: 1; }
+    }
+
+    .apply-ty__title {
+        font-size: 1.75rem;
+        font-weight: 700;
+        color: var(--wiz-text);
+        margin-bottom: 12px;
+        letter-spacing: -0.02em;
+    }
+
+    .apply-ty__sub {
+        color: var(--wiz-muted);
+        font-size: 1rem;
+        margin-bottom: 36px;
+        line-height: 1.6;
+    }
+
+    .apply-ty__steps {
+        text-align: left;
+        margin-bottom: 36px;
+    }
+
+    .apply-ty__step {
+        display: flex;
+        gap: 16px;
+        align-items: flex-start;
+        padding: 14px 0;
+        border-bottom: 1px solid var(--wiz-border);
+    }
+
+    .apply-ty__step:last-child { border-bottom: none; }
+
+    .apply-ty__step-num {
+        width: 26px;
+        height: 26px;
+        border-radius: 50%;
+        background: var(--wiz-primary);
+        color: white;
+        font-size: 12px;
+        font-weight: 700;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        flex-shrink: 0;
+        margin-top: 1px;
+    }
+
+    .apply-ty__step-text strong {
+        display: block;
+        font-size: 0.9375rem;
+        font-weight: 600;
+        color: var(--wiz-text);
+        margin-bottom: 2px;
+    }
+
+    .apply-ty__step-text span {
+        font-size: 0.875rem;
+        color: var(--wiz-muted);
+    }
+
+    .apply-ty__home {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        background: var(--wiz-primary);
+        color: white;
+        padding: 12px 28px;
+        border-radius: 8px;
+        font-size: 0.9375rem;
+        font-weight: 600;
+        text-decoration: none;
+        transition: background 0.15s;
+    }
+
+    .apply-ty__home:hover { background: var(--wiz-primary-dark); }
+
+    /* Mobile */
+    @media (max-width: 680px) {
+        .wizard-body, .wizard-nav { padding-left: 20px; padding-right: 20px; }
+        .wizard-progress { padding: 18px 20px 14px; }
+        .wizard-step-indicator__label { display: none; }
+        .wizard-step-indicator { width: 40px; }
+        .wiz-form-row, .wiz-form-row-3 { grid-template-columns: 1fr; }
+        #business-form-message { margin-left: 20px; margin-right: 20px; }
+        .apply-thank-you-card { padding: 40px 24px; }
+        .review-row { flex-direction: column; gap: 2px; }
+        .review-row__value { text-align: left; }
+        .review-row__label { min-width: auto; }
+        .apply-prompt-card { padding: 36px 24px; }
+    }
+    </style>
 </head>
 <body>
     <a href="#main-content" class="skip-link">Skip to main content</a>
@@ -49,8 +689,8 @@
 
                 <div class="logo-block">
                     <a href="/" class="logo" aria-label="InkCartridges.co.nz Home">
-                                <span class="logo__text">Ink<span>Cartridges</span>.co.nz</span>
-                            </a>
+                        <span class="logo__text">Ink<span>Cartridges</span>.co.nz</span>
+                    </a>
                     <a href="/" class="logo__tagline">Get the full picture on image quality</a>
                 </div>
 
@@ -90,13 +730,18 @@
                     <li class="nav-menu__item"><a href="/html/shop.html" class="nav-menu__link">Shop</a></li>
                     <li class="nav-menu__item"><a href="/?scroll=ink-finder" class="nav-menu__link">Printer Models</a></li>
                     <li class="nav-menu__item nav-menu__item--mega">
-                        <button class="nav-menu__link nav-mega-toggle" type="button"
-                                aria-haspopup="true" aria-expanded="false" aria-controls="brands-mega">
+                        <button class="nav-menu__link nav-mega-toggle" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="brands-mega">
                             Cartridge Brands
                             <svg class="nav-menu__arrow" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
                         </button>
                     </li>
-                    <li class="nav-menu__item nav-menu__item--mega"><button class="nav-menu__link nav-ribbons-toggle" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="ribbons-mega">Typewriter and Printer Ribbons <svg class="nav-menu__arrow" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg></button></li>
+                    <li class="nav-menu__item nav-menu__item--mega">
+                        <button class="nav-menu__link nav-ribbons-toggle" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="ribbons-mega">
+                            Typewriter and Printer Ribbons
+                            <svg class="nav-menu__arrow" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+                        </button>
+                    </li>
+                    <li class="nav-menu__item"><a href="/html/business/" class="nav-menu__link nav-menu__link--active">For Business</a></li>
                 </ul>
 
                 <form class="search-form search-form--nav" action="/html/shop.html" method="GET" role="search">
@@ -112,20 +757,15 @@
         <div class="brands-mega" id="brands-mega" hidden role="region" aria-label="Browse brands">
             <div class="container">
                 <div class="brands-mega__cards"></div>
-                <a href="/html/shop.html" class="brands-mega__view-all">
-                    View All Brands
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
-                </a>
+                <a href="/html/shop.html" class="brands-mega__view-all">View All Brands <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg></a>
             </div>
         </div>
 
         <div class="ribbons-mega" id="ribbons-mega" hidden role="region" aria-label="Browse ribbon brands">
             <div class="container">
+                <p class="ribbons-mega__heading">Select your typewriter or printer brand</p>
                 <div class="ribbons-mega__grid"></div>
-                <a href="/html/ribbons.html" class="ribbons-mega__view-all">
-                    View All Ribbons
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
-                </a>
+                <a href="/html/ribbons.html" class="ribbons-mega__view-all">View All Ribbons <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg></a>
             </div>
         </div>
     </header>
@@ -135,254 +775,365 @@
             <div class="container">
                 <ol class="breadcrumb__list">
                     <li class="breadcrumb__item"><a href="/">Home</a></li>
-                    <li class="breadcrumb__item breadcrumb__item--current" aria-current="page">Business Account</li>
+                    <li class="breadcrumb__item"><a href="/html/business/">For Business</a></li>
+                    <li class="breadcrumb__item breadcrumb__item--current" aria-current="page">Apply</li>
                 </ol>
             </div>
         </nav>
 
-        <section class="business-apply">
+        <div class="apply-page">
             <div class="container">
-                <div class="business-apply__layout">
-                    <div class="business-apply__intro">
-                        <h1>Business Account</h1>
-                        <p>Apply for a business account to access volume pricing, dedicated support, and streamlined ordering for your organisation.</p>
-                        <div class="business-benefits">
-                            <div class="business-benefits__item">
-                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
-                                <span>Volume pricing on bulk orders</span>
-                            </div>
-                            <div class="business-benefits__item">
-                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
-                                <span>Dedicated account support</span>
-                            </div>
-                            <div class="business-benefits__item">
-                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="1" y="4" width="22" height="16" rx="2" ry="2"/><line x1="1" y1="10" x2="23" y2="10"/></svg>
-                                <span>Flexible payment options</span>
-                            </div>
-                            <div class="business-benefits__item">
-                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
-                                <span>Monthly invoicing available</span>
-                            </div>
+
+                <div class="apply-page__header">
+                    <h1>Apply for a Business Account</h1>
+                    <p>Takes about 2 minutes &mdash; no obligation.</p>
+                </div>
+
+                <!-- Not logged in -->
+                <div id="business-login-prompt" hidden>
+                    <div class="apply-prompt-card">
+                        <div class="apply-prompt-card__icon">
+                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
                         </div>
-                    </div>
-
-                    <div class="business-apply__form-wrap">
-                        <div id="business-login-prompt" hidden>
-                            <div class="business-status">
-                                <p>Please <a href="/html/account/index.html">sign in</a> to apply for a business account.</p>
-                            </div>
-                        </div>
-
-                        <div id="business-status-section" hidden>
-                            <div class="business-status">
-                                <h2>Application Status</h2>
-                                <div id="business-status-content"></div>
-                            </div>
-                        </div>
-
-                        <form id="business-form" hidden>
-                            <h2>Apply Now</h2>
-
-                            <div class="form-group">
-                                <label class="form-label" for="biz-company">Company Name <span class="form-required">*</span></label>
-                                <input type="text" id="biz-company" class="form-input" required maxlength="200" placeholder="Your company name">
-                            </div>
-
-                            <div class="form-group">
-                                <label class="form-label" for="biz-nzbn">NZBN <span class="form-hint">(optional)</span></label>
-                                <input type="text" id="biz-nzbn" class="form-input" maxlength="13" placeholder="13-digit NZ Business Number">
-                            </div>
-
-                            <div class="form-group">
-                                <label class="form-label" for="biz-contact-name">Contact Name <span class="form-required">*</span></label>
-                                <input type="text" id="biz-contact-name" class="form-input" required maxlength="200" placeholder="Full name">
-                            </div>
-
-                            <div class="form-group">
-                                <label class="form-label" for="biz-email">Contact Email <span class="form-required">*</span></label>
-                                <input type="email" id="biz-email" class="form-input" required maxlength="200" placeholder="business@example.co.nz">
-                            </div>
-
-                            <div class="form-group">
-                                <label class="form-label" for="biz-phone">Contact Phone <span class="form-required">*</span></label>
-                                <input type="tel" id="biz-phone" class="form-input" required maxlength="20" placeholder="021 123 4567">
-                            </div>
-
-                            <div class="form-group">
-                                <label class="form-label" for="biz-industry">Industry <span class="form-required">*</span></label>
-                                <select id="biz-industry" class="form-input" required>
-                                    <option value="">Select your industry</option>
-                                    <option value="office_supplies">Office Supplies</option>
-                                    <option value="education">Education</option>
-                                    <option value="healthcare">Healthcare</option>
-                                    <option value="legal">Legal</option>
-                                    <option value="government">Government</option>
-                                    <option value="retail">Retail</option>
-                                    <option value="construction">Construction</option>
-                                    <option value="it_services">IT Services</option>
-                                    <option value="other">Other</option>
-                                </select>
-                            </div>
-
-                            <div class="form-group">
-                                <label class="form-label" for="biz-type">Business Type <span class="form-required">*</span></label>
-                                <select id="biz-type" class="form-input" required>
-                                    <option value="">Select business type</option>
-                                    <option value="sole_trader">Sole Trader</option>
-                                    <option value="partnership">Partnership</option>
-                                    <option value="llc">Limited Liability Company (LLC)</option>
-                                    <option value="trust">Trust</option>
-                                    <option value="government">Government</option>
-                                    <option value="nonprofit">Non-Profit</option>
-                                </select>
-                            </div>
-
-                            <div class="form-group">
-                                <label class="form-label" for="biz-ap-email">Accounts Payable Email <span class="form-hint">(optional)</span></label>
-                                <input type="email" id="biz-ap-email" class="form-input" maxlength="200" placeholder="accounts@example.co.nz">
-                            </div>
-
-                            <fieldset class="business-form__fieldset">
-                                <legend class="business-form__legend">Billing Address <span class="form-required">*</span></legend>
-                                <div class="business-form__address-grid">
-                                    <div class="form-group business-form__address-full">
-                                        <label class="form-label" for="biz-billing-address1">Street Address <span class="form-required">*</span></label>
-                                        <input type="text" id="biz-billing-address1" class="form-input" required maxlength="255" placeholder="Street address" autocomplete="billing address-line1">
-                                    </div>
-                                    <div class="form-group business-form__address-full">
-                                        <label class="form-label" for="biz-billing-address2">Apartment, suite, etc. <span class="form-hint">(optional)</span></label>
-                                        <input type="text" id="biz-billing-address2" class="form-input" maxlength="255" autocomplete="billing address-line2">
-                                    </div>
-                                    <div class="form-group">
-                                        <label class="form-label" for="biz-billing-city">City <span class="form-required">*</span></label>
-                                        <input type="text" id="biz-billing-city" class="form-input" required maxlength="100" autocomplete="billing address-level2">
-                                    </div>
-                                    <div class="form-group">
-                                        <label class="form-label" for="biz-billing-region">Region <span class="form-required">*</span></label>
-                                        <select id="biz-billing-region" class="form-input" required autocomplete="billing address-level1">
-                                            <option value="">Select region</option>
-                                            <option value="northland">Northland</option>
-                                            <option value="auckland">Auckland</option>
-                                            <option value="waikato">Waikato</option>
-                                            <option value="bay-of-plenty">Bay of Plenty</option>
-                                            <option value="gisborne">Gisborne</option>
-                                            <option value="hawkes-bay">Hawke's Bay</option>
-                                            <option value="taranaki">Taranaki</option>
-                                            <option value="manawatu-wanganui">Manawatu-Whanganui</option>
-                                            <option value="wellington">Wellington</option>
-                                            <option value="tasman">Tasman</option>
-                                            <option value="nelson">Nelson</option>
-                                            <option value="marlborough">Marlborough</option>
-                                            <option value="west-coast">West Coast</option>
-                                            <option value="canterbury">Canterbury</option>
-                                            <option value="otago">Otago</option>
-                                            <option value="southland">Southland</option>
-                                        </select>
-                                    </div>
-                                    <div class="form-group">
-                                        <label class="form-label" for="biz-billing-postcode">Postcode <span class="form-required">*</span></label>
-                                        <input type="text" id="biz-billing-postcode" class="form-input" required pattern="[0-9]{4}" maxlength="4" placeholder="0000" autocomplete="billing postal-code">
-                                    </div>
-                                </div>
-                            </fieldset>
-
-                            <fieldset class="business-form__fieldset" id="biz-shipping-fieldset">
-                                <legend class="business-form__legend">Shipping Address</legend>
-                                <div class="form-group form-group--checkbox">
-                                    <label>
-                                        <input type="checkbox" id="biz-same-as-billing" class="form-checkbox" checked>
-                                        Same as billing address
-                                    </label>
-                                </div>
-                                <div id="biz-shipping-fields" hidden>
-                                    <div class="business-form__address-grid">
-                                        <div class="form-group business-form__address-full">
-                                            <label class="form-label" for="biz-shipping-address1">Street Address <span class="form-required">*</span></label>
-                                            <input type="text" id="biz-shipping-address1" class="form-input" maxlength="255" placeholder="Street address" autocomplete="shipping address-line1">
-                                        </div>
-                                        <div class="form-group business-form__address-full">
-                                            <label class="form-label" for="biz-shipping-address2">Apartment, suite, etc. <span class="form-hint">(optional)</span></label>
-                                            <input type="text" id="biz-shipping-address2" class="form-input" maxlength="255" autocomplete="shipping address-line2">
-                                        </div>
-                                        <div class="form-group">
-                                            <label class="form-label" for="biz-shipping-city">City <span class="form-required">*</span></label>
-                                            <input type="text" id="biz-shipping-city" class="form-input" maxlength="100" autocomplete="shipping address-level2">
-                                        </div>
-                                        <div class="form-group">
-                                            <label class="form-label" for="biz-shipping-region">Region <span class="form-required">*</span></label>
-                                            <select id="biz-shipping-region" class="form-input" autocomplete="shipping address-level1">
-                                                <option value="">Select region</option>
-                                                <option value="northland">Northland</option>
-                                                <option value="auckland">Auckland</option>
-                                                <option value="waikato">Waikato</option>
-                                                <option value="bay-of-plenty">Bay of Plenty</option>
-                                                <option value="gisborne">Gisborne</option>
-                                                <option value="hawkes-bay">Hawke's Bay</option>
-                                                <option value="taranaki">Taranaki</option>
-                                                <option value="manawatu-wanganui">Manawatu-Whanganui</option>
-                                                <option value="wellington">Wellington</option>
-                                                <option value="tasman">Tasman</option>
-                                                <option value="nelson">Nelson</option>
-                                                <option value="marlborough">Marlborough</option>
-                                                <option value="west-coast">West Coast</option>
-                                                <option value="canterbury">Canterbury</option>
-                                                <option value="otago">Otago</option>
-                                                <option value="southland">Southland</option>
-                                            </select>
-                                        </div>
-                                        <div class="form-group">
-                                            <label class="form-label" for="biz-shipping-postcode">Postcode <span class="form-required">*</span></label>
-                                            <input type="text" id="biz-shipping-postcode" class="form-input" pattern="[0-9]{4}" maxlength="4" placeholder="0000" autocomplete="shipping postal-code">
-                                        </div>
-                                    </div>
-                                </div>
-                            </fieldset>
-
-                            <fieldset class="business-form__fieldset business-form__net30-section">
-                                <legend class="business-form__legend">Payment Terms</legend>
-                                <div class="form-group form-group--checkbox">
-                                    <label>
-                                        <input type="checkbox" id="biz-net30" class="form-checkbox">
-                                        Apply for Net 30 Payment Terms
-                                    </label>
-                                    <span class="form-hint" style="display: block; margin-top: 4px;">Pay invoices within 30 days of order. Subject to credit approval.</span>
-                                </div>
-                                <div id="biz-net30-fields" hidden>
-                                    <div class="form-group">
-                                        <label class="form-label" for="biz-spend">Estimated Monthly Spend <span class="form-required">*</span></label>
-                                        <select id="biz-spend" class="form-input">
-                                            <option value="">Select a range</option>
-                                            <option value="Under $200">Under $200</option>
-                                            <option value="$200-$500">$200 - $500</option>
-                                            <option value="$500-$1000">$500 - $1,000</option>
-                                            <option value="$1000-$2500">$1,000 - $2,500</option>
-                                            <option value="$2500-$5000">$2,500 - $5,000</option>
-                                            <option value="Over $5000">Over $5,000</option>
-                                        </select>
-                                    </div>
-                                    <div class="form-group">
-                                        <label class="form-label" for="biz-credit-ref">Credit Reference / Company Profile <span class="form-hint">(optional)</span></label>
-                                        <input type="file" id="biz-credit-ref" class="form-input business-form__file-upload" accept=".pdf,.jpg,.jpeg,.png">
-                                        <span class="form-hint">PDF, JPG, or PNG. Max 5 MB.</span>
-                                    </div>
-                                </div>
-                            </fieldset>
-
-                            <button type="submit" class="btn btn--primary btn--lg" id="biz-submit-btn">Submit Application</button>
-                            <div id="business-form-message" hidden></div>
-
-                            <div id="business-thank-you" class="business-form__thank-you" hidden>
-                                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#16a34a" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
-                                <h2>Application Received</h2>
-                                <p>Thank you for applying for a business account with InkCartridges.co.nz.</p>
-                                <p>Your application is now under manual review. Our team will contact you within <strong>24-48 business hours</strong> to confirm your account details.</p>
-                                <a href="/" class="btn btn--primary">Continue Shopping</a>
-                            </div>
-                        </form>
+                        <h2>Sign in to apply</h2>
+                        <p>Please log in to your account to apply for a business account. It only takes a moment.</p>
+                        <a href="/html/account/login.html?redirect=/html/business/apply.html" class="btn-login">Log In to Continue</a>
                     </div>
                 </div>
-            </div>
-        </section>
+
+                <!-- Existing application status -->
+                <div id="business-status-section" hidden>
+                    <div class="apply-prompt-card">
+                        <div id="business-status-content"></div>
+                    </div>
+                </div>
+
+                <!-- Thank you state -->
+                <div id="business-thank-you" hidden>
+                    <div class="apply-thank-you-card">
+                        <div class="apply-ty__check">
+                            <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="#16a34a" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                        </div>
+                        <h2 class="apply-ty__title">Application Submitted!</h2>
+                        <p class="apply-ty__sub">Thanks for applying. We'll review your application and email you within 1&ndash;2 business days.</p>
+                        <div class="apply-ty__steps">
+                            <div class="apply-ty__step">
+                                <div class="apply-ty__step-num">1</div>
+                                <div class="apply-ty__step-text">
+                                    <strong>Application received</strong>
+                                    <span>We've got your details and will begin our review shortly.</span>
+                                </div>
+                            </div>
+                            <div class="apply-ty__step">
+                                <div class="apply-ty__step-num">2</div>
+                                <div class="apply-ty__step-text">
+                                    <strong>We'll be in touch</strong>
+                                    <span>Expect an email within 1&ndash;2 business days confirming your account status.</span>
+                                </div>
+                            </div>
+                            <div class="apply-ty__step">
+                                <div class="apply-ty__step-num">3</div>
+                                <div class="apply-ty__step-text">
+                                    <strong>Start saving</strong>
+                                    <span>Once approved, your business pricing is active immediately when you log in.</span>
+                                </div>
+                            </div>
+                        </div>
+                        <a href="/" class="apply-ty__home">Continue Shopping</a>
+                    </div>
+                </div>
+
+                <!-- Wizard form -->
+                <form id="business-form" hidden novalidate>
+                    <div class="wizard-card">
+
+                        <!-- Progress bar -->
+                        <div class="wizard-progress">
+                            <div class="wizard-progress__steps">
+                                <div class="wizard-step-indicator active" data-step-indicator="1">
+                                    <div class="wizard-step-indicator__dot">1</div>
+                                    <span class="wizard-step-indicator__label">Company</span>
+                                </div>
+                                <div class="wizard-progress__line" data-line="1"></div>
+                                <div class="wizard-step-indicator" data-step-indicator="2">
+                                    <div class="wizard-step-indicator__dot">2</div>
+                                    <span class="wizard-step-indicator__label">Contact</span>
+                                </div>
+                                <div class="wizard-progress__line" data-line="2"></div>
+                                <div class="wizard-step-indicator" data-step-indicator="3">
+                                    <div class="wizard-step-indicator__dot">3</div>
+                                    <span class="wizard-step-indicator__label">Address</span>
+                                </div>
+                                <div class="wizard-progress__line" data-line="3"></div>
+                                <div class="wizard-step-indicator" data-step-indicator="4">
+                                    <div class="wizard-step-indicator__dot">4</div>
+                                    <span class="wizard-step-indicator__label">Net 30</span>
+                                </div>
+                                <div class="wizard-progress__line" data-line="4"></div>
+                                <div class="wizard-step-indicator" data-step-indicator="5">
+                                    <div class="wizard-step-indicator__dot">5</div>
+                                    <span class="wizard-step-indicator__label">Review</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Step body -->
+                        <div class="wizard-body">
+
+                            <!-- Step 1: Company -->
+                            <div class="wizard-step active" data-step="1">
+                                <h2 class="wizard-step__title">Company Details</h2>
+                                <p class="wizard-step__subtitle">Tell us about your business.</p>
+                                <div id="step-1-error" class="step-error" hidden></div>
+
+                                <div class="wiz-form-group">
+                                    <label class="wiz-label" for="biz-company">Company Name <span class="req">*</span></label>
+                                    <input type="text" id="biz-company" class="wiz-input" maxlength="200" placeholder="Your company name" autocomplete="organization">
+                                </div>
+
+                                <div class="wiz-form-group">
+                                    <label class="wiz-label" for="biz-nzbn">NZBN <span class="opt">(optional)</span></label>
+                                    <input type="text" id="biz-nzbn" class="wiz-input" maxlength="13" placeholder="13-digit NZ Business Number" inputmode="numeric">
+                                    <p class="wiz-hint">Your New Zealand Business Number &mdash; found on the NZBN register.</p>
+                                </div>
+
+                                <div class="wiz-form-row">
+                                    <div class="wiz-form-group">
+                                        <label class="wiz-label" for="biz-industry">Industry <span class="req">*</span></label>
+                                        <select id="biz-industry" class="wiz-select">
+                                            <option value="">Select industry</option>
+                                            <option value="retail">Retail</option>
+                                            <option value="healthcare">Healthcare</option>
+                                            <option value="education">Education</option>
+                                            <option value="government">Government</option>
+                                            <option value="construction">Construction</option>
+                                            <option value="hospitality">Hospitality</option>
+                                            <option value="professional_services">Professional Services</option>
+                                            <option value="nonprofit">Not-for-Profit</option>
+                                            <option value="other">Other</option>
+                                        </select>
+                                    </div>
+                                    <div class="wiz-form-group">
+                                        <label class="wiz-label" for="biz-type">Business Type <span class="req">*</span></label>
+                                        <select id="biz-type" class="wiz-select">
+                                            <option value="">Select type</option>
+                                            <option value="sole_trader">Sole Trader</option>
+                                            <option value="partnership">Partnership</option>
+                                            <option value="limited_company">Limited Company</option>
+                                            <option value="government">Government / Council</option>
+                                            <option value="school_university">School / University</option>
+                                            <option value="nonprofit">Not-for-Profit</option>
+                                            <option value="other">Other</option>
+                                        </select>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Step 2: Contact -->
+                            <div class="wizard-step" data-step="2">
+                                <h2 class="wizard-step__title">Contact Details</h2>
+                                <p class="wizard-step__subtitle">Who should we contact about this account?</p>
+                                <div id="step-2-error" class="step-error" hidden></div>
+
+                                <div class="wiz-form-row">
+                                    <div class="wiz-form-group">
+                                        <label class="wiz-label" for="biz-contact-name">Contact Name <span class="req">*</span></label>
+                                        <input type="text" id="biz-contact-name" class="wiz-input" maxlength="200" placeholder="Full name" autocomplete="name">
+                                    </div>
+                                    <div class="wiz-form-group">
+                                        <label class="wiz-label" for="biz-phone">Phone Number <span class="req">*</span></label>
+                                        <input type="tel" id="biz-phone" class="wiz-input" maxlength="20" placeholder="021 123 4567" autocomplete="tel">
+                                    </div>
+                                </div>
+
+                                <div class="wiz-form-group">
+                                    <label class="wiz-label" for="biz-email">Email Address <span class="req">*</span></label>
+                                    <input type="email" id="biz-email" class="wiz-input" maxlength="200" placeholder="business@example.co.nz" autocomplete="email">
+                                </div>
+
+                                <div class="wiz-form-group">
+                                    <label class="wiz-label" for="biz-ap-email">Accounts Payable Email <span class="opt">(for invoices, optional)</span></label>
+                                    <input type="email" id="biz-ap-email" class="wiz-input" maxlength="200" placeholder="accounts@example.co.nz">
+                                </div>
+                            </div>
+
+                            <!-- Step 3: Address -->
+                            <div class="wizard-step" data-step="3">
+                                <h2 class="wizard-step__title">Addresses</h2>
+                                <p class="wizard-step__subtitle">Where should we send your invoices and deliveries?</p>
+                                <div id="step-3-error" class="step-error" hidden></div>
+
+                                <div class="wiz-section-label">Billing Address</div>
+
+                                <div class="wiz-form-group">
+                                    <label class="wiz-label" for="biz-billing-address1">Street Address <span class="req">*</span></label>
+                                    <input type="text" id="biz-billing-address1" class="wiz-input" maxlength="255" placeholder="Street address" autocomplete="billing address-line1">
+                                </div>
+                                <div class="wiz-form-group">
+                                    <label class="wiz-label" for="biz-billing-address2">Apt / Suite / Floor <span class="opt">(optional)</span></label>
+                                    <input type="text" id="biz-billing-address2" class="wiz-input" maxlength="255" autocomplete="billing address-line2">
+                                </div>
+                                <div class="wiz-form-row-3">
+                                    <div class="wiz-form-group">
+                                        <label class="wiz-label" for="biz-billing-city">City <span class="req">*</span></label>
+                                        <input type="text" id="biz-billing-city" class="wiz-input" maxlength="100" autocomplete="billing address-level2">
+                                    </div>
+                                    <div class="wiz-form-group">
+                                        <label class="wiz-label" for="biz-billing-region">Region <span class="req">*</span></label>
+                                        <select id="biz-billing-region" class="wiz-select" autocomplete="billing address-level1">
+                                            <option value="">Select region</option>
+                                            <option value="auckland">Auckland</option>
+                                            <option value="wellington">Wellington</option>
+                                            <option value="canterbury">Canterbury</option>
+                                            <option value="waikato">Waikato</option>
+                                            <option value="bay-of-plenty">Bay of Plenty</option>
+                                            <option value="manawatu-wanganui">Manawatu-Whanganui</option>
+                                            <option value="hawkes-bay">Hawke's Bay</option>
+                                            <option value="northland">Northland</option>
+                                            <option value="taranaki">Taranaki</option>
+                                            <option value="otago">Otago</option>
+                                            <option value="southland">Southland</option>
+                                            <option value="gisborne">Gisborne</option>
+                                            <option value="nelson">Nelson</option>
+                                            <option value="marlborough">Marlborough</option>
+                                            <option value="tasman">Tasman</option>
+                                            <option value="west-coast">West Coast</option>
+                                        </select>
+                                    </div>
+                                    <div class="wiz-form-group">
+                                        <label class="wiz-label" for="biz-billing-postcode">Postcode <span class="req">*</span></label>
+                                        <input type="text" id="biz-billing-postcode" class="wiz-input" maxlength="4" placeholder="0000" inputmode="numeric" autocomplete="billing postal-code">
+                                    </div>
+                                </div>
+
+                                <div class="wiz-section-label">Shipping Address</div>
+
+                                <div class="wiz-checkbox-wrap">
+                                    <input type="checkbox" id="biz-same-as-billing" checked>
+                                    <div class="wiz-checkbox-wrap__body">
+                                        <label for="biz-same-as-billing">Same as billing address</label>
+                                    </div>
+                                </div>
+
+                                <div id="biz-shipping-fields" hidden>
+                                    <div class="wiz-form-group">
+                                        <label class="wiz-label" for="biz-shipping-address1">Street Address <span class="req">*</span></label>
+                                        <input type="text" id="biz-shipping-address1" class="wiz-input" maxlength="255" placeholder="Street address" autocomplete="shipping address-line1">
+                                    </div>
+                                    <div class="wiz-form-group">
+                                        <label class="wiz-label" for="biz-shipping-address2">Apt / Suite / Floor <span class="opt">(optional)</span></label>
+                                        <input type="text" id="biz-shipping-address2" class="wiz-input" maxlength="255" autocomplete="shipping address-line2">
+                                    </div>
+                                    <div class="wiz-form-row-3">
+                                        <div class="wiz-form-group">
+                                            <label class="wiz-label" for="biz-shipping-city">City <span class="req">*</span></label>
+                                            <input type="text" id="biz-shipping-city" class="wiz-input" maxlength="100" autocomplete="shipping address-level2">
+                                        </div>
+                                        <div class="wiz-form-group">
+                                            <label class="wiz-label" for="biz-shipping-region">Region <span class="req">*</span></label>
+                                            <select id="biz-shipping-region" class="wiz-select" autocomplete="shipping address-level1">
+                                                <option value="">Select region</option>
+                                                <option value="auckland">Auckland</option>
+                                                <option value="wellington">Wellington</option>
+                                                <option value="canterbury">Canterbury</option>
+                                                <option value="waikato">Waikato</option>
+                                                <option value="bay-of-plenty">Bay of Plenty</option>
+                                                <option value="manawatu-wanganui">Manawatu-Whanganui</option>
+                                                <option value="hawkes-bay">Hawke's Bay</option>
+                                                <option value="northland">Northland</option>
+                                                <option value="taranaki">Taranaki</option>
+                                                <option value="otago">Otago</option>
+                                                <option value="southland">Southland</option>
+                                                <option value="gisborne">Gisborne</option>
+                                                <option value="nelson">Nelson</option>
+                                                <option value="marlborough">Marlborough</option>
+                                                <option value="tasman">Tasman</option>
+                                                <option value="west-coast">West Coast</option>
+                                            </select>
+                                        </div>
+                                        <div class="wiz-form-group">
+                                            <label class="wiz-label" for="biz-shipping-postcode">Postcode <span class="req">*</span></label>
+                                            <input type="text" id="biz-shipping-postcode" class="wiz-input" maxlength="4" placeholder="0000" inputmode="numeric" autocomplete="shipping postal-code">
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Step 4: Net 30 -->
+                            <div class="wizard-step" data-step="4">
+                                <h2 class="wizard-step__title">Net 30 Terms</h2>
+                                <p class="wizard-step__subtitle">Optional &mdash; apply for payment terms that let you pay within 30 days of ordering.</p>
+                                <div id="step-4-error" class="step-error" hidden></div>
+
+                                <div class="wiz-checkbox-wrap">
+                                    <input type="checkbox" id="biz-net30">
+                                    <div class="wiz-checkbox-wrap__body">
+                                        <label for="biz-net30">Apply for Net 30 payment terms</label>
+                                        <p class="hint">Order now and pay within 30 days via monthly invoice.</p>
+                                    </div>
+                                </div>
+
+                                <div id="biz-net30-fields" hidden>
+                                    <div class="net30-callout">
+                                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                                        <p>Net 30 allows you to order now and pay within 30 days. Available from Silver tier. Our team will review your credit reference before approving.</p>
+                                    </div>
+
+                                    <div class="wiz-form-group">
+                                        <label class="wiz-label" for="biz-spend">Estimated Monthly Spend <span class="req">*</span></label>
+                                        <select id="biz-spend" class="wiz-select">
+                                            <option value="">Select a range</option>
+                                            <option value="Under $500">Under $500</option>
+                                            <option value="$500-$1,000">$500 &ndash; $1,000</option>
+                                            <option value="$1,000-$2,500">$1,000 &ndash; $2,500</option>
+                                            <option value="$2,500-$5,000">$2,500 &ndash; $5,000</option>
+                                            <option value="Over $5,000">Over $5,000</option>
+                                        </select>
+                                    </div>
+
+                                    <div class="wiz-form-group">
+                                        <label class="wiz-label" for="biz-credit-ref">Credit Reference <span class="opt">(optional)</span></label>
+                                        <input type="file" id="biz-credit-ref" class="wiz-file" accept=".pdf,.jpg,.jpeg,.png">
+                                        <p class="wiz-hint">PDF, JPG, or PNG. Max 5 MB. A company letterhead or trade reference is ideal.</p>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Step 5: Review -->
+                            <div class="wizard-step" data-step="5">
+                                <h2 class="wizard-step__title">Review &amp; Submit</h2>
+                                <p class="wizard-step__subtitle">Please check your details before submitting. Our team will be in touch within 1&ndash;2 business days.</p>
+
+                                <div id="review-content"></div>
+
+                                <p class="review-note">By submitting this application you agree to our <a href="/html/terms.html">terms and conditions</a>. Your details will only be used to process your business account.</p>
+                            </div>
+
+                        </div><!-- .wizard-body -->
+
+                        <!-- Submission error message -->
+                        <div id="business-form-message" hidden></div>
+
+                        <!-- Navigation -->
+                        <div class="wizard-nav">
+                            <span class="wizard-step-count" id="wizard-step-count">Step 1 of 5</span>
+                            <div class="wizard-nav__right">
+                                <button type="button" class="btn-wiz-back" id="wizard-back-btn" disabled>Back</button>
+                                <button type="button" class="btn-wiz-next" id="wizard-next-btn">
+                                    Next
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
+                                </button>
+                                <button type="submit" class="btn-wiz-submit" id="biz-submit-btn" style="display:none">
+                                    Submit Application
+                                </button>
+                            </div>
+                        </div>
+
+                    </div><!-- .wizard-card -->
+                </form>
+
+            </div><!-- .container -->
+        </div><!-- .apply-page -->
     </main>
 
     <footer class="site-footer"></footer>
@@ -401,7 +1152,6 @@
     <script defer src="/js/footer.js"></script>
     <script defer src="/js/mega-nav.js"></script>
     <script defer src="/js/modern-effects.js"></script>
-
     <script defer src="/js/business-apply-page.js"></script>
 </body>
 </html>

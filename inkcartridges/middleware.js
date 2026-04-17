@@ -3,11 +3,22 @@ const BACKEND = 'https://ink-backend-zaeq.onrender.com';
 const BOT_PATTERN = /googlebot|google-inspectiontool|bingbot|slurp|duckduckbot|baiduspider|yandexbot|facebookexternalhit|facebot|twitterbot|linkedinbot|whatsapp|telegrambot|applebot|pinterest|semrushbot|ahrefsbot|mj12bot|dotbot|rogerbot|embedly|quora link preview|showyoubot|outbrain|chrome-lighthouse|google-structured-data-testing-tool/i;
 
 export default async function middleware(request) {
+  const url = new URL(request.url);
+  const path = url.pathname;
+
+  // Gate admin routes — redirect to login if no auth cookie
+  if (path.startsWith('/html/admin')) {
+    const cookie = request.headers.get('cookie') || '';
+    if (!/__ink_auth=1/.test(cookie)) {
+      const loginUrl = new URL('/html/account/login.html', request.url);
+      loginUrl.searchParams.set('redirect', path + url.search);
+      return Response.redirect(loginUrl.toString(), 302);
+    }
+  }
+
   const ua = request.headers.get('user-agent') || '';
   if (!BOT_PATTERN.test(ua)) return;
 
-  const url = new URL(request.url);
-  const path = url.pathname;
   let prerenderPath = null;
 
   // / → home
@@ -67,6 +78,8 @@ export default async function middleware(request) {
 export const config = {
   matcher: [
     '/',
+    '/html/admin/:path*',
+    '/html/admin',
     '/products/:path*',
     '/product/:path*',
     '/html/ribbons',

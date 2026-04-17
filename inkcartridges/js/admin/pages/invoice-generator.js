@@ -3,6 +3,75 @@
  */
 import { icon, esc, FilterState } from '../app.js';
 
+// ── Product search ───────────────────────────────────────────────────────────
+const SUGGEST_LIMIT = 8;
+const SUGGEST_DEBOUNCE = 250;
+let _suggestTimer = null;
+let _activeSuggest = null; // { rowEl, dropdown }
+
+async function fetchProductSuggestions(query) {
+  const base = (typeof Config !== 'undefined' && Config.API_URL) ? Config.API_URL : '';
+  const url = `${base}/api/search/suggest?q=${encodeURIComponent(query)}&limit=${SUGGEST_LIMIT}`;
+  const res = await fetch(url, { credentials: 'include' });
+  const json = await res.json();
+  if (!json || !json.ok) return [];
+  return (json.data && Array.isArray(json.data.suggestions)) ? json.data.suggestions : [];
+}
+
+function closeSuggestDropdown() {
+  if (_activeSuggest) {
+    _activeSuggest.dropdown.remove();
+    _activeSuggest = null;
+  }
+}
+
+function openSuggestDropdown(rowEl, suggestions, onSelect) {
+  closeSuggestDropdown();
+  if (!suggestions.length) return;
+
+  const codeCell = rowEl.querySelector('[data-field="code"]');
+  if (!codeCell) return;
+
+  const rect = codeCell.getBoundingClientRect();
+  const dd = document.createElement('div');
+  dd.className = 'inv-suggest-dropdown';
+  dd.style.cssText = `
+    position: fixed;
+    top: ${rect.bottom + 2}px;
+    left: ${rect.left}px;
+    width: ${Math.max(rect.width, 340)}px;
+    z-index: 9999;
+    background: #fff;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    box-shadow: 0 8px 24px rgba(0,0,0,.15);
+    overflow: hidden;
+    max-height: 300px;
+    overflow-y: auto;
+  `;
+
+  suggestions.forEach((p, i) => {
+    const item = document.createElement('div');
+    item.className = 'inv-suggest-item';
+    item.dataset.idx = i;
+    const price = p.price != null ? p.price : (p.retail_price != null ? p.retail_price : null);
+    const priceStr = price != null ? ` — $${parseFloat(price).toFixed(2)}` : '';
+    item.innerHTML = `
+      <span class="inv-suggest-sku">${esc(p.sku || '')}</span>
+      <span class="inv-suggest-name">${esc(p.name || '')}<span class="inv-suggest-price">${esc(priceStr)}</span></span>
+    `;
+    item.addEventListener('mousedown', e => {
+      e.preventDefault();
+      onSelect(p);
+      closeSuggestDropdown();
+    });
+    dd.appendChild(item);
+  });
+
+  document.body.appendChild(dd);
+  _activeSuggest = { rowEl, dropdown: dd };
+}
+
 // ── Fixed "from" details ────────────────────────────────────────────────────
 const FROM_DEFAULTS = {
   company:    'Office Consumables Ltd',
@@ -230,10 +299,10 @@ function renderPreview() {
       </table>
 
       <div class="inv-totals">
-        <div class="inv-totals__row"><span>Sub Total</span><span>${money(subtotal)}</span></div>
-        <div class="inv-totals__row"><span>Freight</span><span>${esc(freightDisplay)}</span></div>
-        <div class="inv-totals__row"><span>GST</span><span>${money(gst)}</span></div>
-        <div class="inv-totals__row inv-totals__row--total"><span>Total</span><span>$${money(total)}</span></div>
+        <div class="inv-totals__row"><span>Sub Total <span class="inv-totals__tag">excl. GST</span></span><span>$${money(subtotal)}</span></div>
+        <div class="inv-totals__row"><span>Freight <span class="inv-totals__tag">excl. GST</span></span><span>${esc(freightDisplay)}</span></div>
+        <div class="inv-totals__row"><span>GST (15%)</span><span>$${money(gst)}</span></div>
+        <div class="inv-totals__row inv-totals__row--total"><span>Total <span class="inv-totals__tag inv-totals__tag--dark">incl. GST</span></span><span>$${money(total)}</span></div>
       </div>
 
       <div class="inv-footer">
@@ -379,7 +448,11 @@ function generatePDF() {
 
   const freightDisplay = (s.freight === '' || s.freight === 'free') ? 'free' : `$${money(parseFloat(s.freight)||0)}`;
 
-  for (const [lbl, val] of [['Sub Total', money(subtotal)], ['Freight', freightDisplay], ['GST', money(gst)]]) {
+  for (const [lbl, val] of [
+    [`Sub Total (excl. GST)`, `$${money(subtotal)}`],
+    [`Freight (excl. GST)`,   freightDisplay],
+    [`GST (15%)`,             `$${money(gst)}`],
+  ]) {
     setStyle(9, 'normal', 80);  txt(lbl, totLabelX, tY);
     setStyle(9, 'normal', 20);  txt(val, totValX, tY, { align: 'right' });
     tY += 5.5;
@@ -391,7 +464,7 @@ function generatePDF() {
   tY += 5.5;
 
   setStyle(10.5, 'bold', 10);
-  txt('Total', totLabelX, tY);
+  txt('Total (incl. GST)', totLabelX, tY);
   txt(`$${money(total)}`, totValX, tY, { align: 'right' });
 
   // ── Footer ──
@@ -428,7 +501,9 @@ function renderItemRows() {
   if (!el) return;
   el.innerHTML = _state.items.map((it, i) => `
     <tr class="inv-form-item-row" data-idx="${i}">
-      <td><input class="inv-input" data-field="code" data-idx="${i}" value="${esc(it.code)}" placeholder="e.g. COMPTN2584PK"></td>
+      <td class="inv-item-code-cell">
+        <input class="inv-input inv-input--code" data-field="code" data-idx="${i}" value="${esc(it.code)}" placeholder="Search or type code…" autocomplete="off">
+      </td>
       <td><input class="inv-input" data-field="description" data-idx="${i}" value="${esc(it.description)}" placeholder="Description"></td>
       <td><input class="inv-input inv-input--narrow" type="number" min="1" data-field="qty" data-idx="${i}" value="${it.qty||1}"></td>
       <td><input class="inv-input inv-input--narrow" type="number" step="0.01" min="0" data-field="cost" data-idx="${i}" value="${it.cost!==''?it.cost:''}" placeholder="0.00"></td>
@@ -442,12 +517,63 @@ function renderItemRows() {
 
   // Wire item inputs
   el.querySelectorAll('[data-field]').forEach(inp => {
+    const isCodeField = inp.dataset.field === 'code';
+
     inp.addEventListener('input', () => {
       const idx   = parseInt(inp.dataset.idx, 10);
       const field = inp.dataset.field;
       _state.items[idx][field] = inp.value;
       renderPreview();
+
+      if (isCodeField) {
+        const query = inp.value.trim();
+        clearTimeout(_suggestTimer);
+        if (query.length < 2) { closeSuggestDropdown(); return; }
+        const rowEl = inp.closest('tr');
+        _suggestTimer = setTimeout(async () => {
+          try {
+            const suggestions = await fetchProductSuggestions(query);
+            openSuggestDropdown(rowEl, suggestions, (product) => {
+              const price = product.price != null ? product.price : (product.retail_price != null ? product.retail_price : '');
+              _state.items[idx].code        = product.sku || '';
+              _state.items[idx].description = product.name || '';
+              _state.items[idx].cost        = price !== '' ? parseFloat(price).toFixed(2) : '';
+              renderItemRows();
+              renderPreview();
+            });
+          } catch (_) { closeSuggestDropdown(); }
+        }, SUGGEST_DEBOUNCE);
+      }
     });
+
+    if (isCodeField) {
+      inp.addEventListener('blur', () => {
+        // Small delay so mousedown on dropdown item fires first
+        setTimeout(closeSuggestDropdown, 150);
+      });
+      inp.addEventListener('keydown', e => {
+        if (!_activeSuggest) return;
+        const items = _activeSuggest.dropdown.querySelectorAll('.inv-suggest-item');
+        const active = _activeSuggest.dropdown.querySelector('.inv-suggest-item--active');
+        let idx2 = active ? parseInt(active.dataset.idx, 10) : -1;
+        if (e.key === 'ArrowDown') {
+          e.preventDefault();
+          idx2 = Math.min(idx2 + 1, items.length - 1);
+          items.forEach(it => it.classList.remove('inv-suggest-item--active'));
+          if (items[idx2]) items[idx2].classList.add('inv-suggest-item--active');
+        } else if (e.key === 'ArrowUp') {
+          e.preventDefault();
+          idx2 = Math.max(idx2 - 1, 0);
+          items.forEach(it => it.classList.remove('inv-suggest-item--active'));
+          if (items[idx2]) items[idx2].classList.add('inv-suggest-item--active');
+        } else if (e.key === 'Enter') {
+          const activeItem = _activeSuggest.dropdown.querySelector('.inv-suggest-item--active');
+          if (activeItem) { e.preventDefault(); activeItem.dispatchEvent(new MouseEvent('mousedown')); }
+        } else if (e.key === 'Escape') {
+          closeSuggestDropdown();
+        }
+      });
+    }
   });
 
   el.querySelectorAll('[data-del]').forEach(btn => {
@@ -455,6 +581,7 @@ function renderItemRows() {
       const idx = parseInt(btn.dataset.del, 10);
       if (_state.items.length > 1) {
         _state.items.splice(idx, 1);
+        closeSuggestDropdown();
         renderItemRows();
         renderPreview();
       }
@@ -587,6 +714,7 @@ COMPTN2150 | Brother Comp. TN2150 Toner BLACK | 1 | 32.00</pre>
               </thead>
               <tbody id="inv-items-body"></tbody>
             </table>
+            <p class="inv-search-hint">Type in the Product Code field to search products — selecting one auto-fills all details.</p>
             <button class="inv-btn inv-btn--ghost inv-add-row" id="add-row-btn">
               <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
               Add row
@@ -859,8 +987,10 @@ COMPTN2150 | Brother Comp. TN2150 Toner BLACK | 1 | 32.00</pre>
 
         /* Totals */
         .inv-totals { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; margin-bottom: 28px; }
-        .inv-totals__row { display: flex; gap: 40px; font-size: 12.5px; min-width: 200px; justify-content: space-between; }
+        .inv-totals__row { display: flex; gap: 40px; font-size: 12.5px; min-width: 240px; justify-content: space-between; }
         .inv-totals__row--total { font-weight: bold; font-size: 14px; border-top: 1.5px solid #222; padding-top: 6px; margin-top: 4px; }
+        .inv-totals__tag { font-size: 9.5px; font-weight: normal; color: #888; font-style: italic; margin-left: 4px; }
+        .inv-totals__tag--dark { color: #555; }
 
         /* Footer */
         .inv-footer { border-top: 1px solid #ccc; padding-top: 18px; font-size: 12.5px; }
@@ -869,6 +999,52 @@ COMPTN2150 | Brother Comp. TN2150 Toner BLACK | 1 | 32.00</pre>
         .inv-footer__bank-label { font-weight: bold; min-width: 84px; }
         .inv-footer__bank-val { font-weight: bold; }
         .inv-footer__closing { margin-top: 14px; font-weight: bold; font-size: 12px; }
+
+        /* ── Product search hint ────────────────────────────── */
+        .inv-search-hint { font-size: 11px; color: var(--color-text-muted, #64748b); margin: 2px 0 0; }
+
+        /* ── Product suggest dropdown ───────────────────────── */
+        .inv-item-code-cell { position: relative; }
+        .inv-input--code { min-width: 160px; }
+        .inv-suggest-dropdown {
+          font-family: inherit;
+        }
+        .inv-suggest-item {
+          display: flex;
+          align-items: baseline;
+          gap: 10px;
+          padding: 8px 12px;
+          cursor: pointer;
+          font-size: 13px;
+          border-bottom: 1px solid #f1f5f9;
+          transition: background .1s;
+        }
+        .inv-suggest-item:last-child { border-bottom: none; }
+        .inv-suggest-item:hover,
+        .inv-suggest-item--active {
+          background: #eff6ff;
+        }
+        .inv-suggest-sku {
+          font-family: 'SF Mono', 'Cascadia Code', monospace;
+          font-size: 11.5px;
+          font-weight: 700;
+          color: var(--color-primary, #267fb5);
+          white-space: nowrap;
+          min-width: 120px;
+          flex-shrink: 0;
+        }
+        .inv-suggest-name {
+          color: #1e293b;
+          font-size: 12.5px;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+        }
+        .inv-suggest-price {
+          color: #64748b;
+          font-size: 11.5px;
+          margin-left: 4px;
+        }
       </style>
     `;
 
@@ -963,12 +1139,17 @@ COMPTN2150 | Brother Comp. TN2150 Toner BLACK | 1 | 32.00</pre>
     container.querySelector('#reset-btn').addEventListener('click', () => {
       if (!confirm('Start a new blank invoice? This will clear all fields.')) return;
       _state = defaultState();
-      // Re-init by re-calling init
+      closeSuggestDropdown();
       this.init(container);
     });
+
+    // Close suggest dropdown when clicking outside
+    document.addEventListener('click', closeSuggestDropdown, true);
   },
 
   destroy() {
+    closeSuggestDropdown();
+    document.removeEventListener('click', closeSuggestDropdown, true);
     _container = null;
   },
 };
