@@ -31,6 +31,11 @@ async function initCtaButtons() {
     const statusBanner = document.getElementById('status-banner');
     const statusBannerText = document.getElementById('status-banner-text');
 
+    // Wait for Auth to finish initialising before checking login state
+    if (window.Auth?.readyPromise) {
+        await window.Auth.readyPromise;
+    }
+
     let status = null;
     try {
         if (window.API && window.Auth?.user) {
@@ -46,7 +51,7 @@ async function initCtaButtons() {
 
     if (!window.Auth?.user) {
         ctaText = 'Apply Now';
-        ctaHref = '/html/account/login.html?redirect=/html/business/apply.html';
+        ctaHref = '/html/account/login.html?tab=register&redirect=/html/business/apply.html';
     } else if (status === 'approved') {
         ctaText = 'Go to Business Dashboard';
         ctaHref = '/html/account/business.html';

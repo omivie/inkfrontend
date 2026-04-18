@@ -3,11 +3,11 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-    <meta name="description" content="Business accounts for NZ offices and organisations. Save up to 15% on ink cartridges with exclusive tiered pricing, Net 30 terms, and dedicated support.">
+    <meta name="description" content="Business accounts for NZ offices and organisations. Exclusive pricing on every product, automatically applied when you log in. Net 30 terms available.">
     <meta name="robots" content="index, follow">
 
     <meta property="og:title" content="Business Accounts — InkCartridges.co.nz">
-    <meta property="og:description" content="Exclusive pricing for NZ businesses. Save up to 15% on all ink cartridges. Net 30 terms available.">
+    <meta property="og:description" content="Exclusive pricing for NZ businesses. See your business price on every product when you log in. Net 30 terms available.">
     <meta property="og:type" content="website">
     <meta property="og:url" content="https://www.inkcartridges.co.nz/html/business/">
     <meta property="og:site_name" content="InkCartridges.co.nz">
@@ -183,47 +183,49 @@
         }
         .b2b-benefits__grid {
             display: grid;
-            grid-template-columns: repeat(3, 1fr);
-            gap: 24px;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 28px;
+            max-width: 860px;
+            margin: 0 auto;
         }
-        @media (max-width: 768px) {
-            .b2b-benefits__grid { grid-template-columns: repeat(2, 1fr); }
-        }
-        @media (max-width: 480px) {
+        @media (max-width: 560px) {
             .b2b-benefits__grid { grid-template-columns: 1fr; }
         }
         .b2b-benefit {
-            padding: 28px 24px;
-            border: 1px solid #e8eef6;
-            border-radius: 12px;
-            background: #fafcff;
+            padding: 44px 40px;
+            border: 1.5px solid #e2eaf6;
+            border-radius: 16px;
+            background: #fff;
             transition: border-color 0.2s, box-shadow 0.2s, transform 0.2s;
+            display: flex;
+            flex-direction: column;
         }
         .b2b-benefit:hover {
-            border-color: #bfdbfe;
-            box-shadow: 0 4px 16px rgba(37,99,235,0.08);
-            transform: translateY(-2px);
+            border-color: #93c5fd;
+            box-shadow: 0 8px 32px rgba(37,99,235,0.1);
+            transform: translateY(-3px);
         }
         .b2b-benefit__icon {
-            width: 44px; height: 44px;
+            width: 56px; height: 56px;
             background: #eff6ff;
-            border-radius: 10px;
+            border-radius: 14px;
             display: flex;
             align-items: center;
             justify-content: center;
-            margin-bottom: 16px;
+            margin-bottom: 24px;
             color: var(--b2b-blue);
         }
         .b2b-benefit__title {
-            font-size: 15px;
-            font-weight: 700;
+            font-size: 20px;
+            font-weight: 800;
             color: #0f172a;
-            margin: 0 0 6px;
+            margin: 0 0 12px;
+            letter-spacing: -0.01em;
         }
         .b2b-benefit__desc {
-            font-size: 13.5px;
-            color: #64748b;
-            line-height: 1.55;
+            font-size: 15px;
+            color: #475569;
+            line-height: 1.65;
             margin: 0;
         }
 
@@ -546,6 +548,12 @@
                         </span>
                         <span>Cart</span>
                     </a>
+                    <a href="/html/business/" class="header-actions__item header-actions__item--business">
+                        <span class="header-actions__icon">
+                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="7" width="20" height="14" rx="2" ry="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></svg>
+                        </span>
+                        <span>For Business</span>
+                    </a>
                 </div>
             </div>
         </div>
@@ -572,7 +580,6 @@
                             <svg class="nav-menu__arrow" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
                         </button>
                     </li>
-                    <li class="nav-menu__item"><a href="/html/business/" class="nav-menu__link nav-menu__link--active">For Business</a></li>
                 </ul>
                 <form class="search-form search-form--nav" action="/html/shop.html" method="GET" role="search">
                     <label for="search-input" class="visually-hidden">Search for products</label>
@@ -617,7 +624,7 @@
                     Business Pricing for<br><em>NZ Offices &amp; Organisations</em>
                 </h1>
                 <p class="b2b-hero__subtitle">
-                    Save up to 15% on all ink cartridges. Net 30 terms. GST invoices. Exclusive to approved business accounts.
+                    Exclusive pricing on every product, automatically applied when you log in. Net 30 terms available for approved accounts.
                 </p>
                 <div class="b2b-hero__cta-wrap">
                     <a href="/html/business/apply.html" id="hero-cta-btn" class="b2b-cta-btn">
@@ -642,176 +649,28 @@
         <!-- Benefits -->
         <section class="b2b-benefits">
             <div class="container">
-                <p class="b2b-section-label">Why it matters</p>
-                <h2 class="b2b-section-title">Everything your business needs</h2>
-                <p class="b2b-section-sub">Purpose-built for NZ offices, schools, and organisations that print regularly</p>
+                <p class="b2b-section-label">What you get</p>
+                <h2 class="b2b-section-title">Business account benefits</h2>
+                <p class="b2b-section-sub">Simple, straightforward — exclusive to approved NZ business accounts</p>
                 <div class="b2b-benefits__grid">
                     <div class="b2b-benefit">
                         <div class="b2b-benefit__icon">
-                            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+                            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
                         </div>
-                        <p class="b2b-benefit__title">Tiered Discounts</p>
-                        <p class="b2b-benefit__desc">Bronze 5%, Silver 10%, Gold 15% off every order — automatically applied at checkout.</p>
+                        <p class="b2b-benefit__title">Exclusive Business Pricing</p>
+                        <p class="b2b-benefit__desc">Log in to see your business price on every product across our full range. Your discounted price is shown alongside the standard price — cheaper, automatically applied, no codes needed.</p>
                     </div>
                     <div class="b2b-benefit">
                         <div class="b2b-benefit__icon">
-                            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+                            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
                         </div>
                         <p class="b2b-benefit__title">Net 30 Terms</p>
-                        <p class="b2b-benefit__desc">Order now, pay later with monthly invoicing. Available for approved Silver and Gold accounts.</p>
-                    </div>
-                    <div class="b2b-benefit">
-                        <div class="b2b-benefit__icon">
-                            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
-                        </div>
-                        <p class="b2b-benefit__title">Dedicated Support</p>
-                        <p class="b2b-benefit__desc">Priority email &amp; phone support for business accounts — real people based in New Zealand.</p>
-                    </div>
-                    <div class="b2b-benefit">
-                        <div class="b2b-benefit__icon">
-                            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg>
-                        </div>
-                        <p class="b2b-benefit__title">Bulk Ordering</p>
-                        <p class="b2b-benefit__desc">No minimum order. Easy reordering from your business dashboard with one-click repeat orders.</p>
-                    </div>
-                    <div class="b2b-benefit">
-                        <div class="b2b-benefit__icon">
-                            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
-                        </div>
-                        <p class="b2b-benefit__title">Priority Dispatch</p>
-                        <p class="b2b-benefit__desc">Business orders processed first. Get your cartridges faster when you need them most.</p>
-                    </div>
-                    <div class="b2b-benefit">
-                        <div class="b2b-benefit__icon">
-                            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="1" y="4" width="22" height="16" rx="2" ry="2"/><line x1="1" y1="10" x2="23" y2="10"/></svg>
-                        </div>
-                        <p class="b2b-benefit__title">GST Invoices</p>
-                        <p class="b2b-benefit__desc">Detailed tax invoices on every order. Easy reconciliation for your accounts team.</p>
+                        <p class="b2b-benefit__desc">Order now, pay later. Approved business accounts can receive a monthly invoice with 30 days to pay — great for managing cash flow without holding up your print supplies.</p>
                     </div>
                 </div>
             </div>
         </section>
 
-        <!-- Tiers -->
-        <section class="b2b-tiers" aria-labelledby="b2b-tiers-heading">
-            <div class="container">
-                <p class="b2b-section-label">Pricing tiers</p>
-                <h2 id="b2b-tiers-heading" class="b2b-section-title">Choose your tier</h2>
-                <p class="b2b-section-sub">Tiers are assigned at approval based on your business profile</p>
-
-                <div class="b2b-tiers__grid">
-                    <!-- Bronze -->
-                    <div class="b2b-tier b2b-tier--bronze">
-                        <div class="b2b-tier__header">
-                            <span class="b2b-tier__dot"></span>
-                            <span class="b2b-tier__name">Bronze</span>
-                        </div>
-                        <div class="b2b-tier__discount">5%<span class="b2b-tier__discount-label">off every order</span></div>
-                        <ul class="b2b-tier__features" aria-label="Bronze features">
-                            <li class="b2b-tier__feature">
-                                <span class="b2b-tier__feature-check"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></span>
-                                Exclusive business pricing
-                            </li>
-                            <li class="b2b-tier__feature">
-                                <span class="b2b-tier__feature-check"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></span>
-                                GST invoices on all orders
-                            </li>
-                            <li class="b2b-tier__feature">
-                                <span class="b2b-tier__feature-check"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></span>
-                                Business account dashboard
-                            </li>
-                            <li class="b2b-tier__feature b2b-tier__feature--muted">
-                                <span class="b2b-tier__feature-check"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></span>
-                                Net 30 terms
-                            </li>
-                            <li class="b2b-tier__feature b2b-tier__feature--muted">
-                                <span class="b2b-tier__feature-check"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></span>
-                                Priority dispatch
-                            </li>
-                            <li class="b2b-tier__feature b2b-tier__feature--muted">
-                                <span class="b2b-tier__feature-check"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></span>
-                                Dedicated account manager
-                            </li>
-                        </ul>
-                        <p class="b2b-tier__qualify">For new business accounts and smaller organisations.</p>
-                    </div>
-
-                    <!-- Silver (popular) -->
-                    <div class="b2b-tier b2b-tier--silver b2b-tier--popular">
-                        <span class="b2b-tier__popular-badge">Most Popular</span>
-                        <div class="b2b-tier__header">
-                            <span class="b2b-tier__dot"></span>
-                            <span class="b2b-tier__name">Silver</span>
-                        </div>
-                        <div class="b2b-tier__discount">10%<span class="b2b-tier__discount-label">off every order</span></div>
-                        <ul class="b2b-tier__features" aria-label="Silver features">
-                            <li class="b2b-tier__feature">
-                                <span class="b2b-tier__feature-check"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></span>
-                                Exclusive business pricing
-                            </li>
-                            <li class="b2b-tier__feature">
-                                <span class="b2b-tier__feature-check"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></span>
-                                GST invoices on all orders
-                            </li>
-                            <li class="b2b-tier__feature">
-                                <span class="b2b-tier__feature-check"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></span>
-                                Business account dashboard
-                            </li>
-                            <li class="b2b-tier__feature">
-                                <span class="b2b-tier__feature-check"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></span>
-                                Net 30 terms (approved credit)
-                            </li>
-                            <li class="b2b-tier__feature b2b-tier__feature--muted">
-                                <span class="b2b-tier__feature-check"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></span>
-                                Priority dispatch
-                            </li>
-                            <li class="b2b-tier__feature b2b-tier__feature--muted">
-                                <span class="b2b-tier__feature-check"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></span>
-                                Dedicated account manager
-                            </li>
-                        </ul>
-                        <p class="b2b-tier__qualify">For established businesses with regular print needs.</p>
-                    </div>
-
-                    <!-- Gold -->
-                    <div class="b2b-tier b2b-tier--gold">
-                        <div class="b2b-tier__header">
-                            <span class="b2b-tier__dot"></span>
-                            <span class="b2b-tier__name">Gold</span>
-                        </div>
-                        <div class="b2b-tier__discount">15%<span class="b2b-tier__discount-label">off every order</span></div>
-                        <ul class="b2b-tier__features" aria-label="Gold features">
-                            <li class="b2b-tier__feature">
-                                <span class="b2b-tier__feature-check"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></span>
-                                Exclusive business pricing
-                            </li>
-                            <li class="b2b-tier__feature">
-                                <span class="b2b-tier__feature-check"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></span>
-                                GST invoices on all orders
-                            </li>
-                            <li class="b2b-tier__feature">
-                                <span class="b2b-tier__feature-check"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></span>
-                                Business account dashboard
-                            </li>
-                            <li class="b2b-tier__feature">
-                                <span class="b2b-tier__feature-check"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></span>
-                                Net 30 terms (approved credit)
-                            </li>
-                            <li class="b2b-tier__feature">
-                                <span class="b2b-tier__feature-check"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></span>
-                                Priority dispatch
-                            </li>
-                            <li class="b2b-tier__feature">
-                                <span class="b2b-tier__feature-check"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></span>
-                                Dedicated account manager
-                            </li>
-                        </ul>
-                        <p class="b2b-tier__qualify">For high-volume businesses and enterprise organisations.</p>
-                    </div>
-                </div>
-                <p class="b2b-tiers__note">Tiers are assigned by our team based on your business profile and purchasing history.</p>
-            </div>
-        </section>
 
         <!-- How it works -->
         <section class="b2b-steps" aria-labelledby="b2b-steps-heading">
@@ -865,7 +724,7 @@
                             What are Net 30 terms?
                             <svg class="b2b-faq-item__chevron" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
                         </button>
-                        <div class="b2b-faq-item__a">Net 30 means you receive a monthly invoice and have 30 days to pay. This is available for Silver and Gold tier accounts with approved credit. A credit reference may be required during application.</div>
+                        <div class="b2b-faq-item__a">Net 30 means you receive a monthly invoice and have 30 days to pay. This is available to approved business accounts, subject to a credit check. A credit reference may be required during application.</div>
                     </div>
                     <div class="b2b-faq-item" role="listitem">
                         <button class="b2b-faq-item__q" aria-expanded="false">

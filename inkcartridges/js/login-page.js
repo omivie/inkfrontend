@@ -46,6 +46,11 @@
                 DebugLog.log('Processing email verification...');
             }
 
+            // Auto-open register tab when ?tab=register is in URL
+            if (urlParams.get('tab') === 'register') {
+                switchTab('register-panel');
+            }
+
             // Check if user just verified their email (our custom redirect)
             if (urlParams.get('verified') === 'true') {
                 // Show success message

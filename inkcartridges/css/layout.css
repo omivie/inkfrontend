@@ -374,6 +374,15 @@
     box-shadow: 0 4px 12px rgba(199, 31, 110, 0.5);
 }
 
+.header-actions__item--business {
+    color: var(--color-primary);
+    font-weight: var(--font-weight-medium);
+}
+
+.header-actions__item--business:hover {
+    color: var(--color-primary-dark, #1a4db5);
+}
+
 
 /* ==========================================================================
    NAVIGATION LAYOUT

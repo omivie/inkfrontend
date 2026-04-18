@@ -407,7 +407,13 @@
                 if (res.ok) {
                     this.showThankYou();
                 } else {
-                    const errMsg = (typeof res.error === 'string' ? res.error : res.error?.message) || 'Could not submit application. Please try again.';
+                    let errMsg = (typeof res.error === 'string' ? res.error : res.error?.message) || 'Could not submit application. Please try again.';
+                    if (res.details) {
+                        const details = Array.isArray(res.details)
+                            ? res.details.map(d => d.message || d.field || d).join(', ')
+                            : String(res.details);
+                        if (details) errMsg += ': ' + details;
+                    }
                     this.showMessage(msgEl, errMsg, 'error');
                     btn.textContent = 'Submit Application';
                     btn.disabled = false;
