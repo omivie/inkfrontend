@@ -11937,3 +11937,124 @@
     .loyalty-card__progress { width: 100%; justify-content: flex-start; }
 }
 
+/* ── GMC Compliance: Shipping callouts ── */
+
+.shipping-info-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 14px;
+    margin: 12px 0 20px;
+    background: #f0fdf4;
+    border: 1px solid #bbf7d0;
+    border-radius: var(--radius-md, 6px);
+    font-size: var(--text-sm, 0.875rem);
+    color: #166534;
+}
+
+.shipping-info-bar svg {
+    flex-shrink: 0;
+    color: #16a34a;
+}
+
+.shipping-info-bar a {
+    color: #166534;
+    font-weight: 600;
+    text-decoration: underline;
+}
+
+.product-shipping-note {
+    margin: 6px 0 4px;
+}
+
+.shipping-note {
+    display: inline-block;
+    font-size: var(--text-sm, 0.875rem);
+    color: var(--color-text-muted, #6b7280);
+}
+
+.shipping-note a {
+    color: inherit;
+    text-decoration: underline;
+}
+
+.shipping-note--free {
+    color: var(--color-success, #16a34a);
+    font-weight: 600;
+}
+
+/* ── GMC Compliance: Returns summary box ── */
+
+.returns-summary-box {
+    margin: 20px 0;
+    padding: 18px 20px;
+    background: #f8fafc;
+    border: 1px solid var(--color-border, #e5e7eb);
+    border-radius: var(--radius-md, 6px);
+}
+
+.returns-summary-box h3 {
+    margin: 0 0 12px;
+    font-size: var(--text-base, 1rem);
+    font-weight: 700;
+    color: var(--color-text, #111827);
+}
+
+.returns-summary-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: var(--text-sm, 0.875rem);
+}
+
+.returns-summary-table td {
+    padding: 7px 10px;
+    border-bottom: 1px solid var(--color-border, #e5e7eb);
+    vertical-align: top;
+}
+
+.returns-summary-table tr:last-child td {
+    border-bottom: none;
+}
+
+.returns-summary-table td:first-child {
+    font-weight: 600;
+    color: var(--color-text, #111827);
+    width: 50%;
+}
+
+.returns-summary-table td:last-child {
+    color: var(--color-text-muted, #6b7280);
+}
+
+/* ── Legal table (shipping rates) ── */
+
+.legal-table-wrap {
+    overflow-x: auto;
+    margin: 12px 0;
+}
+
+.legal-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: var(--text-sm, 0.875rem);
+    min-width: 500px;
+}
+
+.legal-table th,
+.legal-table td {
+    padding: 9px 12px;
+    border: 1px solid var(--color-border, #e5e7eb);
+    text-align: left;
+    vertical-align: top;
+}
+
+.legal-table th {
+    background: #f1f5f9;
+    font-weight: 700;
+    color: var(--color-text, #111827);
+}
+
+.legal-table tbody tr:nth-child(even) {
+    background: #f8fafc;
+}
+

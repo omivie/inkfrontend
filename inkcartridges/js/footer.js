@@ -29,6 +29,7 @@
                             <li><a href="/html/terms.html">Terms &amp; Conditions</a></li>
                             <li><a href="/html/privacy.html">Privacy Policy</a></li>
                             <li><a href="/html/returns.html">Returns &amp; Refunds</a></li>
+                            <li><a href="/html/shipping">Shipping Information</a></li>
                         </ul>
                     </div>
 

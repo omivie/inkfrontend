@@ -383,6 +383,16 @@
                      <span class="product-detail__savings">Save ${formatPrice(savingsAmount)} (${savingsPct}%)</span>`);
             }
 
+            // Shipping callout — GMC compliance: show cost or free-shipping status at product level
+            const shippingNoteEl = document.getElementById('product-shipping-note');
+            if (shippingNoteEl) {
+                if (price >= 100) {
+                    shippingNoteEl.innerHTML = '<span class="shipping-note shipping-note--free">&#10003; Free NZ shipping included</span>';
+                } else {
+                    shippingNoteEl.innerHTML = '<span class="shipping-note">From $7 shipping &mdash; <a href="/html/shipping">free over $100</a></span>';
+                }
+            }
+
             // Stock status — dynamic based on API fields
             const stockStatus = getStockStatus(info);
             const stockEl = document.getElementById('product-stock');
