@@ -37,6 +37,11 @@ export default async function middleware(request) {
     const slug = segments[1];
     if (slug) prerenderPath = `/api/prerender/product-by-slug/${encodeURIComponent(slug)}`;
   }
+  // /html/product?sku=X → product (direct hits from scanners/crawlers)
+  else if (path === '/html/product' || path === '/html/product/') {
+    const sku = url.searchParams.get('sku');
+    if (sku) prerenderPath = `/api/prerender/product/${encodeURIComponent(sku)}`;
+  }
   // /html/ribbons → category/ribbons
   else if (path === '/html/ribbons' || path === '/html/ribbons.html') {
     prerenderPath = '/api/prerender/category/ribbons';
@@ -82,6 +87,7 @@ export const config = {
     '/html/admin',
     '/products/:path*',
     '/product/:path*',
+    '/html/product',
     '/html/ribbons',
     '/html/ribbons.html',
     '/html/shop',

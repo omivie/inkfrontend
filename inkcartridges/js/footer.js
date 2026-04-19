@@ -28,10 +28,15 @@
                             <li><a href="/html/business/apply.html">Business Accounts</a></li>
                             <li><a href="/html/terms.html">Terms &amp; Conditions</a></li>
                             <li><a href="/html/privacy.html">Privacy Policy</a></li>
-                            <li><a href="/html/returns.html">Returns &amp; Refunds</a></li>
+                            <li><a href="/html/returns">Returns &amp; Refunds</a></li>
+                            <li><a href="/html/returns">Return Policy</a></li>
                             <li><a href="/html/shipping">Shipping Information</a></li>
                             <li><a href="/html/warranty">Warranty</a></li>
                             <li><a href="/html/payment-info">Payment Information</a></li>
+                            <li><a href="/html/faq">FAQ</a></li>
+                            <li><a href="/html/tracking">Order Tracking</a></li>
+                            <li><a href="/html/disclaimer">Disclaimer</a></li>
+                            <li><a href="/html/legal">Legal</a></li>
                         </ul>
                     </div>
 
