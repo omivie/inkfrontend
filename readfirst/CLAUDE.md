@@ -127,6 +127,7 @@ inkcartridges/
 - Always escape dynamic HTML content with Security.escapeHtml/escapeAttr
 - All API calls go through the API object (api.js)
 - Admin pages must verify access via AdminAuth.init()
+- **Ribbons are isolated**: Never modify anything ribbon-related (ribbons.html, ribbons-page.js, admin/pages/ribbons.js, ribbon product data, ribbon photos, ribbon prices, ribbon descriptions, ribbon CSS) unless the user explicitly asks. Cartridge changes must not touch ribbon code.
 
 ## Hooks
 - **PostToolUse (Write|Edit)**: Auto-runs `node --check` on any `.js` file after edit to catch syntax errors
