@@ -3,12 +3,32 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-    <meta name="description" content="Review your shopping cart - InkCartridges.co.nz">
-    <meta name="robots" content="noindex, nofollow">
+    <meta name="description" content="Warranty Policy for InkCartridges.co.nz. All products are covered by the NZ Consumer Guarantees Act. Compatible cartridges carry a 30-day quality guarantee.">
+    <meta name="robots" content="index, follow">
+
+    <link rel="canonical" href="https://www.inkcartridges.co.nz/html/warranty">
+    <meta property="og:type" content="website">
+    <meta property="og:site_name" content="InkCartridges.co.nz">
+    <meta property="og:title" content="Warranty Policy | InkCartridges.co.nz">
+    <meta property="og:description" content="Warranty Policy for InkCartridges.co.nz. All products covered by the NZ Consumer Guarantees Act.">
+    <meta property="og:url" content="https://www.inkcartridges.co.nz/html/warranty">
+    <meta property="og:image" content="https://www.inkcartridges.co.nz/assets/images/logo.png">
+    <meta property="og:locale" content="en_NZ">
+
+    <script type="application/ld+json">
+    {
+        "@context": "https://schema.org",
+        "@type": "BreadcrumbList",
+        "itemListElement": [
+            { "@type": "ListItem", "position": 1, "name": "Home", "item": "https://www.inkcartridges.co.nz/" },
+            { "@type": "ListItem", "position": 2, "name": "Warranty Policy", "item": "https://www.inkcartridges.co.nz/html/warranty" }
+        ]
+    }
+    </script>
 
     <link rel="icon" type="image/png" href="/favicon.png">
     <link rel="apple-touch-icon" href="/apple-touch-icon.png">
-    <title>Shopping Cart | InkCartridges.co.nz</title>
+    <title>Warranty Policy | InkCartridges.co.nz</title>
 
     <script async src="https://www.googletagmanager.com/gtag/js?id=G-SDQELG0FGD"></script>
     <script src="/js/gtag.js"></script>
@@ -95,11 +115,8 @@
                         <a href="/?scroll=ink-finder" class="nav-menu__link">Printer Models</a>
                     </li>
                     <li class="nav-menu__item nav-menu__item--mega">
-                        <button class="nav-menu__link nav-mega-toggle"
-                                type="button"
-                                aria-haspopup="true"
-                                aria-expanded="false"
-                                aria-controls="brands-mega">
+                        <button class="nav-menu__link nav-mega-toggle" type="button"
+                                aria-haspopup="true" aria-expanded="false" aria-controls="brands-mega">
                             Cartridge Brands
                             <svg class="nav-menu__arrow" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
                         </button>
@@ -156,159 +173,59 @@
     </header>
 
     <main id="main-content" class="site-main">
-
         <nav class="breadcrumb" aria-label="Breadcrumb">
             <div class="container">
                 <ol class="breadcrumb__list">
                     <li class="breadcrumb__item"><a href="/">Home</a></li>
-                    <li class="breadcrumb__item breadcrumb__item--current" aria-current="page">Shopping Cart</li>
+                    <li class="breadcrumb__item breadcrumb__item--current" aria-current="page">Warranty Policy</li>
                 </ol>
             </div>
         </nav>
 
-        <section class="cart-page">
-            <div class="container">
-                <div class="cart-page__header">
-                    <h1 class="cart-page__title">Shopping Cart</h1>
+        <section class="legal-content">
+            <div class="container container--content">
+                <h1>Warranty Policy</h1>
+                <p class="legal-updated">Last updated: 19 April 2026</p>
 
-                    <div class="checkout-progress checkout-progress--compact" aria-label="Checkout progress">
-                        <ol class="checkout-progress__steps">
-                            <li class="checkout-progress__step checkout-progress__step--active">
-                                <span class="checkout-progress__number">1</span>
-                                <span class="checkout-progress__label">Cart</span>
-                            </li>
-                            <li class="checkout-progress__step">
-                                <span class="checkout-progress__number">2</span>
-                                <span class="checkout-progress__label">Details</span>
-                            </li>
-                            <li class="checkout-progress__step">
-                                <span class="checkout-progress__number">3</span>
-                                <span class="checkout-progress__label">Payment</span>
-                            </li>
-                            <li class="checkout-progress__step">
-                                <span class="checkout-progress__number">4</span>
-                                <span class="checkout-progress__label">Confirm</span>
-                            </li>
-                        </ol>
-                    </div>
-                </div>
+                <section class="legal-section" aria-labelledby="overview-heading">
+                    <h2 id="overview-heading">Overview</h2>
+                    <p>All products sold by InkCartridges.co.nz are covered by the New Zealand <strong>Consumer Guarantees Act 1993 (CGA)</strong>. Under the CGA, products must be of acceptable quality, fit for purpose, and match their description.</p>
+                </section>
 
-                <div class="cart-loading" id="cart-loading">
-                    <div class="cart-loading__main">
-                        <div class="cart-loading__item">
-                            <div class="skeleton skeleton--image"></div>
-                            <div class="skeleton-group">
-                                <div class="skeleton skeleton--text skeleton--text-lg"></div>
-                                <div class="skeleton skeleton--text skeleton--text-sm"></div>
-                            </div>
-                            <div class="skeleton skeleton--text skeleton--price"></div>
-                        </div>
-                        <div class="cart-loading__item">
-                            <div class="skeleton skeleton--image"></div>
-                            <div class="skeleton-group">
-                                <div class="skeleton skeleton--text skeleton--text-lg"></div>
-                                <div class="skeleton skeleton--text skeleton--text-sm"></div>
-                            </div>
-                            <div class="skeleton skeleton--text skeleton--price"></div>
-                        </div>
-                    </div>
-                    <div class="cart-loading__summary">
-                        <div class="skeleton skeleton--text skeleton--heading"></div>
-                        <div class="skeleton skeleton--text"></div>
-                        <div class="skeleton skeleton--text"></div>
-                        <div class="skeleton skeleton--text skeleton--text-lg"></div>
-                        <div class="skeleton skeleton--button"></div>
-                    </div>
-                </div>
+                <section class="legal-section" aria-labelledby="genuine-heading">
+                    <h2 id="genuine-heading">Genuine (OEM) Products</h2>
+                    <p>Genuine products are covered by the original manufacturer's warranty. Contact the brand directly for manufacturer warranty claims, or contact us and we will assist you in the process.</p>
+                </section>
 
-                <div class="cart-layout" id="cart-layout" hidden>
-                    <div class="cart-main">
-                        <div class="cart-items" id="cart-items">
-                        </div>
+                <section class="legal-section" aria-labelledby="compatible-heading">
+                    <h2 id="compatible-heading">Compatible Products</h2>
+                    <p>Compatible products are covered by InkCartridges.co.nz's <strong>30-day quality guarantee</strong>. If a compatible product is defective or fails to perform within 30 days of purchase, contact us for a free replacement or full refund.</p>
+                </section>
 
-                        <div class="cart-actions">
-                            <a href="/html/shop.html" class="btn btn--secondary">
-                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>
-                                Continue Shopping
-                            </a>
-                        </div>
-                    </div>
+                <section class="legal-section" aria-labelledby="exclusions-heading">
+                    <h2 id="exclusions-heading">Warranty Exclusions</h2>
+                    <p>Warranty does not cover damage caused by:</p>
+                    <ul>
+                        <li>Incorrect installation</li>
+                        <li>Use in incompatible printers</li>
+                        <li>Physical damage caused by the customer</li>
+                    </ul>
+                    <p>These exclusions do not limit your rights under the Consumer Guarantees Act 1993.</p>
+                </section>
 
-                    <aside class="cart-summary">
-                        <h2 class="cart-summary__heading">Order Summary</h2>
-
-                        <div class="cart-summary__totals">
-                            <div class="cart-summary__row">
-                                <span>Subtotal (<span id="cart-item-count">0</span> items)</span>
-                                <span id="cart-subtotal">$0.00</span>
-                            </div>
-                            <div class="cart-summary__row cart-summary__row--savings" id="cart-savings-row" hidden>
-                                <span>You Save</span>
-                                <span id="cart-savings">$0.00</span>
-                            </div>
-                            <div class="cart-summary__row">
-                                <span>Shipping <span id="cart-shipping-tier" style="font-size:0.75rem;color:#6b7280;font-weight:400;" hidden></span></span>
-                                <span id="cart-shipping">Calculated at checkout</span>
-                            </div>
-                            <div class="cart-summary__row">
-                                <span>GST (15%)</span>
-                                <span>Included</span>
-                            </div>
-                            <div class="cart-summary__row cart-summary__row--total">
-                                <span>Total</span>
-                                <span id="cart-total">$0.00 NZD</span>
-                            </div>
-                        </div>
-
-                        <div class="cart-summary__shipping-message" id="cart-shipping-message" hidden>
-                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
-                            <span></span>
-                        </div>
-                        <div class="cart-summary__shipping-bar" id="cart-shipping-bar" hidden>
-                            <div class="shipping-bar">
-                                <div class="shipping-bar__fill" id="shipping-bar-fill" style="width: 0%"></div>
-                            </div>
-                        </div>
-
-                        <div class="cart-summary__actions">
-                            <a href="/html/checkout.html" id="checkout-btn" class="btn btn--primary btn--lg btn--full-width" data-track="cta_click" data-track-cta="Proceed to Checkout" data-track-location="cart_summary" data-testid="cart-checkout-btn">
-                                Proceed to Checkout
-                            </a>
-                        </div>
-
-                        <div class="cart-summary__trust">
-                            <div class="cart-summary__secure">
-                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
-                                <span>Secure 256-bit SSL checkout</span>
-                            </div>
-                            <div class="cart-summary__payment-icons">
-                                <span>Visa</span>
-                                <span>Mastercard</span>
-                                <span>PayPal</span>
-                            </div>
-                        </div>
-                    </aside>
-                </div>
-
-                <div class="cart-empty" id="cart-empty">
-                    <div class="cart-empty__icon">
-                        <svg width="80" height="80" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"/></svg>
-                    </div>
-                    <h2 class="cart-empty__title">Your cart is empty</h2>
-                    <p class="cart-empty__text">Looks like you haven't added any items to your cart yet.</p>
-                    <a href="/html/shop.html" class="btn btn--primary btn--lg">Start Shopping</a>
-                </div>
+                <section class="legal-section" aria-labelledby="contact-heading">
+                    <h2 id="contact-heading">Contact Us</h2>
+                    <p>For warranty claims or questions, please get in touch:</p>
+                    <address>
+                        <p><strong>InkCartridges.co.nz</strong></p>
+                        <p>37A Archibald Road, Kelston, Auckland 0602, New Zealand</p>
+                        <p>Email: <a href="mailto:inkandtoner@windowslive.com">inkandtoner@windowslive.com</a></p>
+                        <p>Phone: <a href="tel:0274740115">027 474 0115</a></p>
+                        <p>Hours: Mon&ndash;Fri, 9am&ndash;5pm NZST</p>
+                    </address>
+                </section>
             </div>
         </section>
-
-        <section class="related-products" id="related-products" hidden aria-labelledby="related-heading">
-            <div class="container">
-                <h2 id="related-heading" class="section-heading__title">You May Also Like</h2>
-                <div class="product-grid" id="related-products-grid">
-                </div>
-            </div>
-        </section>
-
     </main>
 
     <footer class="site-footer"><noscript><ul><li><a href="/html/privacy">Privacy Policy</a></li><li><a href="/html/terms">Terms &amp; Conditions</a></li><li><a href="/html/returns">Returns &amp; Refunds</a></li><li><a href="/html/shipping">Shipping Information</a></li><li><a href="/html/warranty">Warranty</a></li><li><a href="/html/payment-info">Payment Information</a></li></ul></noscript></footer>
@@ -316,7 +233,6 @@
     <script defer src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.98.0" integrity="sha384-Sm2s7OXxsAMTyJ4iIyRBgVpeGUvMPk2lRQnnZhE78Wej7oggIoolKt+SCt0XJbUB" crossorigin="anonymous"></script>
     <script defer src="/js/config.js"></script>
     <script defer src="/js/security.js"></script>
-    <script defer src="/js/shipping.js"></script>
     <script defer src="/js/utils.js"></script>
     <script defer src="/js/api.js"></script>
     <script defer src="/js/auth.js"></script>
@@ -328,8 +244,6 @@
     <script defer src="/js/mega-nav.js"></script>
     <script defer src="/js/modern-effects.js"></script>
     <script defer src="/js/cart.js"></script>
-    <script defer src="/js/cart-analytics.js"></script>
-    <script defer src="/js/cart-page.js"></script>
     <script defer src="/js/analytics.js"></script>
 </body>
 </html>

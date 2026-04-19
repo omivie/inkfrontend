@@ -30,6 +30,8 @@
                             <li><a href="/html/privacy.html">Privacy Policy</a></li>
                             <li><a href="/html/returns.html">Returns &amp; Refunds</a></li>
                             <li><a href="/html/shipping">Shipping Information</a></li>
+                            <li><a href="/html/warranty">Warranty</a></li>
+                            <li><a href="/html/payment-info">Payment Information</a></li>
                         </ul>
                     </div>
 
