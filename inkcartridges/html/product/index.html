@@ -47,22 +47,49 @@
     {
         "@context": "https://schema.org",
         "@type": "Product",
-        "name": "",
-        "description": "",
-        "sku": "",
+        "name": "Ink Cartridge",
+        "description": "Compatible and genuine ink cartridges for NZ printers. Fast NZ-wide delivery.",
         "brand": {
             "@type": "Brand",
-            "name": ""
+            "name": "InkCartridges.co.nz"
         },
         "offers": {
             "@type": "Offer",
-            "url": "",
             "priceCurrency": "NZD",
-            "price": "",
+            "price": "11.49",
+            "itemCondition": "https://schema.org/NewCondition",
             "availability": "https://schema.org/InStock",
             "seller": {
                 "@type": "Organization",
                 "name": "InkCartridges.co.nz"
+            },
+            "shippingDetails": {
+                "@type": "OfferShippingDetails",
+                "shippingRate": {
+                    "@type": "MonetaryAmount",
+                    "value": "7.00",
+                    "currency": "NZD"
+                },
+                "shippingDestination": {
+                    "@type": "DefinedRegion",
+                    "addressCountry": "NZ"
+                },
+                "deliveryTime": {
+                    "@type": "ShippingDeliveryTime",
+                    "transitTime": {
+                        "@type": "QuantitativeValue",
+                        "minValue": 1,
+                        "maxValue": 4,
+                        "unitCode": "DAY"
+                    }
+                }
+            },
+            "hasMerchantReturnPolicy": {
+                "@type": "MerchantReturnPolicy",
+                "applicableCountry": "NZ",
+                "returnPolicyCategory": "https://schema.org/MerchantReturnFiniteReturnWindow",
+                "merchantReturnDays": 30,
+                "returnMethod": "https://schema.org/ReturnByMail"
             }
         }
     }
