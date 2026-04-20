@@ -325,14 +325,13 @@ function renderPreview() {
 }
 
 // ── PDF generation ───────────────────────────────────────────────────────────
-function generatePDF() {
+function generatePDFForState(s) {
   const jspdf = window.jspdf;
   if (!jspdf) { alert('PDF library not loaded yet — please wait a moment and try again.'); return; }
 
   const { jsPDF } = jspdf;
   const doc = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait' });
 
-  const s = _state;
   const f = s.from;
   const { subtotal, freightN, gst, total } = calcTotals(s.items, s.freight);
   const dateDisplay = isoToDisplay(s.date) || '';
@@ -490,9 +489,209 @@ function generatePDF() {
   txt('Thank you very much for your business and for checking out InkCartridges.co.nz.', ML, fY);
 
   doc.save(`Invoice${s.invoiceNo}.pdf`);
+}
 
-  // Remember this invoice number as the last used
-  localStorage.setItem('inv_last_num', String(s.invoiceNo));
+function generatePDF() {
+  generatePDFForState(_state);
+  localStorage.setItem('inv_last_num', String(_state.invoiceNo));
+}
+
+// ── Supabase helpers ─────────────────────────────────────────────────────────
+async function saveInvoiceToDb(state) {
+  const sb = window.supabaseClient;
+  if (!sb) throw new Error('Supabase not available');
+  const { subtotal, gst, total } = calcTotals(state.items, state.freight);
+  const row = {
+    invoice_no:       state.invoiceNo,
+    invoice_date:     state.date,
+    customer_email:   state.email   || null,
+    customer_name:    state.attn    || null,
+    customer_company: state.company || null,
+    customer_phone:   state.phone   || null,
+    customer_address: state.address || null,
+    attn:             state.attn    || null,
+    freight:          state.freight,
+    items:            state.items,
+    from_details:     state.from,
+    subtotal:         parseFloat(subtotal.toFixed(2)),
+    gst:              parseFloat(gst.toFixed(2)),
+    total:            parseFloat(total.toFixed(2)),
+  };
+  const { error } = await sb.from('admin_invoices').upsert(row, { onConflict: 'invoice_no' });
+  if (error) throw error;
+}
+
+async function fetchSavedInvoices() {
+  const sb = window.supabaseClient;
+  if (!sb) return [];
+  const { data, error } = await sb.from('admin_invoices')
+    .select('*')
+    .order('invoice_no', { ascending: false })
+    .limit(500);
+  if (error) { console.error(error); return []; }
+  return data || [];
+}
+
+async function deleteInvoiceFromDb(id) {
+  const sb = window.supabaseClient;
+  if (!sb) throw new Error('Supabase not available');
+  const { error } = await sb.from('admin_invoices').delete().eq('id', id);
+  if (error) throw error;
+}
+
+function stateFromRow(row) {
+  return {
+    invoiceNo:  row.invoice_no,
+    date:       row.invoice_date,
+    attn:       row.attn       || '',
+    company:    row.customer_company || '',
+    address:    row.customer_address || '',
+    phone:      row.customer_phone   || '',
+    email:      row.customer_email   || '',
+    freight:    row.freight    || 'free',
+    items:      Array.isArray(row.items) && row.items.length ? row.items : [{ code:'', description:'', qty:1, cost:'' }],
+    from:       row.from_details && Object.keys(row.from_details).length ? { ...FROM_DEFAULTS, ...row.from_details } : loadFrom(),
+  };
+}
+
+// Sync form DOM inputs to current _state (used after loading a saved invoice)
+function syncFormToState() {
+  const s = _state;
+  const f = s.from;
+  const setVal = (id, v) => { const el = _container?.querySelector(id); if (el) el.value = (v ?? ''); };
+  setVal('#f-invno',    s.invoiceNo);
+  setVal('#f-date',     s.date);
+  setVal('#f-attn',     s.attn);
+  setVal('#f-company',  s.company);
+  setVal('#f-address',  s.address);
+  setVal('#f-phone',    s.phone);
+  setVal('#f-email',    s.email);
+  setVal('#f-freight',  s.freight);
+  setVal('#ff-company', f.company);
+  setVal('#ff-gst',     f.gst);
+  setVal('#ff-addr1',   f.address1);
+  setVal('#ff-addr2',   f.address2);
+  setVal('#ff-addr3',   f.address3);
+  setVal('#ff-phone',   f.phone);
+  setVal('#ff-contact', f.contact);
+  setVal('#ff-bankname',f.bankName);
+  setVal('#ff-banknum', f.bankNumber);
+  renderItemRows();
+  renderPreview();
+}
+
+let _savedRows = []; // in-memory cache for the saved invoices panel
+
+function renderSavedList(query) {
+  const listEl = _container?.querySelector('#inv-saved-list');
+  if (!listEl) return;
+
+  const q = (query || '').toLowerCase().trim();
+  const rows = q
+    ? _savedRows.filter(r =>
+        (r.customer_email   || '').toLowerCase().includes(q) ||
+        (r.customer_name    || '').toLowerCase().includes(q) ||
+        (r.customer_company || '').toLowerCase().includes(q))
+    : _savedRows;
+
+  if (!rows.length) {
+    listEl.innerHTML = `<p class="inv-saved-empty">${q ? 'No invoices match your search.' : 'No saved invoices yet. Click "Save Invoice" after filling in the form.'}</p>`;
+    return;
+  }
+
+  const fmtDate = iso => {
+    if (!iso) return '';
+    const d = new Date(iso + 'T00:00:00');
+    return d.toLocaleDateString('en-NZ', { day: 'numeric', month: 'short', year: 'numeric' });
+  };
+
+  listEl.innerHTML = `
+    <table class="inv-saved-table">
+      <thead>
+        <tr>
+          <th>Invoice #</th>
+          <th>Date</th>
+          <th>Customer</th>
+          <th>Company</th>
+          <th class="inv-saved-th--right">Total (incl. GST)</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        ${rows.map(r => `
+          <tr data-id="${esc(r.id)}" data-invno="${esc(String(r.invoice_no))}">
+            <td class="inv-saved-no">#${esc(String(r.invoice_no))}</td>
+            <td class="inv-saved-date">${esc(fmtDate(r.invoice_date))}</td>
+            <td>${esc(r.customer_name || '—')}</td>
+            <td>${esc(r.customer_company || '—')}</td>
+            <td class="inv-saved-total">$${esc(r.total != null ? parseFloat(r.total).toFixed(2) : '—')}</td>
+            <td class="inv-saved-actions">
+              <button class="inv-saved-btn inv-saved-btn--load" data-action="load" title="Load into form">Load</button>
+              <button class="inv-saved-btn inv-saved-btn--pdf"  data-action="pdf"  title="Download PDF">PDF</button>
+              <button class="inv-saved-btn inv-saved-btn--del"  data-action="del"  title="Delete">Delete</button>
+            </td>
+          </tr>
+        `).join('')}
+      </tbody>
+    </table>
+  `;
+
+  listEl.querySelectorAll('tr[data-id]').forEach(tr => {
+    const id    = tr.dataset.id;
+    const row   = _savedRows.find(r => r.id === id);
+    if (!row) return;
+
+    tr.querySelector('[data-action="load"]').addEventListener('click', () => {
+      _state = stateFromRow(row);
+      switchTab('create');
+      syncFormToState();
+    });
+
+    tr.querySelector('[data-action="pdf"]').addEventListener('click', () => {
+      generatePDFForState(stateFromRow(row));
+    });
+
+    tr.querySelector('[data-action="del"]').addEventListener('click', async () => {
+      const label = `Invoice #${row.invoice_no}${row.customer_company ? ' — ' + row.customer_company : ''}`;
+      if (!confirm(`Delete ${label}? This cannot be undone.`)) return;
+      try {
+        await deleteInvoiceFromDb(id);
+        _savedRows = _savedRows.filter(r => r.id !== id);
+        renderSavedList(_container?.querySelector('#inv-search-input')?.value);
+      } catch (e) {
+        alert('Delete failed: ' + e.message);
+      }
+    });
+  });
+}
+
+async function loadSavedPanel() {
+  const listEl = _container?.querySelector('#inv-saved-list');
+  if (!listEl) return;
+  listEl.innerHTML = '<p class="inv-saved-empty">Loading…</p>';
+  _savedRows = await fetchSavedInvoices();
+  renderSavedList(_container?.querySelector('#inv-search-input')?.value);
+}
+
+function switchTab(tab) {
+  const createBtn  = _container?.querySelector('#inv-tab-btn-create');
+  const savedBtn   = _container?.querySelector('#inv-tab-btn-saved');
+  const createPanel = _container?.querySelector('#inv-panel-create');
+  const savedPanel  = _container?.querySelector('#inv-panel-saved');
+  if (!createBtn || !savedBtn || !createPanel || !savedPanel) return;
+
+  if (tab === 'saved') {
+    createBtn.classList.remove('inv-tab--active');
+    savedBtn.classList.add('inv-tab--active');
+    createPanel.hidden = true;
+    savedPanel.hidden  = false;
+    loadSavedPanel();
+  } else {
+    savedBtn.classList.remove('inv-tab--active');
+    createBtn.classList.add('inv-tab--active');
+    savedPanel.hidden  = true;
+    createPanel.hidden = false;
+  }
 }
 
 // ── UI ────────────────────────────────────────────────────────────────────────
@@ -617,7 +816,22 @@ export default {
     FilterState.showBar(false);
 
     container.innerHTML = `
-      <div class="inv-workspace">
+      <div class="inv-root">
+
+      <!-- ── Tab bar ── -->
+      <div class="inv-tabs-bar">
+        <button class="inv-tab inv-tab--active" id="inv-tab-btn-create">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="18" x2="12" y2="12"/><line x1="9" y1="15" x2="15" y2="15"/></svg>
+          Create Invoice
+        </button>
+        <button class="inv-tab" id="inv-tab-btn-saved">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+          Saved Invoices
+        </button>
+      </div>
+
+      <!-- ── Create Invoice panel ── -->
+      <div id="inv-panel-create" class="inv-workspace">
 
         <!-- ── LEFT: form ── -->
         <div class="inv-form-panel">
@@ -787,10 +1001,16 @@ COMPTN2150 | Brother Comp. TN2150 Toner BLACK | 1 | 32.00</pre>
               <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 102.13-9.36L1 10"/></svg>
               New invoice
             </button>
-            <button class="inv-btn inv-btn--download" id="download-btn">
-              <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
-              Download PDF
-            </button>
+            <div style="display:flex;gap:8px;align-items:center">
+              <button class="inv-btn inv-btn--save" id="save-btn">
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+                Save Invoice
+              </button>
+              <button class="inv-btn inv-btn--download" id="download-btn">
+                <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
+                Download PDF
+              </button>
+            </div>
           </div>
 
         </div><!-- /inv-form-panel -->
@@ -801,15 +1021,75 @@ COMPTN2150 | Brother Comp. TN2150 Toner BLACK | 1 | 32.00</pre>
           <div id="inv-preview" class="inv-preview-scroll"></div>
         </div>
 
+      </div><!-- /inv-panel-create -->
+
+      <!-- ── Saved Invoices panel ── -->
+      <div id="inv-panel-saved" class="inv-saved-panel" hidden>
+        <div class="inv-saved-inner">
+          <div class="inv-saved-header">
+            <div class="inv-saved-search-wrap">
+              <svg class="inv-saved-search-icon" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+              <input id="inv-search-input" class="inv-saved-search-input" type="search" placeholder="Search by email, name or company…">
+            </div>
+            <button class="inv-btn inv-btn--ghost inv-btn--sm" id="inv-refresh-btn">
+              <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 102.13-9.36L1 10"/></svg>
+              Refresh
+            </button>
+          </div>
+          <div id="inv-saved-list"></div>
+        </div>
       </div>
 
+      </div><!-- /inv-root -->
+
       <style>
+        /* ── Root & tab bar ─────────────────────────────────── */
+        .inv-root {
+          display: flex;
+          flex-direction: column;
+          height: calc(100vh - 56px);
+          overflow: hidden;
+        }
+        .inv-tabs-bar {
+          display: flex;
+          gap: 2px;
+          padding: 8px 16px 0;
+          border-bottom: 1px solid var(--color-border, #e2e8f0);
+          background: var(--color-background, #fff);
+          flex-shrink: 0;
+        }
+        .inv-tab {
+          display: inline-flex;
+          align-items: center;
+          gap: 6px;
+          padding: 7px 16px 8px;
+          font-size: 13px;
+          font-weight: 600;
+          color: var(--color-text-muted, #64748b);
+          background: none;
+          border: 1px solid transparent;
+          border-bottom: none;
+          border-radius: 6px 6px 0 0;
+          cursor: pointer;
+          transition: color .15s, background .15s;
+          font-family: inherit;
+          position: relative;
+          bottom: -1px;
+        }
+        .inv-tab:hover { color: var(--color-text, #1e293b); background: var(--color-background-alt, #f8fafc); }
+        .inv-tab--active {
+          color: var(--color-primary, #267fb5);
+          background: var(--color-background, #fff);
+          border-color: var(--color-border, #e2e8f0);
+          border-bottom-color: var(--color-background, #fff);
+        }
+
         /* ── Workspace layout ───────────────────────────────── */
         .inv-workspace {
           display: grid;
           grid-template-columns: 480px 1fr;
           gap: 0;
-          height: calc(100vh - 56px);
+          flex: 1;
           overflow: hidden;
         }
         .inv-form-panel {
@@ -1045,6 +1325,80 @@ COMPTN2150 | Brother Comp. TN2150 Toner BLACK | 1 | 32.00</pre>
           font-size: 11.5px;
           margin-left: 4px;
         }
+
+        /* ── Save button ────────────────────────────────────── */
+        .inv-btn--save { background: #0f766e; color: #fff; border-color: #0f766e; }
+        .inv-btn--save:hover { background: #0d6661; }
+        .inv-btn--sm { padding: 5px 10px; font-size: 12px; }
+
+        /* ── Saved invoices panel ───────────────────────────── */
+        .inv-saved-panel { flex: 1; overflow-y: auto; background: var(--color-background, #fff); }
+        .inv-saved-inner { max-width: 960px; margin: 0 auto; padding: 28px 32px 48px; }
+        .inv-saved-header {
+          display: flex;
+          align-items: center;
+          gap: 12px;
+          margin-bottom: 20px;
+        }
+        .inv-saved-search-wrap {
+          position: relative;
+          flex: 1;
+          max-width: 420px;
+        }
+        .inv-saved-search-icon {
+          position: absolute;
+          left: 10px;
+          top: 50%;
+          transform: translateY(-50%);
+          color: var(--color-text-muted, #64748b);
+          pointer-events: none;
+        }
+        .inv-saved-search-input {
+          width: 100%;
+          padding: 8px 12px 8px 34px;
+          border: 1px solid var(--color-border, #e2e8f0);
+          border-radius: 7px;
+          font-size: 13px;
+          font-family: inherit;
+          color: var(--color-text, #1e293b);
+          background: var(--color-background, #fff);
+          box-sizing: border-box;
+        }
+        .inv-saved-search-input:focus { outline: none; border-color: var(--color-primary, #267fb5); box-shadow: 0 0 0 3px rgba(38,127,181,.1); }
+        .inv-saved-empty { color: var(--color-text-muted, #64748b); font-size: 14px; padding: 40px 0; text-align: center; }
+        .inv-saved-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+        .inv-saved-table th {
+          padding: 8px 12px;
+          text-align: left;
+          font-size: 11px;
+          font-weight: 700;
+          letter-spacing: .04em;
+          text-transform: uppercase;
+          color: var(--color-text-muted, #64748b);
+          border-bottom: 1px solid var(--color-border, #e2e8f0);
+          white-space: nowrap;
+        }
+        .inv-saved-th--right { text-align: right; }
+        .inv-saved-table td { padding: 10px 12px; border-bottom: 1px solid var(--color-border-light, #f1f5f9); vertical-align: middle; }
+        .inv-saved-table tr:hover td { background: var(--color-background-alt, #f8fafc); }
+        .inv-saved-no { font-weight: 700; color: var(--color-primary, #267fb5); white-space: nowrap; }
+        .inv-saved-date { white-space: nowrap; color: var(--color-text-muted, #64748b); font-size: 12px; }
+        .inv-saved-total { text-align: right; font-weight: 600; white-space: nowrap; }
+        .inv-saved-actions { white-space: nowrap; text-align: right; }
+        .inv-saved-btn {
+          display: inline-flex; align-items: center;
+          padding: 4px 10px; border-radius: 5px; font-size: 12px; font-weight: 600;
+          cursor: pointer; border: 1px solid var(--color-border, #e2e8f0);
+          background: var(--color-background, #fff); color: var(--color-text, #1e293b);
+          transition: all .15s; font-family: inherit; margin-left: 4px;
+        }
+        .inv-saved-btn:hover { background: var(--color-background-alt, #f8fafc); }
+        .inv-saved-btn--load { color: var(--color-primary, #267fb5); border-color: var(--color-primary, #267fb5); }
+        .inv-saved-btn--load:hover { background: #eff6ff; }
+        .inv-saved-btn--pdf { color: #0f766e; border-color: #0f766e; }
+        .inv-saved-btn--pdf:hover { background: #f0fdf4; }
+        .inv-saved-btn--del { color: #dc2626; border-color: #fca5a5; }
+        .inv-saved-btn--del:hover { background: #fef2f2; border-color: #dc2626; }
       </style>
     `;
 
@@ -1135,6 +1489,26 @@ COMPTN2150 | Brother Comp. TN2150 Toner BLACK | 1 | 32.00</pre>
     // Download PDF
     container.querySelector('#download-btn').addEventListener('click', generatePDF);
 
+    // Save Invoice
+    container.querySelector('#save-btn').addEventListener('click', async () => {
+      const btn = container.querySelector('#save-btn');
+      const orig = btn.innerHTML;
+      btn.disabled = true;
+      btn.textContent = 'Saving…';
+      try {
+        await saveInvoiceToDb(_state);
+        localStorage.setItem('inv_last_num', String(_state.invoiceNo));
+        if (typeof showToast === 'function') showToast(`Invoice #${_state.invoiceNo} saved.`, 'success');
+        else alert(`Invoice #${_state.invoiceNo} saved.`);
+      } catch (e) {
+        if (typeof showToast === 'function') showToast('Save failed: ' + e.message, 'error');
+        else alert('Save failed: ' + e.message);
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = orig;
+      }
+    });
+
     // New invoice
     container.querySelector('#reset-btn').addEventListener('click', () => {
       if (!confirm('Start a new blank invoice? This will clear all fields.')) return;
@@ -1142,6 +1516,18 @@ COMPTN2150 | Brother Comp. TN2150 Toner BLACK | 1 | 32.00</pre>
       closeSuggestDropdown();
       this.init(container);
     });
+
+    // Tab switching
+    container.querySelector('#inv-tab-btn-create').addEventListener('click', () => switchTab('create'));
+    container.querySelector('#inv-tab-btn-saved').addEventListener('click',  () => switchTab('saved'));
+
+    // Saved invoices search
+    container.querySelector('#inv-search-input').addEventListener('input', e => {
+      renderSavedList(e.target.value);
+    });
+
+    // Refresh button
+    container.querySelector('#inv-refresh-btn').addEventListener('click', loadSavedPanel);
 
     // Close suggest dropdown when clicking outside
     document.addEventListener('click', closeSuggestDropdown, true);
