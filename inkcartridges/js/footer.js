@@ -37,6 +37,7 @@
                             <li><a href="/html/tracking">Order Tracking</a></li>
                             <li><a href="/html/disclaimer">Disclaimer</a></li>
                             <li><a href="/html/legal">Legal</a></li>
+                            <li><a href="/html/about">About Us</a></li>
                         </ul>
                     </div>
 
