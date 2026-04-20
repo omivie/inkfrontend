@@ -748,6 +748,57 @@ const AdminAPI = {
     }
   },
 
+  // ---- Printer Models (Supabase direct) ----
+
+  async getPrinters({ search = '', brandId = '', sort = 'full_name', order = 'asc', page = 1, limit = 200 } = {}) {
+    try {
+      const sb = this._sb();
+      if (!sb) return { printers: [], total: 0 };
+      let query = sb.from('printer_models')
+        .select('id, full_name, model_name, slug, brand_id, brands(name)', { count: 'exact' });
+      if (search) query = query.or(`full_name.ilike.%${search}%,model_name.ilike.%${search}%`);
+      if (brandId) query = query.eq('brand_id', brandId);
+      const col = ['full_name', 'model_name', 'slug'].includes(sort) ? sort : 'full_name';
+      query = query.order(col, { ascending: order !== 'desc' });
+      const offset = (page - 1) * limit;
+      query = query.range(offset, offset + limit - 1);
+      const { data, count, error } = await query;
+      if (error) throw error;
+      return { printers: data || [], total: count || 0 };
+    } catch (e) {
+      adminApiWarn('Failed to load printers', e);
+      return { printers: [], total: 0 };
+    }
+  },
+
+  async updatePrinter(id, data) {
+    try {
+      const sb = this._sb();
+      if (!sb) throw new Error('Supabase not available');
+      const { data: printer, error } = await sb.from('printer_models').update(data).eq('id', id).select().single();
+      if (error) throw error;
+      return printer;
+    } catch (e) {
+      DebugLog.warn('[AdminAPI] updatePrinter failed:', e.message);
+      throw e;
+    }
+  },
+
+  async deletePrinter(id) {
+    try {
+      const sb = this._sb();
+      if (!sb) throw new Error('Supabase not available');
+      const { error: compatError } = await sb.from('product_compatibility').delete().eq('printer_model_id', id);
+      if (compatError) throw compatError;
+      const { error } = await sb.from('printer_models').delete().eq('id', id);
+      if (error) throw error;
+      return true;
+    } catch (e) {
+      DebugLog.warn('[AdminAPI] deletePrinter failed:', e.message);
+      throw e;
+    }
+  },
+
   // ---- Ribbon Brands (Supabase direct) ----
   _sb() {
     return (typeof Auth !== 'undefined' && Auth.supabase) ? Auth.supabase : null;

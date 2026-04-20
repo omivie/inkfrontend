@@ -1573,6 +1573,8 @@ button.admin-active-dot--clickable:hover::after { opacity: 1; }
   font-size: 0.9em;
 }
 .admin-compat-suggestions__item:hover { background: var(--hover); }
+.admin-compat-suggestions__item--create { color: var(--primary); font-weight: 500; border-top: 1px solid var(--border); }
+.admin-compat-suggestions__item--create:hover { background: var(--primary-light, #eef2ff); }
 .admin-badge .compat-remove {
   background: none; border: none; cursor: pointer;
   color: inherit; opacity: 0.6; margin-left: 4px; padding: 0;

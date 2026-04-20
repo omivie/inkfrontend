@@ -1430,7 +1430,11 @@ function bindProductModalActions(modal, product) {
           const resp = await window.API.searchPrinters(q);
           const list = resp?.data?.printers || resp?.data || [];
           if (!Array.isArray(list) || list.length === 0) {
-            suggestions.innerHTML = `<div class="admin-compat-suggestions__item" style="color:var(--text-muted)">No results</div>`;
+            suggestions.innerHTML = `
+              <div class="admin-compat-suggestions__item" style="color:var(--text-muted);pointer-events:none">No results</div>
+              <div class="admin-compat-suggestions__item admin-compat-suggestions__item--create" data-create-query="${esc(q)}">
+                + Create &amp; Link &ldquo;${esc(q)}&rdquo;
+              </div>`;
             return;
           }
           suggestions.innerHTML = list.slice(0, 10).map(p =>
@@ -1444,7 +1448,32 @@ function bindProductModalActions(modal, product) {
 
     suggestions?.addEventListener('click', async (e) => {
       const item = e.target.closest('.admin-compat-suggestions__item');
-      if (!item?.dataset.printerId || !product.sku) return;
+      if (!item || !product.sku) return;
+
+      // Create & Link new printer model
+      if (item.dataset.createQuery) {
+        const query = item.dataset.createQuery;
+        item.style.opacity = '0.5';
+        item.textContent = 'Creating\u2026';
+        try {
+          const { id, name, wasCreated } = await AdminAPI.getOrCreatePrinterId(query);
+          const { status } = await AdminAPI.ensureCompatibility(
+            product.sku, id, compatPrinters.map(p => printerId(p))
+          );
+          if (status === 'added') { compatPrinters.push({ id, full_name: name }); renderCompatBadges(); }
+          searchWrap.style.display = 'none';
+          searchInput.value = '';
+          suggestions.innerHTML = '';
+          Toast.success(`${wasCreated ? 'Created' : 'Found'} &amp; linked: ${name}`);
+        } catch (err) {
+          Toast.error(`Failed: ${err.message}`);
+          item.style.opacity = '1';
+          item.textContent = `+ Create & Link "${query}"`;
+        }
+        return;
+      }
+
+      if (!item.dataset.printerId) return;
       const pid  = item.dataset.printerId;
       const name = item.dataset.printerName;
       if (compatPrinters.some(p => printerId(p) === pid)) { searchWrap.style.display = 'none'; return; }
@@ -2411,6 +2440,15 @@ async function switchProductTab(tab) {
     } catch (e) {
       content.innerHTML = `<div class="admin-empty"><div class="admin-empty__title">Failed to load Ribbons</div><div class="admin-empty__text">${esc(e.message)}</div></div>`;
     }
+  } else if (tab === 'printers') {
+    try {
+      const mod = await import('./printers.js');
+      _subProductModule = mod.default;
+      content.innerHTML = '';
+      await _subProductModule.init(content);
+    } catch (e) {
+      content.innerHTML = `<div class="admin-empty"><div class="admin-empty__title">Failed to load Printers</div><div class="admin-empty__text">${esc(e.message)}</div></div>`;
+    }
   }
 }
 
@@ -2741,6 +2779,7 @@ export default {
     tabBar.innerHTML = `
       <button class="admin-tab active" data-prod-tab="products">All Products</button>
       <button class="admin-tab" data-prod-tab="ribbons">Ribbons</button>
+      <button class="admin-tab" data-prod-tab="printers">Printers</button>
     `;
     container.appendChild(tabBar);
 
