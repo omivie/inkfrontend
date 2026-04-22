@@ -175,35 +175,4 @@
 
     loadFeaturedProducts();
 
-    // Hero carousel
-    const carousel = document.getElementById('hero-carousel');
-    if (carousel) {
-        const track = carousel.querySelector('.hero-carousel__track');
-        const dots = carousel.querySelectorAll('.hero-carousel__dot');
-        const SLIDE_COUNT = 2;
-        let current = 0;
-
-        function goTo(index) {
-            current = index;
-            track.style.transform = `translateX(-${current * (100 / SLIDE_COUNT)}%)`;
-            dots.forEach((d, i) => {
-                d.classList.toggle('hero-carousel__dot--active', i === current);
-                d.setAttribute('aria-selected', i === current ? 'true' : 'false');
-            });
-        }
-
-        let timer = setInterval(() => goTo((current + 1) % SLIDE_COUNT), 6000);
-
-        carousel.addEventListener('mouseenter', () => clearInterval(timer));
-        carousel.addEventListener('mouseleave', () => {
-            timer = setInterval(() => goTo((current + 1) % SLIDE_COUNT), 6000);
-        });
-
-        dots.forEach(dot => dot.addEventListener('click', () => {
-            clearInterval(timer);
-            goTo(+dot.dataset.slide);
-            timer = setInterval(() => goTo((current + 1) % SLIDE_COUNT), 6000);
-        }));
-    }
-
 })();

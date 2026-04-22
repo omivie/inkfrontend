@@ -225,7 +225,7 @@ const Cart = {
 
         // Store server summary if provided
         const summary = responseData.summary
-            ? { ...responseData.summary, b2b_discount: responseData.b2b_discount || null }
+            ? { ...responseData.summary }
             : null;
         const couponCode = responseData.coupon?.code || null;
         const discountAmount = responseData.coupon?.discount_amount || summary?.discount || 0;
@@ -997,25 +997,6 @@ const Cart = {
             }
         }
 
-        // B2B discount callout — shown when cart response includes b2b_discount
-        const b2bDiscount = this.serverSummary?.b2b_discount;
-        let b2bCallout = document.getElementById('cart-b2b-discount-callout');
-        if (b2bDiscount?.discount_percent > 0) {
-            const tierLabel = b2bDiscount.pricing_tier
-                ? b2bDiscount.pricing_tier.charAt(0).toUpperCase() + b2bDiscount.pricing_tier.slice(1)
-                : 'Business';
-            if (!b2bCallout) {
-                b2bCallout = document.createElement('div');
-                b2bCallout.id = 'cart-b2b-discount-callout';
-                b2bCallout.style.cssText = 'margin:8px 0;padding:10px 14px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;font-size:13px;color:#1d4ed8;display:flex;align-items:center;gap:8px;';
-                const target = savingsRow ? savingsRow.parentNode : document.querySelector('.cart-summary');
-                if (target) target.insertBefore(b2bCallout, savingsRow || target.firstChild);
-            }
-            b2bCallout.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.59 13.41l-7.17 7.17a2 2 0 01-2.83 0L2 12V2h10l8.59 8.59a2 2 0 010 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg><span><strong>${tierLabel} ${b2bDiscount.discount_percent}% discount</strong> is applied to your order.</span>`;
-            b2bCallout.hidden = false;
-        } else if (b2bCallout) {
-            b2bCallout.hidden = true;
-        }
 
         // Cart summary class-based elements
         const cartSummary = document.querySelector('.cart-summary');

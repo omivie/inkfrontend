@@ -38,8 +38,6 @@ const AccountPage = {
         // Check admin access via backend (shows admin nav on all account pages if authorized)
         this.checkAdminAccess();
 
-        // Check B2B status (shows business nav on all account pages if approved)
-        this.checkBusinessAccess();
 
         // Load data based on current page
         const path = window.location.pathname;
@@ -953,51 +951,6 @@ const AccountPage = {
         }
     },
 
-    /**
-     * Check B2B status and show business nav item if approved
-     */
-    async checkBusinessAccess() {
-        const bizNavItem = document.getElementById('biz-nav-item');
-        if (!bizNavItem) return;
-
-        try {
-            const res = await API.getBusinessStatus();
-            const status = res.ok ? res.data?.status : null;
-
-            const setLinkText = (link, text) => {
-                const textNode = [...link.childNodes].find(n => n.nodeType === 3 && n.textContent.trim());
-                if (textNode) textNode.textContent = ` ${text}`;
-            };
-
-            if (status === 'approved') {
-                bizNavItem.hidden = false;
-                const link = bizNavItem.querySelector('a');
-                if (link) {
-                    link.href = '/html/account/business.html';
-                    setLinkText(link, 'Business Account');
-                }
-            } else if (status === 'pending') {
-                bizNavItem.hidden = false;
-                const link = bizNavItem.querySelector('a');
-                if (link) {
-                    link.href = '/html/business/apply.html';
-                    link.style.opacity = '0.7';
-                    setLinkText(link, 'Application Pending');
-                }
-            } else {
-                // No application or declined — show apply CTA
-                bizNavItem.hidden = false;
-                bizNavItem.classList.add('account-nav__item--b2b-apply');
-                const link = bizNavItem.querySelector('a');
-                if (link) {
-                    link.href = '/html/business/apply.html';
-                    setLinkText(link, status === 'declined' ? 'Reapply for Business Account' : 'Apply for Business Account');
-                }
-            }
-        } catch {
-            // Backend unavailable — keep hidden
-        }
-    },
 
     /**
      * Load recent orders for dashboard (from API + local storage fallback)

@@ -25,7 +25,6 @@
                         <p class="footer-column__heading">Support</p>
                         <ul class="footer-links">
                             <li><a href="/html/contact.html">Contact Us</a></li>
-                            <li><a href="/html/business/apply.html">Business Accounts</a></li>
                             <li><a href="/html/terms.html">Terms &amp; Conditions</a></li>
                             <li><a href="/html/privacy.html">Privacy Policy</a></li>
                             <li><a href="/html/returns">Returns &amp; Refunds</a></li>

@@ -15,7 +15,6 @@ const COLUMNS = [
   { key: 'name', label: 'Segment', render: (r) => esc(r.name || '') },
   { key: 'description', label: 'Description', render: (r) => esc(r.description || '') },
   { key: 'member_count', label: 'Members', align: 'right', render: (r) => r.member_count ?? r.user_count ?? '—' },
-  { key: 'pricing_tier', label: 'Pricing Tier', render: (r) => esc(r.pricing_tier || '—') },
   { key: 'created_at', label: 'Created', render: (r) => r.created_at ? new Date(r.created_at).toLocaleDateString('en-NZ') : '—' },
 ];
 
@@ -44,15 +43,6 @@ function openCreateSegment() {
         <label>Description</label>
         <input class="admin-input" id="sg-description" placeholder="Top 10% by lifetime spend">
       </div>
-      <div class="admin-form-group">
-        <label>Pricing Tier</label>
-        <select class="admin-select" id="sg-tier">
-          <option value="">None</option>
-          <option value="bronze">Bronze</option>
-          <option value="silver">Silver</option>
-          <option value="gold">Gold</option>
-        </select>
-      </div>
     `,
     footer: `
       <button class="admin-btn admin-btn--ghost" data-action="cancel">Cancel</button>
@@ -64,10 +54,9 @@ function openCreateSegment() {
   modal.footer.querySelector('[data-action="save"]').addEventListener('click', async () => {
     const name = modal.body.querySelector('#sg-name').value.trim();
     const description = modal.body.querySelector('#sg-description').value.trim();
-    const pricing_tier = modal.body.querySelector('#sg-tier').value || null;
     if (!name) { Toast.warning('Name required'); return; }
     try {
-      await AdminAPI.createSegment({ name, description: description || null, pricing_tier });
+      await AdminAPI.createSegment({ name, description: description || null });
       Toast.success('Segment created');
       Modal.close();
       await loadData();
