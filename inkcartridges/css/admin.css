@@ -198,13 +198,30 @@
   scrollbar-width: none;
   transition: transform 0.28s var(--ease);
 }
-.admin-sidebar__brand {
-  padding: 20px 20px 16px;
-  display: flex; align-items: center; gap: 10px;
-  text-decoration: none; color: var(--text);
+.admin-sidebar__brand-row {
+  display: flex; align-items: center; gap: 8px;
+  padding: 20px 16px 16px 20px;
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
 }
+.admin-sidebar__brand {
+  flex: 1; min-width: 0;
+  display: flex; align-items: center; gap: 10px;
+  text-decoration: none; color: var(--text);
+}
+.admin-sidebar__back-btn {
+  flex-shrink: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 30px; height: 30px; padding: 0;
+  background: transparent; border: 1px solid var(--border);
+  color: var(--text-secondary); cursor: pointer;
+  border-radius: var(--radius);
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.admin-sidebar__back-btn:hover {
+  background: var(--surface-hover); color: var(--text); border-color: var(--border-strong);
+}
+.admin-sidebar__back-btn svg { width: 16px; height: 16px; }
 .admin-sidebar__logo {
   width: 32px; height: 32px;
   background: var(--cyan); border-radius: var(--radius-sm);
@@ -273,20 +290,6 @@
 .admin-user-card__role {
   font-size: 11px; color: var(--text-muted); text-transform: capitalize;
 }
-
-/* ---- Sidebar: Back to site button ---- */
-.admin-sidebar__back-to-site {
-  display: flex; align-items: center; gap: 10px;
-  width: 100%; padding: 8px 10px; margin-bottom: 8px;
-  background: transparent; border: 1px solid var(--border);
-  color: var(--text-secondary); cursor: pointer;
-  border-radius: var(--radius); font-family: inherit; font-size: 13px; font-weight: 500;
-  transition: background 0.15s, color 0.15s, border-color 0.15s;
-}
-.admin-sidebar__back-to-site:hover {
-  background: var(--surface-hover); color: var(--text); border-color: var(--border-strong);
-}
-.admin-sidebar__back-to-site svg { flex-shrink: 0; }
 
 /* ---- Mobile floating menu toggle ---- */
 .admin-mobile-menu {
@@ -1133,9 +1136,19 @@
   width: 60px;
   overflow: hidden;
 }
+.admin-sidebar--collapsed .admin-sidebar__brand-row {
+  padding: 14px 0;
+  justify-content: center;
+  flex-direction: column;
+  gap: 8px;
+}
 .admin-sidebar--collapsed .admin-sidebar__brand {
   justify-content: center;
-  padding: 14px 0;
+  padding: 0;
+  flex: 0 0 auto;
+}
+.admin-sidebar--collapsed .admin-sidebar__back-btn {
+  margin: 0;
 }
 .admin-sidebar--collapsed .admin-sidebar__nav {
   padding: 8px 4px;

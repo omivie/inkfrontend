@@ -100,13 +100,18 @@ function renderSidebar() {
   const isOwner = AdminAuth.isOwner();
 
   let html = `
-    <a class="admin-sidebar__brand" href="#dashboard">
-      <div class="admin-sidebar__logo">${icon('products', 18, 18)}</div>
-      <div>
-        <div class="admin-sidebar__title">InkCartridges</div>
-        <div class="admin-sidebar__subtitle">Admin Panel</div>
-      </div>
-    </a>
+    <div class="admin-sidebar__brand-row">
+      <a class="admin-sidebar__brand" href="#dashboard">
+        <div class="admin-sidebar__logo">${icon('products', 18, 18)}</div>
+        <div>
+          <div class="admin-sidebar__title">InkCartridges</div>
+          <div class="admin-sidebar__subtitle">Admin Panel</div>
+        </div>
+      </a>
+      <button class="admin-sidebar__back-btn" id="back-to-site" aria-label="Back to site" data-tooltip="Back to site">
+        ${icon('logout', 16, 16)}
+      </button>
+    </div>
     <nav class="admin-sidebar__nav">
   `;
 
@@ -135,10 +140,6 @@ function renderSidebar() {
   html += `
     </nav>
     <div class="admin-sidebar__footer">
-      <button class="admin-sidebar__back-to-site" id="back-to-site" data-tooltip="Back to site">
-        ${icon('logout', 16, 16)}
-        <span class="admin-nav-label">Back to site</span>
-      </button>
       <div class="admin-user-card" id="user-card">
         <div class="admin-avatar">${esc(AdminAuth.getInitials())}</div>
         <div class="admin-user-card__info">
