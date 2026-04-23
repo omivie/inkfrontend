@@ -51,6 +51,7 @@
       const t = setTimeout(() => ctrl.abort(), 30000);
       try {
         const res = await fetch(`${BACKEND_URL}/api/admin/verify`, {
+          credentials: 'include',
           headers: { 'Authorization': `Bearer ${session.access_token}` },
           signal: ctrl.signal,
         });
