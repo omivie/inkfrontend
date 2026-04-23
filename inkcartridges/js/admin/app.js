@@ -1,7 +1,7 @@
 /**
  * Admin SPA — Entry point, router, shell
  */
-const APP_VERSION = '2026.04.09a';
+const APP_VERSION = '2026.04.23b';
 
 import { AdminAuth } from './auth.js';
 import { FilterState } from './filters.js';
