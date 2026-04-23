@@ -122,7 +122,7 @@
 
     const safeMsg = message
       ? message.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-      : 'This site is currently restricted. Please sign in with an admin account to continue.';
+      : 'We\'re making some updates and will be back shortly. We appreciate your patience.';
 
     const overlay = document.createElement('div');
     overlay.id = 'sg-overlay';
@@ -136,7 +136,7 @@
           </svg>
           <span id="sg-logo-name">InkCartridges.co.nz</span>
         </div>
-        <h1 id="sg-title">Admin access only</h1>
+        <h1 id="sg-title">We'll be back soon</h1>
         <p id="sg-subtitle">${safeMsg}</p>
         <form id="sg-form" novalidate>
           <div class="sg-field">
@@ -150,7 +150,7 @@
           <div id="sg-error" role="alert"></div>
           <button type="submit" id="sg-btn">Sign in</button>
         </form>
-        <p id="sg-footer">InkCartridges.co.nz &mdash; Admin Portal</p>
+        <p id="sg-footer">InkCartridges.co.nz &mdash; Staff sign in</p>
       </div>
     `;
     document.body.appendChild(overlay);
