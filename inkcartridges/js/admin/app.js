@@ -275,7 +275,7 @@ async function navigate(pageName) {
   `;
 
   // Owner-only page check
-  const ownerPages = ['contact-emails', 'control-center'];
+  const ownerPages = ['contact-emails', 'control-center', 'site-lock'];
   if (ownerPages.includes(pageName) && !AdminAuth.isOwner()) {
     content.innerHTML = `
       <div class="admin-stub">
