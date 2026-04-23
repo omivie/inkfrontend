@@ -19,7 +19,11 @@
   function initClient() {
     if (_sb) return _sb;
     if (typeof supabase === 'undefined' || !supabase.createClient) return null;
-    _sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+    // Use a separate storageKey so this client's session doesn't conflict
+    // with auth.js's Supabase client (different localStorage namespace).
+    _sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+      auth: { storageKey: 'sg-auth', persistSession: true }
+    });
     return _sb;
   }
 
@@ -41,16 +45,32 @@
 
   async function isAdminSession(session) {
     if (!session?.access_token) return false;
-    try {
-      const res = await fetch(`${BACKEND_URL}/api/admin/verify`, {
-        headers: { 'Authorization': `Bearer ${session.access_token}` }
-      });
-      if (!res.ok) return false;
-      const body = await res.json();
-      return body.ok && ['owner', 'admin', 'superadmin'].includes(body.data?.role);
-    } catch {
-      return false;
+
+    async function tryVerify() {
+      const ctrl = new AbortController();
+      const t = setTimeout(() => ctrl.abort(), 30000);
+      try {
+        const res = await fetch(`${BACKEND_URL}/api/admin/verify`, {
+          headers: { 'Authorization': `Bearer ${session.access_token}` },
+          signal: ctrl.signal,
+        });
+        clearTimeout(t);
+        if (!res.ok) return false;
+        const body = await res.json();
+        return body.ok && ['owner', 'admin', 'superadmin'].includes(body.data?.role);
+      } catch {
+        clearTimeout(t);
+        return null; // null = failed (distinct from false = not admin)
+      }
     }
+
+    const first = await tryVerify();
+    if (first !== null) return first;
+
+    // Backend likely cold-starting — wait 4s then retry once
+    await new Promise(r => setTimeout(r, 4000));
+    const second = await tryVerify();
+    return second === true;
   }
 
   function injectStyles() {
@@ -195,15 +215,16 @@
 
         const { data, error } = await sb.auth.signInWithPassword({ email, password });
         if (error) {
-          setError(error.message || 'Sign-in failed. Check your credentials.');
+          setError(error.message || 'Sign-in failed. Please check your email and password.');
           setLoading(false);
           return;
         }
 
+        btn.textContent = 'Verifying access…';
         const ok = await isAdminSession(data.session);
         if (!ok) {
           await sb.auth.signOut();
-          setError('Access denied — this account does not have admin permissions.');
+          setError('Access denied — this account does not have admin permissions. If you believe this is an error, try again in a moment.');
           setLoading(false);
           return;
         }
