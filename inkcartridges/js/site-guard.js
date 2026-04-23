@@ -58,7 +58,7 @@
         clearTimeout(t);
         if (!res.ok) return false;
         const body = await res.json();
-        return body.ok && ['owner', 'admin', 'superadmin'].includes(body.data?.role);
+        return body.ok && ['owner', 'admin', 'superadmin', 'super_admin'].includes(body.data?.role);
       } catch {
         clearTimeout(t);
         return null; // null = failed (distinct from false = not admin)
