@@ -96,6 +96,7 @@ async function loadDashboard() {
     AdminAPI.getOverpricedProducts(1, 5),                   // 12 overpriced
     AdminAPI.getMarketDiscrepancies(15),                    // 13 discrepancies
     AdminAPI.getAuditLogs({ limit: 15 }),                   // 14 audit logs
+    AdminAPI.getAdminAnalyticsPnL(372),                     // 15 p&l (12 months)
   ];
 
   const results = await Promise.allSettled(promises);
@@ -112,6 +113,7 @@ async function loadDashboard() {
     rawOrders:    val(6),
     outOfStock:   val(7),
     cashflow:     val(8),
+    pnl:          val(15),
     runway:       val(9),
     forecasts:    val(10),
     paymentMix:   val(11),
@@ -138,7 +140,7 @@ function render(d) {
     return;
   }
 
-  _cashflowData = d.cashflow;
+  _cashflowData = buildMonthlySeries(d);
 
   const html = `
     <div class="admin-page-header admin-page-header--dash"><h1>Dashboard</h1></div>
@@ -330,36 +332,103 @@ function renderSidePanel(d) {
   `;
 }
 
+// Merges P&L, cashflow and raw-order data into a unified 12-month series.
+// Each element: { key: 'YYYY-MM', label: 'Mar 25', revenue, expenses, net, orders }.
+function buildMonthlySeries(d) {
+  const months = {};
+  const now = new Date();
+
+  // Seed last 12 months (oldest first) so the chart is always full-width.
+  for (let i = 11; i >= 0; i--) {
+    const dt = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    const key = `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}`;
+    months[key] = {
+      key,
+      label: dt.toLocaleDateString('en-NZ', { month: 'short', year: '2-digit' }),
+      revenue: 0, expenses: 0, net: 0, orders: 0,
+      hasRevenue: false, hasExpense: false, hasNet: false,
+    };
+  }
+
+  const keyOf = (raw) => {
+    if (!raw) return null;
+    const s = String(raw);
+    // Accept "YYYY-MM", "YYYY-MM-DD", ISO timestamp, or locale month label
+    const m = s.match(/^(\d{4})-(\d{2})/);
+    if (m) return `${m[1]}-${m[2]}`;
+    const parsed = new Date(s);
+    if (!isNaN(parsed)) {
+      return `${parsed.getFullYear()}-${String(parsed.getMonth() + 1).padStart(2, '0')}`;
+    }
+    return null;
+  };
+
+  // 1. P&L periods — most authoritative for revenue/expenses/net
+  const pnlPeriods = Array.isArray(d.pnl?.periods) ? d.pnl.periods
+                   : Array.isArray(d.pnl) ? d.pnl : [];
+  for (const p of pnlPeriods) {
+    const key = keyOf(p.period || p.month || p.date);
+    if (!key || !months[key]) continue;
+    const bucket = months[key];
+    if (p.revenue != null) { bucket.revenue = Number(p.revenue); bucket.hasRevenue = true; }
+    const expense = (p.cogs != null || p.operating_expenses != null)
+      ? Number(p.cogs || 0) + Number(p.operating_expenses || 0)
+      : (p.expenses != null ? Number(p.expenses) : null);
+    if (expense != null) { bucket.expenses = expense; bucket.hasExpense = true; }
+    if (p.net_profit != null) { bucket.net = Number(p.net_profit); bucket.hasNet = true; }
+  }
+
+  // 2. Cashflow rows — fill gaps (may have expense entries P&L lacks)
+  const cashflowRows = firstArray(d.cashflow, ['months', 'series', 'data']);
+  for (const row of cashflowRows) {
+    const key = keyOf(row.period || row.month || row.monthLabel || row.label || row.date);
+    if (!key || !months[key]) continue;
+    const bucket = months[key];
+    const rev = row.revenue ?? row.inflow ?? row.inflows ?? row.income;
+    const exp = row.expenses ?? row.expense ?? row.outflow ?? row.outflows;
+    const net = row.net_profit ?? row.net ?? row.netFlow ?? row.net_cashflow;
+    if (!bucket.hasRevenue && rev != null) { bucket.revenue = Number(rev); bucket.hasRevenue = true; }
+    if (!bucket.hasExpense && exp != null) { bucket.expenses = Math.abs(Number(exp)); bucket.hasExpense = true; }
+    if (!bucket.hasNet && net != null) { bucket.net = Number(net); bucket.hasNet = true; }
+  }
+
+  // 3. Raw orders — count per month + fallback revenue if no other source
+  const rawOrders = firstArray(d.rawOrders, ['orders', 'data']);
+  for (const o of rawOrders) {
+    const key = keyOf(o.created_at || o.createdAt);
+    if (!key || !months[key]) continue;
+    const bucket = months[key];
+    bucket.orders += 1;
+    if (!bucket.hasRevenue) bucket.revenue += Number(o.total || 0);
+  }
+
+  // 4. Derive net if still missing
+  for (const bucket of Object.values(months)) {
+    if (!bucket.hasNet) bucket.net = bucket.revenue - bucket.expenses;
+  }
+
+  return Object.values(months).sort((a, b) => a.key.localeCompare(b.key));
+}
+
 function drawCashflowChart() {
-  const data = _cashflowData;
-  const months = firstArray(data, ['months', 'series', 'data']);
-  if (!months.length) {
+  const series = Array.isArray(_cashflowData) ? _cashflowData : [];
+  const hasAny = series.some(m => m.revenue || m.expenses || m.orders);
+
+  if (!series.length || !hasAny) {
     const canvas = document.getElementById('chart-cashflow');
     if (canvas) {
       canvas.closest('.admin-chart-box').innerHTML =
-        '<div class="admin-dash-inline-empty">Cashflow data unavailable</div>';
+        '<div class="admin-dash-inline-empty">No monthly data yet — orders will populate this chart</div>';
     }
     return;
   }
 
   const colors = Charts.getThemeColors();
-  const labels = months.map(m => {
-    const key = m.month || m.date || m.period || '';
-    // "2025-03" -> "Mar 25"
-    const mm = String(key).slice(5, 7);
-    const yy = String(key).slice(2, 4);
-    const names = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-    return mm ? `${names[parseInt(mm, 10) - 1] || mm} ${yy}` : key;
-  });
-  const revenueArr = months.map(m => Number(m.revenue ?? m.income ?? 0));
-  const expenseArr = months.map(m => Number(m.expenses ?? m.expense ?? m.outflow ?? 0));
-  const profitArr  = months.map((m, i) => {
-    if (m.net_profit != null) return Number(m.net_profit);
-    if (m.profit != null) return Number(m.profit);
-    if (m.net != null) return Number(m.net);
-    return revenueArr[i] - expenseArr[i];
-  });
-  const orderArr = months.map(m => Number(m.orders ?? m.order_count ?? 0));
+  const labels = series.map(m => m.label);
+  const revenueArr = series.map(m => m.revenue);
+  const expenseArr = series.map(m => m.expenses);
+  const profitArr  = series.map(m => m.net);
+  const orderArr   = series.map(m => m.orders);
 
   let datasets;
   if (_cashflowMetric === 'revenue') {
