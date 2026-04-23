@@ -472,6 +472,15 @@ const AdminAPI = {
     }
   },
 
+  async deleteProductImageUrl(productId) {
+    try {
+      return await window.API.deleteProductImageUrl(productId);
+    } catch (e) {
+      DebugLog.warn('[AdminAPI] deleteProductImageUrl failed:', e.message);
+      throw e;
+    }
+  },
+
   async reorderProductImages(productId, images) {
     try {
       return await window.API.reorderProductImages(productId, images);

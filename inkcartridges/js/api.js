@@ -1370,6 +1370,15 @@ const API = {
     },
 
     /**
+     * Delete legacy product image_url (admin). Used when a product has no
+     * entries in the managed images array and only a legacy/feed image_url.
+     * @param {string} productId - Product UUID
+     */
+    async deleteProductImageUrl(productId) {
+        return this.delete(`/api/admin/products/${productId}/image-url`);
+    },
+
+    /**
      * Reorder product images (admin)
      * @param {string} productId - Product UUID
      * @param {array} images - Array of {id, sort_order, is_primary}

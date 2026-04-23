@@ -1829,11 +1829,7 @@ function bindProductModalActions(modal, product) {
         if (imageId) {
           await AdminAPI.deleteProductImage(product.id, imageId);
         } else {
-          await AdminAPI.updateProduct(product.id, {
-            image_url: null,
-            primary_image: null,
-            retail_price: product.retail_price,
-          });
+          await AdminAPI.deleteProductImageUrl(product.id);
         }
         Toast.success('Image removed');
         if (item) item.remove();
