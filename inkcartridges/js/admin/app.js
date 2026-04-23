@@ -36,6 +36,7 @@ const I = {
   lock: '<rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0110 0v4"/>',
   'lock-open': '<rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 019.9-1"/>',
   invoice: '<path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><line x1="10" y1="9" x2="12" y2="9"/>',
+  calendar: '<rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>',
 };
 
 function icon(name, w = 18, h = 18) {
@@ -51,6 +52,7 @@ const NAV_ITEMS = [
   { key: 'products', label: 'Products', icon: 'products' },
   { key: 'customers', label: 'Customers', icon: 'customers' },
   { divider: true },
+  { key: 'planner', label: 'Planner', icon: 'calendar' },
   { key: 'promotions', label: 'Promotions', icon: 'finance', ownerOnly: true },
   { key: 'shipping-rates', label: 'Shipping Rates', icon: 'fulfillment', ownerOnly: true },
   { key: 'abuse', label: 'Abuse', icon: 'lock', ownerOnly: true },
@@ -133,6 +135,10 @@ function renderSidebar() {
   html += `
     </nav>
     <div class="admin-sidebar__footer">
+      <button class="admin-sidebar__back-to-site" id="back-to-site" data-tooltip="Back to site">
+        ${icon('logout', 16, 16)}
+        <span class="admin-nav-label">Back to site</span>
+      </button>
       <div class="admin-user-card" id="user-card">
         <div class="admin-avatar">${esc(AdminAuth.getInitials())}</div>
         <div class="admin-user-card__info">
@@ -154,70 +160,19 @@ function renderSidebar() {
   document.getElementById('app-shell').appendChild(collapseBtn);
   collapseBtn.addEventListener('click', toggleCollapse);
 
-  // Back to store on user card click
-  document.getElementById('user-card').addEventListener('click', () => {
-    window.location.href = '/html/';
-  });
+  // Back to site - via explicit sidebar button and user card click
+  const goToSite = () => { window.location.href = '/html/'; };
+  document.getElementById('back-to-site')?.addEventListener('click', goToSite);
+  document.getElementById('user-card')?.addEventListener('click', goToSite);
+
+  // Mobile sidebar toggle - floating button, only visible on small screens via CSS
+  const mobileMenu = document.getElementById('mobile-menu-toggle');
+  if (mobileMenu) {
+    mobileMenu.hidden = false;
+    mobileMenu.addEventListener('click', toggleSidebar);
+  }
+  document.getElementById('sidebar-backdrop')?.addEventListener('click', toggleSidebar);
 }
-
-function renderTopbar() {
-  const topbar = document.getElementById('topbar');
-
-  topbar.innerHTML = `
-    <button class="admin-topbar__hamburger" id="menu-toggle" aria-label="Toggle menu">
-      ${icon('menu', 20, 20)}
-    </button>
-    <div class="admin-topbar__spacer"></div>
-    <div class="admin-topbar__search">
-      ${icon('search', 16, 16)}
-      <input type="search" placeholder="Search\u2026" id="global-search" autocomplete="off">
-      <kbd>/</kbd>
-    </div>
-    <div class="admin-topbar__spacer"></div>
-    <div class="admin-topbar__actions">
-      <button class="admin-topbar__btn" id="logout-btn" aria-label="Back to store" data-tooltip="Back to store">
-        ${icon('logout')}
-      </button>
-    </div>
-  `;
-
-  // Mobile menu
-  document.getElementById('menu-toggle').addEventListener('click', toggleSidebar);
-
-  // Sidebar backdrop
-  document.getElementById('sidebar-backdrop').addEventListener('click', toggleSidebar);
-
-  // Back to store
-  document.getElementById('logout-btn').addEventListener('click', () => {
-    window.location.href = '/html/';
-  });
-
-  // Global search — dispatches to current page
-  const globalSearch = document.getElementById('global-search');
-  let globalSearchTimer;
-  globalSearch.addEventListener('input', () => {
-    clearTimeout(globalSearchTimer);
-    globalSearchTimer = setTimeout(() => {
-      const query = globalSearch.value.trim();
-      if (_currentPage && _currentPage.onSearch) {
-        _currentPage.onSearch(query);
-      }
-    }, 250);
-  });
-  globalSearch.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') { globalSearch.value = ''; globalSearch.blur(); if (_currentPage?.onSearch) _currentPage.onSearch(''); }
-  });
-
-  // Search focus shortcut
-  document.addEventListener('keydown', (e) => {
-    if (e.key === '/' && !e.target.closest('input, textarea, select')) {
-      e.preventDefault();
-      document.getElementById('global-search')?.focus();
-    }
-  });
-
-}
-
 
 function toggleSidebar() {
   const sidebar = document.getElementById('sidebar');
@@ -247,10 +202,6 @@ async function navigate(pageName) {
     window.location.hash = pageName;
     return;
   }
-
-  // Clear global search on navigation
-  const gs = document.getElementById('global-search');
-  if (gs) gs.value = '';
 
   // Destroy current page
   if (_currentPage && _currentPage.destroy) {
@@ -513,7 +464,6 @@ async function boot() {
 
     // Render shell
     renderSidebar();
-    renderTopbar();
 
     // Restore sidebar collapse state
     if (localStorage.getItem('admin_sidebar_collapsed') === '1') {

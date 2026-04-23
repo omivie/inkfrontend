@@ -1,166 +1,257 @@
 /**
- * Dashboard Page — 30-second pulse check
+ * Dashboard — "Everything at a glance" bento layout
+ * KPI strip · Revenue vs Expenses · Orders/Products · Alerts · Activity
  */
 import { AdminAuth, FilterState, AdminAPI, esc } from '../app.js';
 import { Charts } from '../components/charts.js';
 
-const formatPrice = (v) => window.formatPrice ? window.formatPrice(v) : `$${Number(v).toFixed(2)}`;
-const MISSING = '\u2014'; // em dash
+const formatPrice = (v) => window.formatPrice ? window.formatPrice(v) : `$${Number(v || 0).toFixed(2)}`;
+const MISSING = '—';
 
-function missing(tooltip = 'Data unavailable') {
+let _container = null;
+let _cashflowData = null;
+let _cashflowMetric = 'revenue';
+
+// ---------- helpers ----------
+
+function deltaBadge(current, previous, { invert = false } = {}) {
+  if (current == null || previous == null) return '';
+  if (previous === 0) {
+    if (current === 0) return '';
+    return `<span class="admin-kpi__delta admin-kpi__delta--up">↑ new</span>`;
+  }
+  const pct = ((current - previous) / Math.abs(previous)) * 100;
+  const isUp = pct > 0, isDown = pct < 0;
+  let cls = 'flat';
+  if (isUp) cls = invert ? 'down' : 'up';
+  else if (isDown) cls = invert ? 'up' : 'down';
+  const arrow = isUp ? '↑' : isDown ? '↓' : '→';
+  return `<span class="admin-kpi__delta admin-kpi__delta--${cls}">${arrow} ${Math.abs(pct).toFixed(1)}%</span>`;
+}
+
+function missingValue(tooltip = 'Data unavailable') {
   return `<span class="admin-kpi__value admin-kpi__value--missing" data-tooltip="${esc(tooltip)}">${MISSING}</span>`;
 }
 
-function delta(current, previous) {
-  if (current == null || previous == null) return '';
-  if (previous === 0) return current > 0 ? '<span class="admin-kpi__delta admin-kpi__delta--up">\u2191 new</span>' : '';
-  const pct = ((current - previous) / Math.abs(previous) * 100).toFixed(1);
-  const dir = pct > 0 ? 'up' : pct < 0 ? 'down' : 'flat';
-  const arrow = dir === 'up' ? '\u2191' : dir === 'down' ? '\u2193' : '\u2192';
-  return `<span class="admin-kpi__delta admin-kpi__delta--${dir}">${arrow} ${Math.abs(pct)}%</span>`;
+function timeAgo(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  const s = Math.floor((Date.now() - d.getTime()) / 1000);
+  if (s < 60) return `${s}s ago`;
+  if (s < 3600) return `${Math.floor(s / 60)}m ago`;
+  if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
+  if (s < 604800) return `${Math.floor(s / 86400)}d ago`;
+  return d.toLocaleDateString();
 }
 
-function badge24h() {
-  return `<span class="admin-kpi__badge-24h">&#x23F1; 24h window</span>`;
+function firstArray(obj, keys) {
+  if (Array.isArray(obj)) return obj;
+  for (const k of keys) {
+    if (obj && Array.isArray(obj[k])) return obj[k];
+  }
+  return [];
 }
 
-function emptyChart(canvasId, message = 'No data for this period') {
-  const canvas = document.getElementById(canvasId);
-  if (!canvas) return;
-  const box = canvas.closest('.admin-chart-box');
-  if (!box) return;
-  box.innerHTML = `<div class="admin-dash-empty"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 3v18h18"/><path d="M7 16l4-4 4 4 4-4"/></svg><span>${esc(message)}</span></div>`;
+function safeDiv(a, b) {
+  if (!b || b === 0 || a == null) return null;
+  return a / b;
 }
 
-let _container = null;
+// ---------- data loading ----------
 
 async function loadDashboard() {
   const params = FilterState.getParams();
   const signal = FilterState.getAbortSignal();
   const isOwner = AdminAuth.isOwner();
 
-  const promises = [];
-  if (isOwner) {
-    promises.push(AdminAPI.getDashboardKPIs(params, signal));
-    promises.push(AdminAPI.getRevenueSeries(params, signal));
-    promises.push(AdminAPI.getCustomerStats(params, signal));
-    promises.push(AdminAPI.getTopProducts(params, signal));
-    promises.push(AdminAPI.getBrandBreakdown(params, 'revenue', signal));
-    promises.push(AdminAPI.getNewOrders24h(signal));
-    // Fetch all orders (up to 500) to build orders-over-time series
-    promises.push(AdminAPI.getOrders(
-      { from: params.get('from'), to: params.get('to') },
-      1, 500, signal
-    ));
+  if (!isOwner) {
+    render({ isOwner: false });
+    return;
   }
 
-  const results = await Promise.allSettled(promises);
-  const kpis         = isOwner ? (results[0]?.value ?? null) : null;
-  const revSeries    = isOwner ? (results[1]?.value ?? null) : null;
-  const custStats    = isOwner ? (results[2]?.value ?? null) : null;
-  const topProducts  = isOwner ? (results[3]?.value ?? null) : null;
-  const brandData    = isOwner ? (results[4]?.value ?? null) : null;
-  const newOrders24h = isOwner ? (results[5]?.value ?? null) : null;
-  const rawOrders    = isOwner ? (results[6]?.value ?? null) : null;
+  // Build an unfiltered date window for refund "this month vs last month" comparison.
+  const now = new Date();
+  const thisMonthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10);
+  const nowStr = now.toISOString().slice(0, 10);
+  const lastMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1).toISOString().slice(0, 10);
+  const lastMonthEnd = new Date(now.getFullYear(), now.getMonth(), 0).toISOString().slice(0, 10);
 
-  render({ kpis, revSeries, custStats, topProducts, brandData, newOrders24h, rawOrders, isOwner });
+  const promises = [
+    AdminAPI.getDashboardKPIs(params, signal),              // 0 kpis
+    AdminAPI.getRevenueSeries(params, signal),              // 1 revenue series
+    AdminAPI.getCustomerStats(params, signal),              // 2 customer stats
+    AdminAPI.getTopProducts(params, signal),                // 3 top products
+    AdminAPI.getRefundAnalytics(params, signal),            // 4 refunds
+    AdminAPI.getOrders({
+      from: params.get('from'), to: params.get('to'),
+    }, 1, 8, signal),                                       // 5 recent orders
+    AdminAPI.getOrders({
+      from: params.get('from'), to: params.get('to'),
+    }, 1, 500, signal),                                     // 6 raw orders for spark
+    AdminAPI.getOutOfStock({ limit: 5 }),                   // 7 out of stock
+    AdminAPI.getAdminAnalyticsCashflow(12),                 // 8 cashflow
+    AdminAPI.getAdminAnalyticsBurnRunway(),                 // 9 runway
+    AdminAPI.getAdminAnalyticsForecasts(),                  // 10 forecasts
+    AdminAPI.getPaymentBreakdown(thisMonthStart, nowStr),   // 11 payment breakdown
+    AdminAPI.getOverpricedProducts(1, 5),                   // 12 overpriced
+    AdminAPI.getMarketDiscrepancies(15),                    // 13 discrepancies
+    AdminAPI.getAuditLogs({ limit: 15 }),                   // 14 audit logs
+  ];
+
+  const results = await Promise.allSettled(promises);
+  const val = (i) => results[i]?.status === 'fulfilled' ? results[i].value : null;
+
+  render({
+    isOwner: true,
+    kpis:         val(0),
+    revSeries:    val(1),
+    custStats:    val(2),
+    topProducts:  val(3),
+    refunds:      val(4),
+    recentOrders: val(5),
+    rawOrders:    val(6),
+    outOfStock:   val(7),
+    cashflow:     val(8),
+    runway:       val(9),
+    forecasts:    val(10),
+    paymentMix:   val(11),
+    overpriced:   val(12),
+    discrepancies: val(13),
+    auditLogs:    val(14),
+  });
 }
 
-function render({ kpis, revSeries, custStats, topProducts, brandData, newOrders24h, rawOrders, isOwner }) {
+// ---------- render ----------
+
+function render(d) {
   if (!_container) return;
   Charts.destroyAll();
 
-  let html = `<div class="admin-page-header"><h1>Dashboard</h1></div>`;
-
-  if (isOwner) {
-    html += renderKPIs(kpis, custStats, newOrders24h);
-    html += `
-      <div class="admin-card admin-mb-lg">
-        <div class="admin-card__title">Revenue Over Time <small>${FilterState.get('period')}</small></div>
-        <div class="admin-chart-box"><canvas id="chart-revenue"></canvas></div>
-      </div>
-      <div class="admin-card admin-mb-lg">
-        <div class="admin-card__title">Orders Over Time <small>${FilterState.get('period')}</small></div>
-        <div class="admin-chart-box"><canvas id="chart-orders"></canvas></div>
-      </div>
-      <div class="admin-grid-2 admin-mb-lg">
-        <div class="admin-card">
-          <div class="admin-card__title">Top Products <small>by revenue</small></div>
-          <div class="admin-chart-box admin-chart-box--tall"><canvas id="chart-top-products"></canvas></div>
-        </div>
-        <div class="admin-card">
-          <div class="admin-card__title">Revenue by Brand</div>
-          <div class="admin-chart-box admin-chart-box--tall"><canvas id="chart-brand-breakdown"></canvas></div>
-        </div>
+  if (!d.isOwner) {
+    _container.innerHTML = `
+      <div class="admin-page-header"><h1>Dashboard</h1></div>
+      <div class="admin-empty">
+        <div class="admin-empty__title">Owner access required</div>
+        <div class="admin-empty__text">The dashboard is available to store owners only.</div>
       </div>
     `;
+    return;
   }
+
+  _cashflowData = d.cashflow;
+
+  const html = `
+    <div class="admin-page-header admin-page-header--dash"><h1>Dashboard</h1></div>
+    ${renderKpiStrip(d)}
+    <div class="admin-dash">
+      ${renderCashflowCard()}
+      ${renderSidePanel(d)}
+      ${renderRecentOrdersCard(d.recentOrders)}
+      ${renderTopProductsCard(d.topProducts)}
+      ${renderLowStockCard(d.outOfStock)}
+      ${renderRefundsCard(d.refunds, d.kpis)}
+      ${renderPaymentMixCard(d.paymentMix)}
+      ${renderMarketIntelCard(d.overpriced, d.discrepancies)}
+      ${renderActivityCard(d.auditLogs)}
+    </div>
+  `;
 
   _container.innerHTML = html;
 
-  if (isOwner) {
-    renderRevenueChart(revSeries);
-    renderOrdersChart(revSeries, rawOrders);
-    renderTopProductsChart(topProducts);
-    renderBrandChart(brandData);
-  }
+  // Charts (after DOM insert)
+  drawCashflowChart();
+  drawSparklines(d);
+  drawRefundReasons(d.refunds);
+  drawPaymentMixDonut(d.paymentMix);
+
+  // Wire interactions
+  wirePills();
+  wireOrderRowClicks();
 }
 
-function renderKPIs(kpis, custStats, newOrders24h) {
-  const cur  = kpis?.current  ?? {};
-  const prev = kpis?.previous ?? {};
-  const cc   = custStats?.current  ?? {};
-  const cp   = custStats?.previous ?? {};
+// ---------- KPI strip ----------
 
-  const cards = [
+function renderKpiStrip(d) {
+  const cur  = d.kpis?.current  ?? {};
+  const prev = d.kpis?.previous ?? {};
+  const cc   = d.custStats?.current  ?? {};
+  const cp   = d.custStats?.previous ?? {};
+
+  // Derived metrics
+  const aov     = safeDiv(cur.revenue, cur.orders);
+  const aovPrev = safeDiv(prev.revenue, prev.orders);
+
+  const refundTotal = sumRefundAmounts(d.refunds);
+  const refundRate  = safeDiv(refundTotal, cur.revenue);
+  const refundPct   = refundRate != null ? (refundRate * 100) : null;
+
+  const oosCount = outOfStockCount(d.outOfStock);
+
+  const newCustomers     = cc.new_customers ?? cc.new ?? cc.newCustomers ?? null;
+  const newCustomersPrev = cp.new_customers ?? cp.new ?? cp.newCustomers ?? null;
+
+  const tiles = [
     {
       label: 'Revenue',
       value: cur.revenue != null ? formatPrice(cur.revenue) : null,
-      raw: cur.revenue,
-      prevRaw: prev.revenue,
+      raw: cur.revenue, prev: prev.revenue,
+      sparkId: 'spark-rev',
     },
     {
-      label: 'Profit',
+      label: 'Gross Profit',
       value: cur.gross_profit != null ? formatPrice(cur.gross_profit) : null,
-      raw: cur.gross_profit,
-      prevRaw: prev.gross_profit,
-      missingTip: 'Requires supplier cost data on order items',
+      raw: cur.gross_profit, prev: prev.gross_profit,
+      tooltip: 'Requires supplier cost data on order items',
     },
     {
       label: 'Orders',
       value: cur.orders != null ? String(cur.orders) : null,
-      raw: cur.orders,
-      prevRaw: prev.orders,
+      raw: cur.orders, prev: prev.orders,
+      sparkId: 'spark-ord',
     },
     {
-      label: 'New Orders',
-      value: newOrders24h != null ? String(newOrders24h) : null,
-      raw: null,
-      prevRaw: null,
-      is24h: true,
+      label: 'Avg Order Value',
+      value: aov != null ? formatPrice(aov) : null,
+      raw: aov, prev: aovPrev,
+    },
+    {
+      label: 'New Customers',
+      value: newCustomers != null ? String(newCustomers) : null,
+      raw: newCustomers, prev: newCustomersPrev,
     },
     {
       label: 'Returning %',
       value: cc.returning_pct != null ? `${cc.returning_pct}%` : null,
-      raw: cc.returning_pct,
-      prevRaw: cp.returning_pct,
-      missingTip: 'Requires analytics_customer_stats RPC',
+      raw: cc.returning_pct, prev: cp.returning_pct,
+      tooltip: 'Requires analytics_customer_stats RPC',
+    },
+    {
+      label: 'Refund Rate',
+      value: refundPct != null ? `${refundPct.toFixed(1)}%` : null,
+      alert: refundPct != null && refundPct > 3,
+      sparkId: 'spark-ref',
+    },
+    {
+      label: 'Out of Stock',
+      value: oosCount != null ? String(oosCount) : null,
+      alert: oosCount > 0,
+      tooltip: 'Products currently flagged out of stock',
     },
   ];
 
-  let html = '<div class="admin-kpi-grid admin-kpi-grid--5 admin-mb-lg">';
-  for (const card of cards) {
-    html += `<div class="admin-kpi">`;
-    html += `<div class="admin-kpi__label">${esc(card.label)}</div>`;
-    if (card.value != null) {
-      html += `<div class="admin-kpi__value">${esc(card.value)}</div>`;
-      if (card.is24h) {
-        html += badge24h();
-      } else {
-        html += delta(card.raw, card.prevRaw);
-      }
+  let html = '<div class="admin-kpi-grid admin-kpi-grid--8">';
+  for (const t of tiles) {
+    const alertCls = t.alert ? ' admin-kpi--alert' : '';
+    html += `<div class="admin-kpi admin-kpi--compact${alertCls}">`;
+    html += `<div class="admin-kpi__label">${esc(t.label)}</div>`;
+    if (t.value != null) {
+      html += `<div class="admin-kpi__value">${esc(t.value)}</div>`;
+      html += deltaBadge(t.raw, t.prev);
     } else {
-      html += missing(card.missingTip || 'Data unavailable');
+      html += missingValue(t.tooltip || 'Data unavailable');
+    }
+    if (t.sparkId) {
+      html += `<div class="admin-kpi__spark"><canvas id="${t.sparkId}"></canvas></div>`;
     }
     html += '</div>';
   }
@@ -168,192 +259,398 @@ function renderKPIs(kpis, custStats, newOrders24h) {
   return html;
 }
 
-async function renderRevenueChart(data) {
-  if (!data?.series?.length) return;
+function sumRefundAmounts(refunds) {
+  const series = firstArray(refunds, ['series', 'refunds', 'data']);
+  if (!series.length) return null;
+  return series.reduce((sum, r) => sum + (r.amount || r.total || r.value || 0), 0);
+}
 
-  const labels   = data.series.map(d => d.date?.slice(5) || '');
-  const revenues = data.series.map(d => d.revenue || 0);
+function outOfStockCount(data) {
+  if (data == null) return null;
+  if (typeof data.total === 'number') return data.total;
+  const items = firstArray(data, ['items', 'products', 'data']);
+  return items.length;
+}
 
-  // Compute 7-day MA
-  const ma7 = [];
-  for (let i = 0; i < revenues.length; i++) {
-    if (i < 6) { ma7.push(null); continue; }
-    let sum = 0;
-    for (let j = i - 6; j <= i; j++) sum += revenues[j];
-    ma7.push(sum / 7);
+// ---------- Row 2: Cashflow + side panel ----------
+
+function renderCashflowCard() {
+  return `
+    <div class="admin-dash__cell--8 admin-card">
+      <div class="admin-card__title">
+        <span>Revenue vs Expenses <small>last 12 months</small></span>
+        <div class="admin-pills" id="dash-trend-pills">
+          <button type="button" class="admin-pill active" data-metric="revenue">Revenue &amp; Expenses</button>
+          <button type="button" class="admin-pill" data-metric="profit">Net Profit</button>
+          <button type="button" class="admin-pill" data-metric="orders">Orders</button>
+        </div>
+      </div>
+      <div class="admin-chart-box admin-chart-box--mid"><canvas id="chart-cashflow"></canvas></div>
+    </div>
+  `;
+}
+
+function renderSidePanel(d) {
+  const runwayMonths = d.runway?.runway_months ?? d.runway?.months ?? d.runway?.runway ?? null;
+  const cashOnHand   = d.runway?.cash_on_hand ?? d.runway?.cash ?? null;
+  const burnRate     = d.runway?.burn_rate ?? d.runway?.monthly_burn ?? null;
+
+  const forecastRevenue = d.forecasts?.next_30_days?.revenue ?? d.forecasts?.revenue_30d ?? d.forecasts?.forecast_revenue ?? null;
+  const forecastConf    = d.forecasts?.confidence ?? null;
+
+  const cur = d.kpis?.current ?? {};
+  const grossMarginPct = cur.revenue && cur.gross_profit != null
+    ? (cur.gross_profit / cur.revenue) * 100
+    : null;
+  const prevMarginPct = (d.kpis?.previous?.revenue && d.kpis?.previous?.gross_profit != null)
+    ? (d.kpis.previous.gross_profit / d.kpis.previous.revenue) * 100
+    : null;
+
+  return `
+    <div class="admin-dash__cell--4 admin-mini-stack">
+      <div class="admin-mini-card">
+        <div class="admin-mini-card__label">Cash Runway</div>
+        <div class="admin-mini-card__value">${runwayMonths != null ? `${Number(runwayMonths).toFixed(1)} mo` : MISSING}</div>
+        <div class="admin-mini-card__sub">
+          ${cashOnHand != null ? `${formatPrice(cashOnHand)} on hand` : ''}
+          ${burnRate != null ? ` · ${formatPrice(burnRate)}/mo burn` : ''}
+        </div>
+      </div>
+      <div class="admin-mini-card">
+        <div class="admin-mini-card__label">30-day Forecast</div>
+        <div class="admin-mini-card__value">${forecastRevenue != null ? formatPrice(forecastRevenue) : MISSING}</div>
+        <div class="admin-mini-card__sub">${forecastConf != null ? `${forecastConf}% confidence` : 'Projected revenue'}</div>
+      </div>
+      <div class="admin-mini-card">
+        <div class="admin-mini-card__label">Gross Margin</div>
+        <div class="admin-mini-card__value">${grossMarginPct != null ? `${grossMarginPct.toFixed(1)}%` : MISSING}</div>
+        <div class="admin-mini-card__sub">${deltaBadge(grossMarginPct, prevMarginPct) || 'vs previous period'}</div>
+      </div>
+    </div>
+  `;
+}
+
+function drawCashflowChart() {
+  const data = _cashflowData;
+  const months = firstArray(data, ['months', 'series', 'data']);
+  if (!months.length) {
+    const canvas = document.getElementById('chart-cashflow');
+    if (canvas) {
+      canvas.closest('.admin-chart-box').innerHTML =
+        '<div class="admin-dash-inline-empty">Cashflow data unavailable</div>';
+    }
+    return;
   }
 
   const colors = Charts.getThemeColors();
-  const datasets = [
-    {
-      label: 'Revenue',
-      data: revenues,
-      borderColor: colors.cyan,
-      backgroundColor: colors.cyan + '18',
-      fill: true,
-      tension: 0.3,
-      pointRadius: data.series.map(d => d.is_anomaly ? 6 : 1),
-      pointBackgroundColor: data.series.map(d => d.is_anomaly ? colors.danger : colors.cyan),
-      borderWidth: 2,
-    },
-    {
-      label: '7D MA',
-      data: ma7,
-      borderColor: colors.cyan + '60',
-      borderDash: [6, 3],
-      borderWidth: 1.5,
-      pointRadius: 0,
-      fill: false,
-    },
-  ];
+  const labels = months.map(m => {
+    const key = m.month || m.date || m.period || '';
+    // "2025-03" -> "Mar 25"
+    const mm = String(key).slice(5, 7);
+    const yy = String(key).slice(2, 4);
+    const names = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    return mm ? `${names[parseInt(mm, 10) - 1] || mm} ${yy}` : key;
+  });
+  const revenueArr = months.map(m => Number(m.revenue ?? m.income ?? 0));
+  const expenseArr = months.map(m => Number(m.expenses ?? m.expense ?? m.outflow ?? 0));
+  const profitArr  = months.map((m, i) => {
+    if (m.net_profit != null) return Number(m.net_profit);
+    if (m.profit != null) return Number(m.profit);
+    if (m.net != null) return Number(m.net);
+    return revenueArr[i] - expenseArr[i];
+  });
+  const orderArr = months.map(m => Number(m.orders ?? m.order_count ?? 0));
 
-  if (data.previous_series?.length) {
-    datasets.push({
-      label: 'Previous Period',
-      data: data.previous_series.map(d => d.revenue || 0),
-      borderColor: colors.textMuted + '40',
-      borderDash: [3, 3],
-      borderWidth: 1,
-      pointRadius: 0,
-      fill: false,
-    });
+  let datasets;
+  if (_cashflowMetric === 'revenue') {
+    datasets = [
+      {
+        type: 'bar',
+        label: 'Revenue',
+        data: revenueArr,
+        backgroundColor: colors.success + 'cc',
+        borderRadius: 4,
+        barPercentage: 0.65,
+      },
+      {
+        type: 'bar',
+        label: 'Expenses',
+        data: expenseArr,
+        backgroundColor: colors.magenta + 'cc',
+        borderRadius: 4,
+        barPercentage: 0.65,
+      },
+      {
+        type: 'line',
+        label: 'Net',
+        data: profitArr,
+        borderColor: colors.cyan,
+        backgroundColor: 'transparent',
+        borderWidth: 2,
+        borderDash: [4, 3],
+        pointRadius: 3,
+        pointBackgroundColor: colors.cyan,
+        tension: 0.25,
+      },
+    ];
+  } else if (_cashflowMetric === 'profit') {
+    datasets = [{
+      type: 'bar',
+      label: 'Net Profit',
+      data: profitArr,
+      backgroundColor: profitArr.map(v => (v >= 0 ? colors.success : colors.danger) + 'cc'),
+      borderRadius: 4,
+      barPercentage: 0.7,
+    }];
+  } else {
+    datasets = [{
+      type: 'bar',
+      label: 'Orders',
+      data: orderArr,
+      backgroundColor: colors.cyan + 'cc',
+      borderRadius: 4,
+      barPercentage: 0.7,
+    }];
   }
 
-  await Charts.line('chart-revenue', {
+  Charts.bar('chart-cashflow', {
     labels,
     datasets,
     options: {
       plugins: {
+        legend: { display: _cashflowMetric === 'revenue', position: 'top', labels: { color: colors.textMuted, font: { size: 11 }, boxWidth: 10, boxHeight: 10 } },
         tooltip: {
           callbacks: {
             label: (ctx) => {
-              if (ctx.datasetIndex === 0) {
-                const d = data.series[ctx.dataIndex];
-                return [
-                  `Revenue: ${formatPrice(d.revenue || 0)}`,
-                  `Orders: ${d.orders ?? MISSING}`,
-                  `AOV: ${d.aov != null ? formatPrice(d.aov) : MISSING}`,
-                ];
-              }
-              return `${ctx.dataset.label}: ${formatPrice(ctx.raw || 0)}`;
+              const v = ctx.raw || 0;
+              if (_cashflowMetric === 'orders') return `${ctx.dataset.label}: ${v}`;
+              return `${ctx.dataset.label}: ${formatPrice(v)}`;
             },
           },
         },
       },
-    },
-  });
-}
-
-async function renderOrdersChart(revSeries, rawOrders) {
-  if (!revSeries?.series?.length) {
-    emptyChart('chart-orders', 'No order data for this period');
-    return;
-  }
-
-  // Build a date → count map from raw orders (accurate per-day counts)
-  const countByDate = {};
-  const orderList = Array.isArray(rawOrders) ? rawOrders : (rawOrders?.orders || rawOrders?.data || []);
-  for (const o of orderList) {
-    const date = (o.created_at || '').slice(0, 10);
-    if (date) countByDate[date] = (countByDate[date] || 0) + 1;
-  }
-
-  const labels = revSeries.series.map(d => d.date?.slice(5) || '');
-  const orders = revSeries.series.map(d => countByDate[d.date] || 0);
-  const hasData = orders.some(v => v > 0);
-
-  if (!hasData) {
-    emptyChart('chart-orders', 'No order data for this period');
-    return;
-  }
-
-  const colors = Charts.getThemeColors();
-
-  await Charts.line('chart-orders', {
-    labels,
-    datasets: [
-      {
-        label: 'Orders',
-        data: orders,
-        borderColor: colors.magenta,
-        backgroundColor: colors.magenta + '18',
-        fill: true,
-        tension: 0.3,
-        pointRadius: 1,
-        borderWidth: 2,
-      },
-    ],
-    options: {
-      plugins: {
-        tooltip: {
-          callbacks: {
-            label: (ctx) => `Orders: ${ctx.raw}`,
+      scales: {
+        y: {
+          ticks: {
+            callback: (v) => _cashflowMetric === 'orders' ? v : formatPrice(v),
           },
         },
       },
-      scales: {
-        y: { ticks: { precision: 0 } },
-      },
     },
   });
 }
 
-async function renderTopProductsChart(data) {
-  // RPC returns raw array; single-result gets unwrapped by rpc() helper
+function wirePills() {
+  const pills = document.getElementById('dash-trend-pills');
+  if (!pills) return;
+  pills.addEventListener('click', (e) => {
+    const btn = e.target.closest('.admin-pill');
+    if (!btn) return;
+    const metric = btn.dataset.metric;
+    if (metric === _cashflowMetric) return;
+    _cashflowMetric = metric;
+    pills.querySelectorAll('.admin-pill').forEach(p => p.classList.toggle('active', p === btn));
+    drawCashflowChart();
+  });
+}
+
+// ---------- Row 3: Recent orders + Top products ----------
+
+function renderRecentOrdersCard(data) {
+  const orders = firstArray(data, ['orders', 'data', 'items']);
+  if (!orders.length) {
+    return `
+      <div class="admin-dash__cell--6 admin-card">
+        <div class="admin-card__title">Recent Orders <small>latest</small></div>
+        <div class="admin-dash-inline-empty">No recent orders</div>
+      </div>
+    `;
+  }
+
+  let rows = '';
+  for (const o of orders.slice(0, 8)) {
+    const id = o.order_number || o.id || '';
+    const who = o.customer_name || o.customer_email || o.email || o.user_email || 'Guest';
+    const total = o.total ?? o.amount ?? 0;
+    const status = (o.status || 'pending').toLowerCase();
+    const when = timeAgo(o.created_at || o.createdAt);
+    rows += `
+      <tr data-order-id="${esc(String(o.id || id))}">
+        <td class="cell-mono">${esc(String(id).slice(-8))}</td>
+        <td class="cell-truncate">${esc(who)}</td>
+        <td class="cell-mono cell-right">${esc(formatPrice(total))}</td>
+        <td><span class="admin-badge admin-badge--${esc(status)}">${esc(status)}</span></td>
+        <td class="cell-muted cell-mono">${esc(when)}</td>
+      </tr>
+    `;
+  }
+
+  return `
+    <div class="admin-dash__cell--6 admin-card">
+      <div class="admin-card__title">
+        <span>Recent Orders <small>latest ${orders.length}</small></span>
+        <a href="#orders" class="admin-mini-card__sub">View all →</a>
+      </div>
+      <table class="admin-dash-table">
+        <thead><tr>
+          <th>Order</th><th>Customer</th><th class="cell-right">Total</th><th>Status</th><th>When</th>
+        </tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>
+  `;
+}
+
+function wireOrderRowClicks() {
+  _container?.querySelectorAll('.admin-dash-table tbody tr[data-order-id]').forEach(tr => {
+    tr.addEventListener('click', () => {
+      const id = tr.getAttribute('data-order-id');
+      if (id) window.location.hash = `orders?order=${encodeURIComponent(id)}`;
+    });
+  });
+}
+
+function renderTopProductsCard(data) {
   const items = Array.isArray(data) ? data : (data ? [data] : []);
   if (!items.length) {
-    emptyChart('chart-top-products', 'Top products unavailable');
-    return;
+    return `
+      <div class="admin-dash__cell--6 admin-card">
+        <div class="admin-card__title">Most Bought <small>top sellers</small></div>
+        <div class="admin-dash-inline-empty">Top product data unavailable</div>
+      </div>
+    `;
   }
 
-  const colors = Charts.getThemeColors();
-  const palette = [colors.cyan, colors.magenta, colors.yellow, colors.success, '#60a5fa', '#a78bfa', '#fb923c', '#f472b6'];
+  const rows = items.slice(0, 10).map(p => {
+    const name = p.product_name || p.name || 'Unknown';
+    const brand = p.brand || '';
+    const units = p.units_sold ?? p.units ?? p.quantity ?? p.qty ?? null;
+    const revenue = p.revenue ?? p.total ?? 0;
+    return `
+      <tr>
+        <td class="cell-truncate">${esc(name)}</td>
+        <td class="cell-muted">${esc(brand)}</td>
+        <td class="cell-mono cell-right">${units != null ? esc(String(units)) : MISSING}</td>
+        <td class="cell-mono cell-right">${esc(formatPrice(revenue))}</td>
+      </tr>
+    `;
+  }).join('');
 
-  const labels   = items.map(d => d.product_name || d.name || 'Unknown');
-  const revenues = items.map(d => d.revenue || 0);
-
-  await Charts.bar('chart-top-products', {
-    labels,
-    datasets: [
-      {
-        label: 'Revenue',
-        data: revenues,
-        backgroundColor: labels.map((_, i) => palette[i % palette.length] + 'cc'),
-        borderRadius: 4,
-        barThickness: 18,
-      },
-    ],
-    options: {
-      indexAxis: 'y',
-      plugins: {
-        legend: { display: false },
-        tooltip: {
-          callbacks: {
-            label: (ctx) => `Revenue: ${formatPrice(ctx.raw || 0)}`,
-          },
-        },
-      },
-    },
-  });
+  return `
+    <div class="admin-dash__cell--6 admin-card">
+      <div class="admin-card__title">
+        <span>Most Bought <small>top ${Math.min(items.length, 10)}</small></span>
+        <a href="#analytics" class="admin-mini-card__sub">View report →</a>
+      </div>
+      <table class="admin-dash-table">
+        <thead><tr>
+          <th>Product</th><th>Brand</th><th class="cell-right">Units</th><th class="cell-right">Revenue</th>
+        </tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>
+  `;
 }
 
-async function renderBrandChart(data) {
-  // RPC returns { brands: [...] }
-  if (!data?.brands?.length) {
-    emptyChart('chart-brand-breakdown', 'Brand data unavailable');
-    return;
+// ---------- Row 4: Low stock + Refunds + Payment mix ----------
+
+function renderLowStockCard(data) {
+  const items = firstArray(data, ['items', 'products', 'data']);
+  const total = data?.total ?? items.length;
+
+  if (!items.length) {
+    return `
+      <div class="admin-dash__cell--4 admin-card">
+        <div class="admin-card__title">Low / Out of Stock <small>${total || 0}</small></div>
+        <div class="admin-dash-inline-empty">All products in stock</div>
+      </div>
+    `;
   }
 
+  const lis = items.slice(0, 5).map(p => {
+    const name = p.product_name || p.name || p.sku || 'Unknown';
+    const brand = p.brand || '';
+    const revAtRisk = p.revenue_at_risk ?? p.monthly_revenue ?? p.last_sold_revenue ?? null;
+    return `
+      <li class="admin-dash-feed__item">
+        <span class="admin-dash-feed__dot admin-dash-feed__dot--danger"></span>
+        <div class="admin-dash-feed__body">
+          <strong>${esc(name)}</strong>
+          ${brand ? ` <span class="cell-muted">· ${esc(brand)}</span>` : ''}
+          <div class="admin-dash-feed__meta">${revAtRisk != null ? `${formatPrice(revAtRisk)} monthly at risk` : 'Out of stock'}</div>
+        </div>
+      </li>
+    `;
+  }).join('');
+
+  return `
+    <div class="admin-dash__cell--4 admin-card admin-card--magenta">
+      <div class="admin-card__title">
+        <span>Low / Out of Stock <small>${total}</small></span>
+        <a href="#inventory" class="admin-mini-card__sub">Restock →</a>
+      </div>
+      <ul class="admin-dash-feed">${lis}</ul>
+    </div>
+  `;
+}
+
+function renderRefundsCard(refunds, kpis) {
+  const series = firstArray(refunds, ['series', 'refunds', 'data']);
+  const now = new Date();
+  const thisMonth = now.toISOString().slice(0, 7);
+  const lastMonthDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+  const lastMonth = lastMonthDate.toISOString().slice(0, 7);
+
+  let thisTotal = 0, thisCount = 0, lastTotal = 0, lastCount = 0;
+  for (const r of series) {
+    const date = String(r.date || r.month || '');
+    const amt = Number(r.amount || r.total || r.value || 0);
+    const cnt = Number(r.count || 1);
+    if (date.startsWith(thisMonth)) { thisTotal += amt; thisCount += cnt; }
+    else if (date.startsWith(lastMonth)) { lastTotal += amt; lastCount += cnt; }
+  }
+
+  const hasData = series.length > 0;
+
+  return `
+    <div class="admin-dash__cell--4 admin-card">
+      <div class="admin-card__title">
+        <span>Refunds <small>this month</small></span>
+        ${hasData ? deltaBadge(thisTotal, lastTotal, { invert: true }) : ''}
+      </div>
+      <div style="display:flex;gap:12px;align-items:center;">
+        <div style="flex:0 0 96px;">
+          <div class="admin-chart-box admin-chart-box--mini"><canvas id="chart-refund-reasons"></canvas></div>
+        </div>
+        <div style="flex:1;">
+          <div class="admin-mini-card__value">${hasData ? formatPrice(thisTotal) : MISSING}</div>
+          <div class="admin-mini-card__sub">${hasData ? `${thisCount} refund${thisCount === 1 ? '' : 's'}` : 'No refund data'}</div>
+          <div class="admin-mini-card__sub">Last month: ${lastTotal ? formatPrice(lastTotal) : '$0'}</div>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function drawRefundReasons(refunds) {
+  const series = firstArray(refunds, ['series', 'refunds', 'data']);
+  if (!series.length) return;
+
+  const reasons = {};
+  for (const r of series) {
+    const reason = r.reason || r.type || 'Other';
+    reasons[reason] = (reasons[reason] || 0) + Number(r.amount || r.total || r.value || 0);
+  }
+  const labels = Object.keys(reasons);
+  const data   = Object.values(reasons);
+  if (!labels.length) return;
+
   const colors = Charts.getThemeColors();
-  const palette = [colors.cyan, colors.magenta, colors.yellow, colors.success, '#60a5fa', '#a78bfa', '#fb923c', '#f472b6'];
+  const palette = [colors.magenta, colors.yellow, colors.cyan, colors.success, colors.danger];
 
-  const brands   = data.brands;
-  const labels   = brands.map(b => b.brand || 'Unknown');
-  const revenues = brands.map(b => b.current_revenue || 0);
-
-  await Charts.doughnut('chart-brand-breakdown', {
+  Charts.doughnut('chart-refund-reasons', {
     labels,
-    data: revenues,
+    data,
     colors: labels.map((_, i) => palette[i % palette.length]),
     options: {
       plugins: {
@@ -367,17 +664,286 @@ async function renderBrandChart(data) {
   });
 }
 
+function renderPaymentMixCard(data) {
+  return `
+    <div class="admin-dash__cell--4 admin-card">
+      <div class="admin-card__title">
+        <span>Payment Methods <small>this month</small></span>
+      </div>
+      <div class="admin-chart-box admin-chart-box--compact"><canvas id="chart-payment-mix"></canvas></div>
+    </div>
+  `;
+}
+
+function drawPaymentMixDonut(data) {
+  if (!data) {
+    emptyCanvas('chart-payment-mix', 'No payment data yet');
+    return;
+  }
+
+  let labels = [], values = [];
+
+  if (Array.isArray(data.methods)) {
+    for (const m of data.methods) {
+      labels.push(m.name || m.method || m.label || 'Unknown');
+      values.push(Number(m.total || m.amount || m.count || 0));
+    }
+  } else if (Array.isArray(data)) {
+    for (const m of data) {
+      labels.push(m.name || m.method || 'Unknown');
+      values.push(Number(m.total || m.amount || m.count || 0));
+    }
+  } else {
+    for (const [k, v] of Object.entries(data)) {
+      if (v && typeof v === 'object' && (v.total != null || v.amount != null || v.count != null)) {
+        labels.push(k);
+        values.push(Number(v.total || v.amount || v.count || 0));
+      } else if (typeof v === 'number') {
+        labels.push(k);
+        values.push(v);
+      }
+    }
+  }
+
+  if (!labels.length || values.every(v => v === 0)) {
+    emptyCanvas('chart-payment-mix', 'No payment data yet');
+    return;
+  }
+
+  const colors = Charts.getThemeColors();
+  const palette = [colors.cyan, colors.magenta, colors.yellow, colors.success, '#60a5fa'];
+
+  Charts.doughnut('chart-payment-mix', {
+    labels,
+    data: values,
+    colors: labels.map((_, i) => palette[i % palette.length]),
+    options: {
+      plugins: {
+        legend: {
+          display: true,
+          position: 'right',
+          labels: { color: colors.textMuted, font: { size: 11 }, boxWidth: 10, boxHeight: 10 },
+        },
+        tooltip: {
+          callbacks: {
+            label: (ctx) => `${ctx.label}: ${formatPrice(ctx.raw || 0)}`,
+          },
+        },
+      },
+    },
+  });
+}
+
+function emptyCanvas(canvasId, message) {
+  const canvas = document.getElementById(canvasId);
+  if (!canvas) return;
+  const box = canvas.closest('.admin-chart-box');
+  if (box) box.innerHTML = `<div class="admin-dash-inline-empty">${esc(message)}</div>`;
+}
+
+// ---------- Row 5: Market Intel + Activity ----------
+
+function renderMarketIntelCard(overpriced, discrepancies) {
+  const over = firstArray(overpriced, ['items', 'products', 'data']).slice(0, 5);
+  const disc = firstArray(discrepancies, ['items', 'products', 'data']).slice(0, 5);
+
+  if (!over.length && !disc.length) {
+    return `
+      <div class="admin-dash__cell--6 admin-card">
+        <div class="admin-card__title">Market Intel <small>alerts</small></div>
+        <div class="admin-dash-inline-empty">No market alerts</div>
+      </div>
+    `;
+  }
+
+  const items = [];
+  for (const p of over) {
+    const name = p.product_name || p.name || p.sku || 'Unknown';
+    const gap = p.gap_pct ?? p.diff_pct ?? p.variance ?? null;
+    items.push({
+      dot: 'yellow',
+      body: `<strong>${esc(name)}</strong> priced above market`,
+      meta: gap != null ? `${Number(gap).toFixed(1)}% over competitors` : 'Review pricing',
+    });
+  }
+  for (const p of disc) {
+    const name = p.product_name || p.name || p.sku || 'Unknown';
+    const gap = p.variance_pct ?? p.variance ?? null;
+    items.push({
+      dot: 'cyan',
+      body: `<strong>${esc(name)}</strong> price discrepancy`,
+      meta: gap != null ? `${Number(gap).toFixed(1)}% variance vs supplier` : 'Sync required',
+    });
+  }
+
+  const lis = items.slice(0, 8).map(i => `
+    <li class="admin-dash-feed__item">
+      <span class="admin-dash-feed__dot admin-dash-feed__dot--${i.dot}"></span>
+      <div class="admin-dash-feed__body">
+        ${i.body}
+        <div class="admin-dash-feed__meta">${esc(i.meta)}</div>
+      </div>
+    </li>
+  `).join('');
+
+  return `
+    <div class="admin-dash__cell--6 admin-card">
+      <div class="admin-card__title">
+        <span>Market Intel <small>alerts</small></span>
+        <a href="#market-intel" class="admin-mini-card__sub">Open intel →</a>
+      </div>
+      <ul class="admin-dash-feed">${lis}</ul>
+    </div>
+  `;
+}
+
+function renderActivityCard(logs) {
+  const entries = firstArray(logs, ['logs', 'items', 'data']);
+  if (!entries.length) {
+    return `
+      <div class="admin-dash__cell--6 admin-card">
+        <div class="admin-card__title">Recent Activity</div>
+        <div class="admin-dash-inline-empty">No recent activity</div>
+      </div>
+    `;
+  }
+
+  const dotFor = (action) => {
+    const a = String(action || '').toLowerCase();
+    if (a.includes('refund') || a.includes('cancel')) return 'magenta';
+    if (a.includes('order')) return 'success';
+    if (a.includes('login') || a.includes('auth')) return 'cyan';
+    if (a.includes('price') || a.includes('discount')) return 'yellow';
+    return '';
+  };
+
+  const lis = entries.slice(0, 12).map(e => {
+    const action = e.action || e.event || 'activity';
+    const who = e.actor_email || e.user_email || e.actor || '';
+    const desc = e.description || e.details || e.message || action;
+    const when = timeAgo(e.created_at || e.createdAt || e.timestamp);
+    const dot = dotFor(action);
+    return `
+      <li class="admin-dash-feed__item">
+        <span class="admin-dash-feed__dot admin-dash-feed__dot--${dot}"></span>
+        <div class="admin-dash-feed__body">
+          <strong>${esc(action)}</strong> ${who ? `<span class="cell-muted">· ${esc(who)}</span>` : ''}
+          <div class="admin-dash-feed__meta">${esc(desc)}${when ? ` · ${esc(when)}` : ''}</div>
+        </div>
+      </li>
+    `;
+  }).join('');
+
+  return `
+    <div class="admin-dash__cell--6 admin-card">
+      <div class="admin-card__title">
+        <span>Recent Activity</span>
+        <a href="#audit" class="admin-mini-card__sub">Audit log →</a>
+      </div>
+      <ul class="admin-dash-feed">${lis}</ul>
+    </div>
+  `;
+}
+
+// ---------- Sparklines ----------
+
+function drawSparklines(d) {
+  const sparkOpts = (color) => ({
+    plugins: { legend: { display: false }, tooltip: { enabled: false } },
+    scales: {
+      x: { display: false, grid: { display: false }, ticks: { display: false } },
+      y: { display: false, grid: { display: false }, ticks: { display: false } },
+    },
+    elements: { point: { radius: 0 } },
+    _sparkColor: color,
+  });
+
+  // Revenue sparkline from daily revSeries
+  const revSeries = firstArray(d.revSeries?.series, []);
+  if (revSeries.length) {
+    const colors = Charts.getThemeColors();
+    Charts.line('spark-rev', {
+      labels: revSeries.map(() => ''),
+      datasets: [{
+        data: revSeries.map(r => r.revenue || 0),
+        borderColor: colors.cyan,
+        backgroundColor: colors.cyan + '22',
+        fill: true,
+        borderWidth: 1.5,
+        tension: 0.35,
+        pointRadius: 0,
+      }],
+      options: sparkOpts(colors.cyan),
+    });
+  }
+
+  // Orders sparkline from raw orders grouped by date within the revSeries window
+  if (revSeries.length) {
+    const colors = Charts.getThemeColors();
+    const rawOrders = firstArray(d.rawOrders, ['orders', 'data']);
+    const countByDate = {};
+    for (const o of rawOrders) {
+      const date = (o.created_at || '').slice(0, 10);
+      if (date) countByDate[date] = (countByDate[date] || 0) + 1;
+    }
+    const orderSeries = revSeries.map(r => countByDate[r.date] || 0);
+    Charts.line('spark-ord', {
+      labels: orderSeries.map(() => ''),
+      datasets: [{
+        data: orderSeries,
+        borderColor: colors.magenta,
+        backgroundColor: colors.magenta + '22',
+        fill: true,
+        borderWidth: 1.5,
+        tension: 0.35,
+        pointRadius: 0,
+      }],
+      options: sparkOpts(colors.magenta),
+    });
+  }
+
+  // Refund rate sparkline: per-date refund amount / matching-date revenue
+  const refSeries = firstArray(d.refunds, ['series', 'refunds', 'data']);
+  if (refSeries.length && revSeries.length) {
+    const revByDate = {};
+    for (const r of revSeries) revByDate[r.date] = r.revenue || 0;
+    const rateSeries = refSeries.map(r => {
+      const rev = revByDate[r.date] || 0;
+      const refundAmt = Number(r.amount || r.total || 0);
+      return rev > 0 ? (refundAmt / rev) * 100 : 0;
+    });
+    const colors = Charts.getThemeColors();
+    Charts.line('spark-ref', {
+      labels: rateSeries.map(() => ''),
+      datasets: [{
+        data: rateSeries,
+        borderColor: colors.danger,
+        backgroundColor: colors.danger + '22',
+        fill: true,
+        borderWidth: 1.5,
+        tension: 0.35,
+        pointRadius: 0,
+      }],
+      options: sparkOpts(colors.danger),
+    });
+  }
+}
+
+// ---------- Page lifecycle ----------
+
 export default {
   title: 'Dashboard',
 
   async init(container) {
     _container = container;
+    _cashflowMetric = 'revenue';
     await loadDashboard();
   },
 
   destroy() {
     Charts.destroyAll();
     _container = null;
+    _cashflowData = null;
   },
 
   async onFilterChange() {

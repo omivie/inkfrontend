@@ -1688,4 +1688,117 @@ const AdminAPI = {
   },
 };
 
-export { AdminAPI };
+// ---- Supabase REST table helper (PostgREST) ----
+async function supabaseREST(method, path, body = null, signal = null) {
+  const token = window.Auth?.session?.access_token;
+  if (!token) throw new Error('Unauthorized');
+  const url = `${Config.SUPABASE_URL}/rest/v1/${path}`;
+  const resp = await fetch(url, {
+    method,
+    headers: {
+      'Content-Type': 'application/json',
+      'apikey': Config.SUPABASE_ANON_KEY,
+      'Authorization': `Bearer ${token}`,
+      'Prefer': 'return=representation',
+    },
+    body: body ? JSON.stringify(body) : undefined,
+    signal,
+  });
+  if (!resp.ok) {
+    const err = await resp.json().catch(() => ({ message: resp.statusText }));
+    throw new Error(err.message || `REST ${method} ${path}: ${resp.status}`);
+  }
+  const text = await resp.text();
+  return text ? JSON.parse(text) : [];
+}
+
+const PlannerAPI = {
+  async getTasks(fromDate, toDate, optsOrSignal = null) {
+    // Backwards compatible: 3rd arg may be an AbortSignal or an options bag.
+    const opts = (optsOrSignal && typeof optsOrSignal === 'object' && !('aborted' in optsOrSignal))
+      ? optsOrSignal
+      : { signal: optsOrSignal };
+    const { owner = null, includeCompleted = true, signal = null } = opts;
+    try {
+      const parts = [`due_date=gte.${fromDate}`, `due_date=lte.${toDate}`];
+      if (owner) parts.push(`owner=eq.${owner}`);
+      if (!includeCompleted) parts.push('completed=eq.false');
+      const q = `planner_tasks?${parts.join('&')}&order=due_date.asc,priority.asc`;
+      return await supabaseREST('GET', q, null, signal) || [];
+    } catch (e) {
+      if (e.name === 'AbortError') return [];
+      adminApiWarn('Failed to load planner tasks', e);
+      return [];
+    }
+  },
+
+  async createTask(data) {
+    try {
+      const rows = await supabaseREST('POST', 'planner_tasks', data);
+      return Array.isArray(rows) ? rows[0] : rows;
+    } catch (e) { adminApiWarn('Failed to create task', e); return null; }
+  },
+
+  async updateTask(id, data) {
+    try {
+      data.updated_at = new Date().toISOString();
+      const rows = await supabaseREST('PATCH', `planner_tasks?id=eq.${id}`, data);
+      return Array.isArray(rows) ? rows[0] : rows;
+    } catch (e) { adminApiWarn('Failed to update task', e); return null; }
+  },
+
+  async toggleComplete(id, currentlyCompleted) {
+    return this.updateTask(id, {
+      completed: !currentlyCompleted,
+      completed_at: !currentlyCompleted ? new Date().toISOString() : null,
+    });
+  },
+
+  async deleteTask(id) {
+    try {
+      await supabaseREST('DELETE', `planner_tasks?id=eq.${id}`);
+      return true;
+    } catch (e) { adminApiWarn('Failed to delete task', e); return false; }
+  },
+};
+
+const PlannerNotesAPI = {
+  async list(signal = null) {
+    try {
+      const q = 'planner_notes?order=pinned.desc,updated_at.desc';
+      return await supabaseREST('GET', q, null, signal) || [];
+    } catch (e) {
+      if (e.name === 'AbortError') return [];
+      adminApiWarn('Failed to load planner notes', e);
+      return [];
+    }
+  },
+
+  async create(data) {
+    try {
+      const rows = await supabaseREST('POST', 'planner_notes', data);
+      return Array.isArray(rows) ? rows[0] : rows;
+    } catch (e) { adminApiWarn('Failed to create note', e); return null; }
+  },
+
+  async update(id, data) {
+    try {
+      data.updated_at = new Date().toISOString();
+      const rows = await supabaseREST('PATCH', `planner_notes?id=eq.${id}`, data);
+      return Array.isArray(rows) ? rows[0] : rows;
+    } catch (e) { adminApiWarn('Failed to update note', e); return null; }
+  },
+
+  async togglePin(id, currentlyPinned) {
+    return this.update(id, { pinned: !currentlyPinned });
+  },
+
+  async remove(id) {
+    try {
+      await supabaseREST('DELETE', `planner_notes?id=eq.${id}`);
+      return true;
+    } catch (e) { adminApiWarn('Failed to delete note', e); return false; }
+  },
+};
+
+export { AdminAPI, PlannerAPI, PlannerNotesAPI };
