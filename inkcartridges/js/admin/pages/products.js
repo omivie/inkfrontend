@@ -12,6 +12,35 @@ import { computeProfitability, marginBadge, markupBadge, formatProfitDollars } f
 const formatPrice = (v) => window.formatPrice ? window.formatPrice(v) : `$${Number(v).toFixed(2)}`;
 const MISSING = '\u2014';
 
+/** Open a large full-screen preview of a product image. */
+function openImageLightbox(url, alt = '') {
+  if (!url) return;
+  // Reuse if already open
+  document.querySelector('.admin-image-lightbox')?.remove();
+
+  const overlay = document.createElement('div');
+  overlay.className = 'admin-image-lightbox';
+  overlay.innerHTML = `
+    <button class="admin-image-lightbox__close" aria-label="Close">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
+    </button>
+    <img class="admin-image-lightbox__img" src="${esc(url)}" alt="${esc(alt)}">
+  `;
+
+  const close = () => {
+    overlay.remove();
+    document.removeEventListener('keydown', onKey);
+  };
+  const onKey = (e) => { if (e.key === 'Escape') close(); };
+
+  overlay.addEventListener('click', (e) => {
+    // Close when clicking the backdrop or close button; not the image itself
+    if (e.target === overlay || e.target.closest('.admin-image-lightbox__close')) close();
+  });
+  document.addEventListener('keydown', onKey);
+  document.body.appendChild(overlay);
+}
+
 /** Extract a brand name string from a product object, handling all API shapes */
 function extractBrandName(p) {
   const raw = p.brand_name || p.brand || '';
@@ -1752,6 +1781,20 @@ function bindProductModalActions(modal, product) {
       this.parentElement.classList.add('admin-product-gallery__item--broken');
     }, { once: true });
   });
+
+  // Click gallery image to expand into a lightbox (delegated so it also covers
+  // newly uploaded images appended after the initial render)
+  const gallery = modal.querySelector('#product-gallery');
+  if (gallery) {
+    gallery.addEventListener('click', (e) => {
+      if (e.target.closest('.admin-product-gallery__delete')) return;
+      const item = e.target.closest('.admin-product-gallery__item');
+      if (!item) return;
+      const url = item.dataset.imageUrl || item.querySelector('img')?.src || '';
+      const alt = item.querySelector('img')?.alt || '';
+      openImageLightbox(url, alt);
+    });
+  }
 
 
   // Image upload (supports multiple files)
