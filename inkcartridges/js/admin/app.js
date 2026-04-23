@@ -60,6 +60,7 @@ const NAV_ITEMS = [
   { key: 'sync-report', label: 'Feed Sync', icon: 'products', href: '/html/admin/sync-report.html', ownerOnly: true },
   { key: 'price-monitor', label: 'Price Monitor', icon: 'finance', ownerOnly: true },
   { key: 'recovery', label: 'Recovery', icon: 'refunds', ownerOnly: true },
+  { key: 'site-lock', label: 'Site Lock', icon: 'lock', ownerOnly: true },
   { key: 'contact-emails', label: 'Settings', icon: 'settings', ownerOnly: true },
 ];
 
