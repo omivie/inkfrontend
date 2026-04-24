@@ -2160,6 +2160,46 @@ button.admin-active-dot--clickable:hover::after { opacity: 1; }
 .admin-table td.col-w-type,  .admin-table th.col-w-type  { width: 110px; min-width: 110px; }
 .admin-table td.col-w-dot,   .admin-table th.col-w-dot   { width: 60px;  min-width: 60px; }
 .admin-table td.col-w-compat,.admin-table th.col-w-compat{ width: 110px; min-width: 110px; }
+.admin-table td.col-w-check, .admin-table th.col-w-check { width: 48px;  min-width: 48px; max-width: 48px; }
+
+/* ---- Reviewed checkbox (All Products table) ---- */
+.review-check {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 22px; height: 22px; cursor: pointer;
+  position: relative;
+}
+.review-check__input {
+  position: absolute; inset: 0; opacity: 0; margin: 0; cursor: pointer;
+}
+.review-check__box {
+  width: 16px; height: 16px;
+  border: 1.5px solid var(--border);
+  border-radius: 4px;
+  background: var(--surface, #fff);
+  transition: background 0.12s, border-color 0.12s;
+  position: relative;
+  pointer-events: none;
+}
+.review-check:hover .review-check__box {
+  border-color: var(--success, #10b981);
+}
+.review-check--on .review-check__box {
+  background: var(--success, #10b981);
+  border-color: var(--success, #10b981);
+}
+.review-check--on .review-check__box::after {
+  content: '';
+  position: absolute;
+  left: 4px; top: 1px;
+  width: 5px; height: 9px;
+  border: solid #fff;
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+}
+.review-check__input:focus-visible + .review-check__box {
+  outline: 2px solid var(--cyan, #3b82f6);
+  outline-offset: 2px;
+}
 
 /* ============================================================
    Table Keyboard Focus

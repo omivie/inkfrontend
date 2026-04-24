@@ -69,6 +69,16 @@ let _bulkBar = null;
 let _activeProductTab = 'products'; // products | ribbons | review
 let _subProductModule = null;
 const DIAG_CACHE_KEY = 'admin_product_diagnostics';
+const REVIEWED_STORAGE_KEY = 'admin_reviewed_products';
+
+let _reviewedIds = (() => {
+  try { return new Set(JSON.parse(localStorage.getItem(REVIEWED_STORAGE_KEY) || '[]')); }
+  catch { return new Set(); }
+})();
+
+function saveReviewedIds() {
+  try { localStorage.setItem(REVIEWED_STORAGE_KEY, JSON.stringify([..._reviewedIds])); } catch {}
+}
 
 function invalidateDiagCache() {
   localStorage.removeItem(DIAG_CACHE_KEY);
@@ -96,6 +106,17 @@ function buildColumns() {
     {
       key: 'sku', label: 'SKU', sortable: true, className: 'col-w-sku',
       render: (r) => `<span class="cell-mono">${esc(r.sku || MISSING)}</span>`,
+    },
+    {
+      key: 'reviewed', label: 'Check', sortable: false, className: 'cell-center col-w-check',
+      render: (r) => {
+        const checked = _reviewedIds.has(String(r.id));
+        return `<label class="review-check${checked ? ' review-check--on' : ''}" title="${checked ? 'Reviewed — click to unmark' : 'Mark as reviewed'}">
+          <input type="checkbox" class="review-check__input" data-product-id="${esc(r.id)}"${checked ? ' checked' : ''} aria-label="Reviewed">
+          <span class="review-check__box" aria-hidden="true"></span>
+        </label>`;
+      },
+      align: 'center',
     },
     {
       key: 'brand', label: 'Brand', sortable: true, className: 'col-w-brand',
@@ -2676,6 +2697,26 @@ async function renderProductsContent(contentEl) {
       e.stopPropagation();
       const name = btn.dataset.copy;
       navigator.clipboard.writeText(name).then(() => Toast.success('Copied to clipboard')).catch(() => Toast.error('Copy failed'));
+    });
+
+    // Reviewed checkbox toggle (event delegation) — persisted to localStorage only
+    tableContainer.addEventListener('change', (e) => {
+      const cb = e.target.closest('.review-check__input');
+      if (!cb) return;
+      e.stopPropagation();
+      const id = String(cb.dataset.productId || '');
+      if (!id) return;
+      const label = cb.closest('.review-check');
+      if (cb.checked) {
+        _reviewedIds.add(id);
+        label?.classList.add('review-check--on');
+        if (label) label.title = 'Reviewed — click to unmark';
+      } else {
+        _reviewedIds.delete(id);
+        label?.classList.remove('review-check--on');
+        if (label) label.title = 'Mark as reviewed';
+      }
+      saveReviewedIds();
     });
 
     // Import lock toggle (event delegation)
