@@ -69,16 +69,6 @@ let _bulkBar = null;
 let _activeProductTab = 'products'; // products | ribbons | review
 let _subProductModule = null;
 const DIAG_CACHE_KEY = 'admin_product_diagnostics';
-const REVIEWED_STORAGE_KEY = 'admin_reviewed_products';
-
-let _reviewedIds = (() => {
-  try { return new Set(JSON.parse(localStorage.getItem(REVIEWED_STORAGE_KEY) || '[]')); }
-  catch { return new Set(); }
-})();
-
-function saveReviewedIds() {
-  try { localStorage.setItem(REVIEWED_STORAGE_KEY, JSON.stringify([..._reviewedIds])); } catch {}
-}
 
 function invalidateDiagCache() {
   localStorage.removeItem(DIAG_CACHE_KEY);
@@ -108,10 +98,13 @@ function buildColumns() {
       render: (r) => `<span class="cell-mono">${esc(r.sku || MISSING)}</span>`,
     },
     {
-      key: 'reviewed', label: 'Check', sortable: false, className: 'cell-center col-w-check',
+      key: 'is_reviewed', label: 'Check', sortable: false, className: 'cell-center col-w-check',
       render: (r) => {
-        const checked = _reviewedIds.has(String(r.id));
-        return `<label class="review-check${checked ? ' review-check--on' : ''}" title="${checked ? 'Reviewed — click to unmark' : 'Mark as reviewed'}">
+        const checked = !!r.is_reviewed;
+        const tip = checked
+          ? `Reviewed${r.reviewed_by_email ? ` by ${r.reviewed_by_email}` : ''}${r.reviewed_at ? ` on ${new Date(r.reviewed_at).toLocaleDateString('en-NZ')}` : ''} — click to unmark`
+          : 'Mark as reviewed';
+        return `<label class="review-check${checked ? ' review-check--on' : ''}" title="${esc(tip)}">
           <input type="checkbox" class="review-check__input" data-product-id="${esc(r.id)}"${checked ? ' checked' : ''} aria-label="Reviewed">
           <span class="review-check__box" aria-hidden="true"></span>
         </label>`;
@@ -283,7 +276,7 @@ async function loadProducts() {
   const sb = (typeof Auth !== 'undefined' && Auth.supabase) ? Auth.supabase : null;
   if (sb) {
     try {
-      const selectCols = 'id, sku, name, retail_price, cost_price, is_active, import_locked, image_url, color, source, weight_kg, page_yield, category, product_type, brand_id, description, description_html, compatible_devices_html, compare_price, meta_title, meta_description, tags, internal_notes, brands(name, slug)';
+      const selectCols = 'id, sku, name, retail_price, cost_price, is_active, import_locked, is_reviewed, reviewed_at, reviewed_by_email, image_url, color, source, weight_kg, page_yield, category, product_type, brand_id, description, description_html, compatible_devices_html, compare_price, meta_title, meta_description, tags, internal_notes, brands(name, slug)';
       let query = sb.from('products').select(selectCols, { count: 'exact' });
 
       // Brand filter
@@ -2699,24 +2692,41 @@ async function renderProductsContent(contentEl) {
       navigator.clipboard.writeText(name).then(() => Toast.success('Copied to clipboard')).catch(() => Toast.error('Copy failed'));
     });
 
-    // Reviewed checkbox toggle (event delegation) — persisted to localStorage only
-    tableContainer.addEventListener('change', (e) => {
+    // Reviewed checkbox toggle (event delegation) — backend toggles is_reviewed on /reviewed
+    tableContainer.addEventListener('change', async (e) => {
       const cb = e.target.closest('.review-check__input');
       if (!cb) return;
       e.stopPropagation();
       const id = String(cb.dataset.productId || '');
       if (!id) return;
       const label = cb.closest('.review-check');
-      if (cb.checked) {
-        _reviewedIds.add(id);
-        label?.classList.add('review-check--on');
-        if (label) label.title = 'Reviewed — click to unmark';
-      } else {
-        _reviewedIds.delete(id);
-        label?.classList.remove('review-check--on');
-        if (label) label.title = 'Mark as reviewed';
+      const optimisticChecked = cb.checked;
+      cb.disabled = true;
+      label?.classList.toggle('review-check--on', optimisticChecked);
+      try {
+        const result = await AdminAPI.toggleProductReviewed(id);
+        const reviewed = !!result?.is_reviewed;
+        // Sync UI to authoritative state (covers the rare case where backend disagrees with the optimistic flip)
+        cb.checked = reviewed;
+        label?.classList.toggle('review-check--on', reviewed);
+        const tip = reviewed
+          ? `Reviewed${result.reviewed_by_email ? ` by ${result.reviewed_by_email}` : ''}${result.reviewed_at ? ` on ${new Date(result.reviewed_at).toLocaleDateString('en-NZ')}` : ''} — click to unmark`
+          : 'Mark as reviewed';
+        if (label) label.title = tip;
+        const row = _table?.data?.find(r => String(r.id) === id);
+        if (row) {
+          row.is_reviewed = reviewed;
+          row.reviewed_at = result?.reviewed_at ?? null;
+          row.reviewed_by_email = result?.reviewed_by_email ?? null;
+        }
+      } catch (err) {
+        // Revert UI on failure
+        cb.checked = !optimisticChecked;
+        label?.classList.toggle('review-check--on', !optimisticChecked);
+        Toast.error(`Could not save: ${err.message}`);
+      } finally {
+        cb.disabled = false;
       }
-      saveReviewedIds();
     });
 
     // Import lock toggle (event delegation)

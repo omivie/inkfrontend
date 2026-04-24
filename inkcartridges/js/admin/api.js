@@ -426,6 +426,17 @@ const AdminAPI = {
     }
   },
 
+  async toggleProductReviewed(productId) {
+    try {
+      const resp = await window.API.put(`/api/admin/products/${productId}/reviewed`);
+      if (resp && resp.ok === false) throw new Error(resp.error || 'Toggle reviewed failed');
+      return resp?.data ?? null;
+    } catch (e) {
+      DebugLog.warn('[AdminAPI] toggleProductReviewed failed:', e.message);
+      throw e;
+    }
+  },
+
   async createProduct(data) {
     try {
       const resp = await window.API.post('/api/admin/products', data);
