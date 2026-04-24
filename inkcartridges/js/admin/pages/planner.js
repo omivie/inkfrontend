@@ -165,6 +165,8 @@ function splitTodayUpcoming(list) {
   const todayOrOverdue = [];
   const upcoming = [];
   for (const t of list) {
+    // Hide completed tasks once their due date has passed — they've served their purpose.
+    if (t.completed && t.due_date < today) continue;
     if (t.due_date <= today) todayOrOverdue.push(t);
     else                     upcoming.push(t);
   }
