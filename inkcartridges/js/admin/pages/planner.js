@@ -525,6 +525,11 @@ function renderNotes(el) {
     titleEl?.addEventListener('input', scheduleSave);
     bodyEl ?.addEventListener('input', scheduleSave);
 
+    if (bodyEl) {
+      autoSizeNoteBody(bodyEl);
+      bodyEl.addEventListener('input', () => autoSizeNoteBody(bodyEl));
+    }
+
     noteEl.querySelector('[data-act="pin"]')?.addEventListener('click', async () => {
       const current = _notes.find(n => n.id === id);
       if (!current) return;
@@ -566,6 +571,11 @@ function noteHtml(note) {
       <button class="planner-note__action" data-act="delete" title="Delete">✕</button>
     </div>
   </div>`;
+}
+
+function autoSizeNoteBody(el) {
+  el.style.height = 'auto';
+  el.style.height = el.scrollHeight + 'px';
 }
 
 function swatchColor(name) {

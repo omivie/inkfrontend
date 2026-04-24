@@ -2727,8 +2727,9 @@ button.admin-active-dot--clickable:hover::after { opacity: 1; }
 .planner-note__body {
   background: transparent; border: none; outline: none; resize: none;
   font-size: .78rem; color: var(--text); line-height: 1.4;
-  padding: 0; width: 100%; flex: 1;
-  font-family: inherit; min-height: 60px;
+  padding: 0; width: 100%;
+  font-family: inherit; min-height: 2.8em;
+  overflow: hidden;
 }
 .planner-note__body::placeholder { color: var(--text-muted); }
 .planner-note__footer {
