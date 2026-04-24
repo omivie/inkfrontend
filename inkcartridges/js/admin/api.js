@@ -1678,6 +1678,14 @@ const AdminAPI = {
       return resp?.data ?? null;
     } catch (e) { adminApiWarn('analytics/forecasts', e); return null; }
   },
+  async getAdminAnalyticsForecastHistory(days = 90, horizon = 30) {
+    try {
+      const d = Math.min(365, Math.max(1, Number(days) || 90));
+      const h = [30, 60, 90].includes(Number(horizon)) ? Number(horizon) : 30;
+      const resp = await window.API.get(`/api/admin/analytics/forecast-history?days=${d}&horizon=${h}`);
+      return resp?.data ?? null;
+    } catch (e) { adminApiWarn('analytics/forecast-history', e); return null; }
+  },
   async getAdminAnalyticsDailyRevenue(days = 365) {
     try {
       const resp = await window.API.get(`/api/admin/analytics/daily-revenue?days=${days}`);

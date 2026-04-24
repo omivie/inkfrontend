@@ -98,6 +98,10 @@ async function loadDashboard() {
     AdminAPI.getMarketDiscrepancies(15),                    // 13 discrepancies
     AdminAPI.getAuditLogs({ limit: 15 }),                   // 14 audit logs
     AdminAPI.getAdminAnalyticsPnL(372),                     // 15 p&l (12 months)
+    AdminAPI.getAdminAnalyticsForecastHistory(
+      Math.min(365, Math.max(90, FilterState.periodToDays())),
+      30
+    ),                                                      // 16 forecast history
   ];
 
   const results = await Promise.allSettled(promises);
@@ -121,6 +125,7 @@ async function loadDashboard() {
     overpriced:   val(12),
     discrepancies: val(13),
     auditLogs:    val(14),
+    forecastHistory: val(16),
   });
 }
 
@@ -661,7 +666,21 @@ function buildForecastSeries(d) {
   const avg60 = f60 != null && f30 != null ? (f60 - f30) / 30 : avg30;
   const avg90 = f90 != null && f60 != null ? (f90 - f60) / 30 : avg60;
 
-  return { historical, cfg, avg30, avg60, avg90, f30, f60, f90 };
+  // Prior forecasts: each snapshot's projected_revenue is a 30-day total.
+  // Convert to implied daily avg so it overlays the daily-scale actual/forecast lines.
+  const priorSnapshots = firstArray(d.forecastHistory?.snapshots, ['snapshots']);
+  const horizonDays = d.forecastHistory?.horizon_days || 30;
+  const prior = priorSnapshots
+    .map(s => ({
+      ts: Date.parse(s.snapshot_date),
+      dailyAvg: Number(s.projected_revenue || 0) / horizonDays,
+      total: Number(s.projected_revenue || 0),
+      confidence: s.confidence || null,
+    }))
+    .filter(x => !isNaN(x.ts))
+    .sort((a, b) => a.ts - b.ts);
+
+  return { historical, prior, cfg, avg30, avg60, avg90, f30, f60, f90, horizonDays };
 }
 
 function drawForecastChart() {
@@ -714,35 +733,69 @@ function drawForecastChart() {
     forecastData[lastActualIdx] = actualData[lastActualIdx];
   }
 
+  // Prior forecasts: align each snapshot's implied daily avg to its snapshot_date bucket.
+  const priorByDay = new Map();
+  for (const p of state.prior || []) {
+    const d = new Date(p.ts); d.setHours(0, 0, 0, 0);
+    priorByDay.set(d.getTime(), p);
+  }
+  const priorData = points.map(p => {
+    if (p.type !== 'actual') return null;
+    const hit = priorByDay.get(p.date.getTime());
+    return hit ? hit.dailyAvg : null;
+  });
+  const hasPrior = priorData.some(v => v != null);
+
+  const datasets = [
+    {
+      label: 'Actual',
+      data: actualData,
+      borderColor: colors.success,
+      backgroundColor: hexToRgba(colors.success, 0.18),
+      borderWidth: 2,
+      fill: true,
+      tension: 0.35,
+      pointRadius: 0,
+      pointHoverRadius: 3,
+      spanGaps: false,
+      order: 2,
+    },
+    {
+      label: 'Forecast',
+      data: forecastData,
+      borderColor: colors.cyan,
+      backgroundColor: hexToRgba(colors.cyan, 0.14),
+      borderWidth: 2,
+      borderDash: [5, 4],
+      fill: true,
+      tension: 0.25,
+      pointRadius: 0,
+      pointHoverRadius: 3,
+      spanGaps: false,
+      order: 2,
+    },
+  ];
+
+  if (hasPrior) {
+    datasets.push({
+      label: 'Prior forecasts (daily avg)',
+      data: priorData,
+      borderColor: colors.yellow,
+      backgroundColor: 'transparent',
+      borderWidth: 1.5,
+      borderDash: [2, 3],
+      fill: false,
+      tension: 0.25,
+      pointRadius: 0,
+      pointHoverRadius: 3,
+      spanGaps: true,
+      order: 1,
+    });
+  }
+
   Charts.line('chart-forecast', {
     labels,
-    datasets: [
-      {
-        label: 'Actual',
-        data: actualData,
-        borderColor: colors.success,
-        backgroundColor: hexToRgba(colors.success, 0.18),
-        borderWidth: 2,
-        fill: true,
-        tension: 0.35,
-        pointRadius: 0,
-        pointHoverRadius: 3,
-        spanGaps: false,
-      },
-      {
-        label: 'Forecast',
-        data: forecastData,
-        borderColor: colors.cyan,
-        backgroundColor: hexToRgba(colors.cyan, 0.14),
-        borderWidth: 2,
-        borderDash: [5, 4],
-        fill: true,
-        tension: 0.25,
-        pointRadius: 0,
-        pointHoverRadius: 3,
-        spanGaps: false,
-      },
-    ],
+    datasets,
     options: {
       plugins: {
         legend: {
