@@ -273,17 +273,35 @@ const Auth = {
     },
 
     /**
-     * Send password reset email
+     * Send password reset email via backend.
+     * Backend always returns success to prevent email enumeration.
      * @param {string} email
      */
     async resetPassword(email) {
-        if (!this.supabase) return { error: { message: 'Auth not initialized' } };
+        try {
+            const res = await fetch(`${Config.API_URL}/api/auth/request-password-reset`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ email })
+            });
 
-        const { data, error } = await this.supabase.auth.resetPasswordForEmail(email, {
-            redirectTo: `${window.location.origin}/html/account/reset-password`
-        });
+            if (res.status === 429) {
+                return { error: { message: 'Too many requests. Please wait a minute before trying again.' } };
+            }
 
-        return { data, error };
+            if (!res.ok) {
+                let msg = 'Failed to send reset email. Please try again.';
+                try {
+                    const body = await res.json();
+                    msg = body?.error?.message || body?.message || msg;
+                } catch (_) { /* ignore */ }
+                return { error: { message: msg } };
+            }
+
+            return { data: { ok: true } };
+        } catch (err) {
+            return { error: { message: 'Network error. Please check your connection and try again.' } };
+        }
     },
 
     /**

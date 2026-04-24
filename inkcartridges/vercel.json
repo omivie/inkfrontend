@@ -101,6 +101,7 @@
   ],
   "rewrites": [
     { "source": "/api/:path*", "destination": "https://ink-backend-zaeq.onrender.com/api/:path*" },
+    { "source": "/auth/reset-password", "destination": "/html/account/reset-password" },
     { "source": "/business/apply", "destination": "/html/business/apply" },
     { "source": "/ribbon/:sku", "destination": "/html/product" },
     { "source": "/html/product-by-name", "destination": "https://ink-backend-zaeq.onrender.com/html/product-by-name" },
