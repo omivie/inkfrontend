@@ -9,8 +9,9 @@ const formatPrice = (v) => window.formatPrice ? window.formatPrice(v) : `$${Numb
 const MISSING = '—';
 
 let _container = null;
-let _cashflowData = null;
-let _cashflowMetric = 'revenue';
+let _trendData = null;       // bucketed historical series keyed to current filter
+let _forecastData = null;    // { historical, projected } for forecast chart
+let _trendMetric = 'revenue';
 
 // ---------- helpers ----------
 
@@ -140,13 +141,15 @@ function render(d) {
     return;
   }
 
-  _cashflowData = buildMonthlySeries(d);
+  _trendData    = buildTrendSeries(d);
+  _forecastData = buildForecastSeries(d);
 
   const html = `
     <div class="admin-page-header admin-page-header--dash"><h1>Dashboard</h1></div>
     ${renderKpiStrip(d)}
     <div class="admin-dash">
-      ${renderCashflowCard()}
+      ${renderTrendCard()}
+      ${renderForecastCard(d)}
       ${renderSidePanel(d)}
       ${renderRecentOrdersCard(d.recentOrders)}
       ${renderTopProductsCard(d.topProducts)}
@@ -161,7 +164,8 @@ function render(d) {
   _container.innerHTML = html;
 
   // Charts (after DOM insert)
-  drawCashflowChart();
+  drawTrendChart();
+  drawForecastChart();
   drawSparklines(d);
   drawRefundReasons(d.refunds);
   drawPaymentMixDonut(d.paymentMix);
@@ -274,31 +278,75 @@ function outOfStockCount(data) {
   return items.length;
 }
 
-// ---------- Row 2: Cashflow + side panel ----------
+// ---------- Row 2: Trend chart + Forecast chart ----------
 
-function renderCashflowCard() {
+function rangeLabel() {
+  const period = FilterState.get('period');
+  const map = { '24h':'last 24h', '72h':'last 72h', '7d':'last 7 days', '1m':'last 30 days',
+                '3m':'last 3 months', '6m':'last 6 months', '1y':'last 12 months',
+                'all':'all time', 'custom':'custom range' };
+  return map[period] || 'selected range';
+}
+
+function renderTrendCard() {
   return `
-    <div class="admin-dash__cell--8 admin-card">
+    <div class="admin-dash__cell--6 admin-card">
       <div class="admin-card__title">
-        <span>Revenue vs Expenses <small>last 12 months</small></span>
+        <span>Trends <small>${esc(rangeLabel())}</small></span>
         <div class="admin-pills" id="dash-trend-pills">
           <button type="button" class="admin-pill active" data-metric="revenue">Revenue &amp; Expenses</button>
           <button type="button" class="admin-pill" data-metric="profit">Net Profit</button>
           <button type="button" class="admin-pill" data-metric="orders">Orders</button>
         </div>
       </div>
-      <div class="admin-chart-box admin-chart-box--mid"><canvas id="chart-cashflow"></canvas></div>
+      <div class="admin-chart-box admin-chart-box--mid"><canvas id="chart-trend"></canvas></div>
     </div>
   `;
+}
+
+function renderForecastCard(d) {
+  const forecastRevenue = pickForecast(d.forecasts, 30);
+  const forecastConf    = d.forecasts?.confidence ?? null;
+  const confStr = typeof forecastConf === 'number'
+    ? `${forecastConf}% confidence`
+    : (typeof forecastConf === 'string' && forecastConf
+        ? `${forecastConf.charAt(0).toUpperCase()}${forecastConf.slice(1)} confidence`
+        : 'Projected revenue');
+  const summary = forecastRevenue != null ? formatPrice(forecastRevenue) : MISSING;
+
+  return `
+    <div class="admin-dash__cell--6 admin-card">
+      <div class="admin-card__title">
+        <span>30-day Forecast <small>${esc(rangeLabel())} + projection</small></span>
+        <div class="admin-forecast-summary">
+          <span class="admin-forecast-summary__value">${esc(summary)}</span>
+          <span class="admin-forecast-summary__sub">${esc(confStr)}</span>
+        </div>
+      </div>
+      <div class="admin-chart-box admin-chart-box--mid"><canvas id="chart-forecast"></canvas></div>
+    </div>
+  `;
+}
+
+function pickForecast(forecasts, days) {
+  if (!forecasts) return null;
+  const fc = forecasts.forecasts || forecasts;
+  const keys = {
+    30: ['next_30_days', 'revenue_30d', 'forecast_revenue', 'forecast30', 'days30', 'd30', '30_days'],
+    60: ['next_60_days', 'revenue_60d', 'forecast60', 'days60', 'd60', '60_days'],
+    90: ['next_90_days', 'revenue_90d', 'forecast90', 'days90', 'd90', '90_days'],
+  }[days] || [];
+  for (const k of keys) {
+    const v = fc[k];
+    if (v != null) return typeof v === 'object' ? (v.revenue ?? v.value ?? null) : Number(v);
+  }
+  return null;
 }
 
 function renderSidePanel(d) {
   const runwayMonths = d.runway?.runway_months ?? d.runway?.months ?? d.runway?.runway ?? null;
   const cashOnHand   = d.runway?.cash_on_hand ?? d.runway?.cash ?? null;
   const burnRate     = d.runway?.burn_rate ?? d.runway?.monthly_burn ?? null;
-
-  const forecastRevenue = d.forecasts?.next_30_days?.revenue ?? d.forecasts?.revenue_30d ?? d.forecasts?.forecast_revenue ?? null;
-  const forecastConf    = d.forecasts?.confidence ?? null;
 
   const cur = d.kpis?.current ?? {};
   const grossMarginPct = cur.revenue && cur.gross_profit != null
@@ -309,7 +357,7 @@ function renderSidePanel(d) {
     : null;
 
   return `
-    <div class="admin-dash__cell--4 admin-mini-stack">
+    <div class="admin-dash__cell--12 admin-mini-row">
       <div class="admin-mini-card">
         <div class="admin-mini-card__label">Cash Runway</div>
         <div class="admin-mini-card__value">${runwayMonths != null ? `${Number(runwayMonths).toFixed(1)} mo` : MISSING}</div>
@@ -317,11 +365,6 @@ function renderSidePanel(d) {
           ${cashOnHand != null ? `${formatPrice(cashOnHand)} on hand` : ''}
           ${burnRate != null ? ` · ${formatPrice(burnRate)}/mo burn` : ''}
         </div>
-      </div>
-      <div class="admin-mini-card">
-        <div class="admin-mini-card__label">30-day Forecast</div>
-        <div class="admin-mini-card__value">${forecastRevenue != null ? formatPrice(forecastRevenue) : MISSING}</div>
-        <div class="admin-mini-card__sub">${forecastConf != null ? `${forecastConf}% confidence` : 'Projected revenue'}</div>
       </div>
       <div class="admin-mini-card">
         <div class="admin-mini-card__label">Gross Margin</div>
@@ -332,93 +375,174 @@ function renderSidePanel(d) {
   `;
 }
 
-// Merges P&L, cashflow and raw-order data into a unified 12-month series.
-// Each element: { key: 'YYYY-MM', label: 'Mar 25', revenue, expenses, net, orders }.
-function buildMonthlySeries(d) {
-  const months = {};
-  const now = new Date();
+// ---------- Filter-aware bucketing ----------
 
-  // Seed last 12 months (oldest first) so the chart is always full-width.
-  for (let i = 11; i >= 0; i--) {
-    const dt = new Date(now.getFullYear(), now.getMonth() - i, 1);
-    const key = `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}`;
-    months[key] = {
-      key,
-      label: dt.toLocaleDateString('en-NZ', { month: 'short', year: '2-digit' }),
+// Pick bucket granularity from filter range. Returns { unit, n, startMs, stepMs, label }.
+function getBucketConfig() {
+  const days = FilterState.periodToDays();
+  const now = new Date();
+  const endMs = now.getTime();
+
+  if (days <= 2) {
+    const n = Math.max(12, days * 12); // 2-hour buckets for 24h/72h
+    const stepMs = 2 * 3600 * 1000;
+    return { unit: 'hour', n, endMs, stepMs, labelFor: (d) => d.toLocaleTimeString('en-NZ', { hour: 'numeric' }) };
+  }
+  if (days <= 60) {
+    const stepMs = 24 * 3600 * 1000;
+    return { unit: 'day', n: days, endMs, stepMs, labelFor: (d) => d.toLocaleDateString('en-NZ', { day: 'numeric', month: 'short' }) };
+  }
+  if (days <= 200) {
+    const stepMs = 7 * 24 * 3600 * 1000;
+    return { unit: 'week', n: Math.ceil(days / 7), endMs, stepMs, labelFor: (d) => d.toLocaleDateString('en-NZ', { day: 'numeric', month: 'short' }) };
+  }
+  const n = Math.min(24, Math.ceil(days / 30));
+  return { unit: 'month', n, endMs, stepMs: null, labelFor: (d) => d.toLocaleDateString('en-NZ', { month: 'short', year: '2-digit' }) };
+}
+
+// Returns epoch ms for the start of the bucket containing `ms`.
+function bucketStart(ms, unit) {
+  const d = new Date(ms);
+  if (unit === 'hour') {
+    d.setMinutes(0, 0, 0);
+    // snap to 2-hour boundary
+    d.setHours(d.getHours() - (d.getHours() % 2));
+    return d.getTime();
+  }
+  if (unit === 'day') {
+    d.setHours(0, 0, 0, 0);
+    return d.getTime();
+  }
+  if (unit === 'week') {
+    d.setHours(0, 0, 0, 0);
+    d.setDate(d.getDate() - d.getDay()); // snap to Sunday
+    return d.getTime();
+  }
+  // month
+  return new Date(d.getFullYear(), d.getMonth(), 1).getTime();
+}
+
+// Build N empty buckets ending at now.
+function seedBuckets(cfg) {
+  const buckets = [];
+  const end = new Date(cfg.endMs);
+  for (let i = cfg.n - 1; i >= 0; i--) {
+    let when;
+    if (cfg.unit === 'month') {
+      when = new Date(end.getFullYear(), end.getMonth() - i, 1);
+    } else {
+      when = new Date(cfg.endMs - i * cfg.stepMs);
+    }
+    const startMs = bucketStart(when.getTime(), cfg.unit);
+    buckets.push({
+      startMs,
+      label: cfg.labelFor(new Date(startMs)),
       revenue: 0, expenses: 0, net: 0, orders: 0,
       hasRevenue: false, hasExpense: false, hasNet: false,
-    };
+    });
   }
+  return buckets;
+}
 
-  const keyOf = (raw) => {
-    if (!raw) return null;
-    const s = String(raw);
-    // Accept "YYYY-MM", "YYYY-MM-DD", ISO timestamp, or locale month label
-    const m = s.match(/^(\d{4})-(\d{2})/);
-    if (m) return `${m[1]}-${m[2]}`;
-    const parsed = new Date(s);
-    if (!isNaN(parsed)) {
-      return `${parsed.getFullYear()}-${String(parsed.getMonth() + 1).padStart(2, '0')}`;
+// Build trend series (revenue/expenses/net/orders) bucketed by filter granularity.
+function buildTrendSeries(d) {
+  const cfg = getBucketConfig();
+  const buckets = seedBuckets(cfg);
+  if (!buckets.length) return [];
+  const firstStart = buckets[0].startMs;
+  const indexFor = (ms) => {
+    const bs = bucketStart(ms, cfg.unit);
+    if (bs < firstStart) return -1;
+    // Linear scan is fine — N is small (≤ 48).
+    for (let i = 0; i < buckets.length; i++) {
+      if (buckets[i].startMs === bs) return i;
     }
-    return null;
+    return -1;
   };
 
-  // 1. P&L periods — most authoritative for revenue/expenses/net
+  // 1. Daily revenue series (most accurate for rev within filter range)
+  const revSeries = firstArray(d.revSeries?.series, []);
+  for (const r of revSeries) {
+    const ts = Date.parse(r.date);
+    if (isNaN(ts)) continue;
+    const i = indexFor(ts);
+    if (i < 0) continue;
+    buckets[i].revenue += Number(r.revenue || 0);
+    buckets[i].hasRevenue = true;
+  }
+
+  // 2. Raw orders — count per bucket + fallback revenue
+  const rawOrders = firstArray(d.rawOrders, ['orders', 'data']);
+  for (const o of rawOrders) {
+    const ts = Date.parse(o.created_at || o.createdAt || '');
+    if (isNaN(ts)) continue;
+    const i = indexFor(ts);
+    if (i < 0) continue;
+    buckets[i].orders += 1;
+    if (!buckets[i].hasRevenue) {
+      buckets[i].revenue += Number(o.total || 0);
+    }
+  }
+
+  // 3. Expenses — only P&L has this, keyed monthly. Distribute evenly into contained buckets.
   const pnlPeriods = Array.isArray(d.pnl?.periods) ? d.pnl.periods
                    : Array.isArray(d.pnl) ? d.pnl : [];
   for (const p of pnlPeriods) {
-    const key = keyOf(p.period || p.month || p.date);
-    if (!key || !months[key]) continue;
-    const bucket = months[key];
-    if (p.revenue != null) { bucket.revenue = Number(p.revenue); bucket.hasRevenue = true; }
+    const raw = p.period || p.month || p.date;
+    if (!raw) continue;
+    const m = String(raw).match(/^(\d{4})-(\d{2})/);
+    let monthStart, monthEnd;
+    if (m) {
+      monthStart = new Date(Number(m[1]), Number(m[2]) - 1, 1).getTime();
+      monthEnd   = new Date(Number(m[1]), Number(m[2]), 1).getTime();
+    } else {
+      const pd = new Date(raw);
+      if (isNaN(pd)) continue;
+      monthStart = new Date(pd.getFullYear(), pd.getMonth(), 1).getTime();
+      monthEnd   = new Date(pd.getFullYear(), pd.getMonth() + 1, 1).getTime();
+    }
     const expense = (p.cogs != null || p.operating_expenses != null)
       ? Number(p.cogs || 0) + Number(p.operating_expenses || 0)
       : (p.expenses != null ? Number(p.expenses) : null);
-    if (expense != null) { bucket.expenses = expense; bucket.hasExpense = true; }
-    if (p.net_profit != null) { bucket.net = Number(p.net_profit); bucket.hasNet = true; }
-  }
+    const net = p.net_profit != null ? Number(p.net_profit) : null;
 
-  // 2. Cashflow rows — fill gaps (may have expense entries P&L lacks)
-  const cashflowRows = firstArray(d.cashflow, ['months', 'series', 'data']);
-  for (const row of cashflowRows) {
-    const key = keyOf(row.period || row.month || row.monthLabel || row.label || row.date);
-    if (!key || !months[key]) continue;
-    const bucket = months[key];
-    const rev = row.revenue ?? row.inflow ?? row.inflows ?? row.income;
-    const exp = row.expenses ?? row.expense ?? row.outflow ?? row.outflows;
-    const net = row.net_profit ?? row.net ?? row.netFlow ?? row.net_cashflow;
-    if (!bucket.hasRevenue && rev != null) { bucket.revenue = Number(rev); bucket.hasRevenue = true; }
-    if (!bucket.hasExpense && exp != null) { bucket.expenses = Math.abs(Number(exp)); bucket.hasExpense = true; }
-    if (!bucket.hasNet && net != null) { bucket.net = Number(net); bucket.hasNet = true; }
-  }
+    // Find buckets overlapping the month, weight by days of overlap.
+    const overlaps = [];
+    for (const b of buckets) {
+      const bStart = b.startMs;
+      const bEnd = cfg.unit === 'month'
+        ? new Date(new Date(bStart).getFullYear(), new Date(bStart).getMonth() + 1, 1).getTime()
+        : bStart + cfg.stepMs;
+      const ov = Math.max(0, Math.min(bEnd, monthEnd) - Math.max(bStart, monthStart));
+      if (ov > 0) overlaps.push({ b, ov });
+    }
+    const totalOv = overlaps.reduce((s, o) => s + o.ov, 0);
+    if (!totalOv) continue;
 
-  // 3. Raw orders — count per month + fallback revenue if no other source
-  const rawOrders = firstArray(d.rawOrders, ['orders', 'data']);
-  for (const o of rawOrders) {
-    const key = keyOf(o.created_at || o.createdAt);
-    if (!key || !months[key]) continue;
-    const bucket = months[key];
-    bucket.orders += 1;
-    if (!bucket.hasRevenue) bucket.revenue += Number(o.total || 0);
+    for (const { b, ov } of overlaps) {
+      const w = ov / totalOv;
+      if (expense != null) { b.expenses += expense * w; b.hasExpense = true; }
+      if (net != null)     { b.net      += net * w;     b.hasNet = true; }
+    }
   }
 
   // 4. Derive net if still missing
-  for (const bucket of Object.values(months)) {
-    if (!bucket.hasNet) bucket.net = bucket.revenue - bucket.expenses;
+  for (const b of buckets) {
+    if (!b.hasNet) b.net = b.revenue - b.expenses;
   }
 
-  return Object.values(months).sort((a, b) => a.key.localeCompare(b.key));
+  return buckets;
 }
 
-function drawCashflowChart() {
-  const series = Array.isArray(_cashflowData) ? _cashflowData : [];
+function drawTrendChart() {
+  const series = Array.isArray(_trendData) ? _trendData : [];
   const hasAny = series.some(m => m.revenue || m.expenses || m.orders);
 
   if (!series.length || !hasAny) {
-    const canvas = document.getElementById('chart-cashflow');
+    const canvas = document.getElementById('chart-trend');
     if (canvas) {
       canvas.closest('.admin-chart-box').innerHTML =
-        '<div class="admin-dash-inline-empty">No monthly data yet — orders will populate this chart</div>';
+        '<div class="admin-dash-inline-empty">No data for this range — try a wider window</div>';
     }
     return;
   }
@@ -430,8 +554,10 @@ function drawCashflowChart() {
   const profitArr  = series.map(m => m.net);
   const orderArr   = series.map(m => m.orders);
 
+  let chartType = 'bar';
   let datasets;
-  if (_cashflowMetric === 'revenue') {
+  if (_trendMetric === 'revenue') {
+    chartType = 'bar';
     datasets = [
       {
         type: 'bar',
@@ -439,7 +565,8 @@ function drawCashflowChart() {
         data: revenueArr,
         backgroundColor: colors.success + 'cc',
         borderRadius: 4,
-        barPercentage: 0.65,
+        barPercentage: 0.7,
+        categoryPercentage: 0.8,
       },
       {
         type: 'bar',
@@ -447,66 +574,212 @@ function drawCashflowChart() {
         data: expenseArr,
         backgroundColor: colors.magenta + 'cc',
         borderRadius: 4,
-        barPercentage: 0.65,
-      },
-      {
-        type: 'line',
-        label: 'Net',
-        data: profitArr,
-        borderColor: colors.cyan,
-        backgroundColor: 'transparent',
-        borderWidth: 2,
-        borderDash: [4, 3],
-        pointRadius: 3,
-        pointBackgroundColor: colors.cyan,
-        tension: 0.25,
+        barPercentage: 0.7,
+        categoryPercentage: 0.8,
       },
     ];
-  } else if (_cashflowMetric === 'profit') {
+  } else if (_trendMetric === 'profit') {
+    chartType = 'line';
     datasets = [{
-      type: 'bar',
       label: 'Net Profit',
       data: profitArr,
-      backgroundColor: profitArr.map(v => (v >= 0 ? colors.success : colors.danger) + 'cc'),
-      borderRadius: 4,
-      barPercentage: 0.7,
+      borderColor: colors.cyan,
+      backgroundColor: hexToRgba(colors.cyan, 0.22),
+      borderWidth: 2,
+      fill: true,
+      tension: 0.35,
+      pointRadius: 0,
+      pointHoverRadius: 4,
     }];
   } else {
+    chartType = 'line';
     datasets = [{
-      type: 'bar',
       label: 'Orders',
       data: orderArr,
-      backgroundColor: colors.cyan + 'cc',
-      borderRadius: 4,
-      barPercentage: 0.7,
+      borderColor: colors.yellow,
+      backgroundColor: hexToRgba(colors.yellow, 0.22),
+      borderWidth: 2,
+      fill: true,
+      tension: 0.35,
+      pointRadius: 0,
+      pointHoverRadius: 4,
     }];
   }
 
-  Charts.bar('chart-cashflow', {
+  const render = chartType === 'bar' ? Charts.bar : Charts.line;
+  render.call(Charts, 'chart-trend', {
     labels,
     datasets,
     options: {
       plugins: {
-        legend: { display: _cashflowMetric === 'revenue', position: 'top', labels: { color: colors.textMuted, font: { size: 11 }, boxWidth: 10, boxHeight: 10 } },
+        legend: {
+          display: _trendMetric === 'revenue',
+          position: 'top',
+          labels: { color: colors.textMuted, font: { size: 11 }, boxWidth: 10, boxHeight: 10 },
+        },
         tooltip: {
           callbacks: {
             label: (ctx) => {
               const v = ctx.raw || 0;
-              if (_cashflowMetric === 'orders') return `${ctx.dataset.label}: ${v}`;
+              if (_trendMetric === 'orders') return `${ctx.dataset.label}: ${v}`;
               return `${ctx.dataset.label}: ${formatPrice(v)}`;
             },
           },
         },
       },
       scales: {
+        x: { ticks: { maxTicksLimit: 10 } },
         y: {
+          beginAtZero: _trendMetric !== 'profit',
           ticks: {
-            callback: (v) => _cashflowMetric === 'orders' ? v : formatPrice(v),
+            callback: (v) => _trendMetric === 'orders' ? v : formatPrice(v),
           },
         },
       },
     },
   });
+}
+
+// ---------- Forecast ----------
+
+function buildForecastSeries(d) {
+  // Historical: use revSeries (daily) — always last 30 days regardless of filter,
+  // so the forecast context is consistent. But we also respect filter if it's wider.
+  const cfg = getBucketConfig();
+  const revSeries = firstArray(d.revSeries?.series, []);
+  const historical = revSeries
+    .map(r => ({ ts: Date.parse(r.date), rev: Number(r.revenue || 0) }))
+    .filter(x => !isNaN(x.ts))
+    .sort((a, b) => a.ts - b.ts);
+
+  const f30 = pickForecast(d.forecasts, 30);
+  const f60 = pickForecast(d.forecasts, 60);
+  const f90 = pickForecast(d.forecasts, 90);
+
+  // Daily avg projections for days 1-30, 31-60, 61-90.
+  const avg30 = f30 != null ? f30 / 30 : null;
+  const avg60 = f60 != null && f30 != null ? (f60 - f30) / 30 : avg30;
+  const avg90 = f90 != null && f60 != null ? (f90 - f60) / 30 : avg60;
+
+  return { historical, cfg, avg30, avg60, avg90, f30, f60, f90 };
+}
+
+function drawForecastChart() {
+  const state = _forecastData;
+  const canvas = document.getElementById('chart-forecast');
+  if (!canvas) return;
+
+  const hasForecast = state && (state.f30 != null || state.avg30 != null);
+  const hasHistorical = state && state.historical.length > 0;
+
+  if (!hasForecast && !hasHistorical) {
+    canvas.closest('.admin-chart-box').innerHTML =
+      '<div class="admin-dash-inline-empty">No forecast data yet — need more order history</div>';
+    return;
+  }
+
+  const colors = Charts.getThemeColors();
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+
+  // Build a contiguous daily series: historical dates + 30 forward days.
+  const points = [];
+  const histByDate = new Map();
+  for (const h of state.historical) {
+    const d = new Date(h.ts); d.setHours(0, 0, 0, 0);
+    histByDate.set(d.getTime(), h.rev);
+  }
+
+  // Historical window: match filter range but cap at 90 days for legibility.
+  const histDays = Math.min(90, Math.max(14, FilterState.periodToDays()));
+  for (let i = histDays - 1; i >= 0; i--) {
+    const d = new Date(today); d.setDate(d.getDate() - i);
+    const key = d.getTime();
+    points.push({ date: d, value: histByDate.get(key) || 0, type: 'actual' });
+  }
+
+  // Forward 30 days of projection, daily averages.
+  const avg = state.avg30 != null ? state.avg30 : 0;
+  for (let i = 1; i <= 30; i++) {
+    const d = new Date(today); d.setDate(d.getDate() + i);
+    points.push({ date: d, value: avg, type: 'forecast' });
+  }
+
+  const labels = points.map(p => p.date.toLocaleDateString('en-NZ', { day: 'numeric', month: 'short' }));
+  const actualData   = points.map(p => p.type === 'actual'   ? p.value : null);
+  const forecastData = points.map(p => p.type === 'forecast' ? p.value : null);
+
+  // Bridge: repeat last actual as first forecast point so line is continuous.
+  const lastActualIdx = points.findIndex(p => p.type === 'forecast') - 1;
+  if (lastActualIdx >= 0) {
+    forecastData[lastActualIdx] = actualData[lastActualIdx];
+  }
+
+  Charts.line('chart-forecast', {
+    labels,
+    datasets: [
+      {
+        label: 'Actual',
+        data: actualData,
+        borderColor: colors.success,
+        backgroundColor: hexToRgba(colors.success, 0.18),
+        borderWidth: 2,
+        fill: true,
+        tension: 0.35,
+        pointRadius: 0,
+        pointHoverRadius: 3,
+        spanGaps: false,
+      },
+      {
+        label: 'Forecast',
+        data: forecastData,
+        borderColor: colors.cyan,
+        backgroundColor: hexToRgba(colors.cyan, 0.14),
+        borderWidth: 2,
+        borderDash: [5, 4],
+        fill: true,
+        tension: 0.25,
+        pointRadius: 0,
+        pointHoverRadius: 3,
+        spanGaps: false,
+      },
+    ],
+    options: {
+      plugins: {
+        legend: {
+          display: true,
+          position: 'top',
+          labels: { color: colors.textMuted, font: { size: 11 }, boxWidth: 10, boxHeight: 10 },
+        },
+        tooltip: {
+          callbacks: {
+            label: (ctx) => `${ctx.dataset.label}: ${formatPrice(ctx.raw || 0)}`,
+          },
+        },
+      },
+      scales: {
+        x: { ticks: { maxTicksLimit: 8 } },
+        y: { beginAtZero: true, ticks: { callback: (v) => formatPrice(v) } },
+      },
+    },
+  });
+}
+
+function hexToRgba(hex, alpha) {
+  if (!hex) return `rgba(100,100,100,${alpha})`;
+  const h = hex.replace('#', '');
+  if (h.length === 3) {
+    const r = parseInt(h[0] + h[0], 16);
+    const g = parseInt(h[1] + h[1], 16);
+    const b = parseInt(h[2] + h[2], 16);
+    return `rgba(${r},${g},${b},${alpha})`;
+  }
+  if (h.length >= 6) {
+    const r = parseInt(h.slice(0, 2), 16);
+    const g = parseInt(h.slice(2, 4), 16);
+    const b = parseInt(h.slice(4, 6), 16);
+    return `rgba(${r},${g},${b},${alpha})`;
+  }
+  return hex;
 }
 
 function wirePills() {
@@ -516,10 +789,11 @@ function wirePills() {
     const btn = e.target.closest('.admin-pill');
     if (!btn) return;
     const metric = btn.dataset.metric;
-    if (metric === _cashflowMetric) return;
-    _cashflowMetric = metric;
+    if (metric === _trendMetric) return;
+    _trendMetric = metric;
     pills.querySelectorAll('.admin-pill').forEach(p => p.classList.toggle('active', p === btn));
-    drawCashflowChart();
+    Charts.destroy('chart-trend');
+    drawTrendChart();
   });
 }
 
@@ -1005,14 +1279,15 @@ export default {
 
   async init(container) {
     _container = container;
-    _cashflowMetric = 'revenue';
+    _trendMetric = 'revenue';
     await loadDashboard();
   },
 
   destroy() {
     Charts.destroyAll();
     _container = null;
-    _cashflowData = null;
+    _trendData = null;
+    _forecastData = null;
   },
 
   async onFilterChange() {

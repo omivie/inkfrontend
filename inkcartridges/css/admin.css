@@ -2807,6 +2807,27 @@ button.admin-active-dot--clickable:hover::after { opacity: 1; }
 .admin-chart-box--compact { height: 180px; }
 .admin-chart-box--mini { height: 130px; }
 
+/* ---- Mini-card row (horizontal strip under trend/forecast charts) ---- */
+.admin-mini-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+@media (max-width: 768px) {
+  .admin-mini-row { grid-template-columns: 1fr; }
+}
+
+/* ---- Forecast summary (inline in card title) ---- */
+.admin-forecast-summary {
+  display: flex; flex-direction: column; align-items: flex-end;
+  line-height: 1.1;
+}
+.admin-forecast-summary__value {
+  font-family: var(--font-mono); font-weight: 700; font-size: 15px;
+  font-variant-numeric: tabular-nums; color: var(--text);
+}
+.admin-forecast-summary__sub { font-size: 10.5px; color: var(--text-muted); }
+
 /* ---- Toggle pills (Revenue | Profit | Orders) ---- */
 .admin-pills {
   display: inline-flex; gap: 2px;
