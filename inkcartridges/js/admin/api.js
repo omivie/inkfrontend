@@ -332,6 +332,7 @@ const AdminAPI = {
       if (filters.category) params.set('category', filters.category);
       if (filters.has_images !== undefined && filters.has_images !== '') params.set('has_images', filters.has_images);
       if (filters.stock_status) params.set('stock_status', filters.stock_status);
+      if (filters.is_reviewed !== undefined && filters.is_reviewed !== '') params.set('is_reviewed', filters.is_reviewed);
       const resp = await window.API.get(`/api/admin/products?${params}`);
       return resp?.data ?? null;
     } catch (e) {
