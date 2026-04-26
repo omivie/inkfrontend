@@ -60,12 +60,20 @@ function persistClearedIds() {
   try { localStorage.setItem(CLEARED_KEY, JSON.stringify([..._clearedIds])); } catch {}
 }
 
-/** Resolve a storage path or URL to a usable <img src>. */
+/** Resolve a storage path or URL to a thumbnail-sized <img src>. */
 function resolveImageSrc(value) {
   if (!value || typeof value !== 'string') return null;
   if (typeof window.storageUrl === 'function') return window.storageUrl(value);
   if (/^https?:\/\//.test(value) || value.startsWith('/')) return value;
   return null;
+}
+
+/** Resolve a storage path or URL to the raw original (used for the lightbox). */
+function resolveRawImageSrc(value) {
+  if (!value || typeof value !== 'string') return null;
+  if (/^https?:\/\//.test(value) || value.startsWith('/')) return value;
+  if (typeof window.storageUrlRaw === 'function') return window.storageUrlRaw(value);
+  return resolveImageSrc(value);
 }
 
 /** Full-screen image preview — same UX as the Image Audit page. */
@@ -121,7 +129,8 @@ function fmtFieldValue(field, value) {
   if (field === 'image_url' && typeof value === 'string') {
     const src = resolveImageSrc(value);
     if (src) {
-      return `<button type="button" class="pc-row__field-thumb" data-zoom="${esc(src)}" data-zoom-alt="${esc(value)}" title="${esc(value)} — click to enlarge"><img src="${esc(src)}" alt="" loading="lazy"></button>`;
+      const raw = resolveRawImageSrc(value) || src;
+      return `<button type="button" class="pc-row__field-thumb" data-zoom="${esc(raw)}" data-zoom-alt="${esc(value)}" title="${esc(value)} — click to enlarge"><img src="${esc(src)}" alt="" loading="lazy"></button>`;
     }
   }
   return esc(String(value));
@@ -497,10 +506,12 @@ function renderRow(item) {
   const fields = getChangedFields(item);
   const cached = item.product_id ? _productCache.get(item.product_id) : null;
   const newImageSrc = resolveImageSrc(item.new_data?.image_url);
+  const newImageRaw = resolveRawImageSrc(item.new_data?.image_url);
   const oldImageSrc = resolveImageSrc(item.old_data?.image_url) || resolveImageSrc(cached?.image_url);
+  const oldImageRaw = resolveRawImageSrc(item.old_data?.image_url) || resolveRawImageSrc(cached?.image_url);
   const fieldChips = fields.slice(0, 6).map(f => {
     if (f === 'image_url' && newImageSrc) {
-      return `<button type="button" class="pc-row__field-thumb" data-zoom="${esc(newImageSrc)}" data-zoom-alt="new image" title="Click to enlarge"><img src="${esc(newImageSrc)}" alt="new image" loading="lazy"></button>`;
+      return `<button type="button" class="pc-row__field-thumb" data-zoom="${esc(newImageRaw || newImageSrc)}" data-zoom-alt="new image" title="Click to enlarge"><img src="${esc(newImageSrc)}" alt="new image" loading="lazy"></button>`;
     }
     return `<span class="pc-row__field-chip">${esc(f)}</span>`;
   }).join('');
@@ -511,8 +522,9 @@ function renderRow(item) {
   const sku = item.sku || item.new_data?.sku || item.old_data?.sku || MISSING;
   const name = item.new_data?.name || item.old_data?.name || cached?.name || item.product_name || '';
   const thumbSrc = oldImageSrc || newImageSrc;
+  const thumbRaw = oldImageRaw || newImageRaw || thumbSrc;
   const thumb = thumbSrc
-    ? `<button type="button" class="pc-row__thumb-btn" data-zoom="${esc(thumbSrc)}" data-zoom-alt="${esc(name || sku)}" title="Click to enlarge"><img class="pc-row__thumb" src="${esc(thumbSrc)}" alt="" loading="lazy"></button>`
+    ? `<button type="button" class="pc-row__thumb-btn" data-zoom="${esc(thumbRaw)}" data-zoom-alt="${esc(name || sku)}" title="Click to enlarge"><img class="pc-row__thumb" src="${esc(thumbSrc)}" alt="" loading="lazy"></button>`
     : `<div class="pc-row__thumb pc-row__thumb--empty">${icon('products', 18, 18)}</div>`;
 
   const actions = renderRowActions(item);
