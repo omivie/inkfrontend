@@ -232,9 +232,9 @@ function ensureStyles() {
     .pc-row__fields { display: flex; flex-wrap: wrap; gap: 6px; max-width: 360px; align-items: center; }
     .pc-row__fields:has(.pc-row__field-thumb) { max-width: none; }
     .pc-row__field-chip { font-size: 11px; padding: 2px 6px; border-radius: 4px; background: var(--cyan-dim); color: var(--cyan-text); font-family: var(--font-mono, monospace); }
-    .pc-row__field-thumb { display: inline-block; width: 320px; height: 320px; border-radius: 10px; overflow: hidden; border: 1px solid var(--border); background: var(--surface-hover); padding: 0; cursor: zoom-in; }
+    .pc-row__field-thumb { display: inline-block; max-width: 400px; max-height: 400px; border-radius: 10px; border: 1px solid var(--border); background: var(--surface-hover); padding: 0; cursor: zoom-in; line-height: 0; }
     button.pc-row__field-thumb { font: inherit; color: inherit; }
-    .pc-row__field-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+    .pc-row__field-thumb img { max-width: 400px; max-height: 400px; width: auto; height: auto; display: block; border-radius: inherit; }
     .pc-row__expand { background: none; border: none; color: var(--text-muted); cursor: pointer; padding: 4px; border-radius: 4px; transition: transform 0.15s; }
     .pc-row__expand:hover { background: var(--surface-hover); color: var(--text); }
     .pc-row__expand[aria-expanded="true"] { transform: rotate(90deg); }
