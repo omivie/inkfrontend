@@ -791,7 +791,8 @@ async function reviewField(id, field, decision, note, btn) {
 async function reviewWholeRow(id, decision, note, btn) {
   const item = _rawItems.find(i => i.id === id);
   if (!item) return;
-  const fields = getChangedFields(item).filter(f => {
+  const allFields = getChangedFields(item);
+  const fields = allFields.filter(f => {
     const d = item.field_decisions?.[f] || 'pending';
     return d === 'pending';
   });
@@ -807,6 +808,22 @@ async function reviewWholeRow(id, decision, note, btn) {
   try {
     const result = await AdminAPI.reviewPendingChange(id, decisions, note);
     if (result) Object.assign(item, result);
+
+    // Denying an image_url change should also clear the product's existing
+    // image — same effect as the × button on the Image Audit page. This is
+    // best-effort; we don't fail the whole reject if the image delete errors.
+    if (decision === 'rejected' && item.product_id && fields.includes('image_url')) {
+      try {
+        await AdminAPI.deleteProductImageUrl(item.product_id);
+        // Reflect the cleared image in the local product cache so the row
+        // thumbnail updates without a full refetch.
+        const cached = _productCache.get(item.product_id);
+        if (cached) _productCache.set(item.product_id, { ...cached, image_url: null });
+      } catch (e) {
+        Toast.error(`Image not removed: ${e.message}`);
+      }
+    }
+
     Toast.success(decision === 'approved' ? 'Approved' : 'Denied');
     _expanded.delete(id);
     if (item.status !== _filters.status) {
