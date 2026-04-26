@@ -68,6 +68,27 @@ function resolveImageSrc(value) {
   return null;
 }
 
+/** Full-screen image preview — same UX as the Image Audit page. */
+function openImageLightbox(url, alt = '') {
+  if (!url) return;
+  document.querySelector('.admin-image-lightbox')?.remove();
+  const overlay = document.createElement('div');
+  overlay.className = 'admin-image-lightbox';
+  overlay.innerHTML = `
+    <button class="admin-image-lightbox__close" aria-label="Close">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
+    </button>
+    <img class="admin-image-lightbox__img" src="${esc(url)}" alt="${esc(alt)}">
+  `;
+  const close = () => { overlay.remove(); document.removeEventListener('keydown', onKey); };
+  const onKey = (e) => { if (e.key === 'Escape') close(); };
+  overlay.addEventListener('click', (e) => {
+    if (e.target === overlay || e.target.closest('.admin-image-lightbox__close')) close();
+  });
+  document.addEventListener('keydown', onKey);
+  document.body.appendChild(overlay);
+}
+
 // ---- Helpers ----
 function fmtDate(iso) {
   if (!iso) return MISSING;
@@ -100,7 +121,7 @@ function fmtFieldValue(field, value) {
   if (field === 'image_url' && typeof value === 'string') {
     const src = resolveImageSrc(value);
     if (src) {
-      return `<a href="${esc(src)}" target="_blank" rel="noopener" class="pc-row__field-thumb" title="${esc(value)}"><img src="${esc(src)}" alt="" loading="lazy"></a>`;
+      return `<button type="button" class="pc-row__field-thumb" data-zoom="${esc(src)}" data-zoom-alt="${esc(value)}" title="${esc(value)} — click to enlarge"><img src="${esc(src)}" alt="" loading="lazy"></button>`;
     }
   }
   return esc(String(value));
@@ -193,6 +214,7 @@ function ensureStyles() {
     .pc-table tbody tr.pc-row--superseded { opacity: 0.55; }
     .pc-table tbody tr.pc-detail td { padding: 0; background: var(--bg, var(--surface)); }
     .pc-row__primary { display: flex; align-items: center; gap: 16px; min-width: 0; }
+    .pc-row__thumb-btn { display: inline-flex; padding: 0; border: none; background: none; cursor: zoom-in; flex-shrink: 0; }
     .pc-row__thumb { width: 48px; height: 48px; border-radius: 6px; object-fit: cover; background: var(--surface-hover); border: 1px solid var(--border); flex-shrink: 0; }
     .pc-row__thumb--empty { display: inline-flex; align-items: center; justify-content: center; color: var(--text-muted); }
     .pc-row__text { min-width: 0; display: flex; flex-direction: column; gap: 4px; }
@@ -201,7 +223,8 @@ function ensureStyles() {
     .pc-row__fields { display: flex; flex-wrap: wrap; gap: 6px; max-width: 360px; align-items: center; }
     .pc-row__fields:has(.pc-row__field-thumb) { max-width: none; }
     .pc-row__field-chip { font-size: 11px; padding: 2px 6px; border-radius: 4px; background: var(--cyan-dim); color: var(--cyan-text); font-family: var(--font-mono, monospace); }
-    .pc-row__field-thumb { display: inline-block; width: 320px; height: 320px; border-radius: 10px; overflow: hidden; border: 1px solid var(--border); background: var(--surface-hover); }
+    .pc-row__field-thumb { display: inline-block; width: 320px; height: 320px; border-radius: 10px; overflow: hidden; border: 1px solid var(--border); background: var(--surface-hover); padding: 0; cursor: zoom-in; }
+    button.pc-row__field-thumb { font: inherit; color: inherit; }
     .pc-row__field-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
     .pc-row__expand { background: none; border: none; color: var(--text-muted); cursor: pointer; padding: 4px; border-radius: 4px; transition: transform 0.15s; }
     .pc-row__expand:hover { background: var(--surface-hover); color: var(--text); }
@@ -477,7 +500,7 @@ function renderRow(item) {
   const oldImageSrc = resolveImageSrc(item.old_data?.image_url) || resolveImageSrc(cached?.image_url);
   const fieldChips = fields.slice(0, 6).map(f => {
     if (f === 'image_url' && newImageSrc) {
-      return `<a href="${esc(newImageSrc)}" target="_blank" rel="noopener" class="pc-row__field-thumb" title="New image_url — click to open"><img src="${esc(newImageSrc)}" alt="new image" loading="lazy"></a>`;
+      return `<button type="button" class="pc-row__field-thumb" data-zoom="${esc(newImageSrc)}" data-zoom-alt="new image" title="Click to enlarge"><img src="${esc(newImageSrc)}" alt="new image" loading="lazy"></button>`;
     }
     return `<span class="pc-row__field-chip">${esc(f)}</span>`;
   }).join('');
@@ -489,7 +512,7 @@ function renderRow(item) {
   const name = item.new_data?.name || item.old_data?.name || cached?.name || item.product_name || '';
   const thumbSrc = oldImageSrc || newImageSrc;
   const thumb = thumbSrc
-    ? `<img class="pc-row__thumb" src="${esc(thumbSrc)}" alt="" loading="lazy">`
+    ? `<button type="button" class="pc-row__thumb-btn" data-zoom="${esc(thumbSrc)}" data-zoom-alt="${esc(name || sku)}" title="Click to enlarge"><img class="pc-row__thumb" src="${esc(thumbSrc)}" alt="" loading="lazy"></button>`
     : `<div class="pc-row__thumb pc-row__thumb--empty">${icon('products', 18, 18)}</div>`;
 
   const actions = renderRowActions(item);
@@ -671,6 +694,13 @@ function bindTableEvents() {
   if (!wrap) return;
 
   wrap.addEventListener('click', (e) => {
+    const zoomEl = e.target.closest('[data-zoom]');
+    if (zoomEl) {
+      e.stopPropagation();
+      e.preventDefault();
+      openImageLightbox(zoomEl.dataset.zoom, zoomEl.dataset.zoomAlt || '');
+      return;
+    }
     const toggle = e.target.closest('[data-toggle]');
     if (toggle) {
       const id = toggle.dataset.toggle;
