@@ -146,14 +146,15 @@ function ensureStyles() {
     .pc-table tbody tr.pc-row--superseded { opacity: 0.55; }
     .pc-table tbody tr.pc-detail td { padding: 0; background: var(--bg, var(--surface)); }
     .pc-row__primary { display: flex; align-items: center; gap: 16px; min-width: 0; }
-    .pc-row__thumb { width: 200px; height: 200px; border-radius: 10px; object-fit: cover; background: var(--surface-hover); border: 1px solid var(--border); flex-shrink: 0; }
+    .pc-row__thumb { width: 400px; height: 400px; border-radius: 12px; object-fit: cover; background: var(--surface-hover); border: 1px solid var(--border); flex-shrink: 0; }
     .pc-row__thumb--empty { display: inline-flex; align-items: center; justify-content: center; color: var(--text-muted); }
     .pc-row__text { min-width: 0; display: flex; flex-direction: column; gap: 4px; }
     .pc-row__name { color: var(--text); font-weight: 500; font-size: 14px; line-height: 1.3; overflow: hidden; text-overflow: ellipsis; }
     .pc-row__sku { font-family: var(--font-mono, monospace); font-size: 12px; color: var(--text-muted); font-weight: 400; line-height: 1.2; }
     .pc-row__fields { display: flex; flex-wrap: wrap; gap: 6px; max-width: 360px; align-items: center; }
+    .pc-row__fields:has(.pc-row__field-thumb) { max-width: none; }
     .pc-row__field-chip { font-size: 11px; padding: 2px 6px; border-radius: 4px; background: var(--cyan-dim); color: var(--cyan-text); font-family: var(--font-mono, monospace); }
-    .pc-row__field-thumb { display: inline-block; width: 160px; height: 160px; border-radius: 8px; overflow: hidden; border: 1px solid var(--border); background: var(--surface-hover); }
+    .pc-row__field-thumb { display: inline-block; width: 320px; height: 320px; border-radius: 10px; overflow: hidden; border: 1px solid var(--border); background: var(--surface-hover); }
     .pc-row__field-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
     .pc-row__expand { background: none; border: none; color: var(--text-muted); cursor: pointer; padding: 4px; border-radius: 4px; transition: transform 0.15s; }
     .pc-row__expand:hover { background: var(--surface-hover); color: var(--text); }
