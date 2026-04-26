@@ -131,10 +131,16 @@ function ensureStyles() {
     .pc-table tbody tr.pc-row:hover { background: var(--surface-hover); }
     .pc-table tbody tr.pc-row--superseded { opacity: 0.55; }
     .pc-table tbody tr.pc-detail td { padding: 0; background: var(--bg, var(--surface)); }
-    .pc-row__sku { font-family: var(--font-mono, monospace); font-weight: 600; }
-    .pc-row__name { color: var(--text-secondary); }
-    .pc-row__fields { display: flex; flex-wrap: wrap; gap: 4px; max-width: 320px; }
+    .pc-row__primary { display: flex; align-items: center; gap: 10px; min-width: 0; }
+    .pc-row__thumb { width: 40px; height: 40px; border-radius: 6px; object-fit: cover; background: var(--surface-hover); border: 1px solid var(--border); flex-shrink: 0; }
+    .pc-row__thumb--empty { display: inline-flex; align-items: center; justify-content: center; color: var(--text-muted); }
+    .pc-row__text { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+    .pc-row__name { color: var(--text); font-weight: 500; font-size: 13px; line-height: 1.3; overflow: hidden; text-overflow: ellipsis; }
+    .pc-row__sku { font-family: var(--font-mono, monospace); font-size: 11px; color: var(--text-muted); font-weight: 400; line-height: 1.2; }
+    .pc-row__fields { display: flex; flex-wrap: wrap; gap: 4px; max-width: 320px; align-items: center; }
     .pc-row__field-chip { font-size: 11px; padding: 2px 6px; border-radius: 4px; background: var(--cyan-dim); color: var(--cyan-text); font-family: var(--font-mono, monospace); }
+    .pc-row__field-thumb { display: inline-block; width: 32px; height: 32px; border-radius: 4px; overflow: hidden; border: 1px solid var(--border); background: var(--surface-hover); }
+    .pc-row__field-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
     .pc-row__expand { background: none; border: none; color: var(--text-muted); cursor: pointer; padding: 4px; border-radius: 4px; transition: transform 0.15s; }
     .pc-row__expand:hover { background: var(--surface-hover); color: var(--text); }
     .pc-row__expand[aria-expanded="true"] { transform: rotate(90deg); }
@@ -344,20 +350,36 @@ function renderBulkBar() {
 
 function renderRow(item) {
   const fields = getChangedFields(item);
-  const fieldChips = fields.slice(0, 6).map(f => `<span class="pc-row__field-chip">${esc(f)}</span>`).join('');
+  const newImageUrl = typeof item.new_data?.image_url === 'string' && /^https?:\/\//.test(item.new_data.image_url) ? item.new_data.image_url : null;
+  const oldImageUrl = typeof item.old_data?.image_url === 'string' && /^https?:\/\//.test(item.old_data.image_url) ? item.old_data.image_url : null;
+  const fieldChips = fields.slice(0, 6).map(f => {
+    if (f === 'image_url' && newImageUrl) {
+      return `<a href="${esc(newImageUrl)}" target="_blank" rel="noopener" class="pc-row__field-thumb" title="New image_url — click to open"><img src="${esc(newImageUrl)}" alt="new image" loading="lazy"></a>`;
+    }
+    return `<span class="pc-row__field-chip">${esc(f)}</span>`;
+  }).join('');
   const more = fields.length > 6 ? `<span class="pc-row__field-chip" style="background:transparent;color:var(--text-muted)">+${fields.length - 6}</span>` : '';
   const reviewable = item.status === 'pending' || item.status === 'partial';
   const isExpanded = _expanded.has(item.id);
   const superseded = item.status === 'superseded' ? ' pc-row--superseded' : '';
   const sku = item.sku || item.new_data?.sku || item.old_data?.sku || MISSING;
   const name = item.new_data?.name || item.old_data?.name || item.product_name || '';
+  const thumbSrc = oldImageUrl || newImageUrl;
+  const thumb = thumbSrc
+    ? `<img class="pc-row__thumb" src="${esc(thumbSrc)}" alt="" loading="lazy">`
+    : `<div class="pc-row__thumb pc-row__thumb--empty">${icon('products', 18, 18)}</div>`;
 
   return `
     <tr class="pc-row${superseded}" data-id="${esc(item.id)}">
       <td><input type="checkbox" class="pc-checkbox pc-row-check" data-id="${esc(item.id)}" ${_selected.has(item.id) ? 'checked' : ''} ${reviewable ? '' : 'disabled'}></td>
       <td>
-        <div class="pc-row__sku">${esc(sku)}</div>
-        ${name ? `<div class="pc-row__name">${esc(name.length > 60 ? name.slice(0, 57) + '…' : name)}</div>` : ''}
+        <div class="pc-row__primary">
+          ${thumb}
+          <div class="pc-row__text">
+            <div class="pc-row__name">${esc(name ? (name.length > 60 ? name.slice(0, 57) + '…' : name) : MISSING)}</div>
+            <div class="pc-row__sku">${esc(sku)}</div>
+          </div>
+        </div>
       </td>
       <td>${changeTypeBadge(item.change_type)}</td>
       <td>${statusBadge(item.status)}</td>
@@ -461,7 +483,7 @@ function renderTable() {
         <thead>
           <tr>
             <th style="width:40px"></th>
-            <th>SKU / Name</th>
+            <th>Name / SKU</th>
             <th>Type</th>
             <th>Status</th>
             <th>Changed Fields</th>
