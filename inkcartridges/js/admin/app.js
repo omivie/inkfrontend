@@ -62,6 +62,7 @@ const NAV_ITEMS = [
   { key: 'image-audit', label: 'Image Audit', icon: 'image', ownerOnly: true },
   { key: 'control-center', label: 'Operations', icon: 'lab', ownerOnly: true },
   { key: 'sync-report', label: 'Feed Sync', icon: 'products', href: '/html/admin/sync-report.html', ownerOnly: true },
+  { key: 'pending-changes', label: 'Pending Changes', icon: 'orders', ownerOnly: true },
   { key: 'price-monitor', label: 'Price Monitor', icon: 'finance', ownerOnly: true },
   { key: 'recovery', label: 'Recovery', icon: 'refunds', ownerOnly: true },
   { key: 'site-lock', label: 'Site Lock', icon: 'lock', ownerOnly: true },

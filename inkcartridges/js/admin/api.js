@@ -542,6 +542,60 @@ const AdminAPI = {
     }
   },
 
+  // ---- Pending Changes (import review queue) ----
+  async getPendingChangesSummary() {
+    try {
+      const resp = await window.API.get('/api/admin/pending-changes/summary');
+      return resp?.data ?? null;
+    } catch (e) {
+      adminApiWarn('Failed to load pending changes summary', e);
+      return null;
+    }
+  },
+
+  async getPendingChanges(filters = {}, page = 1, limit = 50) {
+    try {
+      const params = new URLSearchParams();
+      params.set('page', page);
+      params.set('limit', limit);
+      if (filters.status) params.set('status', filters.status);
+      if (filters.change_type) params.set('change_type', filters.change_type);
+      if (filters.field) params.set('field', filters.field);
+      if (filters.search) params.set('search', filters.search);
+      const resp = await window.API.get(`/api/admin/pending-changes?${params}`);
+      return resp?.data ?? null;
+    } catch (e) {
+      adminApiWarn('Failed to load pending changes', e);
+      return null;
+    }
+  },
+
+  async reviewPendingChange(id, decisions, note = '') {
+    try {
+      const body = { decisions };
+      if (note) body.note = note;
+      const resp = await window.API.post(`/api/admin/pending-changes/${id}/review`, body);
+      if (resp && resp.ok === false) throw new Error(resp.error || 'Review failed');
+      return resp?.data ?? null;
+    } catch (e) {
+      DebugLog.warn('[AdminAPI] reviewPendingChange failed:', e.message);
+      throw e;
+    }
+  },
+
+  async bulkReviewPendingChanges(ids, action, note = '') {
+    try {
+      const body = { ids, action };
+      if (note) body.note = note;
+      const resp = await window.API.post('/api/admin/pending-changes/bulk-review', body);
+      if (resp && resp.ok === false) throw new Error(resp.error || 'Bulk review failed');
+      return resp?.data ?? null;
+    } catch (e) {
+      DebugLog.warn('[AdminAPI] bulkReviewPendingChanges failed:', e.message);
+      throw e;
+    }
+  },
+
   // ---- Suppliers ----
   async getSuppliers() {
     return rpc('get_suppliers');
