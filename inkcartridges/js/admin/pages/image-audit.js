@@ -237,9 +237,11 @@ function renderPagination() {
   const totalPages = Math.max(1, Math.ceil(total / limit));
   if (totalPages <= 1) { wrap.innerHTML = ''; return; }
   wrap.innerHTML = `
+    <button class="admin-btn admin-btn--ghost admin-btn--sm" data-action="prev5"${page <= 1 ? ' disabled' : ''} title="Jump back 5 pages">«&nbsp;-5</button>
     <button class="admin-btn admin-btn--ghost admin-btn--sm" data-action="prev"${page <= 1 ? ' disabled' : ''}>← Prev</button>
     <span style="font-size:13px;color:var(--text-secondary)">Page ${page} of ${totalPages}</span>
     <button class="admin-btn admin-btn--ghost admin-btn--sm" data-action="next"${page >= totalPages ? ' disabled' : ''}>Next →</button>
+    <button class="admin-btn admin-btn--ghost admin-btn--sm" data-action="next5"${page >= totalPages ? ' disabled' : ''} title="Jump forward 5 pages">+5&nbsp;»</button>
   `;
 }
 
@@ -486,6 +488,8 @@ function bindToolbarEvents() {
     const totalPages = Math.max(1, Math.ceil(total / limit));
     if (btn.dataset.action === 'prev') _page = Math.max(1, _page - 1);
     if (btn.dataset.action === 'next') _page = Math.min(totalPages, _page + 1);
+    if (btn.dataset.action === 'prev5') _page = Math.max(1, _page - 5);
+    if (btn.dataset.action === 'next5') _page = Math.min(totalPages, _page + 5);
     window.scrollTo({ top: 0, behavior: 'smooth' });
     load();
   });
