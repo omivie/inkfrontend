@@ -13,9 +13,11 @@ import { AdminAPI, FilterState, icon, esc } from '../app.js';
 import { Toast } from '../components/toast.js';
 import { Modal } from '../components/modal.js';
 
-// Fetch a larger page from the backend so client-side product filters
-// (brand/active/source/product_type) still leave a usable list per page.
-const FETCH_SIZE = 250;
+// We page client-side to allow product-attribute filters to apply across
+// the full result set. The backend caps `limit` per request (~100), so we
+// fetch in chunks up to FETCH_TARGET total items.
+const BACKEND_CHUNK = 100;
+const FETCH_TARGET = 500;
 const PAGE_SIZE = 50;
 const MISSING = '—';
 const CLEARED_KEY = 'admin_pending_changes_cleared_ids';
@@ -817,23 +819,28 @@ async function load() {
   const token = ++_loadToken;
   wrap.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;padding:60px"><div class="admin-loading__spinner"></div></div>`;
 
-  // Always pull a larger set from the backend so the client-side product filters
-  // and cleared-id hide list still leave a usable list. We paginate locally.
   const filters = {};
   if (_filters.status) filters.status = _filters.status;
   if (_filters.field) filters.field = _filters.field;
   if (_filters.search) filters.search = _filters.search;
 
-  const data = await AdminAPI.getPendingChanges(filters, 1, FETCH_SIZE);
-  if (!_container || token !== _loadToken) return;
+  // Fetch up to FETCH_TARGET items in chunks of BACKEND_CHUNK (the backend
+  // caps per-request limit at ~100). Stops early if a chunk comes back
+  // short or empty.
+  const collected = [];
+  const maxPages = Math.ceil(FETCH_TARGET / BACKEND_CHUNK);
+  for (let page = 1; page <= maxPages; page++) {
+    const data = await AdminAPI.getPendingChanges(filters, page, BACKEND_CHUNK);
+    if (!_container || token !== _loadToken) return;
+    const items = data?.items || data?.changes || (Array.isArray(data) ? data : []);
+    if (!items.length) break;
+    collected.push(...items);
+    if (items.length < BACKEND_CHUNK) break;
+  }
+  _rawItems = collected;
 
-  const items = data?.items || data?.changes || (Array.isArray(data) ? data : []);
-  _rawItems = items;
-
-  // Hydrate product attributes synchronously before applying filters so they
-  // (brand, source, product_type, is_active) actually take effect on first
-  // render. Without this, the filters would silently match nothing on cold
-  // load because _productCache hasn't been populated yet.
+  // Hydrate product attributes BEFORE applying filters so brand/source/etc
+  // can actually match on first render — _productCache is empty on cold load.
   await hydrateProductInfo(token);
   if (!_container || token !== _loadToken) return;
 
