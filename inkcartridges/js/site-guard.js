@@ -14,13 +14,6 @@
     ? 'https://ink-backend-zaeq.onrender.com'
     : '';
 
-  // Permanent admin denylist — these emails can never bypass the site lock as admin
-  const ADMIN_EMAIL_DENYLIST = ['junjackson0915@gmail.com'];
-  function isAdminEmailDenied(email) {
-    if (!email) return false;
-    return ADMIN_EMAIL_DENYLIST.includes(String(email).trim().toLowerCase());
-  }
-
   let _sb = null;
 
   function initClient() {
@@ -52,7 +45,6 @@
 
   async function isAdminSession(session) {
     if (!session?.access_token) return false;
-    if (isAdminEmailDenied(session.user?.email)) return false;
 
     async function tryVerify() {
       const ctrl = new AbortController();

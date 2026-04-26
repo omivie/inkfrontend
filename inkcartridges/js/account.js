@@ -939,11 +939,6 @@ const AccountPage = {
         const adminNavItem = document.getElementById('admin-nav-item');
         if (!adminNavItem) return;
 
-        // Permanent admin denylist — keep nav hidden regardless of backend role
-        const ADMIN_EMAIL_DENYLIST = ['junjackson0915@gmail.com'];
-        const currentEmail = (typeof Auth !== 'undefined' && Auth.getUser?.()?.email || '').trim().toLowerCase();
-        if (currentEmail && ADMIN_EMAIL_DENYLIST.includes(currentEmail)) return;
-
         try {
             const response = await API.verifyAdmin();
             if (response.ok && response.data) {

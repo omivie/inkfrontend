@@ -3,15 +3,6 @@
  * Wraps the global Auth module with admin-specific verification
  */
 
-// Permanent admin denylist — these emails can never access admin, regardless of
-// admin_roles state in the backend. Compared case-insensitively after trimming.
-const ADMIN_EMAIL_DENYLIST = ['junjackson0915@gmail.com'];
-
-function isAdminEmailDenied(email) {
-  if (!email) return false;
-  return ADMIN_EMAIL_DENYLIST.includes(String(email).trim().toLowerCase());
-}
-
 const AdminAuth = {
   role: null,
   user: null,
@@ -28,13 +19,6 @@ const AdminAuth = {
     if (!window.Auth || !window.Auth.isAuthenticated()) {
       window.location.href = '/html/account/login.html?redirect=' + encodeURIComponent('/html/admin/');
       throw new Error('Not authenticated');
-    }
-
-    // Permanent denylist — applied before any backend role check
-    const currentUser = window.Auth.getUser();
-    if (isAdminEmailDenied(currentUser?.email)) {
-      window.location.href = '/html/account/';
-      throw new Error('Account permanently blocked from admin access');
     }
 
     // Verify admin role via backend (retry once for Render cold-start / transient errors)
