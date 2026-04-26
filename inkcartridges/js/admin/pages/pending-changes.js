@@ -146,7 +146,7 @@ function ensureStyles() {
     .pc-table tbody tr.pc-row--superseded { opacity: 0.55; }
     .pc-table tbody tr.pc-detail td { padding: 0; background: var(--bg, var(--surface)); }
     .pc-row__primary { display: flex; align-items: center; gap: 16px; min-width: 0; }
-    .pc-row__thumb { width: 400px; height: 400px; border-radius: 12px; object-fit: cover; background: var(--surface-hover); border: 1px solid var(--border); flex-shrink: 0; }
+    .pc-row__thumb { width: 48px; height: 48px; border-radius: 6px; object-fit: cover; background: var(--surface-hover); border: 1px solid var(--border); flex-shrink: 0; }
     .pc-row__thumb--empty { display: inline-flex; align-items: center; justify-content: center; color: var(--text-muted); }
     .pc-row__text { min-width: 0; display: flex; flex-direction: column; gap: 4px; }
     .pc-row__name { color: var(--text); font-weight: 500; font-size: 14px; line-height: 1.3; overflow: hidden; text-overflow: ellipsis; }
