@@ -248,11 +248,14 @@ async function loadProducts() {
   _table.setLoading(true);
   const LIMIT = 100;
 
-  // Backend route: server handles margin/markup/profit sort and has_images filter
-  // (avoids fetching the entire products table to JS just to sort/filter in memory).
+  // Backend route: server handles margin/markup/profit sort and image/stock filters
+  // (those need joins or computed columns we don't have in the simple Supabase path).
+  // Source and product_type are plain columns, so we handle them in Supabase to ensure
+  // they combine correctly with the brand filter (the backend ignores brand when
+  // source is set).
   const needsBackend =
     _sort === 'margin_pct' || _sort === 'markup_pct' || _sort === 'profit_ex_gst' ||
-    !!_imageFilter || !!_sourceFilter || !!_typeFilter || !!_stockFilter;
+    !!_imageFilter || !!_stockFilter;
   if (needsBackend) {
     const filters = { search: _search, sort: _sort, order: _sortDir };
     if (_brandFilter) filters.brand = _brandFilter;
@@ -288,9 +291,15 @@ async function loadProducts() {
       // Active filter
       if (_activeFilter !== '') query = query.eq('is_active', _activeFilter === 'true');
 
-      // Sorting — map column keys to DB columns. Margin/markup/profit and image
-      // filters are routed to the backend earlier (see needsBackend), so we don't
-      // handle them here.
+      // Source filter (genuine / compatible / remanufactured / ribbon)
+      if (_sourceFilter) query = query.eq('source', _sourceFilter);
+
+      // Product type filter (ink_cartridge / toner_cartridge / etc.)
+      if (_typeFilter) query = query.eq('product_type', _typeFilter);
+
+      // Sorting — map column keys to DB columns. Margin/markup/profit, image
+      // and stock filters are routed to the backend earlier (see needsBackend),
+      // so we don't handle them here.
       const sortMap = { brand: 'brand_id' };
       const sortCol = sortMap[_sort] || _sort || 'name';
       query = query.order(sortCol, { ascending: _sortDir !== 'desc' });
