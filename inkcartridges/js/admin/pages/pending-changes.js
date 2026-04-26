@@ -701,9 +701,16 @@ function renderPagination() {
 }
 
 // ---- Event binding ----
+let _tableEventsBound = false;
 function bindTableEvents() {
+  // The #pc-table container persists across renders; only its innerHTML changes.
+  // Attaching listeners to it inside renderTable() would stack a new pair of
+  // listeners on every re-render, causing every click to fire 2×, 3×, … times.
+  // Bind exactly once per page lifetime instead.
+  if (_tableEventsBound) return;
   const wrap = document.getElementById('pc-table');
   if (!wrap) return;
+  _tableEventsBound = true;
 
   wrap.addEventListener('click', (e) => {
     const zoomEl = e.target.closest('[data-zoom]');
@@ -1008,6 +1015,7 @@ export default {
     _productFilters = { brand: '', active: '', images: '', source: '', product_type: '', stock: '' };
     _clearedIds = loadClearedIds();
     _page = 1;
+    _tableEventsBound = false;
     await render();
   },
 
@@ -1018,6 +1026,7 @@ export default {
     _items = [];
     _selected.clear();
     _expanded.clear();
+    _tableEventsBound = false;
   },
 
   onSearch(query) {
