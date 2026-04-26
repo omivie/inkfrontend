@@ -13,22 +13,50 @@ import { AdminAPI, FilterState, icon, esc } from '../app.js';
 import { Toast } from '../components/toast.js';
 import { Modal } from '../components/modal.js';
 
+// Fetch a larger page from the backend so client-side product filters
+// (brand/active/source/product_type) still leave a usable list per page.
+const FETCH_SIZE = 250;
 const PAGE_SIZE = 50;
 const MISSING = '—';
+const CLEARED_KEY = 'admin_pending_changes_cleared_ids';
 
 // ---- Module state ----
 let _container = null;
 let _summary = null;
+// `_rawItems` is the unfiltered set fetched from the backend; `_items` is what
+// we render (after client-side product filters and the cleared-id hide list).
+let _rawItems = [];
 let _items = [];
 let _pagination = { total: 0, page: 1, limit: PAGE_SIZE };
 let _selected = new Set();
 let _expanded = new Set();
 let _filters = { status: 'pending', change_type: '', field: '', search: '' };
+// Product-level filters (mirror the Image Audit / Products page set).
+let _productFilters = { brand: '', active: '', images: '', source: '', product_type: '', stock: '' };
+let _brands = [];
 let _page = 1;
 let _loadToken = 0;
-// Product info cache (id -> { name, image_url }) — pending_product_changes.old_data/new_data
-// only stores the changed fields, so name/current image must be looked up from products.
+// Product info cache (id -> { name, image_url, is_active, source, product_type, brand_id })
+// — pending_product_changes.old_data/new_data only stores the changed fields,
+// so name/current image and the attributes we filter on must come from products.
 const _productCache = new Map();
+// Set of pending_product_changes.id that the user has "cleared" from the
+// Denied view. Persists locally so the choice survives reloads — the backend
+// has no clear/delete endpoint at the moment.
+let _clearedIds = new Set();
+
+function loadClearedIds() {
+  try {
+    const raw = localStorage.getItem(CLEARED_KEY);
+    if (!raw) return new Set();
+    const arr = JSON.parse(raw);
+    return new Set(Array.isArray(arr) ? arr : []);
+  } catch { return new Set(); }
+}
+
+function persistClearedIds() {
+  try { localStorage.setItem(CLEARED_KEY, JSON.stringify([..._clearedIds])); } catch {}
+}
 
 /** Resolve a storage path or URL to a usable <img src>. */
 function resolveImageSrc(value) {
@@ -133,6 +161,23 @@ function ensureStyles() {
     .pc-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 12px; }
     .pc-toolbar .admin-search input { width: 240px; }
     .pc-toolbar .admin-select { width: auto; min-width: 140px; }
+
+    .pc-tabs { display: flex; gap: 2px; margin-bottom: 12px; border-bottom: 1px solid var(--border); }
+    .pc-tab { background: none; border: none; padding: 10px 18px; font-size: 14px; font-weight: 600; color: var(--text-muted); cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -1px; display: inline-flex; align-items: center; gap: 8px; }
+    .pc-tab:hover { color: var(--text); }
+    .pc-tab--active { color: var(--text); border-bottom-color: var(--cyan); }
+    .pc-tab__count { display: inline-flex; align-items: center; padding: 1px 7px; border-radius: 999px; background: var(--surface-hover); color: var(--text-secondary); font-size: 11px; font-weight: 700; min-width: 18px; justify-content: center; }
+    .pc-tab--active .pc-tab__count { background: var(--cyan-dim); color: var(--cyan-text); }
+
+    .pc-row__actions { display: flex; gap: 6px; justify-content: flex-end; align-items: center; }
+    .pc-row__action { padding: 6px 12px; font-size: 12px; font-weight: 600; border-radius: 6px; border: 1px solid transparent; cursor: pointer; }
+    .pc-row__action--approve { background: var(--success-dim); color: var(--success); border-color: transparent; }
+    .pc-row__action--approve:hover { background: var(--success); color: #fff; }
+    .pc-row__action--deny { background: var(--danger-dim); color: #f87171; }
+    .pc-row__action--deny:hover { background: #ef4444; color: #fff; }
+    .pc-row__action--clear { background: var(--surface-hover); color: var(--text-secondary); border-color: var(--border); }
+    .pc-row__action--clear:hover { background: var(--text-muted); color: #fff; }
+    .pc-row__action[disabled] { opacity: 0.5; cursor: not-allowed; }
 
     .pc-bulk-bar { display: flex; align-items: center; gap: 8px; padding: 10px 12px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); margin-bottom: 8px; flex-wrap: wrap; }
     .pc-bulk-bar__count { font-size: 13px; color: var(--text-secondary); }
@@ -274,12 +319,8 @@ function syncFilterControls() {
   const c = _container;
   if (!c) return;
   const search = c.querySelector('#pc-search');
-  const status = c.querySelector('#pc-status');
-  const type = c.querySelector('#pc-type');
   const field = c.querySelector('#pc-field');
   if (search && search.value !== _filters.search) search.value = _filters.search;
-  if (status) status.value = _filters.status;
-  if (type) type.value = _filters.change_type;
   if (field) field.value = _filters.field;
 }
 
@@ -294,27 +335,87 @@ function buildFieldOptions() {
     .join('');
 }
 
+function renderTabs() {
+  const wrap = document.getElementById('pc-tabs');
+  if (!wrap) return;
+  const pendingActive = _filters.status === 'pending' ? ' pc-tab--active' : '';
+  const deniedActive = _filters.status === 'rejected' ? ' pc-tab--active' : '';
+  const pendingCount = _summary?.by_status?.pending ?? _summary?.pending_total ?? null;
+  const deniedCount = _summary?.by_status?.rejected ?? null;
+  const fmtCount = (c) => c == null ? '' : `<span class="pc-tab__count">${Number(c).toLocaleString('en-NZ')}</span>`;
+  wrap.innerHTML = `
+    <button class="pc-tab${pendingActive}" data-pc-tab="pending">Pending ${fmtCount(pendingCount)}</button>
+    <button class="pc-tab${deniedActive}" data-pc-tab="rejected">Denied ${fmtCount(deniedCount)}</button>
+  `;
+  wrap.querySelectorAll('[data-pc-tab]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const next = btn.dataset.pcTab;
+      if (_filters.status === next) return;
+      _filters.status = next;
+      _page = 1;
+      _selected.clear();
+      _expanded.clear();
+      renderTabs();
+      load();
+    });
+  });
+}
+
+function buildBrandOptions() {
+  let html = '<option value="">All Brands</option>';
+  for (const b of _brands) {
+    const name = typeof b === 'string' ? b : b.name || b.brand || String(b);
+    const val = (typeof b === 'object' && b.id) ? b.id : name;
+    const sel = String(val) === String(_productFilters.brand) ? ' selected' : '';
+    html += `<option value="${esc(val)}"${sel}>${esc(name)}</option>`;
+  }
+  return html;
+}
+
 function renderToolbar() {
   const wrap = document.getElementById('pc-toolbar');
   if (!wrap) return;
+  const sel = (cur, val) => cur === val ? ' selected' : '';
+  const pf = _productFilters;
   wrap.innerHTML = `
     <div class="admin-search">
       <span class="admin-search__icon">${icon('search', 14, 14)}</span>
       <input type="search" id="pc-search" placeholder="Search SKU or name…" value="${esc(_filters.search)}">
     </div>
-    <select class="admin-select" id="pc-status">
-      <option value="pending"${_filters.status === 'pending' ? ' selected' : ''}>Pending</option>
-      <option value="partial"${_filters.status === 'partial' ? ' selected' : ''}>Partial</option>
-      <option value="approved"${_filters.status === 'approved' ? ' selected' : ''}>Approved</option>
-      <option value="rejected"${_filters.status === 'rejected' ? ' selected' : ''}>Rejected</option>
-      <option value="superseded"${_filters.status === 'superseded' ? ' selected' : ''}>Superseded</option>
-      <option value=""${_filters.status === '' ? ' selected' : ''}>All</option>
+    <select class="admin-select" id="pc-brand">${buildBrandOptions()}</select>
+    <select class="admin-select" id="pc-active">
+      <option value="">All Status</option>
+      <option value="true"${sel(pf.active, 'true')}>Active</option>
+      <option value="false"${sel(pf.active, 'false')}>Inactive</option>
     </select>
-    <select class="admin-select" id="pc-type">
-      <option value=""${_filters.change_type === '' ? ' selected' : ''}>All types</option>
-      <option value="ADD"${_filters.change_type === 'ADD' ? ' selected' : ''}>ADD</option>
-      <option value="UPDATE"${_filters.change_type === 'UPDATE' ? ' selected' : ''}>UPDATE</option>
-      <option value="DEACTIVATE"${_filters.change_type === 'DEACTIVATE' ? ' selected' : ''}>DEACTIVATE</option>
+    <select class="admin-select" id="pc-images">
+      <option value="">All Images</option>
+      <option value="has-images"${sel(pf.images, 'has-images')}>Has Images</option>
+      <option value="no-images"${sel(pf.images, 'no-images')}>No Images</option>
+    </select>
+    <select class="admin-select" id="pc-source">
+      <option value="">All Sources</option>
+      <option value="genuine"${sel(pf.source, 'genuine')}>Genuine</option>
+      <option value="compatible"${sel(pf.source, 'compatible')}>Compatible</option>
+      <option value="remanufactured"${sel(pf.source, 'remanufactured')}>Remanufactured</option>
+      <option value="ribbon"${sel(pf.source, 'ribbon')}>Ribbon</option>
+    </select>
+    <select class="admin-select" id="pc-product-type">
+      <option value="">All Types</option>
+      <option value="ink_cartridge"${sel(pf.product_type, 'ink_cartridge')}>Ink Cartridge</option>
+      <option value="toner_cartridge"${sel(pf.product_type, 'toner_cartridge')}>Toner</option>
+      <option value="printer_ribbon"${sel(pf.product_type, 'printer_ribbon')}>Printer Ribbon</option>
+      <option value="typewriter_ribbon"${sel(pf.product_type, 'typewriter_ribbon')}>Typewriter Ribbon</option>
+      <option value="correction_tape"${sel(pf.product_type, 'correction_tape')}>Correction Tape</option>
+      <option value="drum"${sel(pf.product_type, 'drum')}>Drum</option>
+      <option value="maintenance_kit"${sel(pf.product_type, 'maintenance_kit')}>Maintenance Kit</option>
+      <option value="paper"${sel(pf.product_type, 'paper')}>Paper</option>
+    </select>
+    <select class="admin-select" id="pc-stock">
+      <option value="">All Stock</option>
+      <option value="in_stock"${sel(pf.stock, 'in_stock')}>In Stock</option>
+      <option value="low_stock"${sel(pf.stock, 'low_stock')}>Low Stock</option>
+      <option value="out_of_stock"${sel(pf.stock, 'out_of_stock')}>Out of Stock</option>
     </select>
     <select class="admin-select" id="pc-field">${buildFieldOptions()}</select>
     <span style="flex:1"></span>
@@ -327,9 +428,13 @@ function renderToolbar() {
     const v = e.target.value.trim();
     searchTimer = setTimeout(() => { _filters.search = v; _page = 1; load(); }, 300);
   });
-  wrap.querySelector('#pc-status').addEventListener('change', (e) => { _filters.status = e.target.value; _page = 1; load(); });
-  wrap.querySelector('#pc-type').addEventListener('change', (e) => { _filters.change_type = e.target.value; _page = 1; renderSummary(); load(); });
   wrap.querySelector('#pc-field').addEventListener('change', (e) => { _filters.field = e.target.value; _page = 1; renderSummary(); load(); });
+  wrap.querySelector('#pc-brand').addEventListener('change', (e) => { _productFilters.brand = e.target.value; _page = 1; applyClientFilters(); });
+  wrap.querySelector('#pc-active').addEventListener('change', (e) => { _productFilters.active = e.target.value; _page = 1; applyClientFilters(); });
+  wrap.querySelector('#pc-images').addEventListener('change', (e) => { _productFilters.images = e.target.value; _page = 1; applyClientFilters(); });
+  wrap.querySelector('#pc-source').addEventListener('change', (e) => { _productFilters.source = e.target.value; _page = 1; applyClientFilters(); });
+  wrap.querySelector('#pc-product-type').addEventListener('change', (e) => { _productFilters.product_type = e.target.value; _page = 1; applyClientFilters(); });
+  wrap.querySelector('#pc-stock').addEventListener('change', (e) => { _productFilters.stock = e.target.value; _page = 1; applyClientFilters(); });
   wrap.querySelector('#pc-refresh').addEventListener('click', refreshAll);
 }
 
@@ -385,6 +490,8 @@ function renderRow(item) {
     ? `<img class="pc-row__thumb" src="${esc(thumbSrc)}" alt="" loading="lazy">`
     : `<div class="pc-row__thumb pc-row__thumb--empty">${icon('products', 18, 18)}</div>`;
 
+  const actions = renderRowActions(item);
+
   return `
     <tr class="pc-row${superseded}" data-id="${esc(item.id)}">
       <td><input type="checkbox" class="pc-checkbox pc-row-check" data-id="${esc(item.id)}" ${_selected.has(item.id) ? 'checked' : ''} ${reviewable ? '' : 'disabled'}></td>
@@ -397,10 +504,8 @@ function renderRow(item) {
           </div>
         </div>
       </td>
-      <td>${changeTypeBadge(item.change_type)}</td>
-      <td>${statusBadge(item.status)}</td>
       <td><div class="pc-row__fields">${fieldChips}${more}</div></td>
-      <td>${fmtRelative(item.created_at || item.detected_at)}</td>
+      <td>${actions}</td>
       <td style="text-align:right">
         <button class="pc-row__expand" aria-expanded="${isExpanded ? 'true' : 'false'}" data-toggle="${esc(item.id)}" title="${isExpanded ? 'Collapse' : 'Expand'}">
           <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
@@ -409,6 +514,26 @@ function renderRow(item) {
     </tr>
     ${isExpanded ? renderDetailRow(item) : ''}
   `;
+}
+
+function renderRowActions(item) {
+  const reviewable = item.status === 'pending' || item.status === 'partial';
+  if (reviewable) {
+    return `
+      <div class="pc-row__actions">
+        <button class="pc-row__action pc-row__action--approve" data-row-action="approve" data-id="${esc(item.id)}" title="Approve all pending fields on this row">Approve</button>
+        <button class="pc-row__action pc-row__action--deny" data-row-action="deny" data-id="${esc(item.id)}" title="Deny all pending fields on this row">Deny</button>
+      </div>
+    `;
+  }
+  if (item.status === 'rejected') {
+    return `
+      <div class="pc-row__actions">
+        <button class="pc-row__action pc-row__action--clear" data-row-action="clear" data-id="${esc(item.id)}" title="Remove from the Denied list">Clear</button>
+      </div>
+    `;
+  }
+  return `<div class="pc-row__actions"><span class="admin-text-muted" style="font-size:12px">${esc(item.status)}</span></div>`;
 }
 
 function renderDetailRow(item) {
@@ -459,7 +584,7 @@ function renderDetailRow(item) {
 
   return `
     <tr class="pc-detail" data-detail-id="${esc(item.id)}">
-      <td colspan="7">
+      <td colspan="5">
         <div class="pc-detail__inner">
           <div class="pc-detail__header">
             <div class="pc-detail__meta">
@@ -500,10 +625,8 @@ function renderTable() {
           <tr>
             <th style="width:40px"></th>
             <th>Name / SKU</th>
-            <th>Type</th>
-            <th>Status</th>
             <th>Changed Fields</th>
-            <th>Age</th>
+            <th style="width:200px;text-align:right">Actions</th>
             <th style="width:40px"></th>
           </tr>
         </thead>
@@ -535,7 +658,7 @@ function renderPagination() {
       if (btn.dataset.action === 'prev') _page = Math.max(1, _page - 1);
       if (btn.dataset.action === 'next') _page = Math.min(totalPages, _page + 1);
       window.scrollTo({ top: 0, behavior: 'smooth' });
-      load();
+      applyClientFilters();
     });
   });
 }
@@ -569,7 +692,13 @@ function bindTableEvents() {
       const action = rowBtn.dataset.rowAction;
       const noteEl = document.getElementById(`pc-note-${id}`);
       const note = noteEl ? noteEl.value.trim() : '';
-      reviewWholeRow(id, action === 'approve-all' ? 'approved' : 'rejected', note, rowBtn);
+      if (action === 'clear') {
+        clearItem(id, rowBtn);
+        return;
+      }
+      // approve / deny / approve-all / reject-all all funnel through reviewWholeRow
+      const decision = (action === 'approve' || action === 'approve-all') ? 'approved' : 'rejected';
+      reviewWholeRow(id, decision, note, rowBtn);
       return;
     }
   });
@@ -585,18 +714,19 @@ function bindTableEvents() {
 
 // ---- Actions ----
 async function reviewField(id, field, decision, note, btn) {
-  const item = _items.find(i => i.id === id);
+  const item = _rawItems.find(i => i.id === id);
   if (!item) return;
   const decisions = { [field]: decision };
   btn.disabled = true;
   btn.textContent = decision === 'approved' ? 'Approving…' : 'Rejecting…';
   try {
     const result = await AdminAPI.reviewPendingChange(id, decisions, note);
-    // Merge updated state back
     if (result) Object.assign(item, result);
     Toast.success(`${field}: ${decision}`);
-    renderTable();
-    // If row is now fully resolved, refresh summary so counts stay in sync
+    if (item.status !== _filters.status) {
+      _rawItems = _rawItems.filter(i => i.id !== id);
+    }
+    applyClientFilters();
     if (item.status === 'approved' || item.status === 'rejected') {
       loadSummary();
     }
@@ -608,7 +738,7 @@ async function reviewField(id, field, decision, note, btn) {
 }
 
 async function reviewWholeRow(id, decision, note, btn) {
-  const item = _items.find(i => i.id === id);
+  const item = _rawItems.find(i => i.id === id);
   if (!item) return;
   const fields = getChangedFields(item).filter(f => {
     const d = item.field_decisions?.[f] || 'pending';
@@ -626,9 +756,12 @@ async function reviewWholeRow(id, decision, note, btn) {
   try {
     const result = await AdminAPI.reviewPendingChange(id, decisions, note);
     if (result) Object.assign(item, result);
-    Toast.success(`Row ${decision}`);
+    Toast.success(decision === 'approved' ? 'Approved' : 'Denied');
     _expanded.delete(id);
-    renderTable();
+    if (item.status !== _filters.status) {
+      _rawItems = _rawItems.filter(i => i.id !== id);
+    }
+    applyClientFilters();
     loadSummary();
   } catch (e) {
     Toast.error(`Failed: ${e.message}`);
@@ -672,6 +805,7 @@ async function loadSummary() {
   if (!_container) return;
   _summary = summary || { pending_total: 0, by_type: {}, by_field: {}, oldest_pending: null, import_runs_with_pending: 0 };
   renderSummary();
+  renderTabs();
   // Refresh field options in case new fields appeared
   const fieldSel = document.getElementById('pc-field');
   if (fieldSel) fieldSel.innerHTML = buildFieldOptions();
@@ -683,46 +817,94 @@ async function load() {
   const token = ++_loadToken;
   wrap.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;padding:60px"><div class="admin-loading__spinner"></div></div>`;
 
+  // Always pull a larger set from the backend so the client-side product filters
+  // and cleared-id hide list still leave a usable list. We paginate locally.
   const filters = {};
   if (_filters.status) filters.status = _filters.status;
-  if (_filters.change_type) filters.change_type = _filters.change_type;
   if (_filters.field) filters.field = _filters.field;
   if (_filters.search) filters.search = _filters.search;
 
-  const data = await AdminAPI.getPendingChanges(filters, _page, PAGE_SIZE);
+  const data = await AdminAPI.getPendingChanges(filters, 1, FETCH_SIZE);
   if (!_container || token !== _loadToken) return;
 
   const items = data?.items || data?.changes || (Array.isArray(data) ? data : []);
-  const pagination = data?.pagination || { total: data?.total ?? items.length, page: _page, limit: PAGE_SIZE };
+  _rawItems = items;
 
-  _items = items;
-  _pagination = pagination;
+  // Hydrate product attributes synchronously before applying filters so they
+  // (brand, source, product_type, is_active) actually take effect on first
+  // render. Without this, the filters would silently match nothing on cold
+  // load because _productCache hasn't been populated yet.
+  await hydrateProductInfo(token);
+  if (!_container || token !== _loadToken) return;
+
+  applyClientFilters();
+}
+
+/** Filter `_rawItems` by `_productFilters` + cleared-id hide list, then paginate. */
+function applyClientFilters() {
+  const pf = _productFilters;
+  const filtered = _rawItems.filter(item => {
+    if (_filters.status === 'rejected' && _clearedIds.has(item.id)) return false;
+    const cached = item.product_id ? _productCache.get(item.product_id) : null;
+    if (pf.brand && (!cached || String(cached.brand_id) !== String(pf.brand))) return false;
+    if (pf.active !== '') {
+      const want = pf.active === 'true';
+      if (!cached || !!cached.is_active !== want) return false;
+    }
+    if (pf.source && (!cached || cached.source !== pf.source)) return false;
+    if (pf.product_type && (!cached || cached.product_type !== pf.product_type)) return false;
+    if (pf.images === 'has-images' && (!cached || !cached.image_url)) return false;
+    if (pf.images === 'no-images' && cached && cached.image_url) return false;
+    if (pf.stock) {
+      if (!cached) return false;
+      if (pf.stock === 'in_stock' && !(cached.stock_quantity > 5)) return false;
+      if (pf.stock === 'low_stock' && !(cached.stock_quantity > 0 && cached.stock_quantity <= 5)) return false;
+      if (pf.stock === 'out_of_stock' && !(cached.stock_quantity === 0 || cached.stock_quantity == null)) return false;
+    }
+    return true;
+  });
+
+  const total = filtered.length;
+  const start = (_page - 1) * PAGE_SIZE;
+  _items = filtered.slice(start, start + PAGE_SIZE);
+  _pagination = { total, page: _page, limit: PAGE_SIZE };
   // Drop selections that are no longer visible
   _selected.forEach(id => { if (!_items.find(i => i.id === id)) _selected.delete(id); });
 
   renderTable();
   renderPagination();
   renderBulkBar();
-
-  // Hydrate product names + current images, then re-render rows once available.
-  hydrateProductInfo(token);
 }
 
-/** Fetch name + current image_url for products referenced by the visible rows. */
+/** Fetch product attributes used for display + filtering for the current batch. */
 async function hydrateProductInfo(token) {
   const sb = (typeof Auth !== 'undefined' && Auth.supabase) ? Auth.supabase : null;
   if (!sb) return;
-  const ids = [...new Set(_items.map(i => i.product_id).filter(id => id && !_productCache.has(id)))];
+  const ids = [...new Set(_rawItems.map(i => i.product_id).filter(id => id && !_productCache.has(id)))];
   if (!ids.length) return;
   try {
-    const { data, error } = await sb.from('products').select('id, name, image_url').in('id', ids);
+    const { data, error } = await sb.from('products')
+      .select('id, name, image_url, is_active, source, product_type, brand_id, stock_quantity')
+      .in('id', ids);
     if (error || !data) return;
     if (token !== _loadToken) return;
-    for (const p of data) _productCache.set(p.id, { name: p.name, image_url: p.image_url });
-    renderTable();
+    for (const p of data) _productCache.set(p.id, p);
   } catch {
     // Silent — row will just show MISSING name and a placeholder thumbnail.
   }
+}
+
+/** Hide a denied row from the Denied list. Persists in localStorage. */
+function clearItem(id, btn) {
+  if (btn) btn.disabled = true;
+  _clearedIds.add(id);
+  persistClearedIds();
+  // Drop from raw list and re-apply filters so the row disappears.
+  _rawItems = _rawItems.filter(i => i.id !== id);
+  _selected.delete(id);
+  _expanded.delete(id);
+  applyClientFilters();
+  Toast.success('Cleared from Denied');
 }
 
 async function refreshAll() {
@@ -735,15 +917,27 @@ async function render() {
     <div class="admin-page-header">
       <div>
         <h1>${icon('products', 20, 20)} Pending Changes</h1>
-        <p style="font-size:13px;color:var(--text-muted);margin:4px 0 0">Review proposed product changes from the latest import. Approve or reject per field, or in bulk.</p>
+        <p style="font-size:13px;color:var(--text-muted);margin:4px 0 0">Review proposed product changes from the latest import. Approve or deny per row, or in bulk.</p>
       </div>
     </div>
     <div id="pc-summary" class="pc-summary"></div>
+    <div id="pc-tabs" class="pc-tabs"></div>
     <div id="pc-toolbar" class="pc-toolbar"></div>
     <div id="pc-bulk" class="pc-bulk-bar"></div>
     <div id="pc-table"></div>
     <div id="pc-pagination" class="pc-pagination"></div>
   `;
+
+  // Load brands once for the filter dropdown.
+  if (!_brands.length) {
+    try {
+      const brandsData = await AdminAPI.getBrands();
+      if (!_container) return;
+      _brands = (brandsData && Array.isArray(brandsData)) ? brandsData : [];
+    } catch { _brands = []; }
+  }
+
+  renderTabs();
   renderToolbar();
   renderBulkBar();
   await Promise.all([loadSummary(), load()]);
@@ -757,10 +951,13 @@ export default {
     FilterState.showBar(false);
     _container = container;
     _summary = null;
+    _rawItems = [];
     _items = [];
     _selected = new Set();
     _expanded = new Set();
     _filters = { status: 'pending', change_type: '', field: '', search: '' };
+    _productFilters = { brand: '', active: '', images: '', source: '', product_type: '', stock: '' };
+    _clearedIds = loadClearedIds();
     _page = 1;
     await render();
   },
@@ -768,6 +965,7 @@ export default {
   destroy() {
     _loadToken++;
     _container = null;
+    _rawItems = [];
     _items = [];
     _selected.clear();
     _expanded.clear();
