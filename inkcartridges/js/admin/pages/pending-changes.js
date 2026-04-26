@@ -26,6 +26,17 @@ let _expanded = new Set();
 let _filters = { status: 'pending', change_type: '', field: '', search: '' };
 let _page = 1;
 let _loadToken = 0;
+// Product info cache (id -> { name, image_url }) — pending_product_changes.old_data/new_data
+// only stores the changed fields, so name/current image must be looked up from products.
+const _productCache = new Map();
+
+/** Resolve a storage path or URL to a usable <img src>. */
+function resolveImageSrc(value) {
+  if (!value || typeof value !== 'string') return null;
+  if (typeof window.storageUrl === 'function') return window.storageUrl(value);
+  if (/^https?:\/\//.test(value) || value.startsWith('/')) return value;
+  return null;
+}
 
 // ---- Helpers ----
 function fmtDate(iso) {
@@ -56,8 +67,11 @@ function fmtFieldValue(field, value) {
   if (/_(price|cost)$|^price$|^cost$/.test(field) && !Number.isNaN(Number(value))) {
     return `$${Number(value).toFixed(2)}`;
   }
-  if (field === 'image_url' && typeof value === 'string' && value.startsWith('http')) {
-    return `<a href="${esc(value)}" target="_blank" rel="noopener" class="pc-link" title="${esc(value)}">${esc(value.length > 60 ? value.slice(0, 57) + '…' : value)}</a>`;
+  if (field === 'image_url' && typeof value === 'string') {
+    const src = resolveImageSrc(value);
+    if (src) {
+      return `<a href="${esc(src)}" target="_blank" rel="noopener" class="pc-row__field-thumb" title="${esc(value)}"><img src="${esc(src)}" alt="" loading="lazy"></a>`;
+    }
   }
   return esc(String(value));
 }
@@ -350,11 +364,12 @@ function renderBulkBar() {
 
 function renderRow(item) {
   const fields = getChangedFields(item);
-  const newImageUrl = typeof item.new_data?.image_url === 'string' && /^https?:\/\//.test(item.new_data.image_url) ? item.new_data.image_url : null;
-  const oldImageUrl = typeof item.old_data?.image_url === 'string' && /^https?:\/\//.test(item.old_data.image_url) ? item.old_data.image_url : null;
+  const cached = item.product_id ? _productCache.get(item.product_id) : null;
+  const newImageSrc = resolveImageSrc(item.new_data?.image_url);
+  const oldImageSrc = resolveImageSrc(item.old_data?.image_url) || resolveImageSrc(cached?.image_url);
   const fieldChips = fields.slice(0, 6).map(f => {
-    if (f === 'image_url' && newImageUrl) {
-      return `<a href="${esc(newImageUrl)}" target="_blank" rel="noopener" class="pc-row__field-thumb" title="New image_url — click to open"><img src="${esc(newImageUrl)}" alt="new image" loading="lazy"></a>`;
+    if (f === 'image_url' && newImageSrc) {
+      return `<a href="${esc(newImageSrc)}" target="_blank" rel="noopener" class="pc-row__field-thumb" title="New image_url — click to open"><img src="${esc(newImageSrc)}" alt="new image" loading="lazy"></a>`;
     }
     return `<span class="pc-row__field-chip">${esc(f)}</span>`;
   }).join('');
@@ -363,8 +378,8 @@ function renderRow(item) {
   const isExpanded = _expanded.has(item.id);
   const superseded = item.status === 'superseded' ? ' pc-row--superseded' : '';
   const sku = item.sku || item.new_data?.sku || item.old_data?.sku || MISSING;
-  const name = item.new_data?.name || item.old_data?.name || item.product_name || '';
-  const thumbSrc = oldImageUrl || newImageUrl;
+  const name = item.new_data?.name || item.old_data?.name || cached?.name || item.product_name || '';
+  const thumbSrc = oldImageSrc || newImageSrc;
   const thumb = thumbSrc
     ? `<img class="pc-row__thumb" src="${esc(thumbSrc)}" alt="" loading="lazy">`
     : `<div class="pc-row__thumb pc-row__thumb--empty">${icon('products', 18, 18)}</div>`;
@@ -687,6 +702,26 @@ async function load() {
   renderTable();
   renderPagination();
   renderBulkBar();
+
+  // Hydrate product names + current images, then re-render rows once available.
+  hydrateProductInfo(token);
+}
+
+/** Fetch name + current image_url for products referenced by the visible rows. */
+async function hydrateProductInfo(token) {
+  const sb = (typeof Auth !== 'undefined' && Auth.supabase) ? Auth.supabase : null;
+  if (!sb) return;
+  const ids = [...new Set(_items.map(i => i.product_id).filter(id => id && !_productCache.has(id)))];
+  if (!ids.length) return;
+  try {
+    const { data, error } = await sb.from('products').select('id, name, image_url').in('id', ids);
+    if (error || !data) return;
+    if (token !== _loadToken) return;
+    for (const p of data) _productCache.set(p.id, { name: p.name, image_url: p.image_url });
+    renderTable();
+  } catch {
+    // Silent — row will just show MISSING name and a placeholder thumbnail.
+  }
 }
 
 async function refreshAll() {
