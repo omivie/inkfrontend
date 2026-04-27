@@ -244,6 +244,108 @@ function productHasImage(p) {
   return false;
 }
 
+const DROP_ALLOWED_TYPES = ['image/png', 'image/jpeg', 'image/webp', 'image/gif'];
+
+// Drag images from the OS straight onto a product row to add them to that product.
+// Avoids opening each product drawer one by one when bulk-attaching images.
+function setupRowImageDrop(tableContainer) {
+  let lastTargetRow = null;
+
+  const clearHighlight = () => {
+    if (lastTargetRow) {
+      lastTargetRow.classList.remove('row-drop-target');
+      lastTargetRow = null;
+    }
+    tableContainer.classList.remove('admin-table--drag-active');
+  };
+
+  const isFileDrag = (e) => {
+    const t = e.dataTransfer?.types;
+    if (!t) return false;
+    return Array.from(t).includes('Files');
+  };
+
+  tableContainer.addEventListener('dragenter', (e) => {
+    if (!isFileDrag(e)) return;
+    e.preventDefault();
+    tableContainer.classList.add('admin-table--drag-active');
+  });
+
+  tableContainer.addEventListener('dragover', (e) => {
+    if (!isFileDrag(e)) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'copy';
+    const row = e.target.closest?.('tr[data-row-key]');
+    if (row !== lastTargetRow) {
+      if (lastTargetRow) lastTargetRow.classList.remove('row-drop-target');
+      if (row) row.classList.add('row-drop-target');
+      lastTargetRow = row;
+    }
+  });
+
+  tableContainer.addEventListener('dragleave', (e) => {
+    if (!tableContainer.contains(e.relatedTarget)) clearHighlight();
+  });
+
+  tableContainer.addEventListener('drop', async (e) => {
+    if (!e.dataTransfer?.files?.length) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const row = e.target.closest?.('tr[data-row-key]');
+    clearHighlight();
+    if (!row) {
+      Toast.error('Drop the image directly onto a product row.');
+      return;
+    }
+    const productId = row.dataset.rowKey;
+    if (!productId) return;
+
+    const files = [...e.dataTransfer.files];
+    const valid = files.filter(f => DROP_ALLOWED_TYPES.includes(f.type));
+    if (!valid.length) {
+      Toast.error('Unsupported format. Use PNG, JPG, WebP, or GIF.');
+      return;
+    }
+    if (valid.length < files.length) {
+      Toast.error(`${files.length - valid.length} file${files.length - valid.length > 1 ? 's' : ''} skipped (unsupported format)`);
+    }
+
+    row.classList.add('row-uploading');
+    let uploaded = 0;
+    let primaryUrl = null;
+    for (const file of valid) {
+      try {
+        const res = await AdminAPI.uploadProductImage(productId, file);
+        const img = res?.data || res;
+        const url = img?.image_url || img?.url || null;
+        if (url && (img?.is_primary || !primaryUrl)) primaryUrl = url;
+        uploaded++;
+      } catch (err) {
+        Toast.error(`Upload failed: ${err.message}`);
+      }
+    }
+    row.classList.remove('row-uploading');
+
+    if (uploaded > 0) {
+      const productName = row.querySelector('.cell-truncate')?.textContent?.trim() || 'product';
+      Toast.success(`${uploaded} image${uploaded > 1 ? 's' : ''} added to ${productName}`);
+      if (primaryUrl) {
+        const dataRow = _table?.data?.find(r => String(r.id) === String(productId));
+        if (dataRow) {
+          dataRow.image_url = primaryUrl;
+          if (!dataRow.images) dataRow.images = [];
+          dataRow.images.unshift({ image_url: primaryUrl, is_primary: true });
+        }
+        const imgCell = row.querySelector('.cell-image');
+        if (imgCell) {
+          imgCell.innerHTML = `<img class="admin-product-thumb" src="${esc(primaryUrl)}" alt="" loading="lazy">`;
+        }
+      }
+      invalidateDiagCache();
+    }
+  });
+}
+
 async function loadProducts() {
   _table.setLoading(true);
   const LIMIT = 100;
@@ -2691,6 +2793,9 @@ async function renderProductsContent(contentEl) {
       emptyMessage: 'No products found',
       emptyIcon: icon('products', 40, 40),
     });
+
+    // Drag-drop images directly onto product rows
+    setupRowImageDrop(tableContainer);
 
     // Copy name buttons (event delegation)
     tableContainer.addEventListener('click', (e) => {
