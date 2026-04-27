@@ -389,7 +389,7 @@
                 if (price >= 100) {
                     shippingNoteEl.innerHTML = '<span class="shipping-note shipping-note--free">&#10003; Free NZ shipping included</span>';
                 } else {
-                    shippingNoteEl.innerHTML = '<span class="shipping-note">From $7 shipping &mdash; <a href="/html/shipping">free over $100</a></span>';
+                    shippingNoteEl.innerHTML = '<span class="shipping-note">From $7 shipping &mdash; free over $100</span>';
                 }
             }
 

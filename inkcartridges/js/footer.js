@@ -22,25 +22,6 @@
                     </div>
 
                     <div class="footer-column">
-                        <p class="footer-column__heading">Support</p>
-                        <ul class="footer-links">
-                            <li><a href="/html/contact.html">Contact Us</a></li>
-                            <li><a href="/html/terms.html">Terms &amp; Conditions</a></li>
-                            <li><a href="/html/privacy.html">Privacy Policy</a></li>
-                            <li><a href="/html/returns">Returns &amp; Refunds</a></li>
-                            <li><a href="/html/returns">Return Policy</a></li>
-                            <li><a href="/html/shipping">Shipping Information</a></li>
-                            <li><a href="/html/warranty">Warranty</a></li>
-                            <li><a href="/html/payment-info">Payment Information</a></li>
-                            <li><a href="/html/faq">FAQ</a></li>
-                            <li><a href="/html/tracking">Order Tracking</a></li>
-                            <li><a href="/html/disclaimer">Disclaimer</a></li>
-                            <li><a href="/html/legal">Legal</a></li>
-                            <li><a href="/html/about">About Us</a></li>
-                        </ul>
-                    </div>
-
-                    <div class="footer-column">
                         <p class="footer-column__heading">Contact</p>
                         <ul class="footer-links">
                             <li>
@@ -164,11 +145,7 @@
                 <p class="footer-copyright">
                     &copy; <span id="current-year"></span> InkCartridges.co.nz. All rights reserved.
                 </p>
-                <div class="footer-legal">
-                    <a href="/html/privacy.html">Privacy Policy</a>
-                    <a href="/html/terms.html">Terms &amp; Conditions</a>
-                </div>
-                <div class="footer-payment">
+<div class="footer-payment">
                     <span class="footer-payment__label">We accept:</span>
                     <div class="footer-payment__icons">
                         <span title="Visa">Visa</span>

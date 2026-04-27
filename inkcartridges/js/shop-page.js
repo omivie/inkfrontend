@@ -2552,11 +2552,12 @@
                                     ${product.compare_price && product.compare_price > price ? ` <span class="product-card__compare-price">${formatPrice(product.compare_price)}</span>` : ''}
                                 </div>
                                 ${stockStatus.class === 'contact-us' ? `
-                                <a href="/html/contact/" class="btn btn--primary btn--sm product-card__cart-btn product-card__contact-btn"
-                                   data-product-id="${product.id}"
-                                   aria-label="Contact us about ${Security.escapeAttr(displayName)}">
+                                <button class="btn btn--primary btn--sm product-card__cart-btn product-card__contact-btn"
+                                        data-product-id="${product.id}"
+                                        disabled
+                                        aria-label="Out of stock: ${Security.escapeAttr(displayName)}">
                                     Contact Us
-                                </a>` : `
+                                </button>` : `
                                 <button class="btn btn--primary btn--sm product-card__cart-btn"
                                         data-product-id="${product.id}"
                                         aria-label="Add ${Security.escapeAttr(displayName)} to cart"
