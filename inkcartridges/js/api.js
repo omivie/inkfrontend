@@ -571,13 +571,21 @@ const API = {
     // =========================================================================
 
     /**
-     * Get search autocomplete suggestions
-     * @param {string} query - Search query
-     * @param {number} limit - Max suggestions
+     * Lightweight type-ahead suggest (per frontend-search-spec §1.1).
+     * Backend handles all normalization (separators, synonyms, did-you-mean) —
+     * pass the user's query unchanged.
      */
-    async getAutocomplete(query, limit = 8) {
+    async getAutocomplete(query, limit = 6) {
         if (!query || query.length < 2) return { ok: true, data: { suggestions: [] } };
         return this.get(`/api/search/suggest?q=${encodeURIComponent(query)}&limit=${limit}`);
+    },
+
+    /**
+     * Richer autocomplete (alternate to /suggest, max limit 50).
+     */
+    async getAutocompleteRich(query, limit = 12) {
+        if (!query || query.length < 2) return { ok: true, data: { suggestions: [] } };
+        return this.get(`/api/search/autocomplete?q=${encodeURIComponent(query)}&limit=${limit}`);
     },
 
     /**
@@ -611,17 +619,26 @@ const API = {
     },
 
     /**
-     * Smart search - returns product cards for autocomplete dropdown
-     * @param {string} query - Search query
-     * @param {number} limit - Max results (default 48)
+     * Smart search — full search-results page (per frontend-search-spec §2.1).
+     * Returns full envelope: products, facets, total, pagination,
+     * matched_printer?, did_you_mean?, corrected_from?
+     * @param {string} query - Raw user query (no client-side normalization).
+     * @param {number|object} limitOrOpts - max results, or { limit, page, include }
      */
-    async smartSearch(query, limit = 48) {
+    async smartSearch(query, limitOrOpts = 24) {
         if (!query || query.length < 1) {
             return { ok: true, data: { products: [], total: 0 } };
         }
-        const endpoint = (typeof searchConfig !== 'undefined' ? searchConfig.apiUrl : '/api/search/smart')
-            + '?q=' + encodeURIComponent(query) + '&limit=' + limit;
-        return this.get(endpoint);
+        const opts = typeof limitOrOpts === 'object' && limitOrOpts !== null
+            ? limitOrOpts
+            : { limit: limitOrOpts };
+        const params = new URLSearchParams({ q: query });
+        params.set('limit', String(opts.limit ?? 24));
+        if (opts.page) params.set('page', String(opts.page));
+        // Default include: compat (printer-compat expansion) + description (for cards)
+        params.set('include', opts.include || 'compat,description');
+        const base = (typeof searchConfig !== 'undefined' ? searchConfig.apiUrl : '/api/search/smart');
+        return this.get(`${base}?${params}`);
     },
 
     /**

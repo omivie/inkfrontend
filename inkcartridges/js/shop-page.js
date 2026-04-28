@@ -2139,32 +2139,6 @@
             try {
                 const searchQuery = this.state.search;
 
-                // If the query is a known printer model, redirect to the strict
-                // printer-products page so users see ONLY compatible cartridges
-                // instead of noisy free-text matches. Retry once because the
-                // backend (Render) can cold-start and fail the first call.
-                let sugg = null;
-                try {
-                    sugg = await API.getAutocomplete(searchQuery, 1);
-                } catch (_) {
-                    try {
-                        await new Promise(r => setTimeout(r, 800));
-                        sugg = await API.getAutocomplete(searchQuery, 1);
-                    } catch (_) { /* give up — fall through to free-text */ }
-                }
-                if (navVersion !== undefined && this.navigationVersion !== navVersion) return;
-                const matched = sugg && sugg.ok && sugg.data && sugg.data.matched_printer;
-                if (matched && matched.slug) {
-                    const newURL = `${window.location.pathname}?printer=${encodeURIComponent(matched.slug)}`;
-                    history.replaceState({}, '', newURL);
-                    this.state.search = null;
-                    this.state.printer = matched.slug;
-                    this.state.level = 'printer-products';
-                    await this.loadPrinterProducts(navVersion);
-                    return;
-                }
-
-
                 // Detect if this is a product-type keyword (e.g. "ribbon", "toner")
                 const typeDetect = typeof SearchNormalize !== 'undefined'
                     ? SearchNormalize.detectProductType(searchQuery)
@@ -2172,6 +2146,9 @@
 
                 let products = [];
                 let isTypeQuery = false;
+                // Smart-search envelope (matched_printer / did_you_mean / corrected_from /
+                // facets / pagination). Populated only on the free-text path.
+                let smartData = null;
 
                 if (typeDetect) {
                     // Type-aware fetch: use getProducts + getRibbons in parallel
@@ -2230,116 +2207,50 @@
 
                     products = (response.ok && response.data?.products) ? response.data.products : [];
                 } else {
-                    // Standard text search path
-                    const response = await API.smartSearch(searchQuery, 100);
-
+                    // Free-text search path. The backend's /smart endpoint already
+                    // handles separator normalization, synonyms, model-number
+                    // splitting, did-you-mean rerun, printer-compat expansion, and
+                    // pack-first ordering — frontend just renders what comes back.
+                    // (Per frontend-search-spec §2.1 / §0 / §8.)
+                    const response = await API.smartSearch(searchQuery, {
+                        limit: 100,
+                        include: 'compat,description'
+                    });
                     if (navVersion !== undefined && this.navigationVersion !== navVersion) return;
+                    smartData = (response && response.ok) ? (response.data || null) : null;
+                    products = (smartData && Array.isArray(smartData.products)) ? smartData.products : [];
 
-                    products = (response.ok && response.data?.products) ? response.data.products : [];
-
-                    // If smart search returned nothing but backend matched a printer, redirect to it
-                    if (products.length === 0 && response.ok && response.data?.matched_printer?.slug) {
-                        const p2 = response.data.matched_printer;
+                    // matched_printer with no products → user typed a printer
+                    // model and the backend has no compat-mapped cartridges.
+                    // Hand off to the dedicated printer-products page so they
+                    // get the strict view (which can fall back to brand-level
+                    // recovery) instead of an ambiguous mixed result set.
+                    if (products.length === 0 && smartData?.matched_printer?.slug) {
+                        const p2 = smartData.matched_printer;
                         const newURL = `${window.location.pathname}?printer=${encodeURIComponent(p2.slug)}`;
                         history.replaceState({}, '', newURL);
                         this.state.search = null;
                         this.state.printer = p2.slug;
+                        this.state.printerName = p2.name || '';
                         this.state.level = 'printer-products';
                         await this.loadPrinterProducts(navVersion);
                         return;
                     }
-
-
-
-                    // If no product results, try searching for printer models
-                    if (products.length === 0) {
-                        try {
-                            const printerResponse = await API.searchPrinters(searchQuery);
-                            if (navVersion !== undefined && this.navigationVersion !== navVersion) return;
-
-                            const printers = Array.isArray(printerResponse.data) ? printerResponse.data : [];
-                            if (printers.length > 0) {
-                                if (printers.length === 1) {
-                                    const printer = printers[0];
-                                    const modelName = printer.full_name || printer.model_name || '';
-                                    const brand = printer.brand?.name || printer.brand || '';
-                                    this.state.printerModel = modelName;
-                                    this.state.printerBrand = brand;
-                                    this.state.level = 'printer-model-products';
-                                    this.state.search = null;
-
-                                    // Update URL to reflect printer context so subsequent searches start clean
-                                    const printerParams = new URLSearchParams({ printer_model: modelName });
-                                    if (brand) printerParams.set('printer_brand', brand);
-                                    if (this.state.type) printerParams.set('type', this.state.type);
-                                    history.replaceState({ ...this.state }, '', `/html/shop?${printerParams}`);
-
-                                    this.showLoading(false);
-                                    await this.loadPrinterModelProducts(navVersion);
-                                    return;
-                                }
-
-                                const existingIds = new Set();
-                                for (const printer of printers.slice(0, 5)) {
-                                    const slug = printer.slug;
-                                    if (!slug) continue;
-                                    try {
-                                        const printerProducts = await API.getProductsByPrinter(slug);
-                                        const pList = printerProducts.data?.products || printerProducts.data?.compatible_products || [];
-                                        if (printerProducts.ok && pList.length > 0) {
-                                            for (const p of pList) {
-                                                if (!existingIds.has(p.id)) {
-                                                    existingIds.add(p.id);
-                                                    products.push(p);
-                                                }
-                                            }
-                                        }
-                                    } catch (e) { /* skip this printer */ }
-                                }
-                            }
-                        } catch (e) {
-                            // Printer search failed — continue with empty results
-                        }
-                    }
-
-                    // If still no results, search descriptions & compatible devices via Supabase
-                    if (products.length === 0) {
-                        try {
-                            const sb = (typeof Auth !== 'undefined' && Auth.supabase)
-                                ? Auth.supabase
-                                : (typeof supabase !== 'undefined' && supabase.createClient && typeof Config !== 'undefined')
-                                    ? supabase.createClient(Config.SUPABASE_URL, Config.SUPABASE_ANON_KEY)
-                                    : null;
-                            if (sb) {
-                                const words = searchQuery.trim().split(/\s+/).filter(w => w.length >= 2);
-                                if (words.length > 0) {
-                                    let dbQuery = sb.from('products')
-                                        .select('*, brand:brands(name, slug)')
-                                        .eq('is_active', true);
-                                    for (const word of words) {
-                                        const pattern = '%' + word + '%';
-                                        dbQuery = dbQuery.or(
-                                            'description.ilike.' + pattern + ',compatible_devices_html.ilike.' + pattern
-                                        );
-                                    }
-                                    const { data } = await dbQuery.limit(100);
-                                    if (navVersion !== undefined && this.navigationVersion !== navVersion) return;
-                                    if (data && data.length > 0) {
-                                        products = data.map(p => ({
-                                            ...p,
-                                            brand: p.brand || {},
-                                            retail_price: p.retail_price ?? p.price,
-                                            image_url: typeof storageUrl === 'function' ? storageUrl(p.image_url) : (p.image_url || '')
-                                        }));
-                                    }
-                                }
-                            }
-                        } catch (e) {
-                            // Description search failed — continue with empty results
-                        }
-                    }
                 }
 
+
+                // Spec §2.2 — banners for did-you-mean / corrected_from /
+                // matched_printer must show on results AND on the empty state,
+                // so render before either branch.
+                this.renderSearchBanners(smartData, searchQuery);
+
+                // Spec §3.3 Case A — when /smart matched a printer, every
+                // product in the pool is fits-the-printer. Tag for the card
+                // renderer (mutates the array we render, not the API cache).
+                if (smartData?.matched_printer?.name) {
+                    const printerName = smartData.matched_printer.name;
+                    for (const p of products) p._fitsPrinter = printerName;
+                }
 
                 if (products.length > 0) {
                     let filteredProducts = products;
@@ -2406,16 +2317,19 @@
 
                     if (navVersion !== undefined && this.navigationVersion !== navVersion) return;
 
-                    this.renderProducts(compatible, this.elements.compatibleProducts, this.elements.compatibleSection, true);
-                    this.renderProducts(genuine, this.elements.genuineProducts, this.elements.genuineSection, false);
+                    // Spec §4 — when /smart returned a matched_printer, the
+                    // backend already pinned packs first. Don't re-sort.
+                    const preserveOrder = !!smartData?.matched_printer;
+                    this.renderProducts(compatible, this.elements.compatibleProducts, this.elements.compatibleSection, true, { preserveOrder });
+                    this.renderProducts(genuine, this.elements.genuineProducts, this.elements.genuineSection, false, { preserveOrder });
 
                     if (genuine.length === 0 && compatible.length === 0) {
-                        this.showEmpty(`No products found for "${searchQuery}".`);
+                        await this.renderZeroResultsRecovery(searchQuery, navVersion);
                     } else {
                         this.elements.levelProducts.hidden = false;
                     }
                 } else {
-                    this.showEmpty(`No products found for "${searchQuery}".`);
+                    await this.renderZeroResultsRecovery(searchQuery, navVersion);
                 }
             } catch (error) {
                 DebugLog.error('Failed to search products:', error);
@@ -2424,6 +2338,222 @@
             }
 
             this.showLoading(false);
+        },
+
+        // Spec §2.2 / §3.1 — render the corrected_from / did_you_mean /
+        // matched_printer notices. Mounted just inside #level-products so the
+        // banners appear above the genuine/compatible grids whether or not
+        // we have results.
+        renderSearchBanners(smartData, searchQuery) {
+            // Tear down any previous banners on this load
+            const existing = document.querySelector('#search-banners');
+            if (existing) existing.remove();
+
+            if (!smartData) return;
+
+            const matchedPrinter = smartData.matched_printer;
+            const correctedFrom = smartData.corrected_from;
+            const didYouMean = smartData.did_you_mean;
+            if (!matchedPrinter && !correctedFrom && !didYouMean) return;
+
+            const wrap = document.createElement('div');
+            wrap.id = 'search-banners';
+            wrap.className = 'search-banners';
+
+            // Hero banner — printer match takes precedence (spec §3.1).
+            if (matchedPrinter && matchedPrinter.name) {
+                const printerSlug = matchedPrinter.slug || '';
+                const total = smartData.total != null ? smartData.total : (Array.isArray(smartData.products) ? smartData.products.length : 0);
+                const subtext = total > 0
+                    ? `${total} cartridge${total === 1 ? '' : 's'} available — genuine and compatible options below.`
+                    : `Cartridges that fit your printer.`;
+                const hero = document.createElement('div');
+                hero.className = 'printer-hero';
+                hero.innerHTML = `
+                    <div class="printer-hero__icon" aria-hidden="true">
+                        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
+                    </div>
+                    <div class="printer-hero__body">
+                        <h2 class="printer-hero__title">Cartridges for ${Security.escapeHtml(matchedPrinter.name)}</h2>
+                        <p class="printer-hero__subtitle">${Security.escapeHtml(subtext)}</p>
+                    </div>
+                    ${printerSlug ? `<a class="printer-hero__cta" href="/html/shop?printer=${Security.escapeAttr(printerSlug)}">View printer page →</a>` : ''}
+                `;
+                wrap.appendChild(hero);
+            }
+
+            // Spec §2.2 — backend already auto-applied did_you_mean.
+            // Show "Showing results for X. Search instead for Y" banner.
+            if (correctedFrom) {
+                const banner = document.createElement('div');
+                banner.className = 'search-correction-banner';
+                // Prefer did_you_mean from the API; if absent, fall back to
+                // the most common brand name in the result set (the live API
+                // sometimes returns corrected_from without did_you_mean).
+                const correctedTo = didYouMean || this._inferCorrectedTerm(smartData.products) || '';
+                const showingFor = correctedTo
+                    ? `Showing results for <strong>"${Security.escapeHtml(correctedTo)}"</strong>.`
+                    : `Showing similar results.`;
+                banner.innerHTML = `
+                    <span>${showingFor}</span>
+                    <a class="search-correction-banner__link" href="/html/shop?q=${Security.escapeAttr(correctedFrom)}">Search instead for "${Security.escapeHtml(correctedFrom)}"</a>
+                `;
+                wrap.appendChild(banner);
+            } else if (didYouMean) {
+                // Spec §2.2 — softer "did you mean" prompt below the result count.
+                const banner = document.createElement('div');
+                banner.className = 'search-did-you-mean';
+                banner.innerHTML = `
+                    Did you mean
+                    <a href="/html/shop?q=${Security.escapeAttr(didYouMean)}"><strong>"${Security.escapeHtml(didYouMean)}"</strong></a>?
+                `;
+                wrap.appendChild(banner);
+            }
+
+            // Insert at the top of #level-products (which holds the grids).
+            const host = this.elements.levelProducts;
+            if (host) host.insertBefore(wrap, host.firstChild);
+        },
+
+        // Heuristic fallback for the "Showing results for X" banner when the
+        // backend gave us corrected_from but no did_you_mean. Pick the most
+        // common brand name across the result set.
+        _inferCorrectedTerm(products) {
+            if (!Array.isArray(products) || products.length === 0) return '';
+            const counts = new Map();
+            for (const p of products) {
+                const name = p?.brand?.name;
+                if (!name) continue;
+                counts.set(name, (counts.get(name) || 0) + 1);
+            }
+            let best = '', bestCount = 0;
+            for (const [name, count] of counts) {
+                if (count > bestCount) { best = name; bestCount = count; }
+            }
+            // Only return if the brand dominates ≥40% of the result set;
+            // otherwise the correction is ambiguous.
+            return bestCount >= Math.max(2, products.length * 0.4) ? best : '';
+        },
+
+        // Spec §2.3 — recovery rails when /smart returns no products.
+        // Three rails: (1) compatible printers for SKU-shaped queries,
+        // (2) cartridges-for-your-printer via /by-printer,
+        // (3) static popular categories.
+        async renderZeroResultsRecovery(query, navVersion) {
+            // Hide both genuine/compatible sections; we'll render our own UI.
+            this.elements.compatibleSection.hidden = true;
+            this.elements.genuineSection.hidden = true;
+            this.elements.empty.hidden = true;
+            this.elements.levelProducts.hidden = false;
+
+            // Tear down any previous recovery panel
+            const old = document.querySelector('#search-recovery');
+            if (old) old.remove();
+
+            const panel = document.createElement('div');
+            panel.id = 'search-recovery';
+            panel.className = 'search-recovery';
+            panel.innerHTML = `
+                <div class="search-recovery__head">
+                    <h2 class="search-recovery__title">No results for “${Security.escapeHtml(query)}”</h2>
+                    <p class="search-recovery__subtitle">Here are some ways to find what you need.</p>
+                </div>
+                <div class="search-recovery__rails"></div>
+            `;
+            const railsHost = panel.querySelector('.search-recovery__rails');
+            this.elements.levelProducts.appendChild(panel);
+
+            const looksLikeSku = (q) => {
+                const t = (q || '').trim();
+                if (!t || /\s/.test(t)) return false;
+                if (t.length < 4) return false;
+                return /[A-Za-z]/.test(t) && /\d/.test(t);
+            };
+
+            // Rail 1: Compatible printers for this SKU
+            const railPromises = [];
+            if (looksLikeSku(query)) {
+                railPromises.push(
+                    API.getCompatiblePrinters(query)
+                        .then(r => ({ kind: 'compat', data: r?.ok ? r.data : null }))
+                        .catch(() => ({ kind: 'compat', data: null }))
+                );
+            }
+
+            // Rail 2: Cartridges for your printer (try query as a printer name)
+            railPromises.push(
+                API.searchByPrinter(query, { limit: 6 })
+                    .then(r => ({ kind: 'by-printer', data: r?.ok ? r.data : null }))
+                    .catch(() => ({ kind: 'by-printer', data: null }))
+            );
+
+            const results = await Promise.all(railPromises);
+            if (navVersion !== undefined && this.navigationVersion !== navVersion) return;
+
+            let renderedAny = false;
+
+            for (const r of results) {
+                if (r.kind === 'compat') {
+                    const printers = (r.data && Array.isArray(r.data.compatible_printers)) ? r.data.compatible_printers : [];
+                    if (printers.length === 0) continue;
+                    renderedAny = true;
+                    const cards = printers.slice(0, 4).map(p => {
+                        const name = Security.escapeHtml(p.name || p.full_name || p.model_name || '');
+                        const slug = Security.escapeAttr(p.slug || '');
+                        return `<a class="recovery-printer-card" href="/html/shop?printer=${slug}">
+                                    <span class="recovery-printer-card__name">${name}</span>
+                                </a>`;
+                    }).join('');
+                    railsHost.insertAdjacentHTML('beforeend', `
+                        <section class="search-recovery__rail">
+                            <h3 class="search-recovery__rail-title">This cartridge fits these printers</h3>
+                            <div class="search-recovery__rail-grid">${cards}</div>
+                        </section>
+                    `);
+                } else if (r.kind === 'by-printer') {
+                    const list = (r.data && Array.isArray(r.data.products)) ? r.data.products : [];
+                    if (list.length === 0) continue;
+                    renderedAny = true;
+                    const cards = list.slice(0, 6).map((p, i) => Products.renderCard(p, i)).join('');
+                    railsHost.insertAdjacentHTML('beforeend', `
+                        <section class="search-recovery__rail">
+                            <h3 class="search-recovery__rail-title">Cartridges for your printer</h3>
+                            <div class="search-recovery__rail-grid product-grid">${cards}</div>
+                        </section>
+                    `);
+                }
+            }
+
+            // Rail 3: popular categories — always render as the safety net.
+            const popular = [
+                { label: 'Brother Ink',   href: '/html/shop?brand=brother&category=ink' },
+                { label: 'HP Toner',      href: '/html/shop?brand=hp&category=toner' },
+                { label: 'Canon Ink',     href: '/html/shop?brand=canon&category=ink' },
+                { label: 'Epson Ink',     href: '/html/shop?brand=epson&category=ink' },
+                { label: 'Samsung Toner', href: '/html/shop?brand=samsung&category=toner' },
+                { label: 'OKI Toner',     href: '/html/shop?brand=oki&category=toner' },
+            ];
+            const popularCards = popular.map(p =>
+                `<a class="recovery-tile" href="${Security.escapeAttr(p.href)}">${Security.escapeHtml(p.label)}</a>`
+            ).join('');
+            railsHost.insertAdjacentHTML('beforeend', `
+                <section class="search-recovery__rail">
+                    <h3 class="search-recovery__rail-title">Browse popular categories</h3>
+                    <div class="search-recovery__rail-grid">${popularCards}</div>
+                </section>
+            `);
+
+            // Bind add-to-cart on any product cards in the by-printer rail
+            if (typeof Products !== 'undefined' && Products.attachCardListeners) {
+                Products.attachCardListeners(railsHost);
+            }
+
+            // If even the popular tiles didn't render (unreachable, but safe),
+            // fall back to the legacy empty state.
+            if (!renderedAny && railsHost.children.length === 0) {
+                panel.remove();
+                this.showEmpty(`No products found for "${query}".`);
+            }
         },
 
         // Get color style (delegates to shared ProductColors utility)
@@ -2458,7 +2588,7 @@
             return ProductSort.byYieldAndColor(products);
         },
 
-        renderProducts(products, container, section, isCompatible = false) {
+        renderProducts(products, container, section, isCompatible = false, options = {}) {
             container.innerHTML = '';
 
             if (products.length === 0) {
@@ -2468,8 +2598,10 @@
 
             section.hidden = false;
 
-            // Sort products: singles by color, then value packs at end
-            const sortedProducts = this.sortProducts([...products]);
+            // Default: sort by yield/color. Spec §4: when smart-search has
+            // pinned bundle-packs at the top of the pool, skip the re-sort
+            // so the backend's order survives.
+            const sortedProducts = options.preserveOrder ? [...products] : this.sortProducts([...products]);
 
             // Render all products in a single wrapping grid
             sortedProducts.forEach(product => {
@@ -2527,11 +2659,26 @@
             // Check if product is already a favourite
             const isFav = typeof Favourites !== 'undefined' && Favourites.isFavourite && Favourites.isFavourite(product.id);
 
+            // Spec §3.3 — "Fits Your Printer" badge when /smart matched a printer.
+            const fitsPrinterBadge = product._fitsPrinter
+                ? `<span class="product-card__badge product-card__badge--fits-printer" title="Fits ${Security.escapeAttr(product._fitsPrinter)}">Fits Your Printer</span>`
+                : '';
+
+            // Spec §4 — bundle-pack visual differentiation.
+            const packTypeRibbon = (() => {
+                const pt = (product.pack_type || '').toLowerCase();
+                if (pt === 'value_pack') return `<span class="product-card__ribbon product-card__ribbon--value-pack">Value Pack</span>`;
+                if (pt === 'multipack')  return `<span class="product-card__ribbon product-card__ribbon--multipack">Multipack</span>`;
+                return '';
+            })();
+
             card.innerHTML = `
                 <a href="${product.slug ? `/products/${Security.escapeAttr(product.slug)}/${Security.escapeAttr(product.sku)}` : `/html/product/?sku=${Security.escapeAttr(product.sku)}`}" class="product-card__link">
                     <div class="product-card__image-wrapper">
                         ${imageContent}
                         ${product.is_lowest_in_market ? `<span class="product-card__badge product-card__badge--lowest-price" title="${product.market_position ? Security.escapeAttr(product.market_position.price_diff_percent + '% less than ' + product.market_position.lowest_competitor_name) : ''}">Lowest Price in NZ</span>` : ''}
+                        ${fitsPrinterBadge}
+                        ${packTypeRibbon}
                     </div>
                     <div class="product-card__content">
                         <h3 class="product-card__title" title="${Security.escapeAttr(displayName)}">${Security.escapeHtml(displayName)}</h3>

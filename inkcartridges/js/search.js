@@ -10,10 +10,15 @@
 (function () {
     'use strict';
 
+    // /suggest is the type-ahead endpoint that returns matched_printer and
+    // did_you_mean metadata. /autocomplete allows higher limits but omits
+    // those fields, so we stick with /suggest at its max of 10.
     const ENDPOINT = '/api/search/suggest';
-    const DEBOUNCE_MS = 300;
+    // Debounce per spec §1.1 — 150ms keeps the bar snappy without flooding
+    // the rate-limited search bucket (30 req/min/IP).
+    const DEBOUNCE_MS = 150;
     const MIN_QUERY_LENGTH = 2;
-    const LIMIT = 24;
+    const LIMIT = 10;
     const SKELETON_DELAY_MS = 150;
     const RECENT_KEY = 'recentSearches';
     const RECENT_MAX = 5;
@@ -49,6 +54,23 @@
         if (!isFinite(v)) return '';
         try { return new Intl.NumberFormat('en-NZ', { style: 'currency', currency: 'NZD' }).format(v); }
         catch (_) { return '$' + v.toFixed(2); }
+    }
+
+    // Term highlighting per spec §1.2 — wrap each whitespace-separated token
+    // in <mark>. Caller is responsible for escaping `text` first; the regex
+    // tokens are escaped inline so query text can never break out as HTML.
+    function highlightTokens(escapedHtml, query) {
+        if (!query) return escapedHtml;
+        const tokens = String(query).trim().split(/\s+/).filter(Boolean);
+        if (!tokens.length) return escapedHtml;
+        let html = escapedHtml;
+        for (const t of tokens) {
+            const safe = t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            try {
+                html = html.replace(new RegExp(`(${safe})`, 'gi'), '<mark class="smart-ac__mark">$1</mark>');
+            } catch (_) { /* malformed regex — skip this token */ }
+        }
+        return html;
     }
 
     function getRecent() {
@@ -241,8 +263,8 @@
                 }
                 const dymHTML = didYouMean
                     ? ` Did you mean <button type="button" class="smart-ac__dym" data-dym="${escAttr(didYouMean)}">${esc(didYouMean)}</button>?`
-                    : ' Try a different term or browse the <a href="/html/shop">full catalog</a>.';
-                state.list.innerHTML = `<div class="smart-ac__no-results">No products match “${q}”.${dymHTML}</div>`;
+                    : ` Keep typing or press <kbd>Enter</kbd> to search anyway.`;
+                state.list.innerHTML = `<div class="smart-ac__no-results">No matches for “${q}”.${dymHTML}</div>`;
                 const dymBtn = state.list.querySelector('.smart-ac__dym');
                 if (dymBtn) {
                     dymBtn.addEventListener('click', () => {
@@ -251,7 +273,7 @@
                         state.input.focus();
                     });
                 }
-                setLive(didYouMean ? `No results. Did you mean ${didYouMean}` : 'No results found');
+                setLive(didYouMean ? `No results. Did you mean ${didYouMean}` : 'No results — press Enter to search anyway');
                 return;
             }
 
@@ -262,17 +284,61 @@
                 return;
             }
 
-            const bannerHTML = matchedPrinter && matchedPrinter.name
-                ? `<div class="smart-ac__matched-printer">Showing results for printer: <strong>${esc(matchedPrinter.name)}</strong> — <a href="/html/shop?printer=${escAttr(matchedPrinter.slug || '')}">view all compatible cartridges →</a></div>`
+            // Spec §1.1: matched_printer and did_you_mean render as clickable
+            // rows ABOVE the product list (not as a banner), so the user can
+            // act on them directly.
+            const printerHref = matchedPrinter && matchedPrinter.slug
+                ? `/html/shop?printer=${encodeURIComponent(matchedPrinter.slug)}`
                 : '';
-            const cardsHTML = list.map((p, i) => Products.renderCard(adaptForCard(p), i)).join('');
+            const matchedRowHTML = matchedPrinter && matchedPrinter.name
+                ? `<a class="smart-ac__top-row smart-ac__top-row--printer" href="${escAttr(printerHref)}" data-printer-name="${escAttr(matchedPrinter.name)}">
+                       <span class="smart-ac__top-row__icon" aria-hidden="true">
+                           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
+                       </span>
+                       <span class="smart-ac__top-row__text">Show all cartridges for <strong>${esc(matchedPrinter.name)}</strong></span>
+                       <span class="smart-ac__top-row__arrow" aria-hidden="true">→</span>
+                   </a>`
+                : '';
+            const dymRowHTML = didYouMean && !matchedPrinter
+                ? `<button type="button" class="smart-ac__top-row smart-ac__top-row--dym" data-dym="${escAttr(didYouMean)}">
+                       <span class="smart-ac__top-row__icon" aria-hidden="true">?</span>
+                       <span class="smart-ac__top-row__text">Did you mean <strong>${esc(didYouMean)}</strong>?</span>
+                   </button>`
+                : '';
             const q = state.input.value.trim();
+            const cardsHTML = list.map((p, i) => Products.renderCard(adaptForCard(p), i)).join('');
             const viewAllHref = `/html/shop?search=${encodeURIComponent(q)}`;
             const viewAllHTML = q
                 ? `<div class="smart-ac__view-all-wrap"><a class="smart-ac__view-all" href="${escAttr(viewAllHref)}">View all results for “${esc(q)}” →</a></div>`
                 : '';
-            state.list.innerHTML = `${bannerHTML}<div class="product-grid smart-ac__grid">${cardsHTML}</div>${viewAllHTML}`;
+            state.list.innerHTML = `${matchedRowHTML}${dymRowHTML}<div class="product-grid smart-ac__grid">${cardsHTML}</div>${viewAllHTML}`;
             positionDropdown();
+
+            // Apply <mark> highlighting to the (already-escaped) product titles.
+            // Spec §1.2: highlight name+sku, never highlight description HTML.
+            if (q) {
+                state.list.querySelectorAll('.smart-ac__grid .product-card__title').forEach(el => {
+                    el.innerHTML = highlightTokens(el.innerHTML, q);
+                });
+                state.list.querySelectorAll('.smart-ac__grid [data-sku-text]').forEach(el => {
+                    el.innerHTML = highlightTokens(el.innerHTML, q);
+                });
+            }
+
+            const dymBtn = state.list.querySelector('.smart-ac__top-row--dym');
+            if (dymBtn) {
+                dymBtn.addEventListener('click', () => {
+                    state.input.value = dymBtn.dataset.dym || '';
+                    state.input.dispatchEvent(new Event('input', { bubbles: true }));
+                    state.input.focus();
+                });
+            }
+            const printerRow = state.list.querySelector('.smart-ac__top-row--printer');
+            if (printerRow) {
+                printerRow.addEventListener('click', () => {
+                    saveRecent(printerRow.dataset.printerName || q);
+                });
+            }
 
             const viewAllLink = state.list.querySelector('.smart-ac__view-all');
             if (viewAllLink) {

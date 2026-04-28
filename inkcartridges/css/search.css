@@ -330,6 +330,65 @@
     text-decoration: underline;
 }
 
+/* Spec §1.1 — clickable top rows above the suggest grid. */
+.smart-ac__top-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    padding: 10px 14px;
+    margin: 0 0 6px;
+    background: var(--color-surface-subtle, #f1f5f9);
+    border: 1px solid transparent;
+    border-radius: 8px;
+    font-size: 13px;
+    color: var(--color-text, #0f172a);
+    text-align: left;
+    text-decoration: none;
+    cursor: pointer;
+    transition: background 0.15s ease, border-color 0.15s ease;
+    font: inherit;
+    font-size: 13px;
+}
+.smart-ac__top-row:hover,
+.smart-ac__top-row:focus-visible {
+    background: #e0f2fe;
+    border-color: var(--cyan-primary, #2563eb);
+    outline: none;
+}
+.smart-ac__top-row__icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    border-radius: 6px;
+    background: #fff;
+    color: var(--cyan-primary, #2563eb);
+    font-weight: 700;
+    flex-shrink: 0;
+}
+.smart-ac__top-row--dym .smart-ac__top-row__icon {
+    background: #fef3c7;
+    color: #92400e;
+}
+.smart-ac__top-row__text { flex: 1; min-width: 0; }
+.smart-ac__top-row__text strong { color: var(--cyan-primary, #2563eb); }
+.smart-ac__top-row__arrow {
+    color: var(--cyan-primary, #2563eb);
+    font-weight: 700;
+    flex-shrink: 0;
+}
+
+/* Spec §1.2 — highlighted query terms inside suggest titles. */
+.smart-ac__mark,
+mark.smart-ac__mark {
+    background: #fef08a;
+    color: inherit;
+    padding: 0 1px;
+    border-radius: 2px;
+}
+
 /* --- Skeleton ------------------------------------------------------------- */
 
 .smart-ac__row--skeleton {
@@ -353,14 +412,20 @@
     100% { background-position: -200% 0; }
 }
 
-/* --- Shop page correction banner (unchanged, used by shop-page.js) ------- */
+/* --- Shop page search banners (spec §2.2 / §3.1) ------------------------- */
+
+.search-banners {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-bottom: 18px;
+}
 
 .search-correction-banner {
     padding: 12px 16px;
     background: var(--cyan-light, #e0f2fe);
     border: 1px solid var(--cyan-primary, #2563eb);
     border-radius: 8px;
-    margin-bottom: 16px;
     font-size: 13px;
     color: var(--color-text-secondary, #475569);
     display: flex;
@@ -368,10 +433,170 @@
     gap: 12px;
     flex-wrap: wrap;
 }
-
 .search-correction-banner strong { color: var(--color-text, #0f172a); }
 .search-correction-banner__link { color: var(--cyan-primary, #2563eb); text-decoration: none; font-size: 12px; }
 .search-correction-banner__link:hover { text-decoration: underline; }
+
+.search-did-you-mean {
+    padding: 8px 14px;
+    background: #fef3c7;
+    border: 1px solid #fcd34d;
+    border-radius: 8px;
+    font-size: 13px;
+    color: #92400e;
+}
+.search-did-you-mean a { color: #92400e; text-decoration: underline; }
+.search-did-you-mean a:hover { text-decoration: none; }
+
+/* Spec §3.1 — printer hero banner above the grid. */
+.printer-hero {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 14px 18px;
+    background: linear-gradient(135deg, #f0f9ff, #e0f2fe);
+    border: 1px solid var(--cyan-primary, #2563eb);
+    border-radius: 12px;
+}
+.printer-hero__icon {
+    flex-shrink: 0;
+    color: var(--cyan-primary, #2563eb);
+    background: #fff;
+    width: 44px; height: 44px;
+    border-radius: 10px;
+    display: flex; align-items: center; justify-content: center;
+}
+.printer-hero__body { flex: 1; min-width: 0; }
+.printer-hero__title {
+    font-size: 18px;
+    font-weight: 700;
+    color: var(--color-text, #0f172a);
+    margin: 0 0 2px;
+    line-height: 1.25;
+}
+.printer-hero__subtitle {
+    font-size: 13px;
+    color: var(--color-text-secondary, #475569);
+    margin: 0;
+}
+.printer-hero__cta {
+    flex-shrink: 0;
+    color: var(--cyan-primary, #2563eb);
+    text-decoration: none;
+    font-size: 13px;
+    font-weight: 600;
+    padding: 8px 14px;
+    border: 1px solid var(--cyan-primary, #2563eb);
+    border-radius: 999px;
+    background: #fff;
+    transition: background 0.15s ease, color 0.15s ease;
+}
+.printer-hero__cta:hover {
+    background: var(--cyan-primary, #2563eb);
+    color: #fff;
+}
+@media (max-width: 640px) {
+    .printer-hero { flex-wrap: wrap; }
+    .printer-hero__cta { width: 100%; text-align: center; }
+}
+
+/* Spec §3.3 — Fits Your Printer badge on product cards. */
+.product-card__badge--fits-printer {
+    background: #2563eb;
+    color: #fff;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+}
+
+/* Spec §4 — value-pack / multipack ribbon. */
+.product-card__ribbon {
+    position: absolute;
+    top: 8px;
+    left: 8px;
+    z-index: 2;
+    padding: 3px 8px;
+    border-radius: 4px;
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: #fff;
+    background: #f59e0b;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.12);
+}
+.product-card__ribbon--multipack { background: #8b5cf6; }
+.product-card__image-wrapper { position: relative; }
+
+/* Spec §2.3 — zero-results recovery rails. */
+.search-recovery {
+    padding: 8px 0 24px;
+}
+.search-recovery__head { margin-bottom: 18px; text-align: center; }
+.search-recovery__title {
+    font-size: 22px;
+    font-weight: 700;
+    color: var(--color-text, #0f172a);
+    margin: 0 0 4px;
+}
+.search-recovery__subtitle {
+    font-size: 14px;
+    color: var(--color-text-secondary, #475569);
+    margin: 0;
+}
+.search-recovery__rails {
+    display: flex;
+    flex-direction: column;
+    gap: 24px;
+}
+.search-recovery__rail-title {
+    font-size: 16px;
+    font-weight: 700;
+    color: var(--color-text, #0f172a);
+    margin: 0 0 10px;
+}
+.search-recovery__rail-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: 10px;
+}
+.search-recovery__rail-grid.product-grid {
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+}
+
+.recovery-printer-card {
+    display: block;
+    padding: 14px 16px;
+    background: #fff;
+    border: 1px solid var(--color-border-light, #e5e7eb);
+    border-radius: 10px;
+    text-decoration: none;
+    color: var(--color-text, #0f172a);
+    font-weight: 600;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.recovery-printer-card:hover {
+    border-color: var(--cyan-primary, #2563eb);
+    box-shadow: 0 4px 12px rgba(37,99,235,0.12);
+}
+
+.recovery-tile {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+    background: #fff;
+    border: 1px solid var(--color-border-light, #e5e7eb);
+    border-radius: 10px;
+    text-decoration: none;
+    color: var(--color-text, #0f172a);
+    font-weight: 600;
+    text-align: center;
+    transition: border-color 0.15s ease, background 0.15s ease;
+}
+.recovery-tile:hover {
+    border-color: var(--cyan-primary, #2563eb);
+    background: var(--cyan-light, #e0f2fe);
+}
 
 /* --- Responsive ----------------------------------------------------------- */
 
