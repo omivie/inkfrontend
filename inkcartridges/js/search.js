@@ -24,17 +24,38 @@
     const RECENT_MAX = 5;
     const PLACEHOLDER_IMG = '/assets/images/placeholder-product.svg';
 
-    // Trending printer chips. Names are resolved via /api/search/suggest at click
-    // time to obtain the canonical slug, then we navigate to /html/shop?printer=<slug>.
-    // Keep this list to printers the backend currently knows about (verified via
-    // /api/products/printer/<slug> returning ≥1 compatible cartridge).
-    const TRENDING_MODELS = [
+    // Trending printer chips. Sourced from GET /api/printers/trending, which ranks
+    // by recent search-match + printer-page pageview signal (last 30 days). The
+    // hardcoded list below is a hard fallback for first paint / offline / fetch
+    // failure; the IIFE replaces it with the real list and caches for 1 h in
+    // localStorage so we don't hammer the API on every page load.
+    const FALLBACK_TRENDING_MODELS = [
         { name: 'Brother MFC-L2750DW',   slug: 'brother-mfc-l2750dw' },
         { name: 'HP OfficeJet Pro 9720', slug: 'hp-officejet-pro-9720' },
         { name: 'Canon PIXMA TS3560',    slug: 'canon-pixma-ts3560' },
         { name: 'Epson EcoTank ET-2850', slug: 'epson-ecotank-et-2850' },
         { name: 'Brother HL-L2460DW',    slug: 'brother-hl-l2460dw' },
     ];
+    let TRENDING_MODELS = FALLBACK_TRENDING_MODELS;
+    const TRENDING_CACHE_KEY = 'trendingPrinters';
+    const TRENDING_CACHE_TTL_MS = 60 * 60 * 1000;
+
+    (async () => {
+        try {
+            const cached = JSON.parse(localStorage.getItem(TRENDING_CACHE_KEY) || 'null');
+            if (cached && Array.isArray(cached.v) && cached.v.length && (Date.now() - cached.t) < TRENDING_CACHE_TTL_MS) {
+                TRENDING_MODELS = cached.v;
+                return;
+            }
+            const base = (typeof Config !== 'undefined' && Config.API_URL) ? Config.API_URL : '';
+            const res = await fetch(`${base}/api/printers/trending?limit=5`);
+            const json = await res.json();
+            if (json && json.ok && json.data && Array.isArray(json.data.printers) && json.data.printers.length) {
+                TRENDING_MODELS = json.data.printers;
+                localStorage.setItem(TRENDING_CACHE_KEY, JSON.stringify({ t: Date.now(), v: TRENDING_MODELS }));
+            }
+        } catch (_) { /* keep fallback */ }
+    })();
 
     let _instanceId = 0;
 
