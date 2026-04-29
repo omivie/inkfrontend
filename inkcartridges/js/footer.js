@@ -15,8 +15,7 @@
                             <span class="logo__text">Ink<span>Cartridges</span>.co.nz</span>
                         </a>
                         <p class="footer-brand__description">
-                            New Zealand's trusted source for quality printing supplies.
-                            We help homes and businesses keep printing with genuine and
+                            We supply New Zealand homes and businesses with genuine and
                             compatible ink and toner cartridges.
                         </p>
                     </div>
@@ -74,7 +73,7 @@
             "name": "InkCartridges.co.nz",
             "url": "https://www.inkcartridges.co.nz",
             "logo": "https://www.inkcartridges.co.nz/logo.png",
-            "description": "New Zealand's trusted source for genuine and compatible ink cartridges, toner, and printer supplies.",
+            "description": "New Zealand supplier of genuine and compatible ink cartridges, toner, and printer supplies.",
             "address": {
                 "@type": "PostalAddress",
                 "streetAddress": "37A Archibald Road",
@@ -102,7 +101,7 @@
                 "@type": "SearchAction",
                 "target": {
                     "@type": "EntryPoint",
-                    "urlTemplate": "https://www.inkcartridges.co.nz/html/shop?search={search_term_string}"
+                    "urlTemplate": "https://www.inkcartridges.co.nz/html/shop?q={search_term_string}"
                 },
                 "query-input": "required name=search_term_string"
             }

@@ -1988,11 +1988,20 @@
                         if (resp.ok && resp.data) {
                             const list = resp.data.compatible_products || resp.data.products || [];
                             if (Array.isArray(list) && list.length > 0) {
-                                allProducts = list.map(p => ({
-                                    ...p,
-                                    brand_name: p.brand?.name || p.brand_name,
-                                    brand_slug: p.brand?.slug || p.brand_slug
-                                }));
+                                // /api/printers/:slug/products returns brand as a bare
+                                // string; other endpoints return { name, slug }. Normalize
+                                // so card rendering (product.brand?.name) works uniformly.
+                                allProducts = list.map(p => {
+                                    const brandObj = (typeof p.brand === 'string')
+                                        ? { name: p.brand, slug: null }
+                                        : (p.brand || null);
+                                    return {
+                                        ...p,
+                                        brand: brandObj,
+                                        brand_name: brandObj?.name || p.brand_name || '',
+                                        brand_slug: brandObj?.slug || p.brand_slug || null
+                                    };
+                                });
                             }
                         }
                     } catch (e) {
@@ -2236,6 +2245,21 @@
                         await this.loadPrinterProducts(navVersion);
                         return;
                     }
+                    // /smart can miss on short / numeric-only queries (e.g. "664")
+                    // even when /products?search= and /suggest find matches —
+                    // backend's smart pipeline rejects them as too ambiguous and
+                    // sometimes attaches a misleading did_you_mean. Fall back to
+                    // the plain product-search endpoint so the results page
+                    // matches what the dropdown shows.
+                    if (products.length === 0 && !smartData?.matched_printer) {
+                        const fallback = await API.getProducts({ search: searchQuery, limit: 100 });
+                        if (navVersion !== undefined && this.navigationVersion !== navVersion) return;
+                        const fallbackProducts = (fallback?.ok && fallback.data?.products) ? fallback.data.products : [];
+                        if (fallbackProducts.length > 0) {
+                            products = fallbackProducts;
+                            smartData = null;
+                        }
+                    }
                 }
 
 
@@ -2362,7 +2386,6 @@
 
             // Hero banner — printer match takes precedence (spec §3.1).
             if (matchedPrinter && matchedPrinter.name) {
-                const printerSlug = matchedPrinter.slug || '';
                 const total = smartData.total != null ? smartData.total : (Array.isArray(smartData.products) ? smartData.products.length : 0);
                 const subtext = total > 0
                     ? `${total} cartridge${total === 1 ? '' : 's'} available — genuine and compatible options below.`
@@ -2377,7 +2400,6 @@
                         <h2 class="printer-hero__title">Cartridges for ${Security.escapeHtml(matchedPrinter.name)}</h2>
                         <p class="printer-hero__subtitle">${Security.escapeHtml(subtext)}</p>
                     </div>
-                    ${printerSlug ? `<a class="printer-hero__cta" href="/html/shop?printer=${Security.escapeAttr(printerSlug)}">View printer page →</a>` : ''}
                 `;
                 wrap.appendChild(hero);
             }

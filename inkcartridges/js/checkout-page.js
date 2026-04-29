@@ -1671,8 +1671,8 @@
         // Fill shipping form fields from an address object
         fillAddressFields(address) {
             const fields = {
-                'first-name': address.first_name || address.recipient_name?.split(' ')[0],
-                'last-name': address.last_name || address.recipient_name?.split(' ').slice(1).join(' '),
+                'first-name': address.first_name || address.recipient_name?.split(' ')[0] || '',
+                'last-name': address.last_name || address.recipient_name?.split(' ').slice(1).join(' ') || '',
                 'company': address.company || '',
                 'address1': address.address_line1 || '',
                 'address2': address.address_line2 || '',

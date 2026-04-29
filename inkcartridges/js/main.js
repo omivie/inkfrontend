@@ -243,13 +243,26 @@ function initSearch() {
             initBasicAutocomplete(searchForm, searchInput);
         }
 
+        // Backend /api/search/* requires q.length >= 2 (Joi). Mirror that here so
+        // users can't fire a 400 — disable submit until the input has 2+ chars.
+        const submitBtn = searchForm.querySelector('button[type="submit"]');
+        const MIN_LEN = 2;
+        const syncSubmitState = () => {
+            if (!submitBtn) return;
+            const q = searchInput.value.trim();
+            const tooShort = q.length < MIN_LEN;
+            submitBtn.disabled = tooShort;
+            submitBtn.setAttribute('aria-disabled', tooShort ? 'true' : 'false');
+        };
+        searchInput.addEventListener('input', syncSubmitState);
+        syncSubmitState();
+
         // Handle form submission
         searchForm.addEventListener('submit', function(e) {
             e.preventDefault();
             const query = searchInput.value.trim();
-            if (query) {
-                window.location.href = `/html/shop?search=${encodeURIComponent(query)}`;
-            }
+            if (query.length < MIN_LEN) return;
+            window.location.href = `/html/shop?q=${encodeURIComponent(query)}`;
         });
     });
 }

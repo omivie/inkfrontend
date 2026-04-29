@@ -47,7 +47,7 @@
                     sku = await this.resolveSkuFromSlug(slug);
                     if (!sku) {
                         const q = slug.replace(/-/g, ' ').trim();
-                        window.location.replace('/html/shop?search=' + encodeURIComponent(q));
+                        window.location.replace('/html/shop?q=' + encodeURIComponent(q));
                         return;
                     }
                     // Canonicalise URL in history so reloads/sharing work.
@@ -603,7 +603,7 @@
                     const slug = (p.name || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
                     const href = isRibbon
                         ? `/html/ribbons?printer_model=${encodeURIComponent(p.name)}`
-                        : `/html/shop?search=${encodeURIComponent(slug)}`;
+                        : `/html/shop?q=${encodeURIComponent(slug)}`;
                     return `<a href="${href}" class="printer-link">${Security.escapeHtml(p.name)}</a>`;
                 }).join(', ');
 
@@ -781,7 +781,7 @@
 
                 list.innerHTML = printers.map(p => {
                     const slug = (p.name || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
-                    return `<li><a href="/html/shop?search=${encodeURIComponent(slug)}">${Security.escapeHtml(p.name)}</a></li>`;
+                    return `<li><a href="/html/shop?q=${encodeURIComponent(slug)}">${Security.escapeHtml(p.name)}</a></li>`;
                 }).join('');
 
                 tabBtn.hidden = false;

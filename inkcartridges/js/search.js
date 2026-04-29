@@ -14,9 +14,9 @@
     // did_you_mean metadata. /autocomplete allows higher limits but omits
     // those fields, so we stick with /suggest at its max of 10.
     const ENDPOINT = '/api/search/suggest';
-    // Debounce per spec §1.1 — 150ms keeps the bar snappy without flooding
-    // the rate-limited search bucket (30 req/min/IP).
-    const DEBOUNCE_MS = 150;
+    // 250ms debounce — backend bucket is 120 req/min/IP; a fast typer hammering
+    // backspace at <250ms intervals can still trip it, so we err on the safe side.
+    const DEBOUNCE_MS = 250;
     const MIN_QUERY_LENGTH = 2;
     const LIMIT = 10;
     const SKELETON_DELAY_MS = 150;
@@ -61,7 +61,7 @@
     // tokens are escaped inline so query text can never break out as HTML.
     function highlightTokens(escapedHtml, query) {
         if (!query) return escapedHtml;
-        const tokens = String(query).trim().split(/\s+/).filter(Boolean);
+        const tokens = String(query).trim().split(/[\s\-/]+/).filter(Boolean);
         if (!tokens.length) return escapedHtml;
         let html = escapedHtml;
         for (const t of tokens) {
@@ -105,15 +105,21 @@
         const sku = p.sku || '';
         if (slug && sku) return `/products/${encodeURIComponent(slug)}/${encodeURIComponent(sku)}`;
         if (sku) return `/html/product/?sku=${encodeURIComponent(sku)}`;
-        return `/html/shop?search=${encodeURIComponent(p.name || '')}`;
+        return `/html/shop?q=${encodeURIComponent(p.name || '')}`;
     }
 
     async function fetchSuggest(query, signal) {
         const base = (typeof Config !== 'undefined' && Config.API_URL) ? Config.API_URL : '';
         const url = `${base}${ENDPOINT}?q=${encodeURIComponent(query)}&limit=${LIMIT}`;
         const res = await fetch(url, { signal });
-        const json = await res.json();
-        if (!json || !json.ok) throw new Error((json && json.error && json.error.message) || 'Search failed');
+        let json = null;
+        try { json = await res.json(); } catch (_) { /* non-JSON body — leave null */ }
+        if (!res.ok || !json || !json.ok) {
+            const err = new Error((json && json.error && json.error.message) || 'Search failed');
+            err.status = res.status;
+            err.code = (json && json.error && json.error.code) || null;
+            throw err;
+        }
         const data = json.data || {};
         return {
             suggestions: Array.isArray(data.suggestions) ? data.suggestions : [],
@@ -264,7 +270,7 @@
                 const dymHTML = didYouMean
                     ? ` Did you mean <button type="button" class="smart-ac__dym" data-dym="${escAttr(didYouMean)}">${esc(didYouMean)}</button>?`
                     : ` Keep typing or press <kbd>Enter</kbd> to search anyway.`;
-                state.list.innerHTML = `<div class="smart-ac__no-results">No matches for “${q}”.${dymHTML}</div>`;
+                state.list.innerHTML = `<div class="smart-ac__no-results">No results for "${q}".${dymHTML}</div>`;
                 const dymBtn = state.list.querySelector('.smart-ac__dym');
                 if (dymBtn) {
                     dymBtn.addEventListener('click', () => {
@@ -307,7 +313,7 @@
                 : '';
             const q = state.input.value.trim();
             const cardsHTML = list.map((p, i) => Products.renderCard(adaptForCard(p), i)).join('');
-            const viewAllHref = `/html/shop?search=${encodeURIComponent(q)}`;
+            const viewAllHref = `/html/shop?q=${encodeURIComponent(q)}`;
             const viewAllHTML = q
                 ? `<div class="smart-ac__view-all-wrap"><a class="smart-ac__view-all" href="${escAttr(viewAllHref)}">View all results for “${esc(q)}” →</a></div>`
                 : '';
@@ -375,10 +381,14 @@
             setLive(liveMsg);
         }
 
-        function renderError() {
+        function renderError(err) {
             state.mode = 'error';
-            state.list.innerHTML = `<div class="smart-ac__error">Search is temporarily unavailable. Please try again.</div>`;
-            setLive('Search error');
+            const isRateLimited = err && (err.status === 429 || err.code === 'RATE_LIMITED');
+            const msg = isRateLimited
+                ? `You're searching too quickly, slow down a sec.`
+                : `Search is temporarily unavailable. Please try again.`;
+            state.list.innerHTML = `<div class="smart-ac__error">${esc(msg)}</div>`;
+            setLive(isRateLimited ? 'Searching too quickly' : 'Search error');
         }
 
         function setLive(msg) {
@@ -404,7 +414,7 @@
                 clearTimeout(state.skeletonTimer);
                 if (err && err.name === 'AbortError') return;
                 console.error('[SmartSearch]', err);
-                renderError();
+                renderError(err);
             }
         }
 
