@@ -138,9 +138,7 @@
     // ============================================
     function renderBrands() {
         brandsCardsContainer.innerHTML = BRANDS.map(brand => {
-            const brandUrl = brand.categories.length === 1
-                ? `/html/shop?brand=${Security.escapeAttr(brand.slug)}&category=${Security.escapeAttr(brand.categories[0].param)}`
-                : `/html/shop?brand=${Security.escapeAttr(brand.slug)}`;
+            const brandUrl = `/brand/${Security.escapeAttr(brand.slug)}`;
             return `
             <div class="brands-mega__card">
                 <div class="brands-mega__logo-wrap">

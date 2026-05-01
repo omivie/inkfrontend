@@ -29,3 +29,9 @@ archive/
 # Audit screenshots — large binaries, ignore everything except the JSON report
 audit-output/*
 !audit-output/report.json
+
+# Generated brand landing pages (built at deploy time by scripts/build-brand-pages.js)
+inkcartridges/brand/
+
+# Local Playwright screenshots
+brand-*.png
