@@ -567,6 +567,32 @@ const API = {
     },
 
     // =========================================================================
+    // SEO SCHEMA (CollectionPage + BreadcrumbList for brand/category/printer pages)
+    // =========================================================================
+
+    /**
+     * Get CollectionPage + BreadcrumbList JSON-LD for a brand and/or category page.
+     * At least one of brand/category required. Slugs validated server-side.
+     * @param {object} params - { brand?, category? }
+     */
+    async getCollectionSchema(params = {}) {
+        const qs = new URLSearchParams();
+        if (params.brand) qs.append('brand', params.brand);
+        if (params.category) qs.append('category', params.category);
+        const query = qs.toString();
+        if (!query) return { ok: false, error: 'brand or category required' };
+        return this.get(`/api/schema/collection?${query}`);
+    },
+
+    /**
+     * Get CollectionPage + BreadcrumbList JSON-LD for a printer landing page.
+     * @param {string} printerSlug - Printer slug (e.g. "brother-mfc-j870")
+     */
+    async getPrinterSchema(printerSlug) {
+        return this.get(`/api/schema/printer/${encodeURIComponent(printerSlug)}`);
+    },
+
+    // =========================================================================
     // SEARCH
     // =========================================================================
 
@@ -755,6 +781,17 @@ const API = {
      */
     async applyCoupon(code) {
         return this.post('/api/cart/coupon', { code });
+    },
+
+    /**
+     * Preview a coupon BEFORE applying — read-only validation that returns
+     * actionable failure reasons (minimum_order_required / account_too_new /
+     * already_used) so we can inline-correct the user.
+     * Always returns HTTP 200; validity is in body.data.valid.
+     * @param {string} code - Coupon code
+     */
+    async previewCoupon(code) {
+        return this.post('/api/cart/coupon/preview', { code });
     },
 
     /**

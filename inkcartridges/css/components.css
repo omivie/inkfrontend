@@ -1140,11 +1140,123 @@
     font-size: 0.85em;
 }
 
+.product-card__price-block {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.product-card__gst {
+    font-size: 0.72rem;
+    color: var(--color-text-muted, #6b7280);
+    margin: 0;
+    line-height: 1.2;
+}
+
+.product-card__badge--discount {
+    background: #dc2626;
+    color: #fff;
+}
+
 .product-detail__compare-price {
     text-decoration: line-through;
     color: var(--color-text-muted, #6b7280);
     font-size: 0.9em;
     margin-left: 0.5rem;
+}
+
+.product-detail__gst-line {
+    display: block;
+    font-size: 0.85em;
+    color: var(--color-text-muted, #6b7280);
+    margin-top: 4px;
+}
+
+/* Cross-sell modal (frequently bought together after add-to-cart) */
+.crosssell-modal {
+    position: fixed;
+    inset: 0;
+    z-index: 10000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0, 0, 0, 0.5);
+    padding: 16px;
+}
+.crosssell-modal__panel {
+    background: #fff;
+    border-radius: 12px;
+    max-width: 760px;
+    width: 100%;
+    padding: 24px;
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+    max-height: 90vh;
+    overflow-y: auto;
+}
+.crosssell-modal__head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 16px;
+}
+.crosssell-modal__head h3 {
+    margin: 0;
+    font-size: 1.125rem;
+}
+.crosssell-modal__close {
+    background: none;
+    border: 0;
+    font-size: 1.5rem;
+    line-height: 1;
+    cursor: pointer;
+    color: var(--color-text-muted, #6b7280);
+}
+.crosssell-modal__grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 16px;
+}
+.crosssell-modal__card {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    text-decoration: none;
+    color: inherit;
+    border: 1px solid var(--color-border, #e5e7eb);
+    border-radius: 8px;
+    padding: 12px;
+    background: #fff;
+    transition: border-color 0.15s;
+}
+.crosssell-modal__card:hover {
+    border-color: var(--color-primary, #2563eb);
+}
+.crosssell-modal__img {
+    width: 100%;
+    aspect-ratio: 1;
+    object-fit: contain;
+    background: #f9fafb;
+    border-radius: 4px;
+}
+.crosssell-modal__img--placeholder {
+    background: #f3f4f6;
+}
+.crosssell-modal__name {
+    font-size: 0.875rem;
+    font-weight: 500;
+    line-height: 1.3;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+.crosssell-modal__price {
+    font-weight: 600;
+    color: var(--color-text, #111827);
+}
+.crosssell-modal__foot {
+    margin-top: 20px;
+    text-align: right;
 }
 
 .product-detail__savings {

@@ -780,16 +780,19 @@ function drawForecastChart() {
     datasets.push({
       label: 'Prior forecasts (daily avg)',
       data: priorData,
-      borderColor: colors.yellow,
+      borderColor: hexToRgba(colors.magenta, 0.7),
       backgroundColor: 'transparent',
-      borderWidth: 1.5,
-      borderDash: [2, 3],
+      borderWidth: 1.75,
+      borderDash: [4, 4],
       fill: false,
-      tension: 0.25,
+      tension: 0.3,
       pointRadius: 0,
-      pointHoverRadius: 3,
+      pointHoverRadius: 4,
+      pointBackgroundColor: colors.magenta,
+      pointBorderColor: colors.surface,
+      pointBorderWidth: 1,
       spanGaps: true,
-      order: 1,
+      order: 3,
     });
   }
 

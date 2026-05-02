@@ -781,10 +781,35 @@
                     region: d.region,
                     postal_code: d.postal_code,
                 });
+
+                // Returning-customer hint — backend sets has_previous_order + welcome_message
+                // when this email has ordered before. Show a friendly banner above the form.
+                if (d.has_previous_order && d.welcome_message) {
+                    this._renderReturningGuestBanner(d.welcome_message);
+                }
+
                 DebugLog.log('Guest prefill: address autofilled from previous order');
             } catch {
                 // Non-blocking — guest fills in manually
             }
+        },
+
+        /**
+         * Render the "Welcome back!" banner above the checkout form.
+         * Idempotent — replaces an existing banner so address re-prefills don't stack.
+         */
+        _renderReturningGuestBanner(message) {
+            const form = document.getElementById('checkout-form');
+            if (!form || !message) return;
+            let banner = document.getElementById('returning-guest-banner');
+            if (!banner) {
+                banner = document.createElement('div');
+                banner.id = 'returning-guest-banner';
+                banner.className = 'returning-guest-banner';
+                banner.setAttribute('role', 'status');
+                form.parentElement.insertBefore(banner, form);
+            }
+            banner.textContent = message;
         },
 
         // Accordion: 2 steps (Contact, Shipping). Sections only change on explicit clicks.
@@ -1046,6 +1071,81 @@
             // Surface any coupon already applied on the server cart, with a Remove control
             this.refreshAppliedCouponUI();
 
+            // Inline preview hint container (created lazily)
+            const ensureHintEl = () => {
+                let hint = document.getElementById('coupon-preview-hint');
+                if (!hint) {
+                    hint = document.createElement('div');
+                    hint.id = 'coupon-preview-hint';
+                    hint.className = 'coupon-form__hint';
+                    hint.setAttribute('role', 'status');
+                    hint.setAttribute('aria-live', 'polite');
+                    const form = couponInput.closest('.coupon-form') || couponInput.parentElement;
+                    if (form && form.parentElement) {
+                        form.parentElement.insertBefore(hint, form.nextSibling);
+                    }
+                }
+                return hint;
+            };
+
+            const setHint = (text, tone) => {
+                const hint = ensureHintEl();
+                if (!text) {
+                    hint.hidden = true;
+                    hint.textContent = '';
+                    hint.className = 'coupon-form__hint';
+                    return;
+                }
+                hint.hidden = false;
+                hint.textContent = text;
+                hint.className = 'coupon-form__hint coupon-form__hint--' + (tone || 'neutral');
+            };
+
+            // Debounced preview — calls /api/cart/coupon/preview without mutating cart state.
+            // Backend returns { valid, reason?, message } so we can inline-correct the user
+            // (e.g. "Add $15 more to use this coupon.") before they click Apply.
+            let previewTimer = null;
+            let lastPreviewedCode = '';
+            const runPreview = async (rawCode) => {
+                const code = (rawCode || '').trim();
+                if (!code || code.length < 2) {
+                    setHint('', 'neutral');
+                    return;
+                }
+                if (code === lastPreviewedCode) return;
+                lastPreviewedCode = code;
+                try {
+                    const res = await API.previewCoupon(code);
+                    // Same code may have changed since the request fired — bail if stale.
+                    if ((couponInput.value || '').trim() !== code) return;
+                    const data = res?.data || res;
+                    if (!data) { setHint('', 'neutral'); return; }
+                    if (data.valid === true) {
+                        const saved = data.discount_amount != null ? formatPrice(data.discount_amount) : '';
+                        setHint(saved ? `Save ${saved} when you apply` : 'Coupon is valid', 'success');
+                    } else if (data.reason && data.message) {
+                        // Backend gives actionable message verbatim for known reasons:
+                        // minimum_order_required / account_too_new / already_used / unavailable
+                        setHint(data.message, 'error');
+                    } else {
+                        setHint('', 'neutral');
+                    }
+                } catch (err) {
+                    DebugLog.warn('Coupon preview failed:', err && err.message);
+                    setHint('', 'neutral');
+                }
+            };
+
+            const schedulePreview = () => {
+                if (previewTimer) clearTimeout(previewTimer);
+                previewTimer = setTimeout(() => runPreview(couponInput.value), 600);
+            };
+            couponInput.addEventListener('input', schedulePreview);
+            couponInput.addEventListener('blur', () => {
+                if (previewTimer) clearTimeout(previewTimer);
+                runPreview(couponInput.value);
+            });
+
             couponBtn.addEventListener('click', async () => {
                 const code = couponInput.value.trim();
                 if (!code) {
@@ -1111,7 +1211,12 @@
                         couponBtn.disabled = false;
                         return;
                     } else {
-                        throw new Error(response.error || 'Invalid coupon code');
+                        // Joi messages on coupon schemas are now user-friendly —
+                        // surface details[0].message verbatim when present.
+                        const fieldMsg = Array.isArray(response.details) && response.details[0]?.message
+                            ? response.details[0].message
+                            : null;
+                        throw new Error(fieldMsg || response.error || 'Invalid coupon code');
                     }
                 } catch (error) {
                     DebugLog.error('Coupon error:', error);

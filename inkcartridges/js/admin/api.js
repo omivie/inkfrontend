@@ -542,6 +542,143 @@ const AdminAPI = {
     }
   },
 
+  // ---- Genuine Image Audit ----
+  // Lower-level fetch that preserves response body regardless of HTTP status.
+  // /refetch and /bulk-refetch return their result envelope on 422 (e.g. when
+  // candidates are rejected) — the generic API helper would throw and lose it.
+  async _imageAuditFetch(path, { method = 'GET', body } = {}) {
+    const baseUrl = Config.API_URL;
+    const token = window.Auth?.session?.access_token;
+    if (!token) throw new Error('Unauthorized');
+    const headers = { 'Authorization': `Bearer ${token}` };
+    if (body !== undefined) headers['Content-Type'] = 'application/json';
+    const resp = await fetch(`${baseUrl}${path}`, {
+      method,
+      headers,
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+    });
+    let json = null;
+    try { json = await resp.json(); } catch (_) { /* non-JSON */ }
+    if (resp.status === 429) {
+      const code = json?.error?.code || 'RATE_LIMITED';
+      const msg = json?.error?.message || 'Rate limited. Please slow down.';
+      const err = new Error(msg);
+      err.code = code;
+      err.status = 429;
+      throw err;
+    }
+    // 2xx + 422 (semantic failure with body): return the body directly so callers
+    // can inspect data.ok / data.reason. Other errors throw.
+    if (resp.ok || resp.status === 422) {
+      return json;
+    }
+    const msg = json?.error?.message || json?.error || `HTTP ${resp.status}`;
+    throw new Error(msg);
+  },
+
+  async getImageAuditStats({ source, pack, exclude_ribbons, brand } = {}) {
+    try {
+      const params = new URLSearchParams();
+      if (source) params.set('source', source);
+      if (pack) params.set('pack', pack);
+      if (exclude_ribbons) params.set('exclude_ribbons', 'true');
+      if (brand) params.set('brand', brand);
+      const qs = params.toString();
+      const resp = await window.API.get(`/api/admin/image-audit/stats${qs ? `?${qs}` : ''}`);
+      return resp?.data ?? null;
+    } catch (e) {
+      adminApiWarn('Failed to load image audit stats', e);
+      return null;
+    }
+  },
+
+  async getImageAuditList(filters = {}, page = 1, limit = 50) {
+    try {
+      const params = new URLSearchParams();
+      params.set('page', page);
+      params.set('limit', limit);
+      if (filters.source) params.set('source', filters.source);
+      if (filters.pack) params.set('pack', filters.pack);
+      if (filters.verdict) params.set('verdict', filters.verdict);
+      if (filters.exclude_ribbons) params.set('exclude_ribbons', 'true');
+      if (filters.missing_only) params.set('missing_only', 'true');
+      if (filters.external_only) params.set('external_only', 'true');
+      if (filters.brand) params.set('brand', filters.brand);
+      if (filters.search) params.set('search', filters.search);
+      if (filters.status) params.set('status', filters.status);
+      if (filters.sort) params.set('sort', filters.sort);
+      const resp = await window.API.get(`/api/admin/image-audit/list?${params}`);
+      return resp?.data ?? null;
+    } catch (e) {
+      adminApiWarn('Failed to load image audit list', e);
+      return null;
+    }
+  },
+
+  async verifyImageWithVision(productId, useVision = true) {
+    const json = await this._imageAuditFetch(
+      `/api/admin/image-audit/${encodeURIComponent(productId)}/verify-with-vision`,
+      { method: 'POST', body: { use_vision: useVision } }
+    );
+    if (json && json.ok === false) {
+      throw new Error(json.error?.message || 'Verification failed');
+    }
+    return json?.data ?? null;
+  },
+
+  async refetchImage(productId, { useVision = true, directApply = false } = {}) {
+    const json = await this._imageAuditFetch(
+      `/api/admin/image-audit/${encodeURIComponent(productId)}/refetch`,
+      { method: 'POST', body: { use_vision: useVision, direct_apply: directApply } }
+    );
+    // Spec: HTTP 422 returns { ok: true, data: { ok: false, reason, ... } }
+    // Spec: HTTP 200 returns { ok: true, data: { ok: true, chosen_url, ... } }
+    if (json && json.ok === false) {
+      throw new Error(json.error?.message || 'Refetch failed');
+    }
+    return json?.data ?? null;
+  },
+
+  async bulkRefetchImages(productIds, { useVision = true, directApply = false } = {}) {
+    const json = await this._imageAuditFetch(
+      '/api/admin/image-audit/bulk-refetch',
+      { method: 'POST', body: { product_ids: productIds, use_vision: useVision, direct_apply: directApply } }
+    );
+    if (json && json.ok === false) {
+      throw new Error(json.error?.message || 'Bulk refetch failed');
+    }
+    return json?.data ?? null;
+  },
+
+  async bulkQuarantineImages(productIds) {
+    try {
+      const resp = await window.API.post('/api/admin/image-audit/bulk-quarantine', { product_ids: productIds });
+      if (resp && resp.ok === false) throw new Error(resp.error || 'Bulk quarantine failed');
+      return resp?.data ?? null;
+    } catch (e) {
+      DebugLog.warn('[AdminAPI] bulkQuarantineImages failed:', e.message);
+      throw e;
+    }
+  },
+
+  async setImageAuditStatus(productId, status) {
+    try {
+      const resp = await window.API.put(
+        `/api/admin/image-audit/${encodeURIComponent(productId)}/status`,
+        { status }
+      );
+      if (resp && resp.ok === false) throw new Error(resp.error || 'Update status failed');
+      return resp?.data ?? null;
+    } catch (e) {
+      DebugLog.warn('[AdminAPI] setImageAuditStatus failed:', e.message);
+      throw e;
+    }
+  },
+
+  imageAuditSearchUrl(productId) {
+    return `${Config.API_URL}/api/admin/image-audit/${encodeURIComponent(productId)}/search-url`;
+  },
+
   // ---- Pending Changes (import review queue) ----
   async getPendingChangesSummary() {
     try {

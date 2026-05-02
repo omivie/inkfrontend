@@ -18,6 +18,7 @@ let _tablePage = 1;
 let _tableMode = 'under-margin';
 let _tableSortBy = 'net_margin';
 let _tableSortOrder = 'asc';
+let _tableMinGap = 0;
 let _savedOffset = null;
 let _sliderTimer = null;
 
@@ -73,10 +74,29 @@ async function loadUnderMargin() {
   if (_table) _table.setLoading(true);
   const limit = _tableMode === 'all' ? 100 : 50;
   const resp = await AdminAPI.getUnderMarginProducts(_tableSource, _tablePage, limit, _tableMode, _tableSortBy, _tableSortOrder);
-  if (!resp) { if (_table) _table.setData([], null); return; }
-  const rows = resp.data || [];
+  if (!resp) { if (_table) _table.setData([], null); updateMarginCountChip(0); return; }
+  const allRows = resp.data || [];
   const meta = resp.metadata || {};
-  if (_table) _table.setData(rows, { total: meta.total || rows.length, page: meta.page || _tablePage, limit });
+  const rows = _tableMinGap > 0
+    ? allRows.filter(r => Math.abs(Number(r.gap) || 0) >= _tableMinGap)
+    : allRows;
+  const total = meta.total != null ? meta.total : allRows.length;
+  if (_table) _table.setData(rows, { total, page: meta.page || _tablePage, limit });
+  updateMarginCountChip(total);
+}
+
+function updateMarginCountChip(total) {
+  const chip = _el?.querySelector('#cc-margin-count');
+  if (!chip) return;
+  const n = Number(total) || 0;
+  chip.textContent = n.toLocaleString('en-NZ');
+  chip.dataset.count = String(n);
+  // Severity colour: red when many under-margin SKUs in under-margin mode, neutral otherwise.
+  if (_tableMode === 'under-margin' && n > 0) {
+    chip.classList.add('cc-count-chip--alert');
+  } else {
+    chip.classList.remove('cc-count-chip--alert');
+  }
 }
 
 async function loadOffset() {
@@ -281,7 +301,10 @@ export default {
         <div class="cc-heatmap" id="cc-heatmap-grid"></div>
       </div>
       <div class="cc-section">
-        <div class="cc-section__title" id="cc-margin-title">Under-Margin Products</div>
+        <div class="cc-section__title" style="display:flex;align-items:center;gap:8px">
+          <span id="cc-margin-title">Under-Margin Products</span>
+          <span class="cc-count-chip" id="cc-margin-count" title="Total products matching the current filter">—</span>
+        </div>
         <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center;margin-bottom:8px">
           <div class="cc-source-toggle" id="cc-table-toggle">
             <button class="cc-source-toggle__btn active" data-source="genuine">Genuine</button>
@@ -291,6 +314,16 @@ export default {
             <button class="cc-source-toggle__btn active" data-mode="under-margin">Under Margin</button>
             <button class="cc-source-toggle__btn" data-mode="all">All Products</button>
           </div>
+          <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:var(--text-muted)">
+            Min gap
+            <select class="admin-input" id="cc-margin-min-gap" style="padding:4px 8px;font-size:13px;width:auto">
+              <option value="0">All</option>
+              <option value="1">≥ 1pp</option>
+              <option value="3">≥ 3pp</option>
+              <option value="5">≥ 5pp</option>
+              <option value="10">≥ 10pp</option>
+            </select>
+          </label>
         </div>
         <div id="cc-under-margin-table"></div>
       </div>
@@ -339,6 +372,12 @@ export default {
         b.classList.toggle('active', b.dataset.mode === _tableMode));
       el.querySelector('#cc-margin-title').textContent =
         _tableMode === 'all' ? 'All Products \u2014 Margin View' : 'Under-Margin Products';
+      loadUnderMargin();
+    });
+
+    // Min-gap filter (client-side narrowing of the current page)
+    el.querySelector('#cc-margin-min-gap').addEventListener('change', (e) => {
+      _tableMinGap = Number(e.target.value) || 0;
       loadUnderMargin();
     });
 

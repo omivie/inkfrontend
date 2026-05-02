@@ -100,6 +100,9 @@
             // Render active filter indicators
             this.renderActiveFilters();
 
+            // Inject CollectionPage / BreadcrumbList JSON-LD for the current view
+            this.injectCollectionSchema();
+
             // Set up browser navigation
             window.addEventListener('popstate', (e) => {
                 if (e.state) {
@@ -110,10 +113,59 @@
                 this.navigationVersion++;
                 this.loadCurrentLevel(this.navigationVersion);
                 this.renderActiveFilters();
+                this.injectCollectionSchema();
             });
 
             // Set up search form to preserve current filters
             this.setupSearchForm();
+        },
+
+        // Embed CollectionPage + BreadcrumbList JSON-LD from the backend so brand /
+        // category / brand+category landing pages get structured data. The backend
+        // owns slug validation and accepts brand+category, brand-only, or category-only.
+        async injectCollectionSchema() {
+            const brand = this.state.brand;
+            const category = this.state.category;
+            // Need at least one of them for a meaningful CollectionPage entry.
+            if (!brand && !category) {
+                this._removeCollectionSchema();
+                return;
+            }
+            try {
+                const res = await API.getCollectionSchema({ brand: brand || undefined, category: category || undefined });
+                if (!res || !res.ok || !res.data) {
+                    this._removeCollectionSchema();
+                    return;
+                }
+                this._writeJsonLdScripts({
+                    'collection-jsonld-collection-page': res.data.collectionPage,
+                    'collection-jsonld-breadcrumbs': res.data.breadcrumbs,
+                });
+            } catch (_) {
+                // Non-critical — JSON-LD is additive
+            }
+        },
+
+        _writeJsonLdScripts(map) {
+            Object.keys(map).forEach(id => {
+                const value = map[id];
+                if (!value) return;
+                let el = document.getElementById(id);
+                if (!el) {
+                    el = document.createElement('script');
+                    el.type = 'application/ld+json';
+                    el.id = id;
+                    document.head.appendChild(el);
+                }
+                el.textContent = JSON.stringify(value);
+            });
+        },
+
+        _removeCollectionSchema() {
+            ['collection-jsonld-collection-page', 'collection-jsonld-breadcrumbs'].forEach(id => {
+                const el = document.getElementById(id);
+                if (el) el.remove();
+            });
         },
 
         // Set up search form to preserve filters when searching

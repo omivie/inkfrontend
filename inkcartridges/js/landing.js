@@ -102,7 +102,21 @@
                 if (typeof API !== 'undefined' && API.subscribe) {
                     const payload = { email: email, source: 'landing' };
                     if (newsletterTurnstileToken) payload.turnstile_token = newsletterTurnstileToken;
-                    await API.subscribe(payload);
+                    const res = await API.subscribe(payload);
+
+                    // Backend returns VALIDATION_FAILED with `details[0].message` already
+                    // user-friendly (e.g. "Please enter a valid email address"). Surface it.
+                    if (res && res.ok === false) {
+                        const fieldMsg = Array.isArray(res.details) && res.details[0]?.message
+                            ? res.details[0].message
+                            : (res.error || 'Could not subscribe. Please try again.');
+                        if (typeof showToast === 'function') showToast(fieldMsg, 'error');
+                        if (siteKey && typeof turnstile !== 'undefined') turnstile.reset('#newsletter-turnstile');
+                        newsletterTurnstileToken = null;
+                        submitBtn.textContent = originalText;
+                        submitBtn.disabled = false;
+                        return;
+                    }
                 }
 
                 if (typeof showToast === 'function') {

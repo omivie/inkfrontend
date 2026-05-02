@@ -60,6 +60,7 @@ const NAV_ITEMS = [
   { key: 'segments', label: 'Segments', icon: 'mail', ownerOnly: true },
   { divider: true },
   { key: 'image-audit', label: 'Image Audit', icon: 'image', ownerOnly: true },
+  { key: 'genuine-image-audit', label: 'Genuine Audit', icon: 'image', ownerOnly: true },
   { key: 'control-center', label: 'Operations', icon: 'lab', ownerOnly: true },
   { key: 'sync-report', label: 'Feed Sync', icon: 'products', href: '/html/admin/sync-report.html', ownerOnly: true },
   { key: 'pending-changes', label: 'Pending Changes', icon: 'orders', ownerOnly: true },

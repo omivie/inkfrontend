@@ -73,18 +73,33 @@ const Products = {
         const resolvedImage = typeof storageUrl === 'function' ? storageUrl(product.image_url) : (product.image_url || '');
         const priority = typeof index === 'number' && index < 4;
 
+        // Discount fields: backend now sends original_price + discount_percent on every
+        // discounted product. Fall back to compare_price for legacy responses.
+        const originalPrice = product.original_price != null
+            ? product.original_price
+            : (product.compare_price && product.compare_price > product.retail_price ? product.compare_price : null);
+        const discountPercent = product.discount_percent != null
+            ? product.discount_percent
+            : (originalPrice && product.retail_price ? Math.round(((originalPrice - product.retail_price) / originalPrice) * 100) : null);
+        const showDiscount = originalPrice && originalPrice > (product.retail_price || 0);
+
+        // GST sub-line: backend sends gst_amount; fall back to local calc.
+        const gstAmount = product.gst_amount != null
+            ? product.gst_amount
+            : (product.retail_price != null && typeof calculateGST === 'function' ? calculateGST(product.retail_price) : null);
+
         return `
             <article class="product-card" data-product-id="${Security.escapeAttr(product.id)}" data-sku="${Security.escapeAttr(product.sku)}">
-                <a href="${product.slug && product.sku ? `/products/${Security.escapeAttr(product.slug)}/${Security.escapeAttr(product.sku)}` : product.sku ? `/html/product/?sku=${Security.escapeAttr(product.sku)}` : product.slug ? `/product/${Security.escapeAttr(product.slug)}` : '#'}" class="product-card__link">
+                <a href="${product.canonical_url ? Security.escapeAttr(product.canonical_url) : (product.slug && product.sku ? `/products/${Security.escapeAttr(product.slug)}/${Security.escapeAttr(product.sku)}` : product.sku ? `/html/product/?sku=${Security.escapeAttr(product.sku)}` : product.slug ? `/product/${Security.escapeAttr(product.slug)}` : '#')}" class="product-card__link">
                     <div class="product-card__image-wrapper">
                         ${this.getProductImageHTML(product, { priority })}
                         ${sourceBadge ? `<span class="product-card__badge ${sourceBadge.class}">${sourceBadge.text}</span>` : ''}
+                        ${showDiscount && discountPercent ? `<span class="product-card__badge product-card__badge--discount">Save ${discountPercent}%</span>` : ''}
                         ${product.is_lowest_in_market ? `<span class="product-card__badge product-card__badge--lowest-price" title="${product.market_position ? Security.escapeAttr(product.market_position.price_diff_percent + '% less than ' + product.market_position.lowest_competitor_name) : ''}">Lowest Price in NZ</span>` : ''}
                     </div>
                     <div class="product-card__content">
                         <p class="product-card__brand">${Security.escapeHtml(product.brand?.name || '')}</p>
                         <h3 class="product-card__title" title="${Security.escapeAttr(product.name)}">${Security.escapeHtml(product.name)}</h3>
-                        ${product.compare_price && product.compare_price > product.retail_price ? `<p class="product-card__savings">Save ${formatPrice(product.compare_price - product.retail_price)}</p>` : ''}
                         ${product.average_rating && product.review_count > 0 ? `<div class="product-card__rating">${this._miniStars(Math.round(parseFloat(product.average_rating)))} <span class="product-card__review-count">(${product.review_count})</span></div>` : ''}
                         ${product.retail_price != null && product.retail_price >= 100 ? '<span class="product-card__free-shipping">FREE SHIPPING</span>' : ''}
                         <div class="product-card__footer">
@@ -93,7 +108,10 @@ const Products = {
                                 <p class="product-card__stock stock-${stockInfo.class}">${Security.escapeHtml(stockInfo.text)}</p>
                             </div>
                             <div class="product-card__footer-row">
-                                <p class="product-card__price">${product.retail_price == null ? 'Price unavailable' : formatPrice(product.retail_price)}${product.compare_price && product.compare_price > product.retail_price ? ` <span class="product-card__compare-price">${formatPrice(product.compare_price)}</span>` : ''}</p>
+                                <div class="product-card__price-block">
+                                    <p class="product-card__price">${product.retail_price == null ? 'Price unavailable' : formatPrice(product.retail_price)}${showDiscount ? ` <span class="product-card__compare-price">${formatPrice(originalPrice)}</span>` : ''}</p>
+                                    ${gstAmount != null ? `<p class="product-card__gst">Inc. GST ${formatPrice(gstAmount)}</p>` : ''}
+                                </div>
                                 <button class="product-card__add-btn btn btn--primary"
                                     ${product.retail_price == null || stockInfo.class !== 'in-stock' ? 'disabled' : ''}
                                     data-product-id="${Security.escapeAttr(product.id)}"

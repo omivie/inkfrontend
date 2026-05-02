@@ -131,6 +131,7 @@ function render() {
 
     <div class="admin-card admin-mb-lg">
       <div class="admin-card__title">Profit & Loss <small>latest period vs prior</small></div>
+      ${renderPnLOrdersSummary()}
       <div style="overflow-x:auto">${renderPnLTable()}</div>
     </div>
 
@@ -151,6 +152,22 @@ function render() {
   bindExpenseForm();
 }
 
+function renderPnLOrdersSummary() {
+  const pnl = _state.pnl || {};
+  const periods = Array.isArray(pnl.periods) ? pnl.periods : [];
+  const cur = periods[periods.length - 1] || pnl.totals || {};
+  const prev = periods.length >= 2 ? periods[periods.length - 2] : {};
+  const curN = num(cur.order_count, NaN);
+  const prevN = num(prev.order_count, NaN);
+  if (!Number.isFinite(curN)) return '';
+  let delta = '';
+  if (Number.isFinite(prevN) && prevN > 0) {
+    const pct = ((curN - prevN) / prevN) * 100;
+    delta = ` <span style="color:var(--text-muted);font-size:12px">(${pct >= 0 ? '+' : ''}${pct.toFixed(1)}% vs prior)</span>`;
+  }
+  return `<div style="font-size:12px;color:var(--text-muted);margin:-4px 0 8px">${curN.toLocaleString('en-NZ')} orders this period${delta}</div>`;
+}
+
 function renderPnLTable() {
   const pnl = _state.pnl || {};
   const periods = Array.isArray(pnl.periods) ? pnl.periods : [];
@@ -160,6 +177,7 @@ function renderPnLTable() {
     ['Revenue', cur.revenue, prev.revenue],
     ['Cost of Goods Sold', cur.cogs, prev.cogs, true],
     ['Gross Profit', cur.gross_profit, prev.gross_profit],
+    ['Stripe Fees', cur.stripe_fees, prev.stripe_fees, true],
     ['Operating Expenses', cur.operating_expenses, prev.operating_expenses, true],
     ['Net Profit', cur.net_profit, prev.net_profit, false, true],
   ];
@@ -268,7 +286,7 @@ async function renderProfitChart() {
   const pnl = _state.pnl || {};
   const periods = Array.isArray(pnl.periods) ? pnl.periods : [];
 
-  const labels = [], gross = [], net = [];
+  const labels = [], gross = [], net = [], orders = [];
   for (const p of periods) {
     const ym = String(p.period || '');
     const [y, m] = ym.split('-');
@@ -278,6 +296,7 @@ async function renderProfitChart() {
     labels.push(label);
     gross.push(num(p.gross_profit));
     net.push(num(p.net_profit));
+    orders.push(p.order_count != null ? num(p.order_count) : null);
   }
 
   const colors = Charts.getThemeColors();
@@ -290,7 +309,16 @@ async function renderProfitChart() {
     options: {
       plugins: {
         legend: { display: true, position: 'top' },
-        tooltip: { callbacks: { label: (ctx) => `${ctx.dataset.label}: ${formatPrice(ctx.parsed.y)}` } },
+        tooltip: {
+          callbacks: {
+            label: (ctx) => `${ctx.dataset.label}: ${formatPrice(ctx.parsed.y)}`,
+            afterBody: (items) => {
+              const i = items?.[0]?.dataIndex;
+              const n = i != null ? orders[i] : null;
+              return n != null ? `${n.toLocaleString('en-NZ')} orders` : '';
+            },
+          },
+        },
       },
     },
   });

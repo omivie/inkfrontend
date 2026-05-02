@@ -32,6 +32,9 @@ const Cart = {
     // Discount amount from server
     discountAmount: 0,
 
+    // Stamp card progress (null for guests or when loyalty service is down)
+    stampCard: null,
+
     // Loading state - starts true, set to false after server data is loaded
     loading: true,
 
@@ -237,7 +240,10 @@ const Cart = {
             showToast(`${count} item${count > 1 ? 's were' : ' was'} removed from your cart (no longer available)`, 'info');
         }
 
-        return { items, summary, couponCode, discountAmount };
+        // Stamp card progress (null for guests or if loyalty service is down)
+        const stampCard = responseData.stamp_card || null;
+
+        return { items, summary, couponCode, discountAmount, stampCard };
     },
 
     /**
@@ -379,6 +385,7 @@ const Cart = {
                 this.serverSummary = parsed.summary;
                 this.appliedCoupon = parsed.couponCode;
                 this.discountAmount = parsed.discountAmount;
+                this.stampCard = parsed.stampCard;
 
                 this.saveToLocalStorage();
 
@@ -425,6 +432,7 @@ const Cart = {
                 this.serverSummary = parsed.summary;
                 this.appliedCoupon = parsed.couponCode;
                 this.discountAmount = parsed.discountAmount;
+                this.stampCard = parsed.stampCard;
             }
         } catch (error) {
             DebugLog.error('Failed to load cart from server:', error);
@@ -1055,6 +1063,7 @@ const Cart = {
         this.updateUI();
 
         // Sync to server only for core items
+        let crossSellPayload = null;
         if (isCore && typeof API !== 'undefined') {
             try {
                 const response = await API.addToCart(product.id, product.quantity || 1);
@@ -1067,6 +1076,17 @@ const Cart = {
                         showToast(response.error || 'Failed to add item to cart', 'error');
                     }
                     return;
+                }
+
+                // Capture cross-sell hint from add-to-cart response.
+                // Backend returns either `frequently_bought_together` (warm cache, inline)
+                // or `frequently_bought_together_url` (cold, hand off to a lazy fetch).
+                if (response.data) {
+                    if (Array.isArray(response.data.frequently_bought_together) && response.data.frequently_bought_together.length) {
+                        crossSellPayload = { products: response.data.frequently_bought_together };
+                    } else if (response.data.frequently_bought_together_url) {
+                        crossSellPayload = { url: response.data.frequently_bought_together_url };
+                    }
                 }
 
                 // Server confirmed - refresh to get accurate server totals
@@ -1105,6 +1125,94 @@ const Cart = {
         if (typeof CartAnalytics !== 'undefined') {
             CartAnalytics.trackAddToCart(product, product.quantity || 1);
         }
+
+        // Show "Customers also bought" carousel from add-to-cart response.
+        // Inline products render immediately; URL fallback fetches on idle so
+        // the cart-confirmation flow isn't blocked.
+        if (crossSellPayload) {
+            this._showCrossSellModal(crossSellPayload).catch(() => {});
+        }
+    },
+
+    /**
+     * Render a "Customers also bought" carousel after a successful add-to-cart.
+     * Accepts either { products: [...] } (warm cache) or { url } (cold cache).
+     */
+    async _showCrossSellModal(payload) {
+        let products = payload.products || null;
+        if (!products && payload.url) {
+            // Lazy-fetch on idle — backend says hot path is cache.set'd for 1h
+            await new Promise(resolve => {
+                if (typeof window.requestIdleCallback === 'function') {
+                    window.requestIdleCallback(() => resolve(), { timeout: 1500 });
+                } else {
+                    setTimeout(resolve, 250);
+                }
+            });
+            try {
+                const res = await fetch(payload.url, { credentials: 'include' });
+                if (!res.ok) return;
+                const json = await res.json();
+                products = json?.data?.bought_together || json?.data?.products || [];
+            } catch (_) {
+                return;
+            }
+        }
+        if (!products || !products.length) return;
+
+        const top = products.slice(0, 3);
+        const existing = document.getElementById('crosssell-modal');
+        if (existing) existing.remove();
+
+        const overlay = document.createElement('div');
+        overlay.id = 'crosssell-modal';
+        overlay.className = 'crosssell-modal';
+
+        const cards = top.map(p => {
+            const img = typeof storageUrl === 'function' ? storageUrl(p.image_url) : (p.image_url || '');
+            const link = p.canonical_url
+                || (p.slug && p.sku ? `/products/${encodeURIComponent(p.slug)}/${encodeURIComponent(p.sku)}` : `/html/product/?sku=${encodeURIComponent(p.sku || '')}`);
+            const price = p.retail_price != null && typeof formatPrice === 'function' ? formatPrice(p.retail_price) : '';
+            return `
+                <a class="crosssell-modal__card" href="${Security.escapeAttr(link)}">
+                    ${img ? `<img class="crosssell-modal__img" src="${Security.escapeAttr(img)}" alt="${Security.escapeAttr(p.name || '')}" loading="lazy">` : '<div class="crosssell-modal__img crosssell-modal__img--placeholder"></div>'}
+                    <div class="crosssell-modal__name">${Security.escapeHtml(p.name || '')}</div>
+                    <div class="crosssell-modal__price">${Security.escapeHtml(price)}</div>
+                    <button type="button" class="btn btn--secondary crosssell-modal__add add-to-cart-btn"
+                        data-product-id="${Security.escapeAttr(p.id || '')}"
+                        data-product-sku="${Security.escapeAttr(p.sku || '')}"
+                        data-product-name="${Security.escapeAttr(p.name || '')}"
+                        data-product-price="${Security.escapeAttr(p.retail_price != null ? p.retail_price : '')}"
+                        data-product-image="${Security.escapeAttr(img || '')}"
+                        data-product-color="${Security.escapeAttr(p.color || '')}"
+                        ${p.in_stock === false ? 'disabled' : ''}>
+                        ${p.in_stock === false ? 'Out of stock' : 'Add to cart'}
+                    </button>
+                </a>`;
+        }).join('');
+
+        overlay.innerHTML = `
+            <div class="crosssell-modal__panel" role="dialog" aria-modal="true" aria-labelledby="crosssell-title">
+                <div class="crosssell-modal__head">
+                    <h3 id="crosssell-title">Customers also bought</h3>
+                    <button type="button" class="crosssell-modal__close" aria-label="Close">&times;</button>
+                </div>
+                <div class="crosssell-modal__grid">${cards}</div>
+                <div class="crosssell-modal__foot">
+                    <a href="/html/cart.html" class="btn btn--primary">Go to cart</a>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(overlay);
+
+        const close = () => overlay.remove();
+        overlay.querySelector('.crosssell-modal__close').addEventListener('click', close);
+        overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+        document.addEventListener('keydown', function escClose(e) {
+            if (e.key === 'Escape') { close(); document.removeEventListener('keydown', escClose); }
+        });
+        // Add-to-cart on cross-sell items goes through the normal Cart.addItem path
+        // via the global delegate already bound in bindEvents().
     },
 
     /**
@@ -1398,6 +1506,24 @@ const Cart = {
     },
 
     /**
+     * Render the loyalty stamp-card chip on the cart page.
+     * Hidden for guests and when the loyalty service couldn't be queried.
+     * Uses stamp_card.message verbatim — do not interpolate from numeric fields.
+     */
+    _renderStampCardChip: function() {
+        const chipEl = document.getElementById('cart-stamp-card-chip');
+        if (!chipEl) return;
+        const sc = this.stampCard;
+        if (!sc || !sc.message) {
+            chipEl.hidden = true;
+            chipEl.textContent = '';
+            return;
+        }
+        chipEl.textContent = sc.message;
+        chipEl.hidden = false;
+    },
+
+    /**
      * Render cart page content
      */
     renderCartPage: function() {
@@ -1537,37 +1663,75 @@ const Cart = {
                 if (totalClassEl) totalClassEl.textContent = formatPrice(cartTotal);
             }
 
-            // Free shipping message + progress bar
+            // Free shipping nudge + progress bar.
+            // Backend cart summary now provides:
+            //   free_shipping_message  — null on empty cart, or pre-formatted copy
+            //   qualifies_for_free_shipping
+            //   free_shipping_threshold / free_shipping_remaining
+            // Render verbatim when present; fall back to local Shipping helper when not.
             const shippingMsgEl = document.getElementById('cart-shipping-message');
             const shippingBarEl = document.getElementById('cart-shipping-bar');
             const barFillEl = document.getElementById('shipping-bar-fill');
 
             if (shippingMsgEl) {
-                const spendMore = (typeof Shipping !== 'undefined') ? Shipping.getSpendMore(subtotal) : null;
+                const summary = this.serverSummary || {};
+                const hasServerNudge = summary.free_shipping_message !== undefined
+                    && summary.free_shipping_threshold != null;
 
-                if (spendMore && spendMore.qualifies) {
-                    shippingMsgEl.querySelector('span').textContent = "You've qualified for FREE shipping!";
-                    shippingMsgEl.className = 'cart-summary__shipping-message cart-summary__shipping-message--success';
-                    shippingMsgEl.hidden = false;
-                    if (shippingBarEl) shippingBarEl.hidden = true;
-                } else if (spendMore) {
-                    const priceStr = (typeof formatPrice === 'function') ? formatPrice(spendMore.needed) : '$' + spendMore.needed.toFixed(2);
-                    shippingMsgEl.querySelector('span').textContent = 'Add ' + priceStr + ' more for free shipping!';
-                    shippingMsgEl.className = 'cart-summary__shipping-message';
-                    shippingMsgEl.hidden = false;
+                if (hasServerNudge) {
+                    if (summary.free_shipping_message) {
+                        shippingMsgEl.querySelector('span').textContent = summary.free_shipping_message;
+                        shippingMsgEl.className = 'cart-summary__shipping-message'
+                            + (summary.qualifies_for_free_shipping ? ' cart-summary__shipping-message--success' : '');
+                        shippingMsgEl.hidden = false;
+                    } else {
+                        shippingMsgEl.hidden = true;
+                    }
 
                     if (shippingBarEl && barFillEl) {
-                        const threshold = (typeof Config !== 'undefined') ? Config.getSetting('FREE_SHIPPING_THRESHOLD', 100) : 100;
-                        const pct = Math.min(Math.round((subtotal / threshold) * 100), 100);
-                        barFillEl.style.width = pct + '%';
-                        barFillEl.className = 'shipping-bar__fill' + (pct >= 100 ? ' shipping-bar__fill--complete' : '');
-                        shippingBarEl.hidden = false;
+                        if (summary.qualifies_for_free_shipping || !summary.free_shipping_message) {
+                            shippingBarEl.hidden = true;
+                        } else {
+                            const threshold = summary.free_shipping_threshold;
+                            const pct = threshold > 0
+                                ? Math.min(Math.round((subtotal / threshold) * 100), 100)
+                                : 0;
+                            barFillEl.style.width = pct + '%';
+                            barFillEl.className = 'shipping-bar__fill' + (pct >= 100 ? ' shipping-bar__fill--complete' : '');
+                            shippingBarEl.hidden = false;
+                        }
                     }
                 } else {
-                    shippingMsgEl.hidden = true;
-                    if (shippingBarEl) shippingBarEl.hidden = true;
+                    // Fallback: local Shipping helper (server didn't return the nudge fields)
+                    const spendMore = (typeof Shipping !== 'undefined') ? Shipping.getSpendMore(subtotal) : null;
+
+                    if (spendMore && spendMore.qualifies) {
+                        shippingMsgEl.querySelector('span').textContent = "You've qualified for FREE shipping!";
+                        shippingMsgEl.className = 'cart-summary__shipping-message cart-summary__shipping-message--success';
+                        shippingMsgEl.hidden = false;
+                        if (shippingBarEl) shippingBarEl.hidden = true;
+                    } else if (spendMore) {
+                        const priceStr = (typeof formatPrice === 'function') ? formatPrice(spendMore.needed) : '$' + spendMore.needed.toFixed(2);
+                        shippingMsgEl.querySelector('span').textContent = 'Add ' + priceStr + ' more for free shipping!';
+                        shippingMsgEl.className = 'cart-summary__shipping-message';
+                        shippingMsgEl.hidden = false;
+
+                        if (shippingBarEl && barFillEl) {
+                            const threshold = (typeof Config !== 'undefined') ? Config.getSetting('FREE_SHIPPING_THRESHOLD', 100) : 100;
+                            const pct = Math.min(Math.round((subtotal / threshold) * 100), 100);
+                            barFillEl.style.width = pct + '%';
+                            barFillEl.className = 'shipping-bar__fill' + (pct >= 100 ? ' shipping-bar__fill--complete' : '');
+                            shippingBarEl.hidden = false;
+                        }
+                    } else {
+                        shippingMsgEl.hidden = true;
+                        if (shippingBarEl) shippingBarEl.hidden = true;
+                    }
                 }
             }
+
+            // Loyalty stamp card chip (auth users only, null for guests / loyalty downtime)
+            this._renderStampCardChip();
 
             // Disable checkout if cart has out-of-stock items
             const checkoutBtn = document.getElementById('checkout-btn');

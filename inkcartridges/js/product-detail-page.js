@@ -243,9 +243,10 @@
             const seo = info.seo || {};
             const og = seo.og || {};
 
-            // Build canonical slug URL (fallback when seo.canonical not provided)
+            // Canonical URL — backend now owns this on every product (info.canonical_url).
+            // Falls back to seo.canonical, then a constructed slug URL for legacy responses.
             const slug = info.slug || info.sku.toLowerCase();
-            const canonicalUrl = seo.canonical || `https://www.inkcartridges.co.nz/products/${slug}/${info.sku}`;
+            const canonicalUrl = info.canonical_url || seo.canonical || `https://www.inkcartridges.co.nz/products/${slug}/${info.sku}`;
 
             // Page title and meta description — prefer API seo fields, fall back to computed
             const genuinePrefix = (info.category !== 'ribbon' && !info.isCompatible) ? 'Genuine ' : '';
@@ -373,14 +374,30 @@
             const priceEl = document.getElementById('product-price');
             priceEl.textContent = formatPrice(price);
 
-            // Compare price & savings
-            const comparePrice = parseFloat(info.compare_price || 0);
-            if (comparePrice && comparePrice > price) {
-                const savingsAmount = comparePrice - price;
-                const savingsPct = Math.round((savingsAmount / comparePrice) * 100);
+            // Compare price & savings — prefer backend-derived original_price/discount_percent;
+            // fall back to local compare_price math for legacy responses.
+            const originalPrice = info.original_price != null
+                ? parseFloat(info.original_price)
+                : parseFloat(info.compare_price || 0);
+            if (originalPrice && originalPrice > price) {
+                const savingsAmount = info.discount_amount != null
+                    ? parseFloat(info.discount_amount)
+                    : (originalPrice - price);
+                const savingsPct = info.discount_percent != null
+                    ? info.discount_percent
+                    : Math.round((savingsAmount / originalPrice) * 100);
                 priceEl.insertAdjacentHTML('afterend',
-                    `<span class="product-detail__compare-price">Was ${formatPrice(comparePrice)}</span>
+                    `<span class="product-detail__compare-price">Was ${formatPrice(originalPrice)}</span>
                      <span class="product-detail__savings">Save ${formatPrice(savingsAmount)} (${savingsPct}%)</span>`);
+            }
+
+            // Inc. GST sub-line — NZ trust signal for international shoppers
+            const gstAmount = info.gst_amount != null
+                ? parseFloat(info.gst_amount)
+                : (typeof calculateGST === 'function' ? calculateGST(price) : null);
+            if (gstAmount != null && gstAmount > 0) {
+                priceEl.insertAdjacentHTML('afterend',
+                    `<span class="product-detail__gst-line">Inc. GST ${formatPrice(gstAmount)}</span>`);
             }
 
             // Shipping callout — GMC compliance: show cost or free-shipping status at product level
@@ -412,13 +429,18 @@
                         ${phoneIcon}
                         Call to Order &mdash; 027 474 0115
                     </a>`;
+            // Waitlist visibility: prefer explicit backend signal (info.waitlist_available),
+            // fall back to stock-status inference. Skip when explicitly false.
+            const waitlistEligible = info.waitlist_available !== undefined
+                ? !!info.waitlist_available
+                : (stockStatus.class === 'out-of-stock');
+
             if (stockStatus.class === 'out-of-stock') {
                 const addBtn = document.getElementById('add-to-cart-btn');
                 if (addBtn) { addBtn.disabled = true; addBtn.textContent = 'Out of Stock'; }
                 const qtyInput = document.getElementById('product-quantity');
                 if (qtyInput) qtyInput.disabled = true;
-                // Inject "Notify me when back in stock" button
-                this._injectWaitlistButton(info.sku);
+                if (waitlistEligible) this._injectWaitlistButton(info.sku);
             } else if (stockStatus.class === 'contact-us') {
                 const addBtn = document.getElementById('add-to-cart-btn');
                 if (addBtn) {
@@ -1228,7 +1250,7 @@
         // Update Schema.org Product structured data
         updateProductSchema(info, price) {
             const slug = info.slug || info.sku.toLowerCase();
-            const canonicalUrl = `https://www.inkcartridges.co.nz/products/${slug}/${info.sku}`;
+            const canonicalUrl = info.canonical_url || `https://www.inkcartridges.co.nz/products/${slug}/${info.sku}`;
             const freeShipping = price >= 100;
             const schema = {
                 "@context": "https://schema.org",
