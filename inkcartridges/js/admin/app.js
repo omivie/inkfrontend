@@ -62,7 +62,7 @@ const NAV_ITEMS = [
   { key: 'image-audit', label: 'Image Audit', icon: 'image', ownerOnly: true },
   { key: 'genuine-image-audit', label: 'Genuine Audit', icon: 'image', ownerOnly: true },
   { key: 'control-center', label: 'Operations', icon: 'lab', ownerOnly: true },
-  { key: 'sync-report', label: 'Feed Sync', icon: 'products', href: '/html/admin/sync-report.html', ownerOnly: true },
+  { key: 'sync-report', label: 'Feed Sync', icon: 'products', href: '/admin/sync-report', ownerOnly: true },
   { key: 'pending-changes', label: 'Pending Changes', icon: 'orders', ownerOnly: true },
   { key: 'price-monitor', label: 'Price Monitor', icon: 'finance', ownerOnly: true },
   { key: 'recovery', label: 'Recovery', icon: 'refunds', ownerOnly: true },
@@ -166,7 +166,7 @@ function renderSidebar() {
   collapseBtn.addEventListener('click', toggleCollapse);
 
   // Back to site - via explicit sidebar button and user card click
-  const goToSite = () => { window.location.href = '/html/'; };
+  const goToSite = () => { window.location.href = '/'; };
   document.getElementById('back-to-site')?.addEventListener('click', goToSite);
   document.getElementById('user-card')?.addEventListener('click', goToSite);
 

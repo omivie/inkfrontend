@@ -12,7 +12,7 @@
 
         // Redirect to login if not authenticated
         if (typeof Auth === 'undefined' || !Auth.isAuthenticated()) {
-            window.location.href = '/html/account/login.html?redirect=' + encodeURIComponent(window.location.pathname);
+            window.location.href = '/account/login?redirect=' + encodeURIComponent(window.location.pathname);
             return;
         }
 

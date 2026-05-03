@@ -596,14 +596,24 @@
     function findProducts() {
         if (!selectedPrinterName || !selectedBrand) return;
 
-        // Prefer the strict printer-products route (?printer=<slug>) which filters
-        // via product_compatibility — no fuzzy name matching, no noise.
+        // Prefer the strict printer-products route which filters via
+        // product_compatibility — no fuzzy name matching, no noise.
         // Fall back to ?printer_model= only when we don't have a slug.
+        //
+        // Canonical printer URL per docs/storefront/search-dropdown-routing.md:
+        // /shop?brand=<brand_slug>&printer_slug=<slug>. selectedBrand is a
+        // brand slug here (data-brand on the brand button), so we have all
+        // the pieces — emit the canonical (branded) form.
         let url;
         if (selectedModel) {
-            url = `/html/shop?printer=${encodeURIComponent(selectedModel)}`;
+            url = (typeof buildPrinterUrl === 'function')
+                ? buildPrinterUrl(
+                      { slug: selectedModel, brand_slug: selectedBrand },
+                      { allowUnbranded: true }
+                  )
+                : `/shop?brand=${encodeURIComponent(selectedBrand)}&printer_slug=${encodeURIComponent(selectedModel)}`;
         } else {
-            url = `/html/shop?printer_model=${encodeURIComponent(selectedPrinterName)}&printer_brand=${encodeURIComponent(selectedBrand)}`;
+            url = `/shop?printer_model=${encodeURIComponent(selectedPrinterName)}&printer_brand=${encodeURIComponent(selectedBrand)}`;
         }
         window.location.href = url;
     }

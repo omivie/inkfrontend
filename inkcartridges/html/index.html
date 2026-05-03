@@ -55,7 +55,7 @@
         "url": "https://www.inkcartridges.co.nz",
         "potentialAction": {
             "@type": "SearchAction",
-            "target": "https://www.inkcartridges.co.nz/html/shop?q={search_term_string}",
+            "target": "https://www.inkcartridges.co.nz/shop?q={search_term_string}",
             "query-input": "required name=search_term_string"
         }
     }
@@ -134,19 +134,19 @@
                 </div>
 
                 <div class="header-actions">
-                    <a href="/html/account/index.html" class="header-actions__item">
+                    <a href="/account" class="header-actions__item">
                         <span class="header-actions__icon">
                             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
                         </span>
                         <span>Account</span>
                     </a>
-                    <a href="/html/account/favourites.html" class="header-actions__item">
+                    <a href="/account/favourites" class="header-actions__item">
                         <span class="header-actions__icon">
                             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
                         </span>
                         <span>Favourites</span>
                     </a>
-                    <a href="/html/cart.html" class="header-actions__item">
+                    <a href="/cart" class="header-actions__item">
                         <span class="header-actions__icon">
                             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"/></svg>
                             <span class="cart-badge" id="cart-count">0</span>
@@ -169,7 +169,7 @@
                         <a href="/" class="nav-menu__link nav-menu__link--active">Home</a>
                     </li>
                     <li class="nav-menu__item">
-                        <a href="/html/shop.html" class="nav-menu__link">Shop</a>
+                        <a href="/shop" class="nav-menu__link">Shop</a>
                     </li>
                     <li class="nav-menu__item">
                         <a href="/?scroll=ink-finder" class="nav-menu__link">Printer Models</a>
@@ -196,7 +196,7 @@
                     </li>
                 </ul>
 
-                <form class="search-form search-form--nav" action="/html/shop.html" method="GET" role="search">
+                <form class="search-form search-form--nav" action="/shop" method="GET" role="search">
                     <label for="search-input" class="visually-hidden">Search for products</label>
                     <input
                         type="search"
@@ -217,7 +217,7 @@
         <div class="brands-mega" id="brands-mega" hidden role="region" aria-label="Browse brands">
             <div class="container">
                 <div class="brands-mega__cards"></div>
-                <a href="/html/shop.html" class="brands-mega__view-all">
+                <a href="/shop" class="brands-mega__view-all">
                     View All Brands
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
                 </a>
@@ -228,7 +228,7 @@
             <div class="container">
                 <p class="ribbons-mega__heading">Select your typewriter or printer brand</p>
                 <div class="ribbons-mega__grid"></div>
-                <a href="/html/ribbons.html" class="ribbons-mega__view-all">
+                <a href="/ribbons" class="ribbons-mega__view-all">
                     View All Ribbons
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
                 </a>
@@ -253,7 +253,7 @@
                 </div>
                 <div class="hero__cta" data-testid="hero-cta">
                     <a href="#ink-finder-heading" class="btn btn--primary btn--large" data-track="cta_click" data-track-cta="Find My Exact Cartridge" data-track-location="hero" data-testid="hero-cta-primary">Find My Exact Cartridge</a>
-                    <a href="/html/shop.html" class="btn btn--outline btn--large hero__btn-outline" data-track="cta_click" data-track-cta="Shop All" data-track-location="hero" data-testid="hero-cta-secondary">Shop All</a>
+                    <a href="/shop" class="btn btn--outline btn--large hero__btn-outline" data-track="cta_click" data-track-cta="Shop All" data-track-location="hero" data-testid="hero-cta-secondary">Shop All</a>
                 </div>
             </div>
         </section>
@@ -383,7 +383,7 @@
                     <div class="ink-finder__tab-panel ink-finder__tab-panel--hidden" id="finder-panel-cartridge" role="tabpanel" aria-labelledby="finder-tab-cartridge">
                         <div class="ink-finder__cartridge-search">
                             <p class="ink-finder__cartridge-hint">Enter the cartridge number printed on your current cartridge (e.g. HP 63, TN-2450, CLI-681)</p>
-                            <form class="ink-finder__cartridge-form" action="/html/shop.html" method="GET">
+                            <form class="ink-finder__cartridge-form" action="/shop" method="GET">
                                 <label for="cartridge-code-input" class="visually-hidden">Cartridge code</label>
                                 <input
                                     type="text"
@@ -404,10 +404,10 @@
 
                     <div class="ink-finder__popular">
                         <span class="ink-finder__popular-label">Popular:</span>
-                        <a href="/html/shop?printer_model=Brother+MFC-J6945DW&printer_brand=brother" class="ink-finder__popular-chip">Brother MFC-J6945DW</a>
-                        <a href="/html/shop?printer_model=HP+ENVY+6020&printer_brand=hp" class="ink-finder__popular-chip">HP ENVY 6020</a>
-                        <a href="/html/shop?printer_model=Epson+XP-4100&printer_brand=epson" class="ink-finder__popular-chip">Epson XP-4100</a>
-                        <a href="/html/shop?printer_model=Canon+PIXMA+TS3360&printer_brand=canon" class="ink-finder__popular-chip">Canon PIXMA TS3360</a>
+                        <a href="/shop?printer_model=Brother+MFC-J6945DW&printer_brand=brother" class="ink-finder__popular-chip">Brother MFC-J6945DW</a>
+                        <a href="/shop?printer_model=HP+ENVY+6020&printer_brand=hp" class="ink-finder__popular-chip">HP ENVY 6020</a>
+                        <a href="/shop?printer_model=Epson+XP-4100&printer_brand=epson" class="ink-finder__popular-chip">Epson XP-4100</a>
+                        <a href="/shop?printer_model=Canon+PIXMA+TS3360&printer_brand=canon" class="ink-finder__popular-chip">Canon PIXMA TS3360</a>
                     </div>
 
                     <p class="ink-finder__help">

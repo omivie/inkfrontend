@@ -311,7 +311,13 @@
             this.state.brand = params.get('brand');
             this.state.category = params.get('category');
             this.state.code = params.get('code');
-            this.state.printer = params.get('printer');
+            // Canonical printer query param is `printer_slug` per
+            // docs: search-dropdown-routing.md (May 2026). The legacy
+            // `printer` form is still accepted to keep bookmarks, cached
+            // crawls, and the /printers/:slug → /shop?printer=:slug Vercel
+            // redirect working. updateURL() and every new emission across
+            // the storefront use the canonical name.
+            this.state.printer = params.get('printer_slug') || params.get('printer');
             this.state.printerModel = params.get('printer_model');
             this.state.printerBrand = params.get('printer_brand'); // Brand of printer (for display, not filtering)
             this.state.search = params.get('search') || params.get('q'); // Support both 'search' and 'q' params
@@ -319,7 +325,7 @@
 
             // Ribbons category → redirect to dedicated ribbons page
             if (this.state.category === 'ribbons' && this.state.brand) {
-                window.location.replace(`/html/ribbons?printer_brand=${encodeURIComponent(this.state.brand)}`);
+                window.location.replace(`/ribbons?printer_brand=${encodeURIComponent(this.state.brand)}`);
                 return;
             }
 
@@ -627,7 +633,7 @@
             this.cache.ribbonDeviceBrands.forEach((b, i) => {
                 const box = document.createElement('a');
                 box.className = 'drilldown-box drilldown-box--ribbon';
-                box.href = `/html/ribbons?printer_brand=${encodeURIComponent(b.value)}`;
+                box.href = `/ribbons?printer_brand=${encodeURIComponent(b.value)}`;
                 box.style.animationDelay = `${60 + i * 30}ms`;
                 box.innerHTML = `<span class="drilldown-box__label">${Security.escapeHtml(b.label)}</span>`;
                 grid.appendChild(box);
@@ -779,7 +785,7 @@
             if (availableCategories.length === 1) {
                 const onlyCat = availableCategories[0];
                 if (onlyCat.id === 'ribbons') {
-                    window.location.href = `/html/ribbons?printer_brand=${encodeURIComponent(this.state.brand)}`;
+                    window.location.href = `/ribbons?printer_brand=${encodeURIComponent(this.state.brand)}`;
                     return;
                 }
                 this.navigateTo('codes', { category: onlyCat.id });
@@ -798,7 +804,7 @@
                 `;
                 if (cat.id === 'ribbons') {
                     box.addEventListener('click', () => {
-                        window.location.href = `/html/ribbons?printer_brand=${encodeURIComponent(this.state.brand)}`;
+                        window.location.href = `/ribbons?printer_brand=${encodeURIComponent(this.state.brand)}`;
                     });
                 } else {
                     box.addEventListener('click', () => this.navigateTo('codes', { category: cat.id }));
@@ -2288,8 +2294,14 @@
                     // recovery) instead of an ambiguous mixed result set.
                     if (products.length === 0 && smartData?.matched_printer?.slug) {
                         const p2 = smartData.matched_printer;
-                        const newURL = `${window.location.pathname}?printer=${encodeURIComponent(p2.slug)}`;
-                        history.replaceState({}, '', newURL);
+                        // Canonical printer URL per search-dropdown-routing.md.
+                        // brand_slug shipped May 2026 — emit the branded form
+                        // when present, fall back to unbranded printer_slug
+                        // (still better than the legacy `?printer=` shape).
+                        const printerHref = (typeof buildPrinterUrl === 'function')
+                            ? buildPrinterUrl(p2, { allowUnbranded: true })
+                            : `/shop?printer_slug=${encodeURIComponent(p2.slug)}`;
+                        history.replaceState({}, '', printerHref);
                         this.state.search = null;
                         this.state.printer = p2.slug;
                         this.state.printerName = p2.name || '';
@@ -2470,7 +2482,7 @@
                     : `Showing similar results.`;
                 banner.innerHTML = `
                     <span>${showingFor}</span>
-                    <a class="search-correction-banner__link" href="/html/shop?q=${Security.escapeAttr(correctedFrom)}">Search instead for "${Security.escapeHtml(correctedFrom)}"</a>
+                    <a class="search-correction-banner__link" href="/shop?q=${Security.escapeAttr(correctedFrom)}">Search instead for "${Security.escapeHtml(correctedFrom)}"</a>
                 `;
                 wrap.appendChild(banner);
             } else if (didYouMean) {
@@ -2479,7 +2491,7 @@
                 banner.className = 'search-did-you-mean';
                 banner.innerHTML = `
                     Did you mean
-                    <a href="/html/shop?q=${Security.escapeAttr(didYouMean)}"><strong>"${Security.escapeHtml(didYouMean)}"</strong></a>?
+                    <a href="/shop?q=${Security.escapeAttr(didYouMean)}"><strong>"${Security.escapeHtml(didYouMean)}"</strong></a>?
                 `;
                 wrap.appendChild(banner);
             }
@@ -2573,8 +2585,14 @@
                     renderedAny = true;
                     const cards = printers.slice(0, 4).map(p => {
                         const name = Security.escapeHtml(p.name || p.full_name || p.model_name || '');
-                        const slug = Security.escapeAttr(p.slug || '');
-                        return `<a class="recovery-printer-card" href="/html/shop?printer=${slug}">
+                        // Canonical printer URL per search-dropdown-routing.md.
+                        // compatible_printers payload includes brand.slug, so
+                        // the branded form is the expected shape; fall back
+                        // to unbranded only if it's missing.
+                        const href = (typeof buildPrinterUrl === 'function')
+                            ? buildPrinterUrl(p, { allowUnbranded: true })
+                            : `/shop?printer_slug=${encodeURIComponent(p.slug || '')}`;
+                        return `<a class="recovery-printer-card" href="${Security.escapeAttr(href)}">
                                     <span class="recovery-printer-card__name">${name}</span>
                                 </a>`;
                     }).join('');
@@ -2600,12 +2618,12 @@
 
             // Rail 3: popular categories — always render as the safety net.
             const popular = [
-                { label: 'Brother Ink',   href: '/html/shop?brand=brother&category=ink' },
-                { label: 'HP Toner',      href: '/html/shop?brand=hp&category=toner' },
-                { label: 'Canon Ink',     href: '/html/shop?brand=canon&category=ink' },
-                { label: 'Epson Ink',     href: '/html/shop?brand=epson&category=ink' },
-                { label: 'Samsung Toner', href: '/html/shop?brand=samsung&category=toner' },
-                { label: 'OKI Toner',     href: '/html/shop?brand=oki&category=toner' },
+                { label: 'Brother Ink',   href: '/shop?brand=brother&category=ink' },
+                { label: 'HP Toner',      href: '/shop?brand=hp&category=toner' },
+                { label: 'Canon Ink',     href: '/shop?brand=canon&category=ink' },
+                { label: 'Epson Ink',     href: '/shop?brand=epson&category=ink' },
+                { label: 'Samsung Toner', href: '/shop?brand=samsung&category=toner' },
+                { label: 'OKI Toner',     href: '/shop?brand=oki&category=toner' },
             ];
             const popularCards = popular.map(p =>
                 `<a class="recovery-tile" href="${Security.escapeAttr(p.href)}">${Security.escapeHtml(p.label)}</a>`
@@ -2747,7 +2765,7 @@
             })();
 
             card.innerHTML = `
-                <a href="${product.slug ? `/products/${Security.escapeAttr(product.slug)}/${Security.escapeAttr(product.sku)}` : `/html/product/?sku=${Security.escapeAttr(product.sku)}`}" class="product-card__link">
+                <a href="${product.slug ? `/products/${Security.escapeAttr(product.slug)}/${Security.escapeAttr(product.sku)}` : `/p/${Security.escapeAttr(product.sku)}`}" class="product-card__link">
                     <div class="product-card__image-wrapper">
                         ${imageContent}
                         ${product.is_lowest_in_market ? `<span class="product-card__badge product-card__badge--lowest-price" title="${product.market_position ? Security.escapeAttr(product.market_position.price_diff_percent + '% less than ' + product.market_position.lowest_competitor_name) : ''}">Lowest Price in NZ</span>` : ''}
@@ -2932,7 +2950,7 @@
             const el = document.getElementById('shop-schema');
             if (!el) return;
             const base = 'https://www.inkcartridges.co.nz';
-            const shopUrl = base + '/html/shop';
+            const shopUrl = base + '/shop';
             const items = [
                 { "@type": "ListItem", "position": 1, "name": "Home", "item": base + '/' },
                 { "@type": "ListItem", "position": 2, "name": "Shop", "item": shopUrl }
@@ -3058,7 +3076,7 @@
                                     const params = new URLSearchParams({ printer_model: p.name });
                                     if (p.brand) params.set('printer_brand', p.brand);
                                     const escapedName = p.name.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-                                    return `<a href="/html/shop?${params}" class="printer-link">${escapedName}</a>`;
+                                    return `<a href="/shop?${params}" class="printer-link">${escapedName}</a>`;
                                 }).join(', ');
                                 this.elements.printersList.innerHTML = links;
                                 this.elements.printersBanner.hidden = false;
@@ -3085,13 +3103,19 @@
 
             let title, description, canonical;
 
+            // Canonical URL: lowercase brand/category/printer slugs (the consolidation
+            // spec requires a single canonical form per page so Google doesn't see
+            // /shop?brand=Canon and /shop?brand=canon as separate URLs). Product
+            // codes preserve case (PG-540 etc.). Search 'q' preserves user input.
+            const lc = (v) => (v == null ? v : String(v).toLowerCase());
             const params = new URLSearchParams();
-            if (brand)              params.set('brand', brand);
-            if (category)           params.set('category', category);
-            if (code)               params.set('code', code);
-            if (this.state.search)  params.set('q', this.state.search);
+            if (brand)                params.set('brand',        lc(brand));
+            if (category)             params.set('category',     lc(category));
+            if (code)                 params.set('code',         code);
+            if (this.state.printer)   params.set('printer_slug', lc(this.state.printer));
+            if (this.state.search)    params.set('q',            this.state.search);
             const qs = params.toString() ? '?' + params.toString() : '';
-            canonical = `${BASE}/html/shop${qs}`;
+            canonical = `${BASE}/shop${qs}`;
 
             switch (this.state.level) {
                 case 'categories':
@@ -3125,7 +3149,7 @@
                 default: // brands level
                     title       = 'Shop Ink Cartridges & Toner NZ | InkCartridges.co.nz';
                     description = 'Browse all printing supplies — ink cartridges, toner, drums and accessories. Filter by brand, type, and compatibility.';
-                    canonical   = `${BASE}/html/shop`;
+                    canonical   = `${BASE}/shop`;
             }
 
             document.title = title;
@@ -3142,7 +3166,7 @@
             if (schemaEl) {
                 const breadcrumbItems = [
                     { "@type": "ListItem", "position": 1, "name": "Home", "item": `${BASE}/` },
-                    { "@type": "ListItem", "position": 2, "name": "Shop", "item": `${BASE}/html/shop` }
+                    { "@type": "ListItem", "position": 2, "name": "Shop", "item": `${BASE}/shop` }
                 ];
                 if (brandName) breadcrumbItems.push({ "@type": "ListItem", "position": 3, "name": brandName, "item": canonical });
                 if (catLabel && brandName) breadcrumbItems.push({ "@type": "ListItem", "position": 4, "name": catLabel, "item": canonical });

@@ -253,6 +253,56 @@ function debounce(func, wait = 300) {
 
 
 /**
+ * URL BUILDERS
+ * ============
+ */
+
+/**
+ * Build the canonical printer-page URL.
+ *
+ * Spec contract (docs: search-dropdown-routing.md, May 2026):
+ *   `/shop?brand=<brand_slug>&printer_slug=<slug>`
+ *
+ * The bot-prerender middleware only rewrites to the SEO prerender API when
+ * BOTH `brand` and `printer_slug` are present. Anything else (e.g. legacy
+ * `?printer=<slug>`) gets the empty SPA shell from Googlebot, breaks the
+ * sitemap canonical, and creates duplicate-content for the printer page.
+ *
+ * The spec is explicit: prefer hiding the drill-in row over rendering a
+ * partial URL. Callers that get `null` back must hide the affordance, not
+ * fall back to a non-canonical shape.
+ *
+ * The unbranded `/shop?printer_slug=<slug>` form is permitted only as a
+ * documented last resort (e.g. an older deploy without `brand_slug`),
+ * surfaced via `buildPrinterUrl(p, { allowUnbranded: true })`.
+ *
+ * @param {Object|null} printer - Printer-shaped object: { slug, brand_slug?, brand?: { slug } }
+ * @param {{ allowUnbranded?: boolean }} [opts]
+ * @returns {string|null} Canonical URL or null when required fields are missing.
+ */
+function buildPrinterUrl(printer, opts) {
+    if (!printer || typeof printer !== 'object') return null;
+    const slug = printer.slug || printer.printer_slug || '';
+    if (!slug) return null;
+    // Accept either flat (matched_printer shape) or nested (search-printers shape).
+    const brandSlug = printer.brand_slug
+        || (printer.brand && (typeof printer.brand === 'object' ? printer.brand.slug : null))
+        || '';
+    if (brandSlug) {
+        return `/shop?brand=${encodeURIComponent(brandSlug)}&printer_slug=${encodeURIComponent(slug)}`;
+    }
+    if (opts && opts.allowUnbranded) {
+        return `/shop?printer_slug=${encodeURIComponent(slug)}`;
+    }
+    return null;
+}
+
+if (typeof window !== 'undefined') {
+    window.buildPrinterUrl = buildPrinterUrl;
+}
+
+
+/**
  * STORAGE URL UTILITY
  * ===================
  */
@@ -507,6 +557,7 @@ if (typeof module !== 'undefined' && module.exports) {
         getStorage, setStorage,
         debounce,
         storageUrl,
-        esc, escAttr
+        esc, escAttr,
+        buildPrinterUrl
     };
 }

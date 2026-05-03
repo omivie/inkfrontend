@@ -7,10 +7,10 @@ export default async function middleware(request) {
   const path = url.pathname;
 
   // Gate admin routes — redirect to login if no auth cookie
-  if (path.startsWith('/html/admin')) {
+  if (path === '/admin' || path.startsWith('/admin/')) {
     const cookie = request.headers.get('cookie') || '';
     if (!/__ink_auth=1/.test(cookie)) {
-      const loginUrl = new URL('/html/account/login.html', request.url);
+      const loginUrl = new URL('/account/login', request.url);
       loginUrl.searchParams.set('redirect', path + url.search);
       return Response.redirect(loginUrl.toString(), 302);
     }
@@ -42,16 +42,23 @@ export default async function middleware(request) {
     const sku = url.searchParams.get('sku');
     if (sku) prerenderPath = `/api/prerender/product/${encodeURIComponent(sku)}`;
   }
-  // /html/ribbons → category/ribbons
-  else if (path === '/html/ribbons' || path === '/html/ribbons.html') {
+  // /p/:sku → product (clean SKU-only fallback)
+  else if (path.startsWith('/p/')) {
+    const sku = path.slice(3).replace(/\/+$/, '');
+    if (sku) prerenderPath = `/api/prerender/product/${encodeURIComponent(sku)}`;
+  }
+  // /ribbons → category/ribbons
+  else if (path === '/ribbons') {
     prerenderPath = '/api/prerender/category/ribbons';
   }
-  // /html/shop?brand=X&printer_slug=Y → printer
-  else if (path === '/html/shop' || path === '/html/shop.html') {
-    const brand = url.searchParams.get('brand');
-    const printerSlug = url.searchParams.get('printer_slug');
-    if (brand && printerSlug) {
-      prerenderPath = `/api/prerender/printer/${encodeURIComponent(brand)}/${encodeURIComponent(printerSlug)}`;
+  // /shop?printer_slug=<slug> → printer prerender (canonical post-May-2026)
+  // Legacy `?printer=<slug>` accepted for back-compat with bookmarks/cached crawls;
+  // new emissions across the storefront use `printer_slug` per
+  // docs: search-dropdown-routing.md (Three-Handler Routing Contract).
+  else if (path === '/shop') {
+    const printerSlug = url.searchParams.get('printer_slug') || url.searchParams.get('printer');
+    if (printerSlug) {
+      prerenderPath = `/api/prerender/printer/${encodeURIComponent(printerSlug)}`;
     }
   }
 
@@ -83,14 +90,13 @@ export default async function middleware(request) {
 export const config = {
   matcher: [
     '/',
-    '/html/admin/:path*',
-    '/html/admin',
+    '/admin/:path*',
+    '/admin',
     '/products/:path*',
     '/product/:path*',
+    '/p/:path*',
     '/html/product',
-    '/html/ribbons',
-    '/html/ribbons.html',
-    '/html/shop',
-    '/html/shop.html',
+    '/ribbons',
+    '/shop',
   ],
 };

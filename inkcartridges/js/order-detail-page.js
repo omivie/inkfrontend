@@ -275,7 +275,7 @@
                             <line x1="12" y1="16" x2="12.01" y2="16"/>
                         </svg>
                         <p>${message}</p>
-                        <a href="/html/account/orders.html" class="btn btn--primary">View All Orders</a>
+                        <a href="/account/orders" class="btn btn--primary">View All Orders</a>
                     </div>
                 `;
             }

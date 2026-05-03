@@ -118,7 +118,7 @@
                                 const { data: signUpData } = await Auth.supabase.auth.signUp({
                                     email,
                                     password,
-                                    options: { emailRedirectTo: `${window.location.origin}/html/account/verify-email` }
+                                    options: { emailRedirectTo: `${window.location.origin}/account/verify-email` }
                                 });
                                 if (signUpData?.user && signUpData.user.identities?.length === 0) {
                                     // Email exists — could be unverified (Supabase masks the real reason)
@@ -159,7 +159,7 @@
                                         type: 'signup',
                                         email: email,
                                         options: {
-                                            emailRedirectTo: `${window.location.origin}/html/account/login.html?verified=true`
+                                            emailRedirectTo: `${window.location.origin}/account/login?verified=true`
                                         }
                                     });
                                     resendLink.textContent = resendError ? 'Failed to send. Try again later.' : 'Verification email sent! Check your inbox.';
@@ -211,7 +211,7 @@
                         // Check email verification before redirecting
                         const isOAuth = data.user?.app_metadata?.provider && data.user.app_metadata.provider !== 'email';
                         if (!isOAuth && !data.user?.email_confirmed_at) {
-                            window.location.href = '/html/account/verify-email.html';
+                            window.location.href = '/account/verify-email';
                             return;
                         }
 
@@ -345,7 +345,7 @@
                     }
 
                     DebugLog.log('📧 Starting signup for:', email);
-                    DebugLog.log('🔗 Redirect URL:', `${window.location.origin}/html/account/login.html?verified=true`);
+                    DebugLog.log('🔗 Redirect URL:', `${window.location.origin}/account/login?verified=true`);
 
                     try {
                     // Sign up with Supabase
@@ -353,7 +353,7 @@
                         email,
                         password,
                         options: {
-                            emailRedirectTo: `${window.location.origin}/html/account/login.html?verified=true`,
+                            emailRedirectTo: `${window.location.origin}/account/login?verified=true`,
                             data: {
                                 full_name: `${firstName} ${lastName}`.trim(),
                                 first_name: firstName,
@@ -402,7 +402,7 @@
                         }
 
                         // Redirect to verify email page
-                        window.location.href = '/html/account/verify-email.html';
+                        window.location.href = '/account/verify-email';
                         return; // Skip re-enable since we're navigating away
                     }
                     } finally {

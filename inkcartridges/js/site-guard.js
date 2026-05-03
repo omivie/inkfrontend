@@ -240,7 +240,7 @@
 
   async function run() {
     const path = location.pathname;
-    if (path.startsWith('/html/admin') || path.startsWith('/admin')) return;
+    if (path.startsWith('/admin') || path.startsWith('/admin')) return;
 
     if (!window.supabase?.createClient) return;
 

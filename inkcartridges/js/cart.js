@@ -650,7 +650,7 @@ const Cart = {
                 // Validation failed (network/Turnstile/auth) — proceed anyway.
             }
 
-            window.location.href = '/html/checkout.html';
+            window.location.href = '/checkout';
         });
     },
 
@@ -1171,7 +1171,7 @@ const Cart = {
         const cards = top.map(p => {
             const img = typeof storageUrl === 'function' ? storageUrl(p.image_url) : (p.image_url || '');
             const link = p.canonical_url
-                || (p.slug && p.sku ? `/products/${encodeURIComponent(p.slug)}/${encodeURIComponent(p.sku)}` : `/html/product/?sku=${encodeURIComponent(p.sku || '')}`);
+                || (p.slug && p.sku ? `/products/${encodeURIComponent(p.slug)}/${encodeURIComponent(p.sku)}` : `/p/${encodeURIComponent(p.sku || '')}`);
             const price = p.retail_price != null && typeof formatPrice === 'function' ? formatPrice(p.retail_price) : '';
             return `
                 <a class="crosssell-modal__card" href="${Security.escapeAttr(link)}">
@@ -1199,7 +1199,7 @@ const Cart = {
                 </div>
                 <div class="crosssell-modal__grid">${cards}</div>
                 <div class="crosssell-modal__foot">
-                    <a href="/html/cart.html" class="btn btn--primary">Go to cart</a>
+                    <a href="/cart" class="btn btn--primary">Go to cart</a>
                 </div>
             </div>
         `;
@@ -1577,7 +1577,7 @@ const Cart = {
 
                     const productLink = item.slug
                         ? '/products/' + encodeURIComponent(item.slug) + '/' + encodeURIComponent(item.sku || '')
-                        : '/html/product/?sku=' + encodeURIComponent(item.sku || '');
+                        : '/p/' + encodeURIComponent(item.sku || '');
 
                     return '\
                     <article class="cart-item" data-item-id="' + item.id + '" data-item-key="' + Security.escapeAttr(itemKey) + '">\

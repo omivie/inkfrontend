@@ -20,7 +20,7 @@ const AccountPage = {
 
         // Check authentication - redirect to login if not authenticated
         if (!Auth.isAuthenticated()) {
-            window.location.href = '/html/account/login.html?redirect=' + encodeURIComponent(window.location.pathname);
+            window.location.href = '/account/login?redirect=' + encodeURIComponent(window.location.pathname);
             return;
         }
 
@@ -1006,7 +1006,7 @@ const AccountPage = {
         return `
             <tr class="orders-table__row">
                 <td data-label="Order #">
-                    <a href="/html/account/order-detail?id=${Security.escapeAttr(order.order_number)}">#${Security.escapeHtml(order.order_number)}</a>
+                    <a href="/account/order-detail?id=${Security.escapeAttr(order.order_number)}">#${Security.escapeHtml(order.order_number)}</a>
                 </td>
                 <td data-label="Date">${Security.escapeHtml(date)}</td>
                 <td data-label="Status">
@@ -1014,7 +1014,7 @@ const AccountPage = {
                 </td>
                 <td data-label="Total">${total}</td>
                 <td>
-                    <a href="/html/account/order-detail?id=${Security.escapeAttr(order.order_number)}" class="btn btn--small btn--text">View</a>
+                    <a href="/account/order-detail?id=${Security.escapeAttr(order.order_number)}" class="btn btn--small btn--text">View</a>
                 </td>
             </tr>
         `;
@@ -1203,12 +1203,18 @@ const AccountPage = {
         const nickname = printer.nickname || printer.location || '';
         const slug = printer.slug || printer.printer_slug || '';
 
-        // Build URL: prefer printer slug (direct API lookup), then printer_model (Supabase lookup)
+        // Canonical printer URL per docs/storefront/search-dropdown-routing.md:
+        // /shop?brand=<brand_slug>&printer_slug=<slug>. Saved-printer payloads
+        // may not include brand_slug — fall back to unbranded printer_slug
+        // (still preferable to legacy ?printer=, which the bot prerender
+        // middleware now also accepts but new emissions should not use).
         const searchUrl = slug
-            ? `/html/shop?printer=${encodeURIComponent(slug)}`
+            ? ((typeof buildPrinterUrl === 'function')
+                ? buildPrinterUrl(printer, { allowUnbranded: true })
+                : `/shop?printer_slug=${encodeURIComponent(slug)}`)
             : model !== 'Unknown Printer'
-                ? `/html/shop?printer_model=${encodeURIComponent(model)}`
-                : '/html/shop';
+                ? `/shop?printer_model=${encodeURIComponent(model)}`
+                : '/shop';
 
         return `
             <div class="printer-card-preview">
@@ -1718,12 +1724,14 @@ const AccountPage = {
         const nickname = printer.nickname || printer.location || '';
         const slug = printer.slug || printer.printer_slug || '';
 
-        // Build URL: prefer printer slug (direct API lookup), then printer_model (Supabase lookup)
+        // Canonical printer URL per docs/storefront/search-dropdown-routing.md.
         const searchUrl = slug
-            ? `/html/shop?printer=${encodeURIComponent(slug)}`
+            ? ((typeof buildPrinterUrl === 'function')
+                ? buildPrinterUrl(printer, { allowUnbranded: true })
+                : `/shop?printer_slug=${encodeURIComponent(slug)}`)
             : model !== 'Unknown Printer'
-                ? `/html/shop?printer_model=${encodeURIComponent(model)}`
-                : '/html/shop';
+                ? `/shop?printer_model=${encodeURIComponent(model)}`
+                : '/shop';
 
         const escapedId = Security.escapeAttr(printer.id);
 

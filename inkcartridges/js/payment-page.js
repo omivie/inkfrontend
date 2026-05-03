@@ -48,7 +48,7 @@
             this.checkoutData = this.loadCheckoutData();
             if (!this.checkoutData) {
                 showToast('No checkout data found. Please fill in your details first.', 'error');
-                setTimeout(() => { window.location.href = '/html/checkout.html'; }, 1500);
+                setTimeout(() => { window.location.href = '/checkout'; }, 1500);
                 return;
             }
 
@@ -142,7 +142,7 @@
 
                 if (this.cartItems.length === 0) {
                     showToast('Your cart is empty.', 'error');
-                    setTimeout(() => { window.location.href = '/html/cart.html'; }, 1500);
+                    setTimeout(() => { window.location.href = '/cart'; }, 1500);
                     return;
                 }
 
@@ -543,7 +543,7 @@
                             elements: this.elements,
                             clientSecret: dupData.client_secret,
                             confirmParams: {
-                                return_url: `${window.location.origin}/html/order-confirmation.html?order=${encodeURIComponent(dupOrderNumber)}`,
+                                return_url: `${window.location.origin}/order-confirmation?order=${encodeURIComponent(dupOrderNumber)}`,
                                 payment_method_data: {
                                     billing_details: {
                                         name: `${this.checkoutData.firstName} ${this.checkoutData.lastName}`,
@@ -593,7 +593,7 @@
                             if (orderCheck.ok && orderCheck.data?.status === 'paid') {
                                 sessionStorage.setItem('lastOrder', JSON.stringify(this.buildOrderSnapshot(dupOrderNumber, 'stripe')));
                                 sessionStorage.removeItem('checkoutData');
-                                window.location.href = `/html/order-confirmation.html?order=${encodeURIComponent(dupOrderNumber)}`;
+                                window.location.href = `/order-confirmation?order=${encodeURIComponent(dupOrderNumber)}`;
                                 return;
                             }
                         } catch (e) {
@@ -611,7 +611,7 @@
                     // Same payment method (stripe), no client_secret = already paid — redirect
                     sessionStorage.setItem('lastOrder', JSON.stringify(this.buildOrderSnapshot(dupOrderNumber, 'stripe')));
                     sessionStorage.removeItem('checkoutData');
-                    window.location.href = `/html/order-confirmation.html?order=${encodeURIComponent(dupOrderNumber)}`;
+                    window.location.href = `/order-confirmation?order=${encodeURIComponent(dupOrderNumber)}`;
                     return;
                 }
 
@@ -643,7 +643,7 @@
                                 try {
                                     const orderCheck = await API.getOrder(existingOrder);
                                     if (orderCheck.ok && orderCheck.data?.status === 'paid') {
-                                        window.location.href = `/html/order-confirmation.html?order=${encodeURIComponent(existingOrder)}`;
+                                        window.location.href = `/order-confirmation?order=${encodeURIComponent(existingOrder)}`;
                                         return;
                                     }
                                 } catch (e) {
@@ -658,7 +658,7 @@
                                 throw new Error('A previous payment attempt was cleared. Please click Pay again.');
                             }
                             // payment_method is 'stripe' and no client_secret = already paid
-                            window.location.href = `/html/order-confirmation.html?order=${encodeURIComponent(existingOrder)}`;
+                            window.location.href = `/order-confirmation?order=${encodeURIComponent(existingOrder)}`;
                             return;
                         } else if (existingOrder && existingClientSecret) {
                             // Payment wasn't completed — show error so user retries
@@ -672,7 +672,7 @@
                             if (pending.ok && pending.data?.order_number) {
                                 // Only redirect if payment was completed (no client_secret means paid)
                                 if (!pending.data.client_secret) {
-                                    window.location.href = `/html/order-confirmation.html?order=${encodeURIComponent(pending.data.order_number)}`;
+                                    window.location.href = `/order-confirmation?order=${encodeURIComponent(pending.data.order_number)}`;
                                     return;
                                 }
                                 // Has client_secret — payment still pending, let user retry
@@ -727,7 +727,7 @@
                     elements: this.elements,
                     clientSecret: client_secret,
                     confirmParams: {
-                        return_url: `${window.location.origin}/html/order-confirmation.html?order=${encodeURIComponent(order_number)}`,
+                        return_url: `${window.location.origin}/order-confirmation?order=${encodeURIComponent(order_number)}`,
                         payment_method_data: {
                             billing_details: {
                                 name: `${this.checkoutData.firstName} ${this.checkoutData.lastName}`,
@@ -1162,7 +1162,7 @@
 
                             sessionStorage.setItem('lastOrder', JSON.stringify(self.buildOrderSnapshot(orderNumber, 'paypal')));
                             sessionStorage.removeItem('checkoutData');
-                            window.location.href = `/html/order-confirmation.html?order=${encodeURIComponent(orderNumber)}`;
+                            window.location.href = `/order-confirmation?order=${encodeURIComponent(orderNumber)}`;
                         } else {
                             self.showError(captureResponse.error?.message || 'Payment capture failed. Please contact support.');
                         }

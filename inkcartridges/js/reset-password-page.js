@@ -29,7 +29,7 @@
                     <h1 class="auth-form__heading">Reset Link Invalid</h1>
                     <p class="auth-form__subheading">${Security.escapeHtml(message)}</p>
                     <div class="auth-success-actions">
-                        <a href="/html/account/forgot-password.html" class="btn btn--primary btn--large btn--full-width">Request a New Link</a>
+                        <a href="/account/forgot-password" class="btn btn--primary btn--large btn--full-width">Request a New Link</a>
                     </div>
                 `;
             }
@@ -159,12 +159,12 @@
                         <h1 class="auth-form__heading">Password Updated!</h1>
                         <p class="auth-form__subheading">Your password has been successfully changed. Redirecting to sign in...</p>
                         <div class="auth-success-actions">
-                            <a href="/html/account/login.html" class="btn btn--primary btn--large btn--full-width">Sign In</a>
+                            <a href="/account/login" class="btn btn--primary btn--large btn--full-width">Sign In</a>
                         </div>
                     `;
 
                     setTimeout(() => {
-                        window.location.href = '/html/account/login.html';
+                        window.location.href = '/account/login';
                     }, 1500);
                 } catch (err) {
                     DebugLog.error('Password update error:', err);

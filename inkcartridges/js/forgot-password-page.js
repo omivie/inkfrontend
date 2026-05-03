@@ -71,7 +71,7 @@
                                 <span>Don't forget to check your spam or junk folder if you don't see the email within a few minutes.</span>
                             </div>
                             <div class="auth-success-actions">
-                                <a href="/html/account/login.html" class="btn btn--primary btn--large btn--full-width">Back to Sign In</a>
+                                <a href="/account/login" class="btn btn--primary btn--large btn--full-width">Back to Sign In</a>
                             </div>
                         `;
                     }

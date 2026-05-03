@@ -138,7 +138,7 @@
     // ============================================
     function renderBrands() {
         brandsCardsContainer.innerHTML = BRANDS.map(brand => {
-            const brandUrl = `/brand/${Security.escapeAttr(brand.slug)}`;
+            const brandUrl = `/shop?brand=${Security.escapeAttr(brand.slug)}`;
             return `
             <div class="brands-mega__card">
                 <div class="brands-mega__logo-wrap">
@@ -148,7 +148,7 @@
                 </div>
                 <div class="brands-mega__card-links">
                     ${brand.categories.map(cat =>
-                        `<a href="/html/shop?brand=${Security.escapeAttr(brand.slug)}&category=${Security.escapeAttr(cat.param)}" class="brands-mega__card-link">${Security.escapeHtml(cat.label)}</a>`
+                        `<a href="/shop?brand=${Security.escapeAttr(brand.slug)}&category=${Security.escapeAttr(cat.param)}" class="brands-mega__card-link">${Security.escapeHtml(cat.label)}</a>`
                     ).join('\n                    ')}
                 </div>
             </div>`;
@@ -161,7 +161,7 @@
     function renderRibbons(brands) {
         if (!ribbonsGrid) return;
         ribbonsGrid.innerHTML = brands.map(b =>
-            `<a href="/html/ribbons?printer_brand=${encodeURIComponent(b.value)}" class="ribbons-mega__brand-btn">${Security.escapeHtml(b.label)}</a>`
+            `<a href="/ribbons?printer_brand=${encodeURIComponent(b.value)}" class="ribbons-mega__brand-btn">${Security.escapeHtml(b.label)}</a>`
         ).join('');
     }
 

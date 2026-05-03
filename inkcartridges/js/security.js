@@ -93,7 +93,7 @@ const Security = {
      * @param {string} fallback - Safe default if URL is invalid
      * @returns {string} A safe redirect URL (always same-origin)
      */
-    safeRedirect(url, fallback = '/html/account/') {
+    safeRedirect(url, fallback = '/account/') {
         if (!url || typeof url !== 'string') return fallback;
         const trimmed = url.trim();
         // Must start with exactly one / (not // which is protocol-relative)

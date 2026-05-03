@@ -9,7 +9,7 @@
     'use strict';
 
     if (navigator.doNotTrack === '1' || window.doNotTrack === '1') return;
-    if (location.pathname.startsWith('/html/admin') || location.pathname.startsWith('/admin')) return;
+    if (location.pathname.startsWith('/admin') || location.pathname.startsWith('/admin')) return;
 
     const SESSION_KEY = 'ic_traffic_session';
     const VISITOR_KEY = 'ic_traffic_visitor';

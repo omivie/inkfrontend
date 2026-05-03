@@ -11,9 +11,9 @@
         var type = hashParams.get('type');
 
         if (type === 'recovery') {
-            window.location.href = '/html/account/reset-password.html' + window.location.hash;
+            window.location.href = '/account/reset-password' + window.location.hash;
         } else {
-            window.location.href = '/html/account/login.html' + window.location.hash;
+            window.location.href = '/account/login' + window.location.hash;
         }
     } else {
         window.location.href = '/';

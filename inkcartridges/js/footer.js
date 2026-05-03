@@ -101,7 +101,7 @@
                 "@type": "SearchAction",
                 "target": {
                     "@type": "EntryPoint",
-                    "urlTemplate": "https://www.inkcartridges.co.nz/html/shop?q={search_term_string}"
+                    "urlTemplate": "https://www.inkcartridges.co.nz/shop?q={search_term_string}"
                 },
                 "query-input": "required name=search_term_string"
             }

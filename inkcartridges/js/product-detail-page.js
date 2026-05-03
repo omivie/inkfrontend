@@ -47,7 +47,7 @@
                     sku = await this.resolveSkuFromSlug(slug);
                     if (!sku) {
                         const q = slug.replace(/-/g, ' ').trim();
-                        window.location.replace('/html/shop?q=' + encodeURIComponent(q));
+                        window.location.replace('/shop?q=' + encodeURIComponent(q));
                         return;
                     }
                     // Canonicalise URL in history so reloads/sharing work.
@@ -319,11 +319,11 @@
                                  info.category === 'drum' ? 'Drums' : 'Ink Cartridges';
             const brandSlug = info.brandName.toLowerCase().replace(/\s+/g, '-');
             if (isRibbon) {
-                document.getElementById('breadcrumb-category').innerHTML = `<a href="/html/ribbons.html">${Security.escapeHtml(categoryName)}</a>`;
-                document.getElementById('breadcrumb-brand').innerHTML = `<a href="/html/ribbons?printer_brand=${Security.escapeAttr(info.brandName.toLowerCase())}">${Security.escapeHtml(info.brandName)}</a>`;
+                document.getElementById('breadcrumb-category').innerHTML = `<a href="/ribbons">${Security.escapeHtml(categoryName)}</a>`;
+                document.getElementById('breadcrumb-brand').innerHTML = `<a href="/ribbons?printer_brand=${Security.escapeAttr(info.brandName.toLowerCase())}">${Security.escapeHtml(info.brandName)}</a>`;
             } else {
-                document.getElementById('breadcrumb-category').innerHTML = `<a href="/html/shop?brand=${Security.escapeAttr(brandSlug)}&category=${Security.escapeAttr(info.category)}">${Security.escapeHtml(categoryName)}</a>`;
-                document.getElementById('breadcrumb-brand').innerHTML = `<a href="/html/shop?brand=${Security.escapeAttr(brandSlug)}">${Security.escapeHtml(info.brandName)}</a>`;
+                document.getElementById('breadcrumb-category').innerHTML = `<a href="/shop?brand=${Security.escapeAttr(brandSlug)}&category=${Security.escapeAttr(info.category)}">${Security.escapeHtml(categoryName)}</a>`;
+                document.getElementById('breadcrumb-brand').innerHTML = `<a href="/shop?brand=${Security.escapeAttr(brandSlug)}">${Security.escapeHtml(info.brandName)}</a>`;
             }
 
             // Add product code breadcrumb (e.g., LC37) — skip for ribbons
@@ -331,7 +331,7 @@
                 const productCode = this.extractProductCode(info);
                 const breadcrumbCode = document.getElementById('breadcrumb-code');
                 if (productCode && breadcrumbCode) {
-                    breadcrumbCode.innerHTML = `<a href="/html/shop?brand=${Security.escapeAttr(brandSlug)}&category=${Security.escapeAttr(info.category)}&code=${Security.escapeAttr(productCode)}">${Security.escapeHtml(productCode)}</a>`;
+                    breadcrumbCode.innerHTML = `<a href="/shop?brand=${Security.escapeAttr(brandSlug)}&category=${Security.escapeAttr(info.category)}&code=${Security.escapeAttr(productCode)}">${Security.escapeHtml(productCode)}</a>`;
                     breadcrumbCode.hidden = false;
                 }
             }
@@ -351,7 +351,7 @@
                         "@type": "BreadcrumbList",
                         "itemListElement": [
                             { "@type": "ListItem", "position": 1, "name": "Home", "item": "https://www.inkcartridges.co.nz" },
-                            { "@type": "ListItem", "position": 2, "name": `${info.brandName} Ink Cartridges`, "item": `https://www.inkcartridges.co.nz/html/shop?brand=${brandSlug}` },
+                            { "@type": "ListItem", "position": 2, "name": `${info.brandName} Ink Cartridges`, "item": `https://www.inkcartridges.co.nz/shop?brand=${brandSlug}` },
                             { "@type": "ListItem", "position": 3, "name": info.displayName }
                         ]
                     };
@@ -624,8 +624,8 @@
                 const printerLinks = printers.map(p => {
                     const slug = (p.name || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
                     const href = isRibbon
-                        ? `/html/ribbons?printer_model=${encodeURIComponent(p.name)}`
-                        : `/html/shop?q=${encodeURIComponent(slug)}`;
+                        ? `/ribbons?printer_model=${encodeURIComponent(p.name)}`
+                        : `/shop?q=${encodeURIComponent(slug)}`;
                     return `<a href="${href}" class="printer-link">${Security.escapeHtml(p.name)}</a>`;
                 }).join(', ');
 
@@ -803,7 +803,7 @@
 
                 list.innerHTML = printers.map(p => {
                     const slug = (p.name || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
-                    return `<li><a href="/html/shop?q=${encodeURIComponent(slug)}">${Security.escapeHtml(p.name)}</a></li>`;
+                    return `<li><a href="/shop?q=${encodeURIComponent(slug)}">${Security.escapeHtml(p.name)}</a></li>`;
                 }).join('');
 
                 tabBtn.hidden = false;
@@ -835,7 +835,7 @@
                             return brand && model ? `${brand} ${model}` : (brand || model);
                         })();
                     if (!label || !modelKey) return null;
-                    return `<a href="/html/ribbons?printer_model=${encodeURIComponent(modelKey)}" class="printer-link">${label}</a>`;
+                    return `<a href="/ribbons?printer_model=${encodeURIComponent(modelKey)}" class="printer-link">${label}</a>`;
                 }).filter(Boolean);
 
                 if (!deviceLinks.length) return;
@@ -1628,7 +1628,7 @@
                     </svg>
                     <p>${Security.escapeHtml(message)}</p>
                     <button class="btn btn--secondary" data-action="reload">Try Again</button>
-                    <a href="/html/shop" class="btn btn--outline">Browse All Products</a>
+                    <a href="/shop" class="btn btn--outline">Browse All Products</a>
                 </div>
             `;
 

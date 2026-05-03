@@ -531,7 +531,7 @@
                 if (headerSecure) headerSecure.textContent = 'Payment Pending';
             } else if (status === 'cancelled' || status === 'failed') {
                 if (titleEl) titleEl.textContent = 'Payment Failed';
-                if (messageEl) messageEl.innerHTML = 'Your payment could not be processed. Please <a href="/html/cart.html">return to your cart</a> and try again, or contact us for assistance.';
+                if (messageEl) messageEl.innerHTML = 'Your payment could not be processed. Please <a href="/cart">return to your cart</a> and try again, or contact us for assistance.';
                 if (headerSecure) headerSecure.textContent = 'Payment Failed';
             }
 

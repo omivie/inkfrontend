@@ -125,8 +125,8 @@
         // Spec payload has no SKU; fall back to slug-only when missing.
         const sku = p.sku || '';
         if (slug && sku) return `/products/${encodeURIComponent(slug)}/${encodeURIComponent(sku)}`;
-        if (sku) return `/html/product/?sku=${encodeURIComponent(sku)}`;
-        return `/html/shop?q=${encodeURIComponent(p.name || '')}`;
+        if (sku) return `/p/${encodeURIComponent(sku)}`;
+        return `/shop?q=${encodeURIComponent(p.name || '')}`;
     }
 
     async function fetchSuggest(query, signal) {
@@ -233,7 +233,19 @@
                    </div>`
                 : '';
 
-            const printerChip = (p) => `<button type="button" class="smart-ac__chip" data-printer-slug="${escAttr(p.slug)}" data-printer-name="${escAttr(p.name)}">${esc(p.name)}</button>`;
+            // brand_slug is forward-compat: when the trending API starts
+            // including it, the chip click handler will build the canonical
+            // /shop?brand=&printer_slug= URL automatically. Until then it's
+            // an empty data attribute and the chip falls back to the
+            // documented unbranded form via buildPrinterUrl(allowUnbranded).
+            const printerChip = (p) => {
+                const brandSlug = p.brand_slug || (p.brand && p.brand.slug) || '';
+                return `<button type="button" class="smart-ac__chip"`
+                    + ` data-printer-slug="${escAttr(p.slug)}"`
+                    + ` data-printer-name="${escAttr(p.name)}"`
+                    + ` data-printer-brand-slug="${escAttr(brandSlug)}"`
+                    + `>${esc(p.name)}</button>`;
+            };
             const trendingSection = `
                 <div class="smart-ac__empty-section">
                     <h4 class="smart-ac__empty-title">Trending printers</h4>
@@ -278,12 +290,16 @@
                 const q = esc(state.input.value.trim());
                 // When the backend matched a printer, the useful action is to view
                 // its compatible cartridges — not a "no results / did you mean" copy.
-                if (matchedPrinter && matchedPrinter.name && matchedPrinter.slug) {
-                    const href = `/html/shop?printer=${encodeURIComponent(matchedPrinter.slug)}`;
+                // Spec (search-dropdown-routing.md): canonical printer URL is
+                // /shop?brand=<brand_slug>&printer_slug=<slug>; if brand_slug is
+                // absent on an older deploy, hide the CTA rather than emit a
+                // partial URL.
+                const matchedHref = buildPrinterUrl(matchedPrinter);
+                if (matchedHref && matchedPrinter.name) {
                     state.list.innerHTML = `
                         <div class="smart-ac__matched-printer">
                             Matched printer: <strong>${esc(matchedPrinter.name)}</strong>
-                            — <a href="${escAttr(href)}">view all compatible cartridges →</a>
+                            — <a href="${escAttr(matchedHref)}">view all compatible cartridges →</a>
                         </div>`;
                     setLive(`Matched printer ${matchedPrinter.name}. View compatible cartridges.`);
                     return;
@@ -314,10 +330,17 @@
             // Spec §1.1: matched_printer and did_you_mean render as clickable
             // rows ABOVE the product list (not as a banner), so the user can
             // act on them directly.
-            const printerHref = matchedPrinter && matchedPrinter.slug
-                ? `/html/shop?printer=${encodeURIComponent(matchedPrinter.slug)}`
-                : '';
-            const matchedRowHTML = matchedPrinter && matchedPrinter.name
+            //
+            // Spec (search-dropdown-routing.md, "Three-handler invariant"):
+            // this drill-in row is the ONLY element in the dropdown that may
+            // navigate to the printer page. The printer-page canonical is
+            // /shop?brand=<brand_slug>&printer_slug=<slug> — emitting any
+            // other shape (e.g. ?printer=<slug>) breaks bot prerender and
+            // splits canonical signals against the sitemap. brand_slug is
+            // nullable in older deploys; prefer hiding the row over rendering
+            // a partial URL.
+            const printerHref = buildPrinterUrl(matchedPrinter);
+            const matchedRowHTML = printerHref && matchedPrinter && matchedPrinter.name
                 ? `<a class="smart-ac__top-row smart-ac__top-row--printer" href="${escAttr(printerHref)}" data-printer-name="${escAttr(matchedPrinter.name)}">
                        <span class="smart-ac__top-row__icon" aria-hidden="true">
                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
@@ -334,7 +357,14 @@
                 : '';
             const q = state.input.value.trim();
             const cardsHTML = list.map((p, i) => Products.renderCard(adaptForCard(p), i)).join('');
-            const viewAllHref = `/html/shop?q=${encodeURIComponent(q)}`;
+            // Spec (search-dropdown-routing.md, "Three-handler invariant"):
+            // the "View all results" footer ALWAYS goes to /search?q=<query>,
+            // independent of matched_printer. Branching on matched_printer here
+            // is the regression this contract pins down — it collapses the
+            // user's disambiguation choice between "the Canon printer" and
+            // "the Epson 200 cartridge family", which is the whole point of
+            // surfacing both affordances in the dropdown.
+            const viewAllHref = `/search?q=${encodeURIComponent(q)}`;
             const viewAllHTML = q
                 ? `<div class="smart-ac__view-all-wrap"><a class="smart-ac__view-all" href="${escAttr(viewAllHref)}">View all results for “${esc(q)}” →</a></div>`
                 : '';
@@ -510,11 +540,25 @@
                 // the backend serves 301 redirects for any legacy slug drift,
                 // so we don't need a suggest round-trip (which can stall on a
                 // cold backend and force a misleading "no products" fallback).
+                //
+                // Spec (search-dropdown-routing.md): canonical printer URL is
+                // /shop?brand=<brand_slug>&printer_slug=<slug>. The trending
+                // API (/api/printers/trending) does not currently return
+                // brand_slug, so we use the documented `allowUnbranded` last-
+                // resort form (/shop?printer_slug=<slug>) — this is a
+                // user-click affordance (a <button>, not an indexed <a>),
+                // so the bot-prerender path isn't impacted; the storefront
+                // shop page filters identically by either query param.
                 const printerSlug = chip.getAttribute('data-printer-slug');
                 if (printerSlug) {
                     const printerName = chip.getAttribute('data-printer-name') || '';
+                    const brandSlug = chip.getAttribute('data-printer-brand-slug') || '';
                     saveRecent(printerName);
-                    window.location.href = `/html/shop?printer=${encodeURIComponent(printerSlug)}`;
+                    const href = buildPrinterUrl(
+                        { slug: printerSlug, brand_slug: brandSlug },
+                        { allowUnbranded: true }
+                    );
+                    window.location.href = href;
                     return;
                 }
                 const q = chip.getAttribute('data-chip') || '';

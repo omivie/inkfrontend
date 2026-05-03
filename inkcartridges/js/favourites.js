@@ -355,7 +355,7 @@ const Favourites = {
         // Render items
         grid.innerHTML = this.items.map(item => `
             <article class="favourite-item" data-item-id="${Security.escapeAttr(item.id)}">
-                <a href="${item.slug ? `/products/${Security.escapeAttr(item.slug)}/${Security.escapeAttr(item.sku)}` : `/html/product/?sku=${Security.escapeAttr(item.sku)}`}" class="favourite-item__link">
+                <a href="${item.slug ? `/products/${Security.escapeAttr(item.slug)}/${Security.escapeAttr(item.sku)}` : `/p/${Security.escapeAttr(item.sku)}`}" class="favourite-item__link">
                     <div class="favourite-item__image">
                         ${this.getItemImageHTML(item)}
                     </div>

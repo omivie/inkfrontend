@@ -7,6 +7,6 @@
 
             document.getElementById('sign-out-btn').addEventListener('click', async () => {
                 await Auth.signOut();
-                window.location.href = '/html/account/login.html';
+                window.location.href = '/account/login';
             });
         });

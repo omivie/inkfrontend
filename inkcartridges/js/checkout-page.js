@@ -78,7 +78,7 @@
             }
 
             if (!this.guestCheckoutEnabled && typeof Auth !== 'undefined' && !Auth.isAuthenticated()) {
-                window.location.href = '/html/account/login.html?redirect=/html/checkout.html';
+                window.location.href = '/account/login?redirect=/checkout';
             }
         },
 
@@ -287,7 +287,7 @@
 
             if (this.cartItems.length === 0) {
                 DebugLog.log('📦 Cart is empty, redirecting to cart page');
-                window.location.href = '/html/cart.html';
+                window.location.href = '/cart';
                 return;
             }
 
@@ -1601,7 +1601,7 @@
                 DebugLog.log('Checkout data saved, redirecting to payment page');
 
                 // Redirect to payment page
-                window.location.href = '/html/payment.html';
+                window.location.href = '/payment';
 
             } catch (error) {
                 DebugLog.error('Error saving checkout data:', error);

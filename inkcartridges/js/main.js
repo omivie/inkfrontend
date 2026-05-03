@@ -257,12 +257,24 @@ function initSearch() {
         searchInput.addEventListener('input', syncSubmitState);
         syncSubmitState();
 
-        // Handle form submission
+        // Handle form submission.
+        //
+        // Spec (search-dropdown-routing.md, "Three-handler invariant"):
+        // Search bar Enter / form submit ALWAYS goes to /search?q=<query>.
+        // Do NOT branch on matched_printer here — the form has no business
+        // reading dropdown state, and branching on it collapses the user's
+        // disambiguation choice (e.g. q=200 matches both an Epson 200 ink
+        // family AND the trailing digits of "Canon LASER SHOT LBP 5200" —
+        // the dropdown surfaces both; Enter must take the user to the
+        // generic search-results page so they can still choose).
+        //
+        // The /search route rewrites to the shop page (vercel.json), which
+        // already handles ?q= via shop-page.js's search-results level.
         searchForm.addEventListener('submit', function(e) {
             e.preventDefault();
             const query = searchInput.value.trim();
             if (query.length < MIN_LEN) return;
-            window.location.href = `/html/shop?q=${encodeURIComponent(query)}`;
+            window.location.href = `/search?q=${encodeURIComponent(query)}`;
         });
     });
 }
@@ -313,7 +325,11 @@ function initBasicAutocomplete(searchForm, searchInput) {
                         id: printer.id,
                         name: printer.full_name || printer.model_name,
                         slug: printer.slug,
-                        brand: printer.brand?.name || '',
+                        // brandName is for human-readable meta text; brandSlug
+                        // is required to build the canonical printer URL per
+                        // search-dropdown-routing.md (/shop?brand=&printer_slug=).
+                        brandName: printer.brand?.name || '',
+                        brandSlug: printer.brand?.slug || '',
                         productCount: printer.compatible_product_count || 0
                     });
                 });
@@ -355,7 +371,7 @@ function initBasicAutocomplete(searchForm, searchInput) {
             if (item.type === 'printer') {
                 return `
                     <li class="search-autocomplete__item search-autocomplete__item--printer"
-                        data-index="${index}" data-type="printer" data-slug="${Security.escapeAttr(item.slug)}">
+                        data-index="${index}" data-type="printer" data-slug="${Security.escapeAttr(item.slug)}" data-brand-slug="${Security.escapeAttr(item.brandSlug || '')}">
                         <span class="search-autocomplete__icon">
                             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                 <polyline points="6 9 6 2 18 2 18 9"></polyline>
@@ -399,11 +415,22 @@ function initBasicAutocomplete(searchForm, searchInput) {
         const type = item.dataset.type;
 
         if (type === 'printer') {
-            window.location.href = `/html/shop?printer=${encodeURIComponent(item.dataset.slug)}`;
+            // Canonical printer URL per search-dropdown-routing.md:
+            // /shop?brand=<brand_slug>&printer_slug=<slug>. /api/printers/search
+            // returns brand.slug, so the canonical (branded) form is the
+            // expected case. Fall through to the unbranded last-resort form
+            // only if a malformed payload omits brand_slug.
+            const href = (typeof buildPrinterUrl === 'function')
+                ? buildPrinterUrl(
+                      { slug: item.dataset.slug, brand_slug: item.dataset.brandSlug || '' },
+                      { allowUnbranded: true }
+                  )
+                : `/shop?printer_slug=${encodeURIComponent(item.dataset.slug)}`;
+            window.location.href = href;
         } else if (type === 'product') {
             window.location.href = item.dataset.slug
                 ? `/products/${item.dataset.slug}/${item.dataset.sku}`
-                : `/html/product/?sku=${item.dataset.sku}`;
+                : `/p/${item.dataset.sku}`;
         }
 
         hideDropdown();

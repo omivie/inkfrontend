@@ -4,6 +4,7 @@
   "private": true,
   "description": "InkCartridges.co.nz frontend — vanilla JS, deployed via Vercel",
   "scripts": {
-    "build": "node scripts/build-brand-pages.js && node scripts/stamp-versions.js"
+    "build": "node scripts/stamp-versions.js",
+    "test": "node --test ../tests/*.test.js"
   }
 }

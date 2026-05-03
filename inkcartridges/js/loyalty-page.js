@@ -32,7 +32,7 @@
         async init() {
             await this.waitForAuth();
             if (!Auth.isAuthenticated()) {
-                window.location.href = '/html/login.html?redirect=/html/account/loyalty.html';
+                window.location.href = '/account/login?redirect=/account/loyalty';
                 return;
             }
 

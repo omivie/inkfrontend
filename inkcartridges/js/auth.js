@@ -183,7 +183,7 @@ const Auth = {
             email,
             password,
             options: {
-                emailRedirectTo: `${window.location.origin}/html/account/verify-email`
+                emailRedirectTo: `${window.location.origin}/account/verify-email`
             }
         });
 
@@ -313,7 +313,7 @@ const Auth = {
         const { data, error } = await this.supabase.auth.signInWithOAuth({
             provider: 'google',
             options: {
-                redirectTo: `${window.location.origin}/html/account/`,
+                redirectTo: `${window.location.origin}/account/`,
                 queryParams: {
                     prompt: 'select_account'
                 }
@@ -392,7 +392,7 @@ const Auth = {
             const returnUrl = redirectUrl || window.location.pathname;
             // Ensure returnUrl is a relative path (safeRedirect rejects absolute URLs)
             const safePath = returnUrl.startsWith('/') ? returnUrl : new URL(returnUrl, window.location.origin).pathname;
-            window.location.href = `/html/account/login.html?redirect=${encodeURIComponent(safePath)}`;
+            window.location.href = `/account/login?redirect=${encodeURIComponent(safePath)}`;
             return false;
         }
         return true;
@@ -424,7 +424,7 @@ const Auth = {
         }
 
         // Unverified — redirect
-        window.location.href = '/html/account/verify-email.html';
+        window.location.href = '/account/verify-email';
         return false;
     },
 

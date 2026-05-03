@@ -166,7 +166,7 @@
                     ? Products.getProductImageHTML(p, { priority: i < 4 })
                     : `<img src="${Security.escapeAttr(typeof storageUrl === 'function' ? storageUrl(p.image_url) : (p.image_url || '/assets/images/placeholder-product.svg'))}" alt="${Security.escapeAttr(name)}" data-fallback="placeholder">`;
                 return `
-                    <a href="${p.slug ? `/products/${Security.escapeAttr(p.slug)}/${Security.escapeAttr(p.sku)}` : `/html/product/?sku=${Security.escapeAttr(p.sku)}`}" class="product-card">
+                    <a href="${p.slug ? `/products/${Security.escapeAttr(p.slug)}/${Security.escapeAttr(p.sku)}` : `/p/${Security.escapeAttr(p.sku)}`}" class="product-card">
                         <div class="product-card__image-wrapper">${imageHtml}</div>
                         <div class="product-card__info">
                             <span class="product-card__brand">${Security.escapeHtml(brandName)}</span>

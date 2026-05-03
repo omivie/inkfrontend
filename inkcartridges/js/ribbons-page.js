@@ -138,7 +138,7 @@ const RibbonsPage = {
             brands.forEach((b, i) => {
                 const box = document.createElement('a');
                 box.className = 'drilldown-box drilldown-box--ribbon';
-                box.href = `/html/ribbons?printer_brand=${encodeURIComponent(b.value)}`;
+                box.href = `/ribbons?printer_brand=${encodeURIComponent(b.value)}`;
                 box.style.animationDelay = `${i * 30}ms`;
                 // Show image if available, otherwise just the label
                 if (b.image_url) {
@@ -701,7 +701,7 @@ const RibbonsPage = {
         const el = document.getElementById('ribbons-schema');
         if (!el) return;
         const base = 'https://www.inkcartridges.co.nz';
-        const ribbonsUrl = base + '/html/ribbons';
+        const ribbonsUrl = base + '/ribbons';
         const items = [
             { "@type": "ListItem", "position": 1, "name": "Home", "item": base + '/' },
             { "@type": "ListItem", "position": 2, "name": "Ribbons", "item": ribbonsUrl }
