@@ -66,7 +66,7 @@
     { "source": "/hl2130-brother-laser-printer-uses-tn2030-toner-cartridge-and-dr2225-drum", "destination": "/shop?search=Brother+HL-2130", "permanent": true },
     { "source": "/hp-no.564-oem-inkjet-cartridges", "destination": "/shop?search=HP+564", "permanent": true },
 
-    { "source": "/([^/]*[Rr]ibbon[^/]*)", "destination": "/ribbons", "permanent": true },
+    { "source": "/((?!ribbons$)[^/]*[Rr]ibbon[^/]*)", "destination": "/ribbons", "permanent": true },
     { "source": "/([^/]*[Tt]ypewriter[^/]*)", "destination": "/ribbons", "permanent": true },
 
     { "source": "/([^/]+)-ink-cartridges-([^/]+)", "destination": "/shop?search=$2", "permanent": true },
