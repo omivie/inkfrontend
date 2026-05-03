@@ -4,6 +4,260 @@ A running list of items the frontend needs from the backend. Each section is sel
 
 ---
 
+## Search — thin-frontend contract (intent, recovery, ribbons-in-smart, by-brand grouped printers)
+
+**From:** Frontend (Vieland)
+**Added:** 2026-05-03
+**Related doc:** `readfirst/SEARCH_AUDIT.md` in this repo (full audit + before/after).
+**Frontend status:** Frontend has been refactored to be a thin caller — it deletes ~700 lines of dead/duplicate logic and uses backend-provided fields when present, with small shims for the not-yet-backend-supported pieces. Once you ship the items below, we'll delete the shims (they're tagged with `// TODO(backend-search-passover)` in the source).
+
+### TL;DR — five tasks
+
+1. Add `intent` field to `/api/search/suggest` and `/api/search/smart` response envelopes.
+2. Always populate `did_you_mean` whenever `corrected_from` is set (no more frontend inference).
+3. Add `recovery` field to `/api/search/smart` zero-result responses.
+4. Include ribbons in `/api/search/smart` results when intent is ribbon-shaped (or always; see options below).
+5. Add `GET /api/printers/by-brand/:brand?grouped=true&exclude_non_ink=true` so the ink-finder and printers-tab don't have to ship a 788-line printer-series taxonomy in the browser.
+
+The current frontend works with the existing API. Each task below is independently shippable — frontend's shim for any not-yet-shipped task keeps the surface working, and reads the new field when it arrives.
+
+---
+
+### Task 1 — `intent` field on `/suggest` and `/smart`
+
+**Goal:** Stop the frontend from carrying its own keyword-detection rules. Backend already has the brand/category taxonomy, so it should classify the query once and emit the result.
+
+**Add to the `data` envelope of both `/api/search/suggest` and `/api/search/smart`:**
+
+```jsonc
+{
+  "ok": true,
+  "data": {
+    // ... existing fields (suggestions, products, total, matched_printer, did_you_mean, ...) ...
+    "intent": {
+      "type":              "ribbon" | "cartridge" | "consumable" | "printer" | "label_tape" | null,
+      "category":          "ink" | "toner" | "laser" | "inkjet" | "consumable" | null,
+      "source":            "genuine" | "compatible" | null,
+      "matched_brand_slug": "brother" | "canon" | "epson" | ... | null
+    }
+  }
+}
+```
+
+**Detection rules (so we agree on the contract):**
+
+- `intent.type = "ribbon"` when the query is a single token equal to `ribbon` or `ribbons` (case-insensitive). Should also fire for `typewriter ribbon`, `dot matrix ribbon`, etc. — basically any query where `ribbon` is the *kind* of thing being searched.
+- `intent.category = "toner"` for `toner`/`toners`/`laser toner`/etc. `ink` for `ink`/`inks`/`inkjet`/etc.
+- `intent.source = "genuine"` for queries that are exactly `genuine` (or `original`/`oem`). `compatible` for `compatible`/`generic`/`aftermarket`.
+- `intent.matched_brand_slug` should be set whenever the query unambiguously starts with or contains a brand name. Used by frontend to show a "Showing only Brother results" affordance.
+- `null` for everything else. Don't guess — empty intent is fine.
+
+**Why this matters:** The frontend currently runs `SearchNormalize.detectProductType` for `intent.type`, a hand-rolled `searchQuery.toLowerCase() === 'genuine'` branch for `intent.source`, and a string-matching loop over every product in the result set for `intent.matched_brand_slug`. All three are duplicating logic the backend already runs to filter the SQL. Just emit it.
+
+**Frontend will use it like this** (already shipped):
+
+```js
+// js/shop-page.js loadSearchResults
+const intent = smartData?.intent;
+const detectedType = intent?.type || (SearchNormalize?.detectProductType(searchQuery)?.keyword || null);
+// ... same for source and matched_brand_slug
+```
+
+---
+
+### Task 2 — Always populate `did_you_mean` when `corrected_from` is set
+
+**Goal:** Remove the frontend's `_inferCorrectedTerm` heuristic, which was guessing the corrected term by counting brand frequencies in the result set. (Yes, really.)
+
+**Current behavior we've seen:** `/api/search/smart?q=brotehr` returns `corrected_from: "brotehr"` but no `did_you_mean`. Frontend then renders "Showing similar results" without telling the user *what* it corrected to.
+
+**Fix:** whenever the smart-search pipeline auto-applied a correction (i.e., `corrected_from` is set), the corrected term must be set as `did_you_mean`. They are two halves of the same statement: "we corrected '<corrected_from>' to '<did_you_mean>' before searching."
+
+```jsonc
+// Before
+{ "corrected_from": "brotehr",  "did_you_mean": null      }
+
+// After
+{ "corrected_from": "brotehr",  "did_you_mean": "brother" }
+```
+
+**Frontend will use it like this** (already shipped — the heuristic is deleted):
+
+```js
+const correctedTo = didYouMean; // never inferred anymore
+```
+
+---
+
+### Task 3 — `recovery` field on zero-result `/smart` responses
+
+**Goal:** Backend tells frontend which zero-result rails to render, instead of frontend probing endpoints based on regex heuristics.
+
+**Add to the `data` envelope of `/api/search/smart` whenever `total === 0`:**
+
+```jsonc
+{
+  "ok": true,
+  "data": {
+    "products": [],
+    "total": 0,
+    // ... other fields ...
+    "recovery": {
+      "rails": [
+        { "kind": "compat-printers", "sku": "CN-664-BK" },        // emit when query looks like a SKU AND has at least one compatible printer in the DB
+        { "kind": "by-printer",       "query": "Brother MFC-J480DW", "count": 12 },  // emit when query plausibly names a printer; count is number of products that would be returned by /by-printer
+        { "kind": "popular" }                                      // always emit as the safety net
+      ]
+    }
+  }
+}
+```
+
+**Rules:**
+
+- `compat-printers` rail — emit when the backend's SKU lookup returns ≥1 compatible printer. Skip otherwise; don't make the frontend fire a request that will be empty.
+- `by-printer` rail — emit when `/api/search/by-printer?q=<query>` would return ≥1 product. The `count` field lets us decide whether to render the rail at all.
+- `popular` rail — always emit; static set, frontend renders it.
+
+**Why:** Frontend currently uses `looksLikeSku()` (a regex: contains a letter, contains a digit, ≥4 chars, no spaces) to decide whether to fire the compat-printers request. Then we fire it and discover whether it returns anything. The backend already knows. Telling us upfront removes a request from the slow path of every empty-results page.
+
+**Frontend will use it like this** (already shipped):
+
+```js
+const rails = smartData?.recovery?.rails;
+if (rails) {
+    // explicit list — render exactly what backend says
+} else {
+    // legacy: the looksLikeSku() heuristic + parallel /by-printer + /compat-printers requests
+}
+```
+
+---
+
+### Task 4 — Include ribbons in `/smart` when intent is ribbon-shaped
+
+**Goal:** Stop the frontend from firing a second `/api/ribbons` request and merging by SKU.
+
+**Current frontend (now-trimmed but still active until you ship):** when `SearchNormalize.detectProductType(query)` returns `{ keyword: 'ribbon', fetchRibbons: true }`, frontend fires `getProducts({ type: 'ribbon' })` AND `getRibbons()` in parallel, then dedupes by SKU and normalizes ribbon fields to match the product schema (`image_path → image_url`, `sale_price → retail_price`, etc.).
+
+**Backend fix (two acceptable shapes):**
+
+**Option A — preferred:** when `/api/search/smart` is called with a ribbon-intent query (or `category=ribbon` filter), include ribbons inline in `data.products`, with the same field names as cartridges. The frontend already handles the merged shape because that's what it constructs locally today.
+
+**Option B — minimal:** add a `data.ribbons` array on the same response. Frontend will merge them client-side (we already have the code for that).
+
+Either way, kill the separate `/api/ribbons` request from the search-results path.
+
+**Frontend will use it like this** (will ship once you do):
+
+```js
+// option A — just trust products[] to include ribbons
+const products = smartData.products;
+
+// option B — merge by SKU
+const products = mergeBySku(smartData.products, smartData.ribbons);
+```
+
+---
+
+### Task 5 — `GET /api/printers/by-brand/:brand?grouped=true&exclude_non_ink=true`
+
+**Goal:** Stop shipping the 788-line printer-series taxonomy (`js/printer-data.js`) to the browser. Frontend should request grouped printer data ready to render.
+
+**Current state:** `ink-finder.js` and `account.js`'s "register a printer" flow both load printers for a brand, then group them client-side using `PrinterData.SERIES_PATTERNS` (a list of `{ prefix, name }` regex patterns per brand), filter out non-ink devices using `PrinterData.NON_INK_*` keyword/regex maps, and dedupe variant suffixes. The grouping rules are duplicated in this codebase and yours.
+
+**Proposed endpoint:**
+
+```
+GET /api/printers/by-brand/:brand?grouped=true&exclude_non_ink=true
+```
+
+**Response:**
+
+```jsonc
+{
+  "ok": true,
+  "data": {
+    "brand": {
+      "slug": "brother",
+      "name": "Brother"
+    },
+    "series": [
+      {
+        "id": "dcp-series-digital-copier",
+        "name": "DCP Series (Digital Copier)",
+        "models": [
+          { "id": 12345, "slug": "brother-dcp-150c", "name": "DCP-150C", "full_name": "Brother DCP-150C" },
+          { "id": 12346, "slug": "brother-dcp-330c", "name": "DCP-330C", "full_name": "Brother DCP-330C" },
+          ...
+        ]
+      },
+      {
+        "id": "mfc-series-multi-function",
+        "name": "MFC Series (Multi-Function)",
+        "models": [...]
+      },
+      ...
+    ]
+  }
+}
+```
+
+**Query params:**
+
+- `brand` (path): brand slug. Required.
+- `grouped` (query, default `false`): when `true`, group models into series. When `false`, return a flat `models: [...]` array (matches existing `/api/printers/search` shape, for back-compat).
+- `exclude_non_ink` (query, default `false`): when `true`, omit label-makers, scanners, dot-matrix, etc. The current frontend filter list lives in `printer-data.js` `NON_INK_SERIES_KEYWORDS` / `NON_INK_MODEL_PREFIXES` / `NON_INK_MODEL_REGEX`. We're happy to email you the list, or you can use whatever taxonomy you already have.
+- Cache-Control: `public, max-age=86400` is fine — printer model lists change a few times a year.
+
+**Why:** the taxonomy in `printer-data.js` was first written when there was no API for printer models. The API now exists (`/api/printers/search?q=*&brand=…`), but it returns a flat list, so frontend keeps the grouping rules. Moving the grouping server-side means: (a) one source of truth for series patterns; (b) a smaller frontend bundle; (c) the iOS app and admin tooling get the same grouping for free.
+
+**Frontend will use it like this** (will ship once you do):
+
+```js
+// js/ink-finder.js loadPrintersForBrand
+const r = await API.getPrintersByBrandGrouped(brandSlug, { excludeNonInk: true });
+return r.ok ? r.data.series : [];  // already in our render shape
+```
+
+After ship, `printer-data.js` (788 lines) deletes from the bundle.
+
+---
+
+### How to verify all five tasks once shipped
+
+```bash
+# Task 1 — intent on /suggest and /smart
+curl -s "https://ink-backend-zaeq.onrender.com/api/search/suggest?q=ribbon&limit=5" | jq '.data.intent'
+# Expect: { "type": "ribbon", "category": null, "source": null, "matched_brand_slug": null }
+
+curl -s "https://ink-backend-zaeq.onrender.com/api/search/smart?q=brother%20toner&limit=5" | jq '.data.intent'
+# Expect: { "type": null, "category": "toner", "source": null, "matched_brand_slug": "brother" }
+
+# Task 2 — did_you_mean populated when corrected_from set
+curl -s "https://ink-backend-zaeq.onrender.com/api/search/smart?q=brotehr" | jq '{corrected_from, did_you_mean}'
+# Expect: { "corrected_from": "brotehr", "did_you_mean": "brother" }
+
+# Task 3 — recovery rails on zero-result responses
+curl -s "https://ink-backend-zaeq.onrender.com/api/search/smart?q=zzzzzqqqq&limit=5" | jq '.data.recovery'
+# Expect: { "rails": [{ "kind": "popular" }] }   (no SKU/printer match → just popular)
+
+curl -s "https://ink-backend-zaeq.onrender.com/api/search/smart?q=LC-3317XL-BK-FAKE&limit=5" | jq '.data.recovery'
+# Expect: rails includes { "kind": "compat-printers", "sku": "..." } if SKU lookup hits
+
+# Task 4 — ribbons in smart-search
+curl -s "https://ink-backend-zaeq.onrender.com/api/search/smart?q=ribbon&limit=20" | jq '.data.products | map(select(.product_type == "ribbon")) | length'
+# Expect: > 0
+
+# Task 5 — by-brand grouped
+curl -s "https://ink-backend-zaeq.onrender.com/api/printers/by-brand/brother?grouped=true&exclude_non_ink=true" | jq '.data.series | length, (.data.series[0] | {id, name, model_count: (.models | length)})'
+# Expect: 5+ series, each with non-empty models[]
+```
+
+After each task ships, ping Vieland; we'll delete the matching shim and re-stamp the cache busters.
+
+---
+
 ## Brand landing pages — wire deploy hook + add sitemap entries
 
 **From:** Frontend (Vieland)

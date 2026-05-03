@@ -224,13 +224,21 @@ test('main.js — submit handler does NOT branch on matched_printer', () => {
         'spec: form submit must not read matched_printer; the branch belongs only on the drill-in row');
 });
 
-test('main.js — basic-fallback selectItem(printer) uses canonical URL builder', () => {
-    const m = MAIN_JS.match(/function selectItem[\s\S]+?\}\s*\n/);
-    assert.ok(m);
-    assert.match(m[0], /buildPrinterUrl/,
-        'spec: basic autocomplete printer click must build the canonical URL via buildPrinterUrl');
-    assert.doesNotMatch(m[0], /\/shop\?printer=\$\{/,
-        'spec: legacy ?printer=<...> shape banned');
+test('main.js — basic-autocomplete fallback is deleted (search.js owns autocomplete)', () => {
+    // The basic autocomplete fallback (~210 lines, with its own selectItem,
+    // fetchSuggestions, renderSuggestions, hideDropdown, etc.) was deleted in
+    // the 2026-05-03 search audit (readfirst/SEARCH_AUDIT.md). It duplicated
+    // logic that /js/search.js (SmartSearch) already does. SmartSearch is
+    // loaded synchronously before main.js on every page that has a search
+    // form, so the fallback was unreachable in practice.
+    //
+    // This test is a regression guard: don't bring it back.
+    assert.doesNotMatch(MAIN_JS, /function\s+initBasicAutocomplete\b/,
+        'spec: initBasicAutocomplete deleted — search.js (SmartSearch) is the only autocomplete path');
+    assert.doesNotMatch(MAIN_JS, /function\s+fetchSuggestions\b/,
+        'spec: the basic-fallback fetchSuggestions duplicated SmartSearch.fetchSuggest — must stay deleted');
+    assert.doesNotMatch(MAIN_JS, /\.search-autocomplete__list/,
+        'spec: basic-fallback DOM (.search-autocomplete__list) is gone — SmartSearch uses .smart-ac-dropdown');
 });
 
 test('search.js — form submit handler is NOT defined inside search.js', () => {

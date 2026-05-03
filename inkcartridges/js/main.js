@@ -236,11 +236,17 @@ function initSearch() {
             });
         }
 
-        // Autocomplete: use SmartSearch if loaded, else basic fallback
+        // Autocomplete is owned by /js/search.js (SmartSearch). It is loaded
+        // synchronously before /js/main.js on every page that has a search
+        // form, so the global is always defined when initSearch() runs after
+        // DOMContentLoaded. The legacy basic-autocomplete fallback (~210
+        // lines) was deleted in the 2026-05-03 search audit (see
+        // readfirst/SEARCH_AUDIT.md) as it duplicated logic the backend
+        // already returns through /api/search/suggest.
         if (typeof SmartSearch !== 'undefined') {
             SmartSearch.init(searchForm, searchInput);
-        } else {
-            initBasicAutocomplete(searchForm, searchInput);
+        } else if (typeof DebugLog !== 'undefined') {
+            DebugLog.warn('[search] SmartSearch not loaded — autocomplete disabled, submit-on-Enter still works');
         }
 
         // Backend /api/search/* requires q.length >= 2 (Joi). Mirror that here so
@@ -278,205 +284,6 @@ function initSearch() {
         });
     });
 }
-
-/**
- * Basic autocomplete fallback (original implementation)
- * Used when search.js / SmartSearch is not loaded.
- */
-function initBasicAutocomplete(searchForm, searchInput) {
-    let dropdown = searchForm.querySelector('.search-autocomplete');
-    if (!dropdown) {
-        dropdown = document.createElement('div');
-        dropdown.className = 'search-autocomplete';
-        dropdown.innerHTML = '<ul class="search-autocomplete__list"></ul>';
-        searchForm.appendChild(dropdown);
-    }
-    const list = dropdown.querySelector('.search-autocomplete__list');
-
-    let debounceTimer = null;
-    let selectedIndex = -1;
-
-    searchInput.addEventListener('input', function() {
-        const query = this.value.trim();
-        clearTimeout(debounceTimer);
-
-        if (query.length < 2) {
-            hideDropdown();
-            return;
-        }
-
-        debounceTimer = setTimeout(() => fetchSuggestions(query), 300);
-    });
-
-    async function fetchSuggestions(query) {
-        try {
-            const [autocompleteRes, printersRes] = await Promise.all([
-                API.getAutocomplete(query, 5),
-                API.searchPrinters(query)
-            ]);
-
-            const suggestions = [];
-
-            if (printersRes.ok && printersRes.data) {
-                const printers = Array.isArray(printersRes.data) ? printersRes.data : printersRes.data.printers || [];
-                printers.slice(0, 4).forEach(printer => {
-                    suggestions.push({
-                        type: 'printer',
-                        id: printer.id,
-                        name: printer.full_name || printer.model_name,
-                        slug: printer.slug,
-                        // brandName is for human-readable meta text; brandSlug
-                        // is required to build the canonical printer URL per
-                        // search-dropdown-routing.md (/shop?brand=&printer_slug=).
-                        brandName: printer.brand?.name || '',
-                        brandSlug: printer.brand?.slug || '',
-                        productCount: printer.compatible_product_count || 0
-                    });
-                });
-            }
-
-            if (autocompleteRes.ok && autocompleteRes.data) {
-                const products = autocompleteRes.data.suggestions || autocompleteRes.data || [];
-                products.slice(0, 4).forEach(item => {
-                    suggestions.push({
-                        type: 'product',
-                        id: item.id,
-                        name: item.name,
-                        slug: item.slug,
-                        sku: item.sku || '',
-                        price: item.price != null ? item.price : item.retail_price
-                    });
-                });
-            }
-
-            renderSuggestions(suggestions, query);
-        } catch (error) {
-            DebugLog.error('Search error:', error);
-            hideDropdown();
-        }
-    }
-
-    function renderSuggestions(suggestions, query) {
-        if (suggestions.length === 0) {
-            list.innerHTML = `
-                <li class="search-autocomplete__empty">
-                    No results for "${Security.escapeHtml(query)}"
-                </li>
-            `;
-            showDropdown();
-            return;
-        }
-
-        list.innerHTML = suggestions.map((item, index) => {
-            if (item.type === 'printer') {
-                return `
-                    <li class="search-autocomplete__item search-autocomplete__item--printer"
-                        data-index="${index}" data-type="printer" data-slug="${Security.escapeAttr(item.slug)}" data-brand-slug="${Security.escapeAttr(item.brandSlug || '')}">
-                        <span class="search-autocomplete__icon">
-                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                <polyline points="6 9 6 2 18 2 18 9"></polyline>
-                                <path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path>
-                                <rect x="6" y="14" width="12" height="8"></rect>
-                            </svg>
-                        </span>
-                        <span class="search-autocomplete__content">
-                            <span class="search-autocomplete__name">${Security.escapeHtml(item.name)}</span>
-                            <span class="search-autocomplete__meta">Printer • ${Security.escapeHtml(String(item.productCount))} compatible products</span>
-                        </span>
-                    </li>
-                `;
-            } else {
-                return `
-                    <li class="search-autocomplete__item search-autocomplete__item--product"
-                        data-index="${index}" data-type="product" data-sku="${Security.escapeAttr(item.sku)}"${item.slug ? ` data-slug="${Security.escapeAttr(item.slug)}"` : ''}>
-                        <span class="search-autocomplete__icon">
-                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                <path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z"/>
-                            </svg>
-                        </span>
-                        <span class="search-autocomplete__content">
-                            <span class="search-autocomplete__name">${Security.escapeHtml(item.name)}</span>
-                            <span class="search-autocomplete__meta">Product ${item.price ? '• ' + formatPrice(item.price) : ''}</span>
-                        </span>
-                    </li>
-                `;
-            }
-        }).join('');
-
-        list.querySelectorAll('.search-autocomplete__item').forEach(item => {
-            item.addEventListener('click', () => selectItem(item));
-        });
-
-        showDropdown();
-        selectedIndex = -1;
-    }
-
-    function selectItem(item) {
-        const type = item.dataset.type;
-
-        if (type === 'printer') {
-            // Canonical printer URL per search-dropdown-routing.md:
-            // /shop?brand=<brand_slug>&printer_slug=<slug>. /api/printers/search
-            // returns brand.slug, so the canonical (branded) form is the
-            // expected case. Fall through to the unbranded last-resort form
-            // only if a malformed payload omits brand_slug.
-            const href = (typeof buildPrinterUrl === 'function')
-                ? buildPrinterUrl(
-                      { slug: item.dataset.slug, brand_slug: item.dataset.brandSlug || '' },
-                      { allowUnbranded: true }
-                  )
-                : `/shop?printer_slug=${encodeURIComponent(item.dataset.slug)}`;
-            window.location.href = href;
-        } else if (type === 'product') {
-            window.location.href = item.dataset.slug
-                ? `/products/${item.dataset.slug}/${item.dataset.sku}`
-                : `/p/${item.dataset.sku}`;
-        }
-
-        hideDropdown();
-    }
-
-    searchInput.addEventListener('keydown', function(e) {
-        const items = list.querySelectorAll('.search-autocomplete__item');
-
-        if (e.key === 'ArrowDown') {
-            e.preventDefault();
-            selectedIndex = Math.min(selectedIndex + 1, items.length - 1);
-            updateSelection(items);
-        } else if (e.key === 'ArrowUp') {
-            e.preventDefault();
-            selectedIndex = Math.max(selectedIndex - 1, -1);
-            updateSelection(items);
-        } else if (e.key === 'Enter' && selectedIndex >= 0) {
-            e.preventDefault();
-            selectItem(items[selectedIndex]);
-        } else if (e.key === 'Escape') {
-            hideDropdown();
-        }
-    });
-
-    function updateSelection(items) {
-        items.forEach((item, i) => {
-            item.classList.toggle('is-selected', i === selectedIndex);
-        });
-    }
-
-    function showDropdown() {
-        dropdown.classList.add('is-open');
-    }
-
-    function hideDropdown() {
-        dropdown.classList.remove('is-open');
-        selectedIndex = -1;
-    }
-
-    document.addEventListener('click', function(e) {
-        if (!searchForm.contains(e.target)) {
-            hideDropdown();
-        }
-    });
-}
-
 
 /**
  * DROPDOWNS

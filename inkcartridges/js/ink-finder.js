@@ -85,21 +85,18 @@
     // ============================================
 
     /**
-     * Get Supabase client (creates one if needed)
-     */
-    function getSupabaseClient() {
-        if (typeof Auth !== 'undefined' && Auth.supabase) {
-            return Auth.supabase;
-        }
-        // Create our own client if Auth isn't available
-        if (typeof supabase !== 'undefined' && supabase.createClient && typeof Config !== 'undefined') {
-            return supabase.createClient(Config.SUPABASE_URL, Config.SUPABASE_ANON_KEY);
-        }
-        return null;
-    }
-
-    /**
-     * Fetch printers for a brand - queries Supabase directly to get ALL models
+     * Fetch printers for a brand. Single API round-trip via /api/printers/search.
+     *
+     * History: this used to query Supabase directly first, then fall back to the
+     * API, then to static data — three sequential round-trips on the slow path
+     * with the direct Supabase query leaking schema names (`brands.id`,
+     * `printer_models.brand_id`, …) into the browser. The 2026-05-03 search
+     * audit removed that path. The static fallback stays for true offline mode.
+     *
+     * Once `GET /api/printers/by-brand/:brand?grouped=true&exclude_non_ink=true`
+     * ships (backend-passover task 5), this whole function collapses to a
+     * single API call that returns already-grouped series, and the
+     * PrinterData taxonomy below deletes from the bundle.
      */
     async function loadPrintersForBrand(brand) {
         if (printerCache[brand]) {
@@ -109,44 +106,13 @@
         const brandName = PrinterData.BRAND_NAMES[brand] || brand;
         let printers = [];
 
-        // Try Supabase direct query first (gets ALL printer models)
-        const supabaseClient = getSupabaseClient();
-        if (supabaseClient) {
-            try {
-                // First get the brand ID
-                const { data: brandData, error: brandError } = await supabaseClient
-                    .from('brands')
-                    .select('id')
-                    .ilike('name', brandName)
-                    .single();
-
-                if (!brandError && brandData) {
-                    // Get all printer models for this brand
-                    const { data: modelsData, error: modelsError } = await supabaseClient
-                        .from('printer_models')
-                        .select('id, model_name, full_name, slug')
-                        .eq('brand_id', brandData.id)
-                        .order('model_name', { ascending: true });
-
-                    if (!modelsError && modelsData && modelsData.length > 0) {
-                        printers = modelsData;
-                    }
-                }
-            } catch (error) {
-                // Supabase direct query failed, try API fallback
+        try {
+            const response = await API.getPrintersByBrand(brandName);
+            if (response.ok && response.data) {
+                printers = Array.isArray(response.data) ? response.data : (response.data.printers || []);
             }
-        }
-
-        // Fall back to API if Supabase query didn't work
-        if (printers.length === 0) {
-            try {
-                const response = await API.getPrintersByBrand(brandName);
-                if (response.ok && response.data) {
-                    printers = Array.isArray(response.data) ? response.data : (response.data.printers || []);
-                }
-            } catch (error) {
-                // API fallback also failed, will use static data
-            }
+        } catch (error) {
+            // API failed — will use static fallback below.
         }
 
         // Transform printers to our format

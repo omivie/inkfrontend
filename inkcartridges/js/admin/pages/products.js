@@ -381,7 +381,7 @@ async function loadProducts() {
   const sb = (typeof Auth !== 'undefined' && Auth.supabase) ? Auth.supabase : null;
   if (sb) {
     try {
-      const selectCols = 'id, sku, name, retail_price, cost_price, is_active, import_locked, is_reviewed, reviewed_at, reviewed_by_email, image_url, color, source, weight_kg, page_yield, category, product_type, brand_id, description, description_html, compatible_devices_html, compare_price, meta_title, meta_description, tags, internal_notes, brands(name, slug)';
+      const selectCols = 'id, sku, name, retail_price, cost_price, is_active, import_locked, is_reviewed, reviewed_at, reviewed_by_email, image_url, color, source, weight_kg, page_yield, category, product_type, brand_id, description, description_html, compatible_devices_html, compare_price, meta_title, meta_description, tags, internal_notes, brands(name, slug), product_images(path, is_primary, sort_order)';
       let query = sb.from('products').select(selectCols, { count: 'exact' });
 
       // Brand filter
@@ -415,11 +415,23 @@ async function loadProducts() {
       if (error) throw error;
 
       // Map brand names and resolve image URLs from joined brands table
-      const mapped = (rows || []).map(p => ({
-        ...p,
-        brand_name: p.brands?.name || '',
-        image_url: p.image_url ? storageUrl(p.image_url) : null,
-      }));
+      const mapped = (rows || []).map(p => {
+        // Pick a thumbnail: prefer the legacy products.image_url, otherwise the
+        // primary entry from product_images, otherwise the lowest sort_order.
+        let thumbPath = p.image_url || null;
+        const pImages = Array.isArray(p.product_images) ? p.product_images : [];
+        if (!thumbPath && pImages.length) {
+          const primary = pImages.find(i => i && i.is_primary);
+          const sorted = [...pImages].sort((a, b) => (a?.sort_order ?? 0) - (b?.sort_order ?? 0));
+          thumbPath = (primary && primary.path) || (sorted[0] && sorted[0].path) || null;
+        }
+        return {
+          ...p,
+          brand_name: p.brands?.name || '',
+          image_url: thumbPath ? storageUrl(thumbPath) : null,
+          images: pImages.map(i => ({ image_url: storageUrl(i.path), path: i.path, is_primary: i.is_primary })),
+        };
+      });
       const pagination = { total: count || mapped.length, page: _page, limit: LIMIT };
       _table.setData(mapped, pagination);
       loadCompatCounts();

@@ -265,47 +265,18 @@ const AccountPage = {
         const brandName = PrinterData.BRAND_NAMES[brand] || brand;
         let printers = [];
 
-        // Try Supabase direct query first (gets ALL printer models)
-        const supabaseClient = (typeof Auth !== 'undefined' && Auth.supabase)
-            ? Auth.supabase
-            : (typeof supabase !== 'undefined' && supabase.createClient && typeof Config !== 'undefined')
-                ? supabase.createClient(Config.SUPABASE_URL, Config.SUPABASE_ANON_KEY)
-                : null;
-
-        if (supabaseClient) {
-            try {
-                const { data: brandData, error: brandError } = await supabaseClient
-                    .from('brands')
-                    .select('id')
-                    .ilike('name', brandName)
-                    .single();
-
-                if (!brandError && brandData) {
-                    const { data: modelsData, error: modelsError } = await supabaseClient
-                        .from('printer_models')
-                        .select('id, model_name, full_name, slug')
-                        .eq('brand_id', brandData.id)
-                        .order('model_name', { ascending: true });
-
-                    if (!modelsError && modelsData && modelsData.length > 0) {
-                        printers = modelsData;
-                    }
-                }
-            } catch (error) {
-                // Supabase direct query failed, try API fallback
+        // Single API round-trip via /api/printers/search. The previous
+        // direct-Supabase-then-API double round-trip was deleted in the
+        // 2026-05-03 search audit (readfirst/SEARCH_AUDIT.md) — schema names
+        // were leaking into the browser and the slow path was twice as slow
+        // as it needed to be. Static fallback below covers the offline case.
+        try {
+            const response = await API.getPrintersByBrand(brandName);
+            if (response.ok && response.data) {
+                printers = Array.isArray(response.data) ? response.data : (response.data.printers || []);
             }
-        }
-
-        // Fall back to API if Supabase query didn't work
-        if (printers.length === 0) {
-            try {
-                const response = await API.getPrintersByBrand(brandName);
-                if (response.ok && response.data) {
-                    printers = Array.isArray(response.data) ? response.data : (response.data.printers || []);
-                }
-            } catch (error) {
-                // API fallback also failed, will use static data
-            }
+        } catch (error) {
+            // API failed — will use static fallback below.
         }
 
         // Transform and filter printers
@@ -1142,14 +1113,19 @@ const AccountPage = {
     },
 
     /**
-     * Enrich printer records that have printer_id but are missing model info.
-     * The backend may not join printer_models — this fills the gap via Supabase.
+     * Normalise nested model data if backend returns it nested under
+     * `printer.printer_models` or `printer.printer`. The 2026-05-03 search
+     * audit (readfirst/SEARCH_AUDIT.md) deleted the second pass that did a
+     * direct `supabaseClient.from('printer_models')` lookup for records that
+     * had only `printer_id` and no nested data — the `supabaseClient` global
+     * referenced there was never defined, so the lookup was throwing a
+     * silent ReferenceError that the catch swallowed (i.e. the lookup never
+     * worked in production). Backend should join `printer_models` in the
+     * saved-printers response if it isn't already.
      */
     async enrichPrintersData(printers) {
         if (!printers.length) return printers;
-
-        // Normalise nested model data if backend returns it nested (e.g. printer.printer_models)
-        printers = printers.map(p => {
+        return printers.map(p => {
             const nested = p.printer_models || p.printer || null;
             if (nested && typeof nested === 'object') {
                 return {
@@ -1161,38 +1137,6 @@ const AccountPage = {
             }
             return p;
         });
-
-        // Find printers that still have no model info but have a printer_id to look up
-        const needsLookup = printers.filter(p => {
-            const hasModelInfo = p.full_name || p.model_name || p.model || p.name || p.slug;
-            return !hasModelInfo && p.printer_id;
-        });
-
-        if (!needsLookup.length) return printers;
-
-        try {
-            const ids = needsLookup.map(p => p.printer_id);
-            const { data } = await supabaseClient
-                .from('printer_models')
-                .select('id, full_name, model_name, slug')
-                .in('id', ids);
-
-            if (data && data.length) {
-                const modelMap = {};
-                data.forEach(m => { modelMap[m.id] = m; });
-                return printers.map(p => {
-                    if (p.printer_id && modelMap[p.printer_id]) {
-                        const m = modelMap[p.printer_id];
-                        return { ...p, full_name: m.full_name, model_name: m.model_name, slug: m.slug };
-                    }
-                    return p;
-                });
-            }
-        } catch (e) {
-            // Supabase lookup failed — continue with what we have
-        }
-
-        return printers;
     },
 
     /**

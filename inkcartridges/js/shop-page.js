@@ -1735,6 +1735,12 @@
         async loadPrinterProducts(navVersion) {
             this.showLoading(true);
 
+            // Backend returns 404 NOT_FOUND for unknown/retired printer slugs;
+            // surface as a redirect to /shop rather than a "Failed to load"
+            // error so stale sitemap entries and old crawler URLs never look
+            // like a broken page.
+            const isPrinterNotFound = (err) => /printer (?:model )?not found|NOT_FOUND/i.test(err && err.message || '');
+
             try {
                 // Fetch compatible products for the printer slug.
                 // The backend lives on Render and can cold-start: the first call
@@ -1745,6 +1751,10 @@
                     response = await API.getProductsByPrinter(this.state.printer);
                 } catch (firstErr) {
                     if (navVersion !== undefined && this.navigationVersion !== navVersion) return;
+                    if (isPrinterNotFound(firstErr)) {
+                        window.location.replace('/shop');
+                        return;
+                    }
                     await new Promise(r => setTimeout(r, 800));
                     response = await API.getProductsByPrinter(this.state.printer);
                 }
@@ -1805,6 +1815,10 @@
                 DebugLog.error('Failed to load printer products:', error);
                 // Check if navigation changed
                 if (navVersion !== undefined && this.navigationVersion !== navVersion) return;
+                if (isPrinterNotFound(error)) {
+                    window.location.replace('/shop');
+                    return;
+                }
                 this.showEmpty('Failed to load products. Please try again.');
             }
 
@@ -2206,20 +2220,42 @@
             try {
                 const searchQuery = this.state.search;
 
-                // Detect if this is a product-type keyword (e.g. "ribbon", "toner")
+                // ─────────────────────────────────────────────────────────────
+                // Branch decision: which API path do we take?
+                //
+                // Source of truth is the backend's `data.intent` field on
+                // /api/search/smart (see readfirst/backend-passover.md, "Search —
+                // thin-frontend contract", task 1). When backend ships intent,
+                // we fire /smart unconditionally and read the type/source flags
+                // off the response.
+                //
+                // Until backend ships intent, we keep two pre-flight shims:
+                //   1. SearchNormalize.detectProductType — single-word
+                //      ribbon/toner/ink → fire getProducts(type=…) + getRibbons()
+                //      because /smart doesn't include ribbons (task 4).
+                //   2. searchQuery in {'genuine', 'compatible'} → fire
+                //      getProducts(source=…) since the term as free-text would
+                //      not match anything useful (task 1).
+                //
+                // Both shims delete once `data.intent` arrives.
+                // ─────────────────────────────────────────────────────────────
+                // TODO(backend-search-passover task 1+4): delete this shim.
                 const typeDetect = typeof SearchNormalize !== 'undefined'
                     ? SearchNormalize.detectProductType(searchQuery)
                     : null;
+                // TODO(backend-search-passover task 1): delete this shim.
+                const sourceKeyword = (searchQuery
+                    && (searchQuery.toLowerCase() === 'genuine' || searchQuery.toLowerCase() === 'compatible'))
+                    ? searchQuery.toLowerCase() : null;
 
                 let products = [];
                 let isTypeQuery = false;
                 // Smart-search envelope (matched_printer / did_you_mean / corrected_from /
-                // facets / pagination). Populated only on the free-text path.
+                // facets / pagination / intent / recovery). Populated only on the free-text path.
                 let smartData = null;
 
                 if (typeDetect) {
-                    // Type-aware fetch: use getProducts + getRibbons in parallel
-                    // (same pattern as search dropdown in search.js)
+                    // Type-aware fetch: getProducts + (if ribbons) getRibbons in parallel.
                     isTypeQuery = true;
                     const promises = [API.getProducts({ ...typeDetect.productParams, limit: 200 })];
                     if (typeDetect.fetchRibbons) {
@@ -2229,14 +2265,12 @@
 
                     if (navVersion !== undefined && this.navigationVersion !== navVersion) return;
 
-                    // Collect product results
                     if (results[0].status === 'fulfilled' && results[0].value.ok && results[0].value.data) {
                         const data = results[0].value.data;
                         const prods = data.products || data || [];
                         if (Array.isArray(prods)) products = prods;
                     }
 
-                    // Merge ribbon results (deduplicate by SKU)
                     if (typeDetect.fetchRibbons && results[1] && results[1].status === 'fulfilled'
                         && results[1].value.ok && results[1].value.data) {
                         const data = results[1].value.data;
@@ -2266,19 +2300,16 @@
                             }
                         }
                     }
-                } else if (searchQuery && (searchQuery.toLowerCase() === 'genuine' || searchQuery.toLowerCase() === 'compatible')) {
-                    // Source filter keyword — use source API param instead of text search
-                    const response = await API.getProducts({ source: searchQuery.toLowerCase(), limit: 200 });
-
+                } else if (sourceKeyword) {
+                    // genuine / compatible single-word: filter by source instead of text search.
+                    const response = await API.getProducts({ source: sourceKeyword, limit: 200 });
                     if (navVersion !== undefined && this.navigationVersion !== navVersion) return;
-
                     products = (response.ok && response.data?.products) ? response.data.products : [];
                 } else {
-                    // Free-text search path. The backend's /smart endpoint already
-                    // handles separator normalization, synonyms, model-number
-                    // splitting, did-you-mean rerun, printer-compat expansion, and
-                    // pack-first ordering — frontend just renders what comes back.
-                    // (Per frontend-search-spec §2.1 / §0 / §8.)
+                    // Free-text search path. The backend's /smart endpoint handles
+                    // separator normalization, synonyms, model-number splitting,
+                    // did-you-mean rerun, printer-compat expansion, and pack-first
+                    // ordering — frontend just renders what comes back.
                     const response = await API.smartSearch(searchQuery, {
                         limit: 100,
                         include: 'compat,description'
@@ -2286,6 +2317,34 @@
                     if (navVersion !== undefined && this.navigationVersion !== navVersion) return;
                     smartData = (response && response.ok) ? (response.data || null) : null;
                     products = (smartData && Array.isArray(smartData.products)) ? smartData.products : [];
+
+                    // When backend ships data.intent, prefer it over the local shim.
+                    // (We refire if intent says ribbon-shape but /smart didn't
+                    // include ribbons. Once task 4 ships, /smart includes ribbons
+                    // natively and this re-fire branch becomes unreachable.)
+                    if (smartData?.intent?.type === 'ribbon' && !products.some(p => p._isRibbon || p.product_type === 'ribbon')) {
+                        const r = await API.getRibbons({ limit: 200 });
+                        if (navVersion !== undefined && this.navigationVersion !== navVersion) return;
+                        if (r?.ok && r.data) {
+                            let ribbons = r.data.ribbons || r.data.products || (Array.isArray(r.data) ? r.data : []);
+                            if (!Array.isArray(ribbons)) ribbons = [];
+                            for (const ribbon of ribbons) {
+                                ribbon._isRibbon = true;
+                                if (!ribbon.image_url && ribbon.image_path) ribbon.image_url = ribbon.image_path;
+                                if (ribbon.retail_price == null && ribbon.sale_price != null) ribbon.retail_price = ribbon.sale_price;
+                                ribbon.in_stock = true;
+                                if (typeof ribbon.brand === 'string') ribbon.brand = { name: ribbon.brand };
+                            }
+                            const existingSkus = new Set(products.map(p => p.sku));
+                            for (const ribbon of ribbons) {
+                                if (ribbon.sku && !existingSkus.has(ribbon.sku)) {
+                                    existingSkus.add(ribbon.sku);
+                                    products.push(ribbon);
+                                }
+                            }
+                        }
+                        if (smartData.intent.type === 'ribbon') isTypeQuery = true;
+                    }
 
                     // matched_printer with no products → user typed a printer
                     // model and the backend has no compat-mapped cartridges.
@@ -2343,41 +2402,49 @@
                 if (products.length > 0) {
                     let filteredProducts = products;
 
-                    // Skip brand detection for type queries (results span multiple brands)
+                    // Brand-narrowing: when the query named a single brand (e.g.
+                    // "brother toner"), narrow the result set to that brand.
+                    //
+                    // Source of truth is `data.intent.matched_brand_slug` from
+                    // the backend (see backend-passover task 1). Until backend
+                    // ships, we read `product.brand?.slug` from the first
+                    // product as a coarse heuristic — products are already
+                    // ranked, so the first hit is the most relevant brand.
+                    //
+                    // The previous implementation walked every product, lower-
+                    // cased and stripped its `name`, then substring-matched
+                    // every brand keyword — that was O(products × brands) of
+                    // string work to recompute information that's already on
+                    // each product as a structured field.
                     let detectedBrand = null;
                     if (!isTypeQuery) {
-                        for (const product of products) {
-                            const productName = (product.name || '').toLowerCase();
-                            const productNameNoSpace = productName.replace(/[\s-]/g, '');
-                            for (const [brandKey, brandData] of Object.entries(this.brandInfo)) {
-                                const brandNameLower = brandData.name.toLowerCase();
-                                const brandNameNoSpace = brandNameLower.replace(/[\s-]/g, '');
-                                if (productName.includes(brandNameLower) || productNameNoSpace.includes(brandNameNoSpace)) {
-                                    detectedBrand = brandKey;
-                                    break;
-                                }
+                        // TODO(backend-search-passover task 1): replace with
+                        //   const intentBrand = smartData?.intent?.matched_brand_slug;
+                        // and drop the first-product fallback.
+                        const intentBrand = smartData?.intent?.matched_brand_slug;
+                        const firstBrandSlug = products[0]?.brand?.slug;
+                        const candidate = intentBrand || (firstBrandSlug && this.brandInfo[firstBrandSlug] ? firstBrandSlug : null);
+                        if (candidate && this.brandInfo[candidate]) {
+                            const targetSlug = candidate;
+                            const narrowed = products.filter(p => p.brand?.slug === targetSlug);
+                            // Only narrow if the candidate brand actually
+                            // dominates the result set (≥40% — same threshold
+                            // as the old `_inferCorrectedTerm` used). This
+                            // prevents a single relevant Brother result in a
+                            // mostly-Canon page from filtering out the Canon
+                            // products.
+                            if (narrowed.length >= Math.max(2, products.length * 0.4)) {
+                                detectedBrand = targetSlug;
+                                filteredProducts = narrowed;
                             }
-                            if (detectedBrand) break;
-                        }
-
-                        if (detectedBrand) {
-                            const brandNameLower = this.brandInfo[detectedBrand].name.toLowerCase();
-                            const brandNameNoSpace = brandNameLower.replace(/[\s-]/g, '');
-                            filteredProducts = products.filter(p => {
-                                const name = (p.name || '').toLowerCase();
-                                const nameNoSpace = name.replace(/[\s-]/g, '');
-                                return name.includes(brandNameLower) || nameNoSpace.includes(brandNameNoSpace);
-                            });
-                            if (filteredProducts.length === 0) filteredProducts = products;
                         }
                     }
 
-                    // Separate genuine and compatible
-                    const isCompatibleProduct = (product) => {
-                        if (product.source) return product.source === 'compatible';
-                        const productName = (product.name || '').toLowerCase().trim();
-                        return productName.includes(this.compatiblePrefix);
-                    };
+                    // Separate genuine and compatible by `product.source` —
+                    // backend canonical field. The previous fallback that
+                    // checked `product.name.includes(this.compatiblePrefix)`
+                    // was for legacy data that no longer exists.
+                    const isCompatibleProduct = (product) => product.source === 'compatible';
 
                     let genuine = filteredProducts.filter(p => !isCompatibleProduct(p));
                     let compatible = filteredProducts.filter(p => isCompatibleProduct(p));
@@ -2412,12 +2479,12 @@
                     this.renderProducts(genuine, this.elements.genuineProducts, this.elements.genuineSection, false, { preserveOrder });
 
                     if (genuine.length === 0 && compatible.length === 0) {
-                        await this.renderZeroResultsRecovery(searchQuery, navVersion);
+                        await this.renderZeroResultsRecovery(searchQuery, navVersion, smartData);
                     } else {
                         this.elements.levelProducts.hidden = false;
                     }
                 } else {
-                    await this.renderZeroResultsRecovery(searchQuery, navVersion);
+                    await this.renderZeroResultsRecovery(searchQuery, navVersion, smartData);
                 }
             } catch (error) {
                 DebugLog.error('Failed to search products:', error);
@@ -2470,15 +2537,21 @@
 
             // Spec §2.2 — backend already auto-applied did_you_mean.
             // Show "Showing results for X. Search instead for Y" banner.
+            //
+            // Backend contract (see backend-passover task 2): when
+            // `corrected_from` is set, `did_you_mean` MUST be set too — they
+            // are two halves of the same statement ("we corrected X → Y
+            // before searching"). The previous heuristic that picked the most
+            // frequent brand name across the result set when `did_you_mean`
+            // was missing has been removed; if the backend drops the field,
+            // we now show "Showing similar results." with no inferred term
+            // (and the bug becomes visible to the backend team rather than
+            // hidden behind a misleading guess).
             if (correctedFrom) {
                 const banner = document.createElement('div');
                 banner.className = 'search-correction-banner';
-                // Prefer did_you_mean from the API; if absent, fall back to
-                // the most common brand name in the result set (the live API
-                // sometimes returns corrected_from without did_you_mean).
-                const correctedTo = didYouMean || this._inferCorrectedTerm(smartData.products) || '';
-                const showingFor = correctedTo
-                    ? `Showing results for <strong>"${Security.escapeHtml(correctedTo)}"</strong>.`
+                const showingFor = didYouMean
+                    ? `Showing results for <strong>"${Security.escapeHtml(didYouMean)}"</strong>.`
                     : `Showing similar results.`;
                 banner.innerHTML = `
                     <span>${showingFor}</span>
@@ -2501,31 +2574,14 @@
             if (host) host.insertBefore(wrap, host.firstChild);
         },
 
-        // Heuristic fallback for the "Showing results for X" banner when the
-        // backend gave us corrected_from but no did_you_mean. Pick the most
-        // common brand name across the result set.
-        _inferCorrectedTerm(products) {
-            if (!Array.isArray(products) || products.length === 0) return '';
-            const counts = new Map();
-            for (const p of products) {
-                const name = p?.brand?.name;
-                if (!name) continue;
-                counts.set(name, (counts.get(name) || 0) + 1);
-            }
-            let best = '', bestCount = 0;
-            for (const [name, count] of counts) {
-                if (count > bestCount) { best = name; bestCount = count; }
-            }
-            // Only return if the brand dominates ≥40% of the result set;
-            // otherwise the correction is ambiguous.
-            return bestCount >= Math.max(2, products.length * 0.4) ? best : '';
-        },
+        // (`_inferCorrectedTerm` removed 2026-05-03 — backend now owns the
+        //  corrected-term copy. Search audit: readfirst/SEARCH_AUDIT.md.)
 
         // Spec §2.3 — recovery rails when /smart returns no products.
         // Three rails: (1) compatible printers for SKU-shaped queries,
         // (2) cartridges-for-your-printer via /by-printer,
         // (3) static popular categories.
-        async renderZeroResultsRecovery(query, navVersion) {
+        async renderZeroResultsRecovery(query, navVersion, smartData) {
             // Hide both genuine/compatible sections; we'll render our own UI.
             this.elements.compatibleSection.hidden = true;
             this.elements.genuineSection.hidden = true;
@@ -2549,6 +2605,18 @@
             const railsHost = panel.querySelector('.search-recovery__rails');
             this.elements.levelProducts.appendChild(panel);
 
+            // ─────────────────────────────────────────────────────────────
+            // Pick which rails to fire.
+            //
+            // Source of truth is `smartData.recovery.rails` from the backend
+            // (see backend-passover task 3): backend tells us exactly which
+            // rails will produce results, so we don't fire requests we know
+            // will be empty.
+            //
+            // Until backend ships, fall back to the legacy heuristic: a
+            // SKU-shaped query gets the compat-printers rail, every query
+            // gets the by-printer rail.
+            // ─────────────────────────────────────────────────────────────
             const looksLikeSku = (q) => {
                 const t = (q || '').trim();
                 if (!t || /\s/.test(t)) return false;
@@ -2556,22 +2624,46 @@
                 return /[A-Za-z]/.test(t) && /\d/.test(t);
             };
 
-            // Rail 1: Compatible printers for this SKU
+            // TODO(backend-search-passover task 3): once backend ships,
+            // delete the heuristic branch and use only `backendRails`.
+            const backendRails = Array.isArray(smartData?.recovery?.rails)
+                ? smartData.recovery.rails
+                : null;
+
             const railPromises = [];
-            if (looksLikeSku(query)) {
+            if (backendRails) {
+                for (const rail of backendRails) {
+                    if (rail.kind === 'compat-printers') {
+                        const sku = rail.sku || query;
+                        railPromises.push(
+                            API.getCompatiblePrinters(sku)
+                                .then(r => ({ kind: 'compat', data: r?.ok ? r.data : null }))
+                                .catch(() => ({ kind: 'compat', data: null }))
+                        );
+                    } else if (rail.kind === 'by-printer') {
+                        const q = rail.query || query;
+                        railPromises.push(
+                            API.searchByPrinter(q, { limit: 6 })
+                                .then(r => ({ kind: 'by-printer', data: r?.ok ? r.data : null }))
+                                .catch(() => ({ kind: 'by-printer', data: null }))
+                        );
+                    }
+                    // 'popular' rail is rendered unconditionally below as the safety net.
+                }
+            } else {
+                if (looksLikeSku(query)) {
+                    railPromises.push(
+                        API.getCompatiblePrinters(query)
+                            .then(r => ({ kind: 'compat', data: r?.ok ? r.data : null }))
+                            .catch(() => ({ kind: 'compat', data: null }))
+                    );
+                }
                 railPromises.push(
-                    API.getCompatiblePrinters(query)
-                        .then(r => ({ kind: 'compat', data: r?.ok ? r.data : null }))
-                        .catch(() => ({ kind: 'compat', data: null }))
+                    API.searchByPrinter(query, { limit: 6 })
+                        .then(r => ({ kind: 'by-printer', data: r?.ok ? r.data : null }))
+                        .catch(() => ({ kind: 'by-printer', data: null }))
                 );
             }
-
-            // Rail 2: Cartridges for your printer (try query as a printer name)
-            railPromises.push(
-                API.searchByPrinter(query, { limit: 6 })
-                    .then(r => ({ kind: 'by-printer', data: r?.ok ? r.data : null }))
-                    .catch(() => ({ kind: 'by-printer', data: null }))
-            );
 
             const results = await Promise.all(railPromises);
             if (navVersion !== undefined && this.navigationVersion !== navVersion) return;
