@@ -762,16 +762,74 @@
     align-items: center;
     justify-content: space-between;
     gap: var(--spacing-2);
+    /* min-width:0 so children with intrinsic min content widths (e.g. nowrap
+       button) cannot push the row past the card's content edge. */
+    min-width: 0;
 }
 
 .product-card__footer-row .product-card__price {
     margin: 0;
     font-size: var(--font-size-sm);
     font-weight: var(--font-weight-bold);
+    line-height: 1.15;
 }
 
-.product-card__footer-row .product-card__pricing {
+/* Pricing column inside the footer row — current price stacked above the
+   strikethrough compare price (when present) so the Add-to-Cart button
+   always has room beside it on narrow product cards. */
+.product-card__footer-row .product-card__pricing,
+.product-card__footer-row .product-card__price-block {
     margin-top: 0;
+    flex: 1 1 auto;
+    /* min-width:0 lets the column shrink below its intrinsic content width
+       inside a flex parent — without this, the inline price+compare row
+       refuses to wrap and forces the button to overflow. */
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 1px;
+}
+
+.product-card__footer-row .product-card__pricing .product-card__compare-price,
+.product-card__footer-row .product-card__price-block .product-card__compare-price {
+    font-size: 0.78rem;
+    line-height: 1.15;
+}
+
+/* Narrow-card fallback: when the card itself is too narrow to fit the
+   pricing column AND a side-by-side button (typical on tablet/mobile or
+   dense list views), stack the button below the pricing and stretch it
+   full-width. Uses container queries so the rule reacts to the card's
+   own width rather than the viewport — a card squeezed into a sidebar
+   gets the same treatment as a card on a phone. */
+.product-card {
+    container-type: inline-size;
+    container-name: pcard;
+}
+
+@container pcard (max-width: 200px) {
+    .product-card__footer .product-card__footer-row:last-child {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 6px;
+    }
+    .product-card__footer .product-card__footer-row:last-child
+        .product-card__pricing,
+    .product-card__footer .product-card__footer-row:last-child
+        .product-card__price-block {
+        width: 100%;
+    }
+    .product-card__footer .product-card__footer-row:last-child
+        .product-card__cart-btn,
+    .product-card__footer .product-card__footer-row:last-child
+        .product-card__add-btn,
+    .product-card__footer .product-card__footer-row:last-child
+        .product-card__add-to-cart {
+        width: 100%;
+        text-align: center;
+        justify-content: center;
+    }
 }
 
 .product-card__cart-col {
