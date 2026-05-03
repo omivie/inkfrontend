@@ -80,9 +80,12 @@ Frontend (this repo):
 
 - **`js/search-normalize.js`** — slimmed from 481 → 78 lines. Kept only `detectProductType` as a documented shim until backend ships `intent`. All other dead code deleted.
 - **`js/main.js`** — deleted `initBasicAutocomplete` (210 lines). Removed dead code paths from `initSearch`. Falls back to plain submit if `SmartSearch` somehow doesn't load (logs a warning and lets Enter route to `/search?q=`).
+- **`js/api.js`** — deleted three never-called search-API methods: `getAutocomplete` (only called by the deleted `initBasicAutocomplete`), `getAutocompleteRich` (zero callers), `searchByPart` (zero callers). Inlined the dead `searchConfig` defensive check in `smartSearch` to its actual value (`searchConfig` was never defined anywhere, so the right-hand fallback was always taken).
 - **`js/shop-page.js` `loadSearchResults`** — reads `data.intent` from backend if present (forward-compat) before falling back to `SearchNormalize.detectProductType`. Reads `data.recovery` flags if present before falling back to `looksLikeSku`. Removed `_inferCorrectedTerm`; banner only renders when backend gives an explicit `did_you_mean`. Removed brand text-match filter; trusts `product.brand?.slug`. Removed `isCompatibleProduct` substring fallback; trusts `product.source`.
+- **`js/shop-page.js` (rest of file)** — same anti-patterns existed four more times in `loadCategoryProducts` / `loadCodeProducts` / `loadPrinterProducts` / paper-products inline. All four `isCompatibleProduct` substring fallbacks now trust `product.source === 'compatible'`. The `loadBrandProducts` brand text-match (`brandNameNoSpace` + `nameWithoutPrefix` source-prefix stripping) is now `p.brand?.slug === brandSlug`. The orphan `compatiblePrefix` config field is deleted.
 - **`js/ink-finder.js`** — removed direct Supabase query path. Single API call (`API.getPrintersByBrand`) → static fallback only on API failure.
-- **`js/account.js`** (printers tab) — same change as ink-finder.
+- **`js/account.js`** (printers tab) — same change as ink-finder. Also deleted a broken `supabaseClient.from('printer_models')` lookup in `enrichPrintersData` that was throwing silent ReferenceError (`supabaseClient` was never defined).
+- **22 HTML pages** — `<script defer src="/js/search-normalize.js">` removed from every page except `shop.html`. The file is consumed only by `shop-page.js loadSearchResults`; loading it on every page (homepage, cart, checkout, account/*, payment, ribbons, etc.) was wasted bandwidth on 21 pages.
 
 Backend spec (separate repo, see `backend-passover.md`):
 

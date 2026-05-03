@@ -3,7 +3,9 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "dev": "npx serve inkcartridges -l 3000"
+    "dev": "npx serve inkcartridges -l 3000",
+    "test": "node --test tests/*.test.js",
+    "test:e2e": "LIVE_E2E=1 npx playwright test tests/e2e-may2026-spec.spec.js"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.97.0"

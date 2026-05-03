@@ -312,8 +312,18 @@ function buildOrderModalContent(modal, o, events, breakdown) {
       const qty = item.qty ?? item.quantity ?? 0;
       totalPrice += (itemPrice ?? 0) * qty;
       if (showCost) totalCost += (item.supplier_cost_snapshot ?? 0) * qty;
+      // Prefer backend-supplied canonical_url; fall back to slug/sku reconstruction.
+      let itemHref = '';
+      if (item.canonical_url) {
+        try { itemHref = new URL(item.canonical_url).pathname; }
+        catch (_) { itemHref = item.canonical_url; }
+      } else if (item.slug && item.sku) {
+        itemHref = `/products/${encodeURIComponent(item.slug)}/${encodeURIComponent(item.sku)}`;
+      } else if (item.sku) {
+        itemHref = `/p/${encodeURIComponent(item.sku)}`;
+      }
       itemsHtml += `<tr>
-        <td class="cell-truncate">${item.sku ? `<a href="${item.slug ? `/products/${esc(item.slug)}/${esc(item.sku)}` : `/p/${encodeURIComponent(item.sku)}`}" target="_blank" style="color:var(--text);text-decoration:underline;text-decoration-color:var(--border);text-underline-offset:2px">${esc(item.product_name || item.name || item.description || MISSING)}</a>` : esc(item.product_name || item.name || item.description || MISSING)}</td>
+        <td class="cell-truncate">${item.sku && itemHref ? `<a href="${esc(itemHref)}" target="_blank" style="color:var(--text);text-decoration:underline;text-decoration-color:var(--border);text-underline-offset:2px">${esc(item.product_name || item.name || item.description || MISSING)}</a>` : esc(item.product_name || item.name || item.description || MISSING)}</td>
         <td class="mono">${esc(item.sku || MISSING)}</td>
         <td>${item.qty ?? item.quantity ?? MISSING}</td>
         <td class="mono">${itemPrice != null ? formatPrice(itemPrice) : MISSING}</td>

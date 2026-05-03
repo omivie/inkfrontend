@@ -31,12 +31,30 @@ const ROOT = path.resolve(__dirname, '..');
 const JS = (rel) => path.join(ROOT, 'inkcartridges', 'js', rel);
 const READ = (rel) => fs.readFileSync(JS(rel), 'utf8');
 
-// Cached source reads.
+// Strip JS comments so regression-guard regexes can't match docstring/comment
+// mentions of code patterns we're about to forbid (e.g. a comment reading
+// "the previous `.from('printer_models')` lookup was deleted" should not
+// trigger a regex that bans the live call).
+function stripComments(src) {
+    return src
+        // Block comments — non-greedy
+        .replace(/\/\*[\s\S]*?\*\//g, '')
+        // Line comments — to end of line
+        .replace(/\/\/[^\n]*/g, '');
+}
+
+// Cached source reads. The *_CODE variants have comments stripped.
 const SEARCH_NORMALIZE_JS = READ('search-normalize.js');
 const SHOP_PAGE_JS        = READ('shop-page.js');
 const MAIN_JS             = READ('main.js');
 const INK_FINDER_JS       = READ('ink-finder.js');
 const ACCOUNT_JS          = READ('account.js');
+
+const SEARCH_NORMALIZE_CODE = stripComments(SEARCH_NORMALIZE_JS);
+const SHOP_PAGE_CODE        = stripComments(SHOP_PAGE_JS);
+const MAIN_CODE             = stripComments(MAIN_JS);
+const INK_FINDER_CODE       = stripComments(INK_FINDER_JS);
+const ACCOUNT_CODE          = stripComments(ACCOUNT_JS);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Bucket B regression guards — dead code stays deleted
@@ -59,11 +77,11 @@ test('search-normalize.js — dead code (normalize, correctSpelling, detectPrint
         /\bABBREVIATIONS\b/,
     ];
     for (const re of banned) {
-        assert.doesNotMatch(SEARCH_NORMALIZE_JS, re,
+        assert.doesNotMatch(SEARCH_NORMALIZE_CODE, re,
             `search-normalize.js must not contain ${re} — it was dead code; backend already does this work`);
     }
     // The one survivor:
-    assert.match(SEARCH_NORMALIZE_JS, /\bfunction\s+detectProductType\b/,
+    assert.match(SEARCH_NORMALIZE_CODE, /\bfunction\s+detectProductType\b/,
         'detectProductType stays as a shim until backend ships data.intent (see backend-passover task 1)');
 });
 
@@ -72,59 +90,153 @@ test('shop-page.js — _inferCorrectedTerm heuristic is deleted', () => {
     // a correction term when backend returned `corrected_from` without
     // `did_you_mean`. That guess was often wrong AND it hid the real backend
     // bug (missing field). Backend now owns the correction copy entirely.
-    assert.doesNotMatch(SHOP_PAGE_JS, /\b_inferCorrectedTerm\b/,
+    assert.doesNotMatch(SHOP_PAGE_CODE, /\b_inferCorrectedTerm\b/,
         '_inferCorrectedTerm removed — backend always populates did_you_mean when corrected_from is set (passover task 2)');
 });
 
-test('shop-page.js — brand text-match filter is replaced by direct brand.slug read', () => {
+// Extract just the loadSearchResults function body — these tests are scoped
+// to the search-bar refactor; other level-loaders (loadBrandProducts etc.)
+// have their own duplicate copies of the same anti-patterns that this audit
+// did NOT touch (they're tracked separately, see end of SEARCH_AUDIT.md).
+function loadSearchResultsBody() {
+    const m = SHOP_PAGE_CODE.match(/async\s+loadSearchResults\s*\([^)]*\)\s*\{[\s\S]+?\n\s{8}\},\s*\n/);
+    assert.ok(m, 'expected loadSearchResults function in shop-page.js');
+    return m[0];
+}
+
+test('shop-page.js loadSearchResults — brand text-match filter is replaced by direct brand.slug read', () => {
+    const body = loadSearchResultsBody();
     // The previous implementation walked every product, lowercased and
     // stripped its name, and substring-matched against every brand keyword.
-    // Replaced with `product.brand?.slug` reads.
-    //
-    // Regression guard: the most distinctive shape of the old code was the
-    // `nameNoSpace` variable used to do collapsed substring matching.
-    assert.doesNotMatch(SHOP_PAGE_JS, /\bnameNoSpace\b/,
-        'shop-page.js: brand-detection-by-string-match deleted — read product.brand.slug instead');
-    assert.doesNotMatch(SHOP_PAGE_JS, /\bbrandNameNoSpace\b/,
-        'shop-page.js: brand-detection-by-string-match deleted — read product.brand.slug instead');
+    // Replaced with `product.brand?.slug` reads inside the search-results path.
+    assert.doesNotMatch(body, /\bnameNoSpace\b/,
+        'loadSearchResults: brand-detection-by-string-match deleted — read product.brand.slug instead');
+    assert.doesNotMatch(body, /\bbrandNameNoSpace\b/,
+        'loadSearchResults: brand-detection-by-string-match deleted — read product.brand.slug instead');
+    assert.match(body, /product\.brand\?\.slug|p\.brand\?\.slug/,
+        'loadSearchResults must read brand.slug directly from each product');
 });
 
-test('shop-page.js — isCompatibleProduct trusts product.source (no name-substring fallback)', () => {
+test('shop-page.js loadSearchResults — isCompatibleProduct trusts product.source (no name-substring fallback)', () => {
+    const body = loadSearchResultsBody();
     // The previous implementation fell back to `name.includes(this.compatiblePrefix)`
     // for legacy data. That data no longer exists; the substring fallback
     // would silently mislabel any future product whose name happens to match.
-    const m = SHOP_PAGE_JS.match(/const\s+isCompatibleProduct\s*=\s*\([^)]*\)\s*=>\s*[^;]+;/);
-    assert.ok(m, 'expected an isCompatibleProduct definition in shop-page.js');
+    const m = body.match(/const\s+isCompatibleProduct\s*=\s*[\s\S]+?;/);
+    assert.ok(m, 'expected an isCompatibleProduct definition inside loadSearchResults');
     assert.doesNotMatch(m[0], /compatiblePrefix/,
-        'isCompatibleProduct must not fall back to name-substring matching against this.compatiblePrefix');
-    assert.match(m[0], /product\.source\s*===\s*['"]compatible['"]/,
-        'isCompatibleProduct must read product.source === "compatible"');
+        'loadSearchResults isCompatibleProduct must not fall back to name-substring matching');
+    assert.match(m[0], /\.source\s*===\s*['"]compatible['"]/,
+        'loadSearchResults isCompatibleProduct must read source === "compatible"');
 });
 
 test('main.js — initBasicAutocomplete and its DOM are deleted', () => {
     // SmartSearch (search.js) is loaded synchronously before main.js on every
     // page that has a search form. The basic-autocomplete fallback was
     // unreachable in practice and ~210 lines of duplicated logic.
-    assert.doesNotMatch(MAIN_JS, /\bfunction\s+initBasicAutocomplete\b/);
-    assert.doesNotMatch(MAIN_JS, /API\.getAutocomplete\b/,
+    assert.doesNotMatch(MAIN_CODE, /\bfunction\s+initBasicAutocomplete\b/);
+    assert.doesNotMatch(MAIN_CODE, /API\.getAutocomplete\b/,
         'main.js: basic fallback used /api/search/autocomplete — gone, SmartSearch uses /api/search/suggest');
+});
+
+test('api.js — dead search methods (getAutocomplete, getAutocompleteRich, searchByPart) are deleted', () => {
+    // None of these were called from any code path after initBasicAutocomplete
+    // was deleted. They duplicated /api/search/suggest and /api/search/by-part
+    // wrappers that nothing reached. /api/search/smart is the canonical search
+    // endpoint via API.smartSearch.
+    const API_CODE = stripComments(READ('api.js'));
+    assert.doesNotMatch(API_CODE, /\basync\s+getAutocomplete\s*\(/,
+        'api.js: getAutocomplete was unused after basic-autocomplete deletion');
+    assert.doesNotMatch(API_CODE, /\basync\s+getAutocompleteRich\s*\(/,
+        'api.js: getAutocompleteRich was never called');
+    assert.doesNotMatch(API_CODE, /\basync\s+searchByPart\s*\(/,
+        'api.js: searchByPart was never called');
+    // Confirm the survivor:
+    assert.match(API_CODE, /\basync\s+smartSearch\s*\(/,
+        'smartSearch is canonical; must stay');
+});
+
+test('api.js — dead `searchConfig` fallback in smartSearch is deleted', () => {
+    // The previous code: `(typeof searchConfig !== 'undefined' ? searchConfig.apiUrl : '/api/search/smart')`
+    // — `searchConfig` was never defined anywhere; the right-hand fallback was
+    // the only branch ever taken. Inlined to its actual value.
+    const API_CODE = stripComments(READ('api.js'));
+    assert.doesNotMatch(API_CODE, /typeof\s+searchConfig\s*!==/,
+        'api.js: dead searchConfig defensive check deleted');
+    // Sanity: smartSearch still hits /api/search/smart.
+    assert.match(API_CODE, /['"`]\/api\/search\/smart\?\$\{params\}['"`]|\/api\/search\/smart/,
+        'api.js: smartSearch still calls /api/search/smart');
+});
+
+test('shop-page.js — `compatiblePrefix` field and all four duplicate substring fallbacks are deleted', () => {
+    // The 2026-05-03 audit removed the search-results substring fallback
+    // first. The four remaining duplicates (loadCategoryProducts /
+    // loadCodeProducts / loadPrinterProducts / and the paper-products inline)
+    // all checked `name.includes(this.compatiblePrefix)` for legacy data shape
+    // that no longer exists. Sweeping all five turns isCompatibleProduct into
+    // a one-liner everywhere and lets us delete the now-orphan
+    // `compatiblePrefix` config field.
+    assert.doesNotMatch(SHOP_PAGE_CODE, /\bcompatiblePrefix\s*:\s*['"]/,
+        'shop-page.js: compatiblePrefix config field deleted (no remaining callers)');
+    assert.doesNotMatch(SHOP_PAGE_CODE, /this\.compatiblePrefix/,
+        'shop-page.js: no isCompatibleProduct may reference this.compatiblePrefix');
+    // Every isCompatibleProduct definition must be the one-liner shape now.
+    const defs = SHOP_PAGE_CODE.match(/const\s+isCompatibleProduct\s*=\s*[^;]+;/g) || [];
+    assert.ok(defs.length >= 1, 'expected at least one isCompatibleProduct definition');
+    for (const d of defs) {
+        assert.match(d, /\.source\s*===\s*['"]compatible['"]/,
+            `isCompatibleProduct must read .source === "compatible". Got: ${d}`);
+    }
+});
+
+test('shop-page.js loadBrandProducts — brand text-match fallback is replaced by direct brand.slug filter', () => {
+    // The previous filterByBrand walked every product, lowercased and stripped
+    // both name and brand-name, substring-matched against brandNameNoSpace,
+    // and even tried `name.replace(/^(compatible|genuine)\s+/, '')` to handle
+    // names with the source prefix. All workarounds for a data shape that no
+    // longer exists. Replaced with `p.brand?.slug === brandSlug`.
+    assert.doesNotMatch(SHOP_PAGE_CODE, /\bbrandNameNoSpace\b/,
+        'shop-page.js loadBrandProducts: collapsed brand-keyword matching deleted');
+    assert.doesNotMatch(SHOP_PAGE_CODE, /\bnameWithoutPrefix\b/,
+        'shop-page.js loadBrandProducts: source-prefix stripping fallback deleted');
+});
+
+test('html — search-normalize.js loads only on shop.html (the one consumer)', () => {
+    // search-normalize.js is consumed by shop-page.js's loadSearchResults
+    // exclusively. Loading it on every other page was wasted bandwidth.
+    const fs = require('node:fs');
+    const path = require('node:path');
+    function listHtml(dir, acc = []) {
+        for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+            if (e.isDirectory()) {
+                if (e.name === 'node_modules' || e.name === '.vercel') continue;
+                listHtml(path.join(dir, e.name), acc);
+            } else if (e.name.endsWith('.html')) acc.push(path.join(dir, e.name));
+        }
+        return acc;
+    }
+    const htmls = listHtml(path.join(ROOT, 'inkcartridges'));
+    const loaders = htmls.filter(p => /<script[^>]*src="\/js\/search-normalize\.js/.test(fs.readFileSync(p, 'utf8')));
+    const rels = loaders.map(p => path.relative(path.join(ROOT, 'inkcartridges'), p)).sort();
+    assert.deepStrictEqual(rels, ['html/shop.html'],
+        `Only shop.html should load search-normalize.js. Found loaders: ${rels.join(', ')}`);
 });
 
 test('ink-finder.js — direct Supabase query path is deleted', () => {
     // The browser shouldn't be reaching into Supabase tables — schema names
     // were leaking into the bundle (`brands.id`, `printer_models.brand_id`).
     // Single API round-trip via /api/printers/search now.
-    assert.doesNotMatch(INK_FINDER_JS, /supabaseClient\.from\(/,
+    assert.doesNotMatch(INK_FINDER_CODE, /supabaseClient\.from\(/,
         'ink-finder.js must not query Supabase directly');
-    assert.doesNotMatch(INK_FINDER_JS, /\.from\(\s*['"]printer_models['"]\s*\)/,
+    assert.doesNotMatch(INK_FINDER_CODE, /\.from\(\s*['"]printer_models['"]\s*\)/,
         'ink-finder.js must not reference the printer_models table directly');
-    assert.doesNotMatch(INK_FINDER_JS, /\.from\(\s*['"]brands['"]\s*\)/,
+    assert.doesNotMatch(INK_FINDER_CODE, /\.from\(\s*['"]brands['"]\s*\)/,
         'ink-finder.js must not reference the brands table directly');
 });
 
 test('account.js — direct Supabase query path is deleted', () => {
     // Same change as ink-finder.js — printer registration tab.
-    assert.doesNotMatch(ACCOUNT_JS, /\.from\(\s*['"]printer_models['"]\s*\)/,
+    assert.doesNotMatch(ACCOUNT_CODE, /\.from\(\s*['"]printer_models['"]\s*\)/,
         'account.js must not reference the printer_models table directly');
 });
 
@@ -135,7 +247,7 @@ test('account.js — direct Supabase query path is deleted', () => {
 test('shop-page.js — reads smartData.intent.matched_brand_slug for brand narrowing', () => {
     // When backend ships `data.intent.matched_brand_slug`, shop-page.js
     // should prefer it over the first-product heuristic.
-    assert.match(SHOP_PAGE_JS, /smartData\?\.intent\?\.matched_brand_slug/,
+    assert.match(SHOP_PAGE_CODE, /smartData\?\.intent\?\.matched_brand_slug/,
         'shop-page.js must prefer intent.matched_brand_slug from backend (passover task 1) over local heuristic');
 });
 
@@ -143,17 +255,17 @@ test('shop-page.js — re-fires getRibbons only when smartData.intent.type === "
     // The intent-driven re-fire is a forward-compat shim. Once backend ships
     // task 4 (ribbons in /smart natively), this branch becomes unreachable.
     // Asserting on the literal string locks the contract field name.
-    assert.match(SHOP_PAGE_JS, /smartData\?\.intent\?\.type\s*===\s*['"]ribbon['"]/,
+    assert.match(SHOP_PAGE_CODE, /smartData\?\.intent\?\.type\s*===\s*['"]ribbon['"]/,
         'shop-page.js must read intent.type === "ribbon" from backend response (passover task 1)');
 });
 
 test('shop-page.js — reads smartData.recovery.rails when present', () => {
     // Forward-compat for backend-passover task 3: backend tells frontend
     // which zero-result rails to fire so we don't probe with looksLikeSku.
-    assert.match(SHOP_PAGE_JS, /smartData\?\.recovery\?\.rails/,
+    assert.match(SHOP_PAGE_CODE, /smartData\?\.recovery\?\.rails/,
         'shop-page.js must read recovery.rails from backend (passover task 3) before falling back to looksLikeSku');
     // Sanity: looksLikeSku still exists as the fallback path.
-    assert.match(SHOP_PAGE_JS, /\blooksLikeSku\b/,
+    assert.match(SHOP_PAGE_CODE, /\blooksLikeSku\b/,
         'looksLikeSku stays as the legacy heuristic until backend ships recovery.rails');
 });
 
@@ -162,14 +274,14 @@ test('shop-page.js — reads smartData.recovery.rails when present', () => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 test('search.js — debounce / abort / recent-cache / trending-cache stay on frontend', () => {
-    const SEARCH_JS = READ('search.js');
-    assert.match(SEARCH_JS, /DEBOUNCE_MS\s*=\s*250/,
+    const SEARCH_CODE = stripComments(READ('search.js'));
+    assert.match(SEARCH_CODE, /DEBOUNCE_MS\s*=\s*250/,
         'debounce stays on frontend — UX-only, server can\'t do this');
-    assert.match(SEARCH_JS, /AbortController/,
+    assert.match(SEARCH_CODE, /AbortController/,
         'AbortController stays on frontend — cancels stale inflight requests');
-    assert.match(SEARCH_JS, /RECENT_KEY/,
+    assert.match(SEARCH_CODE, /RECENT_KEY/,
         'recent searches in localStorage stay on frontend — user-private, no round-trip needed');
-    assert.match(SEARCH_JS, /TRENDING_CACHE_KEY/,
+    assert.match(SEARCH_CODE, /TRENDING_CACHE_KEY/,
         'trending cache stays on frontend — bandwidth optimization (1 h TTL)');
 });
 
@@ -249,4 +361,10 @@ test('search-normalize.js — slimmed to ≤120 lines (was 481 before audit)', (
     assert.ok(lines <= 120,
         `search-normalize.js is ${lines} lines; expected ≤120 after the audit. ` +
         `If you added back logic that backend should own, see readfirst/SEARCH_AUDIT.md.`);
+});
+
+test('main.js — slimmed (initBasicAutocomplete deletion takes ~210 lines)', () => {
+    const lines = MAIN_JS.split('\n').length;
+    assert.ok(lines <= 520,
+        `main.js is ${lines} lines; expected ≤520 after deleting initBasicAutocomplete.`);
 });

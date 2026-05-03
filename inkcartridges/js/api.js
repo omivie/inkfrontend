@@ -223,6 +223,27 @@ const API = {
                     return { ok: false, error: errorMsg, code: 'RATE_LIMITED', retry_after: data.retry_after };
                 }
 
+                // Stock-conflict — caller renders inline message on the line item
+                if (errorCode === 'STOCK_INSUFFICIENT') {
+                    return { ok: false, error: errorMsg, code: errorCode, details: errorDetails };
+                }
+
+                // Forbidden — caller decides between "verify email", "B2B only",
+                // or generic deny. Backend's specific code wins when present.
+                if (response.status === 403 || errorCode === 'FORBIDDEN') {
+                    return { ok: false, error: errorMsg, code: errorCode || 'FORBIDDEN' };
+                }
+
+                // Unauthorized — caller redirects to login
+                if (response.status === 401 || errorCode === 'UNAUTHORIZED') {
+                    return { ok: false, error: errorMsg, code: 'UNAUTHORIZED' };
+                }
+
+                // Not found — caller may show "Couldn't find that product/order"
+                if (response.status === 404 || errorCode === 'NOT_FOUND') {
+                    return { ok: false, error: errorMsg, code: 'NOT_FOUND' };
+                }
+
                 // Build detailed error message
                 let fullMsg = errorMsg;
                 if (errorDetails) {
@@ -247,6 +268,95 @@ const API = {
             DebugLog.error('API Error:', error);
             throw error;
         }
+    },
+
+    /**
+     * Map a backend `{ ok: false, code, error, details }` response (or a thrown
+     * Error with .code) to a friendly user-facing { message, action } pair.
+     * Spec §6 lists the canonical codes; this helper centralises the mapping
+     * so callers don't repeat the same switch in every page controller.
+     *
+     * @param {object|Error} errorOrResponse
+     * @returns {{ code: string, message: string, action?: string, retry_after?: number, details?: any[] }}
+     */
+    mapError(errorOrResponse) {
+        if (!errorOrResponse) {
+            return { code: 'INTERNAL_ERROR', message: 'Something went wrong. Please try again.' };
+        }
+        const code = errorOrResponse.code
+            || (errorOrResponse.error && errorOrResponse.error.code)
+            || 'INTERNAL_ERROR';
+        const fallbackMessage = errorOrResponse.message
+            || (typeof errorOrResponse.error === 'string' ? errorOrResponse.error : null)
+            || (errorOrResponse.error && errorOrResponse.error.message)
+            || 'Something went wrong. Please try again.';
+
+        switch (code) {
+            case 'VALIDATION_FAILED':
+                return {
+                    code,
+                    message: fallbackMessage,
+                    details: errorOrResponse.details || (errorOrResponse.error && errorOrResponse.error.details),
+                    action: 'inline-field-errors',
+                };
+            case 'NOT_FOUND':
+                return {
+                    code,
+                    message: "We couldn't find what you were looking for.",
+                    action: 'back-to-shop',
+                };
+            case 'UNAUTHORIZED':
+                return { code, message: 'Please sign in to continue.', action: 'login' };
+            case 'FORBIDDEN':
+                return { code, message: fallbackMessage || 'You don’t have permission to do that.' };
+            case 'RATE_LIMITED':
+                return {
+                    code,
+                    message: 'Slow down for a sec — try again in a minute.',
+                    retry_after: errorOrResponse.retry_after,
+                    action: 'retry-later',
+                };
+            case 'STOCK_INSUFFICIENT':
+                return {
+                    code,
+                    message: 'Stock dropped while you were shopping. Adjust the quantity to continue.',
+                    details: errorOrResponse.details,
+                    action: 'reduce-quantity',
+                };
+            case 'EMAIL_NOT_VERIFIED':
+                return {
+                    code,
+                    message: 'Please verify your email to use this feature.',
+                    action: 'resend-verification',
+                };
+            case 'IDEMPOTENCY_CONFLICT':
+                return {
+                    code,
+                    message: 'This action was already completed.',
+                    action: 'treat-as-success',
+                };
+            case 'INTERNAL_ERROR':
+            default:
+                return { code, message: fallbackMessage };
+        }
+    },
+
+    /**
+     * Show a toast (or fall back to alert) for a backend error response.
+     * Use when you don't have a dedicated inline display target — e.g. cross-page
+     * cart mutations, login-required actions, idempotency conflicts.
+     */
+    showError(errorOrResponse) {
+        const mapped = this.mapError(errorOrResponse);
+        if (typeof showToast === 'function') {
+            const tone = mapped.code === 'IDEMPOTENCY_CONFLICT' ? 'success'
+                : (mapped.code === 'RATE_LIMITED' ? 'warning' : 'error');
+            showToast(mapped.message, tone, 5000);
+        } else {
+            // eslint-disable-next-line no-alert
+            alert(mapped.message);
+        }
+        return mapped;
     },
 
     /**
@@ -517,7 +627,7 @@ const API = {
      * @param {string} printerSlug - Printer slug
      */
     async getProductsByPrinter(printerSlug) {
-        return this.get(`/api/products/printer/${printerSlug}`);
+        return this.get(`/api/products/printer/${encodeURIComponent(printerSlug)}`);
     },
 
     /**
@@ -556,7 +666,7 @@ const API = {
      */
     async getColorPacks(printerSlug, params = {}) {
         const query = new URLSearchParams(params).toString();
-        const url = `/api/products/printer/${printerSlug}/color-packs${query ? `?${query}` : ''}`;
+        const url = `/api/products/printer/${encodeURIComponent(printerSlug)}/color-packs${query ? `?${query}` : ''}`;
         return this.get(url);
     },
 
@@ -708,41 +818,34 @@ const API = {
         return this.get(`/api/schema/printer/${encodeURIComponent(printerSlug)}`);
     },
 
+    /**
+     * Get site-wide Organization / WebSite / LocalBusiness JSON-LD. Embed in every
+     * page <head> per spec §5.6. Use SWR so repeated page loads don't re-fetch.
+     */
+    async getSiteSchema() {
+        return this.getWithSWR('/api/schema/site', { ttl: 5 * 60 * 1000 });
+    },
+
+    /**
+     * Get the dedicated Product / BreadcrumbList / FAQ JSON-LD payload for a SKU.
+     * `/api/products/:sku` already embeds a `seo.jsonLd` blob; this dedicated
+     * endpoint is the canonical source per spec §5.6 — embed verbatim.
+     */
+    async getProductJsonLd(sku) {
+        return this.get(`/api/products/${encodeURIComponent(sku)}/jsonld`);
+    },
+
     // =========================================================================
     // SEARCH
     // =========================================================================
 
-    /**
-     * Lightweight type-ahead suggest (per frontend-search-spec §1.1).
-     * Backend handles all normalization (separators, synonyms, did-you-mean) —
-     * pass the user's query unchanged.
-     */
-    async getAutocomplete(query, limit = 6) {
-        if (!query || query.length < 2) return { ok: true, data: { suggestions: [] } };
-        return this.get(`/api/search/suggest?q=${encodeURIComponent(query)}&limit=${limit}`);
-    },
-
-    /**
-     * Richer autocomplete (alternate to /suggest, max limit 50).
-     */
-    async getAutocompleteRich(query, limit = 12) {
-        if (!query || query.length < 2) return { ok: true, data: { suggestions: [] } };
-        return this.get(`/api/search/autocomplete?q=${encodeURIComponent(query)}&limit=${limit}`);
-    },
-
-    /**
-     * Search products by part number or name
-     * @param {string} query - Search query
-     * @param {object} options - Search options
-     */
-    async searchByPart(query, options = {}) {
-        const params = new URLSearchParams({ q: query });
-        if (options.type) params.append('type', options.type);
-        if (options.limit) params.append('limit', options.limit);
-        if (options.page) params.append('page', options.page);
-
-        return this.get(`/api/search/by-part?${params}`);
-    },
+    // Three search-related API methods were deleted in the 2026-05-03 search
+    // audit (readfirst/SEARCH_AUDIT.md):
+    //   - getAutocomplete(q, limit)        — used only by initBasicAutocomplete (deleted)
+    //   - getAutocompleteRich(q, limit)    — never called anywhere
+    //   - searchByPart(q, options)         — never called anywhere
+    // /api/search/suggest is now invoked directly from search.js's fetchSuggest;
+    // /api/search/smart is the canonical search endpoint via API.smartSearch.
 
     /**
      * Search for printers
@@ -779,8 +882,10 @@ const API = {
         if (opts.page) params.set('page', String(opts.page));
         // Default include: compat (printer-compat expansion) + description (for cards)
         params.set('include', opts.include || 'compat,description');
-        const base = (typeof searchConfig !== 'undefined' ? searchConfig.apiUrl : '/api/search/smart');
-        return this.get(`${base}?${params}`);
+        // (Previously: `typeof searchConfig !== 'undefined' ? searchConfig.apiUrl : '/api/search/smart'` —
+        //  `searchConfig` was never defined anywhere; the fallback was the
+        //  only branch ever taken. Inlined to its actual value.)
+        return this.get(`/api/search/smart?${params}`);
     },
 
     /**

@@ -1102,14 +1102,16 @@
             };
 
             // Debounced preview — calls /api/cart/coupon/preview without mutating cart state.
-            // Backend returns { valid, reason?, message } so we can inline-correct the user
-            // (e.g. "Add $15 more to use this coupon.") before they click Apply.
+            // Backend returns { valid, discount_amount, new_total, reason?, message } so we can
+            // inline-correct the user (e.g. "Add $15 more to use this coupon.") before they click
+            // Apply. Per spec §5.5 — 300ms debounce, render result inline without applying.
             let previewTimer = null;
             let lastPreviewedCode = '';
             const runPreview = async (rawCode) => {
                 const code = (rawCode || '').trim();
                 if (!code || code.length < 2) {
                     setHint('', 'neutral');
+                    lastPreviewedCode = '';
                     return;
                 }
                 if (code === lastPreviewedCode) return;
@@ -1118,27 +1120,53 @@
                     const res = await API.previewCoupon(code);
                     // Same code may have changed since the request fired — bail if stale.
                     if ((couponInput.value || '').trim() !== code) return;
+                    // API.request returns { ok: false, code } for known error codes — surface
+                    // those before unwrapping data.
+                    if (res && res.ok === false) {
+                        if (res.code === 'RATE_LIMITED') {
+                            setHint('Too many tries — wait a minute and retry.', 'error');
+                        } else if (res.code === 'EMAIL_NOT_VERIFIED') {
+                            setHint('Verify your email to use coupons.', 'error');
+                        } else {
+                            setHint(res.error || 'Coupon not valid for this cart', 'error');
+                        }
+                        return;
+                    }
                     const data = res?.data || res;
                     if (!data) { setHint('', 'neutral'); return; }
                     if (data.valid === true) {
                         const saved = data.discount_amount != null ? formatPrice(data.discount_amount) : '';
-                        setHint(saved ? `Save ${saved} when you apply` : 'Coupon is valid', 'success');
+                        const newTotal = data.new_total != null ? formatPrice(data.new_total) : '';
+                        let copy = 'Coupon is valid';
+                        if (saved && newTotal) copy = `Saves ${saved} → new total ${newTotal}`;
+                        else if (saved) copy = `Save ${saved} when you apply`;
+                        setHint(copy, 'success');
                     } else if (data.reason && data.message) {
                         // Backend gives actionable message verbatim for known reasons:
                         // minimum_order_required / account_too_new / already_used / unavailable
                         setHint(data.message, 'error');
+                    } else if (data.message) {
+                        setHint(data.message, 'error');
                     } else {
-                        setHint('', 'neutral');
+                        setHint('Coupon not valid for this cart', 'error');
                     }
                 } catch (err) {
-                    DebugLog.warn('Coupon preview failed:', err && err.message);
-                    setHint('', 'neutral');
+                    // Map RATE_LIMITED to a friendly inline hint per spec §6.
+                    if (err && err.code === 'RATE_LIMITED') {
+                        setHint('Too many tries — wait a minute and retry.', 'error');
+                    } else if (err && err.code === 'EMAIL_NOT_VERIFIED') {
+                        setHint('Verify your email to use coupons.', 'error');
+                    } else {
+                        DebugLog.warn('Coupon preview failed:', err && err.message);
+                        setHint('', 'neutral');
+                    }
                 }
             };
 
             const schedulePreview = () => {
                 if (previewTimer) clearTimeout(previewTimer);
-                previewTimer = setTimeout(() => runPreview(couponInput.value), 600);
+                // Spec §5.5 — 300ms debounce on every keystroke.
+                previewTimer = setTimeout(() => runPreview(couponInput.value), 300);
             };
             couponInput.addEventListener('input', schedulePreview);
             couponInput.addEventListener('blur', () => {

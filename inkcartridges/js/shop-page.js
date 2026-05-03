@@ -36,8 +36,10 @@
             { id: 'ribbons',      name: 'Printer Ribbons',  icon: 'file-text', apiCategory: 'ribbons' }
         ],
 
-        // Compatible products now have "Compatible" prefix in their name
-        compatiblePrefix: 'compatible',
+        // (`compatiblePrefix` field removed 2026-05-03 — five duplicate
+        // `isCompatibleProduct` definitions used to fall back to
+        // `name.includes(compatiblePrefix)` for legacy data; all now trust
+        // `product.source === 'compatible'`. Search audit: SEARCH_AUDIT.md.)
 
         // Brand display info with local logos
         brandInfo: {
@@ -120,17 +122,57 @@
             this.setupSearchForm();
         },
 
-        // Embed CollectionPage + BreadcrumbList JSON-LD from the backend so brand /
-        // category / brand+category landing pages get structured data. The backend
-        // owns slug validation and accepts brand+category, brand-only, or category-only.
+        // Embed CollectionPage / BreadcrumbList JSON-LD for the current view.
+        // Routes to:
+        //   - Schema.injectPrinter(slug) when on a printer page (`?printer_slug=...`)
+        //   - Schema.injectCollection(brand, category) for everything else
+        // Both fall back to the local _writeJsonLdScripts pathway if the
+        // unified Schema module isn't loaded (defence in depth).
         async injectCollectionSchema() {
             const brand = this.state.brand;
             const category = this.state.category;
-            // Need at least one of them for a meaningful CollectionPage entry.
-            if (!brand && !category) {
+            const printer = this.state.printer;
+
+            // Printer page wins — backend has a dedicated CollectionPage for it.
+            if (printer) {
+                if (typeof Schema !== 'undefined' && Schema.injectPrinter) {
+                    Schema.injectPrinter(printer);
+                    if (typeof Schema.remove === 'function') {
+                        Schema.remove(['collection-jsonld-collection-page', 'collection-jsonld-breadcrumbs']);
+                    }
+                    return;
+                }
+                // Fallback if Schema module didn't load.
+                try {
+                    const res = await API.getPrinterSchema(printer);
+                    if (res && res.ok && res.data) {
+                        this._writeJsonLdScripts({
+                            'printer-jsonld-collection-page': res.data.collectionPage,
+                            'printer-jsonld-breadcrumbs': res.data.breadcrumbs,
+                        });
+                    }
+                } catch (_) { /* additive */ }
                 this._removeCollectionSchema();
                 return;
             }
+
+            // Need at least one of brand/category for a meaningful CollectionPage entry.
+            if (!brand && !category) {
+                this._removeCollectionSchema();
+                if (typeof Schema !== 'undefined' && Schema.remove) {
+                    Schema.remove(['printer-jsonld-collection-page', 'printer-jsonld-breadcrumbs']);
+                }
+                return;
+            }
+
+            if (typeof Schema !== 'undefined' && Schema.injectCollection) {
+                Schema.injectCollection(brand, category);
+                if (typeof Schema.remove === 'function') {
+                    Schema.remove(['printer-jsonld-collection-page', 'printer-jsonld-breadcrumbs']);
+                }
+                return;
+            }
+
             try {
                 const res = await API.getCollectionSchema({ brand: brand || undefined, category: category || undefined });
                 if (!res || !res.ok || !res.data) {
@@ -892,27 +934,19 @@
                             return allProducts;
                         };
 
-                        const brandNameLower = brandName.toLowerCase();
-                        const brandNameNoSpace = brandNameLower.replace(/[\s-]/g, '');
+                        // Trust product.brand.slug — backend canonical field
+                        // (search audit, 2026-05-03). The previous name+brand-name
+                        // text-match fallback walked every product, lowercased and
+                        // no-space-stripped its name and brand, then substring-
+                        // matched against every variant of the brand keyword.
+                        // Backend has returned `product.brand: { id, slug, name }`
+                        // since the structured-brand migration; the no-space
+                        // collapse and "Compatible <Brand>"-prefix stripping were
+                        // workarounds for a data shape that no longer exists.
                         const brandSlug = this.state.brand.toLowerCase();
-                        const filterByBrand = (products) => {
-                            return products.filter(p => {
-                                const productBrandName = (p.brand?.name || '').toLowerCase();
-                                const productBrandSlug = (p.brand?.slug || '').toLowerCase();
-                                if (productBrandName === brandNameLower ||
-                                    productBrandSlug === brandSlug ||
-                                    productBrandName.replace(/[\s-]/g, '') === brandNameNoSpace) {
-                                    return true;
-                                }
-                                const name = (p.name || '').toLowerCase();
-                                const nameWithoutPrefix = name.replace(/^(compatible|genuine)\s+/i, '');
-                                if (nameWithoutPrefix.startsWith(brandNameLower) ||
-                                    nameWithoutPrefix.startsWith(brandNameNoSpace)) {
-                                    return true;
-                                }
-                                return false;
-                            });
-                        };
+                        const filterByBrand = (products) => products.filter(p =>
+                            (p.brand?.slug || '').toLowerCase() === brandSlug
+                        );
 
                         const apiParams = { brand: this.state.brand };
                         if (this.state.type === 'genuine' || this.state.type === 'compatible') {
@@ -1015,10 +1049,8 @@
                             }
                         }
                     }
-                    const isCompatibleProduct = (p) => {
-                        if (p.source) return p.source === 'compatible';
-                        return (p.name || '').toLowerCase().trim().includes(this.compatiblePrefix);
-                    };
+                    // Trust product.source — backend canonical field (search audit, 2026-05-03).
+                    const isCompatibleProduct = (p) => p.source === 'compatible';
                     let genuine = allPaperProducts.filter(p => !isCompatibleProduct(p));
                     let compatible = allPaperProducts.filter(p => isCompatibleProduct(p));
                     if (this.state.type === 'genuine') compatible = [];
@@ -1686,16 +1718,10 @@
                 // Check if navigation changed before rendering
                 if (navVersion !== undefined && this.navigationVersion !== navVersion) return;
 
-                // Separate genuine and compatible using the API's source field (more reliable than name parsing)
-                const isCompatibleProduct = (product) => {
-                    // Primary: use API source field
-                    if (product.source) {
-                        return product.source === 'compatible';
-                    }
-                    // Fallback: check if name starts with "Compatible"
-                    const productName = (product.name || '').toLowerCase().trim();
-                    return productName.includes(this.compatiblePrefix);
-                };
+                // Separate genuine and compatible — trust the API's source field
+                // (search audit, 2026-05-03; the previous name-substring fallback
+                // was for legacy data that no longer exists).
+                const isCompatibleProduct = (product) => product.source === 'compatible';
 
                 let genuine = mergedProducts.filter(p => !isCompatibleProduct(p));
                 let compatible = mergedProducts.filter(p => isCompatibleProduct(p));
@@ -1735,11 +1761,15 @@
         async loadPrinterProducts(navVersion) {
             this.showLoading(true);
 
-            // Backend returns 404 NOT_FOUND for unknown/retired printer slugs;
-            // surface as a redirect to /shop rather than a "Failed to load"
-            // error so stale sitemap entries and old crawler URLs never look
-            // like a broken page.
+            // Backend returns 404 NOT_FOUND for unknown/retired printer slugs
+            // (thrown by API layer), and 400 VALIDATION_FAILED for slugs that
+            // don't match the backend's allowed-character regex (returned
+            // as { ok:false, code:'VALIDATION_FAILED' }). Both mean "this
+            // slug isn't a real printer" — redirect to /shop rather than
+            // showing a "Failed to load" error so stale sitemap entries
+            // and old crawler URLs never look like a broken page.
             const isPrinterNotFound = (err) => /printer (?:model )?not found|NOT_FOUND/i.test(err && err.message || '');
+            const isBadPrinterSlug = (resp) => resp && resp.ok === false && (resp.code === 'NOT_FOUND' || resp.code === 'VALIDATION_FAILED');
 
             try {
                 // Fetch compatible products for the printer slug.
@@ -1762,6 +1792,11 @@
                 // Check if navigation changed during fetch
                 if (navVersion !== undefined && this.navigationVersion !== navVersion) return;
 
+                if (isBadPrinterSlug(response)) {
+                    window.location.replace('/shop');
+                    return;
+                }
+
                 if (response.ok && response.data) {
                     const printerData = response.data.printer;
                     // API returns 'products' array (per product_pages.md documentation)
@@ -1772,16 +1807,8 @@
                     this.updateBreadcrumb();
                     this.updateTitle();
 
-                    // Separate genuine and compatible using the API's source field (more reliable than name parsing)
-                    const isCompatibleProduct = (product) => {
-                        // Primary: use API source field
-                        if (product.source) {
-                            return product.source === 'compatible';
-                        }
-                        // Fallback: check if name starts with "Compatible"
-                        const productName = (product.name || '').toLowerCase().trim();
-                        return productName.includes(this.compatiblePrefix);
-                    };
+                    // Trust product.source — backend canonical field (search audit, 2026-05-03).
+                    const isCompatibleProduct = (product) => product.source === 'compatible';
 
                     let genuine = products.filter(p => !isCompatibleProduct(p));
                     let compatible = products.filter(p => isCompatibleProduct(p));
@@ -2167,16 +2194,8 @@
 
                 if (filteredProducts.length > 0) {
 
-                    // Separate genuine and compatible using the API's source field (more reliable than name parsing)
-                    const isCompatibleProduct = (product) => {
-                        // Primary: use API source field
-                        if (product.source) {
-                            return product.source === 'compatible';
-                        }
-                        // Fallback: check if name starts with "Compatible"
-                        const productName = (product.name || '').toLowerCase().trim();
-                        return productName.includes(this.compatiblePrefix);
-                    };
+                    // Trust product.source — backend canonical field (search audit, 2026-05-03).
+                    const isCompatibleProduct = (product) => product.source === 'compatible';
 
                     let genuine = filteredProducts.filter(p => !isCompatibleProduct(p));
                     let compatible = filteredProducts.filter(p => isCompatibleProduct(p));
@@ -2805,6 +2824,20 @@
 
             // Use retail_price from backend API
             const price = product.retail_price || 0;
+            // Savings fields: backend now sends original_price + discount_amount +
+            // discount_percent on every discounted product. Fall back to compare_price
+            // for legacy responses. Never compute the discount client-side when the
+            // backend has supplied the canonical numbers.
+            const originalPrice = product.original_price != null
+                ? product.original_price
+                : (product.compare_price && product.compare_price > price ? product.compare_price : null);
+            const discountAmount = product.discount_amount != null
+                ? product.discount_amount
+                : (originalPrice ? originalPrice - price : null);
+            const discountPercent = product.discount_percent != null
+                ? product.discount_percent
+                : (originalPrice && originalPrice > 0 ? Math.round(((originalPrice - price) / originalPrice) * 100) : null);
+            const showDiscount = originalPrice && originalPrice > price;
             const stockStatus = getStockStatus(product);
             const inStock = stockStatus.class === 'in-stock';
             const brandName = product.brand?.name || '';
@@ -2856,8 +2889,21 @@
                 return '';
             })();
 
+            // Prefer backend-supplied canonical_url (absolute). Reduce to a
+            // path so router-based navigation stays in-app, falling back to the
+            // legacy slug/sku reconstruction when canonical_url is missing.
+            const cardHref = (() => {
+                if (product.canonical_url) {
+                    try { return new URL(product.canonical_url).pathname; }
+                    catch (_) { return product.canonical_url; }
+                }
+                return product.slug && product.sku
+                    ? `/products/${encodeURIComponent(product.slug)}/${encodeURIComponent(product.sku)}`
+                    : `/p/${encodeURIComponent(product.sku || '')}`;
+            })();
+
             card.innerHTML = `
-                <a href="${product.slug ? `/products/${Security.escapeAttr(product.slug)}/${Security.escapeAttr(product.sku)}` : `/p/${Security.escapeAttr(product.sku)}`}" class="product-card__link">
+                <a href="${Security.escapeAttr(cardHref)}" class="product-card__link">
                     <div class="product-card__image-wrapper">
                         ${imageContent}
                         ${product.is_lowest_in_market ? `<span class="product-card__badge product-card__badge--lowest-price" title="${product.market_position ? Security.escapeAttr(product.market_position.price_diff_percent + '% less than ' + product.market_position.lowest_competitor_name) : ''}">Lowest Price in NZ</span>` : ''}
@@ -2866,7 +2912,7 @@
                     </div>
                     <div class="product-card__content">
                         <h3 class="product-card__title" title="${Security.escapeAttr(displayName)}">${Security.escapeHtml(displayName)}</h3>
-                        ${product.compare_price && product.compare_price > price ? `<span class="product-card__savings">Save ${formatPrice(product.compare_price - price)}</span>` : ''}
+                        ${showDiscount && discountAmount != null ? `<span class="product-card__savings">Save ${formatPrice(discountAmount)}${discountPercent ? ` (${discountPercent}%)` : ''}</span>` : ''}
                         ${stockStatus.class === 'contact-us'
                             ? `<span class="product-card__stock-banner product-card__stock-banner--contact-us">Contact Us for Stock Inquiry</span>`
                             : (product.retail_price != null && product.retail_price >= 100 ? '<span class="product-card__free-shipping">FREE SHIPPING</span>' : '')}
@@ -2880,21 +2926,45 @@
                             <div class="product-card__footer-row">
                                 <div class="product-card__pricing">
                                     <span class="product-card__price">${formatPrice(price)}</span>
-                                    ${product.compare_price && product.compare_price > price ? ` <span class="product-card__compare-price">${formatPrice(product.compare_price)}</span>` : ''}
+                                    ${showDiscount ? ` <span class="product-card__compare-price">${formatPrice(originalPrice)}</span>` : ''}
                                 </div>
-                                ${stockStatus.class === 'contact-us' ? `
-                                <button class="btn btn--primary btn--sm product-card__cart-btn product-card__contact-btn"
-                                        data-product-id="${product.id}"
-                                        disabled
-                                        aria-label="Out of stock: ${Security.escapeAttr(displayName)}">
-                                    Contact Us
-                                </button>` : `
-                                <button class="btn btn--primary btn--sm product-card__cart-btn"
-                                        data-product-id="${product.id}"
-                                        aria-label="Add ${Security.escapeAttr(displayName)} to cart"
-                                        ${!inStock ? 'disabled' : ''}>
-                                    Add to Cart
-                                </button>`}
+                                ${(() => {
+                                    if (stockStatus.class === 'contact-us') {
+                                        return `<button class="btn btn--primary btn--sm product-card__cart-btn product-card__contact-btn"
+                                                data-product-id="${product.id}"
+                                                disabled
+                                                aria-label="Out of stock: ${Security.escapeAttr(displayName)}">
+                                            Contact Us
+                                        </button>`;
+                                    }
+                                    // Spec §5.8 — out-of-stock items with backend
+                                    // waitlist eligibility (default: any OOS unless
+                                    // explicitly opted out) get "Notify me" instead
+                                    // of a dead disabled button. Click bubbles up to
+                                    // the card link → PDP waitlist UI. Read raw
+                                    // backend fields rather than the mapped
+                                    // stockStatus class (which collapses
+                                    // out_of_stock → contact-us).
+                                    const oos = product.in_stock === false
+                                        || product.stock_status === 'out_of_stock'
+                                        || (product.in_stock === undefined && product.stock_quantity === 0);
+                                    const waitlistOk = (product.waitlist_available === true)
+                                        || (oos && product.waitlist_available !== false);
+                                    if (waitlistOk) {
+                                        return `<button class="btn btn--secondary btn--sm product-card__cart-btn product-card__notify-btn"
+                                                data-action="notify"
+                                                data-product-sku="${Security.escapeAttr(product.sku || '')}"
+                                                aria-label="Notify me when ${Security.escapeAttr(displayName)} is back in stock">
+                                            Notify me
+                                        </button>`;
+                                    }
+                                    return `<button class="btn btn--primary btn--sm product-card__cart-btn"
+                                            data-product-id="${product.id}"
+                                            aria-label="Add ${Security.escapeAttr(displayName)} to cart"
+                                            ${!inStock ? 'disabled' : ''}>
+                                        Add to Cart
+                                    </button>`;
+                                })()}
                             </div>
                         </div>
                     </div>
@@ -2918,16 +2988,23 @@
                 </button>
             `;
 
-            // Add cart button event listener (skip for contact-us links)
+            // Add cart button event listener.
+            //   - Notify-me (out-of-stock waitlist CTA): no listener — the click
+            //     bubbles up to the wrapping <a>, sending the user to the PDP
+            //     where the waitlist email-capture form lives. Spec §5.8.
+            //   - Contact-us (also disabled): swallow the click so the card link
+            //     doesn't react.
+            //   - Add-to-cart: standard handler.
             const cartBtn = card.querySelector('.product-card__cart-btn');
-            if (cartBtn && !cartBtn.classList.contains('product-card__contact-btn')) {
+            if (cartBtn && cartBtn.dataset.action === 'notify') {
+                /* let click bubble to anchor */
+            } else if (cartBtn && !cartBtn.classList.contains('product-card__contact-btn')) {
                 cartBtn.addEventListener('click', async (e) => {
                     e.preventDefault();
                     e.stopPropagation();
                     await this.addToCart(product, cartBtn);
                 });
             } else if (cartBtn) {
-                // Contact-us link — stop propagation so the card link doesn't intercept
                 cartBtn.addEventListener('click', (e) => {
                     e.stopPropagation();
                 });

@@ -258,8 +258,10 @@ test('search.js — form submit handler is NOT defined inside search.js', () => 
 test('search.js — Enter on highlighted product card navigates to product, not printer', () => {
     // Enter with a highlighted suggestion uses productHref; assert that
     // productHref emits the canonical /products/<slug>/<sku> shape and never
-    // /shop?printer=.
-    const m = SEARCH_JS.match(/function productHref[\s\S]+?\}\s*\n/);
+    // /shop?printer=. We match against the whole function body — the closing
+    // `}` of `function productHref(...)` lives at the 4-space indent that
+    // matches the opening `function` keyword, so we anchor the end there.
+    const m = SEARCH_JS.match(/function productHref\s*\([\s\S]+?\n {4}\}/);
     assert.ok(m, 'expected productHref function');
     assert.match(m[0], /\/products\/\$\{/,
         'spec: product clicks go to /products/<slug>/<sku>');

@@ -73,11 +73,16 @@ const Products = {
         const resolvedImage = typeof storageUrl === 'function' ? storageUrl(product.image_url) : (product.image_url || '');
         const priority = typeof index === 'number' && index < 4;
 
-        // Discount fields: backend now sends original_price + discount_percent on every
-        // discounted product. Fall back to compare_price for legacy responses.
+        // Discount fields: backend now sends original_price + discount_amount +
+        // discount_percent on every discounted product. Fall back to compare_price
+        // for legacy responses. Never compute the discount client-side when the
+        // backend has supplied the canonical numbers.
         const originalPrice = product.original_price != null
             ? product.original_price
             : (product.compare_price && product.compare_price > product.retail_price ? product.compare_price : null);
+        const discountAmount = product.discount_amount != null
+            ? product.discount_amount
+            : (originalPrice && product.retail_price != null ? originalPrice - product.retail_price : null);
         const discountPercent = product.discount_percent != null
             ? product.discount_percent
             : (originalPrice && product.retail_price ? Math.round(((originalPrice - product.retail_price) / originalPrice) * 100) : null);
@@ -88,9 +93,24 @@ const Products = {
             ? product.gst_amount
             : (product.retail_price != null && typeof calculateGST === 'function' ? calculateGST(product.retail_price) : null);
 
+        // Prefer backend-supplied canonical_url (absolute). Reduce to a path so
+        // router-based navigation stays in-app, falling back to slug/sku — and
+        // finally /p/<sku>, which the Vercel rewrite proxies to the backend's
+        // 301 handler.
+        const cardHref = (() => {
+            if (product.canonical_url) {
+                try { return new URL(product.canonical_url).pathname; }
+                catch (_) { return product.canonical_url; }
+            }
+            if (product.slug && product.sku) return `/products/${encodeURIComponent(product.slug)}/${encodeURIComponent(product.sku)}`;
+            if (product.sku) return `/p/${encodeURIComponent(product.sku)}`;
+            if (product.slug) return `/product/${encodeURIComponent(product.slug)}`;
+            return '#';
+        })();
+
         return `
             <article class="product-card" data-product-id="${Security.escapeAttr(product.id)}" data-sku="${Security.escapeAttr(product.sku)}">
-                <a href="${product.canonical_url ? Security.escapeAttr(product.canonical_url) : (product.slug && product.sku ? `/products/${Security.escapeAttr(product.slug)}/${Security.escapeAttr(product.sku)}` : product.sku ? `/p/${Security.escapeAttr(product.sku)}` : product.slug ? `/product/${Security.escapeAttr(product.slug)}` : '#')}" class="product-card__link">
+                <a href="${Security.escapeAttr(cardHref)}" class="product-card__link">
                     <div class="product-card__image-wrapper">
                         ${this.getProductImageHTML(product, { priority })}
                         ${sourceBadge ? `<span class="product-card__badge ${sourceBadge.class}">${sourceBadge.text}</span>` : ''}
@@ -112,16 +132,36 @@ const Products = {
                                     <p class="product-card__price">${product.retail_price == null ? 'Price unavailable' : formatPrice(product.retail_price)}${showDiscount ? ` <span class="product-card__compare-price">${formatPrice(originalPrice)}</span>` : ''}</p>
                                     ${gstAmount != null ? `<p class="product-card__gst">Inc. GST ${formatPrice(gstAmount)}</p>` : ''}
                                 </div>
-                                <button class="product-card__add-btn btn btn--primary"
-                                    ${product.retail_price == null || stockInfo.class !== 'in-stock' ? 'disabled' : ''}
-                                    data-product-id="${Security.escapeAttr(product.id)}"
-                                    data-product-sku="${Security.escapeAttr(product.sku)}"
-                                    data-product-name="${Security.escapeAttr(product.name)}"
-                                    data-product-price="${Security.escapeAttr(product.retail_price)}"
-                                    data-product-image="${Security.escapeAttr(resolvedImage)}"
-                                    data-product-color="${Security.escapeAttr(product.color || this.detectColorFromName(product.name) || '')}">
-                                ${stockInfo.class === 'contact-us' ? 'Contact Us' : 'Add to Cart'}
-                                </button>
+                                ${(() => {
+                                    // Spec §5.8: when product.in_stock === false (or
+                                    // waitlist_available === true) swap "Add to Cart"
+                                    // for "Notify me". The button click bubbles up to
+                                    // the wrapping <a>, sending the user to the PDP
+                                    // where they can submit an email.
+                                    const oos = product.in_stock === false
+                                        || product.stock_status === 'out_of_stock'
+                                        || (product.in_stock === undefined && product.stock_quantity === 0);
+                                    const waitlistOk = (product.waitlist_available === true)
+                                        || (oos && product.waitlist_available !== false);
+                                    if (waitlistOk) {
+                                        return `<button class="product-card__add-btn btn btn--secondary product-card__notify-btn"
+                                                data-action="notify"
+                                                data-product-sku="${Security.escapeAttr(product.sku)}">
+                                            Notify me
+                                        </button>`;
+                                    }
+                                    const disabled = product.retail_price == null || stockInfo.class !== 'in-stock';
+                                    return `<button class="product-card__add-btn btn btn--primary"
+                                        ${disabled ? 'disabled' : ''}
+                                        data-product-id="${Security.escapeAttr(product.id)}"
+                                        data-product-sku="${Security.escapeAttr(product.sku)}"
+                                        data-product-name="${Security.escapeAttr(product.name)}"
+                                        data-product-price="${Security.escapeAttr(product.retail_price)}"
+                                        data-product-image="${Security.escapeAttr(resolvedImage)}"
+                                        data-product-color="${Security.escapeAttr(product.color || this.detectColorFromName(product.name) || '')}">
+                                    ${stockInfo.class === 'contact-us' ? 'Contact Us' : 'Add to Cart'}
+                                    </button>`;
+                                })()}
                             </div>
                         </div>
                     </div>
@@ -140,11 +180,15 @@ const Products = {
     },
 
     /**
-     * Attach Add to Cart listeners on a container of product cards
+     * Attach Add to Cart listeners on a container of product cards.
+     * Buttons with `data-action="notify"` (out-of-stock waitlist CTA) are
+     * skipped — the click bubbles up to the wrapping <a> so the user lands
+     * on the PDP, where the waitlist email-capture form lives.
      */
     attachCardListeners(container) {
         if (!container) return;
         container.querySelectorAll('.product-card__add-btn').forEach(btn => {
+            if (btn.dataset.action === 'notify') return;
             btn.addEventListener('click', (e) => {
                 e.preventDefault();
                 e.stopPropagation();
@@ -378,10 +422,12 @@ const Products = {
     },
 
     /**
-     * Bind add to cart button events
+     * Bind add to cart button events. Skips notify-mode buttons so the click
+     * bubbles up to the card link and the user lands on the PDP waitlist UI.
      */
     bindAddToCartEvents(container) {
         container.querySelectorAll('.product-card__add-btn').forEach(btn => {
+            if (btn.dataset.action === 'notify') return;
             btn.addEventListener('click', async (e) => {
                 e.preventDefault();
                 e.stopPropagation();

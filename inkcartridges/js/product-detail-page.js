@@ -292,7 +292,14 @@
             // Canonical URL
             document.getElementById('canonical-url').href = canonicalUrl;
 
-            // Schema.org Product structured data — prefer API-provided JSON-LD
+            // Schema.org Product structured data — prefer API-provided JSON-LD.
+            // Spec §5.6: dedicated `/api/products/:sku/jsonld` is canonical; fetch it
+            // through Schema.injectProduct as a belt-and-braces fallback when the
+            // embedded `seo.jsonLd` blob is missing or stale.
+            if (typeof Schema !== 'undefined' && Schema.injectProduct && info.sku) {
+                Schema.injectProduct(info.sku);
+            }
+
             if (seo.jsonLd && typeof seo.jsonLd === 'object' && seo.jsonLd.product_schema) {
                 // API returns separate schema objects — embed each as its own script tag
                 const schemaEl = document.getElementById('product-schema');

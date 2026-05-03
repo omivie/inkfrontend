@@ -353,9 +353,21 @@ const Favourites = {
         grid.style.display = '';
 
         // Render items
-        grid.innerHTML = this.items.map(item => `
+        grid.innerHTML = this.items.map(item => {
+            // Prefer backend-supplied canonical_url. Reduce absolute URLs to a
+            // path so the SPA handles navigation without a backend round-trip.
+            const itemHref = (() => {
+                if (item.canonical_url) {
+                    try { return new URL(item.canonical_url).pathname; }
+                    catch (_) { return item.canonical_url; }
+                }
+                return item.slug && item.sku
+                    ? `/products/${encodeURIComponent(item.slug)}/${encodeURIComponent(item.sku)}`
+                    : `/p/${encodeURIComponent(item.sku || '')}`;
+            })();
+            return `
             <article class="favourite-item" data-item-id="${Security.escapeAttr(item.id)}">
-                <a href="${item.slug ? `/products/${Security.escapeAttr(item.slug)}/${Security.escapeAttr(item.sku)}` : `/p/${Security.escapeAttr(item.sku)}`}" class="favourite-item__link">
+                <a href="${Security.escapeAttr(itemHref)}" class="favourite-item__link">
                     <div class="favourite-item__image">
                         ${this.getItemImageHTML(item)}
                     </div>
@@ -386,7 +398,8 @@ const Favourites = {
                     </button>
                 </div>
             </article>
-        `).join('');
+        `;
+        }).join('');
 
         // Bind image error fallbacks
         if (typeof Products !== 'undefined' && Products.bindImageFallbacks) {

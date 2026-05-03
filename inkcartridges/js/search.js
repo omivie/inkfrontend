@@ -121,6 +121,13 @@
     }
 
     function productHref(p) {
+        // Prefer backend-supplied canonical_url (when the suggest endpoint adds
+        // it). Reduce absolute URLs to a path so the SPA handles navigation
+        // without a backend round-trip.
+        if (p.canonical_url) {
+            try { return new URL(p.canonical_url).pathname; }
+            catch (_) { return p.canonical_url; }
+        }
         const slug = p.slug || '';
         // Spec payload has no SKU; fall back to slug-only when missing.
         const sku = p.sku || '';

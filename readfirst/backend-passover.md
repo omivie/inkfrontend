@@ -4,6 +4,51 @@ A running list of items the frontend needs from the backend. Each section is sel
 
 ---
 
+## Printer-detail empty state — verified, redirect on bad slug shipped
+
+**From:** Frontend (Vieland)
+**Added:** 2026-05-03
+**Status:** Done — 2026-05-03 (frontend side). Backend sitemap cleanup still recommended (see below).
+
+**Backend asked:** verify the printer-detail route's empty-state handling so retired/invalid slugs redirect to `/shop` or render a clean "printer not found" — not an empty product grid. If they're already in the sitemap, regenerate it; if there's a prerender script, drop them.
+
+### What we found
+
+There is **no printer-detail page or prerender script in the storefront repo** to drop:
+
+- `inkcartridges/scripts/` only contains `stamp-versions.js` (cache-busting). The brand SSG was removed in `b56542b` (May URL consolidation); no equivalent ever existed for printers.
+- `/printers/:slug` already 301-redirects to `/shop?printer=:slug` via `vercel.json`.
+- `?printer=` (no `brand`/`printer_slug`) is rewritten to the backend's own `/shop` SSR per the new vercel.json rewrite block, so legacy crawler slugs hit you, not us. `?printer_slug=` stays on the SPA.
+
+### What we changed
+
+`shop-page.js` `loadPrinterProducts` was surfacing 404 NOT_FOUND from `GET /api/products/printer/:slug` as **"Failed to load products. Please try again."** — a network-error-style message that looked broken on retry. It also surfaced 400 VALIDATION_FAILED (slug fails your `^[a-z0-9_-]+$` regex, e.g. `acroprint-$100works` once URL-decoded) the same way.
+
+Both paths now redirect to `/shop` cleanly:
+
+```js
+const isPrinterNotFound = (err) => /printer (?:model )?not found|NOT_FOUND/i.test(err?.message || '');
+const isBadPrinterSlug = (resp) => resp?.ok === false && (resp.code === 'NOT_FOUND' || resp.code === 'VALIDATION_FAILED');
+// inside loadPrinterProducts:
+//   - thrown 404 in the inner try → window.location.replace('/shop')
+//   - { ok:false, code:'VALIDATION_FAILED' } from API → window.location.replace('/shop')
+//   - thrown 404 in the outer catch (after retry) → window.location.replace('/shop')
+// Existing "No compatible products found for this printer." stays for the
+// case where the slug *is* valid but has zero linked products — that's a
+// real, non-broken empty state.
+```
+
+The retry on first-call failure is preserved for cold-start / 5xx, but the inner catch now short-circuits on NOT_FOUND so we don't waste 800 ms retrying a slug that will never resolve.
+
+### What we'd like the backend to do
+
+1. **Sitemap cleanup.** `https://www.inkcartridges.co.nz/sitemap-printers.xml` currently emits **4,479** `<url>` entries. A non-trivial fraction look like artefacts: `printer_slug=24delivers`, `30-day`, `acroprint-%24100works` (URL-encoded `$`, which then 400s your own validator), etc. Even with the redirect we just shipped, every one of these is a wasted Google crawl request that 404s through to a redirect. Regenerate from the live `printer_models` table with a join on `product_compatibility` (only emit slugs that have ≥1 compatible product) and drop anything whose slug doesn't pass the validation regex you already enforce on the API.
+2. **Confirm `/api/products/printer/:slug` is the canonical endpoint** for this lookup. We're calling it from `js/api.js` `getProductsByPrinter`. There's also `/api/printers/:slug/products` (used by `loadPrinterModelProducts` strategy 1). If one of these is the preferred long-term shape, tell us and we'll consolidate.
+
+No frontend action remaining — once the sitemap is regenerated, ping and we'll spot-check via Google Search Console.
+
+---
+
 ## Search — thin-frontend contract (intent, recovery, ribbons-in-smart, by-brand grouped printers)
 
 **From:** Frontend (Vieland)

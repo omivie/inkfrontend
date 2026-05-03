@@ -1170,8 +1170,17 @@ const Cart = {
 
         const cards = top.map(p => {
             const img = typeof storageUrl === 'function' ? storageUrl(p.image_url) : (p.image_url || '');
-            const link = p.canonical_url
-                || (p.slug && p.sku ? `/products/${encodeURIComponent(p.slug)}/${encodeURIComponent(p.sku)}` : `/p/${encodeURIComponent(p.sku || '')}`);
+            // Prefer backend-supplied canonical_url. Reduce absolute URLs to a
+            // path so router-based navigation stays in-app.
+            const link = (() => {
+                if (p.canonical_url) {
+                    try { return new URL(p.canonical_url).pathname; }
+                    catch (_) { return p.canonical_url; }
+                }
+                return p.slug && p.sku
+                    ? `/products/${encodeURIComponent(p.slug)}/${encodeURIComponent(p.sku)}`
+                    : `/p/${encodeURIComponent(p.sku || '')}`;
+            })();
             const price = p.retail_price != null && typeof formatPrice === 'function' ? formatPrice(p.retail_price) : '';
             return `
                 <a class="crosssell-modal__card" href="${Security.escapeAttr(link)}">
@@ -1575,9 +1584,15 @@ const Cart = {
                     const escapedSku = Security.escapeHtml(item.sku || '');
                     const itemKey = item.key || self.cartItemKey(item);
 
-                    const productLink = item.slug
-                        ? '/products/' + encodeURIComponent(item.slug) + '/' + encodeURIComponent(item.sku || '')
-                        : '/p/' + encodeURIComponent(item.sku || '');
+                    let productLink;
+                    if (item.canonical_url) {
+                        try { productLink = new URL(item.canonical_url).pathname; }
+                        catch (_) { productLink = item.canonical_url; }
+                    } else if (item.slug) {
+                        productLink = '/products/' + encodeURIComponent(item.slug) + '/' + encodeURIComponent(item.sku || '');
+                    } else {
+                        productLink = '/p/' + encodeURIComponent(item.sku || '');
+                    }
 
                     return '\
                     <article class="cart-item" data-item-id="' + item.id + '" data-item-key="' + Security.escapeAttr(itemKey) + '">\
@@ -1679,8 +1694,23 @@ const Cart = {
                     && summary.free_shipping_threshold != null;
 
                 if (hasServerNudge) {
-                    if (summary.free_shipping_message) {
-                        shippingMsgEl.querySelector('span').textContent = summary.free_shipping_message;
+                    // Compose a message ourselves when the backend provides
+                    // numbers but no copy — keeps the nudge useful on every
+                    // cart state.
+                    let copy = summary.free_shipping_message;
+                    if (!copy && !summary.qualifies_for_free_shipping
+                        && typeof summary.free_shipping_remaining === 'number'
+                        && summary.free_shipping_remaining > 0) {
+                        const priceStr = (typeof formatPrice === 'function')
+                            ? formatPrice(summary.free_shipping_remaining)
+                            : '$' + summary.free_shipping_remaining.toFixed(2);
+                        copy = 'Add ' + priceStr + ' more for FREE shipping';
+                    } else if (!copy && summary.qualifies_for_free_shipping) {
+                        copy = "You've qualified for FREE shipping!";
+                    }
+
+                    if (copy) {
+                        shippingMsgEl.querySelector('span').textContent = copy;
                         shippingMsgEl.className = 'cart-summary__shipping-message'
                             + (summary.qualifies_for_free_shipping ? ' cart-summary__shipping-message--success' : '');
                         shippingMsgEl.hidden = false;
@@ -1689,14 +1719,18 @@ const Cart = {
                     }
 
                     if (shippingBarEl && barFillEl) {
-                        if (summary.qualifies_for_free_shipping || !summary.free_shipping_message) {
+                        if (summary.qualifies_for_free_shipping || !copy) {
                             shippingBarEl.hidden = true;
                         } else {
                             const threshold = summary.free_shipping_threshold;
+                            // Prefer backend-derived progress: (threshold - remaining)/threshold.
+                            // Fall back to subtotal/threshold for safety.
                             const pct = threshold > 0
-                                ? Math.min(Math.round((subtotal / threshold) * 100), 100)
+                                ? (typeof summary.free_shipping_remaining === 'number'
+                                    ? Math.min(Math.round(((threshold - summary.free_shipping_remaining) / threshold) * 100), 100)
+                                    : Math.min(Math.round((subtotal / threshold) * 100), 100))
                                 : 0;
-                            barFillEl.style.width = pct + '%';
+                            barFillEl.style.width = Math.max(pct, 0) + '%';
                             barFillEl.className = 'shipping-bar__fill' + (pct >= 100 ? ' shipping-bar__fill--complete' : '');
                             shippingBarEl.hidden = false;
                         }
