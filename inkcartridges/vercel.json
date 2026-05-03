@@ -94,6 +94,22 @@
   ],
   "rewrites": [
     { "source": "/api/:path*", "destination": "https://ink-backend-zaeq.onrender.com/api/:path*" },
+
+    {
+      "source": "/html/shop",
+      "has": [{ "type": "query", "key": "printer" }],
+      "destination": "https://ink-backend-zaeq.onrender.com/html/shop"
+    },
+    {
+      "source": "/shop",
+      "has": [{ "type": "query", "key": "printer" }],
+      "missing": [
+        { "type": "query", "key": "brand" },
+        { "type": "query", "key": "printer_slug" }
+      ],
+      "destination": "https://ink-backend-zaeq.onrender.com/shop"
+    },
+
     { "source": "/shop", "destination": "/html/shop" },
     { "source": "/search", "destination": "/html/shop" },
     { "source": "/cart", "destination": "/html/cart" },

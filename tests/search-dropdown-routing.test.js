@@ -359,3 +359,165 @@ test('shop-page.js — parseURLState reads canonical printer_slug with legacy pr
     assert.match(src, /params\.get\('printer_slug'\)\s*\|\|\s*params\.get\('printer'\)/,
         'spec: shop page must read canonical printer_slug first, falling back to legacy printer for old bookmarks');
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Pass E: legacy ?printer= URL → backend rewrite contract
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// Spec section "Storefront prerequisite — Vercel rewrite for legacy ?printer=
+// URLs". The dropdown no longer emits the legacy /shop?printer=<slug> shape
+// (Pass B above pins that), but external links, Google Search index entries,
+// and bookmarks still hit those URLs. Vercel can't compute brand_slug from
+// printer_slug at the edge — the lookup needs the database. So we proxy the
+// legacy URL to the Render backend, which has the printer_models→brands
+// lookup and 301s with the full canonical (?brand=&printer_slug=).
+//
+// Two invariants matter for these rules to function:
+//   (1) The /shop rule MUST have a `missing: [brand, printer_slug]` filter so
+//       canonical traffic (/shop?brand=...&printer_slug=...) passes through
+//       untouched — otherwise a stray ?printer= param alongside canonical
+//       traffic gets hijacked.
+//   (2) The legacy-printer rules MUST come BEFORE the generic /shop and
+//       /html/shop rewrites in source order — Vercel evaluates rewrites top
+//       to bottom and the first match wins. If the generic /shop → /html/shop
+//       rule comes first, it swallows /shop?printer= traffic and the legacy
+//       URL renders the empty SPA shell instead of the printer prerender.
+
+const VERCEL = JSON.parse(fs.readFileSync(path.join(ROOT, 'inkcartridges', 'vercel.json'), 'utf8'));
+const REWRITES = VERCEL.rewrites || [];
+
+function findRewrite(predicate) {
+    return REWRITES.findIndex(predicate);
+}
+
+test('vercel.json — /shop?printer= legacy URLs rewrite to backend for brand lookup', () => {
+    const idx = findRewrite(r =>
+        r.source === '/shop' &&
+        Array.isArray(r.has) &&
+        r.has.some(h => h.type === 'query' && h.key === 'printer')
+    );
+    assert.notEqual(idx, -1, 'expected a /shop rewrite filtered on `?printer=` query');
+    const rule = REWRITES[idx];
+    assert.match(rule.destination, /^https:\/\/ink-backend-zaeq\.onrender\.com\/shop$/,
+        'spec: legacy ?printer= URLs must proxy to backend (Render) — only it can compute brand_slug from printer_slug');
+});
+
+test('vercel.json — /shop?printer= rewrite has missing:[brand, printer_slug] guard', () => {
+    const rule = REWRITES.find(r =>
+        r.source === '/shop' &&
+        Array.isArray(r.has) &&
+        r.has.some(h => h.type === 'query' && h.key === 'printer')
+    );
+    assert.ok(rule, 'precondition: the /shop ?printer= rewrite exists');
+    assert.ok(Array.isArray(rule.missing) && rule.missing.length >= 2,
+        'spec: rule MUST have a `missing` clause so canonical traffic passes through');
+    const missingKeys = rule.missing.map(m => m.key).sort();
+    assert.deepEqual(missingKeys, ['brand', 'printer_slug'],
+        'spec: missing must include both `brand` AND `printer_slug` so /shop?brand=...&printer_slug=... is not hijacked when ?printer= is also stray-set');
+    for (const m of rule.missing) {
+        assert.equal(m.type, 'query', 'missing filter must target query params, not headers/cookies');
+    }
+});
+
+test('vercel.json — /html/shop?printer= legacy URLs also proxy to backend', () => {
+    const rule = REWRITES.find(r =>
+        r.source === '/html/shop' &&
+        Array.isArray(r.has) &&
+        r.has.some(h => h.type === 'query' && h.key === 'printer')
+    );
+    assert.ok(rule, 'spec: defense-in-depth rule for /html/shop?printer= legacy URLs');
+    assert.match(rule.destination, /^https:\/\/ink-backend-zaeq\.onrender\.com\/html\/shop$/,
+        'spec: /html/shop?printer= must proxy to backend so the printer_models→brands lookup runs');
+});
+
+test('vercel.json — legacy ?printer= rewrites come BEFORE the generic /shop and /html/shop rules', () => {
+    // Order in Vercel rewrites is source-order; first match wins. The
+    // ?printer= guarded rules MUST come before the unguarded /shop and
+    // /html/shop rewrites or they will never match.
+    const printerShopIdx = findRewrite(r =>
+        r.source === '/shop' && Array.isArray(r.has) &&
+        r.has.some(h => h.type === 'query' && h.key === 'printer')
+    );
+    const printerHtmlShopIdx = findRewrite(r =>
+        r.source === '/html/shop' && Array.isArray(r.has) &&
+        r.has.some(h => h.type === 'query' && h.key === 'printer')
+    );
+    const genericShopIdx = findRewrite(r => r.source === '/shop' && !r.has);
+    const genericHtmlShopIdx = findRewrite(r => r.source === '/html/shop' && !r.has);
+
+    assert.notEqual(printerShopIdx, -1, 'precondition: /shop ?printer= rule exists');
+    assert.notEqual(printerHtmlShopIdx, -1, 'precondition: /html/shop ?printer= rule exists');
+    assert.notEqual(genericShopIdx, -1, 'precondition: generic /shop rewrite exists');
+
+    assert.ok(printerShopIdx < genericShopIdx,
+        `spec: /shop ?printer= rule (idx=${printerShopIdx}) must come before generic /shop (idx=${genericShopIdx}) — first match wins`);
+    if (genericHtmlShopIdx !== -1) {
+        assert.ok(printerHtmlShopIdx < genericHtmlShopIdx,
+            `spec: /html/shop ?printer= rule (idx=${printerHtmlShopIdx}) must come before generic /html/shop (idx=${genericHtmlShopIdx})`);
+    }
+});
+
+test('vercel.json — canonical /shop?brand=&printer_slug= traffic is NOT hijacked by any rewrite', () => {
+    // Simulate Vercel's first-match-wins evaluation against the canonical URL
+    // /shop?brand=canon&printer_slug=canon-laser-shot-lbp5200. The expected
+    // winner is the generic /shop → /html/shop rewrite (which renders the SPA
+    // shell that knows how to handle brand+printer_slug); the legacy-printer
+    // proxy rule must be skipped because the `missing` clause excludes it.
+    const canonicalQuery = { brand: 'canon', printer_slug: 'canon-laser-shot-lbp5200' };
+    const winner = simulateRewrite('/shop', canonicalQuery);
+    assert.ok(winner, 'expected at least one rewrite to match /shop');
+    assert.equal(winner.destination, '/html/shop',
+        'spec: canonical printer URL must hit the SPA shell, NOT the backend proxy — the SPA renders the printer page from brand+printer_slug params');
+});
+
+test('vercel.json — legacy /shop?printer= traffic hits the backend proxy first', () => {
+    const legacyQuery = { printer: 'canon-laser-shot-lbp5200' };
+    const winner = simulateRewrite('/shop', legacyQuery);
+    assert.ok(winner, 'expected a rewrite to match /shop?printer=');
+    assert.match(winner.destination, /onrender\.com\/shop$/,
+        'spec: legacy ?printer= URL must proxy to backend so the brand_slug lookup runs and 301s to canonical');
+});
+
+test('vercel.json — /shop?printer= alongside ?brand= alone (no printer_slug) is NOT hijacked', () => {
+    // Edge case from the spec: "The `missing` clause on the second rule
+    // prevents hijacking URLs where someone already has `?brand=` or
+    // `?printer_slug=` set alongside a stray `?printer=`."
+    // If only `brand` is set (no `printer_slug`), the canonical SPA still
+    // can't render the printer-specific page, so falling through to the
+    // generic /shop rewrite (SPA shell) is the right call — it renders the
+    // brand-filtered shop, not the empty printer-page shell.
+    const winner1 = simulateRewrite('/shop', { printer: 'x', brand: 'canon' });
+    const winner2 = simulateRewrite('/shop', { printer: 'x', printer_slug: 'canon-x' });
+    assert.equal(winner1.destination, '/html/shop',
+        'spec: stray ?printer= alongside ?brand= must NOT be proxied — let the SPA render the brand page');
+    assert.equal(winner2.destination, '/html/shop',
+        'spec: stray ?printer= alongside ?printer_slug= must NOT be proxied — printer_slug already pins the canonical');
+});
+
+test('vercel.json — bare /shop (no query) hits the SPA shell (regression guard)', () => {
+    const winner = simulateRewrite('/shop', {});
+    assert.ok(winner);
+    assert.equal(winner.destination, '/html/shop',
+        'regression guard: empty-query /shop must fall through to the generic SPA rewrite');
+});
+
+/**
+ * Mini Vercel-rewrite evaluator. Walks the rewrites array in source order
+ * and returns the first rule that matches `path` + `query`. Honors `has`
+ * (all entries must be present) and `missing` (none of the entries may be
+ * present). Only supports `type: 'query'` filters, which is all our config
+ * uses for this contract.
+ */
+function simulateRewrite(path, query) {
+    for (const r of REWRITES) {
+        if (r.source !== path) continue;
+        const hasOk = !r.has || r.has.every(h =>
+            h.type === 'query' && Object.prototype.hasOwnProperty.call(query, h.key)
+        );
+        const missingOk = !r.missing || r.missing.every(m =>
+            m.type === 'query' && !Object.prototype.hasOwnProperty.call(query, m.key)
+        );
+        if (hasOk && missingOk) return r;
+    }
+    return null;
+}
