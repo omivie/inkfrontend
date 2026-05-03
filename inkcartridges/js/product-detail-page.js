@@ -83,7 +83,13 @@
                 }
 
                 if (!response.ok || !response.data) {
-                    this.showError('Product not found');
+                    // API.getProduct returns a richer error message when the
+                    // singular detail endpoint threw (5xx/network/timeout) and
+                    // the search-smart fallback also couldn't recover; surface
+                    // it so users see "temporarily unavailable" + a Try Again
+                    // button rather than a misleading "not found" for what is
+                    // actually a server hiccup.
+                    this.showError(response.error || 'Product not found');
                     return;
                 }
 
@@ -180,7 +186,15 @@
 
         normalizeCategory(raw) {
             if (!raw) return null;
-            const lower = raw.toLowerCase();
+            // Accept both shapes: canonical /api/products/<sku> returns
+            // category as a string code ("CON-RIBBON"), but the search-smart
+            // fallback path may pass through { name, slug } if api.js's
+            // flattening misses an edge case. Coerce defensively so the
+            // renderer can't crash with "toLowerCase is not a function".
+            const str = typeof raw === 'string' ? raw
+                : (raw && typeof raw === 'object') ? (raw.slug || raw.name || '')
+                : String(raw);
+            const lower = str.toLowerCase();
             if (lower.includes('ink')) return 'ink';
             if (lower.includes('toner')) return 'toner';
             if (lower.includes('drum')) return 'drum';
@@ -1590,15 +1604,38 @@
         },
 
         async resolveSkuFromSlug(slug) {
+            if (!slug) return null;
+            const base = (typeof Config !== 'undefined' && Config.API_URL) ? Config.API_URL : '';
+
+            // Primary: /api/products/by-slug/<slug>. Returns 302 → /api/products/<sku>,
+            // which fetch follows by default. For healthy SKUs that's a single
+            // round-trip. For the Epson Genuine 200 family the chained
+            // /api/products/<sku> 500s, breaking the read of res.ok — that's
+            // what the search-smart fallback below catches.
             try {
-                const base = (typeof Config !== 'undefined' && Config.API_URL) ? Config.API_URL : '';
                 const res = await fetch(`${base}/api/products/by-slug/${encodeURIComponent(slug)}`);
-                if (!res.ok) return null;
-                const json = await res.json();
-                return (json && json.ok && json.data && json.data.sku) ? json.data.sku : null;
-            } catch (_) {
-                return null;
-            }
+                if (res.ok) {
+                    const json = await res.json();
+                    if (json && json.ok && json.data && json.data.sku) return json.data.sku;
+                }
+            } catch (_) { /* fall through to search-smart */ }
+
+            // Fallback: search-smart with the slug-as-query, then exact-match
+            // on `slug` to avoid surfacing a near-neighbor. Same fallback shape
+            // as API.getProduct uses when the singular endpoint 500s — keeps
+            // the slug-only URL path working when /api/products/<sku> is broken.
+            try {
+                const q = String(slug).replace(/-/g, ' ').trim();
+                const res2 = await fetch(`${base}/api/search/smart?q=${encodeURIComponent(q)}&limit=20`);
+                if (res2.ok) {
+                    const json = await res2.json();
+                    const products = (json && json.ok && json.data && Array.isArray(json.data.products))
+                        ? json.data.products : [];
+                    const match = products.find(p => p && p.slug === slug);
+                    if (match && match.sku) return match.sku;
+                }
+            } catch (_) { /* return null below */ }
+            return null;
         },
 
         _isTestProduct(product) {

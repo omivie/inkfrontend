@@ -3,6 +3,7 @@
     { "source": "ribbon/**", "destination": "/html/product/index.html" },
     { "source": "products/**", "destination": "/html/product/index.html" },
     { "source": "product/**", "destination": "/html/product/index.html" },
+    { "source": "p/**", "destination": "/html/product/index.html" },
     { "source": "shop", "destination": "/html/shop.html" },
     { "source": "search", "destination": "/html/shop.html" },
     { "source": "cart", "destination": "/html/cart.html" },

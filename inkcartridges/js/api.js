@@ -389,11 +389,127 @@ const API = {
     },
 
     /**
-     * Get single product by SKU
+     * Get single product by SKU.
+     *
+     * Primary: GET /api/products/<sku>. This is the canonical detail endpoint
+     * and returns the richest payload (including manufacturer_part_number,
+     * description_html, color_hex, and related fields the search endpoints
+     * don't include).
+     *
+     * Fallback: when the singular endpoint throws (5xx, network, timeout) or
+     * its response envelope is non-ok with no recoverable error code, hit
+     * /api/search/smart?q=<sku> and pick the suggestion whose `sku` matches
+     * exactly. The smart payload covers everything the product page needs
+     * for first paint (name, slug, retail_price, color, image_url, brand,
+     * category, description, in_stock, stock_quantity, source, pack_type) and
+     * the existing Supabase enrichment in product-detail-page.js fills in
+     * description_html / compatible_devices_html / related_product_skus when
+     * the smart `description` field is HTML-only.
+     *
+     * Why this fallback exists: the singular endpoint has been observed to
+     * return 500 INTERNAL_ERROR for specific product families (most notably
+     * the Epson Genuine 200 ink series — see errors.md for repro and the
+     * backend-passover note). The fallback keeps user-facing product pages
+     * loading even when the canonical endpoint regresses. A genuine NOT_FOUND
+     * (404 envelope, code === 'NOT_FOUND') is preserved as-is — we only
+     * shadow server-side errors, never legitimate "this SKU doesn't exist"
+     * results.
+     *
      * @param {string} sku - Product SKU
+     * @returns {Promise<{ ok: boolean, data?: object, error?: string, source?: string }>}
      */
     async getProduct(sku) {
-        return this.get(`/api/products/${sku}`);
+        if (sku == null || sku === '') {
+            return { ok: false, error: 'No SKU provided' };
+        }
+        const encoded = encodeURIComponent(sku);
+
+        // Use a raw fetch (not this.get) so we can distinguish 404 from 5xx.
+        // request() throws on both; we need to fall back only on 5xx/network.
+        const primary = await this._rawJsonFetch(`/api/products/${encoded}`);
+
+        // Happy path: primary returned a healthy envelope.
+        if (primary.kind === 'ok' && primary.body && primary.body.ok && primary.body.data) {
+            return primary.body;
+        }
+
+        // Genuine 404 / not-found envelope: do NOT fall back. Surfacing a
+        // fuzzy near-neighbor here would mislead the user into thinking they
+        // reached the real product page for a SKU that doesn't exist.
+        const code = primary.body && primary.body.error && primary.body.error.code;
+        const isGenuineMissing = primary.kind === 'http-error' && (primary.status === 404 || code === 'NOT_FOUND');
+        if (isGenuineMissing) {
+            return primary.body || { ok: false, error: 'Product not found' };
+        }
+
+        // Anything else (5xx, network, JSON parse failure, malformed envelope):
+        // fall back to /api/search/smart and pick the exact SKU match. Smart's
+        // payload covers everything the product page needs for first paint
+        // (name, slug, retail_price, color, image_url, brand, category,
+        // description, in_stock, stock_quantity, source, pack_type).
+        if (typeof DebugLog !== 'undefined') {
+            DebugLog.warn(`[API.getProduct] /api/products/${sku} unhealthy (${primary.kind}/${primary.status || ''}) — trying search-smart fallback`);
+        }
+        const fb = await this._rawJsonFetch(`/api/search/smart?q=${encoded}&limit=10`);
+        const products = fb.kind === 'ok' && fb.body && fb.body.ok && fb.body.data && Array.isArray(fb.body.data.products)
+            ? fb.body.data.products : [];
+        const match = products.find(p => p && p.sku === sku);
+        if (match) {
+            // Mirror smart's `description` (HTML body) onto description_html
+            // so the product page renderer reads it through the same field
+            // it would have got from the canonical detail endpoint.
+            if (match.description && !match.description_html) {
+                match.description_html = match.description;
+            }
+            // Smart returns `category: { name, slug }` (object), but the
+            // canonical detail endpoint returns `category` as a string code
+            // (e.g. "CON-RIBBON"). product-detail-page.js → normalizeCategory()
+            // expects a string. Flatten so the renderer doesn't crash with
+            // "raw.toLowerCase is not a function".
+            if (match.category && typeof match.category === 'object') {
+                match.category = match.category.slug || match.category.name || null;
+            }
+            return { ok: true, data: match, source: 'search-smart-fallback' };
+        }
+
+        // Both paths failed.
+        return {
+            ok: false,
+            error: 'Product detail endpoint is temporarily unavailable. Please try again.',
+        };
+    },
+
+    /**
+     * Internal helper for getProduct's fallback machinery. Wraps fetch in a
+     * uniform `{ kind, status?, body? }` shape so the caller can branch on
+     * the *kind* of failure (network vs 4xx vs 5xx vs malformed JSON) without
+     * relying on thrown-Error string matching.
+     *
+     * Bypasses request() because that helper throws on every non-ok envelope
+     * and collapses the distinction between 404-genuine-missing and 500-broken.
+     * Honors the same Authorization + X-Guest-Session headers so behavior in
+     * authed contexts matches request() byte-for-byte.
+     */
+    async _rawJsonFetch(endpoint) {
+        const url = `${Config.API_URL}${endpoint}`;
+        const token = await this.getToken();
+        const headers = { 'Content-Type': 'application/json' };
+        if (token) headers['Authorization'] = `Bearer ${token}`;
+        const guestSession = this.getGuestSessionId();
+        if (!token && guestSession) headers['X-Guest-Session'] = guestSession;
+
+        let res;
+        try {
+            res = await fetch(url, { method: 'GET', headers, credentials: 'include' });
+        } catch (err) {
+            return { kind: 'network-error', error: err && err.message };
+        }
+        let body = null;
+        try { body = await res.json(); } catch (_) { /* body stays null */ }
+        if (res.status >= 200 && res.status < 300 && body) {
+            return { kind: 'ok', status: res.status, body };
+        }
+        return { kind: 'http-error', status: res.status, body };
     },
 
     /**
