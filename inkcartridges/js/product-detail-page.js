@@ -36,6 +36,19 @@
                 if (productPath) sku = decodeURIComponent(productPath[1]);
             }
 
+            // Short SKU URL: /p/:sku — in production this is rewritten to the
+            // backend's 301 handler, but on localhost (and as a resilience
+            // fallback if the backend is unreachable) we resolve client-side.
+            // After the product loads we canonicalise the URL bar.
+            let cameFromShortUrl = false;
+            if (!sku) {
+                const shortPath = window.location.pathname.match(/^\/p\/(.+)$/);
+                if (shortPath) {
+                    sku = decodeURIComponent(shortPath[1]);
+                    cameFromShortUrl = true;
+                }
+            }
+
             // Legacy slug-only URL: /product/:slug or ?slug=
             if (!sku) {
                 let slug = params.get('slug');
@@ -119,6 +132,22 @@
                 if (this._isTestProduct(this.product) && !this.product.active && typeof isCachedSuperAdmin === 'function' && !isCachedSuperAdmin()) {
                     this.showError('Product not found');
                     return;
+                }
+
+                if (cameFromShortUrl) {
+                    const canonicalPath = (() => {
+                        if (this.product.canonical_url) {
+                            try { return new URL(this.product.canonical_url).pathname; }
+                            catch (_) { return null; }
+                        }
+                        if (this.product.slug && this.product.sku) {
+                            return `/products/${encodeURIComponent(this.product.slug)}/${encodeURIComponent(this.product.sku)}`;
+                        }
+                        return null;
+                    })();
+                    if (canonicalPath) {
+                        window.history.replaceState({}, '', canonicalPath + window.location.search + window.location.hash);
+                    }
                 }
 
                 this.renderProduct();
