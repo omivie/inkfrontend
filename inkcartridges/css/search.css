@@ -632,7 +632,12 @@ mark.smart-ac__mark {
     width: var(--smart-ac-width, 100%);
     min-width: 0;
     max-width: 96vw;
-    max-height: min(76vh, 680px);
+    /* Height is set by search.js positionDropdown() to fill the viewport
+       below the search input (window.innerHeight - top - 16px), so two
+       full rows of product cards + the sticky View-all footer always fit.
+       The fallback below covers the millisecond before JS runs and any
+       no-JS preview rendering. */
+    max-height: var(--smart-ac-max-height, calc(100vh - var(--smart-ac-top, 120px) - 16px));
 }
 
 .smart-ac__grid {

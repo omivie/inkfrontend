@@ -185,9 +185,15 @@
             // which is a narrow 260px centered box). 16px side margins.
             const left = isMobile ? 16 : Math.round(formRect.left);
             const width = isMobile ? (window.innerWidth - 32) : Math.round(formRect.width);
-            state.dropdown.style.setProperty('--smart-ac-top', `${Math.round(inputRect.bottom + 6)}px`);
+            const top = Math.round(inputRect.bottom + 6);
+            // Fill available viewport beneath the input so two full rows of
+            // product cards + the sticky "View all results" footer always fit.
+            // Floor at 280px so a tiny window still shows usable content.
+            const maxHeight = Math.max(280, window.innerHeight - top - 16);
+            state.dropdown.style.setProperty('--smart-ac-top', `${top}px`);
             state.dropdown.style.setProperty('--smart-ac-left', `${left}px`);
             state.dropdown.style.setProperty('--smart-ac-width', `${width}px`);
+            state.dropdown.style.setProperty('--smart-ac-max-height', `${maxHeight}px`);
         }
 
         function open() {
