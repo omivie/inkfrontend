@@ -421,13 +421,18 @@
                     `<span class="product-detail__gst-line">Inc. GST ${formatPrice(gstAmount)}</span>`);
             }
 
-            // Shipping callout — GMC compliance: show cost or free-shipping status at product level
+            // Shipping callout — GMC compliance: show cost or free-shipping status at product level.
+            // Threshold sourced from qualifiesForFreeShipping (api.js) so PDP, card pills,
+            // schema.org and cart progress all read the same Config setting.
             const shippingNoteEl = document.getElementById('product-shipping-note');
             if (shippingNoteEl) {
-                if (price >= 100) {
+                const threshold = (typeof Config !== 'undefined' && Config.getSetting)
+                    ? Config.getSetting('FREE_SHIPPING_THRESHOLD', 100)
+                    : 100;
+                if (qualifiesForFreeShipping(info)) {
                     shippingNoteEl.innerHTML = '<span class="shipping-note shipping-note--free">&#10003; Free NZ shipping included</span>';
                 } else {
-                    shippingNoteEl.innerHTML = '<span class="shipping-note">From $7 shipping &mdash; free over $100</span>';
+                    shippingNoteEl.innerHTML = `<span class="shipping-note">From $7 shipping &mdash; free over $${threshold}</span>`;
                 }
             }
 
@@ -1272,7 +1277,11 @@
         updateProductSchema(info, price) {
             const slug = info.slug || info.sku.toLowerCase();
             const canonicalUrl = info.canonical_url || `https://www.inkcartridges.co.nz/products/${slug}/${info.sku}`;
-            const freeShipping = price >= 100;
+            // Use the centralized helper so the schema's shippingRate stays
+            // in sync with the on-page pill and the cart's free-shipping
+            // threshold — Google penalises inconsistencies between markup
+            // and visible content.
+            const freeShipping = qualifiesForFreeShipping({ retail_price: price });
             const schema = {
                 "@context": "https://schema.org",
                 "@type": "Product",

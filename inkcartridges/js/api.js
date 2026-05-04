@@ -1994,6 +1994,28 @@ function getStockStatus(product) {
 }
 
 /**
+ * Free-shipping qualification — single source of truth for product-card and PDP
+ * pills, the schema.org shipping rate, and any future surface that needs to
+ * answer "does this individual product, on its own, qualify for free NZ
+ * shipping?" Threshold reads from Config (loaded from /api/settings) so it
+ * stays in lockstep with the cart progress bar and checkout shipping logic.
+ *
+ * Stock status is intentionally NOT a gate: a Contact-Us product that meets
+ * the threshold still ships free once the customer completes the contact
+ * flow, and hiding the pill there would mis-represent the offer.
+ *
+ * @param {object} product
+ * @returns {boolean}
+ */
+function qualifiesForFreeShipping(product) {
+    if (!product || product.retail_price == null) return false;
+    const threshold = (typeof Config !== 'undefined' && Config.getSetting)
+        ? Config.getSetting('FREE_SHIPPING_THRESHOLD', 100)
+        : 100;
+    return product.retail_price >= threshold;
+}
+
+/**
  * Get source badge
  * @param {string} source - Product source (genuine/compatible)
  * @returns {object} Badge info
@@ -2012,4 +2034,5 @@ function getSourceBadge(source) {
 window.API = API;
 window.formatPrice = formatPrice;
 window.getStockStatus = getStockStatus;
+window.qualifiesForFreeShipping = qualifiesForFreeShipping;
 window.getSourceBadge = getSourceBadge;

@@ -2904,10 +2904,11 @@
 
             // Info-row pills (rendered as a tight horizontal strip beneath the
             // image — never on top of the photo). Empty string when neither
-            // pill applies, so the layout collapses cleanly.
+            // pill applies, so the layout collapses cleanly. Free-shipping
+            // qualification is delegated to qualifiesForFreeShipping (api.js)
+            // so the threshold matches Config + cart + PDP surfaces.
             const showSavingsPill = showDiscount && discountAmount != null;
-            const showFreeShipPill = stockStatus.class !== 'contact-us'
-                && product.retail_price != null && product.retail_price >= 100;
+            const showFreeShipPill = qualifiesForFreeShipping(product);
             // FREE SHIPPING is rendered first so it always sits on the top
             // line of the info-row — gives a consistent visual baseline across
             // cards that have both pills vs only one.

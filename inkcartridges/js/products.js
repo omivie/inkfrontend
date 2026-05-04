@@ -121,7 +121,7 @@ const Products = {
                         <p class="product-card__brand">${Security.escapeHtml(product.brand?.name || '')}</p>
                         <h3 class="product-card__title" title="${Security.escapeAttr(product.name)}">${Security.escapeHtml(product.name)}</h3>
                         ${product.average_rating && product.review_count > 0 ? `<div class="product-card__rating">${this._miniStars(Math.round(parseFloat(product.average_rating)))} <span class="product-card__review-count">(${product.review_count})</span></div>` : ''}
-                        ${product.retail_price != null && product.retail_price >= 100 ? '<div class="product-card__info-row"><span class="product-card__free-shipping">Free Shipping</span></div>' : ''}
+                        ${qualifiesForFreeShipping(product) ? '<div class="product-card__info-row"><span class="product-card__free-shipping">Free Shipping</span></div>' : ''}
                         <div class="product-card__footer">
                             <div class="product-card__footer-row">
                                 ${product.color ? `<p class="product-card__color">${Security.escapeHtml(product.color)}</p>` : '<span></span>'}
