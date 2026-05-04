@@ -17,7 +17,7 @@
  */
 
 export const GST_RATE = 0.15;
-export const STRIPE_RATE = 0.027;       // NZ domestic card: 2.7%
+export const STRIPE_RATE = 0.029;       // NZ domestic card: 2.9%
 export const STRIPE_FIXED = 0.30;       // NZ domestic card: $0.30 per transaction
 const MISSING = '—';
 
@@ -36,19 +36,24 @@ export function computeProfitability(row, gstRate = GST_RATE) {
 }
 
 /**
- * Per-order net profit. Strips GST from revenue, deducts supplier cost,
- * and deducts the full Stripe fee (% + fixed $0.30) ex-GST.
+ * Per-order net profit. Deducts supplier cost and the full Stripe fee
+ * (% + fixed $0.30) ex-GST from ex-GST revenue.
  *
- *   grossRevenue  — sum of GST-inclusive line totals (item sell_price × qty)
- *   totalCost     — sum of supplier costs (assumed ex-GST)
+ *   revenueExGst — sum of ex-GST line totals (order_items.sell_price × qty;
+ *                  backend stores sell_price ex-GST, NOT incl-GST)
+ *   totalCost    — sum of supplier costs (ex-GST)
+ *
+ * Stripe fees are charged on the GROSS amount the customer paid, so we gross
+ * up by (1 + gstRate) before applying the rate, then strip GST since we
+ * reclaim it as input tax.
  */
-export function computeOrderProfit(grossRevenue, totalCost, gstRate = GST_RATE) {
-  const rev = Number(grossRevenue);
+export function computeOrderProfit(revenueExGst, totalCost, gstRate = GST_RATE) {
+  const rev = Number(revenueExGst);
   const cost = Number(totalCost);
   if (!Number.isFinite(rev) || !Number.isFinite(cost) || rev <= 0) return null;
-  const revExGst = rev / (1 + gstRate);
-  const stripeFeeExGst = (rev * STRIPE_RATE + STRIPE_FIXED) / (1 + gstRate);
-  return revExGst - cost - stripeFeeExGst;
+  const grossInclGst = rev * (1 + gstRate);
+  const stripeFeeExGst = (grossInclGst * STRIPE_RATE + STRIPE_FIXED) / (1 + gstRate);
+  return rev - cost - stripeFeeExGst;
 }
 
 export function marginBadge(pct) {
@@ -57,7 +62,7 @@ export function marginBadge(pct) {
   }
   const num = Number(pct);
   const cls = num < 5 ? 'critical' : num < 15 ? 'warning' : num < 30 ? 'healthy' : 'excellent';
-  return `<span class="margin-badge margin-badge--${cls}" title="Margin: net profit (after GST + Stripe 2.7%) as share of ex-GST sale price">${num.toFixed(1)}%</span>`;
+  return `<span class="margin-badge margin-badge--${cls}" title="Margin: net profit (after GST + Stripe 2.9%) as share of ex-GST sale price">${num.toFixed(1)}%</span>`;
 }
 
 export function markupBadge(pct) {
@@ -67,7 +72,7 @@ export function markupBadge(pct) {
   const num = Number(pct);
   const cls = num < 20 ? 'critical' : num < 50 ? 'warning' : num < 150 ? 'healthy' : 'excellent';
   const display = num >= 1000 ? num.toFixed(0) : num.toFixed(1);
-  return `<span class="markup-badge margin-badge margin-badge--${cls}" title="Markup: net profit (after GST + Stripe 2.7%) as a multiple of cost">${display}%</span>`;
+  return `<span class="markup-badge margin-badge margin-badge--${cls}" title="Markup: net profit (after GST + Stripe 2.9%) as a multiple of cost">${display}%</span>`;
 }
 
 export function formatProfitDollars(n) {

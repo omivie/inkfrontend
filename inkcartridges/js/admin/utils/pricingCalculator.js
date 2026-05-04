@@ -16,7 +16,7 @@
  */
 
 const GST_RATE = 0.15;
-const STRIPE_RATE = 0.027;
+const STRIPE_RATE = 0.029;
 
 const DEFAULT_TIERS = {
   genuine: {

@@ -67,9 +67,9 @@ const bundle  = loadModule(BUNDLE_PATH);
 
 // ─── Constants & defaults ───────────────────────────────────────────────────
 
-test('GST_RATE is 15% and STRIPE_RATE is 2.7%', () => {
+test('GST_RATE is 15% and STRIPE_RATE is 2.9%', () => {
   assert.equal(pricing.GST_RATE, 0.15);
-  assert.equal(pricing.STRIPE_RATE, 0.027);
+  assert.equal(pricing.STRIPE_RATE, 0.029);
 });
 
 test('DEFAULT_TIERS has all genuine + compatible tier keys from spec §6', () => {
@@ -174,8 +174,8 @@ for (const g of GOLDENS) {
 // ─── Margin & markup math ───────────────────────────────────────────────────
 
 test('netMarginPct returns >0 for healthy retail and 0 for break-even', () => {
-  // Compatible $4 → retail $8.79. ex-GST = 7.6435; stripe ex-GST = 0.2064;
-  // profit = 7.6435 - 4 - 0.2064 = 3.4371; margin = 3.4371 / 7.6435 = 44.97%
+  // Compatible $4 → retail $8.79. ex-GST = 7.6435; stripe ex-GST = 0.2217;
+  // profit = 7.6435 - 4 - 0.2217 = 3.4218; margin = 3.4218 / 7.6435 ≈ 44.77%
   const m = pricing.netMarginPct(8.79, 4.00);
   assert.ok(m > 44 && m < 46, `expected ~45%, got ${m}`);
 });

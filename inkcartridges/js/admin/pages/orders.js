@@ -334,7 +334,7 @@ function buildOrderModalContent(modal, o, events, breakdown) {
     itemsHtml += `</tbody><tfoot><tr class="admin-order-items__total">
       <td colspan="3"></td>
       <td class="mono"><strong>${formatPrice(totalPrice)}</strong></td>
-      ${showCost ? `<td class="mono"><strong>${formatPrice(totalCost)}</strong></td><td class="mono" style="color:var(--success-text,#15803d)" title="Net profit after GST and Stripe (2.7% + $0.30)"><strong>${profit != null ? formatPrice(profit) : MISSING}</strong></td>` : ''}
+      ${showCost ? `<td class="mono"><strong>${formatPrice(totalCost)}</strong></td><td class="mono" style="color:var(--success-text,#15803d)" title="Net profit after GST and Stripe (2.9% + $0.30)"><strong>${profit != null ? formatPrice(profit) : MISSING}</strong></td>` : ''}
     </tr></tfoot></table>`;
   } else {
     itemsHtml += `<p class="admin-text-muted">${MISSING} No items</p>`;
