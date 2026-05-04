@@ -81,90 +81,84 @@
     let currentModelsData = [];
 
     // ============================================
-    // HELPER FUNCTIONS (uses PrinterData from printer-data.js)
+    // HELPER FUNCTIONS
     // ============================================
 
     /**
-     * Fetch printers for a brand. Single API round-trip via /api/printers/search.
+     * Fetch printers for a brand, already grouped by series.
      *
-     * History: this used to query Supabase directly first, then fall back to the
-     * API, then to static data — three sequential round-trips on the slow path
-     * with the direct Supabase query leaking schema names (`brands.id`,
-     * `printer_models.brand_id`, …) into the browser. The 2026-05-03 search
-     * audit removed that path. The static fallback stays for true offline mode.
+     * Backend returns the dropdown shape directly: groups alphabetised, "Other
+     * Models" pinned last, models natural-sorted, label makers/scanners/dot
+     * matrix excluded server-side. Spec: docs/storefront/value-pack-and-
+     * product-url-contract.md §4.2.1 (backend-passover task 5, May 2026).
      *
-     * Once `GET /api/printers/by-brand/:brand?grouped=true&exclude_non_ink=true`
-     * ships (backend-passover task 5), this whole function collapses to a
-     * single API call that returns already-grouped series, and the
-     * PrinterData taxonomy below deletes from the bundle.
+     * History: pre-May-2026 the frontend pulled a flat printer list and ran
+     * its own ~600-line series taxonomy + ink/toner classifier (printer-data.js
+     * SERIES_PATTERNS, getSeriesForModel, isInkToner, groupPrintersBySeries).
+     * That whole pipeline is now server-side; this function just maps the
+     * grouped payload to the field names the dropdown renderer expects.
      */
     async function loadPrintersForBrand(brand) {
         if (printerCache[brand]) {
             return printerCache[brand];
         }
 
-        const brandName = PrinterData.BRAND_NAMES[brand] || brand;
-        let printers = [];
-
+        let groups = [];
         try {
-            const response = await API.getPrintersByBrand(brandName);
-            if (response.ok && response.data) {
-                printers = Array.isArray(response.data) ? response.data : (response.data.printers || []);
+            const response = await API.getPrintersByBrand(brand);
+            if (response && response.ok && response.data) {
+                groups = response.data.series_groups || [];
             }
         } catch (error) {
-            // API failed — will use static fallback below.
+            // API failed — fall through to static fallback below.
         }
 
-        // Transform printers to our format
-        if (printers.length > 0) {
-            const formattedPrinters = printers.map(p => {
-                const modelName = p.model_name || p.model || p.name || '';
-                const fullName = p.full_name || `${brandName} ${modelName}`;
-
-                // Determine series from model name (uses normalized matching)
-                const series = PrinterData.getSeriesForModel(modelName, brand);
-                const seriesId = series.id;
-                const seriesName = series.name;
-
-                return {
-                    id: (p.slug || modelName).toLowerCase().replace(/\s+/g, '-'),
-                    name: modelName,
-                    fullName: fullName,
-                    seriesId: seriesId,
-                    seriesName: seriesName
-                };
-            }).filter(p => {
-                const name = p.name.trim();
-                if (!name || name.length < 2) return false;
-                if (/\bprinters?\b/i.test(name)) return false;
-                if (/^(inkjet|laser|colour|color|toner|cartridges?|ink|ribbon|ribbons|drums?|fax)$/i.test(name)) return false;
-                if (/^\d+mm$/i.test(name)) return false;
-                if (!PrinterData.isInkToner(p.seriesName, p.name, brand)) return false;
-                // Exclude "Other Models" — series patterns are comprehensive enough
-                // that unmatched models are almost always non-ink devices (label makers,
-                // dot matrix stored without prefix, scanners, etc.)
-                if (p.seriesId === 'other') return false;
-                return true;
-            });
-
-            const series = PrinterData.groupPrintersBySeries(formattedPrinters);
+        if (groups.length > 0) {
+            const series = groups.map(g => ({
+                id: g.id,
+                name: g.name,
+                models: (g.models || []).map(m => ({
+                    id: m.slug,
+                    name: m.model_name,
+                    fullName: m.full_name,
+                    slug: m.slug,
+                    printerId: m.id
+                }))
+            }));
             printerCache[brand] = series;
             return series;
         }
 
-        // Final fallback: use static printer data
-        const staticPrinters = getStaticPrintersForBrand(brand);
-        const series = PrinterData.groupPrintersBySeries(staticPrinters);
+        // Offline fallback: a small hand-curated static set covering the most
+        // common models per brand. Only fires when the API itself is down —
+        // dropdown is much smaller than the live data, but the widget still works.
+        const series = groupStaticPrinters(getStaticPrintersForBrand(brand));
         printerCache[brand] = series;
         return series;
     }
 
     /**
-     * Static printer data fallback
-     *
-     * INTENTIONAL FALLBACK: This static data is used when the /api/printers endpoint
-     * is unavailable. The primary source of printer data should be the server API.
-     * This fallback ensures the ink finder works even if the API is temporarily down.
+     * Group flat static printers into series_groups shape (offline fallback only).
+     */
+    function groupStaticPrinters(printers) {
+        const map = new Map();
+        printers.forEach(p => {
+            if (!map.has(p.seriesId)) {
+                map.set(p.seriesId, { id: p.seriesId, name: p.seriesName, models: [] });
+            }
+            map.get(p.seriesId).models.push({
+                id: p.id,
+                name: p.name,
+                fullName: p.fullName,
+                slug: p.id
+            });
+        });
+        return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name));
+    }
+
+    /**
+     * Static printer data fallback (offline only).
+     * Only fires when /api/printers/by-brand is unreachable.
      */
     function getStaticPrintersForBrand(brand) {
         const staticData = {

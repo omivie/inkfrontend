@@ -889,11 +889,23 @@ const API = {
     },
 
     /**
-     * Get all printers for a brand
-     * @param {string} brand - Brand slug
+     * Get printers for a brand, already grouped by series.
+     *
+     * Returns `{ ok, data: { brand, series_groups: [{ id, name, model_count,
+     * models: [{ id, model_name, full_name, slug, series }] }], total_models } }`.
+     * Groups are alphabetised with "Other Models" forced last; models inside
+     * each group are natural-sorted by name. `exclude_non_ink=true` strips
+     * label makers, scanners, dot-matrix, etc. so the ink-finder dropdown only
+     * shows devices that take cartridges.
+     *
+     * Spec: docs/storefront/value-pack-and-product-url-contract.md §4.2.1
+     * (backend-passover task 5, May 2026).
+     *
+     * @param {string} brand - Brand slug (e.g. "canon"). Lower-cased + URL-encoded.
      */
     async getPrintersByBrand(brand) {
-        return this.get(`/api/printers/search?q=*&brand=${encodeURIComponent(brand)}`);
+        const slug = encodeURIComponent(String(brand || '').toLowerCase());
+        return this.get(`/api/printers/by-brand/${slug}?grouped=true&exclude_non_ink=true`);
     },
 
     /**
