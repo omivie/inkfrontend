@@ -2902,26 +2902,34 @@
                     : `/p/${encodeURIComponent(product.sku || '')}`;
             })();
 
+            // Info-row pills (rendered as a tight horizontal strip beneath the
+            // image — never on top of the photo). Empty string when neither
+            // pill applies, so the layout collapses cleanly.
+            const showSavingsPill = showDiscount && discountAmount != null;
+            const showFreeShipPill = stockStatus.class !== 'contact-us'
+                && product.retail_price != null && product.retail_price >= 100;
+            const infoRowHTML = (showSavingsPill || showFreeShipPill)
+                ? `<div class="product-card__info-row">
+                        ${showSavingsPill ? `<span class="product-card__savings">Save ${formatPrice(discountAmount)}${discountPercent ? ` (${discountPercent}%)` : ''}</span>` : ''}
+                        ${showFreeShipPill ? '<span class="product-card__free-shipping">Free Shipping</span>' : ''}
+                    </div>`
+                : '';
+
             card.innerHTML = `
                 <a href="${Security.escapeAttr(cardHref)}" class="product-card__link">
                     <div class="product-card__image-wrapper">
                         ${imageContent}
-                        ${product.is_lowest_in_market ? `<span class="product-card__badge product-card__badge--lowest-price" title="${product.market_position ? Security.escapeAttr(product.market_position.price_diff_percent + '% less than ' + product.market_position.lowest_competitor_name) : ''}">Lowest Price in NZ</span>` : ''}
+                        ${product.is_lowest_in_market ? `<span class="product-card__badge product-card__badge--lowest-price" title="${product.market_position ? Security.escapeAttr(product.market_position.price_diff_percent + '% less than ' + product.market_position.lowest_competitor_name) : ''}">Lowest Price</span>` : ''}
                         ${fitsPrinterBadge}
                         ${packTypeRibbon}
-                        ${showDiscount && discountAmount != null ? `<span class="product-card__savings">Save ${formatPrice(discountAmount)}${discountPercent ? ` (${discountPercent}%)` : ''}</span>` : ''}
-                        ${stockStatus.class === 'contact-us'
-                            ? `<span class="product-card__stock-banner product-card__stock-banner--contact-us">Contact for Stock</span>`
-                            : (product.retail_price != null && product.retail_price >= 100 ? '<span class="product-card__free-shipping">Free Shipping</span>' : '')}
                     </div>
                     <div class="product-card__content">
+                        ${infoRowHTML}
                         <h3 class="product-card__title" title="${Security.escapeAttr(displayName)}">${Security.escapeHtml(displayName)}</h3>
                         <div class="product-card__footer">
                             <div class="product-card__footer-row">
                                 ${color ? `<span class="product-card__color">${Security.escapeHtml(color)}</span>` : '<span></span>'}
-                                ${stockStatus.class !== 'contact-us' ? `<span class="product-card__stock product-card__stock--${stockStatus.class}">
-                                    ${stockStatus.text}
-                                </span>` : ''}
+                                <span class="product-card__stock product-card__stock--${stockStatus.class}">${stockStatus.text}</span>
                             </div>
                             <div class="product-card__footer-row">
                                 <div class="product-card__pricing">

@@ -734,40 +734,22 @@
     font-weight: 600;
 }
 
-/* Stock banner for contact-us products — overlay on the image (bottom strip)
-   instead of a multi-line content block that pushed the row height up. */
-.product-card__stock-banner {
-    position: absolute;
-    bottom: 6px;
-    left: 6px;
-    right: 6px;
-    z-index: 4;
-    display: block;
-    font-size: 0.62rem;
-    font-weight: 700;
-    padding: 3px 6px;
-    border-radius: 4px;
-    text-align: center;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
-    pointer-events: none;
-    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+/* Info row beneath the image — holds Save / Free Shipping pills. Tight,
+   single-row strip; the row is omitted entirely when there's nothing to
+   show, so cards without promos lose no vertical space. */
+.product-card__info-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px;
+    margin: 0;
+    line-height: 1;
 }
 
-.product-card__stock-banner--contact-us {
-    color: var(--color-success, #16a34a);
-    background: rgba(255, 255, 255, 0.95);
-}
-
-/* When a product is both discounted AND contact-us, the bottom-right savings
-   pill would otherwise sit on top of the full-width stock banner. Lift it
-   above the banner so both stay readable. Same logic applies when both
-   FREE SHIPPING (bottom-left) and Save $X (bottom-right) are present on
-   narrow cards — they collide horizontally at <140px content width. */
-.product-card__image-wrapper:has(.product-card__stock-banner) .product-card__savings,
-.product-card__image-wrapper:has(.product-card__free-shipping) .product-card__savings {
-    bottom: 30px;
-}
+/* Legacy class kept for backwards-compat with any non-shop-page renderer
+   that still emits it; styled as an inline pill in info-row contexts and
+   hidden if it ever ends up loose in the image-wrapper (no longer used). */
+.product-card__stock-banner { display: none; }
 
 /* Contact button in product card */
 .product-card__contact-btn {
@@ -1235,26 +1217,22 @@
     font-size: 0.85em;
 }
 
-/* "Save $X (Y%)" — overlay on the bottom-right of the product image so it
-   sits opposite the FREE-SHIPPING badge and clear of top-corner ribbons
-   (Value Pack, Multipack, Lowest Price, Fits Your Printer). Replaces the
-   legacy in-content row that contributed to the empty middle space. */
+/* "Save $X (Y%)" — small inline pill in the .product-card__info-row strip
+   that sits between the image and the title. Deliberately NOT an image
+   overlay — overlaying text on product photos hides cartridge detail and
+   reads as amateur. Same colour family as other "savings/value" cues. */
 .product-card__savings {
-    position: absolute;
-    bottom: 6px;
-    right: 6px;
-    z-index: 4;
+    display: inline-flex;
+    align-items: center;
     color: #fff;
     background: var(--color-success, #16a34a);
     font-weight: 700;
     font-size: 0.62rem;
     letter-spacing: 0.02em;
-    padding: 3px 7px;
-    border-radius: 4px;
-    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.15);
-    pointer-events: none;
-    text-transform: none;
-    line-height: 1.3;
+    padding: 2px 7px;
+    border-radius: 3px;
+    line-height: 1.4;
+    white-space: nowrap;
 }
 
 .product-card__price-block {

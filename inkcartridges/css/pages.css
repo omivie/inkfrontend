@@ -3079,24 +3079,22 @@
     font-size: var(--font-size-xs, 0.75rem);
 }
 
-/* FREE SHIPPING badge — overlay on the bottom-left of the product image
-   (was a content-row block that took ~25px of vertical content space). */
+/* "Free Shipping" — small inline pill that lives in the .product-card__info-row
+   strip beneath the image (intentionally NOT an image overlay; overlaying
+   marketing text on product photos covers cartridge detail and looks unprofessional). */
 .product-card__free-shipping {
-    position: absolute;
-    bottom: 6px;
-    left: 6px;
-    z-index: 4;
-    display: inline-block;
+    display: inline-flex;
+    align-items: center;
     font-size: 0.62rem;
     font-weight: 700;
     color: #047857;
-    background: rgba(255, 255, 255, 0.94);
-    padding: 3px 7px;
-    border-radius: 4px;
+    background: #ecfdf5;
+    padding: 2px 7px;
+    border-radius: 3px;
     letter-spacing: 0.04em;
     text-transform: uppercase;
-    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
-    pointer-events: none;
+    line-height: 1.4;
+    white-space: nowrap;
 }
 
 /* Bought Together Section */
