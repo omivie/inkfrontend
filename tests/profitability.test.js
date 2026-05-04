@@ -3,16 +3,20 @@
  * =============================================
  *
  * Pins computeOrderProfit and computeProfitability against real-world fixtures
- * so we don't regress the GST direction or Stripe rate again. Background:
+ * so we don't regress the GST/Stripe convention again. Background:
  *
  *   1. order_items.sell_price is stored EX-GST in the backend, not incl-GST.
- *      A pre-2026-05 version of computeOrderProfit divided revenue by 1.15
- *      assuming the input was incl-GST, which under-counted profit by ~13%.
- *   2. NZ domestic Stripe rate is 2.9% + $0.30, not 2.7%.
+ *   2. cost_price is stored ex-GST; we pay supplier incl-GST so it must be
+ *      grossed up by 1.15 before deduction.
+ *   3. Stripe fees are deducted GROSS (no /1.15) — we eat the full fee.
+ *   4. NZ domestic Stripe rate is 2.9% + $0.30.
+ *
+ * Convention set by user 2026-05-04. See project_profit_calc.md for the
+ * accounting rationale.
  *
  * Fixture is taken from order ORD-MOQBMOJI-C81B807 (4 May 2026):
  *   subtotal_excl_gst = $311.52  (line items × qty, ex-GST)
- *   total_cost        = $198.65
+ *   total_cost_ex_gst = $198.65
  *   total_incl_gst    = $358.24  (== subtotal × 1.15)
  *
  * Run with: node --test tests/profitability.test.js
@@ -59,13 +63,13 @@ test('GST_RATE is 15%', () => {
 
 // ─── computeOrderProfit ─────────────────────────────────────────────────────
 
-test('computeOrderProfit: $311.52 ex-GST rev, $198.65 cost → ~$103.58 profit', () => {
-  // grossInclGst   = 311.52 × 1.15        = 358.248
-  // stripeFee gross= 358.248 × 0.029 + 0.30 = 10.689
-  // stripeFee exGst= 10.689 / 1.15        =  9.295
-  // profit         = 311.52 − 198.65 − 9.295 = 103.575
+test('computeOrderProfit: $311.52 ex-GST rev, $198.65 cost ex-GST → ~$72.38 profit', () => {
+  // costInclGst  = 198.65 × 1.15           = 228.4475
+  // grossInclGst = 311.52 × 1.15           = 358.248
+  // stripeFee    = 358.248 × 0.029 + 0.30  =  10.6892
+  // profit       = 311.52 − 228.4475 − 10.6892 ≈ 72.3833
   const profit = sandbox.computeOrderProfit(311.52, 198.65);
-  assert.ok(Math.abs(profit - 103.575) < 0.01, `expected ~103.58, got ${profit}`);
+  assert.ok(Math.abs(profit - 72.3833) < 0.01, `expected ~72.38, got ${profit}`);
 });
 
 test('computeOrderProfit: zero/negative/NaN revenue returns null', () => {
@@ -83,16 +87,17 @@ test('computeOrderProfit: cost > revenue yields a negative profit (loss)', () =>
 
 // ─── computeProfitability (per-product, retail_price is incl-GST) ────────────
 
-test('computeProfitability: $63.49 incl-GST retail, $34.95 cost → ~$18.59 profit', () => {
-  // priceExGst    = 63.49 / 1.15          = 55.2087
-  // stripeFeeExGst= (63.49 × 0.029) / 1.15= 1.6011
-  // profit        = 55.2087 − 34.95 − 1.6011 = 18.6576
-  // margin        = 18.6576 / 55.2087 × 100 ≈ 33.79%
-  // markup        = 18.6576 / 34.95 × 100   ≈ 53.38%
+test('computeProfitability: $63.49 incl-GST retail, $34.95 cost ex-GST → ~$13.18 profit', () => {
+  // priceExGst  = 63.49 / 1.15         = 55.2087
+  // costInclGst = 34.95 × 1.15         = 40.1925
+  // stripeFee   = 63.49 × 0.029        =  1.8412 (gross)
+  // profit      = 55.2087 − 40.1925 − 1.8412 ≈ 13.175
+  // margin      = 13.175 / 55.2087 × 100 ≈ 23.86%   (share of ex-GST revenue)
+  // markup      = 13.175 / 34.95   × 100 ≈ 37.70%   (share of supplier cost ex-GST)
   const r = sandbox.computeProfitability({ retail_price: 63.49, cost_price: 34.95 });
-  assert.ok(Math.abs(r.profitDollars - 18.6576) < 0.01, `profit: ${r.profitDollars}`);
-  assert.ok(r.marginPct > 33 && r.marginPct < 35, `margin: ${r.marginPct}`);
-  assert.ok(r.markupPct > 52 && r.markupPct < 55, `markup: ${r.markupPct}`);
+  assert.ok(Math.abs(r.profitDollars - 13.175) < 0.01, `profit: ${r.profitDollars}`);
+  assert.ok(r.marginPct > 23 && r.marginPct < 25, `margin: ${r.marginPct}`);
+  assert.ok(r.markupPct > 36 && r.markupPct < 39, `markup: ${r.markupPct}`);
 });
 
 test('computeProfitability: missing/invalid inputs return all-null shape', () => {

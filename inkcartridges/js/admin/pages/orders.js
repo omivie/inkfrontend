@@ -264,7 +264,7 @@ function buildOrderModalContent(modal, o, events, breakdown) {
   // Meta grid
   let metaLeft = omRow('Customer', esc(custName));
   metaLeft += omRow('Email', esc(custEmail));
-  if (orderTotal != null) metaLeft += omRow('Total', `<strong>${formatPrice(orderTotal)}</strong>`);
+  if (orderTotal != null) metaLeft += omRow('Total <span class="admin-text-muted" style="font-weight:400">(incl. GST)</span>', `<strong>${formatPrice(orderTotal)}</strong>`);
   if (o.shipping_fee != null) metaLeft += omRow('Shipping', formatPrice(o.shipping_fee));
   if (o.shipping_tier) metaLeft += omRow('Tier', esc(o.shipping_tier));
   if (o.delivery_zone) metaLeft += omRow('Zone', esc(o.delivery_zone));
@@ -303,8 +303,8 @@ function buildOrderModalContent(modal, o, events, breakdown) {
   let itemsHtml = '';
   if (o.items?.length) {
     itemsHtml += `<table class="admin-order-items"><thead><tr>`;
-    itemsHtml += `<th>Product</th><th>SKU</th><th>Qty</th><th>Price</th>`;
-    if (showCost) itemsHtml += `<th>Cost</th><th>Profit</th>`;
+    itemsHtml += `<th>Product</th><th>SKU</th><th>Qty</th><th>Price <span class="admin-text-muted" style="font-weight:400">(excl. GST)</span></th>`;
+    if (showCost) itemsHtml += `<th>Cost <span class="admin-text-muted" style="font-weight:400">(excl. GST)</span></th><th>Profit <span class="admin-text-muted" style="font-weight:400">(net)</span></th>`;
     itemsHtml += `</tr></thead><tbody>`;
     let totalPrice = 0, totalCost = 0;
     for (const item of o.items) {
@@ -334,7 +334,7 @@ function buildOrderModalContent(modal, o, events, breakdown) {
     itemsHtml += `</tbody><tfoot><tr class="admin-order-items__total">
       <td colspan="3"></td>
       <td class="mono"><strong>${formatPrice(totalPrice)}</strong></td>
-      ${showCost ? `<td class="mono"><strong>${formatPrice(totalCost)}</strong></td><td class="mono" style="color:var(--success-text,#15803d)" title="Net profit after GST and Stripe (2.9% + $0.30)"><strong>${profit != null ? formatPrice(profit) : MISSING}</strong></td>` : ''}
+      ${showCost ? `<td class="mono"><strong>${formatPrice(totalCost)}</strong></td><td class="mono" style="color:var(--success-text,#15803d)" title="Net profit: ex-GST revenue minus cost (incl. GST) minus Stripe fee gross (2.9% + $0.30)"><strong>${profit != null ? formatPrice(profit) : MISSING}</strong></td>` : ''}
     </tr></tfoot></table>`;
   } else {
     itemsHtml += `<p class="admin-text-muted">${MISSING} No items</p>`;
