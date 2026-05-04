@@ -1906,6 +1906,121 @@ const AdminAPI = {
     if (resp && resp.ok === false) throw new Error(resp.error?.message || resp.error || 'Save failed');
     return resp?.data ?? null;
   },
+
+  // =========================================================================
+  // Admin — Control Center (May 2026 spec, src/routes/adminControlCenter.js)
+  // 11 endpoints: super_admin only. See readfirst/control-center-may2026.md.
+  //
+  // Convention:
+  //   - Read methods swallow errors and return null (toast on failure) so
+  //     dashboards stay rendered even if one tile is down.
+  //   - Write methods throw with a structured error so the caller can map
+  //     413 / 422 / 429 to inline UX (see ccErrorToast helper below).
+  // =========================================================================
+  controlCenter: {
+    async healthSummary(signal = null) {
+      try {
+        const resp = await window.API.get('/api/admin/health/summary', { signal });
+        return resp?.data ?? null;
+      } catch (e) { adminApiWarn('Load health summary', e); return null; }
+    },
+
+    async simulatePricing(payload) {
+      const resp = await window.API.post('/api/admin/pricing/simulate', payload);
+      if (resp && resp.ok === false) {
+        const err = new Error(resp.error?.message || resp.error || 'Simulate failed');
+        err.code = resp.error?.code; err.details = resp.error?.details;
+        throw err;
+      }
+      return resp?.data ?? null;
+    },
+
+    async getTierMultipliers() {
+      try {
+        const resp = await window.API.get('/api/admin/pricing/tier-multipliers');
+        return resp?.data ?? null;
+      } catch (e) { adminApiWarn('Load tier multipliers', e); return null; }
+    },
+
+    async getPackHealth(skuOrId) {
+      try {
+        const resp = await window.API.get(`/api/admin/packs/${encodeURIComponent(skuOrId)}/health`);
+        return resp?.data ?? null;
+      } catch (e) { adminApiWarn('Load pack health', e); return null; }
+    },
+
+    async getPackHealthList({ source, filter = 'both', page = 1, limit = 50 } = {}) {
+      try {
+        const p = new URLSearchParams();
+        if (source) p.set('source', source);
+        if (filter) p.set('filter', filter);
+        p.set('page', String(page));
+        p.set('limit', String(Math.min(Number(limit) || 50, 200)));
+        const resp = await window.API.get(`/api/admin/packs/health/list?${p}`);
+        return resp ?? null; // keep envelope so caller sees meta
+      } catch (e) { adminApiWarn('Load pack health list', e); return null; }
+    },
+
+    async bulkPackAction({ pack_ids, action, dry_run = true, reason }) {
+      const resp = await window.API.post('/api/admin/packs/bulk-action', {
+        pack_ids, action, dry_run, ...(reason ? { reason } : {}),
+      });
+      if (resp && resp.ok === false) {
+        const err = new Error(resp.error?.message || resp.error || 'Bulk action failed');
+        err.code = resp.error?.code; err.details = resp.error?.details;
+        throw err;
+      }
+      return resp?.data ?? null;
+    },
+
+    async getOrphans() {
+      try {
+        const resp = await window.API.get('/api/admin/compat/orphans');
+        return resp?.data ?? null;
+      } catch (e) { adminApiWarn('Load compat orphans', e); return null; }
+    },
+
+    async getSlugHealth() {
+      try {
+        const resp = await window.API.get('/api/admin/seo/slug-health');
+        return resp?.data ?? null;
+      } catch (e) { adminApiWarn('Load slug health', e); return null; }
+    },
+
+    async previewSlugRename({ product_id, new_slug }) {
+      const resp = await window.API.post('/api/admin/seo/slug-rename-preview', { product_id, new_slug });
+      // Preview can return ok:false with a *reason* — that's not an error,
+      // it's the spec's way of reporting conflicts. Return the body verbatim
+      // so the SlugRenameSheet can branch on resp.reason.
+      return resp ?? null;
+    },
+
+    async commitSlugRename({ product_id, new_slug, reason }) {
+      const resp = await window.API.post('/api/admin/seo/slug-rename', {
+        product_id, new_slug, confirm: true, ...(reason ? { reason } : {}),
+      });
+      if (resp && resp.ok === false) {
+        const err = new Error(resp.error?.message || resp.error || resp.reason || 'Rename failed');
+        err.code = resp.error?.code || resp.reason; err.details = resp.error?.details;
+        throw err;
+      }
+      return resp?.data ?? resp ?? null;
+    },
+
+    async getPrerenderHealth() {
+      try {
+        const resp = await window.API.get('/api/admin/infra/prerender-health');
+        return resp?.data ?? null;
+      } catch (e) { adminApiWarn('Load prerender health', e); return null; }
+    },
+
+    async getImagePipeline() {
+      try {
+        const resp = await window.API.get('/api/admin/infra/image-pipeline');
+        return resp?.data ?? null;
+      } catch (e) { adminApiWarn('Load image pipeline health', e); return null; }
+    },
+  },
 };
 
 // ---- Supabase REST table helper (PostgREST) ----
