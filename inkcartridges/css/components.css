@@ -669,11 +669,12 @@
     line-height: var(--line-height-tight);
     color: var(--color-text);
     margin: 0;
-    /* 2-line clamp (was 3) so cards reserve ~32px instead of ~48px for the
-       title row. Hover-expand is intentionally not added here — keeps the
-       grid stable. The `title` attr on the <h3> covers truncation tooltips. */
+    /* 3-line clamp so long product names ("Compatible Ink Cartridge
+       Replacement for Epson …") show enough text to identify the SKU
+       at a glance. The `title` attr on the <h3> still covers any
+       remaining overflow tooltip. */
     display: -webkit-box;
-    -webkit-line-clamp: 2;
+    -webkit-line-clamp: 3;
     -webkit-box-orient: vertical;
     overflow: hidden;
 }
@@ -1344,7 +1345,7 @@
     font-weight: 500;
     line-height: 1.3;
     display: -webkit-box;
-    -webkit-line-clamp: 2;
+    -webkit-line-clamp: 3;
     -webkit-box-orient: vertical;
     overflow: hidden;
 }
@@ -3219,7 +3220,7 @@
     color: var(--color-text-heading);
     margin: 0 0 var(--spacing-1);
     display: -webkit-box;
-    -webkit-line-clamp: 2;
+    -webkit-line-clamp: 3;
     -webkit-box-orient: vertical;
     overflow: hidden;
 }

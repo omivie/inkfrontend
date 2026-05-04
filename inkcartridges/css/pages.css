@@ -6422,7 +6422,7 @@
     font-weight: var(--font-weight-semibold);
     color: var(--color-text);
     display: -webkit-box;
-    -webkit-line-clamp: 2;
+    -webkit-line-clamp: 3;
     -webkit-box-orient: vertical;
     overflow: hidden;
     line-height: 1.3;
@@ -8504,7 +8504,7 @@
     margin: var(--spacing-xs) 0;
     line-height: 1.3;
     display: -webkit-box;
-    -webkit-line-clamp: 2;
+    -webkit-line-clamp: 3;
     -webkit-box-orient: vertical;
     overflow: hidden;
 }
@@ -10120,11 +10120,13 @@
     color: var(--color-text);
     margin: 0;
     line-height: 1.3;
-    /* Clamp to 2 lines (was 3). Reserves ~32px instead of ~48px while
-       still aligning consistently across cards in the same row. */
-    min-height: calc(var(--font-size-xs) * 1.3 * 2);
+    /* Clamp to 3 lines so long generic names ("Compatible Ink Cartridge
+       Replacement for Epson …") show enough text to identify which
+       cartridge the card represents. Reserves ~48px and keeps cards
+       in the same row aligned. */
+    min-height: calc(var(--font-size-xs) * 1.3 * 3);
     display: -webkit-box;
-    -webkit-line-clamp: 2;
+    -webkit-line-clamp: 3;
     -webkit-box-orient: vertical;
     overflow: hidden;
 }
