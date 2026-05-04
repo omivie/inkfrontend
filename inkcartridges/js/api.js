@@ -1977,10 +1977,10 @@ function calculateGST(inclusiveAmount) {
 function getStockStatus(product) {
     // Use stock_status from API if available (in_stock / contact_us / out_of_stock)
     if (product.stock_status === 'contact_us') {
-        return { class: 'contact-us', text: 'Contact Us for Stock Inquiry', icon: 'phone' };
+        return { class: 'contact-us', text: 'Contact Us', icon: 'phone' };
     }
     if (product.stock_status === 'out_of_stock') {
-        return { class: 'contact-us', text: 'Contact Us for Stock Inquiry', icon: 'phone' };
+        return { class: 'contact-us', text: 'Contact Us', icon: 'phone' };
     }
     if (product.stock_status === 'in_stock') {
         return { class: 'in-stock', text: 'In Stock', icon: 'check-circle' };
@@ -1988,7 +1988,7 @@ function getStockStatus(product) {
     // Fallback for endpoints that don't return stock_status (listing, search)
     const inStock = product.in_stock !== undefined ? product.in_stock : (product.stock_quantity > 0);
     if (!inStock) {
-        return { class: 'contact-us', text: 'Contact Us for Stock Inquiry', icon: 'phone' };
+        return { class: 'contact-us', text: 'Contact Us', icon: 'phone' };
     }
     return { class: 'in-stock', text: 'In Stock', icon: 'check-circle' };
 }

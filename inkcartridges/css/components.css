@@ -540,7 +540,10 @@
 }
 
 .product-card__image-wrapper {
-    aspect-ratio: 1;
+    /* 4:3 keeps the cartridge box clearly visible while shaving ~25% off
+       the card height vs. the prior 1:1 — the dominant single fix for
+       all the empty space that used to sit between content and footer. */
+    aspect-ratio: 4 / 3;
     background-color: var(--off-white);
     position: relative;
     display: flex;
@@ -643,7 +646,9 @@
 }
 
 .product-card__content {
-    padding: var(--spacing-4);
+    /* Tighter padding (was --spacing-4 = 16px) — combined with the 4:3 image
+       this trims ~10px per card edge while keeping a clean breathing room. */
+    padding: var(--spacing-3);
     display: flex;
     flex-direction: column;
     gap: var(--spacing-1);
@@ -664,8 +669,11 @@
     line-height: var(--line-height-tight);
     color: var(--color-text);
     margin: 0;
+    /* 2-line clamp (was 3) so cards reserve ~32px instead of ~48px for the
+       title row. Hover-expand is intentionally not added here — keeps the
+       grid stable. The `title` attr on the <h3> covers truncation tooltips. */
     display: -webkit-box;
-    -webkit-line-clamp: 3;
+    -webkit-line-clamp: 2;
     -webkit-box-orient: vertical;
     overflow: hidden;
 }
@@ -726,20 +734,39 @@
     font-weight: 600;
 }
 
-/* Prominent stock banner for contact-us products */
+/* Stock banner for contact-us products — overlay on the image (bottom strip)
+   instead of a multi-line content block that pushed the row height up. */
 .product-card__stock-banner {
+    position: absolute;
+    bottom: 6px;
+    left: 6px;
+    right: 6px;
+    z-index: 4;
     display: block;
-    font-size: 0.75rem;
-    font-weight: 600;
-    padding: 4px 8px;
+    font-size: 0.62rem;
+    font-weight: 700;
+    padding: 3px 6px;
     border-radius: 4px;
     text-align: center;
-    margin-top: 2px;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    pointer-events: none;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
 }
 
 .product-card__stock-banner--contact-us {
     color: var(--color-success, #16a34a);
-    background: rgba(22, 163, 74, 0.08);
+    background: rgba(255, 255, 255, 0.95);
+}
+
+/* When a product is both discounted AND contact-us, the bottom-right savings
+   pill would otherwise sit on top of the full-width stock banner. Lift it
+   above the banner so both stay readable. Same logic applies when both
+   FREE SHIPPING (bottom-left) and Save $X (bottom-right) are present on
+   narrow cards — they collide horizontally at <140px content width. */
+.product-card__image-wrapper:has(.product-card__stock-banner) .product-card__savings,
+.product-card__image-wrapper:has(.product-card__free-shipping) .product-card__savings {
+    bottom: 30px;
 }
 
 /* Contact button in product card */
@@ -1208,10 +1235,26 @@
     font-size: 0.85em;
 }
 
+/* "Save $X (Y%)" — overlay on the bottom-right of the product image so it
+   sits opposite the FREE-SHIPPING badge and clear of top-corner ribbons
+   (Value Pack, Multipack, Lowest Price, Fits Your Printer). Replaces the
+   legacy in-content row that contributed to the empty middle space. */
 .product-card__savings {
-    color: var(--color-success, #22c55e);
-    font-weight: 600;
-    font-size: 0.85em;
+    position: absolute;
+    bottom: 6px;
+    right: 6px;
+    z-index: 4;
+    color: #fff;
+    background: var(--color-success, #16a34a);
+    font-weight: 700;
+    font-size: 0.62rem;
+    letter-spacing: 0.02em;
+    padding: 3px 7px;
+    border-radius: 4px;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.15);
+    pointer-events: none;
+    text-transform: none;
+    line-height: 1.3;
 }
 
 .product-card__price-block {

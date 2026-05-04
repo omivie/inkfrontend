@@ -3079,16 +3079,24 @@
     font-size: var(--font-size-xs, 0.75rem);
 }
 
+/* FREE SHIPPING badge — overlay on the bottom-left of the product image
+   (was a content-row block that took ~25px of vertical content space). */
 .product-card__free-shipping {
+    position: absolute;
+    bottom: 6px;
+    left: 6px;
+    z-index: 4;
     display: inline-block;
-    font-size: 0.7rem;
-    font-weight: 600;
-    color: #059669;
-    background: #ecfdf5;
-    padding: 2px 8px;
+    font-size: 0.62rem;
+    font-weight: 700;
+    color: #047857;
+    background: rgba(255, 255, 255, 0.94);
+    padding: 3px 7px;
     border-radius: 4px;
-    margin-top: 4px;
-    letter-spacing: 0.02em;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+    pointer-events: none;
 }
 
 /* Bought Together Section */
@@ -10041,7 +10049,9 @@
 }
 
 .product-card__image-wrapper {
-    aspect-ratio: 1 / 1;
+    /* 4:3 — see components.css comment. Saves ~44px per card on the shop
+       grid (181px-wide cards) without cropping any cartridge image. */
+    aspect-ratio: 4 / 3;
     background: var(--color-background-alt);
     display: flex;
     align-items: center;
@@ -10093,11 +10103,12 @@
 }
 
 .product-card__content {
-    padding: 2px var(--spacing-sm) 2px;
-    padding-right: 0;
+    /* Balanced horizontal padding (was right:0 — looked off-centre).
+       Vertical padding kept tight so the image sits right above content. */
+    padding: 8px 10px 10px;
     display: flex;
     flex-direction: column;
-    gap: 1px;
+    gap: 4px;
     flex-grow: 1;
 }
 
@@ -10111,9 +10122,11 @@
     color: var(--color-text);
     margin: 0;
     line-height: 1.3;
-    min-height: calc(var(--font-size-xs) * 1.3 * 3);
+    /* Clamp to 2 lines (was 3). Reserves ~32px instead of ~48px while
+       still aligning consistently across cards in the same row. */
+    min-height: calc(var(--font-size-xs) * 1.3 * 2);
     display: -webkit-box;
-    -webkit-line-clamp: 3;
+    -webkit-line-clamp: 2;
     -webkit-box-orient: vertical;
     overflow: hidden;
 }
@@ -10326,9 +10339,9 @@
         max-width: 170px;
     }
 
-    .product-card__image-wrapper {
-        max-height: 100px;
-    }
+    /* max-height intentionally not set — the 4:3 aspect-ratio on the
+       image-wrapper handles vertical sizing automatically and stays
+       proportional at any card width. */
 }
 
 @media (max-width: 480px) {
@@ -10430,17 +10443,19 @@
     }
 
     .product-card {
-        flex: 0 0 calc(33.33% - var(--spacing-xs));
-        min-width: 100px;
-        max-width: 140px;
+        /* 2 cards per row on phones. The row's gap is var(--spacing-sm)
+           (8px); each card subtracts half the gap from its 50% width. */
+        flex: 0 0 calc(50% - var(--spacing-sm) / 2);
+        min-width: 0;
+        max-width: none;
     }
 
-    .product-card__image-wrapper {
-        max-height: 80px;
-    }
+    /* max-height intentionally not set — see 768px-rule note. The 4:3
+       aspect ratio gives ~110px-tall images on ~145px-wide cards on phones,
+       which keeps two cards comfortably side-by-side. */
 
     .product-card__content {
-        padding: var(--spacing-xs);
+        padding: 8px;
     }
 
     .product-card__title {
@@ -10650,8 +10665,14 @@
     }
 
     /* The desktop product-card has max-width: 185px which leaves grid tracks
-       half-empty on phones. Let the card stretch to fill its grid track. */
-    .product-card {
+       half-empty on phones. Inside *grid* parents (shop-section-card,
+       related-products), let the card stretch to fill its track. Do NOT
+       apply this to flex-row parents like .products-row — that would
+       collapse them to a single column on mobile. */
+    .shop-section-card .product-card,
+    .related-products__grid .product-card,
+    .ribbon-products-grid .product-card,
+    .product-grid .product-card {
         max-width: none;
         min-width: 0;
         width: 100%;
