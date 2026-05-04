@@ -129,6 +129,9 @@ const Favourites = {
                     brand: product.brand || '',
                     color: product.color || '',
                     color_hex: product.color_hex || null,
+                    // Brand source feeds the COMPATIBLE/GENUINE badge in the
+                    // favourites list and the cart it later pushes to.
+                    product_source: product.source || product.product_source || null,
                     addedAt: response.data.added_at || new Date().toISOString()
                 });
                 this.updateUI();
@@ -372,7 +375,7 @@ const Favourites = {
                         ${this.getItemImageHTML(item)}
                     </div>
                     <div class="favourite-item__info">
-                        <span class="source-badge source-badge--${item.source === 'compatible' || (item.name || '').toLowerCase().includes('compatible') ? 'compatible' : 'genuine'}">${item.source === 'compatible' || (item.name || '').toLowerCase().includes('compatible') ? 'COMPATIBLE' : 'GENUINE'}</span>
+                        <span class="source-badge source-badge--${Cart._isCompatible(item) ? 'compatible' : 'genuine'}">${Cart._isCompatible(item) ? 'COMPATIBLE' : 'GENUINE'}</span>
                         <h3 class="favourite-item__name">${Security.escapeHtml(item.name)}</h3>
                         ${item.brand ? `<p class="favourite-item__brand">${Security.escapeHtml(item.brand)}</p>` : ''}
                         ${(item.color || (typeof ProductColors !== 'undefined' ? ProductColors.detectFromName(item.name) : '')) ? `<p class="favourite-item__color">${Security.escapeHtml(item.color || ProductColors.detectFromName(item.name))}</p>` : ''}
@@ -387,6 +390,7 @@ const Favourites = {
                             data-product-price="${Security.escapeAttr(item.price)}"
                             data-product-image="${Security.escapeAttr(item.image)}"
                             data-product-brand="${Security.escapeAttr(item.brand)}"
+                            data-product-source="${Security.escapeAttr(item.product_source || '')}"
                             >
                         Add to Cart
                     </button>
@@ -421,7 +425,8 @@ const Favourites = {
                         name: btn.dataset.productName,
                         price: parseFloat(btn.dataset.productPrice),
                         image: btn.dataset.productImage,
-                        brand: btn.dataset.productBrand
+                        brand: btn.dataset.productBrand,
+                        product_source: btn.dataset.productSource || null
                     };
 
                     await Cart.addItem(product);

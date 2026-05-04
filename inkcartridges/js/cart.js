@@ -73,6 +73,28 @@ const Cart = {
     },
 
     /**
+     * Decide whether a stored cart/favourites/checkout item is a Compatible
+     * product. Reads `product_source` first (the field added by addItem in
+     * the May 2026 catalog overhaul cleanup), falls back to `source` only
+     * when it carries a brand-source value (i.e. not the cart-namespace
+     * sentinels 'core' / 'cross-sell'), and finally — for legacy localStorage
+     * rows that predate the field — looks at the leading "Compatible" word
+     * of the stored name. The name fallback is constrained to leading word
+     * to dodge accidental matches in description text and is the only
+     * survival path for carts saved before this field existed.
+     */
+    _isCompatible: function(item) {
+        if (!item) return false;
+        if (item.product_source === 'compatible') return true;
+        if (item.product_source) return false; // explicit non-compatible
+        if (item.source && !['core', 'cross-sell'].includes(item.source)) {
+            return item.source === 'compatible';
+        }
+        // Legacy stored row — last-resort check on the persisted name.
+        return /^compatible\b/i.test(item.name || '');
+    },
+
+    /**
      * Get color style for a product color (delegates to shared ProductColors in utils.js)
      */
     getColorStyle: function(colorName) {
@@ -718,7 +740,11 @@ const Cart = {
                     name: btn.dataset.productName,
                     price: parseFloat(btn.dataset.productPrice) || 0,
                     image: btn.dataset.productImage || '',
-                    source: btn.dataset.productSource || 'core'
+                    // Subsystem namespace (core / cross-sell / …)
+                    source: btn.dataset.productSubsystem || 'core',
+                    // Brand source (genuine / compatible / remanufactured) for the
+                    // COMPATIBLE/GENUINE badge — not used in the composite key.
+                    product_source: btn.dataset.productSource || null
                 };
 
                 if (productData.id) {
@@ -1026,8 +1052,24 @@ const Cart = {
         // Snapshot for rollback
         const previousItems = JSON.parse(JSON.stringify(this.items));
 
-        // Determine source and compute composite key
+        // The cart's `source` field is a SUBSYSTEM namespace — it tags where
+        // the row was added from ('core' for the main catalog, 'cross-sell'
+        // for upsell strips, etc.) and is part of the composite key so the
+        // same SKU can live in both buckets. It is NOT the product's genuine/
+        // compatible classification.
+        //
+        // For the COMPATIBLE/GENUINE badge we capture `product_source`
+        // separately. May 2026 catalog overhaul (api-changes-may2026.md §2)
+        // changed the compatible name format and asked us to stop parsing
+        // names — `product_source` lets the cart, favourites, and checkout
+        // render the badge from a real signal instead of `name.includes
+        // ('compatible')`. Falls through `product.product_source` first for
+        // explicit callers; otherwise treats `product.source` as the brand
+        // source when it's a known catalog value (i.e. not the cart-namespace
+        // sentinels 'core' / 'cross-sell').
         const source = product.source || 'core';
+        const productSource = product.product_source
+            || (product.source && !['core', 'cross-sell'].includes(product.source) ? product.source : null);
         const key = this.cartItemKey({ source: source, sku: product.sku, slug: product.slug, id: product.id });
         const isCore = source === 'core';
 
@@ -1038,6 +1080,10 @@ const Cart = {
 
         if (existingItem) {
             existingItem.quantity += product.quantity || 1;
+            // Backfill product_source on legacy rows once we learn it
+            if (productSource && !existingItem.product_source) {
+                existingItem.product_source = productSource;
+            }
         } else {
             this.items.push({
                 id: product.id,
@@ -1050,6 +1096,7 @@ const Cart = {
                 color_hex: product.color_hex || null,
                 quantity: product.quantity || 1,
                 source: source,
+                product_source: productSource,
                 key: key,
                 slug: product.slug || ''
             });
@@ -1194,6 +1241,7 @@ const Cart = {
                         data-product-price="${Security.escapeAttr(p.retail_price != null ? p.retail_price : '')}"
                         data-product-image="${Security.escapeAttr(img || '')}"
                         data-product-color="${Security.escapeAttr(p.color || '')}"
+                        data-product-source="${Security.escapeAttr(p.source || '')}"
                         ${p.in_stock === false ? 'disabled' : ''}>
                         ${p.in_stock === false ? 'Out of stock' : 'Add to cart'}
                     </button>
@@ -1600,7 +1648,7 @@ const Cart = {
                             ' + self.getItemImageHTML(item) + '\
                         </div>\
                         <div class="cart-item__details">\
-                            <span class="source-badge source-badge--' + (item.source === 'compatible' || (item.name || '').toLowerCase().includes('compatible') ? 'compatible' : 'genuine') + '">' + (item.source === 'compatible' || (item.name || '').toLowerCase().includes('compatible') ? 'COMPATIBLE' : 'GENUINE') + '</span>\
+                            <span class="source-badge source-badge--' + (Cart._isCompatible(item) ? 'compatible' : 'genuine') + '">' + (Cart._isCompatible(item) ? 'COMPATIBLE' : 'GENUINE') + '</span>\
                             <h3 class="cart-item__name">\
                                 <a href="' + productLink + '">' + escapedName + '</a>\
                             </h3>\

@@ -163,8 +163,12 @@
             const name = p.name || '';
             const category = this.normalizeProductType(p.product_type) || this.normalizeCategory(p.category) || this.detectCategory(name);
             const isRibbonProduct = category === 'ribbon';
-            const nameLower = name.toLowerCase();
-            const isCompatible = !isRibbonProduct && (p.source === 'compatible' || nameLower.includes('compatible'));
+            // Trust `p.source`. The legacy `name.includes('compatible')`
+            // fallback was for a pre-source-field data shape that no longer
+            // exists, and it would now overmatch on the May 2026 compatible
+            // name format ("Compatible <Type> Cartridge Replacement for ...")
+            // rather than disambiguating anything new.
+            const isCompatible = !isRibbonProduct && p.source === 'compatible';
             const displayName = name;
             const brandName = p.brand?.name || (typeof p.brand === 'string' ? p.brand : null) || this.extractBrand(name) || 'Unknown';
             const pageYield = p.page_yield || p.yield || null;
@@ -246,9 +250,26 @@
         },
 
         /**
-         * Extract the primary product code (e.g., "LC37") from product name/MPN
+         * Resolve the primary product code (e.g. "LC37") for "related products".
+         *
+         * Preferred source: `info.series_codes` — the backend's `extractSeriesCodes`
+         * output, shipped on /api/shop and /api/products/:sku since the May
+         * 2026 catalog overhaul. Trust it; the same regex set lives backend-side.
+         *
+         * Fallbacks (legacy responses + the new compatible name format that puts
+         * the type words BEFORE the brand): manufacturer_part_number, then a
+         * brand-specific regex over the name with the leading marketing prefix
+         * (`Compatible Ink Cartridge Replacement for <Brand>` or `<Brand>
+         * Genuine`) stripped so the regex anchors on the model number, not
+         * the boilerplate.
          */
         extractProductCode(info) {
+            // Backend-supplied — trust it.
+            if (Array.isArray(info.series_codes) && info.series_codes.length) {
+                const first = String(info.series_codes[0] || '').trim();
+                if (first) return first.replace(/-/g, '').toUpperCase();
+            }
+
             const brand = (info.brandName || '').toLowerCase();
             const patterns = {
                 brother: /\b(LC[-]?\d{2,5}(?:XL)?|TN[-]?\d{3,4}|DR[-]?\d{3,4})\b/i,
@@ -265,8 +286,15 @@
             const pattern = patterns[brand] || patterns[brand.replace(/[\s-]/g, '')] ||
                 /\b[A-Z]{1,3}[-]?\d{2,4}(?:XL)?\b/i;
 
-            // Try manufacturer_part_number first, then product name (without brand prefix)
-            const nameWithoutPrefix = (info.name || '').replace(/^(Compatible\s+)?/i, '').replace(new RegExp('^' + info.brandName + '\\s+', 'i'), '');
+            // Strip the marketing prefix so the brand regex anchors on the
+            // model code. The May 2026 compatible name format is
+            // `Compatible <Type> Cartridge Replacement for <Brand> <Codes> <Color>`,
+            // so we strip "Compatible <words> for <Brand>" as well as the
+            // legacy "<Brand>" leading variant.
+            const nameWithoutPrefix = (info.name || '')
+                .replace(/^Compatible\s+[A-Za-z\s]+?\s+for\s+/i, '')
+                .replace(/^Compatible\s+/i, '')
+                .replace(new RegExp('^' + info.brandName + '\\s+(?:Genuine\\s+)?', 'i'), '');
             const sources = [info.manufacturer_part_number, nameWithoutPrefix, info.name];
 
             for (const source of sources) {
@@ -914,27 +942,12 @@
             }
         },
 
-        _sortByColor(products) {
-            const packOrder = { single: 0, value_pack: 1, multipack: 2 };
-            const colorOrder = { black: 0, 'photo black': 1, cyan: 2, 'light cyan': 3, magenta: 4, 'light magenta': 5, yellow: 6, cmy: 7, kcmy: 8, cmyk: 9 };
-            const sizeOrder = (name) => {
-                const n = (name || '').toLowerCase();
-                if (n.includes('xxl') || n.includes('super high')) return 2;
-                if (n.includes('xl') || n.includes('high yield') || /\bhy\b/.test(n)) return 1;
-                return 0;
-            };
-            return [...products].sort((a, b) => {
-                const pa = packOrder[a.pack_type] ?? 0;
-                const pb = packOrder[b.pack_type] ?? 0;
-                if (pa !== pb) return pa - pb;
-                const sa = sizeOrder(a.name);
-                const sb = sizeOrder(b.name);
-                if (sa !== sb) return sa - sb;
-                const ca = colorOrder[(a.color || '').toLowerCase()] ?? 99;
-                const cb = colorOrder[(b.color || '').toLowerCase()] ?? 99;
-                return ca - cb;
-            });
-        },
+        // _sortByColor was removed in the May 2026 catalog overhaul. Every
+        // product-list endpoint now applies sortByCatalogOrder server-side
+        // (see api-changes-may2026.md §1) — the client cannot replicate the
+        // (accessoryTier, yieldTier, seriesBase, colorOrder, packRank, name)
+        // hierarchy without shipping the same regex set as the backend, so
+        // any client resort here is by definition wrong. Render in API order.
 
         async renderRelatedProducts(info) {
             try {
@@ -1020,21 +1033,22 @@
                     await Promise.all(lookups);
                 }
 
-                // Infer source from available fields
-                const inferSource = (p) => {
-                    if (p.source) return p.source;
-                    const name = (p.name || '').toLowerCase();
-                    const slug = (p.slug || '').toLowerCase();
-                    const sku = (p.sku || '').toLowerCase();
-                    if (name.startsWith('compatible') || slug.startsWith('compatible-') || sku.startsWith('comp-')) return 'compatible';
-                    if (name.startsWith('genuine') || slug.startsWith('genuine-') || sku.startsWith('g-') || sku.startsWith('gen-')) return 'genuine';
-                    // Default: assume same source as the current product
-                    return info.source || 'genuine';
-                };
+                // Trust `product.source` — the canonical backend field. The May
+                // 2026 catalog overhaul changed the compatible-name format to
+                // `Compatible <Type> Cartridge Replacement for <Brand> <Codes>
+                // <Color>`, which means a name-based fallback (`startsWith
+                // ('compatible')`) would still pass for compatibles but is
+                // explicitly deprecated by the backend team — they want one
+                // source of truth, the `source` field. If a row arrives without
+                // it, fall through to the current product's source as a tie-
+                // breaker rather than parsing the name.
+                const inferSource = (p) => p.source || info.source || 'genuine';
 
                 const isCompatible = info.source === 'compatible';
-                const compatibles = this._sortByColor(related.filter(p => inferSource(p) === 'compatible'));
-                const genuines    = this._sortByColor(related.filter(p => inferSource(p) !== 'compatible'));
+                // Server-side sort (May 2026 sortByCatalogOrder) is applied by
+                // /api/shop, the only feeder for `related`. Render in API order.
+                const compatibles = related.filter(p => inferSource(p) === 'compatible');
+                const genuines    = related.filter(p => inferSource(p) !== 'compatible');
 
                 const firstGroup  = isCompatible ? compatibles : genuines;
                 const secondGroup = isCompatible ? genuines    : compatibles;
@@ -1091,10 +1105,14 @@
                 const container = section.querySelector('.container');
 
                 if (info.category === 'ribbon') {
-                    // Ribbons: render into right column of two-column layout
+                    // Ribbons: render into right column of two-column layout.
+                    // `related` for ribbons is either the manually-curated
+                    // related_product_skus (preserved in user-supplied order)
+                    // or /api/shop output (server-sorted). Either way, render
+                    // in source order — no client resort.
                     const brandName = Security.escapeHtml((info.brandName || '').trim());
                     const heading = `${brandName} Ribbons`.trim();
-                    const sorted = this._sortByColor(related);
+                    const sorted = related;
                     const rightCol = document.getElementById('ribbon-col-right');
 
                     let relatedHtml = '';
@@ -1198,7 +1216,8 @@
                         sku: info.sku || '',
                         image: info.image_url || '',
                         brand: info.brandName || '',
-                        quantity: qty
+                        quantity: qty,
+                        product_source: info.source || null
                     });
                     btn.textContent = 'Added!';
                     setTimeout(() => {

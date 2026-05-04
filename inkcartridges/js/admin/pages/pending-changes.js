@@ -374,7 +374,13 @@ function renderTabs() {
   if (!wrap) return;
   const pendingActive = _filters.status === 'pending' ? ' pc-tab--active' : '';
   const deniedActive = _filters.status === 'rejected' ? ' pc-tab--active' : '';
-  const pendingCount = _summary?.by_status?.pending ?? _summary?.pending_total ?? null;
+  // Pending tab includes `partial` rows (api-changes-may2026.md §6):
+  // bulk-approve can land a row in `status='partial'` when some fields were
+  // approved and others (genuine `image_url`) rejected — those still need
+  // admin attention and should counted+rendered on the Pending tab.
+  const pendingBase = _summary?.by_status?.pending ?? _summary?.pending_total ?? null;
+  const partialBase = _summary?.by_status?.partial ?? 0;
+  const pendingCount = pendingBase == null ? null : (Number(pendingBase) + Number(partialBase || 0));
   const deniedCount = _summary?.by_status?.rejected ?? null;
   const fmtCount = (c) => c == null ? '' : `<span class="pc-tab__count">${Number(c).toLocaleString('en-NZ')}</span>`;
   wrap.innerHTML = `
@@ -774,7 +780,7 @@ async function reviewField(id, field, decision, note, btn) {
     const result = await AdminAPI.reviewPendingChange(id, decisions, note);
     if (result) Object.assign(item, result);
     Toast.success(`${field}: ${decision}`);
-    if (item.status !== _filters.status) {
+    if (!_belongsInCurrentTab(item)) {
       _rawItems = _rawItems.filter(i => i.id !== id);
     }
     applyClientFilters();
@@ -786,6 +792,18 @@ async function reviewField(id, field, decision, note, btn) {
     btn.disabled = false;
     btn.textContent = decision === 'approved' ? 'Approve' : 'Reject';
   }
+}
+
+// Whether a row should remain visible on the currently-selected tab.
+// Pending tab covers `pending` + `partial` (api-changes-may2026.md §6) so
+// reviewing one field on a multi-field row doesn't make the row vanish
+// before the admin finishes the rest of the fields.
+function _belongsInCurrentTab(item) {
+  if (!item) return false;
+  if (_filters.status === 'pending') {
+    return item.status === 'pending' || item.status === 'partial';
+  }
+  return item.status === _filters.status;
 }
 
 async function reviewWholeRow(id, decision, note, btn) {
@@ -826,7 +844,7 @@ async function reviewWholeRow(id, decision, note, btn) {
 
     Toast.success(decision === 'approved' ? 'Approved' : 'Denied');
     _expanded.delete(id);
-    if (item.status !== _filters.status) {
+    if (!_belongsInCurrentTab(item)) {
       _rawItems = _rawItems.filter(i => i.id !== id);
     }
     applyClientFilters();
@@ -885,23 +903,41 @@ async function load() {
   const token = ++_loadToken;
   wrap.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;padding:60px"><div class="admin-loading__spinner"></div></div>`;
 
-  const filters = {};
-  if (_filters.status) filters.status = _filters.status;
-  if (_filters.field) filters.field = _filters.field;
-  if (_filters.search) filters.search = _filters.search;
+  // The Pending tab now covers anything that still needs admin attention:
+  // both `status='pending'` (untouched rows) AND `status='partial'` (rows
+  // where some fields were already decided but at least one field is still
+  // pending — see api-changes-may2026.md §6). We fetch both buckets and
+  // merge client-side so the count and the rendered list stay coherent
+  // without requiring a backend `status=in(pending,partial)` filter.
+  const statusesToFetch = _filters.status === 'pending'
+    ? ['pending', 'partial']
+    : [_filters.status].filter(Boolean);
 
-  // Fetch up to FETCH_TARGET items in chunks of BACKEND_CHUNK (the backend
-  // caps per-request limit at ~100). Stops early if a chunk comes back
-  // short or empty.
   const collected = [];
+  const seen = new Set();
   const maxPages = Math.ceil(FETCH_TARGET / BACKEND_CHUNK);
-  for (let page = 1; page <= maxPages; page++) {
-    const data = await AdminAPI.getPendingChanges(filters, page, BACKEND_CHUNK);
-    if (!_container || token !== _loadToken) return;
-    const items = data?.items || data?.changes || (Array.isArray(data) ? data : []);
-    if (!items.length) break;
-    collected.push(...items);
-    if (items.length < BACKEND_CHUNK) break;
+
+  for (const status of statusesToFetch) {
+    const filters = {};
+    if (status) filters.status = status;
+    if (_filters.field) filters.field = _filters.field;
+    if (_filters.search) filters.search = _filters.search;
+
+    // Fetch up to FETCH_TARGET items per status in chunks of BACKEND_CHUNK
+    // (backend caps per-request limit at ~100). Stops early on a short page.
+    for (let page = 1; page <= maxPages; page++) {
+      const data = await AdminAPI.getPendingChanges(filters, page, BACKEND_CHUNK);
+      if (!_container || token !== _loadToken) return;
+      const items = data?.items || data?.changes || (Array.isArray(data) ? data : []);
+      if (!items.length) break;
+      for (const it of items) {
+        if (it && it.id && !seen.has(it.id)) {
+          seen.add(it.id);
+          collected.push(it);
+        }
+      }
+      if (items.length < BACKEND_CHUNK) break;
+    }
   }
   _rawItems = collected;
 

@@ -866,11 +866,15 @@
                 const apiCategory = categoryConfig?.apiCategory || this.state.category;
                 const brandName = this.brandInfo[this.state.brand]?.name || this.state.brand;
 
-                // Include type filter in cache key to prevent stale results when switching genuine/compatible
-                // v5: Uses /api/shop endpoint for server-side series extraction
+                // Include type filter in cache key to prevent stale results when switching genuine/compatible.
+                // v6 (May 2026 catalog overhaul): Epson specialty colors collapse into base T-series
+                // chips (T3127/T3128/T3129 → T312) and bare-numeric Epson chips (212, 802, 46S, 604)
+                // appear as first-class chips. Bumping the key invalidates any stale v5 chip counts
+                // sitting in this in-memory cache from a previous SPA navigation.
+                // v5 (legacy): /api/shop endpoint for server-side series extraction.
                 const typeKey = this.state.type || 'all';
                 const categoryId = this.state.category;
-                const cacheKey = `${this.state.brand}-${categoryId}-${typeKey}-codes-v5`;
+                const cacheKey = `${this.state.brand}-${categoryId}-${typeKey}-codes-v6`;
                 const codesCacheKey = `${cacheKey}-final`;
 
                 // Check if we have cached codes with counts already
@@ -1130,9 +1134,24 @@
                 // Collect ALL codes found in this product
                 const foundCodes = new Set();
 
+                // PRIORITY 0: Trust backend-supplied `series_codes` when present.
+                // The May 2026 catalog overhaul (api-changes-may2026.md §2)
+                // ships `series_codes: string[]` on shop responses; the backend
+                // uses the canonical `extractSeriesCodes` we'd otherwise try to
+                // mimic with the per-brand regex below. This legacy path only
+                // runs when /api/shop fails over to the client-side computation,
+                // so series_codes will normally already be populated from the
+                // failed-over response or upstream cache.
+                if (Array.isArray(product.series_codes) && product.series_codes.length) {
+                    for (const raw of product.series_codes) {
+                        const code = this.normalizeCode(String(raw || ''), brand);
+                        if (code && code.length >= 2) foundCodes.add(code);
+                    }
+                }
+
                 // ALWAYS extract ALL codes from product name first
                 // This is critical for products compatible with multiple series (e.g., LC77 LC73 LC40)
-                if (pattern) {
+                if (pattern && foundCodes.size === 0) {
                     const nameMatches = name.matchAll(pattern);
                     for (const match of nameMatches) {
                         const code = this.normalizeCode(match[0], brand);
@@ -1331,14 +1350,21 @@
                     }
                 }
 
-                // PRIORITY 6: Last resort - use product name
+                // PRIORITY 6: Last resort — use product name. Strips both the
+                // legacy "<Brand> Compatible <Code>" leading prefix and the
+                // May 2026 "Compatible <Type> Cartridge Replacement for
+                // <Brand> <Code>" prefix so the first 3 surviving tokens are
+                // meaningful (model + color, typically) rather than the
+                // boilerplate "INK-CARTRIDGE-REPLACEMENT".
                 if (foundCodes.size === 0) {
-                    const nameCode = name.replace(/^(Compatible|Genuine)\s*/i, '')
-                                        .split(/\s+/)
-                                        .slice(0, 3)
-                                        .join('-')
-                                        .toUpperCase()
-                                        .substring(0, 20);
+                    const nameCode = name
+                        .replace(/^Compatible\s+[A-Za-z\s]+?\s+for\s+/i, '')
+                        .replace(/^(Compatible|Genuine)\s*/i, '')
+                        .split(/\s+/)
+                        .slice(0, 3)
+                        .join('-')
+                        .toUpperCase()
+                        .substring(0, 20);
                     if (nameCode) {
                         foundCodes.add(nameCode);
                     }
@@ -1657,11 +1683,13 @@
                 let mergedProducts = this.cache.products[productCacheKey] || [];
 
                 if (mergedProducts.length === 0) {
-                    // Try the old codes cache (v5 from /api/shop, or v4 from legacy)
+                    // Try the codes cache, newest first
+                    // (v6 May 2026, v5 /api/shop legacy, v4 client-side legacy).
+                    const codesCacheKey6 = `${this.state.brand}-${categoryId}-${typeKey}-codes-v6-final`;
                     const codesCacheKey5 = `${this.state.brand}-${categoryId}-${typeKey}-codes-v5-final`;
                     const codesCacheKey4 = `${this.state.brand}-${categoryId}-${typeKey}-codes-v4-final`;
 
-                    for (const cacheKey of [codesCacheKey5, codesCacheKey4]) {
+                    for (const cacheKey of [codesCacheKey6, codesCacheKey5, codesCacheKey4]) {
                         if (this.cache.products[cacheKey]) {
                             const codeEntry = this.cache.products[cacheKey].find(c => c.code === code);
                             if (codeEntry?.products) {
@@ -1696,9 +1724,10 @@
                         this.elements.levelCodes.hidden = true;
                         if (navVersion !== undefined && this.navigationVersion !== navVersion) return;
 
+                        const codesCacheKey6 = `${this.state.brand}-${categoryId}-${typeKey}-codes-v6-final`;
                         const codesCacheKey5 = `${this.state.brand}-${categoryId}-${typeKey}-codes-v5-final`;
                         const codesCacheKey4 = `${this.state.brand}-${categoryId}-${typeKey}-codes-v4-final`;
-                        for (const cacheKey of [codesCacheKey5, codesCacheKey4]) {
+                        for (const cacheKey of [codesCacheKey6, codesCacheKey5, codesCacheKey4]) {
                             if (this.cache.products[cacheKey]) {
                                 const codeEntry = this.cache.products[cacheKey].find(c => c.code === code);
                                 if (codeEntry?.products) {
@@ -1921,7 +1950,8 @@
                                     id: item.product_id,
                                     name: item.name,
                                     price: item.price,
-                                    quantity: 1
+                                    quantity: 1,
+                                    product_source: item.source || null
                                 });
                             }
                             this.textContent = 'Added!';
@@ -2491,11 +2521,12 @@
 
                     if (navVersion !== undefined && this.navigationVersion !== navVersion) return;
 
-                    // Spec §4 — when /smart returned a matched_printer, the
-                    // backend already pinned packs first. Don't re-sort.
-                    const preserveOrder = !!smartData?.matched_printer;
-                    this.renderProducts(compatible, this.elements.compatibleProducts, this.elements.compatibleSection, true, { preserveOrder });
-                    this.renderProducts(genuine, this.elements.genuineProducts, this.elements.genuineSection, false, { preserveOrder });
+                    // Render in /smart's API order — sortByRelevance is now
+                    // server-side (May 2026 catalog hierarchy + relevance
+                    // tiebreak), and bundle-pack pinning when matched_printer
+                    // is set is also server-side. No client resort.
+                    this.renderProducts(compatible, this.elements.compatibleProducts, this.elements.compatibleSection, true);
+                    this.renderProducts(genuine, this.elements.genuineProducts, this.elements.genuineSection, false);
 
                     if (genuine.length === 0 && compatible.length === 0) {
                         await this.renderZeroResultsRecovery(searchQuery, navVersion, smartData);
@@ -2785,13 +2816,22 @@
             return false;
         },
 
-        // Sort products: group by yield (standard → high → super high), then color order.
-        // Delegates to ProductSort (utils.js) so search and shop share one ordering source.
-        sortProducts(products) {
-            return ProductSort.byYieldAndColor(products);
-        },
-
-        renderProducts(products, container, section, isCompatible = false, options = {}) {
+        // Render products in the order the API returned them.
+        //
+        // As of the May 2026 catalog overhaul, every product-list endpoint
+        // (`/api/shop`, `/api/products/printer/:slug`, `/api/printers/:slug/products`,
+        // `/api/search/smart`, `/api/search/by-printer`, `/api/search/by-part`,
+        // `/api/prerender/printer/...`, `/api/prerender/category/...`) applies
+        // the canonical `sortByCatalogOrder` (or `sortByRelevance` for /smart)
+        // server-side. The frontend cannot replicate that hierarchy without
+        // shipping the same regex set as the backend (pack/yield/series
+        // detection), so any client-side resort here is by definition wrong.
+        //
+        // The legacy `sortProducts()` / `ProductSort.byYieldAndColor` helper is
+        // intentionally NOT called here — keep it exported from utils.js so a
+        // future ad-hoc client-side merge can opt in, but the default for
+        // every API-list response is "render in API order."
+        renderProducts(products, container, section, isCompatible = false, _options = {}) {
             container.innerHTML = '';
 
             if (products.length === 0) {
@@ -2801,10 +2841,7 @@
 
             section.hidden = false;
 
-            // Default: sort by yield/color. Spec §4: when smart-search has
-            // pinned bundle-packs at the top of the pool, skip the re-sort
-            // so the backend's order survives.
-            const sortedProducts = options.preserveOrder ? [...products] : this.sortProducts([...products]);
+            const sortedProducts = products;
 
             // Render all products in a single wrapping grid
             sortedProducts.forEach(product => {
@@ -3053,7 +3090,8 @@
                     image: typeof storageUrl === 'function' ? storageUrl(product.image_url) : (product.image_url || ''),
                     brand: product.brand?.name || '',
                     color: product.color || '',
-                    quantity: 1
+                    quantity: 1,
+                    product_source: product.source || null
                 });
 
                 button.textContent = 'Added!';

@@ -573,7 +573,8 @@ const RibbonsPage = {
                 image: ribbon.image_url || '',
                 brand: ribbon._brandName || '',
                 color: ribbon.color || '',
-                quantity: 1
+                quantity: 1,
+                product_source: ribbon.source || null
             });
 
             button.textContent = 'Added!';

@@ -159,7 +159,8 @@ const Products = {
                                         data-product-name="${Security.escapeAttr(product.name)}"
                                         data-product-price="${Security.escapeAttr(product.retail_price)}"
                                         data-product-image="${Security.escapeAttr(resolvedImage)}"
-                                        data-product-color="${Security.escapeAttr(product.color || this.detectColorFromName(product.name) || '')}">
+                                        data-product-color="${Security.escapeAttr(product.color || this.detectColorFromName(product.name) || '')}"
+                                        data-product-source="${Security.escapeAttr(product.source || '')}">
                                     ${stockInfo.class === 'contact-us' ? 'Contact Us' : 'Add to Cart'}
                                     </button>`;
                                 })()}
@@ -440,7 +441,11 @@ const Products = {
                     name: btn.dataset.productName,
                     price: parseFloat(btn.dataset.productPrice),
                     image: btn.dataset.productImage,
-                    color: btn.dataset.productColor
+                    color: btn.dataset.productColor,
+                    // Brand source (genuine/compatible) — feeds the cart's
+                    // COMPATIBLE/GENUINE badge. May be empty on legacy cards;
+                    // _isCompatible falls back to the leading-word heuristic.
+                    product_source: btn.dataset.productSource || null
                 };
 
                 // Add to cart (server-first for authenticated users)
