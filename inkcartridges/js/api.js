@@ -906,6 +906,18 @@ const API = {
 
     /**
      * Search cartridges by printer name/model
+     *
+     * Normalizes the response shape so callers can treat `/by-printer` rows
+     * the same as `/smart` rows. Per the May 2026 search-enrichment contract
+     * (search-enrichment-may2026.md, "Note for /by-printer + /by-part"):
+     *   - the RPC path uses `product_id` instead of `id`
+     *   - canonical_url, slug, original_price, discount_* may be omitted on
+     *     the RPC path (the fallback path returns the full shape)
+     *
+     * We map `product_id` → `id` before returning so card renderers — which
+     * read `product.id` for `data-product-id` (Add-to-Cart, favourites) —
+     * keep working without per-call-site shimming.
+     *
      * @param {string} query - Printer name or model query
      * @param {object} options - { limit, page }
      */
@@ -913,7 +925,26 @@ const API = {
         const params = new URLSearchParams({ q: query });
         if (options.limit) params.append('limit', options.limit);
         if (options.page) params.append('page', options.page);
-        return this.get(`/api/search/by-printer?${params}`);
+        const res = await this.get(`/api/search/by-printer?${params}`);
+        return _normalizeRpcSearchResponse(res);
+    },
+
+    /**
+     * Search cartridges by manufacturer part / SKU.
+     *
+     * Symmetric with `searchByPrinter` — the RPC path emits `product_id`
+     * instead of `id` and may omit canonical_url + savings fields. We
+     * normalize on the client so renderers never see two product shapes.
+     *
+     * @param {string} query - Part number or SKU query
+     * @param {object} options - { limit, page }
+     */
+    async searchByPart(query, options = {}) {
+        const params = new URLSearchParams({ q: query });
+        if (options.limit) params.append('limit', options.limit);
+        if (options.page) params.append('page', options.page);
+        const res = await this.get(`/api/search/by-part?${params}`);
+        return _normalizeRpcSearchResponse(res);
     },
 
     // =========================================================================
@@ -1955,6 +1986,41 @@ function formatPrice(price) {
 }
 
 /**
+ * Normalize a `/api/search/by-printer` or `/api/search/by-part` response so
+ * downstream renderers see the same shape as `/api/search/smart`.
+ *
+ * Per the May 2026 search-enrichment contract:
+ *   - the RPC path emits `product_id` (not `id`) and may omit `canonical_url`,
+ *     `slug`, `original_price`, `discount_amount`, `discount_percent`
+ *   - the fallback path returns the full smart-search shape
+ *
+ * We always set `id ← product_id || id`. The optional fields stay optional —
+ * card renderers already fall back to `compare_price` for savings and to
+ * `slug + sku` for URL construction when canonical_url is missing.
+ *
+ * Returns the response unchanged on error or unexpected shape so callers'
+ * existing error paths still trigger.
+ *
+ * @param {object} res - Raw API envelope { ok, data: { products: [...] } }
+ * @returns {object} Same envelope, products with normalized `id`.
+ */
+function _normalizeRpcSearchResponse(res) {
+    if (!res || !res.ok || !res.data || !Array.isArray(res.data.products)) {
+        return res;
+    }
+    const products = res.data.products.map(p => {
+        if (!p || typeof p !== 'object') return p;
+        // product_id → id is the only mandatory normalization. Don't clobber
+        // an already-present id (the fallback path supplies one).
+        if (p.id == null && p.product_id != null) {
+            return { ...p, id: p.product_id };
+        }
+        return p;
+    });
+    return { ...res, data: { ...res.data, products } };
+}
+
+/**
  * Extract GST from a GST-inclusive amount.
  * Uses the rate from Config.settings if available, otherwise defaults to 15% NZ GST.
  * Formula: GST = inclusive_amount * rate / (1 + rate)
@@ -2036,3 +2102,7 @@ window.formatPrice = formatPrice;
 window.getStockStatus = getStockStatus;
 window.qualifiesForFreeShipping = qualifiesForFreeShipping;
 window.getSourceBadge = getSourceBadge;
+window.calculateGST = calculateGST;
+// Test hook — used by __tests__/search-enrichment.test.js. Not part of the
+// public API surface; do not call from product code.
+window._normalizeRpcSearchResponse = _normalizeRpcSearchResponse;

@@ -130,7 +130,7 @@ const Products = {
                             <div class="product-card__footer-row">
                                 <div class="product-card__price-block">
                                     <p class="product-card__price">${product.retail_price == null ? 'Price unavailable' : formatPrice(product.retail_price)}</p>
-                                    ${showDiscount ? `<span class="product-card__compare-price">${formatPrice(originalPrice)}</span>` : ''}
+                                    ${showDiscount ? `<span class="product-card__compare-price" aria-label="Was ${formatPrice(originalPrice)}">${formatPrice(originalPrice)}</span>` : ''}
                                     ${gstAmount != null ? `<p class="product-card__gst">Inc. GST ${formatPrice(gstAmount)}</p>` : ''}
                                 </div>
                                 ${(() => {

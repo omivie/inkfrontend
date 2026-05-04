@@ -2825,9 +2825,12 @@
             // Use retail_price from backend API
             const price = product.retail_price || 0;
             // Savings fields: backend now sends original_price + discount_amount +
-            // discount_percent on every discounted product. Fall back to compare_price
-            // for legacy responses. Never compute the discount client-side when the
-            // backend has supplied the canonical numbers.
+            // discount_percent on every discounted product (May 2026 enrichment —
+            // search-enrichment-may2026.md). Fall back to compare_price for
+            // legacy responses (e.g. /by-printer RPC path may omit these). Never
+            // compute the discount client-side when the backend has supplied the
+            // canonical numbers — the backend does GST-aware rounding that a
+            // client-side `compare - retail` won't replicate.
             const originalPrice = product.original_price != null
                 ? product.original_price
                 : (product.compare_price && product.compare_price > price ? product.compare_price : null);
@@ -2838,6 +2841,13 @@
                 ? product.discount_percent
                 : (originalPrice && originalPrice > 0 ? Math.round(((originalPrice - price) / originalPrice) * 100) : null);
             const showDiscount = originalPrice && originalPrice > price;
+
+            // GST sub-line: backend sends gst_amount on /smart, /by-printer,
+            // /by-part. Fall back to local calc so the trust copy never goes
+            // missing on legacy responses or RPC-path omissions.
+            const gstAmount = product.gst_amount != null
+                ? product.gst_amount
+                : (price > 0 && typeof calculateGST === 'function' ? calculateGST(price) : null);
             const stockStatus = getStockStatus(product);
             const inStock = stockStatus.class === 'in-stock';
             const brandName = product.brand?.name || '';
@@ -2938,7 +2948,8 @@
                             <div class="product-card__footer-row">
                                 <div class="product-card__pricing">
                                     <span class="product-card__price">${formatPrice(price)}</span>
-                                    ${showDiscount ? ` <span class="product-card__compare-price">${formatPrice(originalPrice)}</span>` : ''}
+                                    ${showDiscount ? ` <span class="product-card__compare-price" aria-label="Was ${formatPrice(originalPrice)}">${formatPrice(originalPrice)}</span>` : ''}
+                                    ${gstAmount != null ? `<span class="product-card__gst">Inc. GST ${formatPrice(gstAmount)}</span>` : ''}
                                 </div>
                                 ${(() => {
                                     if (stockStatus.class === 'contact-us') {

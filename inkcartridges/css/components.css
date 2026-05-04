@@ -1244,6 +1244,7 @@
 }
 
 .product-card__gst {
+    display: block;
     font-size: 0.72rem;
     color: var(--color-text-muted, #6b7280);
     margin: 0;

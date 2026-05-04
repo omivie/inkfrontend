@@ -139,21 +139,29 @@ test('main.js — initBasicAutocomplete and its DOM are deleted', () => {
         'main.js: basic fallback used /api/search/autocomplete — gone, SmartSearch uses /api/search/suggest');
 });
 
-test('api.js — dead search methods (getAutocomplete, getAutocompleteRich, searchByPart) are deleted', () => {
-    // None of these were called from any code path after initBasicAutocomplete
-    // was deleted. They duplicated /api/search/suggest and /api/search/by-part
-    // wrappers that nothing reached. /api/search/smart is the canonical search
-    // endpoint via API.smartSearch.
+test('api.js — dead autocomplete wrappers stay deleted (getAutocomplete, getAutocompleteRich)', () => {
+    // initBasicAutocomplete was deleted; nothing in the storefront calls
+    // /api/search/autocomplete any more. Suggest is the typeahead endpoint
+    // (invoked directly by search.js's fetchSuggest), smart is the results
+    // endpoint (via API.smartSearch).
+    //
+    // searchByPart was previously listed here as "never called" — it's now
+    // restored intentionally for the May 2026 search-enrichment contract
+    // (search-enrichment-may2026.md). Symmetric pair with searchByPrinter,
+    // both go through _normalizeRpcSearchResponse so RPC-path products with
+    // `product_id` instead of `id` get normalized for the renderer.
     const API_CODE = stripComments(READ('api.js'));
     assert.doesNotMatch(API_CODE, /\basync\s+getAutocomplete\s*\(/,
         'api.js: getAutocomplete was unused after basic-autocomplete deletion');
     assert.doesNotMatch(API_CODE, /\basync\s+getAutocompleteRich\s*\(/,
         'api.js: getAutocompleteRich was never called');
-    assert.doesNotMatch(API_CODE, /\basync\s+searchByPart\s*\(/,
-        'api.js: searchByPart was never called');
-    // Confirm the survivor:
+    // Confirm the survivors:
     assert.match(API_CODE, /\basync\s+smartSearch\s*\(/,
         'smartSearch is canonical; must stay');
+    assert.match(API_CODE, /\basync\s+searchByPrinter\s*\(/,
+        'searchByPrinter wraps /api/search/by-printer; must stay');
+    assert.match(API_CODE, /\basync\s+searchByPart\s*\(/,
+        'searchByPart wraps /api/search/by-part; must stay (May 2026 enrichment)');
 });
 
 test('api.js — dead `searchConfig` fallback in smartSearch is deleted', () => {
