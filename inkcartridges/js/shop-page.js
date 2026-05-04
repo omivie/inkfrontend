@@ -2908,10 +2908,13 @@
             const showSavingsPill = showDiscount && discountAmount != null;
             const showFreeShipPill = stockStatus.class !== 'contact-us'
                 && product.retail_price != null && product.retail_price >= 100;
+            // FREE SHIPPING is rendered first so it always sits on the top
+            // line of the info-row — gives a consistent visual baseline across
+            // cards that have both pills vs only one.
             const infoRowHTML = (showSavingsPill || showFreeShipPill)
                 ? `<div class="product-card__info-row">
-                        ${showSavingsPill ? `<span class="product-card__savings">Save ${formatPrice(discountAmount)}${discountPercent ? ` (${discountPercent}%)` : ''}</span>` : ''}
                         ${showFreeShipPill ? '<span class="product-card__free-shipping">Free Shipping</span>' : ''}
+                        ${showSavingsPill ? `<span class="product-card__savings">Save ${formatPrice(discountAmount)}${discountPercent ? ` (${discountPercent}%)` : ''}</span>` : ''}
                     </div>`
                 : '';
 

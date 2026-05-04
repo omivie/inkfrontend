@@ -734,14 +734,16 @@
     font-weight: 600;
 }
 
-/* Info row beneath the image — holds Save / Free Shipping pills. Tight,
-   single-row strip; the row is omitted entirely when there's nothing to
-   show, so cards without promos lose no vertical space. */
+/* Info row beneath the image — holds Free Shipping / Save pills, always
+   stacked vertically. Free Shipping is rendered first in the DOM so it
+   sits on the top line; cards with only one pill still get a consistent
+   baseline because the row collapses to that pill's height. The row is
+   omitted entirely when no pills apply — no vertical space is lost. */
 .product-card__info-row {
     display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 4px;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 3px;
     margin: 0;
     line-height: 1;
 }
