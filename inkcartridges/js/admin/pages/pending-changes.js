@@ -172,6 +172,204 @@ function getChangedFields(item) {
   return [...keys];
 }
 
+// ---- Inline diff renderer (spec: pending-changes-price-diff-spec-may2026.md) ----
+// Render `[field]  old → new` next to each changed-field pill on the row,
+// so reviewers can verify a price/yield/etc. move at a glance without
+// expanding the row. Render-only: no extra API calls.
+const PRICE_FIELDS    = new Set(['cost_price', 'retail_price']);
+const NUMERIC_FIELDS  = new Set(['page_yield', 'weight_kg']);
+const ENUM_FIELDS     = new Set(['color', 'product_type', 'pack_type']);
+const BLOCK_FIELDS    = new Set(['name', 'image_url', 'description']);
+
+/** Money formatter — cartridges rarely exceed $999, no separator needed. */
+function formatNzd(n) {
+  const num = Number(n);
+  if (!Number.isFinite(num)) return '$0.00';
+  return `$${num.toFixed(2)}`;
+}
+
+/** Two-decimal weight formatter (kg). */
+function formatWeight(n) {
+  const num = Number(n);
+  if (!Number.isFinite(num)) return String(n ?? '');
+  return num.toFixed(2);
+}
+
+/** Middle-truncate long barcodes so the diff stays readable on one line. */
+function truncateBarcode(s) {
+  const str = String(s ?? '');
+  if (str.length <= 24) return str;
+  return `${str.slice(0, 12)}…${str.slice(-12)}`;
+}
+
+/**
+ * Normalise a row into per-field diff descriptors. Mirrors the reference
+ * `buildFieldDiffs` in the spec so the test file can pin the shape.
+ */
+function buildFieldDiffs(row) {
+  const isAdd = row.change_type === 'ADD' || row.old_data == null;
+  const fields = getChangedFields(row);
+  return fields.map(field => {
+    const oldVal = isAdd ? null : (row.old_data?.[field] ?? null);
+    const newVal = row.new_data?.[field];
+    const delta = (typeof oldVal === 'number' && typeof newVal === 'number')
+      ? Number((newVal - oldVal).toFixed(4))
+      : undefined;
+    return { field, old: oldVal, newValue: newVal, isAdd, delta };
+  });
+}
+
+function pillHtml(field) {
+  return `<span class="pc-row__field-chip">${esc(field)}</span>`;
+}
+
+function renderImageDiff(oldUrl, newUrl, isAdd) {
+  const newSrc = resolveImageSrc(newUrl);
+  const newRaw = resolveRawImageSrc(newUrl) || newSrc;
+  const newThumb = newSrc
+    ? `<button type="button" class="pc-diff__thumb" data-zoom="${esc(newRaw)}" data-zoom-alt="new image" title="Click to enlarge"><img src="${esc(newSrc)}" alt="" loading="lazy"></button>`
+    : `<span class="pc-diff__value pc-diff__value--mono">${esc(String(newUrl ?? ''))}</span>`;
+  if (isAdd || !oldUrl) {
+    // ADD rows have a NEW tag in the head; UPDATE-with-no-old shows it inline.
+    const tag = isAdd ? '' : '<span class="pc-diff__new-tag">NEW</span>';
+    return `<span class="pc-diff__images">${newThumb}${tag}</span>`;
+  }
+  const oldSrc = resolveImageSrc(oldUrl);
+  const oldRaw = resolveRawImageSrc(oldUrl) || oldSrc;
+  const oldThumb = oldSrc
+    ? `<button type="button" class="pc-diff__thumb" data-zoom="${esc(oldRaw)}" data-zoom-alt="old image" title="Click to enlarge"><img src="${esc(oldSrc)}" alt="" loading="lazy"></button>`
+    : `<span class="pc-diff__value pc-diff__value--mono">${esc(String(oldUrl ?? ''))}</span>`;
+  return `<span class="pc-diff__images">${oldThumb}<span class="pc-diff__arrow">→</span>${newThumb}</span>`;
+}
+
+function renderNameDiff(oldVal, newVal) {
+  const oldStr = String(oldVal ?? '');
+  const newStr = String(newVal ?? '');
+  const tooltip = `OLD:\n${oldStr}\n\nNEW:\n${newStr}`;
+  return `<div class="pc-diff__name" title="${esc(tooltip)}">`
+       + `<span class="pc-diff__old">${esc(oldStr)}</span>`
+       + `<span class="pc-diff__arrow"> → </span>`
+       + `<span class="pc-diff__new">${esc(newStr)}</span>`
+       + `</div>`;
+}
+
+function renderAddValue(field, value) {
+  if (PRICE_FIELDS.has(field)) {
+    return `<span class="pc-diff__value pc-diff__value--mono">${formatNzd(value)}</span>`;
+  }
+  if (field === 'weight_kg') {
+    return `<span class="pc-diff__value pc-diff__value--mono">${esc(formatWeight(value))}</span>`;
+  }
+  if (field === 'image_url') {
+    return renderImageDiff(null, value, true);
+  }
+  if (field === 'is_active') {
+    return `<span class="pc-diff__value">${value ? 'true' : 'false'}</span>`;
+  }
+  if (field === 'name' || field === 'description') {
+    const str = String(value ?? '');
+    return `<div class="pc-diff__name" title="${esc(str)}"><span class="pc-diff__new">${esc(str)}</span></div>`;
+  }
+  if (field === 'barcode') {
+    const str = String(value ?? '');
+    return `<span class="pc-diff__value pc-diff__value--mono" title="${esc(str)}">${esc(truncateBarcode(str))}</span>`;
+  }
+  return `<span class="pc-diff__value">${esc(String(value ?? ''))}</span>`;
+}
+
+/**
+ * Render one inline diff (pill + values). For short fields the value sits
+ * to the right of the pill; for long fields (`name`, `image_url`) the value
+ * wraps to the line below. Returns a complete `<div class="pc-diff">…</div>`.
+ */
+function renderInlineDiff(diff) {
+  const { field, old: oldVal, newValue, isAdd } = diff;
+  const block = BLOCK_FIELDS.has(field);
+  const wrapClass = `pc-diff${block ? ' pc-diff--block' : ''}`;
+  const pill = pillHtml(field);
+
+  if (isAdd) {
+    return `<div class="${wrapClass} pc-diff--add">`
+         + `<div class="pc-diff__head">${pill}<span class="pc-diff__new-tag">NEW</span></div>`
+         + `<div class="pc-diff__body">${renderAddValue(field, newValue)}</div>`
+         + `</div>`;
+  }
+
+  let bodyHtml;
+  if (PRICE_FIELDS.has(field)) {
+    const oldNum = Number(oldVal);
+    const newNum = Number(newValue);
+    const delta  = Number.isFinite(oldNum) && Number.isFinite(newNum)
+      ? Number((newNum - oldNum).toFixed(4)) : 0;
+    const tint   = delta > 0 ? 'pc-diff--up'
+                : delta < 0 ? 'pc-diff--down'
+                : 'pc-diff--neutral';
+    const arrow  = delta > 0 ? ' ▲' : delta < 0 ? ' ▼' : '';
+    bodyHtml = `<span class="pc-diff__values pc-diff__values--mono">`
+             + `<span class="pc-diff__old">${formatNzd(oldNum)}</span>`
+             + `<span class="pc-diff__arrow">→</span>`
+             + `<span class="pc-diff__new">${formatNzd(newNum)}${arrow}</span>`
+             + `</span>`;
+    return `<div class="${wrapClass} ${tint}"><div class="pc-diff__head">${pill}</div><div class="pc-diff__body">${bodyHtml}</div></div>`;
+  }
+
+  if (NUMERIC_FIELDS.has(field)) {
+    const oldNum = Number(oldVal);
+    const newNum = Number(newValue);
+    const haveBoth = Number.isFinite(oldNum) && Number.isFinite(newNum);
+    const delta = haveBoth ? Number((newNum - oldNum).toFixed(4)) : null;
+    const fmt = (n, raw) => {
+      if (!Number.isFinite(n)) return String(raw ?? '');
+      return field === 'weight_kg' ? n.toFixed(2) : String(n);
+    };
+    const deltaStr = (delta !== null && delta !== 0)
+      ? ` (${delta > 0 ? '+' : ''}${field === 'weight_kg' ? delta.toFixed(2) : delta})`
+      : '';
+    bodyHtml = `<span class="pc-diff__values pc-diff__values--mono">`
+             + `<span class="pc-diff__old">${esc(fmt(oldNum, oldVal))}</span>`
+             + `<span class="pc-diff__arrow">→</span>`
+             + `<span class="pc-diff__new">${esc(fmt(newNum, newValue))}${deltaStr ? `<span class="pc-diff__delta">${esc(deltaStr)}</span>` : ''}</span>`
+             + `</span>`;
+    return `<div class="${wrapClass} pc-diff--neutral"><div class="pc-diff__head">${pill}</div><div class="pc-diff__body">${bodyHtml}</div></div>`;
+  }
+
+  if (ENUM_FIELDS.has(field)) {
+    bodyHtml = `<span class="pc-diff__values">`
+             + `<span class="pc-diff__enum">${esc(String(oldVal ?? '—'))}</span>`
+             + `<span class="pc-diff__arrow">→</span>`
+             + `<span class="pc-diff__enum">${esc(String(newValue ?? '—'))}</span>`
+             + `</span>`;
+    return `<div class="${wrapClass}"><div class="pc-diff__head">${pill}</div><div class="pc-diff__body">${bodyHtml}</div></div>`;
+  }
+
+  if (field === 'barcode') {
+    const oldStr = String(oldVal ?? '');
+    const newStr = String(newValue ?? '');
+    bodyHtml = `<span class="pc-diff__values pc-diff__values--mono">`
+             + `<span class="pc-diff__old" title="${esc(oldStr)}">${esc(truncateBarcode(oldStr))}</span>`
+             + `<span class="pc-diff__arrow">→</span>`
+             + `<span class="pc-diff__new" title="${esc(newStr)}">${esc(truncateBarcode(newStr))}</span>`
+             + `</span>`;
+    return `<div class="${wrapClass}"><div class="pc-diff__head">${pill}</div><div class="pc-diff__body">${bodyHtml}</div></div>`;
+  }
+
+  if (field === 'is_active') {
+    bodyHtml = `<span class="pc-diff__values">`
+             + `<span class="pc-diff__old">${oldVal ? 'true' : 'false'}</span>`
+             + `<span class="pc-diff__arrow">→</span>`
+             + `<span class="pc-diff__new">${newValue ? 'true' : 'false'}</span>`
+             + `</span>`;
+    return `<div class="${wrapClass}"><div class="pc-diff__head">${pill}</div><div class="pc-diff__body">${bodyHtml}</div></div>`;
+  }
+
+  if (field === 'image_url') {
+    return `<div class="${wrapClass}"><div class="pc-diff__head">${pill}</div><div class="pc-diff__body">${renderImageDiff(oldVal, newValue, false)}</div></div>`;
+  }
+
+  // name + description + unknown — long text, render below the pill.
+  return `<div class="${wrapClass}"><div class="pc-diff__head">${pill}</div><div class="pc-diff__body">${renderNameDiff(oldVal, newValue)}</div></div>`;
+}
+
 // ---- Inject scoped styles ----
 function ensureStyles() {
   if (document.getElementById('pc-styles')) return;
@@ -229,12 +427,39 @@ function ensureStyles() {
     .pc-row__text { min-width: 0; display: flex; flex-direction: column; gap: 4px; }
     .pc-row__name { color: var(--text); font-weight: 500; font-size: 14px; line-height: 1.3; overflow: hidden; text-overflow: ellipsis; }
     .pc-row__sku { font-family: var(--font-mono, monospace); font-size: 12px; color: var(--text-muted); font-weight: 400; line-height: 1.2; }
-    .pc-row__fields { display: flex; flex-wrap: wrap; gap: 6px; max-width: 360px; align-items: center; }
-    .pc-row__fields:has(.pc-row__field-thumb) { max-width: none; }
-    .pc-row__field-chip { font-size: 11px; padding: 2px 6px; border-radius: 4px; background: var(--cyan-dim); color: var(--cyan-text); font-family: var(--font-mono, monospace); }
+    .pc-row__fields { display: flex; flex-direction: column; gap: 6px; max-width: 540px; align-items: stretch; }
+    .pc-row__fields:has(.pc-diff__thumb), .pc-row__fields:has(.pc-row__field-thumb) { max-width: none; }
+    .pc-row__field-chip { font-size: 11px; padding: 2px 6px; border-radius: 4px; background: var(--cyan-dim); color: var(--cyan-text); font-family: var(--font-mono, monospace); white-space: nowrap; }
+    .pc-row__field-chip--more { background: transparent; color: var(--text-muted); align-self: flex-start; }
     .pc-row__field-thumb { display: inline-block; max-width: 400px; max-height: 400px; border-radius: 10px; border: 1px solid var(--border); background: var(--surface-hover); padding: 0; cursor: zoom-in; line-height: 0; }
     button.pc-row__field-thumb { font: inherit; color: inherit; }
     .pc-row__field-thumb img { max-width: 400px; max-height: 400px; width: auto; height: auto; display: block; border-radius: inherit; }
+
+    /* Inline old → new diff (spec: pending-changes-price-diff-spec-may2026.md) */
+    .pc-diff { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; line-height: 1.35; }
+    .pc-diff--block { flex-direction: column; align-items: flex-start; gap: 4px; }
+    .pc-diff__head { display: inline-flex; align-items: center; gap: 6px; flex-shrink: 0; }
+    .pc-diff__body { display: inline-flex; align-items: center; gap: 6px; min-width: 0; flex: 1; }
+    .pc-diff--block .pc-diff__body { width: 100%; }
+    .pc-diff__values { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; flex-wrap: wrap; }
+    .pc-diff__values--mono { font-family: var(--font-mono, monospace); }
+    .pc-diff__old { color: var(--text-muted); }
+    .pc-diff__new { color: var(--text); font-weight: 500; }
+    .pc-diff__arrow { color: var(--text-muted); font-size: 11px; }
+    .pc-diff__delta { color: var(--text-muted); margin-left: 4px; font-size: 11px; }
+    .pc-diff__value { font-size: 12px; color: var(--text); }
+    .pc-diff__value--mono { font-family: var(--font-mono, monospace); }
+    .pc-diff__enum { display: inline-flex; align-items: center; padding: 1px 7px; border-radius: 999px; background: var(--surface-hover); color: var(--text-secondary); font-size: 11px; font-weight: 600; text-transform: lowercase; }
+    .pc-diff__name { font-size: 12px; color: var(--text-secondary); display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; overflow: hidden; text-overflow: ellipsis; max-width: 100%; word-break: break-word; cursor: help; }
+    .pc-diff__name .pc-diff__old { text-decoration: line-through; }
+    .pc-diff__images { display: inline-flex; align-items: center; gap: 6px; }
+    .pc-diff__thumb { display: inline-block; padding: 0; border: 1px solid var(--border); background: var(--surface-hover); border-radius: 6px; cursor: zoom-in; line-height: 0; }
+    .pc-diff__thumb img { width: 32px; height: 32px; object-fit: cover; display: block; border-radius: inherit; }
+    .pc-diff__new-tag { display: inline-flex; align-items: center; padding: 1px 7px; border-radius: 4px; background: var(--success-dim); color: var(--success); font-size: 10px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; }
+    /* Tints — applied to .pc-diff--up / --down on the new value + arrow */
+    .pc-diff--up .pc-diff__new, .pc-diff--up .pc-diff__arrow { color: var(--danger); }
+    .pc-diff--down .pc-diff__new, .pc-diff--down .pc-diff__arrow { color: var(--success); }
+    .pc-diff--neutral .pc-diff__new { color: var(--text); }
     .pc-row__expand { background: none; border: none; color: var(--text-muted); cursor: pointer; padding: 4px; border-radius: 4px; transition: transform 0.15s; }
     .pc-row__expand:hover { background: var(--surface-hover); color: var(--text); }
     .pc-row__expand[aria-expanded="true"] { transform: rotate(90deg); }
@@ -515,13 +740,12 @@ function renderRow(item) {
   const newImageRaw = resolveRawImageSrc(item.new_data?.image_url);
   const oldImageSrc = resolveImageSrc(item.old_data?.image_url) || resolveImageSrc(cached?.image_url);
   const oldImageRaw = resolveRawImageSrc(item.old_data?.image_url) || resolveRawImageSrc(cached?.image_url);
-  const fieldChips = fields.slice(0, 6).map(f => {
-    if (f === 'image_url' && newImageSrc) {
-      return `<button type="button" class="pc-row__field-thumb" data-zoom="${esc(newImageRaw || newImageSrc)}" data-zoom-alt="new image" title="Click to enlarge"><img src="${esc(newImageSrc)}" alt="new image" loading="lazy"></button>`;
-    }
-    return `<span class="pc-row__field-chip">${esc(f)}</span>`;
-  }).join('');
-  const more = fields.length > 6 ? `<span class="pc-row__field-chip" style="background:transparent;color:var(--text-muted)">+${fields.length - 6}</span>` : '';
+  // Inline diffs: render `[field] old → new` for each changed field. Cap the
+  // visible list at 6 — the +N chip prompts the reviewer to expand the row
+  // for the remainder, matching the pre-diff behaviour.
+  const diffs = buildFieldDiffs(item).slice(0, 6);
+  const fieldChips = diffs.map(renderInlineDiff).join('');
+  const more = fields.length > 6 ? `<span class="pc-row__field-chip pc-row__field-chip--more">+${fields.length - 6}</span>` : '';
   const reviewable = item.status === 'pending' || item.status === 'partial';
   const isExpanded = _expanded.has(item.id);
   const superseded = item.status === 'superseded' ? ' pc-row--superseded' : '';
