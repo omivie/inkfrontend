@@ -282,6 +282,48 @@ test('§7 vercel.json CSP allows the OpenStreetMap iframe used for the map embed
     assert.match(csp.value, /frame-src[^;]*openstreetmap\.org/,    'frame-src must allow openstreetmap.org for the map embed');
 });
 
+test('§7 vercel.json CSP allows the Cloudflare Turnstile script + iframe (contact form CAPTCHA)', () => {
+    // Turnstile is the only bot defence on /contact. Removing the CSP
+    // allow would silently break the form for every user, so pin it.
+    const csp = (VERCEL.headers || []).flatMap((h) => h.headers || []).find((h) => h.key === 'Content-Security-Policy');
+    assert.match(csp.value, /script-src[^;]*challenges\.cloudflare\.com/, 'script-src must allow challenges.cloudflare.com (Turnstile)');
+    assert.match(csp.value, /frame-src[^;]*challenges\.cloudflare\.com/,  'frame-src must allow challenges.cloudflare.com (Turnstile widget)');
+});
+
+test('§7 serve.json (local dev) mirrors the legal-page rewrites in vercel.json', () => {
+    // serve.json is what `npx serve inkcartridges` reads — local dev would
+    // 404 on /terms /privacy etc. without these. The two files must stay
+    // in lock-step or the dev/prod parity claim breaks.
+    const SERVE = JSON.parse(READ(path.join(ROOT, 'inkcartridges', 'serve.json')));
+    const slugs = ['terms', 'privacy', 'returns', 'shipping', 'about', 'faq'];
+    for (const slug of slugs) {
+        const found = (SERVE.rewrites || []).some((r) => r.source === slug && r.destination === '/html/' + slug + '.html');
+        assert.ok(found, `serve.json must rewrite ${slug} → /html/${slug}.html`);
+    }
+});
+
+test('§7 contact.html loads the Cloudflare Turnstile script', () => {
+    // Turnstile is the bot defence on the contact form; without the script
+    // load, the widget never renders and form submissions are blocked
+    // server-side. Pin both the script load and the widget container.
+    const src = SRC['contact.html'];
+    assert.match(src, /challenges\.cloudflare\.com\/turnstile\/v0\/api\.js/,
+        'contact.html must load the Turnstile API script');
+    assert.match(src, /id="contact-turnstile"/, 'contact.html must render the Turnstile container element');
+});
+
+test('§7 no surviving links to the non-existent /business/apply page', () => {
+    // The /business/apply rewrite in vercel.json points to a page that
+    // doesn't exist on disk; we removed the storefront-side links to it.
+    // Re-introducing one would surface a 404 to users.
+    for (const p of PAGES) {
+        assert.ok(!/href="\/business\/apply"/.test(SRC[p]),
+            `${p}: must not link to /business/apply (page does not exist)`);
+    }
+    assert.ok(!/href="\/business\/apply"/.test(FOOTER_JS),
+        'footer.js must not link to /business/apply (page does not exist)');
+});
+
 // ─────────────────────────────────────────────────────────────────────────────
 // §8 — Accessibility: ARIA labels, headings, skip-link, reduced-motion friendly
 // ─────────────────────────────────────────────────────────────────────────────

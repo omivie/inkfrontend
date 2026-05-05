@@ -49,7 +49,7 @@
                             <li><a href="/contact">Contact Us</a></li>
                             <li><a href="/faq">FAQ</a></li>
                             <li><a href="/shop">Shop All</a></li>
-                            <li><a href="/business/apply">Business Accounts</a></li>
+                            <li><a href="/contact?subject=Business%20%2F%20bulk%20pricing">Business Accounts</a></li>
                         </ul>
                     </div>
 
