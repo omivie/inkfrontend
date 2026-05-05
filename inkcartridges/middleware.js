@@ -78,7 +78,16 @@ export default async function middleware(request) {
       status: 200,
       headers: {
         'Content-Type': 'text/html; charset=utf-8',
-        'Cache-Control': 'public, s-maxage=3600, max-age=3600',
+        // s-maxage caps how long the CDN serves a single response without
+        // revalidating; stale-while-revalidate lets the next request after
+        // expiry serve stale immediately while a fresh fetch happens in the
+        // background. Without SWR, post-backend-deploy catalog changes
+        // (e.g. May 2026 pack-resolver fix that surfaced ~232 more packs)
+        // can stay invisible to crawlers for a full hour. With SWR=86400,
+        // the first crawler hit after s-maxage expiry triggers a refresh
+        // without blocking, so subsequent hits see the new HTML almost
+        // immediately. Pinned by tests/dense-pack-rollout-may2026.test.js.
+        'Cache-Control': 'public, s-maxage=3600, max-age=3600, stale-while-revalidate=86400',
         'X-Prerendered': 'true',
       },
     });
