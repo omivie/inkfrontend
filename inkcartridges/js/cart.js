@@ -751,6 +751,18 @@ const Cart = {
      */
     bindEvents: function() {
         document.addEventListener('click', async (e) => {
+            // Contact-us CTA on OOS cards (contact-button-may2026.md). The
+            // crosssell modal nests buttons inside an outer <a>, so a real
+            // anchor would be auto-closed by the HTML5 parser. The button
+            // navigates and stops the bubble that would open the PDP.
+            const contactBtn = e.target.closest('[data-action="contact"]');
+            if (contactBtn) {
+                e.preventDefault();
+                e.stopPropagation();
+                window.location.href = '/contact';
+                return;
+            }
+
             // Add to cart button
             if (e.target.matches('.product-card__add-btn, .add-to-cart-btn')) {
                 e.preventDefault();
@@ -1255,17 +1267,23 @@ const Cart = {
                     ${img ? `<img class="crosssell-modal__img" src="${Security.escapeAttr(img)}" alt="${Security.escapeAttr(p.name || '')}" loading="lazy">` : '<div class="crosssell-modal__img crosssell-modal__img--placeholder"></div>'}
                     <div class="crosssell-modal__name">${Security.escapeHtml(p.name || '')}</div>
                     <div class="crosssell-modal__price">${Security.escapeHtml(price)}</div>
-                    <button type="button" class="btn btn--secondary crosssell-modal__add add-to-cart-btn"
-                        data-product-id="${Security.escapeAttr(p.id || '')}"
-                        data-product-sku="${Security.escapeAttr(p.sku || '')}"
-                        data-product-name="${Security.escapeAttr(p.name || '')}"
-                        data-product-price="${Security.escapeAttr(p.retail_price != null ? p.retail_price : '')}"
-                        data-product-image="${Security.escapeAttr(img || '')}"
-                        data-product-color="${Security.escapeAttr(p.color || '')}"
-                        data-product-source="${Security.escapeAttr(p.source || '')}"
-                        ${p.in_stock === false ? 'disabled' : ''}>
-                        ${p.in_stock === false ? 'Out of stock' : 'Add to cart'}
-                    </button>
+                    ${p.in_stock === false
+                        ? `<button type="button"
+                            class="btn btn--primary crosssell-modal__add"
+                            data-action="contact"
+                            aria-label="Contact us about ${Security.escapeAttr(p.name || 'this product')}">
+                            Contact us
+                          </button>`
+                        : `<button type="button" class="btn btn--secondary crosssell-modal__add add-to-cart-btn"
+                            data-product-id="${Security.escapeAttr(p.id || '')}"
+                            data-product-sku="${Security.escapeAttr(p.sku || '')}"
+                            data-product-name="${Security.escapeAttr(p.name || '')}"
+                            data-product-price="${Security.escapeAttr(p.retail_price != null ? p.retail_price : '')}"
+                            data-product-image="${Security.escapeAttr(img || '')}"
+                            data-product-color="${Security.escapeAttr(p.color || '')}"
+                            data-product-source="${Security.escapeAttr(p.source || '')}">
+                            Add to cart
+                          </button>`}
                 </a>`;
         }).join('');
 

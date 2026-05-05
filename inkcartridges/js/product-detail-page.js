@@ -506,29 +506,23 @@
                 ${Security.escapeHtml(stockStatus.text)}
             </span>`;
 
-            // Disable Add to Cart if out of stock or contact-us
-            const phoneIcon = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/></svg>';
-            const callToOrderLink = `<a href="tel:0274740115" class="btn btn--primary btn--lg product-info__add-to-cart" style="text-decoration:none;display:inline-flex;align-items:center;gap:8px;">
-                        ${phoneIcon}
-                        Call to Order &mdash; 027 474 0115
+            // Out-of-stock CTA per contact-button-may2026.md — both
+            // 'out-of-stock' and 'contact-us' classes collapse into one
+            // primary "Contact us" anchor → /contact. The waitlist UI
+            // is removed; the waitlist API stays mounted (so cached
+            // bundles don't 404) but no surface calls it. The PDP main
+            // CTA is unique on the page (not nested in another <a>) so
+            // we use a real <a> here per spec.
+            const contactCtaLabel = `Contact us about ${Security.escapeAttr(info.displayName || info.name || 'this product')}`;
+            const contactCtaPdp = `<a href="/contact"
+                        class="btn btn--primary btn--lg product-info__add-to-cart"
+                        aria-label="${contactCtaLabel}"
+                        style="text-decoration:none;display:inline-flex;align-items:center;justify-content:center;gap:8px;">
+                        Contact us
                     </a>`;
-            // Waitlist visibility: prefer explicit backend signal (info.waitlist_available),
-            // fall back to stock-status inference. Skip when explicitly false.
-            const waitlistEligible = info.waitlist_available !== undefined
-                ? !!info.waitlist_available
-                : (stockStatus.class === 'out-of-stock');
-
-            if (stockStatus.class === 'out-of-stock') {
+            if (stockStatus.class === 'out-of-stock' || stockStatus.class === 'contact-us') {
                 const addBtn = document.getElementById('add-to-cart-btn');
-                if (addBtn) { addBtn.disabled = true; addBtn.textContent = 'Out of Stock'; }
-                const qtyInput = document.getElementById('product-quantity');
-                if (qtyInput) qtyInput.disabled = true;
-                if (waitlistEligible) this._injectWaitlistButton(info.sku);
-            } else if (stockStatus.class === 'contact-us') {
-                const addBtn = document.getElementById('add-to-cart-btn');
-                if (addBtn) {
-                    addBtn.outerHTML = callToOrderLink;
-                }
+                if (addBtn) addBtn.outerHTML = contactCtaPdp;
                 const qtyInput = document.getElementById('product-quantity');
                 if (qtyInput) qtyInput.disabled = true;
             }
@@ -537,13 +531,12 @@
             const stickyBtn = document.getElementById('sticky-atc-btn');
             const stickyBar = document.getElementById('sticky-atc');
             if (stickyBtn && stickyBar) {
-                if (stockStatus.class === 'out-of-stock') {
-                    stickyBtn.disabled = true;
-                    stickyBtn.textContent = 'Out of Stock';
-                } else if (stockStatus.class === 'contact-us') {
-                    stickyBtn.outerHTML = `<a href="tel:0274740115" class="btn btn--primary sticky-atc__btn" style="text-decoration:none;display:inline-flex;align-items:center;gap:8px;">
-                        ${phoneIcon}
-                        Call to Order &mdash; 027 474 0115
+                if (stockStatus.class === 'out-of-stock' || stockStatus.class === 'contact-us') {
+                    stickyBtn.outerHTML = `<a href="/contact"
+                        class="btn btn--primary sticky-atc__btn"
+                        aria-label="${contactCtaLabel}"
+                        style="text-decoration:none;display:inline-flex;align-items:center;justify-content:center;gap:8px;">
+                        Contact us
                     </a>`;
                 }
             }
@@ -734,116 +727,6 @@
             } catch (error) {
                 // Silently fail — compatible printers are optional
             }
-        },
-
-        /**
-         * Inject a "Notify me when back in stock" button next to the disabled
-         * Add-to-Cart button. Posts to /api/products/:sku/waitlist.
-         */
-        async _injectWaitlistButton(sku) {
-            const addBtn = document.getElementById('add-to-cart-btn');
-            if (!addBtn || !sku) return;
-            if (document.getElementById('waitlist-btn')) return; // already injected
-
-            const container = document.createElement('div');
-            container.id = 'waitlist-container';
-            container.style.cssText = 'margin-top:12px;display:flex;flex-direction:column;gap:8px;';
-            container.innerHTML = `
-                <button id="waitlist-btn" class="btn btn--secondary btn--lg" style="width:100%">
-                    Notify me when back in stock
-                </button>
-                <div id="waitlist-form" style="display:none;flex-direction:column;gap:8px">
-                    <input id="waitlist-email" type="email" class="form-input" placeholder="your@email.com" autocomplete="email" />
-                    <button id="waitlist-submit" class="btn btn--primary btn--lg">Subscribe</button>
-                </div>
-                <div id="waitlist-msg" role="status" style="font-size:13px;color:var(--color-text-muted)"></div>
-            `;
-            addBtn.parentNode.insertBefore(container, addBtn.nextSibling);
-
-            const toggleBtn = container.querySelector('#waitlist-btn');
-            const form = container.querySelector('#waitlist-form');
-            const emailEl = container.querySelector('#waitlist-email');
-            const submit = container.querySelector('#waitlist-submit');
-            const msg = container.querySelector('#waitlist-msg');
-
-            const isAuthed = typeof Auth !== 'undefined' && Auth.isAuthenticated && Auth.isAuthenticated();
-
-            // If authed, fetch status to reflect existing subscription
-            if (isAuthed) {
-                try {
-                    const statusRes = await API.waitlistStatus(sku);
-                    if (statusRes?.ok && statusRes.data?.subscribed) {
-                        toggleBtn.textContent = 'Unsubscribe from waitlist';
-                        toggleBtn.dataset.subscribed = '1';
-                        if (statusRes.data.position) {
-                            msg.textContent = `You're #${statusRes.data.position} on the waitlist.`;
-                        }
-                    }
-                } catch { /* non-fatal */ }
-            }
-
-            toggleBtn.addEventListener('click', async () => {
-                // Authed user: one-click subscribe/unsubscribe
-                if (isAuthed) {
-                    toggleBtn.disabled = true;
-                    try {
-                        if (toggleBtn.dataset.subscribed === '1') {
-                            const res = await API.waitlistUnsubscribe(sku);
-                            if (res?.ok) {
-                                toggleBtn.textContent = 'Notify me when back in stock';
-                                delete toggleBtn.dataset.subscribed;
-                                msg.textContent = 'Removed from waitlist.';
-                            } else {
-                                msg.textContent = res?.error || 'Failed to unsubscribe.';
-                            }
-                        } else {
-                            const res = await API.waitlistSubscribe(sku);
-                            if (res?.ok) {
-                                toggleBtn.textContent = 'Unsubscribe from waitlist';
-                                toggleBtn.dataset.subscribed = '1';
-                                msg.textContent = "You'll be emailed when stock returns.";
-                            } else {
-                                msg.textContent = res?.error || 'Could not subscribe.';
-                            }
-                        }
-                    } catch (e) {
-                        msg.textContent = e.message || 'Request failed.';
-                    } finally {
-                        toggleBtn.disabled = false;
-                    }
-                    return;
-                }
-
-                // Guest: reveal email form
-                toggleBtn.style.display = 'none';
-                form.style.display = 'flex';
-                emailEl.focus();
-            });
-
-            submit.addEventListener('click', async () => {
-                const email = (emailEl.value || '').trim();
-                if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-                    msg.textContent = 'Please enter a valid email address.';
-                    return;
-                }
-                submit.disabled = true;
-                try {
-                    const res = await API.waitlistSubscribe(sku, { email });
-                    if (res?.ok) {
-                        form.style.display = 'none';
-                        toggleBtn.style.display = 'block';
-                        toggleBtn.disabled = true;
-                        toggleBtn.textContent = 'On the waitlist';
-                        msg.textContent = "We'll email " + email + ' when stock returns.';
-                    } else {
-                        msg.textContent = res?.error || 'Could not subscribe.';
-                    }
-                } catch (e) {
-                    msg.textContent = e.message || 'Request failed.';
-                } finally {
-                    submit.disabled = false;
-                }
-            });
         },
 
         /**

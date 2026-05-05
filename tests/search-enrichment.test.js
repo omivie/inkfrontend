@@ -278,31 +278,47 @@ test('products.js renderCard — prefers canonical_url over local URL constructi
     assert.ok(canonIdx < localIdx, 'canonical_url branch must precede slug/sku fallback');
 });
 
-test('products.js renderCard — wires waitlist_available into Notify-me CTA', () => {
+// The May 2026 enrichment payload still ships `waitlist_available`
+// (additive) but `contact-button-may2026.md` says the storefront must
+// IGNORE that field. The OOS CTA collapses to a single primary
+// "Contact us" link to /contact in every render path. Authoritative
+// pin is in tests/contact-button-may2026.test.js.
+
+test('products.js renderCard — OOS branch renders Contact us → /contact and ignores waitlist_available', () => {
     const src = fs.readFileSync(PRODUCTS_JS_PATH, 'utf8');
-    assert.match(src, /product\.waitlist_available/, 'must read waitlist_available');
-    assert.match(src, /Notify me/, 'must render "Notify me" copy on OOS cards');
-    assert.match(src, /data-action="notify"/, 'must tag the button so attachCardListeners skips it');
+    assert.doesNotMatch(src, /product\.waitlist_available/,
+        'products.js must not branch on waitlist_available (contact-button-may2026.md)');
+    assert.doesNotMatch(src, /Notify me/,
+        'products.js must not retain superseded "Notify me" copy');
+    assert.match(src, /Contact us/, 'products.js must render "Contact us" CTA on OOS cards');
+    assert.match(src, /data-action=["']contact["']/,
+        'products.js OOS button must be marked data-action="contact"');
 });
 
-test('shop-page.js createProductCard — has same enrichment wiring as products.js', () => {
+test('shop-page.js createProductCard — has same enrichment wiring (canonical_url, GST, discount) and OOS Contact-us CTA', () => {
     const src = fs.readFileSync(SHOP_JS_PATH, 'utf8');
     assert.match(src, /product\.original_price/);
     assert.match(src, /product\.discount_percent/);
     assert.match(src, /product\.canonical_url/);
-    assert.match(src, /product\.waitlist_available/);
     assert.match(src, /product\.gst_amount/, 'must read gst_amount on the shop renderer');
     assert.match(src, /Inc\. GST/, 'shop renderer must show the GST trust line');
-    assert.match(src, /Notify me/, 'shop renderer must show "Notify me" CTA');
+    assert.doesNotMatch(src, /product\.waitlist_available/,
+        'shop-page.js must not branch on waitlist_available (contact-button-may2026.md)');
+    assert.doesNotMatch(src, /Notify me/,
+        'shop-page.js must not retain superseded "Notify me" copy');
+    assert.match(src, /Contact us/, 'shop renderer must show "Contact us" CTA on OOS cards');
 });
 
-test('Products.attachCardListeners + Products.bindAddToCartEvents — skip notify buttons', () => {
+test('Products.attachCardListeners + Products.bindAddToCartEvents — handle contact buttons in BOTH binders', () => {
     const src = fs.readFileSync(PRODUCTS_JS_PATH, 'utf8');
-    // Both listener binders must guard against data-action="notify" so the
-    // click bubbles to the wrapping <a> and the user lands on the PDP.
-    const guards = src.match(/btn\.dataset\.action\s*===\s*['"]notify['"]/g) || [];
+    // Both listener binders must branch on data-action="contact" and
+    // navigate to /contact (the wrapping card-link <a> would otherwise
+    // send the user to the PDP).
+    const guards = src.match(/btn\.dataset\.action\s*===\s*['"]contact['"]/g) || [];
     assert.ok(guards.length >= 2,
-        `expected attachCardListeners + bindAddToCartEvents to guard "notify"; found ${guards.length}`);
+        `expected attachCardListeners + bindAddToCartEvents to handle "contact"; found ${guards.length}`);
+    assert.match(src, /window\.location\.href\s*=\s*['"]\/contact['"]/,
+        'contact handler must navigate to /contact');
 });
 
 test('api.js — exposes _normalizeRpcSearchResponse as a test hook', () => {

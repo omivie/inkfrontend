@@ -518,12 +518,17 @@ const RibbonsPage = {
                             <div class="product-card__pricing">
                                 <span class="product-card__price">${formatPrice(price)}</span>
                             </div>
-                            <button class="btn btn--primary btn--sm product-card__cart-btn"
-                                    data-product-id="${ribbonId}"
-                                    aria-label="Add ${Security.escapeAttr(displayName)} to cart"
-                                    ${!inStock ? 'disabled' : ''}>
-                                Add to Cart
-                            </button>
+                            ${inStock
+                                ? `<button class="btn btn--primary btn--sm product-card__cart-btn"
+                                        data-product-id="${ribbonId}"
+                                        aria-label="Add ${Security.escapeAttr(displayName)} to cart">
+                                    Add to Cart
+                                  </button>`
+                                : `<button type="button" class="btn btn--primary btn--sm product-card__cart-btn product-card__contact-btn"
+                                        data-action="contact"
+                                        aria-label="Contact us about ${Security.escapeAttr(displayName)}">
+                                    Contact us
+                                  </button>`}
                         </div>
                     </div>
                 </div>
@@ -548,10 +553,18 @@ const RibbonsPage = {
         `;
 
         const cartBtn = card.querySelector('.product-card__cart-btn');
-        cartBtn.addEventListener('click', async (e) => {
-            e.preventDefault();
-            await this.addToCart(ribbon, cartBtn);
-        });
+        if (cartBtn && cartBtn.dataset.action === 'contact') {
+            cartBtn.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                window.location.href = '/contact';
+            });
+        } else if (cartBtn) {
+            cartBtn.addEventListener('click', async (e) => {
+                e.preventDefault();
+                await this.addToCart(ribbon, cartBtn);
+            });
+        }
 
         return card;
     },

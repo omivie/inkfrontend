@@ -10,6 +10,7 @@
     { "source": "checkout", "destination": "/html/checkout.html" },
     { "source": "payment", "destination": "/html/payment.html" },
     { "source": "order-confirmation", "destination": "/html/order-confirmation.html" },
+    { "source": "contact", "destination": "/html/contact.html" },
     { "source": "ribbons", "destination": "/html/ribbons.html" },
     { "source": "account", "destination": "/html/account/index.html" },
     { "source": "account/addresses", "destination": "/html/account/addresses.html" },

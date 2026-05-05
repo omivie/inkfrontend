@@ -265,31 +265,43 @@ test('All non-admin storefront HTML pages include /js/schema.js', () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// (§5.8) Out-of-stock waitlist UX on product cards
+// (§5.8 — superseded May 2026) Out-of-stock CTA on product cards.
+//
+// The original §5.8 rule rendered a "Notify me" button on OOS cards that
+// took users to the PDP waitlist. `contact-button-may2026.md` replaces
+// that with a primary "Contact us" link to /contact and rips the
+// waitlist UI out entirely. Authoritative pin lives in
+// tests/contact-button-may2026.test.js — these checks just guard the
+// minimum surface so this file stays accurate after the swap.
 // ─────────────────────────────────────────────────────────────────────────────
 
-test('js/products.js — renders Notify me button when product.in_stock === false', () => {
+test('js/products.js — OOS branch renders Contact us → /contact (supersedes §5.8 Notify me)', () => {
     const src = readText(path.join(INK, 'js', 'products.js'));
-    assert.ok(/Notify me/.test(src), 'products.js card must render "Notify me"');
-    assert.ok(/data-action="notify"/.test(src),
-        'products.js card must mark notify buttons with data-action="notify"');
-    assert.ok(/in_stock === false/.test(src),
-        'products.js card must check product.in_stock === false');
+    assert.ok(/Contact us/.test(src), 'products.js card must render "Contact us"');
+    assert.ok(/data-action=["']contact["']/.test(src),
+        'products.js OOS button must be marked data-action="contact"');
+    assert.ok(!/Notify me/.test(src),
+        'products.js must not retain the superseded "Notify me" copy');
 });
 
-test('js/shop-page.js — printer card renders Notify me when out of stock', () => {
+test('js/shop-page.js — OOS branch renders Contact us → /contact (supersedes §5.8 Notify me)', () => {
     const src = readText(path.join(INK, 'js', 'shop-page.js'));
-    assert.ok(/Notify me/.test(src), 'shop-page.js card must render "Notify me"');
-    assert.ok(/data-action="notify"/.test(src),
-        'shop-page.js card must mark notify buttons with data-action="notify"');
+    assert.ok(/Contact us/.test(src), 'shop-page.js card must render "Contact us"');
+    assert.ok(/data-action=["']contact["']/.test(src),
+        'shop-page.js OOS button must be marked data-action="contact"');
+    assert.ok(!/Notify me/.test(src),
+        'shop-page.js must not retain the superseded "Notify me" copy');
 });
 
-test('js/products.js — notify-mode buttons skip Add-to-Cart click handler', () => {
+test('js/products.js — contact-mode buttons navigate to /contact in BOTH card click binders', () => {
     const src = readText(path.join(INK, 'js', 'products.js'));
-    // Both attachCardListeners and bindAddToCartEvents must guard on data-action="notify".
-    const guards = src.match(/btn\.dataset\.action === ['"]notify['"]/g) || [];
+    // Both attachCardListeners and bindAddToCartEvents must branch on
+    // data-action="contact" and navigate.
+    const guards = src.match(/btn\.dataset\.action\s*===\s*['"]contact['"]/g) || [];
     assert.ok(guards.length >= 2,
-        `products.js must skip notify buttons in BOTH card click binders, got ${guards.length}`);
+        `products.js must handle contact buttons in BOTH card click binders, got ${guards.length}`);
+    assert.ok(/window\.location\.href\s*=\s*['"]\/contact['"]/.test(src),
+        'products.js contact handler must navigate to /contact');
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

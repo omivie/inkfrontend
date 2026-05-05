@@ -134,24 +134,31 @@ const Products = {
                                     ${gstAmount != null ? `<p class="product-card__gst">Inc. GST ${formatPrice(gstAmount)}</p>` : ''}
                                 </div>
                                 ${(() => {
-                                    // Spec §5.8: when product.in_stock === false (or
-                                    // waitlist_available === true) swap "Add to Cart"
-                                    // for "Notify me". The button click bubbles up to
-                                    // the wrapping <a>, sending the user to the PDP
-                                    // where they can submit an email.
+                                    // contact-button-may2026.md: any OOS product —
+                                    // out_of_stock, contact_us, or stock_quantity≤0 —
+                                    // renders one primary "Contact us" CTA. The
+                                    // waitlist_available field is intentionally
+                                    // ignored; the waitlist API stays mounted but
+                                    // no UI surface calls it. Spec uses <a href>;
+                                    // we render <button> because the card is wrapped
+                                    // in a parent <a class="product-card__link"> and
+                                    // the HTML5 parser would auto-close it on a
+                                    // nested <a>, breaking the layout. The button
+                                    // handler in attachCardListeners navigates to
+                                    // /contact and stops the outer-link bubble.
                                     const oos = product.in_stock === false
                                         || product.stock_status === 'out_of_stock'
-                                        || (product.in_stock === undefined && product.stock_quantity === 0);
-                                    const waitlistOk = (product.waitlist_available === true)
-                                        || (oos && product.waitlist_available !== false);
-                                    if (waitlistOk) {
-                                        return `<button class="product-card__add-btn btn btn--secondary product-card__notify-btn"
-                                                data-action="notify"
-                                                data-product-sku="${Security.escapeAttr(product.sku)}">
-                                            Notify me
+                                        || product.stock_status === 'contact_us'
+                                        || (product.in_stock === undefined && (product.stock_quantity || 0) <= 0);
+                                    if (oos) {
+                                        return `<button type="button"
+                                                class="product-card__add-btn btn btn--primary product-card__contact-btn"
+                                                data-action="contact"
+                                                aria-label="Contact us about ${Security.escapeAttr(product.name)}">
+                                            Contact us
                                         </button>`;
                                     }
-                                    const disabled = product.retail_price == null || stockInfo.class !== 'in-stock';
+                                    const disabled = product.retail_price == null;
                                     return `<button class="product-card__add-btn btn btn--primary"
                                         ${disabled ? 'disabled' : ''}
                                         data-product-id="${Security.escapeAttr(product.id)}"
@@ -161,7 +168,7 @@ const Products = {
                                         data-product-image="${Security.escapeAttr(resolvedImage)}"
                                         data-product-color="${Security.escapeAttr(product.color || this.detectColorFromName(product.name) || '')}"
                                         data-product-source="${Security.escapeAttr(product.source || '')}">
-                                    ${stockInfo.class === 'contact-us' ? 'Contact Us' : 'Add to Cart'}
+                                    Add to Cart
                                     </button>`;
                                 })()}
                             </div>
@@ -182,15 +189,22 @@ const Products = {
     },
 
     /**
-     * Attach Add to Cart listeners on a container of product cards.
-     * Buttons with `data-action="notify"` (out-of-stock waitlist CTA) are
-     * skipped — the click bubbles up to the wrapping <a> so the user lands
-     * on the PDP, where the waitlist email-capture form lives.
+     * Attach Add-to-Cart listeners on a container of product cards.
+     * Buttons with `data-action="contact"` (out-of-stock CTA per
+     * contact-button-may2026.md) navigate to /contact instead of falling
+     * through to the wrapping card-link <a> (which points to the PDP).
      */
     attachCardListeners(container) {
         if (!container) return;
         container.querySelectorAll('.product-card__add-btn').forEach(btn => {
-            if (btn.dataset.action === 'notify') return;
+            if (btn.dataset.action === 'contact') {
+                btn.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    window.location.href = '/contact';
+                });
+                return;
+            }
             btn.addEventListener('click', (e) => {
                 e.preventDefault();
                 e.stopPropagation();
@@ -424,12 +438,20 @@ const Products = {
     },
 
     /**
-     * Bind add to cart button events. Skips notify-mode buttons so the click
-     * bubbles up to the card link and the user lands on the PDP waitlist UI.
+     * Bind add-to-cart button events. Contact-mode buttons (OOS CTA per
+     * contact-button-may2026.md) navigate to /contact instead of falling
+     * through to the wrapping card-link <a>.
      */
     bindAddToCartEvents(container) {
         container.querySelectorAll('.product-card__add-btn').forEach(btn => {
-            if (btn.dataset.action === 'notify') return;
+            if (btn.dataset.action === 'contact') {
+                btn.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    window.location.href = '/contact';
+                });
+                return;
+            }
             btn.addEventListener('click', async (e) => {
                 e.preventDefault();
                 e.stopPropagation();

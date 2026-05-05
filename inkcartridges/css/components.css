@@ -754,12 +754,6 @@
    hidden if it ever ends up loose in the image-wrapper (no longer used). */
 .product-card__stock-banner { display: none; }
 
-/* Contact button in product card */
-.product-card__contact-btn {
-    text-decoration: none;
-    text-align: center;
-}
-
 /* Footer: color + stock row, then price + button row */
 .product-card__footer {
     padding-top: 0;
@@ -891,20 +885,23 @@
     box-shadow: none;
 }
 
-/* Out-of-stock waitlist CTA — visually distinct from "Add to Cart" so users
-   understand it's a different action (open PDP, enter email). Spec §5.8. */
-.product-card__notify-btn,
-.product-card__footer .product-card__cart-btn.product-card__notify-btn {
-    background-color: transparent;
-    border: 1px solid var(--color-border, #d1d5db);
-    color: var(--color-text, #111827);
-    cursor: pointer;
+/* Out-of-stock CTA per contact-button-may2026.md — rendered with the same
+   primary-button styling as Add-to-Cart so card layout stays identical
+   between in-stock and OOS states (spec: "Same primary-button class as
+   Add to Cart"). The button-shaped <a>/<button> below uses the existing
+   primary chrome; this rule only ensures hit-target sizing and
+   anchor-decoration cleanup when an <a> happens to wear the class. */
+.product-card__contact-btn,
+.product-card__footer .product-card__cart-btn.product-card__contact-btn {
+    text-decoration: none;
+    text-align: center;
+    min-height: 44px; /* WCAG 2.5.5 minimum hit target */
 }
-.product-card__notify-btn:hover,
-.product-card__footer .product-card__cart-btn.product-card__notify-btn:hover {
-    background-color: var(--color-bg-muted, #f3f4f6);
-    color: var(--color-text, #111827);
-    transform: translateY(-1px);
+a.product-card__contact-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    text-decoration: none;
 }
 
 /* Category Card - Bold hover effects */

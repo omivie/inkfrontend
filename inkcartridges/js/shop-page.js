@@ -2989,39 +2989,33 @@
                                     ${gstAmount != null ? `<span class="product-card__gst">Inc. GST ${formatPrice(gstAmount)}</span>` : ''}
                                 </div>
                                 ${(() => {
-                                    if (stockStatus.class === 'contact-us') {
-                                        return `<button class="btn btn--primary btn--sm product-card__cart-btn product-card__contact-btn"
-                                                data-product-id="${product.id}"
-                                                disabled
-                                                aria-label="Out of stock: ${Security.escapeAttr(displayName)}">
-                                            Contact Us
-                                        </button>`;
-                                    }
-                                    // Spec §5.8 — out-of-stock items with backend
-                                    // waitlist eligibility (default: any OOS unless
-                                    // explicitly opted out) get "Notify me" instead
-                                    // of a dead disabled button. Click bubbles up to
-                                    // the card link → PDP waitlist UI. Read raw
-                                    // backend fields rather than the mapped
-                                    // stockStatus class (which collapses
-                                    // out_of_stock → contact-us).
+                                    // contact-button-may2026.md — any OOS product
+                                    // (out_of_stock, contact_us, or
+                                    // stock_quantity≤0) renders ONE primary
+                                    // "Contact us" CTA navigating to /contact. The
+                                    // waitlist_available field is intentionally
+                                    // ignored; the waitlist API stays mounted but
+                                    // no UI surface calls it. Spec wants <a> for
+                                    // anchor semantics; we render <button> because
+                                    // the card is wrapped in a parent <a> and a
+                                    // nested <a> auto-closes the outer one,
+                                    // breaking the layout. The handler below
+                                    // navigates to /contact and stops the bubble.
                                     const oos = product.in_stock === false
                                         || product.stock_status === 'out_of_stock'
-                                        || (product.in_stock === undefined && product.stock_quantity === 0);
-                                    const waitlistOk = (product.waitlist_available === true)
-                                        || (oos && product.waitlist_available !== false);
-                                    if (waitlistOk) {
-                                        return `<button class="btn btn--secondary btn--sm product-card__cart-btn product-card__notify-btn"
-                                                data-action="notify"
-                                                data-product-sku="${Security.escapeAttr(product.sku || '')}"
-                                                aria-label="Notify me when ${Security.escapeAttr(displayName)} is back in stock">
-                                            Notify me
+                                        || product.stock_status === 'contact_us'
+                                        || (product.in_stock === undefined && (product.stock_quantity || 0) <= 0);
+                                    if (oos) {
+                                        return `<button type="button"
+                                                class="btn btn--primary btn--sm product-card__cart-btn product-card__contact-btn"
+                                                data-action="contact"
+                                                aria-label="Contact us about ${Security.escapeAttr(displayName)}">
+                                            Contact us
                                         </button>`;
                                     }
                                     return `<button class="btn btn--primary btn--sm product-card__cart-btn"
                                             data-product-id="${product.id}"
-                                            aria-label="Add ${Security.escapeAttr(displayName)} to cart"
-                                            ${!inStock ? 'disabled' : ''}>
+                                            aria-label="Add ${Security.escapeAttr(displayName)} to cart">
                                         Add to Cart
                                     </button>`;
                                 })()}
@@ -3049,24 +3043,22 @@
             `;
 
             // Add cart button event listener.
-            //   - Notify-me (out-of-stock waitlist CTA): no listener — the click
-            //     bubbles up to the wrapping <a>, sending the user to the PDP
-            //     where the waitlist email-capture form lives. Spec §5.8.
-            //   - Contact-us (also disabled): swallow the click so the card link
-            //     doesn't react.
+            //   - Contact-us (OOS CTA per contact-button-may2026.md): navigate
+            //     to /contact and stop the click bubbling up to the wrapping
+            //     card-link <a> (which targets the PDP).
             //   - Add-to-cart: standard handler.
             const cartBtn = card.querySelector('.product-card__cart-btn');
-            if (cartBtn && cartBtn.dataset.action === 'notify') {
-                /* let click bubble to anchor */
-            } else if (cartBtn && !cartBtn.classList.contains('product-card__contact-btn')) {
+            if (cartBtn && cartBtn.dataset.action === 'contact') {
+                cartBtn.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    window.location.href = '/contact';
+                });
+            } else if (cartBtn) {
                 cartBtn.addEventListener('click', async (e) => {
                     e.preventDefault();
                     e.stopPropagation();
                     await this.addToCart(product, cartBtn);
-                });
-            } else if (cartBtn) {
-                cartBtn.addEventListener('click', (e) => {
-                    e.stopPropagation();
                 });
             }
 

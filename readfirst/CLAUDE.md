@@ -128,6 +128,7 @@ inkcartridges/
 - All API calls go through the API object (api.js)
 - Admin pages must verify access via AdminAuth.init()
 - **Ribbons are isolated**: Never modify anything ribbon-related (ribbons.html, ribbons-page.js, admin/pages/ribbons.js, ribbon product data, ribbon photos, ribbon prices, ribbon descriptions, ribbon CSS) unless the user explicitly asks. Cartridge changes must not touch ribbon code.
+- **Out-of-stock CTA (May 2026):** when `product.in_stock === false`, render a primary "Contact us" CTA pointing at `/contact` (`<a>` on the PDP, `<button data-action="contact">` inside the wrapping `<a>` on cards — the parser auto-closes a nested `<a>`). **Do not** render "Notify me" or call `/api/products/:sku/waitlist` from any UI surface. The waitlist API stays mounted but is unused; `waitlist_available` in API responses is ignored. Spec: `readfirst/contact-button-may2026.md`. Pinned by `tests/contact-button-may2026.test.js`.
 
 ## Hooks
 - **PostToolUse (Write|Edit)**: Auto-runs `node --check` on any `.js` file after edit to catch syntax errors

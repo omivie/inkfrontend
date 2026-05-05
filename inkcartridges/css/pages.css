@@ -11500,3 +11500,240 @@
     background: #f8fafc;
 }
 
+/* ─────────────────────────────────────────────────────────────────────────
+   Contact page (/contact) — landing target for the May 2026 OOS
+   "Contact us" CTA. Two-column layout: direct-channel card + form card.
+   See contact-button-may2026.md.
+   ───────────────────────────────────────────────────────────────────────── */
+
+.contact-page {
+    padding: var(--spacing-8, 32px) 0 var(--spacing-12, 56px);
+}
+
+.contact-page__header {
+    max-width: 640px;
+    margin: 0 auto var(--spacing-8, 32px);
+    text-align: center;
+}
+
+.contact-page__title {
+    margin: 0 0 8px;
+    font-size: clamp(1.75rem, 4vw, 2.25rem);
+    font-weight: 800;
+    color: var(--color-text, #111827);
+    letter-spacing: -0.01em;
+}
+
+.contact-page__lead {
+    margin: 0;
+    font-size: var(--font-size-md, 1rem);
+    color: var(--color-text-muted, #6b7280);
+    line-height: 1.55;
+}
+
+.contact-page__layout {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr);
+    gap: var(--spacing-6, 24px);
+    align-items: start;
+}
+
+@media (max-width: 768px) {
+    .contact-page__layout {
+        grid-template-columns: 1fr;
+    }
+}
+
+.contact-card,
+.contact-form-card {
+    background: var(--white-primary, #fff);
+    border: 1px solid var(--color-border, #e5e7eb);
+    border-radius: var(--radius-lg, 12px);
+    padding: var(--spacing-6, 24px);
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+
+.contact-card__title,
+.contact-form-card__title {
+    margin: 0 0 var(--spacing-4, 16px);
+    font-size: 1.15rem;
+    font-weight: 700;
+    color: var(--color-text, #111827);
+}
+
+.contact-card__list {
+    list-style: none;
+    margin: 0 0 var(--spacing-5, 20px);
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-4, 16px);
+}
+
+.contact-card__item {
+    display: grid;
+    grid-template-columns: 36px 1fr;
+    gap: 12px;
+    align-items: start;
+}
+
+.contact-card__icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    background: var(--cyan-50, #ecfeff);
+    color: var(--cyan-primary, #0891b2);
+    flex-shrink: 0;
+}
+
+.contact-card__label {
+    font-size: 0.78rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--color-text-muted, #6b7280);
+    font-weight: 600;
+}
+
+.contact-card__value {
+    display: block;
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--color-text, #111827);
+    text-decoration: none;
+    margin-top: 2px;
+}
+
+.contact-card__value[href]:hover {
+    text-decoration: underline;
+}
+
+.contact-card__value--address {
+    font-style: normal;
+    font-weight: 500;
+    line-height: 1.45;
+}
+
+.contact-card__hint {
+    margin-top: 2px;
+    font-size: 0.82rem;
+    color: var(--color-text-muted, #6b7280);
+}
+
+.contact-card__footnote {
+    margin: 0;
+    padding: var(--spacing-3, 12px) var(--spacing-4, 16px);
+    background: var(--cyan-50, #ecfeff);
+    border-radius: var(--radius-md, 8px);
+    color: var(--color-text, #111827);
+    font-size: 0.88rem;
+    line-height: 1.5;
+}
+
+.contact-form-card__lead {
+    margin: 0 0 var(--spacing-5, 20px);
+    color: var(--color-text-muted, #6b7280);
+    font-size: 0.95rem;
+    line-height: 1.5;
+}
+
+.contact-form {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-4, 16px);
+}
+
+.contact-form__row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--spacing-4, 16px);
+}
+
+@media (max-width: 540px) {
+    .contact-form__row {
+        grid-template-columns: 1fr;
+    }
+}
+
+.contact-form__field {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.contact-form__label {
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--color-text, #111827);
+}
+
+.contact-form__optional {
+    font-weight: 400;
+    color: var(--color-text-muted, #6b7280);
+    font-size: 0.78rem;
+    margin-left: 4px;
+}
+
+.contact-form .form-input {
+    width: 100%;
+    padding: 10px 12px;
+    border: 1px solid var(--color-border, #d1d5db);
+    border-radius: var(--radius-md, 8px);
+    font-size: 0.95rem;
+    font-family: inherit;
+    color: var(--color-text, #111827);
+    background: #fff;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.contact-form .form-input:focus {
+    outline: none;
+    border-color: var(--cyan-primary, #0891b2);
+    box-shadow: 0 0 0 3px rgba(8, 145, 178, 0.18);
+}
+
+.contact-form .form-input[aria-invalid="true"] {
+    border-color: var(--color-error, #ef4444);
+    box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.15);
+}
+
+.contact-form textarea.form-input {
+    resize: vertical;
+    min-height: 140px;
+}
+
+.contact-form__turnstile {
+    min-height: 65px;
+}
+
+.contact-form__actions {
+    display: flex;
+    justify-content: flex-end;
+}
+
+.contact-form__actions .btn {
+    min-width: 180px;
+}
+
+.contact-form__result {
+    margin: 0;
+    padding: 12px 14px;
+    border-radius: var(--radius-md, 8px);
+    font-size: 0.9rem;
+    line-height: 1.5;
+}
+
+.contact-form__result--success {
+    background: #ecfdf5;
+    color: #065f46;
+    border: 1px solid #6ee7b7;
+}
+
+.contact-form__result--error {
+    background: #fef2f2;
+    color: #991b1b;
+    border: 1px solid #fecaca;
+}
+
