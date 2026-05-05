@@ -11737,3 +11737,437 @@
     border: 1px solid #fecaca;
 }
 
+/* ===========================================================================
+   LEGAL / POLICY / INFO PAGES (May 2026)
+   ---------------------------------------------------------------------------
+   Styles shared by /terms, /privacy, /returns, /shipping, /about, /faq.
+   Mobile-first: stacked layout, single column. Desktop: 280px sticky TOC
+   on the left, fluid prose on the right.
+   =========================================================================== */
+
+.legal-page {
+    padding: clamp(20px, 4vw, 40px) 0 80px;
+}
+
+.legal-page__layout {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 32px;
+}
+
+@media (min-width: 960px) {
+    .legal-page__layout {
+        grid-template-columns: 260px minmax(0, 1fr);
+        gap: 56px;
+        align-items: start;
+    }
+}
+
+.legal-page__hero {
+    margin-bottom: 28px;
+    padding-bottom: 20px;
+    border-bottom: 1px solid var(--color-border, #e5e7eb);
+}
+
+.legal-page__title {
+    font-size: clamp(1.6rem, 4vw, 2.4rem);
+    font-weight: 700;
+    color: var(--color-text, #111827);
+    margin: 0 0 10px;
+    letter-spacing: -0.02em;
+}
+
+.legal-page__lead {
+    color: var(--color-text-muted, #4b5563);
+    font-size: 1.05rem;
+    line-height: 1.6;
+    max-width: 70ch;
+    margin: 0 0 14px;
+}
+
+.legal-page__meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 18px;
+    font-size: 0.85rem;
+    color: var(--color-text-muted, #6b7280);
+}
+
+.legal-page__meta strong {
+    color: var(--color-text, #111827);
+    font-weight: 600;
+    margin-right: 4px;
+}
+
+/* Table of contents — sticky on desktop, inline on mobile */
+.legal-toc {
+    display: block;
+}
+
+@media (min-width: 960px) {
+    .legal-toc {
+        position: sticky;
+        top: 24px;
+        align-self: start;
+        max-height: calc(100vh - 48px);
+        overflow-y: auto;
+    }
+}
+
+.legal-toc__nav {
+    background: var(--color-surface-alt, #f9fafb);
+    border: 1px solid var(--color-border, #e5e7eb);
+    border-radius: var(--radius-lg, 12px);
+    padding: 18px 20px;
+}
+
+.legal-toc__heading {
+    font-size: 0.78rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--color-text-muted, #6b7280);
+    margin: 0 0 10px;
+}
+
+.legal-toc__list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    counter-reset: legal-toc;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.legal-toc__list li {
+    counter-increment: legal-toc;
+}
+
+.legal-toc__list a {
+    display: block;
+    padding: 6px 8px 6px 28px;
+    border-radius: var(--radius-sm, 6px);
+    text-decoration: none;
+    color: var(--color-text, #111827);
+    font-size: 0.92rem;
+    line-height: 1.4;
+    position: relative;
+    transition: background 0.12s ease, color 0.12s ease;
+}
+
+.legal-toc__list a::before {
+    content: counter(legal-toc) ".";
+    position: absolute;
+    left: 8px;
+    top: 6px;
+    color: var(--color-text-muted, #9ca3af);
+    font-variant-numeric: tabular-nums;
+    font-size: 0.85rem;
+}
+
+.legal-toc__list a:hover,
+.legal-toc__list a:focus-visible {
+    background: var(--cyan-50, #ecfeff);
+    color: var(--cyan-primary, #0891b2);
+    outline: none;
+}
+
+/* Policy sections — the prose body */
+.legal-page__body {
+    min-width: 0;
+}
+
+.policy-section {
+    padding: 4px 0 18px;
+    scroll-margin-top: 24px;
+}
+
+.policy-section + .policy-section {
+    border-top: 1px solid var(--color-border, #e5e7eb);
+    margin-top: 28px;
+    padding-top: 28px;
+}
+
+.policy-section h2 {
+    font-size: clamp(1.2rem, 2.4vw, 1.5rem);
+    font-weight: 700;
+    color: var(--color-text, #111827);
+    margin: 0 0 14px;
+    letter-spacing: -0.01em;
+    outline: none;
+}
+
+.policy-section h3 {
+    font-size: 1.05rem;
+    font-weight: 600;
+    color: var(--color-text, #111827);
+    margin: 22px 0 8px;
+}
+
+.policy-section p,
+.policy-section li {
+    color: var(--color-text, #111827);
+    font-size: 0.98rem;
+    line-height: 1.65;
+    max-width: 70ch;
+}
+
+.policy-section p {
+    margin: 0 0 14px;
+}
+
+.policy-section ul,
+.policy-section ol {
+    margin: 0 0 14px;
+    padding-left: 22px;
+}
+
+.policy-section ul li,
+.policy-section ol li {
+    margin-bottom: 6px;
+}
+
+.policy-section a {
+    color: var(--cyan-primary, #0891b2);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+}
+
+.policy-section a:hover { text-decoration-thickness: 2px; }
+
+/* Callout box for emphasised legal/compliance points */
+.policy-callout {
+    border-left: 3px solid var(--cyan-primary, #0891b2);
+    background: var(--cyan-50, #ecfeff);
+    padding: 14px 16px;
+    border-radius: 0 var(--radius-md, 8px) var(--radius-md, 8px) 0;
+    margin: 16px 0 20px;
+}
+
+.policy-callout--warn {
+    border-left-color: #d97706;
+    background: #fffbeb;
+}
+
+.policy-callout--ok {
+    border-left-color: #059669;
+    background: #ecfdf5;
+}
+
+.policy-callout__title {
+    font-weight: 700;
+    margin: 0 0 6px;
+    font-size: 0.95rem;
+    color: var(--color-text, #111827);
+}
+
+.policy-callout p:last-child { margin-bottom: 0; }
+
+/* Tables (data processors, cookies, shipping zones) */
+.policy-table-wrap {
+    overflow-x: auto;
+    margin: 0 0 18px;
+    border: 1px solid var(--color-border, #e5e7eb);
+    border-radius: var(--radius-md, 8px);
+}
+
+.policy-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.92rem;
+    min-width: 520px;
+}
+
+.policy-table thead th {
+    text-align: left;
+    font-weight: 600;
+    background: var(--color-surface-alt, #f9fafb);
+    color: var(--color-text, #111827);
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--color-border, #e5e7eb);
+    font-size: 0.85rem;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+}
+
+.policy-table tbody th,
+.policy-table tbody td {
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--color-border-soft, #f3f4f6);
+    vertical-align: top;
+    color: var(--color-text, #111827);
+}
+
+.policy-table tbody th {
+    text-align: left;
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.policy-table tbody tr:last-child th,
+.policy-table tbody tr:last-child td { border-bottom: 0; }
+
+/* FAQ — uses native <details>/<summary> */
+.faq-list { display: flex; flex-direction: column; gap: 10px; }
+
+.faq-item {
+    border: 1px solid var(--color-border, #e5e7eb);
+    border-radius: var(--radius-md, 8px);
+    background: #fff;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.faq-item[open] {
+    border-color: var(--cyan-primary, #0891b2);
+    box-shadow: 0 1px 4px rgba(8, 145, 178, 0.08);
+}
+
+.faq-item > summary {
+    list-style: none;
+    cursor: pointer;
+    padding: 14px 18px;
+    font-weight: 600;
+    color: var(--color-text, #111827);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    font-size: 1rem;
+    line-height: 1.4;
+}
+
+.faq-item > summary::-webkit-details-marker { display: none; }
+
+.faq-item > summary::after {
+    content: '+';
+    font-size: 1.4rem;
+    line-height: 1;
+    color: var(--cyan-primary, #0891b2);
+    transition: transform 0.18s ease;
+    flex-shrink: 0;
+}
+
+.faq-item[open] > summary::after {
+    content: '−';
+}
+
+.faq-item__body {
+    padding: 0 18px 16px;
+    color: var(--color-text, #111827);
+    font-size: 0.95rem;
+    line-height: 1.65;
+}
+
+.faq-item__body p { margin: 0 0 10px; }
+.faq-item__body p:last-child { margin-bottom: 0; }
+
+/* About page — value cards + brand story */
+.about-hero {
+    background: linear-gradient(135deg, var(--cyan-50, #ecfeff) 0%, #ffffff 100%);
+    padding: clamp(28px, 5vw, 48px);
+    border-radius: var(--radius-lg, 12px);
+    margin-bottom: 32px;
+}
+
+.about-values {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 18px;
+    margin: 24px 0 32px;
+}
+
+.about-value {
+    background: #fff;
+    border: 1px solid var(--color-border, #e5e7eb);
+    border-radius: var(--radius-md, 8px);
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.about-value__icon {
+    width: 36px;
+    height: 36px;
+    color: var(--cyan-primary, #0891b2);
+}
+
+.about-value__title {
+    font-size: 1rem;
+    font-weight: 700;
+    margin: 0;
+    color: var(--color-text, #111827);
+}
+
+.about-value__body {
+    font-size: 0.92rem;
+    color: var(--color-text-muted, #4b5563);
+    line-height: 1.55;
+    margin: 0;
+}
+
+/* Map embed (contact + about location) */
+.legal-map {
+    border: 1px solid var(--color-border, #e5e7eb);
+    border-radius: var(--radius-md, 8px);
+    overflow: hidden;
+    margin: 16px 0 8px;
+    background: #f3f4f6;
+}
+
+.legal-map__frame {
+    width: 100%;
+    height: 320px;
+    border: 0;
+    display: block;
+}
+
+.legal-map__link {
+    display: block;
+    text-align: right;
+    padding: 8px 12px;
+    font-size: 0.85rem;
+    color: var(--cyan-primary, #0891b2);
+    text-decoration: none;
+    background: var(--color-surface-alt, #f9fafb);
+    border-top: 1px solid var(--color-border, #e5e7eb);
+}
+
+.legal-map__link:hover { text-decoration: underline; }
+
+/* Footer policy nav block — added by footer.js */
+.footer-legal-nav {
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+    padding: 14px 0;
+    margin-top: 8px;
+}
+
+.footer-legal-nav ul {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 18px;
+    justify-content: center;
+    font-size: 0.85rem;
+}
+
+.footer-legal-nav a {
+    color: rgba(255, 255, 255, 0.78);
+    text-decoration: none;
+    transition: color 0.15s ease;
+}
+
+.footer-legal-nav a:hover,
+.footer-legal-nav a:focus-visible {
+    color: #fff;
+    text-decoration: underline;
+}
+
+.footer-legal-nav__sep {
+    color: rgba(255, 255, 255, 0.3);
+    user-select: none;
+}
+

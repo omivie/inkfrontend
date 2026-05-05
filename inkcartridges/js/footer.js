@@ -41,6 +41,27 @@
                             </li>
                         </ul>
                     </div>
+
+                    <div class="footer-column">
+                        <p class="footer-column__heading">Information</p>
+                        <ul class="footer-links">
+                            <li><a href="/about">About Us</a></li>
+                            <li><a href="/contact">Contact Us</a></li>
+                            <li><a href="/faq">FAQ</a></li>
+                            <li><a href="/shop">Shop All</a></li>
+                            <li><a href="/business/apply">Business Accounts</a></li>
+                        </ul>
+                    </div>
+
+                    <div class="footer-column">
+                        <p class="footer-column__heading">Policies</p>
+                        <ul class="footer-links">
+                            <li><a href="/shipping">Shipping &amp; Delivery</a></li>
+                            <li><a href="/returns">Refunds &amp; Returns</a></li>
+                            <li><a href="/terms">Terms of Service</a></li>
+                            <li><a href="/privacy">Privacy Policy</a></li>
+                        </ul>
+                    </div>
                 </div>
 
                 <div class="footer-trust">
@@ -141,8 +162,25 @@
 
         <div class="footer-bottom">
             <div class="container">
+                <nav class="footer-legal-nav" aria-label="Policies and information">
+                    <ul>
+                        <li><a href="/terms">Terms of Service</a></li>
+                        <li class="footer-legal-nav__sep" aria-hidden="true">&middot;</li>
+                        <li><a href="/privacy">Privacy Policy</a></li>
+                        <li class="footer-legal-nav__sep" aria-hidden="true">&middot;</li>
+                        <li><a href="/returns">Refunds &amp; Returns</a></li>
+                        <li class="footer-legal-nav__sep" aria-hidden="true">&middot;</li>
+                        <li><a href="/shipping">Shipping &amp; Delivery</a></li>
+                        <li class="footer-legal-nav__sep" aria-hidden="true">&middot;</li>
+                        <li><a href="/about">About Us</a></li>
+                        <li class="footer-legal-nav__sep" aria-hidden="true">&middot;</li>
+                        <li><a href="/faq">FAQ</a></li>
+                        <li class="footer-legal-nav__sep" aria-hidden="true">&middot;</li>
+                        <li><a href="/contact">Contact</a></li>
+                    </ul>
+                </nav>
                 <p class="footer-copyright">
-                    &copy; <span id="current-year"></span> InkCartridges.co.nz. All rights reserved.
+                    &copy; <span id="current-year"></span> InkCartridges.co.nz. All rights reserved. NZ owned and operated. Prices NZD, GST inclusive. No card surcharges.
                 </p>
 <div class="footer-payment">
                     <span class="footer-payment__label">We accept:</span>
