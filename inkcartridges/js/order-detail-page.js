@@ -106,7 +106,7 @@
                                 <div class="order-item__image">
                                     ${imageUrl
                                         ? `<img src="${escAttr(imageUrl)}" alt="${escAttr(item.product_name)}" data-fallback="placeholder">`
-                                        : this.getColorPlaceholder(item.product_name)
+                                        : this.getColorPlaceholder(item.product_name, item.source)
                                     }
                                 </div>
                                 <div class="order-item__details">
@@ -236,7 +236,17 @@
             return statusMap[status] || status;
         },
 
-        getColorPlaceholder(productName) {
+        getColorPlaceholder(productName, source) {
+            // Genuine-no-color-tile invariant: when the order line is for a
+            // genuine product with no image_url (e.g. the new genuine packs
+            // that ship before the composite-image generator catches up),
+            // never render a colored tile. Fall straight through to the
+            // neutral cartridge SVG. Compatible items keep the color tile —
+            // it helps customers recognize what they bought.
+            if (source && source !== 'compatible') {
+                return `<svg width="60" height="60" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="6" y="2" width="12" height="20" rx="2"/><line x1="9" y1="6" x2="15" y2="6"/></svg>`;
+            }
+
             const name = (productName || '').toLowerCase();
             const colors = {
                 'black': '#1a1a1a',

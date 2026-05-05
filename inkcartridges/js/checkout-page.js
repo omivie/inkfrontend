@@ -7,9 +7,18 @@
         isEmailVerified: false,
         guestCheckoutEnabled: true,
 
-        // Get image HTML for an item (uses ProductColors from utils.js)
+        // Get image HTML for an item (uses ProductColors from utils.js).
+        //
+        // Genuine-no-color-tile invariant: only compatible items render the
+        // color tile. Genuine items fall through to the neutral cartridge
+        // SVG so a genuine pack with image_url=NULL never shows a colored
+        // gradient (which would falsely imply third-party / compatible).
         getItemImageHTML(item) {
-            const colorStyle = typeof ProductColors !== 'undefined' ? ProductColors.getProductStyle(item) : null;
+            const isCompatibleItem = (typeof Cart !== 'undefined' && Cart._isCompatible)
+                ? Cart._isCompatible(item)
+                : /^compatible\b/i.test(item.name || '');
+            const rawColorStyle = typeof ProductColors !== 'undefined' ? ProductColors.getProductStyle(item) : null;
+            const colorStyle = isCompatibleItem ? rawColorStyle : null;
 
             // escAttr() provided by utils.js
             if (item.image) {

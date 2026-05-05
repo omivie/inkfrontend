@@ -109,10 +109,23 @@ const Cart = {
     },
 
     /**
-     * Get image HTML for a cart item
+     * Get image HTML for a cart item.
+     *
+     * Genuine-no-color-tile invariant: the color-block fallback only renders
+     * for compatible items. Genuine items (e.g. genuine KCMY packs that ship
+     * with image_url=NULL until the composite-image generator catches up)
+     * fall through to the neutral placeholder SVG — never a colored tile.
      */
     getItemImageHTML: function(item) {
-        const colorStyle = ProductColors.getProductStyle(item, 'background-color: #e0e0e0;');
+        const isCompatibleItem = this._isCompatible(item);
+        // Color style is only allowed to surface as a tile for compatible
+        // items. For genuine items we still need a *fallback* style for the
+        // image-error case (so a broken constituent thumbnail doesn't show a
+        // grey rectangle), but it's only painted on broken-image, not on
+        // missing-image — that's why we never paint it on the no-image path
+        // for genuine items below.
+        const rawColorStyle = ProductColors.getProductStyle(item, 'background-color: #e0e0e0;');
+        const colorStyle = isCompatibleItem ? rawColorStyle : null;
         const escapedName = Security.escapeHtml(item.name);
         const imageUrl = typeof storageUrl === 'function' ? storageUrl(item.image) : item.image;
 
@@ -242,7 +255,15 @@ const Cart = {
                 color: item.product.color || '',
                 color_hex: item.product.color_hex || null,
                 quantity: item.quantity,
-                source: 'core'
+                source: 'core',
+                // Preserve the brand-source field separately from the cart's
+                // 'core' subsystem namespace. _isCompatible reads this first
+                // so the COMPATIBLE/GENUINE badge — and the color-tile gate
+                // in getItemImageHTML — both stay correct after a server
+                // cart reload, which is when the legacy name fallback
+                // (`/^compatible\b/`) would silently misfire on the May 2026
+                // "Compatible Ink Cartridge Replacement for …" rename.
+                product_source: item.product.source || null
             };
             parsed.key = self.cartItemKey(parsed);
             return parsed;

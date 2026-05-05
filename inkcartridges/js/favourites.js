@@ -95,6 +95,14 @@ const Favourites = {
                     image: typeof storageUrl === 'function' ? storageUrl(fav.product?.image_url) : (fav.product?.image_url || ''),
                     brand: fav.product?.brand?.name || '',
                     color: fav.product?.color || '',
+                    color_hex: fav.product?.color_hex || null,
+                    // Brand source feeds the genuine-no-color-tile gate in
+                    // getItemImageHTML and the COMPATIBLE/GENUINE badge —
+                    // without this, server-loaded favourites lose track of
+                    // genuine vs compatible (legacy code only had a name
+                    // regex, which the May 2026 "Compatible <Type> Cartridge
+                    // Replacement for ..." rename now overmatches).
+                    product_source: fav.product?.source || null,
                     in_stock: true,
                     is_active: fav.product?.is_active !== false,
                     addedAt: fav.added_at
@@ -443,10 +451,35 @@ const Favourites = {
     },
 
     /**
-     * Get image HTML for a favourite item (with color fallback)
+     * Detect whether a favourited item is a compatible product. Mirrors
+     * Cart._isCompatible — preferences `product_source` (the canonical brand
+     * source field), then a non-sentinel `source`, then a leading-word name
+     * regex for very old persisted rows. Used to gate the color-tile
+     * fallback so the genuine-no-color-tile invariant holds for genuine
+     * packs that ship with image_url=NULL until the composite-image
+     * generator catches up.
+     */
+    _isCompatible(item) {
+        if (!item) return false;
+        if (item.product_source === 'compatible') return true;
+        if (item.product_source) return false;
+        if (item.source && !['core', 'cross-sell'].includes(item.source)) {
+            return item.source === 'compatible';
+        }
+        return /^compatible\b/i.test(item.name || '');
+    },
+
+    /**
+     * Get image HTML for a favourite item (with color fallback).
+     *
+     * Genuine-no-color-tile invariant: only compatible items may render the
+     * color tile when image_url is missing. Genuine items fall through to
+     * the placeholder SVG.
      */
     getItemImageHTML(item) {
-        const colorStyle = typeof ProductColors !== 'undefined' ? ProductColors.getProductStyle(item) : null;
+        const isCompatibleItem = this._isCompatible(item);
+        const rawColorStyle = typeof ProductColors !== 'undefined' ? ProductColors.getProductStyle(item) : null;
+        const colorStyle = isCompatibleItem ? rawColorStyle : null;
 
         if (item.image) {
             if (colorStyle) {

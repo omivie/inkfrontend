@@ -581,8 +581,12 @@
                     }, { once: true });
                 });
             } else {
-                // No image - show color block or placeholder
-                if (colorStyle) {
+                // No image. Genuine-no-color-tile invariant: only compatible
+                // products may show a color tile when image_url is missing.
+                // Genuine packs (KCMY/CMY) ship with image_url=NULL while the
+                // composite-image generator runs separately — they MUST fall
+                // through to the placeholder, never a striped gradient tile.
+                if (info.isCompatible && colorStyle) {
                     // colorStyle is safe — sourced from hardcoded ProductColors.map
                     productImageEl.classList.add('product-gallery__main--color-only');
                     productImageEl.closest('.product-detail__layout').classList.add('product-detail__layout--color-only');

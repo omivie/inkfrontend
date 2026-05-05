@@ -419,9 +419,20 @@
             return date.toISOString().split('T')[0];
         },
 
-        // Uses ProductColors from utils.js for color lookups
+        // Uses ProductColors from utils.js for color lookups.
+        //
+        // Genuine-no-color-tile invariant: when image_url is missing, only
+        // compatible items may show the colored tile. Genuine items fall
+        // through to the neutral placeholder. The new genuine packs (HP,
+        // Lexmark, OKI, Canon) ship with image_url=NULL until composite
+        // images are generated; without this gate they would render a
+        // striped gradient that misreads as a third-party product on the
+        // confirmation page.
         getItemImageHtml(item) {
-            const colorStyle = typeof ProductColors !== 'undefined' ? ProductColors.getProductStyle(item) : null;
+            const isCompatibleItem = item.source === 'compatible'
+                || ((typeof Cart !== 'undefined' && Cart._isCompatible) ? Cart._isCompatible(item) : false);
+            const rawColorStyle = typeof ProductColors !== 'undefined' ? ProductColors.getProductStyle(item) : null;
+            const colorStyle = isCompatibleItem ? rawColorStyle : null;
 
             // escAttr() provided by utils.js
             if (item.image_url) {
