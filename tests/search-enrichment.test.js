@@ -262,10 +262,16 @@ test('products.js renderCard — reads original_price + discount_percent + disco
     assert.match(src, /product\.discount_amount/, 'must read discount_amount');
 });
 
-test('products.js renderCard — reads gst_amount and renders Inc. GST line', () => {
+test('products.js renderCard — renders static "Incl. GST" trust label, never the dollar breakdown', () => {
+    // Authoritative pin lives in tests/inc-gst-amount-removed.test.js. The
+    // dollar-amount trust line was retired May 2026 in favour of the cleaner
+    // "Incl. GST" label that already sits beside the PDP price.
     const src = fs.readFileSync(PRODUCTS_JS_PATH, 'utf8');
-    assert.match(src, /product\.gst_amount/, 'must read gst_amount from backend');
-    assert.match(src, /Inc\. GST/, 'must render the "Inc. GST $X" trust line');
+    assert.match(src, /Incl\. GST/, 'card must render the "Incl. GST" trust label');
+    assert.doesNotMatch(src, /Inc\. GST \$/,
+        'card must not render the legacy "Inc. GST $X" dollar breakdown');
+    assert.doesNotMatch(src, /Inc\. GST \$\{/,
+        'card must not interpolate a GST dollar amount into the trust line');
 });
 
 test('products.js renderCard — prefers canonical_url over local URL construction', () => {
@@ -295,13 +301,14 @@ test('products.js renderCard — OOS branch renders Contact us → /contact and 
         'products.js OOS button must be marked data-action="contact"');
 });
 
-test('shop-page.js createProductCard — has same enrichment wiring (canonical_url, GST, discount) and OOS Contact-us CTA', () => {
+test('shop-page.js createProductCard — has same enrichment wiring (canonical_url, discount) and OOS Contact-us CTA', () => {
     const src = fs.readFileSync(SHOP_JS_PATH, 'utf8');
     assert.match(src, /product\.original_price/);
     assert.match(src, /product\.discount_percent/);
     assert.match(src, /product\.canonical_url/);
-    assert.match(src, /product\.gst_amount/, 'must read gst_amount on the shop renderer');
-    assert.match(src, /Inc\. GST/, 'shop renderer must show the GST trust line');
+    assert.match(src, /Incl\. GST/, 'shop renderer must show the "Incl. GST" trust label');
+    assert.doesNotMatch(src, /Inc\. GST \$/,
+        'shop renderer must not render the legacy "Inc. GST $X" dollar breakdown');
     assert.doesNotMatch(src, /product\.waitlist_available/,
         'shop-page.js must not branch on waitlist_available (contact-button-may2026.md)');
     assert.doesNotMatch(src, /Notify me/,

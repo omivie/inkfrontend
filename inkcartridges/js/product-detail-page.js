@@ -469,14 +469,10 @@
                      <span class="product-detail__savings">Save ${formatPrice(savingsAmount)} (${savingsPct}%)</span>`);
             }
 
-            // Inc. GST sub-line — NZ trust signal for international shoppers
-            const gstAmount = info.gst_amount != null
-                ? parseFloat(info.gst_amount)
-                : (typeof calculateGST === 'function' ? calculateGST(price) : null);
-            if (gstAmount != null && gstAmount > 0) {
-                priceEl.insertAdjacentHTML('afterend',
-                    `<span class="product-detail__gst-line">Inc. GST ${formatPrice(gstAmount)}</span>`);
-            }
+            // GST trust signal lives in the static "Incl. GST" badge rendered
+            // beside the price (html/product/index.html). The dollar breakdown
+            // was redundant alongside the badge, so it is intentionally not
+            // injected here — pinned by tests/inc-gst-amount-removed.test.js.
 
             // Shipping callout — GMC compliance: show cost or free-shipping status at product level.
             // Threshold sourced from qualifiesForFreeShipping (api.js) so PDP, card pills,

@@ -1261,13 +1261,6 @@ a.product-card__contact-btn {
     margin-left: 0.5rem;
 }
 
-.product-detail__gst-line {
-    display: block;
-    font-size: 0.85em;
-    color: var(--color-text-muted, #6b7280);
-    margin-top: 4px;
-}
-
 /* Cross-sell modal (frequently bought together after add-to-cart) */
 .crosssell-modal {
     position: fixed;

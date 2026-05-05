@@ -88,10 +88,9 @@ const Products = {
             : (originalPrice && product.retail_price ? Math.round(((originalPrice - product.retail_price) / originalPrice) * 100) : null);
         const showDiscount = originalPrice && originalPrice > (product.retail_price || 0);
 
-        // GST sub-line: backend sends gst_amount; fall back to local calc.
-        const gstAmount = product.gst_amount != null
-            ? product.gst_amount
-            : (product.retail_price != null && typeof calculateGST === 'function' ? calculateGST(product.retail_price) : null);
+        // GST trust label below the price. Just the wording — the dollar
+        // breakdown was redundant on cards and is pinned out by
+        // tests/inc-gst-amount-removed.test.js.
 
         // Prefer backend-supplied canonical_url (absolute). Reduce to a path so
         // router-based navigation stays in-app, falling back to slug/sku — and
@@ -131,7 +130,7 @@ const Products = {
                                 <div class="product-card__price-block">
                                     <p class="product-card__price">${product.retail_price == null ? 'Price unavailable' : formatPrice(product.retail_price)}</p>
                                     ${showDiscount ? `<span class="product-card__compare-price" aria-label="Was ${formatPrice(originalPrice)}">${formatPrice(originalPrice)}</span>` : ''}
-                                    ${gstAmount != null ? `<p class="product-card__gst">Inc. GST ${formatPrice(gstAmount)}</p>` : ''}
+                                    ${product.retail_price != null ? `<p class="product-card__gst">Incl. GST</p>` : ''}
                                 </div>
                                 ${(() => {
                                     // contact-button-may2026.md: any OOS product —

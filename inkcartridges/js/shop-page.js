@@ -2879,12 +2879,8 @@
                 : (originalPrice && originalPrice > 0 ? Math.round(((originalPrice - price) / originalPrice) * 100) : null);
             const showDiscount = originalPrice && originalPrice > price;
 
-            // GST sub-line: backend sends gst_amount on /smart, /by-printer,
-            // /by-part. Fall back to local calc so the trust copy never goes
-            // missing on legacy responses or RPC-path omissions.
-            const gstAmount = product.gst_amount != null
-                ? product.gst_amount
-                : (price > 0 && typeof calculateGST === 'function' ? calculateGST(price) : null);
+            // GST trust label is the static "Incl. GST" copy (no dollar
+            // breakdown — pinned by tests/inc-gst-amount-removed.test.js).
             const stockStatus = getStockStatus(product);
             const inStock = stockStatus.class === 'in-stock';
             const brandName = product.brand?.name || '';
@@ -2986,7 +2982,7 @@
                                 <div class="product-card__pricing">
                                     <span class="product-card__price">${formatPrice(price)}</span>
                                     ${showDiscount ? ` <span class="product-card__compare-price" aria-label="Was ${formatPrice(originalPrice)}">${formatPrice(originalPrice)}</span>` : ''}
-                                    ${gstAmount != null ? `<span class="product-card__gst">Inc. GST ${formatPrice(gstAmount)}</span>` : ''}
+                                    ${price > 0 ? `<span class="product-card__gst">Incl. GST</span>` : ''}
                                 </div>
                                 ${(() => {
                                     // contact-button-may2026.md — any OOS product
