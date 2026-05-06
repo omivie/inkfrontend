@@ -99,6 +99,13 @@
     --color-background-dark: var(--steel-900);
     --color-background-overlay: rgba(15, 23, 42, 0.7);
 
+    /* Canonical background painted behind every product photo (cards,
+       gallery, cart, favourites, dashboard, related, smart-AC). Locked
+       to pure white so transparent-PNG cartridge boxes sit seamlessly
+       on the page instead of looking like a white tile inside a grey
+       frame. Pinned by tests/product-image-bg-white.test.js. */
+    --product-image-bg: var(--white-primary);
+
     /* Border colours — mapped to steel */
     --color-border: var(--steel-200);
     --color-border-light: var(--steel-100);

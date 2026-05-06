@@ -155,6 +155,11 @@ const API = {
                 this.setGuestSessionId(respSessionId);
             }
 
+            // Capture x-request-id for log correlation. Backend (Render) sets this
+            // on every response; surfacing it on errors lets a customer's "the form
+            // broke" report be grepped against stderr without guessing timestamps.
+            const requestId = response.headers.get('x-request-id') || null;
+
             // Handle 204 No Content — DELETE endpoints return no body
             if (response.status === 204) {
                 return { ok: true, data: null };
@@ -167,9 +172,16 @@ const API = {
             } catch (_jsonErr) {
                 const status = response.status;
                 if (status >= 500) {
-                    throw new Error('The server is temporarily unavailable. Please try again in a moment.');
+                    const e = new Error('The server is temporarily unavailable. Please try again in a moment.');
+                    e.code = 'INTERNAL_ERROR';
+                    e.status = status;
+                    if (requestId) e.request_id = requestId;
+                    throw e;
                 }
-                throw new Error(`Unexpected response from server (HTTP ${status}).`);
+                const e = new Error(`Unexpected response from server (HTTP ${status}).`);
+                e.status = status;
+                if (requestId) e.request_id = requestId;
+                throw e;
             }
 
             // Normalize backend envelope: { ok, data, meta, error: { code, message, details } }
@@ -188,60 +200,75 @@ const API = {
                 const errorMsg = (typeof err === 'object' && err !== null) ? (err.message || 'Unknown error') : (err || data.message || 'Unknown error');
                 const errorDetails = (typeof err === 'object' && err !== null) ? err.details : data.details;
 
-                DebugLog.warn('API Error:', response.status, errorMsg);
+                DebugLog.warn('API Error:', response.status, errorMsg, requestId ? `(req ${requestId})` : '');
+
+                const withRid = (env) => requestId ? Object.assign(env, { request_id: requestId }) : env;
 
                 // Return error response instead of throwing for specific codes
                 // so callers can handle them with targeted UI
                 if (errorCode === 'EMAIL_NOT_VERIFIED') {
-                    return { ok: false, error: errorMsg, code: 'EMAIL_NOT_VERIFIED' };
+                    return withRid({ ok: false, error: errorMsg, code: 'EMAIL_NOT_VERIFIED' });
                 }
                 if (errorCode === 'DISPOSABLE_EMAIL') {
-                    return { ok: false, error: errorMsg, code: 'DISPOSABLE_EMAIL' };
+                    return withRid({ ok: false, error: errorMsg, code: 'DISPOSABLE_EMAIL' });
                 }
                 if (errorCode === 'ACCOUNT_FLAGGED') {
-                    return { ok: false, error: errorMsg, code: 'ACCOUNT_FLAGGED' };
+                    return withRid({ ok: false, error: errorMsg, code: 'ACCOUNT_FLAGGED' });
                 }
 
                 // Return 409 conflicts with code so callers can handle them
                 if (response.status === 409 && errorCode) {
-                    return { ok: false, error: errorMsg, code: errorCode, data: data };
+                    return withRid({ ok: false, error: errorMsg, code: errorCode, data: data });
                 }
 
                 // Return order/payment errors with code so callers can show specific messages
                 if (errorCode === 'ORDER_DB_ERROR' || errorCode === 'PAYMENT_ERROR' || errorCode === 'ORDER_TOTAL_TOO_LOW') {
-                    return { ok: false, error: errorMsg, code: errorCode };
+                    return withRid({ ok: false, error: errorMsg, code: errorCode });
                 }
 
                 // Return validation errors with details so callers can show per-field messages
                 if (errorCode === 'VALIDATION_FAILED') {
-                    return { ok: false, error: errorMsg, code: errorCode, details: errorDetails };
+                    return withRid({ ok: false, error: errorMsg, code: errorCode, details: errorDetails });
                 }
 
 
                 // Return rate limit errors with retry_after so callers can handle them
                 if (response.status === 429 || errorCode === 'RATE_LIMITED') {
-                    return { ok: false, error: errorMsg, code: 'RATE_LIMITED', retry_after: data.retry_after };
+                    return withRid({ ok: false, error: errorMsg, code: 'RATE_LIMITED', retry_after: data.retry_after });
                 }
 
                 // Stock-conflict — caller renders inline message on the line item
                 if (errorCode === 'STOCK_INSUFFICIENT') {
-                    return { ok: false, error: errorMsg, code: errorCode, details: errorDetails };
+                    return withRid({ ok: false, error: errorMsg, code: errorCode, details: errorDetails });
                 }
 
                 // Forbidden — caller decides between "verify email", "B2B only",
                 // or generic deny. Backend's specific code wins when present.
                 if (response.status === 403 || errorCode === 'FORBIDDEN') {
-                    return { ok: false, error: errorMsg, code: errorCode || 'FORBIDDEN' };
+                    return withRid({ ok: false, error: errorMsg, code: errorCode || 'FORBIDDEN' });
                 }
 
                 // Unauthorized — caller redirects to login
                 if (response.status === 401 || errorCode === 'UNAUTHORIZED') {
-                    return { ok: false, error: errorMsg, code: 'UNAUTHORIZED' };
+                    return withRid({ ok: false, error: errorMsg, code: 'UNAUTHORIZED' });
                 }
 
                 // Not found — caller may show "Couldn't find that product/order"
                 if (response.status === 404 || errorCode === 'NOT_FOUND') {
-                    return { ok: false, error: errorMsg, code: 'NOT_FOUND' };
+                    return withRid({ ok: false, error: errorMsg, code: 'NOT_FOUND' });
+                }
+
+                // 5xx — return a structured envelope so callers can show a friendly
+                // message AND the request_id (for Render-log grepping). Newsletter
+                // and contact forms specifically rely on this branch to distinguish
+                // a backend hiccup from validation failure.
+                if (response.status >= 500) {
+                    return withRid({
+                        ok: false,
+                        error: errorMsg,
+                        code: errorCode || 'INTERNAL_ERROR',
+                        status: response.status,
+                    });
                 }
 
                 // Build detailed error message
@@ -255,7 +282,11 @@ const API = {
                         fullMsg += ': ' + errorDetails;
                     }
                 }
-                throw new Error(fullMsg);
+                const e = new Error(fullMsg);
+                e.code = errorCode;
+                e.status = response.status;
+                if (requestId) e.request_id = requestId;
+                throw e;
             }
 
             // Capture guest session ID from response body (fallback to header)
@@ -290,6 +321,13 @@ const API = {
             || (typeof errorOrResponse.error === 'string' ? errorOrResponse.error : null)
             || (errorOrResponse.error && errorOrResponse.error.message)
             || 'Something went wrong. Please try again.';
+        const requestId = errorOrResponse.request_id
+            || (errorOrResponse.error && errorOrResponse.error.request_id)
+            || null;
+        // Short prefix of the request id keeps the toast readable while still being
+        // unique enough for log correlation (Render IDs are UUID v4 — 8 chars is
+        // collision-safe within any reasonable log window).
+        const ridShort = requestId ? String(requestId).slice(0, 8) : null;
 
         switch (code) {
             case 'VALIDATION_FAILED':
@@ -336,8 +374,20 @@ const API = {
                     action: 'treat-as-success',
                 };
             case 'INTERNAL_ERROR':
+                return {
+                    code,
+                    message: ridShort
+                        ? `Server hiccup — please try again. If it keeps happening, contact us with reference ${ridShort}.`
+                        : 'Server hiccup — please try again. If it keeps happening, contact us.',
+                    request_id: requestId,
+                    action: 'retry',
+                };
             default:
-                return { code, message: fallbackMessage };
+                return {
+                    code,
+                    message: ridShort ? `${fallbackMessage} (ref ${ridShort})` : fallbackMessage,
+                    request_id: requestId,
+                };
         }
     },
 

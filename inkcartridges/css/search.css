@@ -726,7 +726,7 @@ mark.smart-ac__mark {
 
 .smart-ac__grid .product-card--skeleton .product-card__image-wrapper {
     aspect-ratio: 1 / 1;
-    background: #f7fafc;
+    background: var(--product-image-bg);
     border-radius: 6px;
     margin-bottom: 8px;
 }

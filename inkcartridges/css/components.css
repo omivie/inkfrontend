@@ -544,7 +544,7 @@
        the card height vs. the prior 1:1 — the dominant single fix for
        all the empty space that used to sit between content and footer. */
     aspect-ratio: 4 / 3;
-    background-color: var(--off-white);
+    background-color: var(--product-image-bg);
     position: relative;
     display: flex;
     align-items: center;
@@ -3178,7 +3178,7 @@ a.product-card__contact-btn {
 .favourite-item__image {
     position: relative;
     aspect-ratio: 4 / 3;
-    background: var(--color-background-alt);
+    background: var(--product-image-bg);
     display: flex;
     align-items: center;
     justify-content: center;

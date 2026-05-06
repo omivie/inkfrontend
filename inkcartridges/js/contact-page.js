@@ -199,6 +199,13 @@
         if (typeof API !== 'undefined' && typeof API.submitContactForm === 'function') {
             return API.submitContactForm(payload).then(function (res) {
                 if (res && res.ok) return res;
+                // 5xx now returns a structured envelope (api.js); route through mapError
+                // so the user sees "Server hiccup — please try again. … reference XXXXXXXX."
+                if (res && (res.code === 'INTERNAL_ERROR' || (typeof res.status === 'number' && res.status >= 500))) {
+                    if (res.request_id) console.warn('[contact] submit failed', { code: res.code, request_id: res.request_id });
+                    var mapped = (typeof API.mapError === 'function') ? API.mapError(res) : null;
+                    throw new Error((mapped && mapped.message) || 'Server hiccup — please try again, or call 027 474 0115.');
+                }
                 var msg = (res && res.error && res.error.message) || (res && res.error) || 'Could not send your message.';
                 throw new Error(typeof msg === 'string' ? msg : 'Could not send your message.');
             });
@@ -210,9 +217,15 @@
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload),
         }).then(function (r) {
+            var rid = r.headers.get('x-request-id');
             return r.json().then(function (data) {
                 if (r.ok && data && data.ok) return data;
                 var msg = (data && data.error && data.error.message) || (data && data.error) || 'Could not send your message.';
+                if (r.status >= 500) {
+                    if (rid) console.warn('[contact] submit failed', { status: r.status, request_id: rid });
+                    var ref = rid ? ' (ref ' + String(rid).slice(0, 8) + ')' : '';
+                    throw new Error('Server hiccup — please try again, or call 027 474 0115.' + ref);
+                }
                 throw new Error(typeof msg === 'string' ? msg : 'Could not send your message.');
             });
         });
