@@ -75,16 +75,51 @@ Returns a **new** array; never mutates input. Edge cases (`null`,
 `undefined`, non-array) → `[]`.
 
 ```js
-ProductSort.rowBreakIndices(sortedProducts) → number[]
+ProductSort.rowBreakIndices(sortedProducts, opts?) → number[]
 ```
 
 Given an array already sorted by `byCodeThenColor`, returns the indices at
 which a row break belongs. A boundary fires when `(familyKey, yieldTier)`
-changes from the previous item. The first item is never a boundary.
+changes from the previous item AND **both adjacent groups carry at least
+`opts.minGroupSize` cards** (default `2`). The first item is never a
+boundary.
 
 ```js
-input  : [TN645·K, TN645·C, TN645·Y, TN645XL·K, TN645XL·C, TN645XXL·K]
-output : [3, 5]
+input  : [TN645·K, TN645·C, TN645·M, TN645·Y, TN645XL·K, TN645XL·C, TN645XL·M, TN645XL·Y, TN645XXL·K, TN645XXL·C, TN645XXL·M, TN645XXL·Y]
+                                                                                          (group sizes 4 / 4 / 4)
+output : [4, 8]                          ← break before 645XL and 645XXL
+```
+
+### Why the threshold
+
+A forced row break is only useful when grouping wins more than the lost
+vertical space. For sparse pages (Canon CL586 = 1 std card + 1 XL card),
+forcing a break creates two rows of one card each — the customer scrolls
+past whitespace for nothing. The threshold lets the natural flex-wrap
+keep the cards on a single row instead.
+
+```
+Without threshold:                With threshold (default 2):
+  ┌──────┐                          ┌──────┬──────┐
+  │CL586 │  ← row 1, lonely         │CL586 │CL586 │  ← row 1, full
+  └──────┘                          │      │  XL  │
+  ┌──────┐                          └──────┴──────┘
+  │CL586 │  ← row 2 — whitespace
+  │  XL  │     above wastes a fold
+  └──────┘
+```
+
+**Trade-off:** when both adjacent groups are dense (≥ 2), the break wins
+on visual grouping; when either side is a single card, it loses on space
+efficiency. `2` strikes the balance — bumps to `3+` if you want
+breaks only between substantial groups; drop to `1` to revert to the
+strict "always break" rule (useful for diagnostics).
+
+Pass `opts.minGroupSize` to override:
+
+```js
+ProductSort.rowBreakIndices(sorted, { minGroupSize: 1 })  // strict
+ProductSort.rowBreakIndices(sorted, { minGroupSize: 4 })  // looser
 ```
 
 ### Why `familyKey` had to grow up

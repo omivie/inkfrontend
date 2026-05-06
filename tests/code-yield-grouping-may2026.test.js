@@ -268,10 +268,11 @@ test('byCodeThenColor handles edge cases: empty, single-item, null, non-array', 
 // 3. rowBreakIndices — boundary detection
 // ─────────────────────────────────────────────────────────────────────────────
 
-test('rowBreakIndices flags every (familyKey, yieldTier) transition', () => {
+test('rowBreakIndices flags every (familyKey, yieldTier) transition when groups are dense', () => {
     const sorted = ProductSort.byCodeThenColor(TN645_SCRAMBLED);
     const breaks = ProductSort.rowBreakIndices(sorted);
-    // 12 cards in 3 yield groups of 4 → breaks before cards 4 and 8.
+    // 12 cards in 3 yield groups of 4 → both sides ≥ 2 at every boundary,
+    // so breaks fire before cards 4 and 8.
     assert.deepEqual(breaks, [4, 8]);
 });
 
@@ -286,15 +287,56 @@ test('rowBreakIndices returns [] for empty / single-item input', () => {
     assert.deepEqual(ProductSort.rowBreakIndices([{ name: 'X', color: 'Black' }]), []);
 });
 
-test('rowBreakIndices fires between families at the same yield tier', () => {
-    // Brother std (yield 0) immediately followed by HP std (yield 0) — different
-    // family means a row break still belongs there.
+test('rowBreakIndices fires between families at the same yield tier when both sides ≥ 2', () => {
+    // Brother std followed by HP std — different family, both with ≥2 cards
+    // → a break belongs there. The default threshold is met on both sides.
     const sorted = [
-        { sku: 'B1', name: 'Brother Genuine TN645BK Toner Cartridge Black', color: 'Black', brand: { name: 'Brother' } },
-        { sku: 'B2', name: 'Brother Genuine TN645C Toner Cartridge Cyan',   color: 'Cyan',  brand: { name: 'Brother' } },
-        { sku: 'H1', name: 'HP Genuine 975A Ink Cartridge Black',           color: 'Black', brand: { name: 'HP' } }
+        { sku: 'B1', name: 'Brother Genuine TN645BK Toner Cartridge Black', color: 'Black',   brand: { name: 'Brother' } },
+        { sku: 'B2', name: 'Brother Genuine TN645C Toner Cartridge Cyan',   color: 'Cyan',    brand: { name: 'Brother' } },
+        { sku: 'H1', name: 'HP Genuine 975A Ink Cartridge Black',           color: 'Black',   brand: { name: 'HP' } },
+        { sku: 'H2', name: 'HP Genuine 975A Ink Cartridge Cyan',            color: 'Cyan',    brand: { name: 'HP' } }
     ];
     assert.deepEqual(ProductSort.rowBreakIndices(sorted), [2]);
+});
+
+test('rowBreakIndices SKIPS the break when either adjacent group has only 1 card (CL586 case)', () => {
+    // Live evidence /search?q=cl586 (2026-05-06): 1 std card + 1 XL card.
+    // Forcing a row break wastes a full row of vertical space for nothing —
+    // the customer should see both cards on the same row instead of having
+    // to scroll. The default threshold (minGroupSize=2) skips this break.
+    const sorted = ProductSort.byCodeThenColor([
+        { sku: 'G-CAN-CL586',   name: 'Canon Genuine CL586 Ink Cartridge Fine Colour',   color: 'CMY', brand: { name: 'Canon' }, pack_type: 'value_pack' },
+        { sku: 'G-CAN-CL586XL', name: 'Canon Genuine CL586XL Ink Cartridge Fine Colour', color: 'CMY', brand: { name: 'Canon' }, pack_type: 'value_pack' }
+    ]);
+    assert.deepEqual(ProductSort.rowBreakIndices(sorted), [],
+        'CL586 std + CL586XL must share a single row — no forced break for 1-card groups');
+});
+
+test('rowBreakIndices SKIPS the break for sparse-on-either-side transitions (3 + 1 + 3)', () => {
+    // Three families, sizes 3 / 1 / 3. The lonely middle group makes BOTH
+    // adjacent boundaries fail the threshold (threshold=2 needs both sides
+    // ≥ 2). Result: zero breaks, all 7 cards flow into the natural wrap.
+    const sorted = ProductSort.byCodeThenColor([
+        { sku: 'A1', name: 'Brother Genuine TN111BK Toner Cartridge Black',   color: 'Black',   brand: { name: 'Brother' } },
+        { sku: 'A2', name: 'Brother Genuine TN111C Toner Cartridge Cyan',     color: 'Cyan',    brand: { name: 'Brother' } },
+        { sku: 'A3', name: 'Brother Genuine TN111M Toner Cartridge Magenta',  color: 'Magenta', brand: { name: 'Brother' } },
+        { sku: 'B1', name: 'Brother Genuine TN222BK Toner Cartridge Black',   color: 'Black',   brand: { name: 'Brother' } },
+        { sku: 'C1', name: 'Brother Genuine TN333BK Toner Cartridge Black',   color: 'Black',   brand: { name: 'Brother' } },
+        { sku: 'C2', name: 'Brother Genuine TN333C Toner Cartridge Cyan',     color: 'Cyan',    brand: { name: 'Brother' } },
+        { sku: 'C3', name: 'Brother Genuine TN333M Toner Cartridge Magenta',  color: 'Magenta', brand: { name: 'Brother' } }
+    ]);
+    assert.deepEqual(ProductSort.rowBreakIndices(sorted), []);
+});
+
+test('rowBreakIndices respects an explicit minGroupSize override', () => {
+    // Caller can opt into the strict "always break" behaviour by passing
+    // minGroupSize: 1 — useful for tests / debugging.
+    const sorted = ProductSort.byCodeThenColor([
+        { sku: 'G-CAN-CL586',   name: 'Canon Genuine CL586 Ink Cartridge Fine Colour',   color: 'CMY', brand: { name: 'Canon' }, pack_type: 'value_pack' },
+        { sku: 'G-CAN-CL586XL', name: 'Canon Genuine CL586XL Ink Cartridge Fine Colour', color: 'CMY', brand: { name: 'Canon' }, pack_type: 'value_pack' }
+    ]);
+    assert.deepEqual(ProductSort.rowBreakIndices(sorted, { minGroupSize: 1 }), [1],
+        'minGroupSize:1 reverts to "always break" — useful for diagnostics');
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

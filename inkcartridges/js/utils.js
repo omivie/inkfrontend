@@ -723,21 +723,46 @@ const ProductSort = (function() {
 
     // Indices at which a row break should be inserted, given a list already
     // sorted by `byCodeThenColor`. A boundary fires when (familyKey, yieldTier)
-    // changes from the previous item. The first item is never a boundary.
+    // changes AND both adjacent groups carry at least `opts.minGroupSize`
+    // cards (default 2). The threshold avoids wasting vertical space on
+    // boundaries between sparse (1-card) groups — e.g. Canon CL586 with one
+    // std card + one XL card flows onto a single row instead of two rows of
+    // one. Larger groups (TN645 std/XL/XXL × 6 cards each) still get their
+    // break and render as the customer-expected "one row per yield-code".
+    // The first item is never a boundary.
     //
-    //   input  : [645-K, 645-C, 645-M, 645XL-K, 645XL-C, 645XXL-K]
-    //   output : [3, 5]   ← break before index 3 (645XL) and index 5 (645XXL)
+    //   input  : [645-K, 645-C, 645-M, 645XL-K, 645XL-C, 645XXL-K]   (group sizes 3, 2, 1)
+    //   output : [3]                       ← break before 645XL only
+    //                                        (645XL → 645XXL skipped: 1<2)
     //
     // Returns [] for arrays of length < 2.
-    function rowBreakIndices(sortedProducts) {
+    function rowBreakIndices(sortedProducts, opts) {
         if (!Array.isArray(sortedProducts) || sortedProducts.length < 2) return [];
-        const out = [];
-        let prevKey = familyKey(sortedProducts[0]) + '|' + yieldTier(sortedProducts[0]);
-        for (let i = 1; i < sortedProducts.length; i++) {
+        const minGroupSize = (opts && Number.isFinite(opts.minGroupSize))
+            ? opts.minGroupSize : 2;
+
+        // Pass 1 — segment the sorted list into [{startIndex, key, size}, …].
+        // Each segment is one (familyKey, yieldTier) tuple.
+        const segments = [];
+        let prevKey = null;
+        for (let i = 0; i < sortedProducts.length; i++) {
             const key = familyKey(sortedProducts[i]) + '|' + yieldTier(sortedProducts[i]);
             if (key !== prevKey) {
-                out.push(i);
+                segments.push({ startIndex: i, key, size: 1 });
                 prevKey = key;
+            } else {
+                segments[segments.length - 1].size++;
+            }
+        }
+
+        // Pass 2 — emit a break index only when both sides of the transition
+        // meet the threshold, so lonely groups merge into the previous row.
+        const out = [];
+        for (let s = 1; s < segments.length; s++) {
+            const prev = segments[s - 1];
+            const curr = segments[s];
+            if (prev.size >= minGroupSize && curr.size >= minGroupSize) {
+                out.push(curr.startIndex);
             }
         }
         return out;
