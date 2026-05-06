@@ -224,7 +224,38 @@ const ProductColors = {
         }
 
         return null;
-    }
+    },
+
+    // Canonical color options for admin product editing.
+    // Values match the PascalCase strings the backend stores in `products.color`.
+    // Order mirrors ProductSort COLOR_ORDER (K → C → M → Y → CMY → KCMY → specialty).
+    // Single source of truth — admin dropdowns and the dropdown contract test
+    // both bind to this list. Extending it requires no admin/UI change.
+    OPTIONS: [
+        { value: 'Black',         label: 'Black' },
+        { value: 'Photo Black',   label: 'Photo Black' },
+        { value: 'Matte Black',   label: 'Matte Black' },
+        { value: 'Cyan',          label: 'Cyan' },
+        { value: 'Photo Cyan',    label: 'Photo Cyan' },
+        { value: 'Light Cyan',    label: 'Light Cyan' },
+        { value: 'Magenta',       label: 'Magenta' },
+        { value: 'Photo Magenta', label: 'Photo Magenta' },
+        { value: 'Light Magenta', label: 'Light Magenta' },
+        { value: 'Yellow',        label: 'Yellow' },
+        { value: 'CMY',           label: 'CMY (Tri-Colour)' },
+        { value: 'KCMY',          label: 'KCMY (4-Colour Pack)' },
+        { value: 'Photo',         label: 'Photo' },
+        { value: 'Red',           label: 'Red' },
+        { value: 'Blue',          label: 'Blue' },
+        { value: 'Green',         label: 'Green' },
+        { value: 'Gray',          label: 'Gray' },
+        { value: 'Light Gray',    label: 'Light Gray' },
+        { value: 'White',         label: 'White' },
+        { value: 'Clear',         label: 'Clear' },
+        { value: 'Black/Red',     label: 'Black/Red' },
+        { value: 'Value Pack',    label: 'Value Pack' },
+        { value: 'Multipack',     label: 'Multipack' }
+    ]
 };
 
 // Make ProductColors available globally (browser-only; Node test runs skip this).

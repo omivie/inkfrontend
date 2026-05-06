@@ -67,6 +67,7 @@ const NAV_ITEMS = [
   { key: 'price-monitor', label: 'Price Monitor', icon: 'finance', ownerOnly: true },
   { key: 'recovery', label: 'Recovery', icon: 'refunds', ownerOnly: true },
   { key: 'site-lock', label: 'Site Lock', icon: 'lock', ownerOnly: true },
+  { key: 'legal-content', label: 'Legal Content', icon: 'invoice', ownerOnly: true },
   { key: 'contact-emails', label: 'Settings', icon: 'settings', ownerOnly: true },
 ];
 
@@ -231,7 +232,7 @@ async function navigate(pageName) {
   `;
 
   // Owner-only page check
-  const ownerPages = ['contact-emails', 'control-center', 'site-lock'];
+  const ownerPages = ['contact-emails', 'control-center', 'site-lock', 'legal-content'];
   if (ownerPages.includes(pageName) && !AdminAuth.isOwner()) {
     content.innerHTML = `
       <div class="admin-stub">

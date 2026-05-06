@@ -678,7 +678,7 @@ function openCreateProductModal() {
       ], empty.product_type))}
     </div>
     <div class="admin-form-row">
-      ${formGroup('Color', `<input class="admin-input" id="edit-color" placeholder="e.g. Black">`)}
+      ${formGroup('Color', buildColorSelect('edit-color', empty.color))}
       ${formGroup('Source', buildSelect('edit-source', ['genuine', 'compatible', 'remanufactured'], empty.source))}
     </div>
   `;
@@ -933,7 +933,7 @@ function buildProductModalTabs(modal, full, isOwner) {
       ], full.product_type), 'product_type')}
     </div>
     <div class="admin-form-row">
-      ${formGroup('Color', `<input class="admin-input" id="edit-color" value="${esc(full.color || '')}">`, 'color')}
+      ${formGroup('Color', buildColorSelect('edit-color', full.color), 'color')}
       ${formGroup('Source', buildSelect('edit-source', ['genuine', 'compatible', 'remanufactured'], full.source), 'source')}
     </div>
   `;
@@ -1325,6 +1325,30 @@ function buildSelect(id, options, selected) {
     const label = typeof opt === 'object' ? opt.label : opt.charAt(0).toUpperCase() + opt.slice(1);
     const sel = (selected || '').toLowerCase() === value.toLowerCase() ? ' selected' : '';
     html += `<option value="${esc(value)}"${sel}>${esc(label)}</option>`;
+  }
+  html += '</select>';
+  return html;
+}
+
+// Color dropdown bound to the canonical ProductColors.OPTIONS list.
+// Shows a leading "Select color…" blank, all canonical options, and — if the
+// product has a legacy color string outside the canonical list — appends it
+// pre-selected so editing an existing record never silently drops the value.
+function buildColorSelect(id, selected) {
+  const options = (typeof window !== 'undefined' && window.ProductColors && Array.isArray(window.ProductColors.OPTIONS))
+    ? window.ProductColors.OPTIONS
+    : [];
+  const current = (selected || '').toString();
+  const matchesCanonical = options.some(o => o.value.toLowerCase() === current.toLowerCase());
+
+  let html = `<select class="admin-select" id="${id}" data-color-select="canonical">`;
+  html += `<option value=""${current ? '' : ' selected'}>Select color…</option>`;
+  for (const opt of options) {
+    const sel = current.toLowerCase() === opt.value.toLowerCase() ? ' selected' : '';
+    html += `<option value="${esc(opt.value)}"${sel}>${esc(opt.label)}</option>`;
+  }
+  if (current && !matchesCanonical) {
+    html += `<option value="${esc(current)}" selected>${esc(current)} (legacy)</option>`;
   }
   html += '</select>';
   return html;
