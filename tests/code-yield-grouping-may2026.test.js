@@ -118,6 +118,55 @@ test('familyKey collapses Canon CART069 / CART069H / CART069HK onto base', () =>
     assert.equal(base, 'B:CANON:CART069');
 });
 
+test('familyKey collapses single-digit Canon BCI6 series (B/C/M/Y/R/PC + pack) onto base', () => {
+    // Live bug 2026-05-06: \d{2,} required two digits, so BCI6 (one digit)
+    // fell through to the colour-stripped name fallback. Page-count parens
+    // like "(280 Pages)" were then picked up by the bare-numeric regex and
+    // every product got family=B:CANON:280 / B:CANON:100. Black landed on
+    // its own row because its page count (280) differed from the rest (100).
+    const fk = (name) => ProductSort.familyKey({ name, brand: { name: 'Canon' } });
+    const base = fk('Canon Genuine BCI6B Ink Cartridge Black (280 Pages)');
+    assert.equal(base, 'B:CANON:BCI6');
+    assert.equal(fk('Canon Genuine BCI6C Ink Cartridge Cyan (100 Pages)'),    base);
+    assert.equal(fk('Canon Genuine BCI6M Ink Cartridge Magenta (100 Pages)'), base);
+    assert.equal(fk('Canon Genuine BCI6Y Ink Cartridge Yellow (100 Pages)'),  base);
+    assert.equal(fk('Canon Genuine BCI6R Ink Cartridge Red (100 Pages)'),     base);
+    assert.equal(fk('Canon Genuine BCI6PC Ink Cartridge Photo Cyan (100 Pages)'), base,
+        'BCI6PC must collapse to BCI6 — multi-letter PC color suffix gets stripped before single-letter C');
+    assert.equal(fk('Canon Genuine BCI6 Value Pack KCMY 4-Pack'), base,
+        'BCI6 with no colour suffix must still collapse to BCI6');
+});
+
+test('familyKey picks the LAST product code for compatibles that list multiple', () => {
+    // Compatible names like "BCI3 BCI6 Cyan" cover both Canon BCI3 and BCI6.
+    // The LAST code is the more modern / specific one and is the canonical
+    // grouping for the customer-facing row. (When the customer searches
+    // "bci6" they expect the row to live with BCI6, not BCI3.)
+    const fk = (name) => ProductSort.familyKey({ name, brand: { name: 'Canon' } });
+    const base = fk('Compatible Ink Cartridge Replacement for Canon BCI6 Black');
+    assert.equal(fk('Compatible Ink Cartridge Replacement for Canon BCI6 KCMY 4-Pack'), base);
+    assert.equal(fk('Compatible Ink Cartridge Replacement for Canon BCI3 BCI6 Cyan'),    base);
+    assert.equal(fk('Compatible Ink Cartridge Replacement for Canon BCI3 BCI6 Magenta'), base);
+    assert.equal(fk('Compatible Ink Cartridge Replacement for Canon BCI3 BCI6 Yellow'),  base);
+    assert.equal(fk('Compatible Ink Cartridge Replacement for Canon BCI3 BCI6 CMY 3-Pack'), base);
+    assert.equal(base, 'B:CANON:BCI6');
+});
+
+test('familyKey ignores trailing page-count parens for bare-numeric codes (HP)', () => {
+    // "HP Genuine 975A Ink Cartridge Black (450 Pages)" must pick 975A,
+    // not 450. Bare-numeric pass uses the FIRST match for exactly this reason.
+    const fk = (name) => ProductSort.familyKey({ name, brand: { name: 'HP' } });
+    assert.equal(fk('HP Genuine 975A Ink Cartridge Black (450 Pages)'), 'B:HP:975A');
+    assert.equal(fk('HP Genuine 975X Ink Cartridge Cyan (1500 Pages)'), 'B:HP:975X');
+});
+
+test('colorTier maps Photo Cyan / Photo Magenta into C / M tiers (not specialty)', () => {
+    const t = ProductSort.TIERS;
+    assert.equal(ProductSort.colorTier({ color: 'Photo Cyan' }),    t.C,
+        'Photo Cyan belongs in the C tier so BCI6PC sits right after BCI6C in the row');
+    assert.equal(ProductSort.colorTier({ color: 'Photo Magenta' }), t.M);
+});
+
 // ─────────────────────────────────────────────────────────────────────────────
 // 2. byCodeThenColor — sort
 // ─────────────────────────────────────────────────────────────────────────────
@@ -141,6 +190,51 @@ test('byCodeThenColor preserves family appearance order from the input', () => {
         'G-BR-TN645BK', 'G-BR-TN645C',  // Brother family, K then C
         'G-HP-975A-INK-BK'              // HP family
     ]);
+});
+
+test('byCodeThenColor renders BCI6 series (B/C/M/Y/R/PC + KCMY pack) on a single row', () => {
+    // Live bug 2026-05-06 (/search?q=bci6): BCI6B Black landed on its own
+    // row because the family key was page-count-derived (B:CANON:280 vs
+    // B:CANON:100). After the single-digit + page-count fix, all 7 BCI6
+    // products share family B:CANON:BCI6 and yield 0 — one row, no breaks.
+    const input = [
+        { sku: 'G-CAN-BCI6B',  name: 'Canon Genuine BCI6B Ink Cartridge Black (280 Pages)',     color: 'Black',       brand: { name: 'Canon' } },
+        { sku: 'G-CAN-BCI6C',  name: 'Canon Genuine BCI6C Ink Cartridge Cyan (100 Pages)',      color: 'Cyan',        brand: { name: 'Canon' } },
+        { sku: 'G-CAN-BCI6M',  name: 'Canon Genuine BCI6M Ink Cartridge Magenta (100 Pages)',   color: 'Magenta',     brand: { name: 'Canon' } },
+        { sku: 'G-CAN-BCI6Y',  name: 'Canon Genuine BCI6Y Ink Cartridge Yellow (100 Pages)',    color: 'Yellow',      brand: { name: 'Canon' } },
+        { sku: 'G-CAN-BCI6R',  name: 'Canon Genuine BCI6R Ink Cartridge Red (100 Pages)',       color: 'Red',         brand: { name: 'Canon' } },
+        { sku: 'G-CAN-BCI6PC', name: 'Canon Genuine BCI6PC Ink Cartridge Photo Cyan (100 Pages)', color: 'Photo Cyan', brand: { name: 'Canon' } },
+        { sku: 'GP-CAN-BCI6-KCMY', name: 'Canon Genuine BCI6 Value Pack KCMY 4-Pack', color: 'KCMY', brand: { name: 'Canon' }, pack_type: 'value_pack' }
+    ];
+    const sorted = ProductSort.byCodeThenColor(input);
+    // K → C → PC (also C tier) → M → Y → KCMY → R (specialty)
+    assert.deepEqual(sorted.map(p => p.sku), [
+        'G-CAN-BCI6B', 'G-CAN-BCI6C', 'G-CAN-BCI6PC', 'G-CAN-BCI6M', 'G-CAN-BCI6Y',
+        'GP-CAN-BCI6-KCMY', 'G-CAN-BCI6R'
+    ]);
+    // Every product shares (familyKey, yieldTier) → no row breaks at all.
+    assert.deepEqual(ProductSort.rowBreakIndices(sorted), [],
+        'BCI6 row must NOT split — all 7 products belong on one row');
+});
+
+test('byCodeThenColor renders BCI6 compatibles (mixed BCI3/BCI6 names) on a single row', () => {
+    // Compatible names "BCI3 BCI6 …" must still group with BCI6-only names
+    // because the LAST product code wins.
+    const input = [
+        { sku: 'C-CAN-BCI6-BK',   name: 'Compatible Ink Cartridge Replacement for Canon BCI6 Black',         color: 'Black',   brand: { name: 'Canon' }, source: 'compatible' },
+        { sku: 'C-CAN-BCI3BCI6-CY', name: 'Compatible Ink Cartridge Replacement for Canon BCI3 BCI6 Cyan',    color: 'Cyan',    brand: { name: 'Canon' }, source: 'compatible' },
+        { sku: 'C-CAN-BCI3BCI6-MG', name: 'Compatible Ink Cartridge Replacement for Canon BCI3 BCI6 Magenta', color: 'Magenta', brand: { name: 'Canon' }, source: 'compatible' },
+        { sku: 'C-CAN-BCI3BCI6-YL', name: 'Compatible Ink Cartridge Replacement for Canon BCI3 BCI6 Yellow',  color: 'Yellow',  brand: { name: 'Canon' }, source: 'compatible' },
+        { sku: 'C-CAN-BCI3BCI6-CMY',name: 'Compatible Ink Cartridge Replacement for Canon BCI3 BCI6 CMY 3-Pack', color: 'CMY',  brand: { name: 'Canon' }, source: 'compatible', pack_type: 'value_pack' },
+        { sku: 'C-CAN-BCI6-KCMY', name: 'Compatible Ink Cartridge Replacement for Canon BCI6 KCMY 4-Pack',   color: 'KCMY',    brand: { name: 'Canon' }, source: 'compatible', pack_type: 'value_pack' }
+    ];
+    const sorted = ProductSort.byCodeThenColor(input);
+    assert.deepEqual(sorted.map(p => p.sku), [
+        'C-CAN-BCI6-BK', 'C-CAN-BCI3BCI6-CY', 'C-CAN-BCI3BCI6-MG', 'C-CAN-BCI3BCI6-YL',
+        'C-CAN-BCI3BCI6-CMY', 'C-CAN-BCI6-KCMY'
+    ]);
+    assert.deepEqual(ProductSort.rowBreakIndices(sorted), [],
+        'BCI6 compatible row must NOT split — BCI3+BCI6 names belong with BCI6-only names');
 });
 
 test('byCodeThenColor places CMY/KCMY packs after singles within their yield', () => {

@@ -210,8 +210,11 @@ const ProductColors = {
 
         // Check for individual colors (order matters - check compound names first)
         const colorWords = [
-            'photo black', 'matte black', 'light cyan', 'light magenta',
-            'light gray', 'light grey', 'black', 'cyan', 'magenta',
+            'photo black', 'matte black',
+            'light cyan', 'light magenta',
+            'photo cyan', 'photo magenta',
+            'light gray', 'light grey',
+            'black', 'cyan', 'magenta',
             'yellow', 'red', 'blue', 'green', 'gray', 'grey'
         ];
         for (const color of colorWords) {
@@ -443,13 +446,13 @@ const ProductSort = (function() {
     // sit immediately after the Y single — between singles and specialty.
     const COLOR_ORDER = [
         'black', 'photo black', 'matte black',                             // 0-2  → K tier
-        'cyan', 'light cyan',                                              // 3-4  → C tier
-        'magenta', 'light magenta',                                        // 5-6  → M tier
-        'yellow',                                                          // 7    → Y tier
-        'cmy', 'tri-color', 'tri-colour', 'color', 'colour',               // 8-12 → CMY tier
-        'kcmy', 'cmyk', 'bcmy', '4-pack', '4 pack',                        // 13-17 → KCMY tier
-        'red', 'blue', 'green',                                            // 18-20 → specialty
-        'gray', 'grey', 'light gray', 'light grey'                         // 21-24 → specialty
+        'cyan', 'photo cyan', 'light cyan',                                // 3-5  → C tier
+        'magenta', 'photo magenta', 'light magenta',                       // 6-8  → M tier
+        'yellow',                                                          // 9    → Y tier
+        'cmy', 'tri-color', 'tri-colour', 'color', 'colour',               // 10-14 → CMY tier
+        'kcmy', 'cmyk', 'bcmy', '4-pack', '4 pack',                        // 15-19 → KCMY tier
+        'red', 'blue', 'green',                                            // 20-22 → specialty
+        'gray', 'grey', 'light gray', 'light grey'                         // 23-26 → specialty
     ];
 
     // Canonical 8-tier bucket the storefront groups by (K=0 → unknown=7).
@@ -513,8 +516,10 @@ const ProductSort = (function() {
             // in legacy fixtures.
             return isPack ? TIER_KCMY : TIER_K;
         }
-        if (name === 'cyan' || name === 'light cyan')     return isPack ? TIER_CMY : TIER_C;
-        if (name === 'magenta' || name === 'light magenta') return isPack ? TIER_CMY : TIER_M;
+        if (name === 'cyan' || name === 'light cyan' || name === 'photo cyan')
+            return isPack ? TIER_CMY : TIER_C;
+        if (name === 'magenta' || name === 'light magenta' || name === 'photo magenta')
+            return isPack ? TIER_CMY : TIER_M;
         if (name === 'yellow')                              return isPack ? TIER_CMY : TIER_Y;
 
         // Specialty named colours — red/blue/green/grays/etc. Anything in
@@ -572,10 +577,25 @@ const ProductSort = (function() {
         // tails like `XXLBK` (Brother TN645) and `XLCY`/`XLMG` etc.
         // Matches CART069, CART069HK, CART069H, S0720690, S41069, TN645XXLBK,
         // TN645XLBK, PG-40, etc.
-        // Try `LETTERS DIGITS LETTERS?` first (Brother TN645, Canon CART069,
-        // Epson T0731). Fall back to bare-numeric codes (HP 975A, Epson 802).
-        let m = name.match(/\b([A-Z]{1,6})(\d{2,})([A-Z]{0,8})\b/)
-             || name.match(/\b()(\d{2,})([A-Z]{0,8})\b/);
+        // Two-pass extraction:
+        //   Pass 1 — `LETTERS DIGITS LETTERS?` (Brother TN645, Canon BCI6,
+        //            Canon CART069, Epson T0731). LAST match wins so compatible
+        //            names like "BCI3 BCI6 Cyan" pick BCI6 (the more specific /
+        //            modern code), not BCI3.
+        //   Pass 2 — bare-numeric (HP 975A, Epson 802). Only runs when pass 1
+        //            finds nothing. FIRST match wins to avoid trailing page
+        //            counts: "HP 975A Ink Cartridge Black (450 Pages)" picks
+        //            975A, not 450.
+        // Both passes use `\d+` so single-digit codes (Canon BCI6, BCI3, …)
+        // resolve here instead of falling to the colour-stripped name fallback.
+        const letterMatches = [...name.matchAll(/\b([A-Z]{1,6})(\d+)([A-Z]{0,8})\b/g)];
+        let m;
+        if (letterMatches.length > 0) {
+            m = letterMatches[letterMatches.length - 1];
+        } else {
+            const numMatches = [...name.matchAll(/\b()(\d+)([A-Z]{0,8})\b/g)];
+            if (numMatches.length > 0) m = numMatches[0];
+        }
         let base;
         if (m) {
             const prefix = m[1];
@@ -589,7 +609,8 @@ const ProductSort = (function() {
             suffix = suffix.replace(/^(XXL|XL|HY|H)/, '');
             // Now strip color from the right. Multi-letter first so `BK` isn't
             // reduced to `B` (which would survive the single-letter pass).
-            suffix = suffix.replace(/(BK|CY|MG|YL|PK|MK|LC|LM|GY)$/, '');
+            // PC = Photo Cyan, PM = Photo Magenta (Canon BCI6PC / BCI6PM).
+            suffix = suffix.replace(/(BK|CY|MG|YL|PK|MK|LC|LM|GY|PC|PM)$/, '');
             suffix = suffix.replace(/(K|C|M|Y|R|G|B)$/, '');
             base = prefix + digits + suffix;
         } else {
