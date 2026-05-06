@@ -2816,21 +2816,23 @@
             return false;
         },
 
-        // Render products in the order the API returned them.
+        // Render products with the canonical color tier override.
         //
-        // As of the May 2026 catalog overhaul, every product-list endpoint
-        // (`/api/shop`, `/api/products/printer/:slug`, `/api/printers/:slug/products`,
-        // `/api/search/smart`, `/api/search/by-printer`, `/api/search/by-part`,
-        // `/api/prerender/printer/...`, `/api/prerender/category/...`) applies
-        // the canonical `sortByCatalogOrder` (or `sortByRelevance` for /smart)
-        // server-side. The frontend cannot replicate that hierarchy without
-        // shipping the same regex set as the backend (pack/yield/series
-        // detection), so any client-side resort here is by definition wrong.
+        // The May 2026 catalog overhaul makes the backend authoritative for
+        // `(accessoryTier, yieldTier, seriesBase, colorOrder, packRank, name)`.
+        // In practice some `/api/shop?brand=&category=&code=` responses arrive
+        // with packs interleaved between Black and CMY singles (HP 975
+        // returns Black, CMY-pack, KCMY-pack, Cyan, Magenta, Yellow). The
+        // storefront contract is K → C → M → Y → CMY → KCMY → specialty.
         //
-        // The legacy `sortProducts()` / `ProductSort.byYieldAndColor` helper is
-        // intentionally NOT called here — keep it exported from utils.js so a
-        // future ad-hoc client-side merge can opt in, but the default for
-        // every API-list response is "render in API order."
+        // `ProductSort.byColor` is a STABLE secondary pass: products in the
+        // same color tier keep their incoming relative order, so the
+        // backend's series/yield grouping within a tier is preserved. We
+        // do NOT call `byYieldAndColor` (which would override the backend's
+        // primary sort). The override is colour-tier only.
+        //
+        // Spec: readfirst/color-display-order-may2026.md
+        // Pinned by tests/color-display-order.test.js.
         renderProducts(products, container, section, isCompatible = false, _options = {}) {
             container.innerHTML = '';
 
@@ -2841,7 +2843,9 @@
 
             section.hidden = false;
 
-            const sortedProducts = products;
+            const sortedProducts = (typeof ProductSort !== 'undefined' && ProductSort.byColor)
+                ? ProductSort.byColor(products)
+                : products;
 
             // Render all products in a single wrapping grid
             sortedProducts.forEach(product => {

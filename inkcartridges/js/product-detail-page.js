@@ -929,9 +929,16 @@
 
                 const isCompatible = info.source === 'compatible';
                 // Server-side sort (May 2026 sortByCatalogOrder) is applied by
-                // /api/shop, the only feeder for `related`. Render in API order.
-                const compatibles = related.filter(p => inferSource(p) === 'compatible');
-                const genuines    = related.filter(p => inferSource(p) !== 'compatible');
+                // /api/shop, the only feeder for `related`. We then apply the
+                // storefront's K→C→M→Y→CMY→KCMY override per source group via
+                // a stable secondary pass — the backend's series/yield grouping
+                // within a tier is preserved.
+                // Spec: readfirst/color-display-order-may2026.md
+                const sortByColor = (arr) => (typeof ProductSort !== 'undefined' && ProductSort.byColor)
+                    ? ProductSort.byColor(arr)
+                    : arr;
+                const compatibles = sortByColor(related.filter(p => inferSource(p) === 'compatible'));
+                const genuines    = sortByColor(related.filter(p => inferSource(p) !== 'compatible'));
 
                 const firstGroup  = isCompatible ? compatibles : genuines;
                 const secondGroup = isCompatible ? genuines    : compatibles;

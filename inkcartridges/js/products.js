@@ -255,7 +255,14 @@ const Products = {
             `;
         }
 
-        return products.map((p, i) => this.renderCard(p, i)).join('');
+        // Apply the storefront K→C→M→Y→CMY→KCMY canonical color order as a
+        // stable secondary sort. Stability preserves the backend's
+        // series/yield grouping inside a tier — see
+        // readfirst/color-display-order-may2026.md.
+        const ordered = (typeof ProductSort !== 'undefined' && ProductSort.byColor)
+            ? ProductSort.byColor(products)
+            : products;
+        return ordered.map((p, i) => this.renderCard(p, i)).join('');
     },
 
     /**

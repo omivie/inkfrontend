@@ -96,14 +96,24 @@ test('§1 ProductDetail._sortByColor stays deleted', () => {
         '_sortByColor function definition must be removed');
 });
 
-test('§1 ProductDetail.renderRelatedProducts filters by source without resorting', () => {
-    // `compatibles` and `genuines` should be plain `.filter()` calls — no `.sort()` and no `_sortByColor`.
+test('§1 ProductDetail.renderRelatedProducts filters by source, then applies the canonical color tier (May 2026 override)', () => {
+    // `compatibles` and `genuines` start as filtered slices, then get a stable
+    // `ProductSort.byColor(…)` pass to enforce K→C→M→Y→CMY→KCMY display order
+    // (color-display-order-may2026.md). The forbidden helpers are the legacy
+    // `_sortByColor` and `byYieldAndColor` — those would override the
+    // backend's primary series/yield grouping. `byColor` is colour-only and
+    // stable, so it preserves that grouping inside a tier.
     const compatibleAssign = PDP_CODE.match(/const\s+compatibles\s*=\s*([^;]+);/);
     const genuineAssign    = PDP_CODE.match(/const\s+genuines\s*=\s*([^;]+);/);
     assert.ok(compatibleAssign, 'compatibles assignment must exist in renderRelatedProducts');
     assert.ok(genuineAssign,    'genuines assignment must exist in renderRelatedProducts');
-    assert.doesNotMatch(compatibleAssign[1], /sort/i, 'compatibles must not be re-sorted');
-    assert.doesNotMatch(genuineAssign[1],    /sort/i, 'genuines must not be re-sorted');
+    for (const [label, src] of [['compatibles', compatibleAssign[1]], ['genuines', genuineAssign[1]]]) {
+        assert.doesNotMatch(src, /\b_sortByColor\b/, `${label} must not call the legacy _sortByColor`);
+        assert.doesNotMatch(src, /\bbyYieldAndColor\b/i,
+            `${label} must not call byYieldAndColor — that would override the backend's seriesBase/yieldTier sort`);
+        assert.match(src, /sortByColor\s*\(\s*related\.filter|ProductSort\.byColor/,
+            `${label} must apply the canonical K→C→M→Y→CMY→KCMY tier via ProductSort.byColor (color-display-order-may2026.md)`);
+    }
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
