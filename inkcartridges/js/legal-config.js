@@ -84,11 +84,13 @@
             { zone: 'North Island',          urban: '$7.00 – $12.00', rural: '$14.00 – $20.00', eta: '1–3 working days' },
             { zone: 'South Island',          urban: '$7.00 – $22.00', rural: '$14.00 – $30.00', eta: '2–4 working days' },
         ],
-        // Dropshipping transparency — a small minority of low-volume SKUs
-        // are dispatched directly from the supplier's NZ warehouse, which
-        // adds 1–2 business days to handling. The product page surfaces
-        // this on a per-SKU basis; the policy explains the model in prose.
-        supplierFulfillment:    'Most stocked SKUs ship from our Auckland warehouse. A small number of low-velocity SKUs are dispatched directly by our New Zealand supplier partners; this is disclosed on the relevant product page and adds 1–2 working days to handling.',
+        // Dropshipping transparency — we run from a small Auckland office
+        // and don't hold stock; every SKU is held and dispatched by one of
+        // our New Zealand wholesale supplier partners. The product page
+        // surfaces the lead time on a per-SKU basis; the policy explains
+        // the model in prose. NB: keep this string warehouse-free; tests
+        // pin it (tests/dropship-wording-may2026.test.js).
+        supplierFulfillment:    'We don’t hold stock at our Auckland office — every order is picked, packed, and dispatched directly by one of our New Zealand wholesale supplier partners through the same NZ Post / Aramex networks any local retailer uses. Most orders dispatch the same working day; a small number of low-velocity SKUs add 1–2 working days to handling and that lead time is disclosed on the relevant product page.',
 
         // ─── Returns ──────────────────────────────────────────────────────
         returnWindowDays:       30,

@@ -24,7 +24,7 @@
                         <p class="footer-column__heading">Contact</p>
                         <ul class="footer-links">
                             <li>
-                                <strong>Address:</strong><br>
+                                <strong>Office:</strong><br>
                                 37A Archibald Road, Kelston, Auckland 0602, New Zealand
                             </li>
                             <li>
