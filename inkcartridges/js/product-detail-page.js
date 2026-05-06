@@ -928,17 +928,15 @@
                 const inferSource = (p) => p.source || info.source || 'genuine';
 
                 const isCompatible = info.source === 'compatible';
-                // Server-side sort (May 2026 sortByCatalogOrder) is applied by
-                // /api/shop, the only feeder for `related`. We then apply the
-                // storefront's K→C→M→Y→CMY→KCMY override per source group via
-                // a stable secondary pass — the backend's series/yield grouping
-                // within a tier is preserved.
-                // Spec: readfirst/color-display-order-may2026.md
-                const sortByColor = (arr) => (typeof ProductSort !== 'undefined' && ProductSort.byColor)
-                    ? ProductSort.byColor(arr)
+                // Apply the (familyKey → yieldTier → colorTier) override per
+                // source group so PDP related products render in the same
+                // K→C→M→Y per-code rows the shop grid uses.
+                // Spec: readfirst/code-yield-grouping-may2026.md
+                const sortByCodeThenColor = (arr) => (typeof ProductSort !== 'undefined' && ProductSort.byCodeThenColor)
+                    ? ProductSort.byCodeThenColor(arr)
                     : arr;
-                const compatibles = sortByColor(related.filter(p => inferSource(p) === 'compatible'));
-                const genuines    = sortByColor(related.filter(p => inferSource(p) !== 'compatible'));
+                const compatibles = sortByCodeThenColor(related.filter(p => inferSource(p) === 'compatible'));
+                const genuines    = sortByCodeThenColor(related.filter(p => inferSource(p) !== 'compatible'));
 
                 const firstGroup  = isCompatible ? compatibles : genuines;
                 const secondGroup = isCompatible ? genuines    : compatibles;
@@ -972,7 +970,18 @@
                                      productType === 'toner' ? 'Toner Cartridges' : 'Ink Cartridges';
                         const heading = `${brandName} ${label}`.trim();
 
-                        const grids = `<div class="related-products__grid product-grid">${items.map(p => Products.renderCard(p)).join('')}</div>`;
+                        // Splice row-breaks between (familyKey, yieldTier)
+                        // groups so each yield-code starts on its own row.
+                        // Spec: readfirst/code-yield-grouping-may2026.md
+                        const breaks = (typeof ProductSort !== 'undefined' && ProductSort.rowBreakIndices)
+                            ? new Set(ProductSort.rowBreakIndices(items))
+                            : new Set();
+                        const ROW_BREAK = '<div class="products-row__break" aria-hidden="true"></div>';
+                        const cardsHtml = items.map((p, i) => {
+                            const card = Products.renderCard(p);
+                            return breaks.has(i) ? ROW_BREAK + card : card;
+                        }).join('');
+                        const grids = `<div class="related-products__grid product-grid">${cardsHtml}</div>`;
 
                         return `
                             <div class="related-products__type-group">

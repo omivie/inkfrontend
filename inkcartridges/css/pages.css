@@ -2096,7 +2096,7 @@
     bottom: 0;
     aspect-ratio: unset;
     margin-bottom: 0;
-    background-color: #fff;
+    background-color: var(--product-image-bg);
 }
 
 .product-detail__layout .product-gallery__main img {
@@ -2108,7 +2108,7 @@
 /* Product Gallery */
 .product-gallery__main {
     aspect-ratio: 1;
-    background-color: var(--color-background-alt);
+    background-color: var(--product-image-bg);
     border-radius: var(--radius-xl);
     margin-bottom: var(--spacing-md);
     overflow: hidden;
@@ -2211,7 +2211,7 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    background-color: var(--color-background-alt);
+    background-color: var(--product-image-bg);
 }
 
 .product-gallery__thumb:hover {
@@ -3406,7 +3406,7 @@
 .cart-item__image {
     width: 70px;
     height: 70px;
-    background-color: var(--color-background-alt);
+    background-color: var(--product-image-bg);
     border-radius: var(--radius-sm);
     display: flex;
     align-items: center;
@@ -4810,7 +4810,7 @@
 .checkout-summary__item-image {
     width: 60px;
     height: 60px;
-    background-color: var(--color-background);
+    background-color: var(--product-image-bg);
     border-radius: var(--radius-md);
     flex-shrink: 0;
     position: relative;
@@ -5481,7 +5481,7 @@
 .order-item__image {
     width: 80px;
     height: 80px;
-    background-color: var(--white-primary);
+    background-color: var(--product-image-bg);
     border-radius: var(--radius-md);
     display: flex;
     align-items: center;
@@ -6401,7 +6401,7 @@
     align-items: center;
     justify-content: center;
     padding: var(--spacing-sm);
-    background: var(--steel-50);
+    background: var(--product-image-bg);
 }
 
 .dash-fav-card__image img {
@@ -8474,7 +8474,7 @@
 
 .product-box__image {
     aspect-ratio: 1;
-    background: var(--color-background-alt);
+    background: var(--product-image-bg);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -10018,6 +10018,30 @@
     padding: var(--spacing-xs) 0 var(--spacing-sm);
 }
 
+/*
+ * Row-break for the (familyKey, yieldTier) grouping contract.
+ * `flex-basis: 100%` + zero height forces the wrapping flex container
+ * (.products-row, .product-grid) to start the next card on a fresh row,
+ * so e.g. TN645 / TN645XL / TN645XXL each get their own row of K, C, M, Y,
+ * CMY, KCMY cards. Margin reset prevents any inherited gap from showing.
+ *
+ * Spec: readfirst/code-yield-grouping-may2026.md
+ * Pinned by tests/code-yield-grouping-may2026.test.js.
+ */
+.products-row__break {
+    flex-basis: 100%;
+    width: 100%;
+    height: 0;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    pointer-events: none;
+}
+.product-grid > .products-row__break {
+    /* CSS Grid layouts ignore flex-basis — span every column instead. */
+    grid-column: 1 / -1;
+}
+
 /* Product Card */
 .product-card {
     position: relative;
@@ -10050,7 +10074,7 @@
     /* 4:3 — see components.css comment. Saves ~44px per card on the shop
        grid (181px-wide cards) without cropping any cartridge image. */
     aspect-ratio: 4 / 3;
-    background: var(--color-background-alt);
+    background: var(--product-image-bg);
     display: flex;
     align-items: center;
     justify-content: center;

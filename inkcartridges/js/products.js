@@ -255,14 +255,21 @@ const Products = {
             `;
         }
 
-        // Apply the storefront K→C→M→Y→CMY→KCMY canonical color order as a
-        // stable secondary sort. Stability preserves the backend's
-        // series/yield grouping inside a tier — see
-        // readfirst/color-display-order-may2026.md.
-        const ordered = (typeof ProductSort !== 'undefined' && ProductSort.byColor)
-            ? ProductSort.byColor(products)
+        // Apply the (familyKey → yieldTier → colorTier) override and splice
+        // a row-break between (familyKey, yieldTier) groups so each yield-
+        // code starts on a new row in the wrapping flex/grid container.
+        // Spec: readfirst/code-yield-grouping-may2026.md
+        const ordered = (typeof ProductSort !== 'undefined' && ProductSort.byCodeThenColor)
+            ? ProductSort.byCodeThenColor(products)
             : products;
-        return ordered.map((p, i) => this.renderCard(p, i)).join('');
+        const breaks = (typeof ProductSort !== 'undefined' && ProductSort.rowBreakIndices)
+            ? new Set(ProductSort.rowBreakIndices(ordered))
+            : new Set();
+        const ROW_BREAK = '<div class="products-row__break" aria-hidden="true"></div>';
+        return ordered.map((p, i) => {
+            const card = this.renderCard(p, i);
+            return breaks.has(i) ? ROW_BREAK + card : card;
+        }).join('');
     },
 
     /**

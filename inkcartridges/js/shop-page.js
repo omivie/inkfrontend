@@ -2816,23 +2816,25 @@
             return false;
         },
 
-        // Render products with the canonical color tier override.
+        // Render products with the canonical (code → yield → color) override.
         //
         // The May 2026 catalog overhaul makes the backend authoritative for
         // `(accessoryTier, yieldTier, seriesBase, colorOrder, packRank, name)`.
-        // In practice some `/api/shop?brand=&category=&code=` responses arrive
-        // with packs interleaved between Black and CMY singles (HP 975
-        // returns Black, CMY-pack, KCMY-pack, Cyan, Magenta, Yellow). The
-        // storefront contract is K → C → M → Y → CMY → KCMY → specialty.
+        // The storefront then imposes the customer-facing convention:
         //
-        // `ProductSort.byColor` is a STABLE secondary pass: products in the
-        // same color tier keep their incoming relative order, so the
-        // backend's series/yield grouping within a tier is preserved. We
-        // do NOT call `byYieldAndColor` (which would override the backend's
-        // primary sort). The override is colour-tier only.
+        //   645    K, C, M, Y, CMY, KCMY      ← std yield      row 1
+        //   645XL  K, C, M, Y, CMY, KCMY      ← XL/HY yield    row 2
+        //   645XXL K, C, M, Y, CMY, KCMY      ← XXL yield      row 3
         //
-        // Spec: readfirst/color-display-order-may2026.md
-        // Pinned by tests/color-display-order.test.js.
+        // `ProductSort.byCodeThenColor` groups by familyKey (preserving
+        // backend order between families), then forces yield ascending and
+        // color into K→KCMY canonical order. `rowBreakIndices` returns the
+        // boundaries where (familyKey, yieldTier) changes; we splice in a
+        // zero-height flex breaker so each yield-code starts a fresh row in
+        // the wrapping flex grid.
+        //
+        // Spec: readfirst/code-yield-grouping-may2026.md
+        // Pinned by tests/code-yield-grouping-may2026.test.js.
         renderProducts(products, container, section, isCompatible = false, _options = {}) {
             container.innerHTML = '';
 
@@ -2843,12 +2845,20 @@
 
             section.hidden = false;
 
-            const sortedProducts = (typeof ProductSort !== 'undefined' && ProductSort.byColor)
-                ? ProductSort.byColor(products)
+            const sortedProducts = (typeof ProductSort !== 'undefined' && ProductSort.byCodeThenColor)
+                ? ProductSort.byCodeThenColor(products)
                 : products;
+            const breaks = (typeof ProductSort !== 'undefined' && ProductSort.rowBreakIndices)
+                ? new Set(ProductSort.rowBreakIndices(sortedProducts))
+                : new Set();
 
-            // Render all products in a single wrapping grid
-            sortedProducts.forEach(product => {
+            sortedProducts.forEach((product, i) => {
+                if (breaks.has(i)) {
+                    const breaker = document.createElement('div');
+                    breaker.className = 'products-row__break';
+                    breaker.setAttribute('aria-hidden', 'true');
+                    container.appendChild(breaker);
+                }
                 const card = this.createProductCard(product, isCompatible);
                 container.appendChild(card);
             });

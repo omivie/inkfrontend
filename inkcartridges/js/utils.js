@@ -550,31 +550,53 @@ const ProductSort = (function() {
     // `G-DYM-S0720690-LBL-BK`, `G-EPS-S41069-PPR`, etc. — these don't parse cleanly from
     // SKU suffixes, so we extract from the name which always contains the product code.
     //
-    // e.g. "Canon Genuine CART069HK Toner Cartridge Black"  → B:CANON:CART069
-    //      "Canon Genuine CART069 Value Pack CMY 3-Pack"    → B:CANON:CART069
-    //      "Canon Genuine CART069H Value Pack KCMY 4-Pack"  → B:CANON:CART069
+    // The family key is yield-AGNOSTIC by design: XL/XXL/HY/H markers are stripped
+    // so all three of `TN645BK`, `TN645XLBK`, `TN645XXLBK` collapse to `TN645`.
+    // `yieldTier(p)` then provides the secondary ordering inside the family — this
+    // is what lets `byCodeThenColor` group all yields of one base code together
+    // and stack them std → XL → XXL on consecutive rows.
+    //
+    // e.g. "Canon Genuine CART069HK Toner Cartridge Black"   → B:CANON:CART069
+    //      "Canon Genuine CART069 Value Pack CMY 3-Pack"     → B:CANON:CART069
+    //      "Canon Genuine CART069H Value Pack KCMY 4-Pack"   → B:CANON:CART069
+    //      "Brother Genuine TN645BK Toner Cartridge Black"   → B:BROTHER:TN645
+    //      "Brother Genuine TN645XLBK Toner Cartridge Black" → B:BROTHER:TN645
+    //      "Brother Genuine TN645XXLBK Toner Cartridge …"    → B:BROTHER:TN645
     function familyKey(product) {
         const name = (product.name || '').toUpperCase();
         const brand = (product.brand?.name || product.brand || '')
             .toString().toUpperCase().replace(/\s+/g, '');
 
-        // First token shaped like a product code: letters + digits + optional trailing letters.
-        // Matches CART069, CART069HK, CART069H, S0720690, S41069, CT351069, PG-40, etc.
-        const m = name.match(/\b([A-Z]{1,6})(\d{2,})([A-Z]{0,3})\b/);
+        // First token shaped like a product code: letters + digits + optional
+        // trailing letters. Suffix length up to 8 because real codes carry 5-char
+        // tails like `XXLBK` (Brother TN645) and `XLCY`/`XLMG` etc.
+        // Matches CART069, CART069HK, CART069H, S0720690, S41069, TN645XXLBK,
+        // TN645XLBK, PG-40, etc.
+        // Try `LETTERS DIGITS LETTERS?` first (Brother TN645, Canon CART069,
+        // Epson T0731). Fall back to bare-numeric codes (HP 975A, Epson 802).
+        let m = name.match(/\b([A-Z]{1,6})(\d{2,})([A-Z]{0,8})\b/)
+             || name.match(/\b()(\d{2,})([A-Z]{0,8})\b/);
         let base;
         if (m) {
             const prefix = m[1];
             const digits = m[2];
             let suffix = m[3] || '';
-            // Reduce suffix: strip color letter(s), then yield marker H/HY
+            // Parse from the LEFT: yield prefix (XXL/XL/HY/H) comes first in
+            // every real SKU we see, then color suffix. Strip yield by anchoring
+            // to the START of the suffix so `XLC` parses as XL+C (correct) and
+            // not as X+LC (Light Cyan, wrong). Longest-yield-first beats greedy
+            // ambiguity (XXL must beat XL, HY must beat H).
+            suffix = suffix.replace(/^(XXL|XL|HY|H)/, '');
+            // Now strip color from the right. Multi-letter first so `BK` isn't
+            // reduced to `B` (which would survive the single-letter pass).
             suffix = suffix.replace(/(BK|CY|MG|YL|PK|MK|LC|LM|GY)$/, '');
             suffix = suffix.replace(/(K|C|M|Y|R|G|B)$/, '');
-            suffix = suffix.replace(/(HY|H)$/, '');
             base = prefix + digits + suffix;
         } else {
-            // Fallback: color-stripped name
+            // Fallback: color-stripped, yield-stripped name
             base = name.toLowerCase()
                 .replace(/\b(photo black|matte black|light cyan|light magenta|tri[- ]?colou?r|black|cyan|magenta|yellow|red|blue|green|gray|grey|cmyk|kcmy|bcmy|cmy|value pack|\d+[- ]?pack)\b/gi, '')
+                .replace(/\b(xxl|xl|high yield|super high yield)\b/gi, '')
                 .replace(/\s+/g, ' ')
                 .trim();
         }
@@ -603,6 +625,70 @@ const ProductSort = (function() {
             return Array.isArray(products) ? products.slice() : [];
         }
         return products.slice().sort((a, b) => colorTier(a) - colorTier(b));
+    }
+
+    // Stable composite sort: family code → yield tier → color tier.
+    // Returns a NEW array. This is the May 2026 product-grid contract:
+    //
+    //   645   K, C, M, Y, CMY, KCMY      ← yield 0 (std)       row 1
+    //   645XL K, C, M, Y, CMY, KCMY      ← yield 1 (XL/HY)     row 2
+    //   645XXL K, C, M, Y, CMY, KCMY     ← yield 2 (XXL)       row 3
+    //
+    // Family order is preserved from the incoming array (first occurrence
+    // wins) so the backend's brand / accessory-tier ordering still drives
+    // which family appears first. Within a family, yield tier is forced to
+    // ascending (std → HY → XXL), then color tier to canonical K→KCMY.
+    //
+    // Renderers pair this with `rowBreakIndices` to insert a flex-basis:100%
+    // breaker so each (family, yield) group physically starts on a new row.
+    //
+    // Spec: readfirst/code-yield-grouping-may2026.md
+    // Pinned by: tests/code-yield-grouping-may2026.test.js
+    function byCodeThenColor(products) {
+        if (!Array.isArray(products) || products.length < 2) {
+            return Array.isArray(products) ? products.slice() : [];
+        }
+        // Capture each family's first-appearance index so the family sort key
+        // mirrors the incoming order — backend-decided brand/accessory grouping
+        // stays intact, we only impose yield+color within a family.
+        const familyOrder = new Map();
+        let nextRank = 0;
+        for (const p of products) {
+            const fk = familyKey(p);
+            if (!familyOrder.has(fk)) {
+                familyOrder.set(fk, nextRank++);
+            }
+        }
+        const fRank = (p) => familyOrder.get(familyKey(p));
+        return products.slice().sort((a, b) => {
+            const fa = fRank(a), fb = fRank(b);
+            if (fa !== fb) return fa - fb;
+            const ya = yieldTier(a), yb = yieldTier(b);
+            if (ya !== yb) return ya - yb;
+            return colorTier(a) - colorTier(b);
+        });
+    }
+
+    // Indices at which a row break should be inserted, given a list already
+    // sorted by `byCodeThenColor`. A boundary fires when (familyKey, yieldTier)
+    // changes from the previous item. The first item is never a boundary.
+    //
+    //   input  : [645-K, 645-C, 645-M, 645XL-K, 645XL-C, 645XXL-K]
+    //   output : [3, 5]   ← break before index 3 (645XL) and index 5 (645XXL)
+    //
+    // Returns [] for arrays of length < 2.
+    function rowBreakIndices(sortedProducts) {
+        if (!Array.isArray(sortedProducts) || sortedProducts.length < 2) return [];
+        const out = [];
+        let prevKey = familyKey(sortedProducts[0]) + '|' + yieldTier(sortedProducts[0]);
+        for (let i = 1; i < sortedProducts.length; i++) {
+            const key = familyKey(sortedProducts[i]) + '|' + yieldTier(sortedProducts[i]);
+            if (key !== prevKey) {
+                out.push(i);
+                prevKey = key;
+            }
+        }
+        return out;
     }
 
     // Group products by family, order families by max member score (descending),
@@ -646,6 +732,8 @@ const ProductSort = (function() {
         familyKey,
         byYieldAndColor,
         byColor,
+        byCodeThenColor,
+        rowBreakIndices,
         groupByFamilyScored
     };
 })();

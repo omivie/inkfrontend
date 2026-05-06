@@ -221,42 +221,12 @@ test('byColor pushes unknown-color rows last', () => {
 // 4. Render-surface wiring — every product list runs through byColor
 // ─────────────────────────────────────────────────────────────────────────────
 
-test('Shop.renderProducts calls ProductSort.byColor on the products array', () => {
-    // Locate the renderProducts method body.
-    const m = SHOP_CODE.match(/renderProducts\s*\([^)]*\)\s*\{([\s\S]*?)\n\s{8}\},/);
-    assert.ok(m, 'expected to find renderProducts method body in shop-page.js');
-    const body = m[1];
-    assert.match(body, /ProductSort\.byColor\s*\(\s*products\s*\)/,
-        'renderProducts must apply ProductSort.byColor(products) — color-display-order-may2026.md');
-    // Still no calls to the legacy yieldAndColor (that would override the backend's
-    // primary series/yield grouping) and no naive .sort() on products.
-    assert.doesNotMatch(body, /\bbyYieldAndColor\b/i,
-        'renderProducts must not call byYieldAndColor — backend owns yield/series order');
-    assert.doesNotMatch(body, /products\.sort\s*\(/,
-        'renderProducts must not call .sort() directly on products — go through ProductSort.byColor');
-});
-
-test('PDP renderRelatedProducts applies byColor after filtering by source', () => {
-    // The compatibles/genuines slices must each pass through byColor (or the
-    // local sortByColor wrapper) so per-section display order is K→C→M→Y→
-    // CMY→KCMY.
-    const compatibleAssign = PDP_CODE.match(/const\s+compatibles\s*=\s*([^;]+);/);
-    const genuineAssign    = PDP_CODE.match(/const\s+genuines\s*=\s*([^;]+);/);
-    assert.ok(compatibleAssign && genuineAssign,
-        'compatibles/genuines assignments must exist in renderRelatedProducts');
-    for (const [label, src] of [['compatibles', compatibleAssign[1]], ['genuines', genuineAssign[1]]]) {
-        assert.match(src, /sortByColor\s*\(|ProductSort\.byColor\s*\(/,
-            `${label} must apply the canonical color tier (color-display-order-may2026.md)`);
-    }
-});
-
-test('Products.renderCards orders the array via ProductSort.byColor before rendering', () => {
-    const m = PRODUCTS_CODE.match(/renderCards\s*\(\s*products\s*\)\s*\{([\s\S]*?)\n\s{4}\},/);
-    assert.ok(m, 'expected Products.renderCards method body in products.js');
-    const body = m[1];
-    assert.match(body, /ProductSort\.byColor\s*\(\s*products\s*\)/,
-        'Products.renderCards must apply ProductSort.byColor — every grid surface inherits this helper');
-});
+// Wiring tests for the (familyKey → yieldTier → colorTier) successor sort
+// were moved to tests/code-yield-grouping-may2026.test.js once
+// `byCodeThenColor` superseded `byColor` on the three render surfaces.
+// `byColor` remains a standalone primitive (covered by the byColor unit
+// tests above) for any caller that wants colour-only without the yield-
+// code grouping.
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 5. Endpoint-callable color contract — every product carries a color we can

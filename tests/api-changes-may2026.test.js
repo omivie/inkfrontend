@@ -98,11 +98,15 @@ test('§1 ProductDetail._sortByColor stays deleted', () => {
 
 test('§1 ProductDetail.renderRelatedProducts filters by source, then applies the canonical color tier (May 2026 override)', () => {
     // `compatibles` and `genuines` start as filtered slices, then get a stable
-    // `ProductSort.byColor(…)` pass to enforce K→C→M→Y→CMY→KCMY display order
-    // (color-display-order-may2026.md). The forbidden helpers are the legacy
-    // `_sortByColor` and `byYieldAndColor` — those would override the
-    // backend's primary series/yield grouping. `byColor` is colour-only and
-    // stable, so it preserves that grouping inside a tier.
+    // pass to enforce the storefront colour/yield contract. The forbidden
+    // helpers are the legacy `_sortByColor` and `byYieldAndColor` — those
+    // would override the backend's primary series/yield grouping.
+    //
+    // 2026-05-06 update (code-yield-grouping-may2026.md): the colour-only
+    // `byColor` was superseded by `byCodeThenColor`, which composes a stable
+    // (familyKey → yieldTier → colorTier) sort so each yield-code starts on
+    // its own row. This test accepts either name — the next file
+    // (code-yield-grouping-may2026.test.js) pins `byCodeThenColor` exactly.
     const compatibleAssign = PDP_CODE.match(/const\s+compatibles\s*=\s*([^;]+);/);
     const genuineAssign    = PDP_CODE.match(/const\s+genuines\s*=\s*([^;]+);/);
     assert.ok(compatibleAssign, 'compatibles assignment must exist in renderRelatedProducts');
@@ -111,8 +115,8 @@ test('§1 ProductDetail.renderRelatedProducts filters by source, then applies th
         assert.doesNotMatch(src, /\b_sortByColor\b/, `${label} must not call the legacy _sortByColor`);
         assert.doesNotMatch(src, /\bbyYieldAndColor\b/i,
             `${label} must not call byYieldAndColor — that would override the backend's seriesBase/yieldTier sort`);
-        assert.match(src, /sortByColor\s*\(\s*related\.filter|ProductSort\.byColor/,
-            `${label} must apply the canonical K→C→M→Y→CMY→KCMY tier via ProductSort.byColor (color-display-order-may2026.md)`);
+        assert.match(src, /sortByColor\s*\(\s*related\.filter|sortByCodeThenColor\s*\(\s*related\.filter|ProductSort\.byColor|ProductSort\.byCodeThenColor/,
+            `${label} must apply the canonical colour/yield tier via ProductSort.byColor or .byCodeThenColor (code-yield-grouping-may2026.md)`);
     }
 });
 
