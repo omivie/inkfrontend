@@ -218,7 +218,6 @@
             'privacy-officer': cfg.privacyOfficerName,
             'privacy-email':   cfg.privacyOfficerEmail,
             'handling-time':   cfg.handlingTime,
-            'supplier-fulfillment': cfg.supplierFulfillment,
         };
 
         Object.keys(bindings).forEach(function (key) {

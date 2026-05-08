@@ -226,7 +226,7 @@ test('§6 legal-config.js exposes every binding key used by the pages', () => {
         'phone-display', 'phone-href', 'email', 'email-href', 'hours',
         'response-sla', 'free-threshold', 'currency', 'return-window',
         'policy-date', 'policy-version', 'privacy-officer', 'privacy-email',
-        'handling-time', 'supplier-fulfillment',
+        'handling-time',
         'tax-line', 'payment-methods', 'carriers',
         'shipping-zones', 'data-processors', 'cookies', 'map',
     ];
@@ -352,27 +352,27 @@ test('§8 FAQ page exposes structured FAQ schema for Google rich results', () =>
 // ─────────────────────────────────────────────────────────────────────────────
 
 // ─────────────────────────────────────────────────────────────────────────────
-// §10 — Dropshipping wording (May 2026): no "warehouse" claims on policy pages,
-//        "Address:" labels reframed as "Office:" since the property is a
-//        small office (not a warehouse) and we don't hold stock ourselves.
+// §10 — Retail wording (May 2026): no "warehouse" claims on policy pages,
+//        "Address:" labels reframed as "Office:" since we operate from a
+//        small Auckland office. The earlier dropship-disclosure contract
+//        was retired; the full set of forbidden tokens (warehouse + the
+//        prior supplier-partner / dropship copy) is pinned in
+//        tests/retail-wording-may2026.test.js. The minimal pins here keep
+//        the rule visible inside the consolidated legal-pages suite.
 // ─────────────────────────────────────────────────────────────────────────────
 
 test('§10 no policy/about page contains the word "warehouse" — we don\'t have one', () => {
-    // The business runs from a small office and dropships from NZ wholesale
-    // suppliers. Claiming a warehouse on any customer-facing page would be
-    // a misrepresentation under the Fair Trading Act §13 and would fail
-    // the same Google Ads "Misrepresentation" review §2 above pins.
     for (const p of PAGES) {
         assert.ok(!/warehouse/i.test(SRC[p]),
-            `${p} must not mention a "warehouse" — we operate from an office and dropship from NZ supplier partners`);
+            `${p} must not mention a "warehouse" — we operate from an Auckland office`);
     }
 });
 
 test('§10 footer.js labels the contact block "Office:" not "Address:"', () => {
     assert.match(FOOTER_JS, /<strong>Office:<\/strong>/,
-        'footer.js Contact column must label the address line "Office:" (we operate from an office, not a warehouse)');
+        'footer.js Contact column must label the address line "Office:"');
     assert.ok(!/<strong>Address:<\/strong>/.test(FOOTER_JS),
-        'footer.js must not use the bare "Address:" label — was reframed to "Office:" in May 2026');
+        'footer.js must not use the bare "Address:" label');
 });
 
 test('§10 about.html hero meta uses "Office:" label', () => {
@@ -381,34 +381,10 @@ test('§10 about.html hero meta uses "Office:" label', () => {
 });
 
 test('§10 contact.html contact card label is "Office", not "Address"', () => {
-    // The contact-card__label is the visible label above the street address.
     assert.match(SRC['contact.html'], /class="contact-card__label">Office</,
         'contact.html contact card must label the address block "Office"');
     assert.ok(!/class="contact-card__label">Address</.test(SRC['contact.html']),
-        'contact.html must not use the "Address" contact-card label — reframed to "Office" in May 2026');
-});
-
-test('§10 supplier-fulfillment string in legal-config.js is warehouse-free', () => {
-    // The supplierFulfillment string is rendered into the Shipping page via
-    // data-legal-bind="supplier-fulfillment". It must reflect the dropship
-    // model: every order ships from a supplier partner, not a warehouse.
-    const sandbox = { window: {} };
-    const fn = new Function('window', CONFIG_JS + '\nreturn window.LegalConfig;');
-    const cfg = fn(sandbox.window);
-    assert.ok(typeof cfg.supplierFulfillment === 'string' && cfg.supplierFulfillment.length > 0,
-        'LegalConfig.supplierFulfillment must be a non-empty string');
-    assert.ok(!/warehouse/i.test(cfg.supplierFulfillment),
-        `supplierFulfillment must not claim a warehouse; got: ${cfg.supplierFulfillment}`);
-    assert.match(cfg.supplierFulfillment, /supplier partners?/i,
-        'supplierFulfillment must name the NZ supplier-partner model explicitly');
-});
-
-test('§10 shipping.html dropship section names the supplier-direct model', () => {
-    const src = SRC['shipping.html'];
-    assert.match(src, /id="dropship"/,
-        'shipping.html must keep its #dropship section anchor (linked from FAQ and About)');
-    assert.match(src, /supplier-direct dispatch|directly by .{0,40}supplier partners?/i,
-        'shipping.html dropship section must explain the supplier-direct dispatch model');
+        'contact.html must not use the "Address" contact-card label');
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

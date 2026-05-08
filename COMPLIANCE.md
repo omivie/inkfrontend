@@ -27,7 +27,7 @@ satisfy four things:
 | **Identity is unambiguous** — physical address, phone, email, hours visible site-wide | Footer (`js/footer.js`); Contact `/contact`; Terms §1, §14; Privacy §1, §12; About §6 | `§1`, `§5` |
 | **Pricing transparency** — no hidden fees, no card surcharges, GST inclusive | Terms §4 callout; Shipping §1 callout; Returns §1 callout; FAQ "Card surcharges" Q; Footer copyright line | `§3` |
 | **Returns / refunds clearly described** before the user pays | Returns page §1–§10; cross-linked from Terms §7 and Shipping §9 | `§4` |
-| **Shipping clearly described** including dropshipping transparency | Shipping page §1–§10, especially §4 (dropship disclosure) | `§3` |
+| **Shipping clearly described** — carriers, zones, rates, handling time, transit estimates | Shipping page §1–§9 | `§3` |
 | **Cross-linked policies in footer** | Footer Policies column + bottom legal nav strip | `§2` |
 
 > **Why we render the legal nav twice in the footer.** Reviewers scan
@@ -71,7 +71,7 @@ Center accepts any clearly legible map of the business location.
 | --- | --- | --- |
 | Explicit "in trade" declaration on the entity | Terms §1 callout: *"We sell in trade within the meaning of the Fair Trading Act 1986…"* | `§4` |
 | No false, misleading, or deceptive representations | Compatible cartridges marked clearly (Terms §8, About §4, FAQ "Genuine vs compatible") | — |
-| Disclosure of supplier-fulfilled items (avoiding "ships from NZ" misrepresentation when it doesn't) | Shipping §4 ("Items dispatched directly from our suppliers"), About §3 | — |
+| No positive false claims about place of operation (e.g. "warehouse" we don't own) | Pinned by `tests/retail-wording-may2026.test.js` §1 (forbidden tokens) and `tests/legal-pages.test.js` §10 | `§10` |
 
 The test `§4 Terms page contains an explicit "In trade" declaration` fails
 if the callout, the phrase "in trade", or the citation to the Fair Trading
@@ -147,7 +147,7 @@ audience may include minors.
 | Terms of Service | `/terms` | 14 | The contract; in-trade declaration; pricing transparency; CGA pointer; governing law |
 | Privacy Policy | `/privacy` | 12 | Privacy Act 2020 IPPs; processor & cookie tables; access/correction/deletion |
 | Refund & Return Policy | `/returns` | 10 | CGA-aligned faulty-goods rights; 30-day change-of-mind window; opened-cartridge consumables rule |
-| Shipping & Delivery | `/shipping` | 10 | Carriers; zone-by-zone rates; handling vs. transit times; dropship transparency |
+| Shipping & Delivery | `/shipping` | 9 | Carriers; zone-by-zone rates; handling vs. transit times; tracking; problems with delivery |
 | About Us | `/about` | 7 | NZ-owned framing; values cards; how we work; map; policies hub |
 | FAQ | `/faq` | 6 | Cartridge questions; orders/shipping; returns/warranty; account/privacy; business |
 | Contact | `/contact` | – | Address card, map, phone, email, contact form (Turnstile + honeypot) |
