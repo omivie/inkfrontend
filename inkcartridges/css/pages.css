@@ -10045,7 +10045,7 @@
 /* Product Card */
 .product-card {
     position: relative;
-    flex: 0 0 calc(16.666% - var(--spacing-sm));
+    flex: 0 0 calc(14.285% - var(--spacing-sm));
     max-width: 185px;
     min-width: 140px;
     display: flex;
@@ -10060,6 +10060,21 @@
 .product-card:hover {
     box-shadow: var(--shadow-md);
     transform: translateY(-2px);
+}
+
+/* Medium laptops: 7-card flex-basis would clamp to min-width:140px and overflow.
+   Fall back to 6 cols below the comfortable 7-up threshold. */
+@media (max-width: 1099px) {
+    .product-card {
+        flex: 0 0 calc(16.666% - var(--spacing-sm));
+    }
+}
+
+/* Shop / search / brand / printer pages: trim outer gutters so 7 cards fit
+   without shrinking each card too much. Scoped via body class on shop.html. */
+body.page-shop {
+    --container-max-width: 1240px;
+    --container-padding: 24px;
 }
 
 .product-card__link {
