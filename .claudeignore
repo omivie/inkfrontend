@@ -8,4 +8,6 @@ assets/images/
 *.ico
 .git/
 archive/
+.playwright-mcp/
+audit-output/*.png
 package-lock.json

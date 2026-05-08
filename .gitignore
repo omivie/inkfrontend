@@ -30,5 +30,14 @@ archive/
 audit-output/*
 !audit-output/report.json
 
-# Local Playwright screenshots
-brand-*.png
+# Local Playwright / dev screenshots — keep brand assets in inkcartridges/assets/ tracked,
+# only block ad-hoc captures that land at the repo root.
+/*.png
+/*.jpg
+/*.jpeg
+/*.gif
+/*.webp
+
+# One-off PDFs and ad-hoc reports dumped at the repo root
+/*.pdf
+/*-report.html
