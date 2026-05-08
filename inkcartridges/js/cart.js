@@ -128,8 +128,13 @@ const Cart = {
         const colorStyle = isCompatibleItem ? rawColorStyle : null;
         const escapedName = Security.escapeHtml(item.name);
         const imageUrl = typeof storageUrl === 'function' ? storageUrl(item.image) : item.image;
+        // Stale-swatch fallback — drop the per-SKU color-swatch placeholder
+        // when the canonical color would no longer match (admin color edit
+        // outran the static image upload). Render the color block instead.
+        // See utils.js ProductColors.isPlaceholderSwatchImage.
+        const swatchStale = ProductColors.isPlaceholderSwatchImage(item.image) && colorStyle;
 
-        if (imageUrl && imageUrl !== '/assets/images/placeholder-product.svg') {
+        if (imageUrl && imageUrl !== '/assets/images/placeholder-product.svg' && !swatchStale) {
             if (colorStyle) {
                 return `<img src="${Security.escapeAttr(imageUrl)}" alt="${escapedName}" data-fallback="color-block">
                         <div class="cart-item__color-block" style="${colorStyle}; width: 100%; height: 100%; border-radius: 4px; display: none;"></div>`;

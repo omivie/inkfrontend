@@ -19,9 +19,12 @@
                 : /^compatible\b/i.test(item.name || '');
             const rawColorStyle = typeof ProductColors !== 'undefined' ? ProductColors.getProductStyle(item) : null;
             const colorStyle = isCompatibleItem ? rawColorStyle : null;
+            // Stale-swatch fallback — render canonical color block instead
+            // of an outdated per-SKU swatch image.
+            const swatchStale = typeof ProductColors !== 'undefined' && ProductColors.isPlaceholderSwatchImage(item.image) && colorStyle;
 
             // escAttr() provided by utils.js
-            if (item.image) {
+            if (item.image && !swatchStale) {
                 if (colorStyle) {
                     return `<img src="${escAttr(item.image)}" alt="${escAttr(item.name)}" width="50" height="50" style="object-fit: contain;"
                                 data-fallback="color-block">

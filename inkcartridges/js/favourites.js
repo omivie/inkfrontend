@@ -480,8 +480,13 @@ const Favourites = {
         const isCompatibleItem = this._isCompatible(item);
         const rawColorStyle = typeof ProductColors !== 'undefined' ? ProductColors.getProductStyle(item) : null;
         const colorStyle = isCompatibleItem ? rawColorStyle : null;
+        // Stale-swatch fallback — drop the per-SKU color-swatch placeholder
+        // when admin color edits would no longer match the picture; render
+        // the canonical color block instead. See utils.js
+        // ProductColors.isPlaceholderSwatchImage.
+        const swatchStale = typeof ProductColors !== 'undefined' && ProductColors.isPlaceholderSwatchImage(item.image) && colorStyle;
 
-        if (item.image) {
+        if (item.image && !swatchStale) {
             if (colorStyle) {
                 return `<img src="${Security.escapeAttr(item.image)}" alt="${Security.escapeAttr(item.name)}" data-fallback="color-block">
                         <div class="favourite-item__color-block" style="${colorStyle} display: none;"></div>`;

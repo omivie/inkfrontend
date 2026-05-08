@@ -170,6 +170,22 @@ const ProductColors = {
     },
 
     /**
+     * True when a product's image_url is one of the legacy placeholder
+     * "color-swatch-vN.png" PNGs we hand-uploaded per SKU folder before
+     * canonical color was authoritative. These images don't update when
+     * an admin changes `products.color`, so a tri-colour cartridge whose
+     * folder still hosts a red swatch reads as red on the storefront —
+     * the bug captured in this comment block. Detecting them lets the
+     * card renderers fall through to a `getProductStyle` swatch rendered
+     * from the canonical color, so admin edits flow visually without a
+     * fresh image upload.
+     */
+    isPlaceholderSwatchImage(url) {
+        if (!url || typeof url !== 'string') return false;
+        return /\/color-swatch(?:-v\d+)?\.png(?:\?.*)?$/i.test(url);
+    },
+
+    /**
      * Get CSS style string for any product/item object.
      * Priority: color_hex array > color name > detectFromName fallback.
      * @param {Object} obj - Product or cart item with optional color_hex, color, name fields
@@ -602,6 +618,30 @@ const ProductSort = (function() {
         const name = (product.name || '').toUpperCase();
         const brand = (product.brand?.name || product.brand || '')
             .toString().toUpperCase().replace(/\s+/g, '');
+
+        // PRIORITY 0: trust the backend when it ships a series code. The May
+        // 2026 catalog overhaul (api-changes-may2026.md §2) added
+        // `series_codes: string[]` to /api/shop responses; same code shipped
+        // via the smart/by-printer endpoints in some payloads. Using the
+        // backend value collapses families like Brother LC133 / LC139 / LC133
+        // XL into one row even when the name regex below would fork them.
+        // Prefer the SHORTEST series code so XL/HY tagged variants
+        // ("LC139XL") still join the std row ("LC139") rather than starting a
+        // new family — yieldTier(p) is what splits them inside the family.
+        if (Array.isArray(product.series_codes) && product.series_codes.length) {
+            const codes = product.series_codes
+                .map(c => (c || '').toString().toUpperCase().replace(/\s+/g, ''))
+                .filter(Boolean)
+                .sort((a, b) => a.length - b.length || a.localeCompare(b));
+            if (codes.length) {
+                // Strip yield prefix from the chosen base so std/XL/XXL all
+                // resolve to the same family even if the backend included
+                // them as separate codes.
+                let base = codes[0];
+                base = base.replace(/^([A-Z]+\d+)(XXL|XL|HY|H)([A-Z]*)$/, '$1$3');
+                return (brand ? 'B:' + brand + ':' : '') + base;
+            }
+        }
 
         // First token shaped like a product code: letters + digits + optional
         // trailing letters. Suffix length up to 8 because real codes carry 5-char

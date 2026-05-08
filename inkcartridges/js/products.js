@@ -28,7 +28,14 @@ const Products = {
         const srcsetVal = typeof imageSrcset === 'function' && product.image_url ? imageSrcset(product.image_url) : '';
         const srcsetHtml = srcsetVal ? ` srcset="${Security.escapeAttr(srcsetVal)}" sizes="(max-width: 480px) 200px, (max-width: 768px) 300px, 400px"` : '';
         const loadAttrs = priority ? 'fetchpriority="high" decoding="async"' : 'loading="lazy" decoding="async"';
-        if (imageUrl && imageUrl !== '/assets/images/placeholder-product.svg') {
+        // Stale-swatch fallback: when image_url is the per-SKU `color-swatch-vN.png`
+        // placeholder we hand-uploaded once per product, prefer rendering a fresh
+        // color block from the canonical `color` field. The image was authored
+        // for the product's original color and goes stale when admin changes
+        // `products.color` (e.g. Red → Tri-Colour) without re-uploading. Pinned
+        // by tests/stale-color-swatch.test.js.
+        const swatchStale = ProductColors.isPlaceholderSwatchImage(product.image_url) && colorStyle;
+        if (imageUrl && imageUrl !== '/assets/images/placeholder-product.svg' && !swatchStale) {
             // Has image URL - use it with error fallback (listeners attached after DOM insertion)
             if (colorStyle) {
                 return `<img src="${Security.escapeAttr(imageUrl)}"
@@ -113,7 +120,7 @@ const Products = {
                     <div class="product-card__image-wrapper">
                         ${this.getProductImageHTML(product, { priority })}
                         ${sourceBadge ? `<span class="product-card__badge ${sourceBadge.class}">${sourceBadge.text}</span>` : ''}
-                        ${showDiscount && discountPercent ? `<span class="product-card__badge product-card__badge--discount">Save ${discountPercent}%</span>` : ''}
+                        ${showDiscount && (this._isPack(product) ? discountAmount != null : discountPercent) ? `<span class="product-card__badge product-card__badge--discount">${this._isPack(product) ? `Save ${formatPrice(discountAmount)}` : `Save ${discountPercent}%`}</span>` : ''}
                         ${product.is_lowest_in_market ? `<span class="product-card__badge product-card__badge--lowest-price" title="${product.market_position ? Security.escapeAttr(product.market_position.price_diff_percent + '% less than ' + product.market_position.lowest_competitor_name) : ''}">Lowest Price</span>` : ''}
                     </div>
                     <div class="product-card__content">
@@ -181,6 +188,16 @@ const Products = {
     /**
      * Render mini star icons for product cards
      */
+    // Value-pack and multipack savings render as a dollar amount only — the
+    // pack price already advertises a percentage discount via "Value Pack"
+    // ribbons, so doubling up "(15%)" reads as redundant copy. Singles still
+    // show the percent because that's the conventional shorthand for sale
+    // pricing and removing it loses signal.
+    _isPack(product) {
+        const pt = (product && product.pack_type || '').toString().toLowerCase();
+        return pt === 'value_pack' || pt === 'multipack';
+    },
+
     _miniStars(filled) {
         return Array.from({ length: 5 }, (_, i) =>
             `<svg class="product-card__star" width="14" height="14" viewBox="0 0 24 24" fill="${i < filled ? 'currentColor' : 'none'}" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>`

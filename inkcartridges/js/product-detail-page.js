@@ -464,9 +464,14 @@
                 const savingsPct = info.discount_percent != null
                     ? info.discount_percent
                     : Math.round((savingsAmount / originalPrice) * 100);
+                // Value packs / multipacks render dollars only — the pack
+                // already broadcasts its "savings vs singles" via the Value
+                // Pack ribbon, so the percent reads as redundant copy.
+                const _packType = (info.pack_type || '').toString().toLowerCase();
+                const _isPack = _packType === 'value_pack' || _packType === 'multipack';
                 priceEl.insertAdjacentHTML('afterend',
                     `<span class="product-detail__compare-price">Was ${formatPrice(originalPrice)}</span>
-                     <span class="product-detail__savings">Save ${formatPrice(savingsAmount)} (${savingsPct}%)</span>`);
+                     <span class="product-detail__savings">Save ${formatPrice(savingsAmount)}${_isPack ? '' : ` (${savingsPct}%)`}</span>`);
             }
 
             // GST trust signal lives in the static "Incl. GST" badge rendered
@@ -543,7 +548,14 @@
             // Build srcset for responsive product detail images (400/600/800w)
             const detailSrcset = typeof imageSrcset === 'function' && info.image_url_raw ? imageSrcset(info.image_url_raw, [400, 600, 800]) : '';
             const detailSrcsetHtml = detailSrcset ? ` srcset="${Security.escapeAttr(detailSrcset)}" sizes="(max-width: 480px) 400px, (max-width: 768px) 600px, 800px"` : '';
-            if (info.image_url) {
+            // Stale-swatch fallback — if the product image is the legacy
+            // per-SKU "color-swatch-vN.png" we hand-uploaded once, drop it
+            // and render the canonical color block instead so admin color
+            // edits propagate without needing a fresh upload. See
+            // ProductColors.isPlaceholderSwatchImage in utils.js for the
+            // detection rule. Pinned by tests/stale-color-swatch.test.js.
+            const _swatchStale = ProductColors.isPlaceholderSwatchImage(info.image_url) && colorStyle && info.isCompatible;
+            if (info.image_url && !_swatchStale) {
                 if (colorStyle) {
                     // Image with color fallback on error
                     productImageEl.innerHTML = `
@@ -570,11 +582,12 @@
                     }, { once: true });
                 });
             } else {
-                // No image. Genuine-no-color-tile invariant: only compatible
-                // products may show a color tile when image_url is missing.
-                // Genuine packs (KCMY/CMY) ship with image_url=NULL while the
-                // composite-image generator runs separately — they MUST fall
-                // through to the placeholder, never a striped gradient tile.
+                // No image (or stale swatch image stripped above). Genuine-no-
+                // color-tile invariant: only compatible products may show a
+                // color tile when image_url is missing. Genuine packs
+                // (KCMY/CMY) ship with image_url=NULL while the composite-
+                // image generator runs separately — they MUST fall through to
+                // the placeholder, never a striped gradient tile.
                 if (info.isCompatible && colorStyle) {
                     // colorStyle is safe — sourced from hardcoded ProductColors.map
                     productImageEl.classList.add('product-gallery__main--color-only');

@@ -101,10 +101,14 @@
                         ${items.map(item => {
                             const rawImageUrl = item.product?.image_url || item.image_url || null;
                             const imageUrl = rawImageUrl && typeof storageUrl === 'function' ? storageUrl(rawImageUrl) : rawImageUrl;
+                            // Stale-swatch fallback — for compatibles whose
+                            // hand-uploaded swatch image is now out of date,
+                            // fall through to the canonical color placeholder.
+                            const _swatchStale = typeof ProductColors !== 'undefined' && ProductColors.isPlaceholderSwatchImage(rawImageUrl) && (item.source === 'compatible' || /^compatible\b/i.test(item.product_name || ''));
                             return `
                             <div class="order-item">
                                 <div class="order-item__image">
-                                    ${imageUrl
+                                    ${(imageUrl && !_swatchStale)
                                         ? `<img src="${escAttr(imageUrl)}" alt="${escAttr(item.product_name)}" data-fallback="placeholder">`
                                         : this.getColorPlaceholder(item.product_name, item.source)
                                     }

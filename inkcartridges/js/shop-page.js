@@ -2915,7 +2915,13 @@
             const colorStyle = ProductColors.getProductStyle(product);
             // Get raw (non-optimized) image URL for fallback when optimization endpoint fails (429/error)
             const rawImageUrl = product.image_url && typeof storageUrlRaw === 'function' ? storageUrlRaw(product.image_url) : product.image_url;
-            if (resolvedImageUrl && resolvedImageUrl !== '/assets/images/placeholder-product.svg') {
+            // Stale-swatch fallback — see Products.getProductImageHTML in
+            // products.js for the rationale. We strip the static swatch image
+            // and fall through to a freshly-styled color block whenever the
+            // canonical `color` is set, so admin color edits propagate
+            // visually without an image re-upload.
+            const swatchStale = ProductColors.isPlaceholderSwatchImage(product.image_url) && colorStyle;
+            if (resolvedImageUrl && resolvedImageUrl !== '/assets/images/placeholder-product.svg' && !swatchStale) {
                 const srcsetHtml = srcsetAttr ? ` srcset="${Security.escapeAttr(srcsetAttr)}" sizes="${sizesAttr}"` : '';
                 const rawAttr = rawImageUrl && rawImageUrl !== resolvedImageUrl ? ` data-raw-src="${Security.escapeAttr(rawImageUrl)}"` : '';
                 if (colorStyle) {
@@ -2972,7 +2978,7 @@
             const infoRowHTML = (showSavingsPill || showFreeShipPill)
                 ? `<div class="product-card__info-row">
                         ${showFreeShipPill ? '<span class="product-card__free-shipping">Free Shipping</span>' : ''}
-                        ${showSavingsPill ? `<span class="product-card__savings">Save ${formatPrice(discountAmount)}${discountPercent ? ` (${discountPercent}%)` : ''}</span>` : ''}
+                        ${showSavingsPill ? `<span class="product-card__savings">Save ${formatPrice(discountAmount)}${(discountPercent && !((product.pack_type || '').toString().toLowerCase() === 'value_pack' || (product.pack_type || '').toString().toLowerCase() === 'multipack')) ? ` (${discountPercent}%)` : ''}</span>` : ''}
                     </div>`
                 : '';
 

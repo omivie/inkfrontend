@@ -240,6 +240,9 @@ function loadProducts() {
                 if (n.includes('black')) return 'black';
                 return null;
             },
+            isPlaceholderSwatchImage(url) {
+                return !!url && /\/color-swatch(?:-v\d+)?\.png$/i.test(url);
+            },
         },
         getStockStatus: () => ({ class: 'in-stock', text: 'In stock' }),
         getSourceBadge: (s) => s === 'compatible'

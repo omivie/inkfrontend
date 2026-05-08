@@ -433,9 +433,13 @@
                 || ((typeof Cart !== 'undefined' && Cart._isCompatible) ? Cart._isCompatible(item) : false);
             const rawColorStyle = typeof ProductColors !== 'undefined' ? ProductColors.getProductStyle(item) : null;
             const colorStyle = isCompatibleItem ? rawColorStyle : null;
+            // Stale-swatch fallback — drop the per-SKU placeholder so admin
+            // color edits flow through. See utils.js
+            // ProductColors.isPlaceholderSwatchImage.
+            const swatchStale = typeof ProductColors !== 'undefined' && ProductColors.isPlaceholderSwatchImage(item.image_url) && colorStyle;
 
             // escAttr() provided by utils.js
-            if (item.image_url) {
+            if (item.image_url && !swatchStale) {
                 if (colorStyle) {
                     return `<img src="${escAttr(item.image_url)}" alt="${escAttr(item.name)}" loading="lazy"
                                 data-fallback="color-block">
