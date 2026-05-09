@@ -3,6 +3,12 @@
  * KPI strip · Revenue vs Expenses · Orders/Products · Alerts · Activity
  */
 import { AdminAuth, FilterState, AdminAPI, esc } from '../app.js';
+import {
+  STRIPE_RATE_DERIVE, STRIPE_FIXED_DERIVE, GST_FRACTION_OF_GROSS,
+  bucketOperatingExpenses, distributeCogsByRevenue, assembleBucketExpense,
+  sumTrendTotals, bucketCogsFromOrders, kpiCogsInclGst,
+  expandRecurringExpenses,
+} from '../utils/trend-math.js';
 import { Charts } from '../components/charts.js';
 
 const formatPrice = (v) => window.formatPrice ? window.formatPrice(v) : `$${Number(v || 0).toFixed(2)}`;
@@ -102,6 +108,7 @@ async function loadDashboard() {
       Math.min(365, Math.max(90, FilterState.periodToDays())),
       30
     ),                                                      // 16 forecast history
+    AdminAPI.getAdminAnalyticsExpenses(500),                // 17 logged expenses
   ];
 
   const results = await Promise.allSettled(promises);
@@ -126,6 +133,7 @@ async function loadDashboard() {
     discrepancies: val(13),
     auditLogs:    val(14),
     forecastHistory: val(16),
+    expenses:     val(17),
   });
 }
 
@@ -305,6 +313,7 @@ function renderTrendCard() {
         </div>
       </div>
       <div class="admin-chart-box admin-chart-box--mid"><canvas id="chart-trend"></canvas></div>
+      <div id="dash-trend-totals" class="admin-trend-totals" aria-live="polite"></div>
     </div>
   `;
 }
@@ -444,10 +453,20 @@ function seedBuckets(cfg) {
       label: cfg.labelFor(new Date(startMs)),
       revenue: 0, expenses: 0, net: 0, orders: 0,
       hasRevenue: false, hasExpense: false, hasNet: false,
+      // Per-period P&L lines if the backend ships them — kept for forward compat
+      pnlCogs: 0, pnlOpex: 0, pnlStripe: 0, pnlGst: 0,
+      hasPnlCogs: false, hasPnlOpex: false, hasPnlStripe: false, hasPnlGst: false,
+      // Frontend-derived components (used when P&L is empty)
+      cogsDerived: 0,                                  // revenue-share fallback
+      cogsFromOrders: 0, hasOrderCogs: false,          // exact, from items[]
+      opexLogged: 0, hasOpexLogged: false,
+      // Final assembled components for tooltip + totals strip
+      cogsTotal: 0, opexTotal: 0, stripeTotal: 0, gstTotal: 0,
     });
   }
   return buckets;
 }
+
 
 // Build trend series (revenue/expenses/net/orders) bucketed by filter granularity.
 function buildTrendSeries(d) {
@@ -489,54 +508,208 @@ function buildTrendSeries(d) {
     }
   }
 
-  // 3. Expenses — only P&L has this, keyed monthly. Distribute evenly into contained buckets.
+  // 3. P&L lines (forward-compat) — if the backend ever populates per-period
+  // cogs/opex/stripe/gst on /api/admin/analytics/pnl, pick them up. Today most
+  // periods come back null, which is why steps 4 + 5 reconstruct the totals
+  // from sources that DO work.
+  //
+  // GRANULARITY RULE (set 2026-05-10): P&L periods are MONTHS. Smearing a
+  // monthly aggregate across day/week buckets paints fake expenses on empty
+  // days (the "$29.80 ghost" — see readfirst/recurring-expenses-may2026.md).
+  // At sub-month granularity we let the actual sources of truth speak: per-
+  // order COGS (step 4) and dated logged expenses incl. recurring (step 5).
+  // P&L pre-fill only runs at month-or-wider granularity where each row maps
+  // to exactly one bucket and no smearing is needed.
   const pnlPeriods = Array.isArray(d.pnl?.periods) ? d.pnl.periods
                    : Array.isArray(d.pnl) ? d.pnl : [];
-  for (const p of pnlPeriods) {
-    const raw = p.period || p.month || p.date;
-    if (!raw) continue;
-    const m = String(raw).match(/^(\d{4})-(\d{2})/);
-    let monthStart, monthEnd;
-    if (m) {
-      monthStart = new Date(Number(m[1]), Number(m[2]) - 1, 1).getTime();
-      monthEnd   = new Date(Number(m[1]), Number(m[2]), 1).getTime();
-    } else {
-      const pd = new Date(raw);
-      if (isNaN(pd)) continue;
-      monthStart = new Date(pd.getFullYear(), pd.getMonth(), 1).getTime();
-      monthEnd   = new Date(pd.getFullYear(), pd.getMonth() + 1, 1).getTime();
-    }
-    const expense = (p.cogs != null || p.operating_expenses != null)
-      ? Number(p.cogs || 0) + Number(p.operating_expenses || 0)
-      : (p.expenses != null ? Number(p.expenses) : null);
-    const net = p.net_profit != null ? Number(p.net_profit) : null;
+  if (cfg.unit === 'month') {
+    for (const p of pnlPeriods) {
+      const raw = p.period || p.month || p.date;
+      if (!raw) continue;
+      const m = String(raw).match(/^(\d{4})-(\d{2})/);
+      let monthStart, monthEnd;
+      if (m) {
+        monthStart = new Date(Number(m[1]), Number(m[2]) - 1, 1).getTime();
+        monthEnd   = new Date(Number(m[1]), Number(m[2]), 1).getTime();
+      } else {
+        const pd = new Date(raw);
+        if (isNaN(pd)) continue;
+        monthStart = new Date(pd.getFullYear(), pd.getMonth(), 1).getTime();
+        monthEnd   = new Date(pd.getFullYear(), pd.getMonth() + 1, 1).getTime();
+      }
+      const cogs   = p.cogs != null ? Number(p.cogs) : null;
+      const opex   = p.operating_expenses != null ? Number(p.operating_expenses) : null;
+      const stripe = p.stripe_fees != null ? Number(p.stripe_fees) : null;
+      const gst    = (p.gst ?? p.gst_remitted ?? p.gst_payable ?? p.tax);
+      const gstNum = gst != null ? Number(gst) : null;
+      const net    = p.net_profit != null ? Number(p.net_profit) : null;
 
-    // Find buckets overlapping the month, weight by days of overlap.
-    const overlaps = [];
-    for (const b of buckets) {
-      const bStart = b.startMs;
-      const bEnd = cfg.unit === 'month'
-        ? new Date(new Date(bStart).getFullYear(), new Date(bStart).getMonth() + 1, 1).getTime()
-        : bStart + cfg.stepMs;
-      const ov = Math.max(0, Math.min(bEnd, monthEnd) - Math.max(bStart, monthStart));
-      if (ov > 0) overlaps.push({ b, ov });
-    }
-    const totalOv = overlaps.reduce((s, o) => s + o.ov, 0);
-    if (!totalOv) continue;
+      // At month granularity each bucket spans one calendar month, so the
+      // overlap loop simplifies to "find the matching bucket and assign".
+      // Kept as a loop for resilience to off-by-one edge cases (DST etc.).
+      const overlaps = [];
+      for (const b of buckets) {
+        const bStart = b.startMs;
+        const bEnd = new Date(new Date(bStart).getFullYear(), new Date(bStart).getMonth() + 1, 1).getTime();
+        const ov = Math.max(0, Math.min(bEnd, monthEnd) - Math.max(bStart, monthStart));
+        if (ov > 0) overlaps.push({ b, ov });
+      }
+      const totalOv = overlaps.reduce((s, o) => s + o.ov, 0);
+      if (!totalOv) continue;
 
-    for (const { b, ov } of overlaps) {
-      const w = ov / totalOv;
-      if (expense != null) { b.expenses += expense * w; b.hasExpense = true; }
-      if (net != null)     { b.net      += net * w;     b.hasNet = true; }
+      for (const { b, ov } of overlaps) {
+        const w = ov / totalOv;
+        if (cogs   != null && cogs   > 0) { b.pnlCogs   += cogs   * w; b.hasPnlCogs   = true; }
+        if (opex   != null && opex   > 0) { b.pnlOpex   += opex   * w; b.hasPnlOpex   = true; }
+        if (stripe != null && stripe > 0) { b.pnlStripe += stripe * w; b.hasPnlStripe = true; }
+        if (gstNum != null && gstNum > 0) { b.pnlGst    += gstNum * w; b.hasPnlGst    = true; }
+        if (net != null) { b.net += net * w; b.hasNet = true; }
+      }
     }
   }
 
-  // 4. Derive net if still missing
-  for (const b of buckets) {
-    if (!b.hasNet) b.net = b.revenue - b.expenses;
+  // 4. COGS — three-tier preference. Use the most accurate source available
+  // and fall back gracefully:
+  //
+  //   (a) Per-order line items (`o.items[].supplier_cost_snapshot * qty * 1.15`)
+  //       when the bulk-orders endpoint includes them. Exact match to the
+  //       order detail page; no smearing across days.
+  //   (b) For orders the backend list endpoint left without items, distribute
+  //       a residual COGS amount over the remaining revenue. Residual =
+  //       (kpiCogsInclGst total) − (sum of resolved per-order COGS), so the
+  //       window total still matches the KPI even when only some orders
+  //       resolved exactly.
+  //   (c) If neither is available, fall back to pure revenue-share
+  //       distribution of the full grossed-up KPI cost.
+  //
+  // The 1.15 gross-up matters: the KPI's gross_profit follows the canonical
+  // profitability convention (`revenue_ex_gst − cost_incl_gst`), so when the
+  // chart's revenue tile is gross-incl-GST, `revenue − gross_profit` gives
+  // ex-GST cost. Real cash to suppliers is that × 1.15.
+  const kpiCur = d.kpis?.current || {};
+  const totalCogsInclGst = kpiCogsInclGst(kpiCur.revenue, kpiCur.gross_profit);
+  const hasAnyPnlCogs = buckets.some(b => b.hasPnlCogs);
+  if (!hasAnyPnlCogs) {
+    // (a) try per-order — only counts toward the bucket if items[] exists.
+    const { resolvedRevenue } = bucketCogsFromOrders(buckets, rawOrders, indexFor);
+    if (totalCogsInclGst > 0) {
+      const totalRev = buckets.reduce((s, b) => s + (b.revenue || 0), 0);
+      // (b) compute a residual to spread across the un-resolved revenue.
+      // We approximate per-order resolution by revenue: orders whose items[]
+      // were present contributed `resolvedRevenue` worth of revenue, so the
+      // residual COGS for the rest = totalCogs × (1 − resolvedRevenue / totalRev).
+      const unresolvedShare = totalRev > 0
+        ? Math.max(0, 1 - (resolvedRevenue / totalRev))
+        : 1;
+      const residualCogs = totalCogsInclGst * unresolvedShare;
+      if (residualCogs > 0) {
+        // Distribute the residual only across buckets whose orders weren't
+        // resolved exactly — using each bucket's UN-resolved revenue.
+        const phantomBuckets = buckets.map(b => ({
+          revenue: b.hasOrderCogs ? 0 : (b.revenue || 0),
+        }));
+        distributeCogsByRevenue(phantomBuckets, residualCogs);
+        for (let i = 0; i < buckets.length; i++) {
+          buckets[i].cogsDerived = phantomBuckets[i].cogsDerived || 0;
+        }
+      }
+    }
   }
+
+  // 5. Operating expenses — drop in every manually-logged expense at the
+  // exact day it happened. This is where the user's 3 May supplier purchase
+  // shows up, IF they logged it via Finance → Add Expense.
+  //
+  // Recurring rows (Vercel/Render/etc., schema in trend-math.js) are expanded
+  // into one virtual occurrence per fire-date inside the visible window so a
+  // monthly $30 sub bills on the 12th every month, not smeared, not pinned to
+  // the 1st. Expansion is bounded by the bucket window so we never emit
+  // off-screen ghost rows.
+  const expenseRows = Array.isArray(d.expenses)
+    ? d.expenses
+    : (d.expenses?.expenses || d.expenses?.items || d.expenses?.data || []);
+  const lastBucket = buckets[buckets.length - 1];
+  const windowEndMs = cfg.unit === 'month'
+    ? new Date(new Date(lastBucket.startMs).getFullYear(), new Date(lastBucket.startMs).getMonth() + 1, 1).getTime()
+    : lastBucket.startMs + cfg.stepMs;
+  const expandedRows = expandRecurringExpenses(expenseRows, firstStart, windowEndMs);
+  bucketOperatingExpenses(buckets, expandedRows, indexFor);
+
+  // 6. Assemble each bucket's final expense components. Order of preference:
+  //    cogs   → P&L per-period if populated, else revenue-distributed KPI cogs
+  //    opex   → P&L per-period if populated, else logged expenses (date-bucketed)
+  //    stripe → P&L per-period if populated, else derive from revenue + orders
+  //    gst    → P&L per-period if populated, else derive from gross revenue
+  for (const b of buckets) assembleBucketExpense(b);
 
   return buckets;
+}
+
+function renderTrendTotals(series) {
+  const el = document.getElementById('dash-trend-totals');
+  if (!el) return;
+  if (!series.length) { el.innerHTML = ''; return; }
+
+  const totals = sumTrendTotals(series);
+  const net = totals.revenue - totals.expenses;
+  const isLoss = net < 0;
+  const hasNoOpex = totals.opex === 0;
+
+  // Horizontal bar layout:
+  // - profit case: [pink expenses | green profit] = revenue (100%)
+  // - loss case:   [full pink revenue width][red overflow = how far over]
+  let segs;
+  if (isLoss) {
+    const overflowPct = totals.revenue > 0
+      ? Math.min(100, (Math.abs(net) / totals.revenue) * 100)
+      : 100;
+    segs = `
+      <div class="admin-trend-totals__seg admin-trend-totals__seg--expense" style="width:100%"></div>
+      <div class="admin-trend-totals__seg admin-trend-totals__seg--loss"    style="width:${overflowPct.toFixed(2)}%"></div>
+    `;
+  } else {
+    const expensePct = totals.revenue > 0
+      ? Math.min(100, (totals.expenses / totals.revenue) * 100)
+      : 0;
+    const profitPct = 100 - expensePct;
+    segs = `
+      <div class="admin-trend-totals__seg admin-trend-totals__seg--expense" style="width:${expensePct.toFixed(2)}%"></div>
+      <div class="admin-trend-totals__seg admin-trend-totals__seg--profit"  style="width:${profitPct.toFixed(2)}%"></div>
+    `;
+  }
+
+  const netLabel = isLoss
+    ? `Loss <strong>−${esc(formatPrice(Math.abs(net)))}</strong>`
+    : `Profit <strong>+${esc(formatPrice(net))}</strong>`;
+  const netClass = isLoss ? 'admin-trend-totals__chip--loss' : 'admin-trend-totals__chip--profit';
+  const breakdown = `COGS ${formatPrice(totals.cogs)} · Opex ${formatPrice(totals.opex)} · Stripe ${formatPrice(totals.stripe)} · GST ${formatPrice(totals.gst)}`;
+
+  const hint = hasNoOpex
+    ? `<div class="admin-trend-totals__hint">
+        No operating expenses logged for this window.
+        <a href="#financial-health">Add at Finance → Expenses</a>
+        to capture supplier purchases, shipping, marketing, etc.
+       </div>`
+    : '';
+
+  el.innerHTML = `
+    <div class="admin-trend-totals__row">
+      <span class="admin-trend-totals__chip admin-trend-totals__chip--revenue">
+        Revenue <strong>${esc(formatPrice(totals.revenue))}</strong>
+      </span>
+      <span class="admin-trend-totals__chip admin-trend-totals__chip--expense" title="${esc(breakdown)}">
+        Expenses <strong>${esc(formatPrice(totals.expenses))}</strong>
+      </span>
+      <span class="admin-trend-totals__chip ${netClass}">
+        ${netLabel}
+      </span>
+    </div>
+    <div class="admin-trend-totals__bar" role="img" aria-label="Revenue vs total expenses for ${esc(rangeLabel())}">
+      ${segs}
+    </div>
+    <div class="admin-trend-totals__breakdown">${esc(breakdown)}</div>
+    ${hint}
+  `;
 }
 
 function drawTrendChart() {
@@ -549,8 +722,10 @@ function drawTrendChart() {
       canvas.closest('.admin-chart-box').innerHTML =
         '<div class="admin-dash-inline-empty">No data for this range — try a wider window</div>';
     }
+    renderTrendTotals([]);
     return;
   }
+  renderTrendTotals(series);
 
   const colors = Charts.getThemeColors();
   const labels = series.map(m => m.label);

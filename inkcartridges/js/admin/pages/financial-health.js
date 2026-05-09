@@ -224,8 +224,55 @@ function renderExpenseForm() {
         <option value="other">Other</option>
       </select>
       <input class="admin-input" type="number" step="0.01" min="0" id="fh-exp-amount" placeholder="Amount (NZD)" required>
-      <input class="admin-input" type="date" id="fh-exp-date" required>
+      <input class="admin-input" type="date" id="fh-exp-date" required title="One-off: date of expense. Recurring: first occurrence (start date).">
       <input class="admin-input" type="text" id="fh-exp-vendor" placeholder="Vendor / description">
+
+      <select class="admin-input" id="fh-exp-recurrence">
+        <option value="none">One-off (no repeat)</option>
+        <option value="weekly">Repeats weekly</option>
+        <option value="monthly">Repeats monthly</option>
+        <option value="yearly">Repeats yearly</option>
+        <option value="custom">Repeats every N days</option>
+      </select>
+
+      <div id="fh-exp-rec-weekly" style="display:none">
+        <select class="admin-input" id="fh-exp-dow">
+          <option value="0">Sunday</option><option value="1">Monday</option>
+          <option value="2">Tuesday</option><option value="3" selected>Wednesday</option>
+          <option value="4">Thursday</option><option value="5">Friday</option>
+          <option value="6">Saturday</option>
+        </select>
+      </div>
+
+      <div id="fh-exp-rec-monthly" style="display:none">
+        <input class="admin-input" type="number" min="1" max="31" id="fh-exp-dom"
+          placeholder="Day of month (1-31)"
+          title="31 falls back to the last day of shorter months (Feb 28/29, Apr 30, etc.)">
+      </div>
+
+      <div id="fh-exp-rec-yearly" style="display:none;grid-column:span 2;gap:12px;grid-template-columns:1fr 1fr">
+        <select class="admin-input" id="fh-exp-month">
+          <option value="1">January</option><option value="2">February</option>
+          <option value="3">March</option><option value="4">April</option>
+          <option value="5">May</option><option value="6">June</option>
+          <option value="7">July</option><option value="8">August</option>
+          <option value="9">September</option><option value="10">October</option>
+          <option value="11">November</option><option value="12">December</option>
+        </select>
+        <input class="admin-input" type="number" min="1" max="31" id="fh-exp-yearly-dom"
+          placeholder="Day of month (1-31)">
+      </div>
+
+      <div id="fh-exp-rec-custom" style="display:none">
+        <input class="admin-input" type="number" min="1" id="fh-exp-interval"
+          placeholder="Every N days">
+      </div>
+
+      <div id="fh-exp-rec-end" style="display:none">
+        <input class="admin-input" type="date" id="fh-exp-end"
+          title="Optional. Leave blank if the subscription is still active.">
+      </div>
+
       <div style="grid-column:span 4;display:flex;gap:8px;justify-content:flex-end">
         <button type="button" class="admin-btn admin-btn--ghost admin-btn--sm" id="fh-exp-cancel">Cancel</button>
         <button type="submit" class="admin-btn admin-btn--primary admin-btn--sm">Save Expense</button>
@@ -247,10 +294,37 @@ function renderExpensesTable() {
     const cat = pick(r, 'category', 'category_name') || '';
     const vendor = pick(r, 'vendor', 'description') || '';
     const amount = num(pick(r, 'amount', 'total'));
-    html += `<tr><td>${esc(dateStr)}</td><td>${esc(cat)}</td><td>${esc(vendor)}</td><td style="text-align:right;color:var(--magenta, #C71F6E)">-${esc(formatPrice(amount))}</td></tr>`;
+    const recSuffix = recurrenceSummary(r);
+    const vendorCell = recSuffix
+      ? `${esc(vendor)} <span style="color:var(--text-muted);font-size:11px">· ${esc(recSuffix)}</span>`
+      : esc(vendor);
+    html += `<tr><td>${esc(dateStr)}</td><td>${esc(cat)}</td><td>${vendorCell}</td><td style="text-align:right;color:var(--magenta, #C71F6E)">-${esc(formatPrice(amount))}</td></tr>`;
   }
   html += '</tbody></table>';
   return html;
+}
+
+const DOW_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const MONTH_NAMES = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+function recurrenceSummary(r) {
+  const v = r?.recurrence;
+  if (!v || v === 'none') return '';
+  const end = r.recurrence_end ? ` until ${new Date(r.recurrence_end).toLocaleDateString('en-NZ')}` : '';
+  if (v === 'weekly') {
+    const d = Number(r.recurrence_day_of_week);
+    return `Every ${DOW_NAMES[d] || '?'}${end}`;
+  }
+  if (v === 'monthly') {
+    return `Monthly · day ${r.recurrence_day_of_month ?? '?'}${end}`;
+  }
+  if (v === 'yearly') {
+    const m = Number(r.recurrence_month);
+    return `Yearly · ${MONTH_NAMES[m - 1] || '?'} ${r.recurrence_day_of_month ?? '?'}${end}`;
+  }
+  if (v === 'custom') {
+    return `Every ${r.recurrence_interval_days ?? '?'} days${end}`;
+  }
+  return '';
 }
 
 async function renderCashflowChart() {
@@ -330,27 +404,88 @@ function bindExpenseForm() {
   const cancelBtn = _container.querySelector('#fh-exp-cancel');
   const formEl = _container.querySelector('#fh-expense-form-el');
   const dateInput = _container.querySelector('#fh-exp-date');
+  const recSel = _container.querySelector('#fh-exp-recurrence');
+
+  // Conditional sub-panels keyed by recurrence value. Yearly uses inline-grid
+  // to spread its two inputs (month + day-of-month); the rest are single inputs.
+  const panels = {
+    weekly:  { el: _container.querySelector('#fh-exp-rec-weekly'),  display: 'block' },
+    monthly: { el: _container.querySelector('#fh-exp-rec-monthly'), display: 'block' },
+    yearly:  { el: _container.querySelector('#fh-exp-rec-yearly'),  display: 'grid'  },
+    custom:  { el: _container.querySelector('#fh-exp-rec-custom'),  display: 'block' },
+  };
+  const endPanel = _container.querySelector('#fh-exp-rec-end');
+
+  function syncRecurrenceUi() {
+    const v = recSel?.value || 'none';
+    for (const [key, p] of Object.entries(panels)) {
+      if (p.el) p.el.style.display = (key === v) ? p.display : 'none';
+    }
+    if (endPanel) endPanel.style.display = (v === 'none') ? 'none' : 'block';
+    // Tweak the date input's placeholder semantics for clarity.
+    if (dateInput) {
+      dateInput.title = (v === 'none')
+        ? 'Date the expense was paid'
+        : 'First occurrence (start date)';
+    }
+  }
+  recSel?.addEventListener('change', syncRecurrenceUi);
 
   addBtn?.addEventListener('click', () => {
     formWrap.style.display = 'block';
     if (dateInput && !dateInput.value) dateInput.valueAsDate = new Date();
+    syncRecurrenceUi();
   });
   cancelBtn?.addEventListener('click', () => {
     formWrap.style.display = 'none';
     formEl?.reset();
+    syncRecurrenceUi();
   });
   formEl?.addEventListener('submit', async (e) => {
     e.preventDefault();
+    const recurrence = recSel?.value || 'none';
     const payload = {
       category: _container.querySelector('#fh-exp-category').value,
       amount: parseFloat(_container.querySelector('#fh-exp-amount').value),
       date: _container.querySelector('#fh-exp-date').value,
       vendor: _container.querySelector('#fh-exp-vendor').value,
     };
+    if (recurrence !== 'none') {
+      payload.recurrence = recurrence;
+      const endVal = _container.querySelector('#fh-exp-end')?.value || '';
+      if (endVal) payload.recurrence_end = endVal;
+      if (recurrence === 'weekly') {
+        payload.recurrence_day_of_week = parseInt(_container.querySelector('#fh-exp-dow').value, 10);
+      } else if (recurrence === 'monthly') {
+        const dom = parseInt(_container.querySelector('#fh-exp-dom').value, 10);
+        if (!Number.isInteger(dom) || dom < 1 || dom > 31) {
+          alert('Day of month must be between 1 and 31.');
+          return;
+        }
+        payload.recurrence_day_of_month = dom;
+      } else if (recurrence === 'yearly') {
+        const dom = parseInt(_container.querySelector('#fh-exp-yearly-dom').value, 10);
+        const mo  = parseInt(_container.querySelector('#fh-exp-month').value, 10);
+        if (!Number.isInteger(dom) || dom < 1 || dom > 31) {
+          alert('Day of month must be between 1 and 31.');
+          return;
+        }
+        payload.recurrence_month = mo;
+        payload.recurrence_day_of_month = dom;
+      } else if (recurrence === 'custom') {
+        const n = parseInt(_container.querySelector('#fh-exp-interval').value, 10);
+        if (!Number.isInteger(n) || n < 1) {
+          alert('Interval must be a whole number of days, ≥ 1.');
+          return;
+        }
+        payload.recurrence_interval_days = n;
+      }
+    }
     try {
       await AdminAPI.addAdminAnalyticsExpense(payload);
       formWrap.style.display = 'none';
       formEl.reset();
+      syncRecurrenceUi();
       await load();
     } catch (err) {
       alert('Failed to save expense: ' + (err.message || 'Please try again.'));
