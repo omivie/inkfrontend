@@ -188,6 +188,45 @@ The frontend already handles the field — `familyKey` in `js/utils.js` will swi
 
 ---
 
+## 8a. `series_codes` empty on compatibles via `/api/shop` default join  *(blocking — visible May 10 2026)*
+
+**Symptom:** every code-filtered storefront URL drops compatibles. `/shop?brand=hp&category=ink&code=02` rendered 0 products (8 expected). `/shop?brand=hp&category=ink&code=564` rendered 7 of 14. The codes drilldown chip strip lost ~16 entries on HP alone (HP 02, 15, 22, 27, 28, 56, 57, 74, 75, 92, 93, 95, 98 …) because their counts collapsed to zero. Brother LC67 lost its 6 multi-printer compatibles (`for Brother LC38/LC67`).
+
+**Backend status — the inconsistency is in the same endpoint:**
+
+```
+GET /api/shop?brand=hp&category=ink&limit=200
+→ compatible products carry series_codes: []     ← EMPTY
+
+GET /api/shop?brand=hp&category=ink&source=compatible&limit=200
+→ same products carry series_codes: ["02"], ["LC38","LC67"], …   ← POPULATED
+
+GET /api/shop?brand=hp&category=ink&code=02
+→ matches by series_codes-array-contains → drops every compatible because its array is empty in this query path
+```
+
+So the backend's series-code extractor IS wired up for compatibles — it just doesn't run on the default `/api/shop` join, only on the `?source=compatible` join. The `?code=` filter then queries against the empty array and hides them.
+
+**Frontend mitigation shipped 2026-05-10:** `api.js` `getShopData(params)` fires a parallel `?source=compatible` sidecar fetch when brand+category are set and `source !== 'genuine'`, then merges missing compatibles into the primary response (`products` for code-filtered calls, `series` for drilldown). `_enrichSeriesCodes(product)` derives codes from name/SKU as a backstop for any compatibles that still come back with empty arrays. SWR-cached so the customer pays for the sidecar once per brand+category per session. Pinned by `tests/compatible-products-recovery.test.js` (16 tests). Spec: `readfirst/compatible-products-recovery-may2026.md`.
+
+**Backend action (still needed — frontend mitigation is a workaround, not a fix):**
+
+1. Make `/api/shop` always project `series_codes` as it does on the `?source=compatible` path. The discrepancy is one join clause away — the SQL that populates the array on the source-filtered query needs to run on the default query too. This automatically fixes:
+   - `/api/shop?code=X` server-side filter (no FE recovery needed)
+   - `/api/search/smart` (recovery doesn't cover search; users searching `02` or `LC67` still see only genuines until backend lands)
+   - Sitemap and structured-data emissions
+   - Admin filter views
+
+2. Once shipped, the frontend recovery becomes a no-op (the merge will find no compatibles missing from the primary response), but it can stay as defense in depth — there's no perf cost when the sidecar finds zero rows to add.
+
+**Acceptance:**
+
+- `GET /api/shop?brand=hp&category=ink&limit=10` returns at least one row with `source='compatible' AND series_codes!='{}'`.
+- `GET /api/shop?brand=hp&category=ink&code=02` returns `meta.total ≥ 8` (the eight HP-02 compatibles).
+- `GET /api/search/smart?q=02` returns those same compatibles in the products list.
+
+---
+
 ## 9. "Inc. GST $X" breakdown — N/A
 
 The PDP and cards no longer render the per-line GST breakdown (pinned by `tests/inc-gst-amount-removed.test.js`). No backend work required.

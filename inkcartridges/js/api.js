@@ -531,7 +531,33 @@ const API = {
     },
 
     /**
-     * Get shop data (products, series codes, category counts) in a single call
+     * Get shop data (products, series codes, category counts) in a single call.
+     *
+     * Recovers compatible products that the backend's `code` filter drops.
+     * The backend filters /api/shop?code=X by `series_codes` array contains;
+     * compatible products in the catalog ship with `series_codes: []` (the
+     * extraction job that runs for genuines never ran for compatibles — see
+     * readfirst/catalog-defects-may2026.md §6 — "Backfill series_codes on
+     * compatible products"). Without recovery the storefront looks like it
+     * stocks no compatibles for any code: chips for compatible-only series
+     * (HP 02, Epson 73N, …) never appear in the drilldown, and chips that
+     * exist for genuine series (HP 564, Brother LC133, …) undercount and
+     * hide their compatible siblings on click.
+     *
+     * Strategy: when a brand+category is supplied and the caller hasn't
+     * narrowed to `source=genuine`, fire a parallel compatibles-only fetch
+     * for the same brand+category, derive series codes from each compat's
+     * name/SKU via `_enrichSeriesCodes`, and merge the missing rows back into
+     * the primary response. The sidecar fetch is deduplicated by SWR so
+     * across the codes drilldown + the code-filtered grid the customer pays
+     * for it once per brand+category per session.
+     *
+     * The merge is conservative: if the sidecar call fails or returns empty,
+     * the primary response stands. Code-filtered requests get extra products
+     * (with `meta.total` bumped to match); unfiltered requests get extra
+     * series entries (with merged counts). Genuine-source-only requests skip
+     * the sidecar entirely (zero recovery is needed).
+     *
      * @param {Object} params - Query parameters
      */
     async getShopData(params = {}) {
@@ -545,7 +571,191 @@ const API = {
         if (params.code) qs.append('code', params.code);
         if (params.color) qs.append('color', params.color);
         if (params.sort) qs.append('sort', params.sort);
-        return this.getWithSWR(`/api/shop?${qs.toString()}`);
+
+        const primary = await this.getWithSWR(`/api/shop?${qs.toString()}`);
+
+        // Skip recovery when it can't help or isn't needed:
+        //  - no brand+category → can't dedupe the sidecar narrowly
+        //  - source=genuine → caller asked for genuine only; no compatibles wanted
+        //  - search= → server-side search match isn't a code drilldown
+        const eligibleForRecovery = params.brand
+            && params.category
+            && params.source !== 'genuine'
+            && !params.search
+            && primary
+            && primary.ok
+            && primary.data;
+        if (!eligibleForRecovery) return primary;
+
+        let sidecar;
+        try {
+            const fbQs = new URLSearchParams();
+            fbQs.append('brand', params.brand);
+            fbQs.append('category', params.category);
+            fbQs.append('source', 'compatible');
+            fbQs.append('limit', '200');
+            sidecar = await this.getWithSWR(`/api/shop?${fbQs.toString()}`);
+        } catch (_) { /* fail-open: primary stands */ }
+
+        if (!sidecar || !sidecar.ok || !sidecar.data || !Array.isArray(sidecar.data.products)) {
+            return primary;
+        }
+
+        // Enrich every compatible with derived series_codes (in place, on the
+        // SWR-cloned objects we own — _swrClone deep-copies on every read).
+        const compats = sidecar.data.products;
+        for (const p of compats) this._enrichSeriesCodes(p);
+
+        if (params.code) {
+            // Code-filtered request: merge missing compatibles for that code.
+            const wanted = String(params.code).toUpperCase();
+            const seen = new Set();
+            for (const p of (primary.data.products || [])) {
+                if (p && (p.id || p.sku)) seen.add(p.id || p.sku);
+            }
+            const recovered = compats.filter(p => {
+                if (!p || seen.has(p.id || p.sku)) return false;
+                if (p.source !== 'compatible') return false;
+                const codes = (p.series_codes || []).map(c => String(c || '').toUpperCase());
+                return codes.includes(wanted);
+            });
+            if (recovered.length) {
+                primary.data.products = (primary.data.products || []).concat(recovered);
+                if (primary.meta && typeof primary.meta.total === 'number') {
+                    primary.meta.total += recovered.length;
+                }
+            }
+        } else {
+            // Codes drilldown request: merge compat counts into series[] so
+            // chips for compatible-only series show up and counts add together.
+            const seriesByCode = new Map();
+            const seriesArr = Array.isArray(primary.data.series) ? primary.data.series : [];
+            primary.data.series = seriesArr;
+            for (const s of seriesArr) {
+                if (s && s.code) seriesByCode.set(String(s.code).toUpperCase(), s);
+            }
+            for (const p of compats) {
+                if (!p || p.source !== 'compatible') continue;
+                const codes = p.series_codes || [];
+                // Per-product dedupe in case enrichment yielded multiples for
+                // the same family (eg a multi-printer compat naming "BCI3 BCI6").
+                const seen = new Set();
+                for (const raw of codes) {
+                    const c = String(raw || '').toUpperCase();
+                    if (!c || seen.has(c)) continue;
+                    seen.add(c);
+                    const existing = seriesByCode.get(c);
+                    if (existing) {
+                        existing.count = (existing.count || 0) + 1;
+                    } else {
+                        const entry = { code: c, count: 1 };
+                        seriesByCode.set(c, entry);
+                        seriesArr.push(entry);
+                    }
+                }
+            }
+            // Stable sort: alphanumeric, matching how the codes drilldown
+            // already orders chips client-side. Numeric-aware so "02" < "11".
+            seriesArr.sort((a, b) => String(a.code).localeCompare(String(b.code), 'en', { numeric: true, sensitivity: 'base' }));
+        }
+
+        return primary;
+    },
+
+    /**
+     * Derive `series_codes` for a product whose backend value is empty.
+     *
+     * The backend's series-code extractor runs for genuine products (it reads
+     * the manufacturer_part_number) but compatibles in the catalog ship with
+     * `series_codes: []` because they don't carry that field. Their name and
+     * SKU encode the family unambiguously:
+     *
+     *   sku  "C200XLBK"                                      → 200XL
+     *   name "200XLBK Compatible Ink Cartridge for Epson 200XL C13T201192 Black"
+     *                                                        → 200XL
+     *   sku  "CBCI3CMY"                                      → BCI3
+     *   name "BCI3CMY Compatible Ink Cartridge for Canon BCI3 BCI6 CMY 3-Pack"
+     *                                                        → BCI3, BCI6
+     *
+     * Three patterns, applied in order; results unioned into one set:
+     *
+     *   1. SKU "C<CODE><COLOR_SUFFIX>" — the leading "C" is the catalog's
+     *      compatible-prefix convention. Strip recognized colour/pack suffixes
+     *      from the tail to recover the bare code.
+     *   2. Leading word of the name e.g. "200XLBK" — same suffix-strip.
+     *   3. Name "for <Brand> <CODE>[ <CODE2> …]" — captures multi-printer
+     *      compatibles (Canon "BCI3 BCI6"). Tokens are kept only when they
+     *      contain a digit (skips brand names, "PHOTO", etc).
+     *
+     * Mutates `product.series_codes` in place when at least one code is found.
+     * No-op when the array is already populated (we trust the backend).
+     */
+    _enrichSeriesCodes(product) {
+        if (!product || typeof product !== 'object') return;
+        const existing = Array.isArray(product.series_codes)
+            ? product.series_codes.filter(c => c != null && String(c).trim())
+            : [];
+        if (existing.length) {
+            // Normalize casing/whitespace even for backend-supplied values so
+            // downstream comparisons (case-insensitive) hit consistently.
+            product.series_codes = existing.map(c => String(c).trim().toUpperCase());
+            return;
+        }
+
+        const codes = new Set();
+        const sku = (product.sku || '').toString().trim();
+        const name = (product.name || '').toString().trim();
+
+        // Color/pack suffixes that trail a compatible's SKU body or name lead.
+        // Order matters: longer suffixes first so PBK doesn't match BK then leave 'P'.
+        const COLOR_SUFFIX = /(?:KCMY|CMYK|CMY|PBK|PCY|PMG|PYL|CLR|BK|CY|MG|YL|LC|LM|RD|GN|BL|VT|GR|WH|OR|PK)$/;
+
+        const stripSuffix = (token) => {
+            if (!token) return '';
+            let body = token.toUpperCase();
+            // Strip recognized suffix once (avoids over-stripping eg "TN243BK" -> "TN243").
+            const stripped = body.replace(COLOR_SUFFIX, '');
+            // If stripping removed at least one char and what's left contains a
+            // digit, treat that as the code. Otherwise return the body itself
+            // when it already contains a digit (the SKU body IS the code).
+            if (stripped !== body && /\d/.test(stripped) && stripped.length >= 2) return stripped;
+            if (/\d/.test(body) && body.length >= 2) return body;
+            return '';
+        };
+
+        // 1. SKU pattern: "C<body>"
+        const skuMatch = sku.match(/^C([A-Z0-9-]+)$/i);
+        if (skuMatch) {
+            const code = stripSuffix(skuMatch[1]);
+            if (code) codes.add(code);
+        }
+
+        if (name) {
+            const upper = name.toUpperCase();
+
+            // 2. Leading word of the name e.g. "200XLBK Compatible..."
+            const lead = upper.match(/^([A-Z0-9-]+)\b/);
+            if (lead) {
+                const code = stripSuffix(lead[1]);
+                if (code) codes.add(code);
+            }
+
+            // 3. "for <Brand> <CODE>[ <CODE2> …]" pattern. Capture body until
+            // a paren, color word, pack token, or end of string.
+            const STOP = '(?:\\(|BLACK|CYAN|MAGENTA|YELLOW|TRI[- ]?COLOU?R|LIGHT\\s+(?:CYAN|MAGENTA)|PHOTO\\s+(?:BLACK|CYAN|MAGENTA)|RED|BLUE|GREEN|GREY|GRAY|VIOLET|ORANGE|WHITE|PINK|CMY|KCMY|CMYK|\\d+\\s*-?\\s*PACK|VALUE\\s+PACK|MULTI-?PACK|XL\\s+VALUE)';
+            const forMatch = upper.match(new RegExp(`\\bFOR\\s+[A-Z][A-Z0-9-]*\\s+(.+?)(?=\\s+${STOP}|$)`));
+            if (forMatch && forMatch[1]) {
+                forMatch[1].split(/\s+/).forEach(tok => {
+                    const t = tok.replace(/[^A-Z0-9-]/g, '');
+                    if (!t) return;
+                    if (!/\d/.test(t)) return;          // skip brand words
+                    if (t.length < 2 || t.length > 12) return;
+                    codes.add(t);
+                });
+            }
+        }
+
+        if (codes.size) product.series_codes = [...codes];
     },
 
     /**
