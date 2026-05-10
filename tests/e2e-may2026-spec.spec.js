@@ -91,4 +91,94 @@ test.describe('May 2026 storefront contract — live', () => {
         // Add an item ~$90 → expect "Add $X.XX more" copy.
         // Add another to cross $100 → expect "Free shipping unlocked" copy.
     });
+
+    // ─── category-page-contract-may2026.md §1 — per-card source chip ───────
+    // Acceptance: "Open /shop?brand=epson&category=ink&code=200. Every Epson
+    // 200 single shows a yellow COMPATIBLE chip." We assert (a) every visible
+    // product card carries a top-left source chip; (b) compatible chips are
+    // yellow-painted, genuine chips are blue-painted (CSS class assertion is
+    // sufficient — the colour is locked by tests/category-page-contract-may2026.test.js
+    // §1 components.css greps).
+    test('§1 /shop?brand=epson&category=ink&code=200 — every card carries a source chip', async ({ page }) => {
+        await page.goto(`${BASE_URL}/shop?brand=epson&category=ink&code=200`);
+        await page.waitForSelector('.product-card', { timeout: 15000 });
+
+        const cards = page.locator('.product-card').filter({ hasNot: page.locator('.product-card--skeleton') });
+        const count = await cards.count();
+        expect(count, 'at least one Epson 200 card must render').toBeGreaterThan(0);
+
+        for (let i = 0; i < count; i++) {
+            const card = cards.nth(i);
+            const chips = card.locator('.product-card__badge--compatible, .product-card__badge--genuine');
+            const chipCount = await chips.count();
+            expect(chipCount,
+                `card #${i} must carry a COMPATIBLE or GENUINE chip (category-page-contract-may2026.md §1)`)
+                .toBeGreaterThan(0);
+        }
+    });
+
+    test('§1 /search?q=bci6 — every card carries a source chip across mixed sources', async ({ page }) => {
+        await page.goto(`${BASE_URL}/search?q=bci6`);
+        await page.waitForSelector('.product-card', { timeout: 15000 });
+
+        const cards = page.locator('.product-card').filter({ hasNot: page.locator('.product-card--skeleton') });
+        const count = await cards.count();
+        expect(count, 'BCI6 search must return at least one card').toBeGreaterThan(0);
+
+        // Stable spec acceptance: "regardless of whether the card has an image
+        // or a fallback colour swatch" — every card has a source chip.
+        const compatibleChips = await page.locator('.product-card .product-card__badge--compatible').count();
+        const genuineChips    = await page.locator('.product-card .product-card__badge--genuine').count();
+        expect(compatibleChips + genuineChips,
+            'mixed-source search results must each carry a source chip').toBeGreaterThanOrEqual(count);
+    });
+
+    // ─── category-page-contract-may2026.md §2 — "For Use In" PDP-only ──────
+    // Acceptance: "Open /shop?brand=epson&category=ink&code=200. The 'For Use
+    // In: …' block under the FREE SHIPPING banner is GONE." The block lived
+    // in #printers-banner; that element is no longer shipped from shop.html.
+    test('§2 list page does NOT render the "For Use In:" aggregation banner', async ({ page }) => {
+        await page.goto(`${BASE_URL}/shop?brand=epson&category=ink&code=200`);
+        await page.waitForSelector('.product-card', { timeout: 15000 });
+
+        // The retired aggregation lived inside the level-products region —
+        // it must not exist by id, and the literal "For Use In:" copy must
+        // not appear anywhere outside the PDP.
+        await expect(page.locator('#printers-banner')).toHaveCount(0);
+        await expect(page.locator('#level-products .product-printers-banner')).toHaveCount(0);
+        await expect(page.locator('#level-products').getByText('For Use In:')).toHaveCount(0);
+    });
+
+    test('§2 PDP retains the per-product "For Use In:" banner', async ({ page }) => {
+        await page.goto(`${BASE_URL}/products/brother-genuine-lc233-ink-cartridge-cmy-3-pack-550-pages/G-BRO-LC233-INK-CMY`);
+        await page.waitForLoadState('networkidle');
+        // Spec: "Open /products/.../G-EPS-200-INK-CY. The 'For Use In: …'
+        // block IS present." We assert against a known-good genuine pack.
+        await expect(page.locator('.product-printers-banner')).toBeVisible({ timeout: 10000 });
+        await expect(page.locator('.product-printers-banner').getByText('For Use In:')).toBeVisible();
+    });
+
+    // ─── category-page-contract-may2026.md §3 — honest "Did you mean X?" ───
+    // Acceptance: "/search?q=tn645z → did_you_mean: 'TN645' → banner reads
+    // 'Did you mean TN645?'". We hit the live search and assert the banner
+    // copy + link target. The retired "Showing similar results / Search
+    // instead for X" banner must not appear.
+    test('§3 typo search renders "Did you mean X?" with /search link', async ({ page }) => {
+        await page.goto(`${BASE_URL}/search?q=tn645z`);
+        await page.waitForLoadState('networkidle');
+
+        // The new banner — DOM class + literal copy.
+        const dymBanner = page.locator('.search-did-you-mean');
+        await expect(dymBanner).toBeVisible({ timeout: 15000 });
+        await expect(dymBanner).toContainText(/Did you mean/i);
+
+        // The suggestion link must point at /search?q=<encoded suggestion>.
+        const dymLink = dymBanner.locator('a[href^="/search?q="]');
+        await expect(dymLink).toBeVisible();
+
+        // The retired banner must not render.
+        await expect(page.locator('.search-correction-banner')).toHaveCount(0);
+        await expect(page.getByText(/Showing similar results/i)).toHaveCount(0);
+        await expect(page.getByText(/Search instead for/i)).toHaveCount(0);
+    });
 });

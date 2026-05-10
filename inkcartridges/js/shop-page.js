@@ -121,6 +121,35 @@
                 this.injectCollectionSchema();
             });
 
+            // BFCACHE / NAVIGATION-AWAY GUARDS (bfcache-restore-may2026.md)
+            // Symptom: clicking a product card → pressing Back fast pinned a
+            // sticky "Failed to load products. Please try again." state on
+            // the shop page. Two cooperating fixes:
+            //   1. `pagehide` bumps navigationVersion. Every loader's catch
+            //      block early-returns when navigationVersion changes, so
+            //      an in-flight fetch that rejects during unload no longer
+            //      writes the empty-error DOM that gets snapshotted into
+            //      the back/forward cache.
+            //   2. `pageshow` with event.persisted === true means the
+            //      browser restored a bfcache snapshot; DOMContentLoaded
+            //      did NOT fire, so any stale empty/error DOM is still
+            //      visible. Re-run loadCurrentLevel against the now-current
+            //      URL to refresh the view.
+            window.addEventListener('pagehide', () => {
+                this._unloading = true;
+                this.navigationVersion++;
+            });
+            window.addEventListener('pageshow', (e) => {
+                this._unloading = false;
+                if (!e.persisted) return;
+                if (this.elements.empty) this.elements.empty.hidden = true;
+                this.parseURLState();
+                this.navigationVersion++;
+                this.loadCurrentLevel(this.navigationVersion);
+                this.renderActiveFilters();
+                this.injectCollectionSchema();
+            });
+
             // Set up search form to preserve current filters
             this.setupSearchForm();
         },
@@ -525,6 +554,13 @@
         },
 
         showEmpty(message) {
+            // bfcache-restore-may2026.md: when the page is unloading
+            // (the browser is about to snapshot it into bfcache), do not
+            // mutate the DOM. Otherwise an in-flight fetch that rejects
+            // mid-navigation would write a sticky "Failed to load…" state
+            // that gets snapshotted and then shown when the user presses
+            // Back. The pageshow/persisted handler in init() will refetch.
+            if (this._unloading) return;
             this.elements.emptyMessage.textContent = message;
             this.elements.empty.hidden = false;
         },

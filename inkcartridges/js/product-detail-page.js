@@ -1621,6 +1621,13 @@
 
 
         showError(message) {
+            // bfcache-restore-may2026.md: skip DOM mutation while the
+            // page is unloading. Otherwise an in-flight /api/products
+            // fetch that rejects mid-navigation would paint a sticky
+            // "Product not found" state that bfcache then snapshots,
+            // showing a phantom-broken product page when the user
+            // presses Back. The pageshow/persisted handler refetches.
+            if (this._unloading) return;
             // Update title
             document.getElementById('product-title').textContent = message;
             document.getElementById('product-sku').textContent = '';
@@ -1657,6 +1664,18 @@
 
     // Initialize when DOM is ready
     document.addEventListener('DOMContentLoaded', () => ProductPage.init());
+
+    // BFCACHE / NAVIGATION-AWAY GUARDS (bfcache-restore-may2026.md)
+    // Suppress error painting while unloading and re-init when the
+    // browser restores us from the back/forward cache (DOMContentLoaded
+    // does NOT fire on bfcache restore, so a half-loaded or errored
+    // snapshot would otherwise stick on the next Back press).
+    window.addEventListener('pagehide', () => { ProductPage._unloading = true; });
+    window.addEventListener('pageshow', (e) => {
+        ProductPage._unloading = false;
+        if (!e.persisted) return;
+        ProductPage.init();
+    });
 
     // Sticky mobile Add-to-Cart bar
     document.addEventListener('DOMContentLoaded', () => {

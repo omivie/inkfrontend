@@ -74,6 +74,33 @@ const RibbonsPage = {
                 this.updateTitle();
             }
         });
+
+        // BFCACHE / NAVIGATION-AWAY GUARDS (bfcache-restore-may2026.md)
+        // 1. `pagehide` neutralizes any in-flight catch handler so a
+        //    fetch that rejects mid-navigation can't paint a sticky
+        //    "Failed to load…" DOM into the bfcache snapshot.
+        // 2. `pageshow` with persisted=true means the browser restored
+        //    from bfcache; DOMContentLoaded did NOT fire, so any stale
+        //    error/empty DOM is still visible. Re-run the loader.
+        window.addEventListener('pagehide', () => {
+            this._unloading = true;
+            this.navigationVersion++;
+        });
+        window.addEventListener('pageshow', (e) => {
+            this._unloading = false;
+            if (!e.persisted) return;
+            if (this.elements.empty) this.elements.empty.hidden = true;
+            this.parseURLState();
+            this.syncFilterUI();
+            this.navigationVersion++;
+            if (this.state.brand || this.state.model) {
+                this.showLevel('products');
+                this.loadProducts(this.navigationVersion);
+            } else {
+                this.showLevel('brands');
+                this.loadBrands();
+            }
+        });
     },
 
     // =========================================
@@ -296,6 +323,10 @@ const RibbonsPage = {
     },
 
     showEmpty(message) {
+        // bfcache-restore-may2026.md — skip DOM mutation while unloading
+        // so an in-flight fetch that rejects during navigation does not
+        // paint a sticky "Failed to load…" state into the bfcache snapshot.
+        if (this._unloading) return;
         if (this.elements.emptyMessage) {
             this.elements.emptyMessage.textContent = message;
         }
