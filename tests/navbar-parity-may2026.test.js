@@ -191,3 +191,73 @@ test('every page with a site-header includes main.js so the active link lights u
             `${rel(file)} ships the site-header but does not load /js/main.js — the active nav link won't light up`);
     }
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Chrome-lock invariants (May 2026 — second-pass fix)
+// =============================================================================
+// The first pass made the markup byte-identical, but the search bar still
+// rendered different widths on shop pages. Root cause: shop pages set
+// `body.page-shop { --container-max-width: 1240px; --container-padding: 24px }`
+// to widen the product grid, and that custom-property override cascaded INTO
+// the navbar's `.container` (which is shared with the main grid). Net effect:
+// shop's nav inner area was 56px wider, and the search form's `flex: 1 1 auto`
+// expanded to fill that extra space.
+//
+// The fix re-declares the same custom properties on `.site-header` so any
+// page-level override is shadowed before it can reach the navbar.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const LAYOUT_CSS = fs.readFileSync(path.join(HTML_ROOT, 'css', 'layout.css'), 'utf8');
+const PAGES_CSS  = fs.readFileSync(path.join(HTML_ROOT, 'css', 'pages.css'), 'utf8');
+
+function extractRuleBody(css, selector) {
+    const idx = css.indexOf(selector + ' {');
+    if (idx === -1) return null;
+    const before = css[idx - 1];
+    if (before && !/[\s}\/*]/.test(before)) return null;
+    let depth = 0, i = idx;
+    while (i < css.length) {
+        if (css[i] === '{') depth++;
+        else if (css[i] === '}') {
+            depth--;
+            if (depth === 0) return css.substring(idx, i + 1);
+        }
+        i++;
+    }
+    return null;
+}
+
+test('chrome lock — .site-header re-declares --container-max-width to shadow page-level overrides', () => {
+    const body = extractRuleBody(LAYOUT_CSS, '.site-header');
+    assert.ok(body, '.site-header rule must exist in layout.css');
+    assert.match(body, /--container-max-width\s*:\s*1200px/,
+        '.site-header must re-declare --container-max-width: 1200px so body.page-shop (1240px) and any future page-level override cannot bleed into the navbar.');
+    assert.match(body, /--container-padding\s*:/,
+        '.site-header must re-declare --container-padding so the chrome cannot inherit body.page-shop\'s 24px override.');
+});
+
+test('chrome lock — body.page-* container overrides are still insulated by the .site-header lock', () => {
+    const overrides = [...PAGES_CSS.matchAll(/body\.page-[a-z0-9-]+\s*\{[^}]*--container-(?:max-width|padding)[^}]*\}/g)];
+    if (overrides.length > 0) {
+        const headerLock = extractRuleBody(LAYOUT_CSS, '.site-header') || '';
+        assert.match(headerLock, /--container-max-width/,
+            `pages.css declares ${overrides.length} body.page-* container override(s); .site-header must re-declare --container-max-width to insulate the chrome. Current overrides:\n` +
+            overrides.map(m => '  ' + m[0].slice(0, 80) + '...').join('\n'));
+    }
+});
+
+test('chrome lock — layout.css cache key is bumped so the fix actually ships', () => {
+    let stale = 0;
+    let total = 0;
+    for (const { file } of PAGES_WITH_HEADER) {
+        const html = fs.readFileSync(file, 'utf8');
+        const m = html.match(/layout\.css\?v=([^"'\s]+)/);
+        if (!m) continue;
+        total++;
+        // Reject the pre-fix key. Any string containing 'chrome-lock' or a
+        // later-dated marker is fine.
+        if (m[1] === '2c8b28f0') stale++;
+    }
+    assert.equal(stale, 0,
+        `${stale}/${total} HTML pages still reference layout.css?v=2c8b28f0 (the pre-fix key). Bump to v=chrome-lock-may2026 (or a later marker).`);
+});

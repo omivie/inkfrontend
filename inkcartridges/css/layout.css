@@ -47,6 +47,15 @@
     background-color: var(--color-background);
     box-shadow: var(--shadow-sm);
     z-index: var(--z-sticky);
+
+    /* Chrome lock: re-declare the container CSS custom properties so any
+       page-level override (e.g. body.page-shop bumping --container-max-width
+       to 1240px to fit a wider product grid) cannot bleed into the navbar.
+       Without this, the search bar, logo position, and account/cart actions
+       all shift between pages. See project_navbar_parity_may2026 — search
+       bar drift was a regression caused exactly by this cascade leak. */
+    --container-max-width: 1200px;
+    --container-padding: var(--spacing-8);
 }
 
 /* Top utility bar */
