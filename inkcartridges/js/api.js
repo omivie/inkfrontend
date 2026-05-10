@@ -572,91 +572,116 @@ const API = {
         if (params.color) qs.append('color', params.color);
         if (params.sort) qs.append('sort', params.sort);
 
-        const primary = await this.getWithSWR(`/api/shop?${qs.toString()}`);
-
-        // Skip recovery when it can't help or isn't needed:
+        // Eligibility for compat-recovery sidecar — decided BEFORE awaiting so
+        // primary and sidecar fire in parallel (halves cold-start latency on
+        // Render). Recovery is skipped when:
         //  - no brand+category → can't dedupe the sidecar narrowly
-        //  - source=genuine → caller asked for genuine only; no compatibles wanted
+        //  - source=genuine → caller asked for genuine only; no compats wanted
         //  - search= → server-side search match isn't a code drilldown
-        const eligibleForRecovery = params.brand
+        const eligibleForRecovery = !!(params.brand
             && params.category
             && params.source !== 'genuine'
-            && !params.search
-            && primary
-            && primary.ok
-            && primary.data;
-        if (!eligibleForRecovery) return primary;
+            && !params.search);
 
-        let sidecar;
-        try {
+        const primaryPromise = this.getWithSWR(`/api/shop?${qs.toString()}`);
+        let sidecarPromise = null;
+        if (eligibleForRecovery) {
             const fbQs = new URLSearchParams();
             fbQs.append('brand', params.brand);
             fbQs.append('category', params.category);
             fbQs.append('source', 'compatible');
             fbQs.append('limit', '200');
-            sidecar = await this.getWithSWR(`/api/shop?${fbQs.toString()}`);
-        } catch (_) { /* fail-open: primary stands */ }
+            // .catch absorbs sidecar failure so it can never reject the
+            // top-level Promise.allSettled below — but allSettled would handle
+            // a rejection anyway. Belt + braces is intentional here.
+            sidecarPromise = this.getWithSWR(`/api/shop?${fbQs.toString()}`).catch(() => null);
+        }
 
-        if (!sidecar || !sidecar.ok || !sidecar.data || !Array.isArray(sidecar.data.products)) {
+        // Await both. The primary may still throw (no try/catch around
+        // primaryPromise — the codes drilldown's existing fallback path
+        // expects a thrown error to trigger legacy mode). The sidecar
+        // promise was wrapped in .catch(() => null) above so it can't reject.
+        const [primary, sidecar] = await Promise.all([primaryPromise, sidecarPromise || Promise.resolve(null)]);
+
+        // Skip merge when primary unhealthy or recovery wasn't requested.
+        // We always return `primary` so the caller's existing branching on
+        // `response.ok` / `response.data` semantics is unchanged.
+        if (!eligibleForRecovery
+            || !primary || !primary.ok || !primary.data
+            || !sidecar || !sidecar.ok || !sidecar.data || !Array.isArray(sidecar.data.products)) {
             return primary;
         }
 
-        // Enrich every compatible with derived series_codes (in place, on the
-        // SWR-cloned objects we own — _swrClone deep-copies on every read).
-        const compats = sidecar.data.products;
-        for (const p of compats) this._enrichSeriesCodes(p);
+        // Enrich + merge in a try/catch — if any merge step throws (malformed
+        // data, unexpected shape) the primary response stands. We never
+        // surface a recovery failure to the caller because the alternative
+        // (whole drilldown shows "Failed to load products") is strictly worse
+        // than having the unrecovered primary render.
+        try {
+            // Enrich every compatible with derived series_codes (in place, on
+            // the SWR-cloned objects we own — _swrClone deep-copies on every
+            // read).
+            const compats = sidecar.data.products;
+            for (const p of compats) this._enrichSeriesCodes(p);
 
-        if (params.code) {
-            // Code-filtered request: merge missing compatibles for that code.
-            const wanted = String(params.code).toUpperCase();
-            const seen = new Set();
-            for (const p of (primary.data.products || [])) {
-                if (p && (p.id || p.sku)) seen.add(p.id || p.sku);
-            }
-            const recovered = compats.filter(p => {
-                if (!p || seen.has(p.id || p.sku)) return false;
-                if (p.source !== 'compatible') return false;
-                const codes = (p.series_codes || []).map(c => String(c || '').toUpperCase());
-                return codes.includes(wanted);
-            });
-            if (recovered.length) {
-                primary.data.products = (primary.data.products || []).concat(recovered);
-                if (primary.meta && typeof primary.meta.total === 'number') {
-                    primary.meta.total += recovered.length;
-                }
-            }
-        } else {
-            // Codes drilldown request: merge compat counts into series[] so
-            // chips for compatible-only series show up and counts add together.
-            const seriesByCode = new Map();
-            const seriesArr = Array.isArray(primary.data.series) ? primary.data.series : [];
-            primary.data.series = seriesArr;
-            for (const s of seriesArr) {
-                if (s && s.code) seriesByCode.set(String(s.code).toUpperCase(), s);
-            }
-            for (const p of compats) {
-                if (!p || p.source !== 'compatible') continue;
-                const codes = p.series_codes || [];
-                // Per-product dedupe in case enrichment yielded multiples for
-                // the same family (eg a multi-printer compat naming "BCI3 BCI6").
+            if (params.code) {
+                // Code-filtered request: merge missing compatibles for that code.
+                const wanted = String(params.code).toUpperCase();
                 const seen = new Set();
-                for (const raw of codes) {
-                    const c = String(raw || '').toUpperCase();
-                    if (!c || seen.has(c)) continue;
-                    seen.add(c);
-                    const existing = seriesByCode.get(c);
-                    if (existing) {
-                        existing.count = (existing.count || 0) + 1;
-                    } else {
-                        const entry = { code: c, count: 1 };
-                        seriesByCode.set(c, entry);
-                        seriesArr.push(entry);
+                for (const p of (primary.data.products || [])) {
+                    if (p && (p.id || p.sku)) seen.add(p.id || p.sku);
+                }
+                const recovered = compats.filter(p => {
+                    if (!p || seen.has(p.id || p.sku)) return false;
+                    if (p.source !== 'compatible') return false;
+                    const codes = (p.series_codes || []).map(c => String(c || '').toUpperCase());
+                    return codes.includes(wanted);
+                });
+                if (recovered.length) {
+                    primary.data.products = (primary.data.products || []).concat(recovered);
+                    if (primary.meta && typeof primary.meta.total === 'number') {
+                        primary.meta.total += recovered.length;
                     }
                 }
+            } else {
+                // Codes drilldown request: merge compat counts into series[]
+                // so chips for compatible-only series show up and counts add
+                // together.
+                const seriesByCode = new Map();
+                const seriesArr = Array.isArray(primary.data.series) ? primary.data.series : [];
+                primary.data.series = seriesArr;
+                for (const s of seriesArr) {
+                    if (s && s.code) seriesByCode.set(String(s.code).toUpperCase(), s);
+                }
+                for (const p of compats) {
+                    if (!p || p.source !== 'compatible') continue;
+                    const codes = p.series_codes || [];
+                    // Per-product dedupe in case enrichment yielded multiples
+                    // for the same family (eg a multi-printer compat naming
+                    // "BCI3 BCI6").
+                    const seen = new Set();
+                    for (const raw of codes) {
+                        const c = String(raw || '').toUpperCase();
+                        if (!c || seen.has(c)) continue;
+                        seen.add(c);
+                        const existing = seriesByCode.get(c);
+                        if (existing) {
+                            existing.count = (existing.count || 0) + 1;
+                        } else {
+                            const entry = { code: c, count: 1 };
+                            seriesByCode.set(c, entry);
+                            seriesArr.push(entry);
+                        }
+                    }
+                }
+                // Stable sort: alphanumeric, matching how the codes drilldown
+                // already orders chips client-side. Numeric-aware so "02" < "11".
+                seriesArr.sort((a, b) => String(a.code).localeCompare(String(b.code), 'en', { numeric: true, sensitivity: 'base' }));
             }
-            // Stable sort: alphanumeric, matching how the codes drilldown
-            // already orders chips client-side. Numeric-aware so "02" < "11".
-            seriesArr.sort((a, b) => String(a.code).localeCompare(String(b.code), 'en', { numeric: true, sensitivity: 'base' }));
+        } catch (mergeErr) {
+            if (typeof DebugLog !== 'undefined' && DebugLog.warn) {
+                DebugLog.warn('[API.getShopData] compat-recovery merge failed; returning primary unchanged', mergeErr);
+            }
         }
 
         return primary;

@@ -421,3 +421,103 @@ test('getShopData — Brother LC67 (no compatibles in catalog): zero rows added'
     const resp = await API.getShopData({ brand: 'brother', category: 'ink', code: 'LC67' });
     assert.equal(resp.data.products.length, 6, 'no compatibles to recover; row count unchanged');
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 6. Parallelism + hardening — regressions guards (added after the 2026-05-10
+//    "Failed to load products" report on /shop?brand=epson&category=ink).
+//    The first fix awaited primary then awaited sidecar; on a Render cold
+//    start that doubled latency and made the codes drilldown look broken.
+//    The hardened version fires both in parallel via Promise.all and wraps
+//    the merge in a try/catch so any error returns the unmerged primary.
+// ─────────────────────────────────────────────────────────────────────────────
+
+test('getShopData — primary + sidecar fire in parallel, not sequentially', async () => {
+    // Each request resolves after a per-URL delay. If sequential, total wall
+    // time would be primaryDelay + sidecarDelay. If parallel, it's max(both).
+    const primary = shopEnvelope({ products: [], series: [{ code: 'LC67', count: 6 }] });
+    const sidecar = shopEnvelope({ products: [] });
+    let primaryStartedAt = null;
+    let sidecarStartedAt = null;
+    const { API } = loadApi({
+        fetchImpl: (url) => new Promise(resolve => {
+            const isSidecar = url.includes('source=compatible');
+            const startedAt = Date.now();
+            if (isSidecar) sidecarStartedAt = startedAt; else primaryStartedAt = startedAt;
+            setTimeout(() => {
+                resolve(mockResponse({ status: 200, body: isSidecar ? sidecar : primary }));
+            }, 60);
+        }),
+    });
+    const t0 = Date.now();
+    await API.getShopData({ brand: 'brother', category: 'ink' });
+    const elapsed = Date.now() - t0;
+
+    assert.ok(primaryStartedAt !== null && sidecarStartedAt !== null,
+        'both primary and sidecar must have been initiated');
+    // Sidecar must start within the same tick as primary (parallel), not after
+    // primary resolves. Allow 25ms slack for event-loop scheduling.
+    const startGap = Math.abs(sidecarStartedAt - primaryStartedAt);
+    assert.ok(startGap < 25, `expected parallel start, got ${startGap}ms gap between primary and sidecar`);
+    // Total wall time is bounded by max(60ms, 60ms) + overhead, NOT 60+60.
+    assert.ok(elapsed < 100, `expected parallel total ~60ms, got ${elapsed}ms (suggests sequential await)`);
+});
+
+test('getShopData — sidecar that returns malformed shape: primary unchanged, no throw', async () => {
+    const primary = shopEnvelope({
+        products: [{ id: 'g1', sku: 'g1', source: 'genuine', series_codes: ['LC67'] }],
+        series: [{ code: 'LC67', count: 1 }],
+    });
+    // Malformed: data.products is not an array
+    const malformed = { ok: true, data: { products: 'not-an-array', series: null }, meta: {} };
+    const { API } = loadApi({
+        fetchImpl: (url) => mockResponse({ status: 200, body: url.includes('source=compatible') ? malformed : primary }),
+    });
+    const resp = await API.getShopData({ brand: 'brother', category: 'ink', code: 'LC67' });
+    assert.equal(resp.ok, true);
+    assert.equal(resp.data.products.length, 1);
+});
+
+test('getShopData — primary 5xx rejects: error propagates so caller can fall back to legacy', async () => {
+    // shop-page.js loadProductCodes catches a thrown error and shows the
+    // "Failed to load products" empty state. The hardening MUST keep this
+    // path: getShopData should not swallow primary failures, only sidecar.
+    const { API } = loadApi({
+        fetchImpl: (url) => {
+            if (url.includes('source=compatible')) {
+                return mockResponse({ status: 200, body: shopEnvelope({ products: [] }) });
+            }
+            // Primary throws like a real 5xx: request() rejects with Error
+            // when status >= 500 and no JSON body. Simulate that here by
+            // returning an unhealthy envelope that request() would reject.
+            return mockResponse({ status: 500, body: { ok: false, error: { code: 'INTERNAL_ERROR', message: 'cold start' } } });
+        },
+    });
+    const resp = await API.getShopData({ brand: 'epson', category: 'ink' });
+    // request() returns a structured envelope for 5xx (see api.js line ~265).
+    // The eligibility check sees `primary.ok === false` and returns primary
+    // as-is — caller's branching on `response.ok && response.data?.series`
+    // then falls through to legacy.
+    assert.equal(resp.ok, false);
+    assert.equal(resp.code, 'INTERNAL_ERROR');
+});
+
+test('getShopData — sidecar rejects: primary returned unchanged (fail-open)', async () => {
+    const primary = shopEnvelope({
+        products: [],
+        series: [{ code: 'LC67', count: 6 }, { code: 'TN243', count: 4 }],
+    });
+    const { API } = loadApi({
+        fetchImpl: (url) => {
+            if (url.includes('source=compatible')) {
+                // Simulate network/Render hard failure — a thrown error,
+                // not just an envelope.
+                return Promise.reject(new Error('ECONNREFUSED'));
+            }
+            return mockResponse({ status: 200, body: primary });
+        },
+    });
+    const resp = await API.getShopData({ brand: 'brother', category: 'ink' });
+    assert.equal(resp.ok, true);
+    // series unchanged from primary — no merge ran.
+    assert.equal(resp.data.series.length, 2);
+});

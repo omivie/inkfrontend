@@ -23,18 +23,27 @@ The `?source=compatible` path on the same endpoint **does** ship populated `seri
 
 ## Frontend fix
 
-`api.js` `getShopData(params)` now fires a parallel sidecar fetch when the request is eligible for recovery:
+`api.js` `getShopData(params)` fires the sidecar fetch **in parallel** with the primary fetch when the request is eligible for recovery (Promise.all both, await once):
 
 - Eligibility: `params.brand && params.category && params.source !== 'genuine' && !params.search`.
 - Sidecar URL: `/api/shop?brand=…&category=…&source=compatible&limit=200`. SWR-cached, so across the codes drilldown + the code-filter grid the customer pays for it once per brand+category per session.
 - Each sidecar product is run through `_enrichSeriesCodes(product)` — backend-populated values pass through (with casing normalized); empty arrays fall through to derivation from name / SKU.
+
+Parallelism matters: the first iteration of this fix awaited primary then awaited sidecar, doubling cold-start latency. On 2026-05-10 a Render cold start surfaced as a "Failed to load products" empty state on the codes drilldown. Parallel + a try/catch around the merge brought worst-case latency from ~7s back down to ~700ms (Promise.all bounds wall time at `max(primary, sidecar)`) and ensures any merge anomaly returns the unmerged primary instead of throwing.
 
 After enrichment the merge runs in one of two modes:
 
 - **Code-filtered request** (`params.code` set): missing compatibles whose enriched `series_codes` include the requested code are appended to `primary.data.products`. `meta.total` is bumped. Existing rows (matched by `id || sku`) are not duplicated.
 - **Drilldown request** (no `params.code`): compatible series counts are merged into `primary.data.series`. New chips for compatible-only codes appear; mixed-source counts add together. The merged array is sorted numeric-aware.
 
-If the sidecar 5xx's, returns malformed JSON, or the network drops, the primary response stands unchanged.
+Failure modes — all handled without surfacing to the caller:
+
+| Path | Behaviour |
+|---|---|
+| Primary throws (5xx/network) | Propagates — `loadProductCodes`/`loadProductsByCode` already have legacy fallback that depends on this. |
+| Sidecar throws | Caught by `.catch(() => null)` on the sidecar promise; primary returned unchanged. |
+| Sidecar returns `ok:false` envelope | Eligibility check sees missing `data.products`; returns primary unchanged. |
+| Merge logic throws (malformed shape) | Caught by `try/catch` around the merge block; primary returned unmerged + `DebugLog.warn`. |
 
 ## Series-code derivation — `_enrichSeriesCodes(product)`
 
