@@ -205,8 +205,33 @@ When the backend ships, add or extend these tests:
 
 ---
 
+## 11. Admin orders list — ship cost data per row
+
+The dashboard's Revenue & Expenses chart wants per-order COGS so the pink
+bar matches the order detail page exactly. Today the bulk endpoint
+`GET /api/admin/orders` ships order-level fields but not item-level cost,
+so the frontend falls back to a window-level KPI estimate
+(`(revenue − gross_profit) × 1.15` distributed by revenue share).
+
+**Ask:** Add ONE of the following to every row in `GET /api/admin/orders`:
+
+- `items[]` with `supplier_cost_snapshot` and `qty` (matches the detail
+  endpoint shape — easiest to consume), OR
+- An aggregated `cost_total_excl_gst: number` on the order itself.
+
+The frontend already prefers either field via
+`inkcartridges/js/admin/utils/trend-math.js::orderCostInclGst`. Once
+shipped, the dashboard chart's per-bucket COGS becomes exact and the
+residual KPI fallback goes silent.
+
+**Pinned by:** `tests/dashboard-trend-math.test.js` integration test for
+the user's 4 May order fixture (asserts cost-incl-GST = $228.45 exact when
+items[] are present).
+
+---
+
 ## Source-of-truth pointers
 
-- **Affected frontend memories:** `MEMORY.md` entries for catalog-overhaul, ink-finder-grouped, code-yield-grouping, color-display-order. Update once the backend ships `series_codes` everywhere.
-- **Original specs reused for context:** `readfirst/api-changes-may2026.md` §1 (catalog ordering), `readfirst/code-yield-grouping-may2026.md`, `readfirst/color-display-order-may2026.md`.
+- **Affected frontend memories:** `MEMORY.md` entries for catalog-overhaul, ink-finder-grouped, code-yield-grouping, color-display-order, dashboard-expenses-total-cash-out. Update once the backend ships `series_codes` everywhere.
+- **Original specs reused for context:** `readfirst/api-changes-may2026.md` §1 (catalog ordering), `readfirst/code-yield-grouping-may2026.md`, `readfirst/color-display-order-may2026.md`, `readfirst/dashboard-expense-rebuild-may2026.md`.
 - **This doc supersedes:** none.

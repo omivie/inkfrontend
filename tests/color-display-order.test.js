@@ -2,29 +2,32 @@
  * Canonical color display order — frontend contract tests
  * =======================================================
  *
- * Pins the May 2026 storefront override on top of the backend's catalog
- * sort (api-changes-may2026.md §1):
+ * Pins the May 2026 storefront secondary sort on top of the backend's
+ * catalog sort (sort-hierarchy-may2026.md). The 22-rank contract:
  *
- *   K (Black / Photo / Matte) → C / LC → M / LM → Y → CMY → KCMY
- *   → specialty (R/B/G/grays/etc.) → unknown
+ *   K (0) → C (1) → M (2) → Y (3)              ← standard singles
+ *   → PB → MB → LC → LM → VLM → grey → violet → tri-colour
+ *   → R → B → G → O → W → B/R                  ← specialty singles (4-17)
+ *   → unknown single (19)
+ *   → CMY 3-Pack (20) → KCMY 4-Pack (21)       ← packs
  *
- * The backend's `sortByCatalogOrder` was supposed to enforce this, but
- * `/api/shop?brand=hp&category=ink&code=975` (and other shop responses)
- * still arrive with packs interleaved between Black and CMY singles —
- * so the storefront applies a stable secondary pass via
- * `ProductSort.byColor`. Stability preserves the backend's
- * `seriesBase`/`yieldTier` grouping inside a colour tier.
+ * The backend's `sortByCatalogOrder` is the primary order; the FE applies
+ * a stable secondary pass via `ProductSort.byColor` so customer-facing
+ * rows always read K→C→M→Y→specialty→packs even when an upstream feed
+ * drifts. Stability preserves the backend's `seriesBase`/`yieldTier`
+ * grouping inside a colour rank.
  *
  * What this file guards against:
  *
  *   - Reordering / dropping COLOR_ORDER entries (the canonical index list).
  *   - colorTier returning the wrong bucket for K/C/M/Y singles, CMY/KCMY
  *     packs, light variants, specialty colors, or unknown rows.
- *   - byColor losing stability (same-tier rows must keep API order).
+ *   - byColor losing stability (same-rank rows must keep API order).
  *   - The three render surfaces (shop grid, PDP related, Products.renderCards)
  *     dropping their byColor pass.
  *
- * Spec: readfirst/color-display-order-may2026.md
+ * Spec: readfirst/sort-hierarchy-may2026.md
+ *       (supersedes readfirst/color-display-order-may2026.md)
  *
  * Run: node --test tests/color-display-order.test.js
  */
@@ -61,24 +64,46 @@ const { ProductSort, ProductColors } = require(JS('utils.js'));
 // 1. COLOR_ORDER — canonical index list
 // ─────────────────────────────────────────────────────────────────────────────
 
-test('COLOR_ORDER puts K before C before M before Y before CMY before KCMY', () => {
+test('COLOR_ORDER puts standards (K→C→M→Y) before specialty before packs', () => {
     const idx = (n) => ProductSort.COLOR_ORDER.indexOf(n);
+    // Standards lead.
     assert.ok(idx('black')   < idx('cyan'),    'black before cyan');
     assert.ok(idx('cyan')    < idx('magenta'), 'cyan before magenta');
     assert.ok(idx('magenta') < idx('yellow'),  'magenta before yellow');
-    assert.ok(idx('yellow')  < idx('cmy'),     'yellow before cmy');
+    // Specialty singles sit between Y and packs (post-May 2026 contract).
+    assert.ok(idx('yellow')  < idx('red'),     'yellow before specialty (red)');
+    assert.ok(idx('red')     < idx('cmy'),     'specialty before CMY 3-Pack');
+    // Packs at the end.
     assert.ok(idx('cmy')     < idx('kcmy'),    'cmy before kcmy');
-    assert.ok(idx('kcmy')    < idx('red'),     'kcmy before specialty (red)');
 });
 
-test('COLOR_ORDER groups light variants with their parent colour', () => {
+test('COLOR_ORDER puts light variants AFTER yellow (specialty range, not parent tier)', () => {
+    // The May 2026 sort-hierarchy spec moved Light Cyan / Light Magenta
+    // out of the C / M tiers and into specialty (4-17). Customers see
+    // standards (K→C→M→Y) first, then specialty singles, then packs.
     const idx = (n) => ProductSort.COLOR_ORDER.indexOf(n);
-    // Light Cyan sits in the C tier (between cyan and magenta).
-    assert.ok(idx('cyan') < idx('light cyan'));
-    assert.ok(idx('light cyan') < idx('magenta'));
-    // Light Magenta sits in the M tier (between magenta and yellow).
-    assert.ok(idx('magenta') < idx('light magenta'));
-    assert.ok(idx('light magenta') < idx('yellow'));
+    assert.ok(idx('yellow') < idx('light cyan'),    'light cyan now sorts after yellow');
+    assert.ok(idx('yellow') < idx('light magenta'), 'light magenta now sorts after yellow');
+    assert.ok(idx('light cyan')    < idx('cmy'),    'light cyan still before packs');
+    assert.ok(idx('light magenta') < idx('cmy'),    'light magenta still before packs');
+});
+
+test('colorOrder ranks the 22-position table per spec', () => {
+    // Standards 0-3
+    assert.equal(ProductSort.colorOrder({ color: 'Black' }),   0);
+    assert.equal(ProductSort.colorOrder({ color: 'Cyan' }),    1);
+    assert.equal(ProductSort.colorOrder({ color: 'Magenta' }), 2);
+    assert.equal(ProductSort.colorOrder({ color: 'Yellow' }),  3);
+    // Specialty singles 4-17 (sample)
+    assert.equal(ProductSort.colorOrder({ color: 'Photo Black' }),    4);
+    assert.equal(ProductSort.colorOrder({ color: 'Matte Black' }),    5);
+    assert.equal(ProductSort.colorOrder({ color: 'Light Cyan' }),     6);
+    assert.equal(ProductSort.colorOrder({ color: 'Light Magenta' }),  7);
+    assert.equal(ProductSort.colorOrder({ color: 'Red' }),           12);
+    assert.equal(ProductSort.colorOrder({ color: 'Blue' }),          13);
+    // Packs 20-21
+    assert.equal(ProductSort.colorOrder({ color: 'CMY',  pack_type: 'value_pack' }), 20);
+    assert.equal(ProductSort.colorOrder({ color: 'KCMY', pack_type: 'value_pack' }), 21);
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -101,16 +126,21 @@ test('colorTier maps CMY / KCMY packs to tiers 4 / 5', () => {
     assert.equal(ProductSort.colorTier({ color: 'BCMY', pack_type: 'value_pack' }), t.KCMY);
 });
 
-test('colorTier groups Photo Black / Matte Black with K', () => {
+test('colorTier classifies Photo Black / Matte Black as SPECIALTY (not K)', () => {
+    // sort-hierarchy-may2026.md §3 — PB/MB sort AFTER Y at ranks 4 and 5.
+    // The legacy 8-tier `colorTier` view maps the new specialty range
+    // (4-17) to TIER_SPECIALTY. Standards-only (K=0) remains the strict
+    // K bucket.
     const t = ProductSort.TIERS;
-    assert.equal(ProductSort.colorTier({ color: 'Photo Black' }), t.K);
-    assert.equal(ProductSort.colorTier({ color: 'Matte Black' }), t.K);
+    assert.equal(ProductSort.colorTier({ color: 'Photo Black' }), t.SPECIALTY);
+    assert.equal(ProductSort.colorTier({ color: 'Matte Black' }), t.SPECIALTY);
 });
 
-test('colorTier groups Light Cyan / Light Magenta with their parent tier', () => {
+test('colorTier classifies Light Cyan / Light Magenta as SPECIALTY (not C / M)', () => {
+    // sort-hierarchy-may2026.md §3 — LC/LM sort AFTER Y at ranks 6 and 7.
     const t = ProductSort.TIERS;
-    assert.equal(ProductSort.colorTier({ color: 'Light Cyan' }),    t.C);
-    assert.equal(ProductSort.colorTier({ color: 'Light Magenta' }), t.M);
+    assert.equal(ProductSort.colorTier({ color: 'Light Cyan' }),    t.SPECIALTY);
+    assert.equal(ProductSort.colorTier({ color: 'Light Magenta' }), t.SPECIALTY);
 });
 
 test('colorTier maps specialty colors (red/blue/green/gray) to TIER_SPECIALTY', () => {

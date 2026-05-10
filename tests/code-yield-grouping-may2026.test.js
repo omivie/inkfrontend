@@ -160,11 +160,18 @@ test('familyKey ignores trailing page-count parens for bare-numeric codes (HP)',
     assert.equal(fk('HP Genuine 975X Ink Cartridge Cyan (1500 Pages)'), 'B:HP:975X');
 });
 
-test('colorTier maps Photo Cyan / Photo Magenta into C / M tiers (not specialty)', () => {
+test('colorTier classifies Photo Cyan / Photo Magenta as SPECIALTY (post-May 2026)', () => {
+    // sort-hierarchy-may2026.md §3 — PC/PM are specialty singles ranked
+    // 6.5 / 7.5 (slotted between LC/LM and VLM). They sort AFTER Y but
+    // BEFORE the multi-cartridge packs. The pre-May 2026 contract bucketed
+    // them with their parent C/M tiers, but customer feedback showed that
+    // pushed packs ahead of specialty singles on Epson 46S / Canon CLI42.
     const t = ProductSort.TIERS;
-    assert.equal(ProductSort.colorTier({ color: 'Photo Cyan' }),    t.C,
-        'Photo Cyan belongs in the C tier so BCI6PC sits right after BCI6C in the row');
-    assert.equal(ProductSort.colorTier({ color: 'Photo Magenta' }), t.M);
+    assert.equal(ProductSort.colorTier({ color: 'Photo Cyan' }),    t.SPECIALTY);
+    assert.equal(ProductSort.colorTier({ color: 'Photo Magenta' }), t.SPECIALTY);
+    // Rank assertion: PC sits between LC (6) and VLM (8) on the sort line.
+    assert.ok(ProductSort.colorOrder({ color: 'Light Cyan' }) <= ProductSort.colorOrder({ color: 'Photo Cyan' }));
+    assert.ok(ProductSort.colorOrder({ color: 'Photo Cyan' })  <  ProductSort.colorOrder({ color: 'Vivid Light Magenta' }));
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -197,6 +204,11 @@ test('byCodeThenColor renders BCI6 series (B/C/M/Y/R/PC + KCMY pack) on a single
     // row because the family key was page-count-derived (B:CANON:280 vs
     // B:CANON:100). After the single-digit + page-count fix, all 7 BCI6
     // products share family B:CANON:BCI6 and yield 0 — one row, no breaks.
+    //
+    // Order under sort-hierarchy-may2026.md:
+    //   K (0) → C (1) → M (2) → Y (3)
+    //   → PC (6.5, specialty) → R (12, specialty)
+    //   → KCMY pack (21)
     const input = [
         { sku: 'G-CAN-BCI6B',  name: 'Canon Genuine BCI6B Ink Cartridge Black (280 Pages)',     color: 'Black',       brand: { name: 'Canon' } },
         { sku: 'G-CAN-BCI6C',  name: 'Canon Genuine BCI6C Ink Cartridge Cyan (100 Pages)',      color: 'Cyan',        brand: { name: 'Canon' } },
@@ -207,10 +219,11 @@ test('byCodeThenColor renders BCI6 series (B/C/M/Y/R/PC + KCMY pack) on a single
         { sku: 'GP-CAN-BCI6-KCMY', name: 'Canon Genuine BCI6 Value Pack KCMY 4-Pack', color: 'KCMY', brand: { name: 'Canon' }, pack_type: 'value_pack' }
     ];
     const sorted = ProductSort.byCodeThenColor(input);
-    // K → C → PC (also C tier) → M → Y → KCMY → R (specialty)
+    // Standards (K, C, M, Y) → specialty singles (PC, R) → packs (KCMY 4-Pack).
     assert.deepEqual(sorted.map(p => p.sku), [
-        'G-CAN-BCI6B', 'G-CAN-BCI6C', 'G-CAN-BCI6PC', 'G-CAN-BCI6M', 'G-CAN-BCI6Y',
-        'GP-CAN-BCI6-KCMY', 'G-CAN-BCI6R'
+        'G-CAN-BCI6B', 'G-CAN-BCI6C', 'G-CAN-BCI6M', 'G-CAN-BCI6Y',
+        'G-CAN-BCI6PC', 'G-CAN-BCI6R',
+        'GP-CAN-BCI6-KCMY'
     ]);
     // Every product shares (familyKey, yieldTier) → no row breaks at all.
     assert.deepEqual(ProductSort.rowBreakIndices(sorted), [],

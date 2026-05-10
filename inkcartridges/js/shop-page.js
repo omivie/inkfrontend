@@ -74,8 +74,11 @@
             compatibleSection: document.getElementById('compatible-section'),
             compatibleTitleText: document.getElementById('compatible-title-text'),
             genuineTitleText: document.getElementById('genuine-title-text'),
-            printersBanner: document.getElementById('printers-banner'),
-            printersList: document.getElementById('printers-list'),
+            // category-page-contract-may2026.md §2 — the page-level
+            // "For Use In: …" aggregation has been retired from list views.
+            // Backend never emits a top-level compatible_printers[] for
+            // list endpoints; the previous client-side aggregation has
+            // been stripped. The PDP keeps its per-product printer block.
             yieldBanner: document.getElementById('yield-banner'),
             yieldValue: document.getElementById('yield-value'),
             loading: document.getElementById('drilldown-loading'),
@@ -2557,9 +2560,8 @@
             if (!smartData) return;
 
             const matchedPrinter = smartData.matched_printer;
-            const correctedFrom = smartData.corrected_from;
             const didYouMean = smartData.did_you_mean;
-            if (!matchedPrinter && !correctedFrom && !didYouMean) return;
+            if (!matchedPrinter && !didYouMean) return;
 
             const wrap = document.createElement('div');
             wrap.id = 'search-banners';
@@ -2585,36 +2587,20 @@
                 wrap.appendChild(hero);
             }
 
-            // Spec §2.2 — backend already auto-applied did_you_mean.
-            // Show "Showing results for X. Search instead for Y" banner.
-            //
-            // Backend contract (see backend-passover task 2): when
-            // `corrected_from` is set, `did_you_mean` MUST be set too — they
-            // are two halves of the same statement ("we corrected X → Y
-            // before searching"). The previous heuristic that picked the most
-            // frequent brand name across the result set when `did_you_mean`
-            // was missing has been removed; if the backend drops the field,
-            // we now show "Showing similar results." with no inferred term
-            // (and the bug becomes visible to the backend team rather than
-            // hidden behind a misleading guess).
-            if (correctedFrom) {
-                const banner = document.createElement('div');
-                banner.className = 'search-correction-banner';
-                const showingFor = didYouMean
-                    ? `Showing results for <strong>"${Security.escapeHtml(didYouMean)}"</strong>.`
-                    : `Showing similar results.`;
-                banner.innerHTML = `
-                    <span>${showingFor}</span>
-                    <a class="search-correction-banner__link" href="/shop?q=${Security.escapeAttr(correctedFrom)}">Search instead for "${Security.escapeHtml(correctedFrom)}"</a>
-                `;
-                wrap.appendChild(banner);
-            } else if (didYouMean) {
-                // Spec §2.2 — softer "did you mean" prompt below the result count.
+            // category-page-contract-may2026.md §3 — when did_you_mean is
+            // present, the banner reads "Did you mean X?" with X linking to
+            // /search?q=<encoded>. The previous "Showing similar results.
+            // Search instead for X" copy was misleading: the original query
+            // was never asked for again. The honest framing is the one the
+            // backend already powers — both the zero-result fallback and the
+            // weak-result fallback (May 2026, F1) populate did_you_mean, and
+            // both branches share the same banner now.
+            if (didYouMean) {
                 const banner = document.createElement('div');
                 banner.className = 'search-did-you-mean';
                 banner.innerHTML = `
                     Did you mean
-                    <a href="/shop?q=${Security.escapeAttr(didYouMean)}"><strong>"${Security.escapeHtml(didYouMean)}"</strong></a>?
+                    <a href="/search?q=${Security.escapeAttr(didYouMean)}"><strong>${Security.escapeHtml(didYouMean)}</strong></a>?
                 `;
                 wrap.appendChild(banner);
             }
@@ -2944,6 +2930,16 @@
                 ? `<span class="product-card__badge product-card__badge--fits-printer" title="Fits ${Security.escapeAttr(product._fitsPrinter)}">Fits Your Printer</span>`
                 : '';
 
+            // category-page-contract-may2026.md §1 — every list-view card
+            // ships a top-left COMPATIBLE/GENUINE chip driven by product.source.
+            // Yellow for compatible, blue for genuine. The chip is additive to
+            // the section header chip above the grid; mixed-source search
+            // results stay scannable card-by-card.
+            const sourceBadge = typeof getSourceBadge === 'function' ? getSourceBadge(product.source) : null;
+            const sourceBadgeHTML = sourceBadge
+                ? `<span class="product-card__badge ${sourceBadge.class}">${sourceBadge.text}</span>`
+                : '';
+
             // Spec §4 — bundle-pack visual differentiation.
             const packTypeRibbon = (() => {
                 const pt = (product.pack_type || '').toLowerCase();
@@ -2986,8 +2982,8 @@
                 <a href="${Security.escapeAttr(cardHref)}" class="product-card__link">
                     <div class="product-card__image-wrapper">
                         ${imageContent}
+                        ${(sourceBadgeHTML || fitsPrinterBadge) ? `<div class="product-card__chip-stack">${sourceBadgeHTML}${fitsPrinterBadge}</div>` : ''}
                         ${product.is_lowest_in_market ? `<span class="product-card__badge product-card__badge--lowest-price" title="${product.market_position ? Security.escapeAttr(product.market_position.price_diff_percent + '% less than ' + product.market_position.lowest_competitor_name) : ''}">Lowest Price</span>` : ''}
-                        ${fitsPrinterBadge}
                         ${packTypeRibbon}
                     </div>
                     <div class="product-card__content">
@@ -3255,76 +3251,19 @@
             return label;
         },
 
-        // Display compatible printers and yield info, update section titles
+        // Update section titles + yield info. The "For Use In: …"
+        // aggregation has been retired from list pages per
+        // category-page-contract-may2026.md §2 — that block now lives
+        // ONLY on the PDP. The skipPrinters parameter is kept for call-
+        // site compatibility but is no longer load-bearing.
         async displayProductInfo(products, { skipPrinters = false } = {}) {
-            // Reset banners
-            this.elements.printersBanner.hidden = true;
             this.elements.yieldBanner.hidden = true;
 
-            // Get brand name and product type for section titles
             const brandName = this.brandInfo[this.state.brand]?.name || this.state.brand || '';
             const productType = this.getProductTypeLabel();
 
-            // Update section titles with brand name
             this.elements.compatibleTitleText.textContent = `${brandName} Compatible ${productType}`;
             this.elements.genuineTitleText.textContent = `${brandName} Original ${productType}`;
-
-            if (!products || products.length === 0) return;
-
-            // Get yield/page count from products
-            let yieldValue = null;
-            products.forEach(product => {
-                if (!yieldValue && product.page_yield) {
-                    yieldValue = product.page_yield;
-                }
-                if (!yieldValue && product.yield) {
-                    yieldValue = product.yield;
-                }
-                if (!yieldValue && product.pages) {
-                    yieldValue = product.pages;
-                }
-            });
-
-
-            // Paper categories don't have a "For Use In" printer association
-            if (this.state.category === 'paper') return;
-
-            // Skip printer banner for search results
-            if (skipPrinters) return;
-
-            // Fetch compatible printers from API using first product's SKU
-            const firstProduct = products.find(p => p.sku);
-            if (firstProduct && firstProduct.sku) {
-                try {
-                    const response = await API.getCompatiblePrinters(firstProduct.sku);
-                    if (response.ok && response.data) {
-                        const printers = response.data.printers || response.data.compatible_printers || response.data;
-
-                        if (Array.isArray(printers) && printers.length > 0) {
-                            // Extract printer info with names and brands
-                            const printerInfo = printers.map(p => {
-                                if (typeof p === 'string') return { name: p, brand: '' };
-                                const name = p.full_name || p.model_name || p.name || p.model || '';
-                                const brand = p.brand_name || p.brand || '';
-                                return { name, brand };
-                            }).filter(p => p.name).sort((a, b) => a.name.localeCompare(b.name));
-
-                            if (printerInfo.length > 0) {
-                                const links = printerInfo.map(p => {
-                                    const params = new URLSearchParams({ printer_model: p.name });
-                                    if (p.brand) params.set('printer_brand', p.brand);
-                                    const escapedName = p.name.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-                                    return `<a href="/shop?${params}" class="printer-link">${escapedName}</a>`;
-                                }).join(', ');
-                                this.elements.printersList.innerHTML = links;
-                                this.elements.printersBanner.hidden = false;
-                            }
-                        }
-                    }
-                } catch (error) {
-                    // Could not fetch compatible printers - continue without them
-                }
-            }
         },
 
         updateSEO() {

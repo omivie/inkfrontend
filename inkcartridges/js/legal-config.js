@@ -45,7 +45,9 @@
         responseSLA:   'within one business day',
 
         // Geo (used for LocalBusiness schema + the static map embed on /contact).
-        geo: { lat: -36.9020, lng: 174.6555 },          // Kelston, Auckland
+        // Pinned to 1/37 Archibald Road — the actual office on the corner of
+        // Archlynn Road, opposite Kelston Boys High School.
+        geo: { lat: -36.9005, lng: 174.6669 },          // 1/37 Archibald Rd, Kelston
 
         // ─── Privacy / data handling ──────────────────────────────────────
         privacyOfficerName:  'Privacy Officer, InkCartridges.co.nz',
@@ -78,7 +80,7 @@
         currencySymbol:         '$',
         freeShippingThreshold:  FREE_SHIPPING_THRESHOLD,
         carriers:               ['NZ Post', 'Aramex (CourierPost network)'],
-        handlingTime:           'Same-day dispatch on orders placed before 2:00pm NZT, Monday – Friday. Orders placed after 2:00pm, on weekends, or on NZ public holidays dispatch the next working day.',
+        handlingTime:           'Same-day dispatch on orders placed before 12:00pm NZT, Monday – Friday. Orders placed after 12:00pm, on weekends, or on NZ public holidays dispatch the next working day.',
         shippingZones: [
             { zone: 'Auckland metro',        urban: '$7.00', rural: '$14.00', eta: '1–2 working days' },
             { zone: 'North Island',          urban: '$7.00 – $12.00', rural: '$14.00 – $20.00', eta: '1–3 working days' },

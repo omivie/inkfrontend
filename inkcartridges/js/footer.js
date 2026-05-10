@@ -145,8 +145,8 @@
             },
             "geo": {
                 "@type": "GeoCoordinates",
-                "latitude": -36.8485,
-                "longitude": 174.7633
+                "latitude": -36.9005,
+                "longitude": 174.6669
             },
             "priceRange": "$$",
             "currenciesAccepted": "NZD",

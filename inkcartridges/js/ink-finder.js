@@ -19,12 +19,24 @@
     const modelDropdown = document.getElementById('ink-finder-model-dropdown');
     const modelInput = document.getElementById('ink-finder-model');
     const submitBtn = document.getElementById('ink-finder-submit');
+    const submitLabel = submitBtn ? submitBtn.querySelector('.ink-finder__btn-label') : null;
     const steps = document.querySelectorAll('.ink-finder__step');
+    const stickyCta = document.getElementById('ink-finder-sticky-cta');
+    const stickyBtn = document.getElementById('ink-finder-sticky-btn');
+    const stickyLabel = document.getElementById('ink-finder-sticky-label');
 
     // Exit if elements don't exist (not on this page)
     if (!brandButtons.length || !seriesTrigger || !modelTrigger || !submitBtn) {
         return;
     }
+
+    // localStorage key — see readfirst/ink-finder-may2026.md "Acceptance":
+    // homepage finder shows series for the user's last-selected brand
+    // (or default Brother).
+    const LS_BRAND_KEY = 'ink-finder-last-brand';
+    const DEFAULT_BRAND = 'brother';
+    const DEFAULT_CTA_TEXT = (submitLabel && submitLabel.dataset.defaultLabel)
+        || 'Find Cartridges';
 
     // ============================================
     // TAB SWITCHING
@@ -127,6 +139,34 @@
             }));
             printerCache[brand] = series;
             return series;
+        }
+
+        // Empty-state fallback (readfirst/ink-finder-may2026.md "Empty-state
+        // fallback"): when series_groups is empty — rare brands like Dymo where
+        // the taxonomy collapses — re-fetch with grouped=false and present a
+        // single "All Models" series so the cascade still resolves.
+        try {
+            const flat = await API.getPrintersByBrand(brand, { grouped: false });
+            const printers = flat && flat.ok && flat.data
+                ? (flat.data.printers || flat.data.models || [])
+                : [];
+            if (printers.length > 0) {
+                const series = [{
+                    id: 'all',
+                    name: 'All Models',
+                    models: printers.map(p => ({
+                        id: p.slug,
+                        name: p.model_name,
+                        fullName: p.full_name,
+                        slug: p.slug,
+                        printerId: p.id
+                    }))
+                }];
+                printerCache[brand] = series;
+                return series;
+            }
+        } catch (error) {
+            // Both calls failed — fall through to the offline static fallback.
         }
 
         // Offline fallback: a small hand-curated static set covering the most
@@ -416,6 +456,9 @@
                 const count = option.models.length;
                 li.textContent = `${option[labelKey]} (${count} ${count === 1 ? 'model' : 'models'})`;
             } else {
+                // Stash the raw label so the model-selected handler can rebuild
+                // "✓ <label>" without regex-stripping every time.
+                li.dataset.modelLabel = option[labelKey];
                 li.textContent = option[labelKey];
             }
 
@@ -468,7 +511,9 @@
     /**
      * Handle brand selection
      */
-    async function selectBrand(brand) {
+    async function selectBrand(brand, opts) {
+        const silent = !!(opts && opts.silent);
+
         // Update button states
         brandButtons.forEach(btn => {
             btn.classList.remove('ink-finder__brand-btn--selected');
@@ -482,12 +527,22 @@
         selectedModel = null;
         selectedPrinterName = null;
 
+        // Persist for next visit (acceptance: homepage finder shows series for
+        // the user's last-selected brand). Skip when called via the silent
+        // bootstrap path so a returning user with no preference doesn't get
+        // their (empty) preference rewritten by the default.
+        if (!silent) {
+            try { localStorage.setItem(LS_BRAND_KEY, brand); } catch { /* ignore */ }
+        }
+
         // Show loading state
-        setSelectValue(seriesTrigger, seriesInput, '', 'Loading series...');
+        setSelectValue(seriesTrigger, seriesInput, '', 'Loading series…');
         seriesTrigger.disabled = true;
-        setSelectValue(modelTrigger, modelInput, '', '← Select series');
+        setSelectValue(modelTrigger, modelInput, '', 'Which model?');
         modelTrigger.disabled = true;
         submitBtn.disabled = true;
+        resetCtaLabel();
+        hideStickyCta();
 
         updateStepStates();
 
@@ -502,7 +557,7 @@
 
         // Populate series dropdown
         populateDropdown(seriesDropdown, series);
-        setSelectValue(seriesTrigger, seriesInput, '', 'Select Series');
+        setSelectValue(seriesTrigger, seriesInput, '', 'Which series?');
         seriesTrigger.disabled = false;
 
         updateStepStates();
@@ -533,9 +588,11 @@
 
         // Populate models dropdown
         populateDropdown(modelDropdown, currentModelsData);
-        setSelectValue(modelTrigger, modelInput, '', 'Select Model');
+        setSelectValue(modelTrigger, modelInput, '', 'Which model?');
         modelTrigger.disabled = false;
         submitBtn.disabled = true;
+        resetCtaLabel();
+        hideStickyCta();
 
         updateStepStates();
     }
@@ -547,7 +604,53 @@
         selectedModel = modelId;
         selectedPrinterName = printerFullName;
         submitBtn.disabled = false;
+        updateCtaLabel(printerFullName);
+        showStickyCta(printerFullName);
         updateStepStates();
+    }
+
+    // ============================================
+    // CTA TEXT + STICKY BAR
+    // (spec: "Show cartridges for <full_name>")
+    // ============================================
+
+    function updateCtaLabel(fullName) {
+        const text = fullName ? `Show cartridges for ${fullName}` : DEFAULT_CTA_TEXT;
+        if (submitLabel) submitLabel.textContent = text;
+    }
+
+    function resetCtaLabel() {
+        if (submitLabel) submitLabel.textContent = DEFAULT_CTA_TEXT;
+    }
+
+    function showStickyCta(fullName) {
+        if (!stickyCta || !stickyBtn) return;
+        const span = stickyBtn.querySelector('span');
+        if (span) span.textContent = `Show cartridges for ${fullName}`;
+        if (stickyLabel) stickyLabel.textContent = fullName || 'Show cartridges';
+        // Only reveal once the inline button leaves the viewport — the
+        // IntersectionObserver further down handles that. Mark "ready" and
+        // let the observer decide visibility.
+        stickyCta.dataset.ready = '1';
+        applyStickyVisibility();
+    }
+
+    function hideStickyCta() {
+        if (!stickyCta) return;
+        delete stickyCta.dataset.ready;
+        stickyCta.hidden = true;
+        stickyCta.setAttribute('aria-hidden', 'true');
+        stickyCta.classList.remove('ink-finder__sticky-cta--visible');
+    }
+
+    function applyStickyVisibility() {
+        if (!stickyCta) return;
+        const ready = stickyCta.dataset.ready === '1';
+        const inlineOffscreen = stickyCta.dataset.inlineOffscreen === '1';
+        const visible = ready && inlineOffscreen;
+        stickyCta.hidden = !visible;
+        stickyCta.setAttribute('aria-hidden', visible ? 'false' : 'true');
+        stickyCta.classList.toggle('ink-finder__sticky-cta--visible', visible);
     }
 
     /**
@@ -629,13 +732,19 @@
         const option = e.target.closest('.custom-select__option');
         if (option) {
             const value = option.dataset.value;
-            const label = option.textContent;
+            const label = option.dataset.modelLabel || option.textContent.replace(/^✓\s+/, '');
             const fullName = option.dataset.fullName || label;
 
             modelDropdown.querySelectorAll('.custom-select__option').forEach(opt => {
                 opt.classList.remove('custom-select__option--selected');
+                // Strip any leftover "✓ " prefix from a previous selection
+                const prev = opt.dataset.modelLabel || opt.textContent.replace(/^✓\s+/, '');
+                opt.textContent = prev;
             });
             option.classList.add('custom-select__option--selected');
+            // Affordance (spec): selected model gets a "✓" prefix in the dropdown
+            // and bold weight (the latter via .custom-select__option--selected).
+            option.textContent = `✓ ${label}`;
 
             setSelectValue(modelTrigger, modelInput, value, label);
             closeDropdown(modelTrigger, modelDropdown);
@@ -661,7 +770,58 @@
     // Submit button click
     submitBtn.addEventListener('click', findProducts);
 
-    // Initialize step states
-    updateStepStates();
+    // Sticky CTA click — same handler as the inline button.
+    if (stickyBtn) {
+        stickyBtn.addEventListener('click', findProducts);
+    }
+
+    // ============================================
+    // STICKY CTA — IntersectionObserver
+    // ============================================
+    // Show the sticky bar only when the inline button is off-screen, so the
+    // customer never sees two buttons doing the same thing at the same time.
+    if (stickyCta && 'IntersectionObserver' in window) {
+        const inlineObserver = new IntersectionObserver((entries) => {
+            for (const entry of entries) {
+                stickyCta.dataset.inlineOffscreen = entry.isIntersecting ? '0' : '1';
+            }
+            applyStickyVisibility();
+        }, { root: null, threshold: 0 });
+        inlineObserver.observe(submitBtn);
+    } else if (stickyCta) {
+        // No IntersectionObserver — show the sticky bar whenever it's ready.
+        stickyCta.dataset.inlineOffscreen = '1';
+    }
+
+    // ============================================
+    // BOOTSTRAP — auto-load the user's last brand
+    // (spec: "homepage finder shows series cards for the user's last-selected
+    // brand (or default Brother)")
+    // ============================================
+    function bootstrap() {
+        let brand = null;
+        try { brand = localStorage.getItem(LS_BRAND_KEY); } catch { /* ignore */ }
+
+        // Validate against the brand buttons actually rendered on the page —
+        // a stale localStorage value (renamed brand, retired button) would
+        // otherwise silently no-op.
+        const knownBrands = new Set(
+            Array.from(brandButtons).map(b => b.dataset.brand).filter(Boolean)
+        );
+        if (!brand || !knownBrands.has(brand)) {
+            brand = knownBrands.has(DEFAULT_BRAND) ? DEFAULT_BRAND : null;
+        }
+
+        // Initialize step states first so the UI doesn't flash "all disabled".
+        updateStepStates();
+
+        if (brand) {
+            // silent: don't overwrite localStorage on the bootstrap path —
+            // we want to remember the user's *explicit* picks, not the default.
+            selectBrand(brand, { silent: true });
+        }
+    }
+
+    bootstrap();
 
 })();

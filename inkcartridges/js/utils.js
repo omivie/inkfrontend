@@ -469,62 +469,247 @@ function isCachedSuperAdmin() {
 /**
  * PRODUCTSORT
  * ===========
- * Shared KCMY color/yield ordering + product-family grouping.
- * Used by shop-page.js and search.js so the two can never drift.
+ * Shared catalog-sort contract. Frontend mirror of the backend's
+ * `src/utils/productSort.js` so the storefront's secondary sort never
+ * disturbs the backend's primary order.
  *
- * Canonical display order for product-list surfaces (May 2026 override):
- *   K (Black / Photo / Matte) → C / LC → M / LM → Y → CMY → KCMY → specialty (R/B/G/grays)
+ * Canonical display order (May 2026 — sort-hierarchy-may2026.md):
  *
- * The catalog overhaul (api-changes-may2026.md §1) made the backend
- * authoritative for `(accessoryTier, yieldTier, seriesBase, colorOrder,
- * packRank, name)`. In practice some `/api/shop?brand=&category=&code=`
- * responses still arrive with packs interleaved between Black and
- * Cyan-Magenta-Yellow (e.g. HP 975 returns Black, CMY-pack, KCMY-pack,
- * Cyan, Magenta, Yellow). `ProductSort.byColor` is a stable secondary
- * pass that pins the canonical color tier on the storefront without
- * disturbing the backend's primary `seriesBase`/`yieldTier` grouping —
- * stable sort means same-tier rows keep their incoming relative order.
+ *   Within a single (yieldTier, seriesBase) group:
  *
- * Spec: readfirst/color-display-order-may2026.md
- * Pinned by: tests/color-display-order.test.js
+ *     0   Black   (K)              ─┐
+ *     1   Cyan    (C)               │ standard singles
+ *     2   Magenta (M)               │
+ *     3   Yellow  (Y)              ─┘
+ *     4   Photo Black   (PB)       ─┐
+ *     5   Matte Black   (MB)        │
+ *     6   Light Cyan    (LC)        │
+ *     6.5 Photo Cyan    (PC)        │
+ *     7   Light Magenta (LM)        │
+ *     7.5 Photo Magenta (PM)        │ specialty singles
+ *     8   Vivid Light Magenta (VLM) │
+ *     9   Grey                      │
+ *     10  Violet                    │
+ *     11  Tri-Colour (single        │
+ *         cartridge, e.g. HP 22)    │
+ *     12  Red                       │
+ *     13  Blue                      │
+ *     14  Green                     │
+ *     15  Orange                    │
+ *     16  White                     │
+ *     17  Black/Red (legacy)       ─┘
+ *     19  Unknown single
+ *     20  CMY 3-Pack               ─┐ packs
+ *     21  KCMY 4-Pack / CMYK / BCMY ┘
+ *
+ * Sort key tuple: (accessoryTier, yieldTier, seriesBase, colorOrder, packRank, name)
+ *
+ *   - accessoryTier — cartridges (0) before paper/printers/accessories (3).
+ *   - yieldTier     — std (0) → XL/HY (1) → XXL/SHY/XLL (2). HY ≡ XL.
+ *   - seriesBase    — alphanumeric MPN family with yield + colour suffixes
+ *                     stripped (`TN645`, `LC3317`, `BCI6`, `975A`).
+ *   - colorOrder    — table above. Pack-name regex first to defend against
+ *                     mislabeled feed rows (color="Black" on a KCMY pack).
+ *   - packRank      — single (0) < value_pack (1) < multipack (2). Defends
+ *                     against the rare colorOrder tie.
+ *   - name          — final lexicographic tiebreaker.
+ *
+ * Why singles always rank below packs: customers shopping a series want to
+ * evaluate every individual cartridge first, then decide whether the bundle
+ * is worthwhile. The pre-May-2026 frontend collapsed every specialty colour
+ * into the parent tier (Photo Black → K, Light Cyan → C), which inverted the
+ * intended hierarchy on Epson 46S, Canon CLI42, and any printer with photo /
+ * matte / light variants. The new table promotes packs to 20/21, leaving 4-17
+ * for specialty singles so std → specialty → packs reads cleanly.
+ *
+ * Spec: readfirst/sort-hierarchy-may2026.md
+ * Pinned by: tests/sort-hierarchy-may2026.test.js,
+ *            tests/color-display-order.test.js,
+ *            tests/code-yield-grouping-may2026.test.js
  */
 const ProductSort = (function() {
-    // Order is the source of truth for `colorIndex`. Multipacks (CMY, KCMY)
-    // sit immediately after the Y single — between singles and specialty.
-    const COLOR_ORDER = [
-        'black', 'photo black', 'matte black',                             // 0-2  → K tier
-        'cyan', 'photo cyan', 'light cyan',                                // 3-5  → C tier
-        'magenta', 'photo magenta', 'light magenta',                       // 6-8  → M tier
-        'yellow',                                                          // 9    → Y tier
-        'cmy', 'tri-color', 'tri-colour', 'color', 'colour',               // 10-14 → CMY tier
-        'kcmy', 'cmyk', 'bcmy', '4-pack', '4 pack',                        // 15-19 → KCMY tier
-        'red', 'blue', 'green',                                            // 20-22 → specialty
-        'gray', 'grey', 'light gray', 'light grey'                         // 23-26 → specialty
-    ];
+    // ─── COLOR_RANK ─────────────────────────────────────────────────────
+    //
+    // The 22-position rank table. Source of truth for `colorOrder()`.
+    //
+    // All keys are lowercased canonical color strings or aliases. Float
+    // ranks (e.g. 6.5 for Photo Cyan) are deliberate — they let new
+    // colours slot between existing ranks without renumbering downstream
+    // entries or breaking previously-pinned ordering invariants.
+    const COLOR_RANK = Object.freeze({
+        // Standard singles (0-3)
+        'black': 0,
+        'k':     0,
+        'cyan':  1,
+        'c':     1,
+        'magenta': 2,
+        'm':       2,
+        'yellow':  3,
+        'y':       3,
 
-    // Canonical 8-tier bucket the storefront groups by (K=0 → unknown=7).
-    // Kept independent of COLOR_ORDER so the granular index can grow
-    // (e.g. add 'orange', 'photo gray') without renumbering tiers.
-    const TIER_K = 0, TIER_C = 1, TIER_M = 2, TIER_Y = 3;
-    const TIER_CMY = 4, TIER_KCMY = 5, TIER_SPECIALTY = 6, TIER_UNKNOWN = 7;
+        // Specialty singles (4-17)
+        'photo black':         4,
+        'pb':                  4,
+        'pgbk':                4,   // pigment black, often co-billed with photo black
+        'matte black':         5,
+        'mb':                  5,
+        'mbk':                 5,
+        'light cyan':          6,
+        'lc':                  6,
+        'photo cyan':          6.5,
+        'pc':                  6.5,
+        'light magenta':       7,
+        'lm':                  7,
+        'photo magenta':       7.5,
+        'pm':                  7.5,
+        'vivid light magenta': 8,
+        'vlm':                 8,
+        'grey':                9,
+        'gray':                9,
+        'light grey':          9.3,
+        'light gray':          9.3,
+        'photo grey':          9.6,
+        'photo gray':          9.6,
+        'violet':             10,
+        'tri-colour':         11,
+        'tri-color':          11,
+        'tricolour':          11,
+        'tricolor':           11,
+        'colour':             11,   // single tri-colour cartridge label
+        'color':              11,
+        'red':                12,
+        'r':                  12,
+        'blue':               13,
+        'b':                  13,
+        'green':              14,
+        'g':                  14,
+        'orange':             15,
+        'o':                  15,
+        'white':              16,
+        'w':                  16,
+        'black/red':          17,
+        'black and red':      17,
+
+        // Pack ranks (20-21) — colorOrder values for canonical pack labels.
+        // Pack-name regex still wins over these so a "Black" value pack
+        // resolves correctly via PACK_NAME_REGEX.
+        'cmy':       20,
+        '3-pack':    20,
+        '3 pack':    20,
+        'kcmy':      21,
+        'cmyk':      21,
+        'bcmy':      21,
+        '4-pack':    21,
+        '4 pack':    21
+    });
+
+    // Unknown single — between specialty (4-17) and packs (20-21). A row
+    // whose color string isn't in COLOR_RANK and isn't pack-shaped lands
+    // here so it sits below known singles but above packs.
+    const RANK_UNKNOWN_SINGLE = 19;
+
+    // Pack-name fallback regex. Some supplier feeds ship value packs with
+    // `color = "Black"` (the SKU's "primary" colour). Without this, a
+    // "Brother Genuine LC3317 KCMY 4-Pack" with color="Black" would
+    // inherit colorOrder=0 and rank ahead of the K single. We detect the
+    // pack shape from the name FIRST, so colorOrder=21 even when color=Black.
+    //
+    // KCMY/CMYK/BCMY/4-pack/4 colour → 21
+    // CMY/3-pack/3 colour            → 20
+    // Order matters: KCMY pattern checked first because "CMY" is a strict
+    // subset of "KCMY". The 4-token branch must short-circuit.
+    const PACK_NAME_REGEX_4 = /\b(?:KCMY|CMYK|BCMY)\b|\b4\s*colou?r\b|\b4\s*-?\s*pack\b/i;
+    const PACK_NAME_REGEX_3 = /\bCMY\b|\b3\s*colou?r\b|\b3\s*-?\s*pack\b/i;
+
+    // Legacy COLOR_ORDER list — derived from COLOR_RANK keys, sorted by
+    // their rank, with aliases deduped. Kept for back-compat with callers
+    // that read `ProductSort.COLOR_ORDER` (older code referenced it for
+    // membership checks). New code should use `colorOrder(product)`.
+    const COLOR_ORDER = (() => {
+        const seen = new Set();
+        const list = [];
+        for (const [name, rank] of Object.entries(COLOR_RANK)) {
+            if (rank >= 20) continue;            // packs handled separately
+            if (name.length <= 1 && rank === Math.floor(rank)) continue; // skip 1-letter aliases (k, c, m, y, r, b, g, o, w)
+            if (seen.has(rank)) continue;
+            seen.add(rank);
+            list.push(name);
+        }
+        // Append CMY then KCMY at the end so legacy index-based callers
+        // still see packs after singles.
+        list.push('cmy', 'kcmy', 'cmyk', 'bcmy', '4-pack', '4 pack');
+        return Object.freeze(list);
+    })();
+
+    // ─── BUCKET TIERS (legacy 8-tier view) ───────────────────────────────
+    //
+    // Kept so any caller still reading `ProductSort.TIERS` / `colorTier`
+    // gets a coherent answer. Each tier is the broad family the colorOrder
+    // rank lives in. Tests assert these specifically.
+    const TIER_K = 0;            // Black/PB/MB and any black-derivative single
+    const TIER_C = 1;            // Cyan only — strict standard
+    const TIER_M = 2;            // Magenta only — strict standard
+    const TIER_Y = 3;            // Yellow only — strict standard
+    const TIER_CMY = 4;          // CMY 3-pack (and tri-colour single in legacy view)
+    const TIER_KCMY = 5;         // KCMY/CMYK/BCMY 4-pack
+    const TIER_SPECIALTY = 6;    // LC, LM, PC, PM, VLM, R, B, G, grays, etc.
+    const TIER_UNKNOWN = 7;      // truly unknown / unrecognised
+
+    // ─── yield + accessory + source ──────────────────────────────────────
 
     function yieldTier(product) {
-        const n = (product.name || '').toLowerCase();
-        if (n.includes('xxl') || n.includes('super high')) return 2;
+        const n = (product && product.name || '').toLowerCase();
+        if (n.includes('xxl') || n.includes('super high') || /\bxll\b/.test(n) || /\bshy\b/.test(n)) return 2;
         if (n.includes('xl') || n.includes('high yield') || /\bhy\b/.test(n)) return 1;
-        const sku = (product.sku || '').toUpperCase();
+        const sku = (product && product.sku || '').toUpperCase();
         if (/CART\d{3,}H(?=[A-Z]|-|$)/.test(sku)) return 1;
         return 0;
     }
 
-    // Resolve the product's color name from the canonical fields, in priority:
-    //   1. product.color (backend's normalized 'Black'/'Cyan'/'CMY'/'KCMY' string)
-    //   2. ProductColors.detectFromName(product.name) (legacy / search rows)
-    //
-    // pack_type is consulted only as a tiebreaker — a CMY pack with a stale
-    // `color: 'Cyan'` field still classifies as TIER_CMY because pack_type
-    // dominates. This means a pack mis-labelled as a single colour cannot
-    // sneak into the Cyan bucket and break the K→C→M→Y→CMY→KCMY contract.
+    // accessoryTier: cartridges first (0), drums (1), paper/maintenance (2),
+    // printers/everything else (3). Mirrors backend `accessoryTier`. The
+    // frontend rarely mixes these in a single list — but when /search returns
+    // a long-tail row that includes both ink and accessory results, this
+    // ensures cartridges still come first.
+    function accessoryTier(product) {
+        if (!product) return 3;
+        const cat = (product.category || '').toString().toLowerCase();
+        const name = (product.name || '').toString().toLowerCase();
+        const isInkOrToner = cat === 'ink' || cat === 'toner'
+            || /\b(ink|toner)\s+(cartridge|cartridges)\b/.test(name)
+            || /\bcartridge\b/.test(name) && !/\bdrum|paper|printer\b/.test(name);
+        if (isInkOrToner) return 0;
+        if (/\bdrum\b/.test(cat) || /\bdrum\b/.test(name)) return 1;
+        if (cat === 'paper' || /\bpaper\b/.test(name) || /\bmaintenance\b/.test(name)) return 2;
+        return 3;
+    }
+
+    // packRank: single (0) < value_pack (1) < multipack (2). Tiebreaker
+    // when colorOrder collapses (e.g. two rows both resolve to 20 because
+    // both pack-name-detect as CMY).
+    function packRank(product) {
+        const t = (product && product.pack_type || '').toString().toLowerCase();
+        if (t === 'multipack') return 2;
+        if (t === 'value_pack' || t === 'valuepack') return 1;
+        return 0;
+    }
+
+    // Source-tier (genuine before compatible) is preserved for callers
+    // that still rely on it; the backend now bakes this into
+    // `accessoryTier` + family ordering, but internal compares keep it
+    // available as a stable, documented helper.
+    function sourceTier(product) {
+        const s = (product && product.source || '').toString().toLowerCase();
+        if (s === 'genuine') return 0;
+        if (s === 'compatible') return 1;
+        return 2;
+    }
+
+    // ─── color resolution ────────────────────────────────────────────────
+
+    // Resolve the product's color string. Priority:
+    //   1. product.color  (backend's canonical 'Black'/'Cyan'/'CMY'/'KCMY')
+    //   2. ProductColors.detectFromName(product.name) — legacy rows missing color
     function resolveColorName(product) {
         if (!product) return '';
         const c = (product.color || '').toString().toLowerCase().trim();
@@ -536,65 +721,94 @@ const ProductSort = (function() {
         return '';
     }
 
-    function colorIndex(product) {
-        const i = COLOR_ORDER.indexOf(resolveColorName(product));
-        return i === -1 ? 999 : i;
+    // colorOrder — the spec's primary sort key for a product within its
+    // (accessoryTier, yieldTier, seriesBase) group. Pack-name regex wins
+    // over the color field so mislabeled feed rows (KCMY pack with
+    // color="Black") still sort as packs.
+    function colorOrder(product) {
+        if (!product) return RANK_UNKNOWN_SINGLE;
+        const name = (product.name || '').toString();
+
+        // Step 1 — pack-name regex first. A row whose NAME contains
+        // KCMY/CMYK/BCMY/4-pack always ranks 21, regardless of color field.
+        if (PACK_NAME_REGEX_4.test(name)) return 21;
+        if (PACK_NAME_REGEX_3.test(name)) return 20;
+
+        // Step 2 — pack_type override. A value_pack/multipack with no
+        // pack-shape keyword in the name still sorts as a pack. Use the
+        // color field to choose between CMY (20) and KCMY (21):
+        //   - color in {cmy, color, colour, tri-color, tri-colour} → 20
+        //   - everything else (including 'Black' on a misclassified pack) → 21
+        const pType = packRank(product);
+        if (pType >= 1) {
+            const cn = resolveColorName(product);
+            if (cn === 'cmy' || cn === 'color' || cn === 'colour'
+                || cn === 'tri-color' || cn === 'tri-colour'
+                || cn === 'tricolor' || cn === 'tricolour') return 20;
+            return 21;
+        }
+
+        // Step 3 — color string lookup. Empty / unknown → RANK_UNKNOWN_SINGLE
+        // so the row sits between specialty singles (≤17) and packs (≥20).
+        const c = resolveColorName(product);
+        if (!c) return RANK_UNKNOWN_SINGLE;
+        if (Object.prototype.hasOwnProperty.call(COLOR_RANK, c)) {
+            return COLOR_RANK[c];
+        }
+        return RANK_UNKNOWN_SINGLE;
     }
 
-    // Map a product to one of the 8 display tiers.
-    // Pack-type override: a value_pack/multipack with a CMY/KCMY/cmyk color
-    // resolves to TIER_CMY/TIER_KCMY even if the color string drifts.
+    // colorIndex — legacy alias kept for back-compat. Returns the rank
+    // (or 999 for unknown), which preserves the prior semantics of
+    // "missing color sorts last" if any caller still reads it.
+    function colorIndex(product) {
+        const r = colorOrder(product);
+        return r === RANK_UNKNOWN_SINGLE ? 999 : r;
+    }
+
+    // colorTier — legacy 8-bucket classifier mapping the new rank back to
+    // the broad K/C/M/Y/CMY/KCMY/specialty/unknown buckets. Used by older
+    // surfaces and pinned tests; new callers should use `colorOrder()`
+    // directly. The mapping reflects the *post-May-2026* rule that PB/MB,
+    // LC/LM, PC/PM, VLM, grays, R, B, G, O, W, B/R all live in the
+    // SPECIALTY bucket — they're singles that sort after Y but before
+    // the multi-cartridge packs.
     function colorTier(product) {
-        const name = resolveColorName(product);
-        const packType = (product && product.pack_type || '').toString().toLowerCase();
-        const isPack = packType === 'value_pack' || packType === 'multipack';
-
-        // Tier 4: CMY family — tri-color packs, "color" packs.
-        if (name === 'cmy' || name === 'tri-color' || name === 'tri-colour'
-            || name === 'color' || name === 'colour') return TIER_CMY;
-        // Tier 5: KCMY family — KCMY/CMYK/BCMY/4-pack value packs.
-        if (name === 'kcmy' || name === 'cmyk' || name === 'bcmy'
-            || name === '4-pack' || name === '4 pack') return TIER_KCMY;
-
-        // Singles K/C/M/Y. Light variants share the parent tier.
-        if (name === 'black' || name === 'photo black' || name === 'matte black') {
-            // A pack with color='Black' is still a pack — fall through to KCMY
-            // if the row also marks itself as a value/multipack. Rare but real
-            // in legacy fixtures.
-            return isPack ? TIER_KCMY : TIER_K;
-        }
-        if (name === 'cyan' || name === 'light cyan' || name === 'photo cyan')
-            return isPack ? TIER_CMY : TIER_C;
-        if (name === 'magenta' || name === 'light magenta' || name === 'photo magenta')
-            return isPack ? TIER_CMY : TIER_M;
-        if (name === 'yellow')                              return isPack ? TIER_CMY : TIER_Y;
-
-        // Specialty named colours — red/blue/green/grays/etc. Anything in
-        // COLOR_ORDER (so the frontend recognises it) but not in the K/C/M/Y/
-        // CMY/KCMY buckets.
-        if (COLOR_ORDER.indexOf(name) !== -1) return TIER_SPECIALTY;
-
+        const rank = colorOrder(product);
+        if (rank === 0) return TIER_K;
+        if (rank === 1) return TIER_C;
+        if (rank === 2) return TIER_M;
+        if (rank === 3) return TIER_Y;
+        if (rank === 20) return TIER_CMY;
+        if (rank === 21) return TIER_KCMY;
+        if (rank === RANK_UNKNOWN_SINGLE) return TIER_UNKNOWN;
+        if (rank >= 4 && rank < 20) return TIER_SPECIALTY;
         return TIER_UNKNOWN;
     }
 
-    // Source tier: genuine first, then compatible, then anything else.
-    function sourceTier(product) {
-        const s = (product.source || '').toString().toLowerCase();
-        if (s === 'genuine') return 0;
-        if (s === 'compatible') return 1;
-        return 2;
-    }
-
+    // compareByYieldAndColor — within-a-family comparator. Walks the spec's
+    // sort tuple from left to right but skips accessoryTier + seriesBase
+    // because the caller has already grouped by family. Source tier is the
+    // first split (genuine → compatible) so genuine cartridges always lead
+    // the row; yield tier (std → HY → XXL) drives the row stack; colorOrder
+    // gives K → C → M → Y → specialty → packs; packRank is the final
+    // tiebreaker; name is the lexicographic guard.
     function compareByYieldAndColor(a, b) {
-        // Within a family, group by source (genuine → compatible),
-        // then by yield tier (std → HY → XXL), then by KCMY color order.
         const sa = sourceTier(a);
         const sb = sourceTier(b);
         if (sa !== sb) return sa - sb;
         const ya = yieldTier(a);
         const yb = yieldTier(b);
         if (ya !== yb) return ya - yb;
-        return colorIndex(a) - colorIndex(b);
+        const ca = colorOrder(a);
+        const cb = colorOrder(b);
+        if (ca !== cb) return ca - cb;
+        const pa = packRank(a);
+        const pb = packRank(b);
+        if (pa !== pb) return pa - pb;
+        const na = (a && a.name || '').toString();
+        const nb = (b && b.name || '').toString();
+        return na.localeCompare(nb);
     }
 
     // Extract a brand + base product code as the family key.
@@ -695,47 +909,62 @@ const ProductSort = (function() {
         return (brand ? 'B:' + brand + ':' : '') + base;
     }
 
+    // seriesBase — alphanumeric MPN family with brand prefix stripped. The
+    // spec's `seriesBase` corresponds to the family-key BASE without the
+    // `B:BRAND:` prefix. We expose a thin alias for parity with the
+    // backend's API; callers that need the brand-scoped key keep using
+    // familyKey, which dedupes families across different brands.
+    function seriesBase(product) {
+        const key = familyKey(product) || '';
+        const idx = key.indexOf(':');
+        if (idx === -1) return key;
+        // strip leading "B:BRAND:" → leave the bare base.
+        const second = key.indexOf(':', idx + 1);
+        return second === -1 ? key.slice(idx + 1) : key.slice(second + 1);
+    }
+
     // Sort in place: yield tier → color order. Returns the same array.
     function byYieldAndColor(products) {
         return products.sort(compareByYieldAndColor);
     }
 
-    // Stable sort by canonical 8-tier color order (K, C, M, Y, CMY, KCMY,
-    // specialty, unknown). Returns a NEW array — callers don't have to
-    // defensively `[...products]`.
+    // Stable sort by canonical colorOrder (the May 2026 22-rank table).
+    // Returns a NEW array — callers don't have to defensively `[...products]`.
     //
-    // Stability matters: products in the same color tier keep their incoming
-    // relative order, which preserves the backend's `seriesBase`/`yieldTier`
-    // grouping within a tier. The function is the storefront's K→C→M→Y→
-    // CMY→KCMY override on top of the (occasionally drifty) backend sort.
+    // Stability matters: products with the same colorOrder keep their
+    // incoming relative order, which preserves the backend's
+    // `(accessoryTier, yieldTier, seriesBase)` grouping within a rank.
+    // The function is the storefront's secondary pass on top of the
+    // backend's primary catalog sort.
     //
     // Array.prototype.sort is stable in V8 / SpiderMonkey / JavaScriptCore
     // (TC39 stable-sort guarantee since ES2019), so a single .sort() call
-    // by tier index is sufficient — no decorate-sort-undecorate needed.
+    // by colorOrder is sufficient — no decorate-sort-undecorate needed.
     function byColor(products) {
         if (!Array.isArray(products) || products.length < 2) {
             return Array.isArray(products) ? products.slice() : [];
         }
-        return products.slice().sort((a, b) => colorTier(a) - colorTier(b));
+        return products.slice().sort((a, b) => colorOrder(a) - colorOrder(b));
     }
 
-    // Stable composite sort: family code → yield tier → color tier.
+    // Stable composite sort: family code → yield tier → colorOrder → packRank.
     // Returns a NEW array. This is the May 2026 product-grid contract:
     //
-    //   645   K, C, M, Y, CMY, KCMY      ← yield 0 (std)       row 1
-    //   645XL K, C, M, Y, CMY, KCMY      ← yield 1 (XL/HY)     row 2
-    //   645XXL K, C, M, Y, CMY, KCMY     ← yield 2 (XXL)       row 3
+    //   645   K, C, M, Y, [specialty…], CMY, KCMY    ← yield 0 (std)    row 1
+    //   645XL K, C, M, Y, [specialty…], CMY, KCMY    ← yield 1 (XL/HY)  row 2
+    //   645XXL K, C, M, Y, [specialty…], CMY, KCMY   ← yield 2 (XXL)    row 3
     //
     // Family order is preserved from the incoming array (first occurrence
     // wins) so the backend's brand / accessory-tier ordering still drives
     // which family appears first. Within a family, yield tier is forced to
-    // ascending (std → HY → XXL), then color tier to canonical K→KCMY.
+    // ascending (std → HY → XXL), then colorOrder to the 22-position table,
+    // then packRank to break a colorOrder tie.
     //
     // Renderers pair this with `rowBreakIndices` to insert a flex-basis:100%
     // breaker so each (family, yield) group physically starts on a new row.
     //
-    // Spec: readfirst/code-yield-grouping-may2026.md
-    // Pinned by: tests/code-yield-grouping-may2026.test.js
+    // Spec: readfirst/sort-hierarchy-may2026.md, readfirst/code-yield-grouping-may2026.md
+    // Pinned by: tests/sort-hierarchy-may2026.test.js, tests/code-yield-grouping-may2026.test.js
     function byCodeThenColor(products) {
         if (!Array.isArray(products) || products.length < 2) {
             return Array.isArray(products) ? products.slice() : [];
@@ -757,7 +986,85 @@ const ProductSort = (function() {
             if (fa !== fb) return fa - fb;
             const ya = yieldTier(a), yb = yieldTier(b);
             if (ya !== yb) return ya - yb;
-            return colorTier(a) - colorTier(b);
+            const ca = colorOrder(a), cb = colorOrder(b);
+            if (ca !== cb) return ca - cb;
+            return packRank(a) - packRank(b);
+        });
+    }
+
+    // sortByCatalogOrder — frontend mirror of the backend's
+    // `sortByCatalogOrder(products)`. Applies the full 6-tuple
+    // (accessoryTier, yieldTier, seriesBase, colorOrder, packRank, name).
+    // Returns a NEW array. Use this when the input list mixes families
+    // and/or accessories and the caller wants a complete catalog-order
+    // pass — e.g. a search-drilldown response that includes both ink
+    // cartridges and an accessory or two.
+    //
+    // For per-family rendering on the storefront, prefer `byCodeThenColor`
+    // which preserves the API's incoming family-appearance order.
+    function sortByCatalogOrder(products) {
+        if (!Array.isArray(products) || products.length < 2) {
+            return Array.isArray(products) ? products.slice() : [];
+        }
+        return products.slice().sort((a, b) => {
+            const aa = accessoryTier(a), ab = accessoryTier(b);
+            if (aa !== ab) return aa - ab;
+            const ya = yieldTier(a), yb = yieldTier(b);
+            if (ya !== yb) return ya - yb;
+            const sa = seriesBase(a), sb = seriesBase(b);
+            const sCmp = sa.localeCompare(sb);
+            if (sCmp !== 0) return sCmp;
+            const ca = colorOrder(a), cb = colorOrder(b);
+            if (ca !== cb) return ca - cb;
+            const pa = packRank(a), pb = packRank(b);
+            if (pa !== pb) return pa - pb;
+            const na = (a && a.name || '').toString();
+            const nb = (b && b.name || '').toString();
+            return na.localeCompare(nb);
+        });
+    }
+
+    // sortByRelevance — frontend mirror of the backend's
+    // `sortByRelevance(products, scoreMap)`. Score wins across families;
+    // within a family (same seriesBase + yieldTier) the colour/pack
+    // hierarchy overrides score so per-row RPC variance can't invert
+    // CMY/KCMY ordering. `scoreMap` keys can be sku / product_code / id.
+    //
+    // Used by /search?q=… payloads (smart endpoint already applies this
+    // server-side; the FE pass is a no-op when the BE got it right).
+    function sortByRelevance(products, scoreMap) {
+        if (!Array.isArray(products) || products.length < 2) {
+            return Array.isArray(products) ? products.slice() : [];
+        }
+        const keyOf = (p) => (p && (p.sku || p.product_code || p.code || p.id));
+        const scoreOf = (p) => {
+            const k = keyOf(p);
+            return (scoreMap && k != null && scoreMap.has(k)) ? scoreMap.get(k) : 0;
+        };
+        return products.slice().sort((a, b) => {
+            // Same family (seriesBase + yieldTier)? colour hierarchy wins.
+            const sameFamily = seriesBase(a) === seriesBase(b)
+                && yieldTier(a) === yieldTier(b);
+            if (sameFamily) {
+                const ca = colorOrder(a), cb = colorOrder(b);
+                if (ca !== cb) return ca - cb;
+                const pa = packRank(a), pb = packRank(b);
+                if (pa !== pb) return pa - pb;
+            }
+            // Different families? Score dominates (descending).
+            const ra = scoreOf(a), rb = scoreOf(b);
+            if (ra !== rb) return rb - ra;
+            // Score-tie fallback: full catalog order.
+            const aa = accessoryTier(a), ab = accessoryTier(b);
+            if (aa !== ab) return aa - ab;
+            const ya = yieldTier(a), yb = yieldTier(b);
+            if (ya !== yb) return ya - yb;
+            const sa = seriesBase(a), sb = seriesBase(b);
+            const sCmp = sa.localeCompare(sb);
+            if (sCmp !== 0) return sCmp;
+            const ca = colorOrder(a), cb = colorOrder(b);
+            if (ca !== cb) return ca - cb;
+            return packRank(a) - packRank(b);
         });
     }
 
@@ -836,12 +1143,20 @@ const ProductSort = (function() {
     }
 
     return {
+        COLOR_RANK,
         COLOR_ORDER,
+        RANK_UNKNOWN_SINGLE,
+        PACK_NAME_REGEX_3,
+        PACK_NAME_REGEX_4,
         TIERS: { K: TIER_K, C: TIER_C, M: TIER_M, Y: TIER_Y,
                  CMY: TIER_CMY, KCMY: TIER_KCMY,
                  SPECIALTY: TIER_SPECIALTY, UNKNOWN: TIER_UNKNOWN },
+        accessoryTier,
         yieldTier,
         sourceTier,
+        seriesBase,
+        packRank,
+        colorOrder,
         colorIndex,
         colorTier,
         resolveColorName,
@@ -851,7 +1166,9 @@ const ProductSort = (function() {
         byColor,
         byCodeThenColor,
         rowBreakIndices,
-        groupByFamilyScored
+        groupByFamilyScored,
+        sortByCatalogOrder,
+        sortByRelevance
     };
 })();
 

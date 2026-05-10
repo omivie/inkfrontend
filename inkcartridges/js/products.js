@@ -114,13 +114,31 @@ const Products = {
             return '#';
         })();
 
+        // category-page-contract-may2026.md §1 — every list-view card
+        // ships a top-left COMPATIBLE/GENUINE chip driven by product.source.
+        // The source chip + discount chip + fits-printer chip share the
+        // top-left corner via .product-card__chip-stack so they stack
+        // vertically without overlapping (acceptance: "FITS YOUR PRINTER
+        // chip stacks above or beside the source chip without overlapping").
+        const sourceBadgeHTML = sourceBadge
+            ? `<span class="product-card__badge ${sourceBadge.class}">${sourceBadge.text}</span>`
+            : '';
+        const discountBadgeHTML = (showDiscount && (this._isPack(product) ? discountAmount != null : discountPercent))
+            ? `<span class="product-card__badge product-card__badge--discount">${this._isPack(product) ? `Save ${formatPrice(discountAmount)}` : `Save ${discountPercent}%`}</span>`
+            : '';
+        const fitsPrinterBadgeHTML = product._fitsPrinter
+            ? `<span class="product-card__badge product-card__badge--fits-printer" title="Fits ${Security.escapeAttr(product._fitsPrinter)}">Fits Your Printer</span>`
+            : '';
+        const chipStackHTML = (sourceBadgeHTML || discountBadgeHTML || fitsPrinterBadgeHTML)
+            ? `<div class="product-card__chip-stack">${sourceBadgeHTML}${fitsPrinterBadgeHTML}${discountBadgeHTML}</div>`
+            : '';
+
         return `
             <article class="product-card" data-product-id="${Security.escapeAttr(product.id)}" data-sku="${Security.escapeAttr(product.sku)}">
                 <a href="${Security.escapeAttr(cardHref)}" class="product-card__link">
                     <div class="product-card__image-wrapper">
                         ${this.getProductImageHTML(product, { priority })}
-                        ${sourceBadge ? `<span class="product-card__badge ${sourceBadge.class}">${sourceBadge.text}</span>` : ''}
-                        ${showDiscount && (this._isPack(product) ? discountAmount != null : discountPercent) ? `<span class="product-card__badge product-card__badge--discount">${this._isPack(product) ? `Save ${formatPrice(discountAmount)}` : `Save ${discountPercent}%`}</span>` : ''}
+                        ${chipStackHTML}
                         ${product.is_lowest_in_market ? `<span class="product-card__badge product-card__badge--lowest-price" title="${product.market_position ? Security.escapeAttr(product.market_position.price_diff_percent + '% less than ' + product.market_position.lowest_competitor_name) : ''}">Lowest Price</span>` : ''}
                     </div>
                     <div class="product-card__content">

@@ -697,6 +697,81 @@
     text-decoration: underline;
 }
 
+/* ============================================
+ * Sticky CTA — May 2026 spec
+ * (readfirst/ink-finder-may2026.md "Affordance")
+ *
+ * Appears at the bottom of the viewport once both series and model are
+ * picked, but only when the inline submit button is off-screen — so the
+ * customer never sees two of the same CTA stacked.
+ * ============================================ */
+.ink-finder__sticky-cta {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 9000;
+    background: var(--white-primary);
+    border-top: 1px solid var(--color-border, #e2e8f0);
+    box-shadow: 0 -8px 24px rgba(15, 23, 42, 0.12);
+    padding: 12px 0 calc(12px + env(safe-area-inset-bottom, 0px));
+    transform: translateY(100%);
+    transition: transform 0.25s ease;
+    pointer-events: none;
+}
+
+.ink-finder__sticky-cta--visible {
+    transform: translateY(0);
+    pointer-events: auto;
+}
+
+.ink-finder__sticky-inner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--spacing-md);
+}
+
+.ink-finder__sticky-label {
+    flex: 1;
+    min-width: 0;
+    font-size: 14px;
+    font-weight: var(--font-weight-medium);
+    color: var(--color-text-heading);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.ink-finder__sticky-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+    white-space: nowrap;
+}
+
+@media (max-width: 600px) {
+    .ink-finder__sticky-label {
+        display: none;
+    }
+    .ink-finder__sticky-btn {
+        flex: 1;
+        justify-content: center;
+    }
+}
+
+/* "✓" prefix on selected model option (spec affordance). The dropdown JS
+ * prepends the glyph to the textContent; bold weight comes from the
+ * existing .custom-select__option--selected rule. This rule keeps the
+ * glyph aligned and tinted to the cyan accent. */
+.ink-finder__step[data-step="3"] .custom-select__option--selected {
+    /* selected check is provided by JS-injected text "✓ <label>"; no
+       pseudo-element needed. font-weight: 600 already applied via the
+       shared .custom-select__option--selected rule. */
+    letter-spacing: 0.01em;
+}
+
 /* Responsive - Ink Finder */
 @media (max-width: 1200px) {
     .ink-finder__steps {

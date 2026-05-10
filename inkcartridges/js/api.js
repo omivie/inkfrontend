@@ -948,14 +948,26 @@ const API = {
      * label makers, scanners, dot-matrix, etc. so the ink-finder dropdown only
      * shows devices that take cartridges.
      *
-     * Spec: docs/storefront/value-pack-and-product-url-contract.md §4.2.1
-     * (backend-passover task 5, May 2026).
+     * Pass `{ grouped: false }` for the empty-state fallback documented in
+     * readfirst/ink-finder-may2026.md — rare brands (e.g. Dymo) where the
+     * series taxonomy collapses to one group so the cascade adds no value.
+     * The flat shape is `{ ok, data: { brand, printers: [{ id, model_name,
+     * full_name, slug, series }] } }`.
+     *
+     * Spec: readfirst/ink-finder-may2026.md (May 2026 wiring contract);
+     * docs/storefront/value-pack-and-product-url-contract.md §4.2.1
+     * (backend-passover task 5).
      *
      * @param {string} brand - Brand slug (e.g. "canon"). Lower-cased + URL-encoded.
+     * @param {{ grouped?: boolean }} [opts] - { grouped: false } for the flat fallback.
      */
-    async getPrintersByBrand(brand) {
+    async getPrintersByBrand(brand, opts) {
         const slug = encodeURIComponent(String(brand || '').toLowerCase());
-        return this.get(`/api/printers/by-brand/${slug}?grouped=true&exclude_non_ink=true`);
+        const grouped = !(opts && opts.grouped === false);
+        const qs = grouped
+            ? 'grouped=true&exclude_non_ink=true'
+            : 'grouped=false&exclude_non_ink=true';
+        return this.get(`/api/printers/by-brand/${slug}?${qs}`);
     },
 
     /**
@@ -2148,16 +2160,23 @@ function qualifiesForFreeShipping(product) {
 }
 
 /**
- * Get source badge
+ * Get source badge — short, uppercase chip used at the top-left of every
+ * product card on list views (shop, search, printer products, brand pages).
+ *
+ * Per category-page-contract-may2026.md §1: every card MUST display either
+ * a yellow COMPATIBLE chip or a blue GENUINE chip at the top-left.
+ * The chip class names map to .product-card__badge--{compatible,genuine}
+ * in components.css.
+ *
  * @param {string} source - Product source (genuine/compatible)
- * @returns {object} Badge info
+ * @returns {object|null} Badge info ({ class, text }) or null when source is unknown
  */
 function getSourceBadge(source) {
     if (source === 'genuine') {
-        return { class: 'badge-genuine', text: 'Genuine OEM' };
+        return { class: 'product-card__badge--genuine', text: 'GENUINE' };
     }
     if (source === 'compatible') {
-        return { class: 'badge-compatible', text: 'Compatible' };
+        return { class: 'product-card__badge--compatible', text: 'COMPATIBLE' };
     }
     return null;
 }

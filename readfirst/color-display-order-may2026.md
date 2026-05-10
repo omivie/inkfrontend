@@ -1,9 +1,20 @@
 # Canonical Color Display Order — May 2026
 
-**Status:** active contract
+> **⚠ SUPERSEDED — 2026-05-10**
+>
+> The 8-tier model documented below has been replaced by the 22-position
+> rank table in **`readfirst/sort-hierarchy-may2026.md`**. The new contract
+> moves Photo Black, Matte Black, Light Cyan, Light Magenta, Photo Cyan,
+> and Photo Magenta out of the K / C / M tiers and into the specialty
+> range (4–17) so every single sorts before any pack. `tests/color-display-order.test.js`
+> has been updated to assert the new ranks; this doc is kept as historical
+> context for the override that motivated the spec.
+
+**Status:** historical / superseded
 **Layer:** storefront frontend (vanilla JS)
 **Spec date:** 2026-05-06
-**Pinned by:** `tests/color-display-order.test.js`
+**Superseded by:** `readfirst/sort-hierarchy-may2026.md`
+**Pinned by:** `tests/color-display-order.test.js` (now asserts the new contract)
 
 ---
 

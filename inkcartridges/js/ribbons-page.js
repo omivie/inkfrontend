@@ -502,10 +502,18 @@ const RibbonsPage = {
         const isFav = typeof Favourites !== 'undefined' && Favourites.isFavourite && Favourites.isFavourite(ribbonId);
         const productUrl = sku ? `/ribbon/${Security.escapeAttr(sku)}` : '#';
 
+        // category-page-contract-may2026.md §1 — every list-view card
+        // ships a top-left COMPATIBLE/GENUINE chip driven by source.
+        const sourceBadge = typeof getSourceBadge === 'function' ? getSourceBadge(ribbon.source) : null;
+        const sourceChipHTML = sourceBadge
+            ? `<div class="product-card__chip-stack"><span class="product-card__badge ${sourceBadge.class}">${sourceBadge.text}</span></div>`
+            : '';
+
         card.innerHTML = `
             <a href="${productUrl}" class="product-card__link">
                 <div class="product-card__image-wrapper">
                     ${imageContent}
+                    ${sourceChipHTML}
                 </div>
                 <div class="product-card__content">
                     <h3 class="product-card__title">${Security.escapeHtml(displayName)}</h3>
