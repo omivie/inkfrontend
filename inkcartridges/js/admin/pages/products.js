@@ -12,6 +12,13 @@ import { computeProfitability, marginBadge, markupBadge, formatProfitDollars } f
 const formatPrice = (v) => window.formatPrice ? window.formatPrice(v) : `$${Number(v).toFixed(2)}`;
 const MISSING = '\u2014';
 
+// Ribbon umbrella: the #source-filter dropdown surfaces a "Ribbon" option that
+// is conceptually a product_type, not a source. Legacy products carry source='ribbon'
+// (34 rows), but newer ribbons live under source='compatible'/'genuine' with
+// product_type IN these three values (116 rows total). Filtering by source='ribbon'
+// alone misses the 82 newer rows, so we expand the umbrella here.
+const RIBBON_PRODUCT_TYPES = ['printer_ribbon', 'typewriter_ribbon', 'correction_tape'];
+
 /** Open a large full-screen preview of a product image. */
 function openImageLightbox(url, alt = '') {
   if (!url) return;
@@ -355,9 +362,15 @@ async function loadProducts() {
   // Source and product_type are plain columns, so we handle them in Supabase to ensure
   // they combine correctly with the brand filter (the backend ignores brand when
   // source is set).
-  const needsBackend =
-    _sort === 'margin_pct' || _sort === 'markup_pct' || _sort === 'profit_ex_gst' ||
-    !!_imageFilter || !!_stockFilter;
+  //
+  // Special case: when _sourceFilter==='ribbon' we MUST use the Supabase path because
+  // "Ribbon" is a product_type umbrella that the backend's source=ribbon filter does
+  // not honor (it only matches the 34 legacy rows where source='ribbon', missing the
+  // ~82 newer ribbons that carry source='compatible'/'genuine'). We compensate by
+  // applying image/stock filters and margin sort on the Supabase result below.
+  const isMarginSort = _sort === 'margin_pct' || _sort === 'markup_pct' || _sort === 'profit_ex_gst';
+  const ribbonUmbrella = _sourceFilter === 'ribbon';
+  const needsBackend = !ribbonUmbrella && (isMarginSort || !!_imageFilter || !!_stockFilter);
   if (needsBackend) {
     const filters = { search: _search, sort: _sort, order: _sortDir };
     if (_brandFilter) filters.brand = _brandFilter;
@@ -393,18 +406,35 @@ async function loadProducts() {
       // Active filter
       if (_activeFilter !== '') query = query.eq('is_active', _activeFilter === 'true');
 
-      // Source filter (genuine / compatible / remanufactured / ribbon)
-      if (_sourceFilter) query = query.eq('source', _sourceFilter);
+      // Source filter (genuine / compatible / remanufactured / ribbon).
+      // "Ribbon" is a product_type umbrella, not a real source — see comment on
+      // RIBBON_PRODUCT_TYPES. An explicit _typeFilter (e.g. "Printer Ribbon")
+      // takes priority and narrows further.
+      if (_sourceFilter === 'ribbon') {
+        if (!_typeFilter) query = query.in('product_type', RIBBON_PRODUCT_TYPES);
+      } else if (_sourceFilter) {
+        query = query.eq('source', _sourceFilter);
+      }
 
       // Product type filter (ink_cartridge / toner_cartridge / etc.)
       if (_typeFilter) query = query.eq('product_type', _typeFilter);
 
-      // Sorting — map column keys to DB columns. Margin/markup/profit, image
-      // and stock filters are routed to the backend earlier (see needsBackend),
-      // so we don't handle them here.
+      // Image filter — only applied when we forced the ribbon umbrella through
+      // Supabase. Approximation: products.image_url IS NOT NULL. (Backend has
+      // a richer join-aware check; this covers the common case.)
+      if (ribbonUmbrella && _imageFilter === 'has-images') query = query.not('image_url', 'is', null);
+      else if (ribbonUmbrella && _imageFilter === 'no-images') query = query.is('image_url', null);
+
+      // Stock filter — products.stock_status is a direct column.
+      if (ribbonUmbrella && _stockFilter) query = query.eq('stock_status', _stockFilter);
+
+      // Sorting — map column keys to DB columns. Margin/markup/profit normally
+      // route to backend; for the ribbon umbrella path we sort client-side
+      // after the fetch (see below).
       const sortMap = { brand: 'brand_id' };
       const sortCol = sortMap[_sort] || _sort || 'name';
-      query = query.order(sortCol, { ascending: _sortDir !== 'desc' });
+      const dbSort = (ribbonUmbrella && isMarginSort) ? 'name' : sortCol;
+      query = query.order(dbSort, { ascending: _sortDir !== 'desc' });
 
       // Pagination
       const offset = (_page - 1) * LIMIT;
@@ -414,8 +444,23 @@ async function loadProducts() {
       if (!_table) return;
       if (error) throw error;
 
+      // Client-side margin/markup/profit sort for the ribbon umbrella path
+      // (we couldn't push it to Supabase because it's a computed value).
+      let sortedRows = rows || [];
+      if (ribbonUmbrella && isMarginSort) {
+        const dir = _sortDir === 'desc' ? -1 : 1;
+        sortedRows = [...sortedRows].sort((a, b) => {
+          const ap = computeProfitability(a);
+          const bp = computeProfitability(b);
+          const key = _sort === 'profit_ex_gst' ? 'profit_dollars' : (_sort === 'markup_pct' ? 'markup_pct' : 'margin_pct');
+          const av = ap?.[key] ?? -Infinity;
+          const bv = bp?.[key] ?? -Infinity;
+          return (av - bv) * dir;
+        });
+      }
+
       // Map brand names and resolve image URLs from joined brands table
-      const mapped = (rows || []).map(p => {
+      const mapped = sortedRows.map(p => {
         // Pick a thumbnail: prefer the legacy products.image_url, otherwise the
         // primary entry from product_images, otherwise the lowest sort_order.
         let thumbPath = p.image_url || null;
@@ -1319,12 +1364,26 @@ function formGroup(label, inputHtml, overrideField) {
 }
 
 function buildSelect(id, options, selected) {
+  // Preserve legacy values: if `selected` is not in `options`, append it as a
+  // ("legacy") option pre-selected. Without this, the browser silently auto-
+  // selects the first <option> when none matches, and Save then writes that
+  // wrong value back to the row — corrupting data on rows that hold legacy
+  // enums (e.g. source='ribbon' on the 34 carry-over ribbon products that
+  // pre-date the genuine|compatible enum lock-down). Mirrors buildColorSelect.
+  const current = (selected ?? '').toString();
+  const matchesCanonical = options.some(opt => {
+    const v = typeof opt === 'object' ? opt.value : opt;
+    return v.toLowerCase() === current.toLowerCase();
+  });
   let html = `<select class="admin-select" id="${id}">`;
   for (const opt of options) {
     const value = typeof opt === 'object' ? opt.value : opt;
     const label = typeof opt === 'object' ? opt.label : opt.charAt(0).toUpperCase() + opt.slice(1);
-    const sel = (selected || '').toLowerCase() === value.toLowerCase() ? ' selected' : '';
+    const sel = current.toLowerCase() === value.toLowerCase() ? ' selected' : '';
     html += `<option value="${esc(value)}"${sel}>${esc(label)}</option>`;
+  }
+  if (current && !matchesCanonical) {
+    html += `<option value="${esc(current)}" selected>${esc(current)} (legacy)</option>`;
   }
   html += '</select>';
   return html;
@@ -2211,8 +2270,15 @@ function getProductExportParams() {
   if (_activeFilter !== '') p.set('active', _activeFilter);
   if (_imageFilter === 'has-images') p.set('has_images', 'true');
   else if (_imageFilter === 'no-images') p.set('has_images', 'false');
-  if (_sourceFilter) p.set('source', _sourceFilter);
-  if (_typeFilter) p.set('product_type', _typeFilter);
+  // Ribbon umbrella: source='ribbon' is a product_type filter — see RIBBON_PRODUCT_TYPES.
+  // Translate so the export endpoint returns the same 116 rows the table shows.
+  if (_sourceFilter === 'ribbon') {
+    if (_typeFilter) p.set('product_type', _typeFilter);
+    else p.set('product_type', RIBBON_PRODUCT_TYPES.join(','));
+  } else {
+    if (_sourceFilter) p.set('source', _sourceFilter);
+    if (_typeFilter) p.set('product_type', _typeFilter);
+  }
   if (_stockFilter) p.set('stock_status', _stockFilter);
   if (_sort) p.set('sort', _sort);
   if (_sortDir) p.set('order', _sortDir);
