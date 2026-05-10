@@ -322,9 +322,19 @@ test('getShopData — code=02: missing compatibles are appended, dedup by id', a
     assert.deepEqual(ids, ['a', 'b', 'c']);
     assert.equal(resp.meta.total, 3, 'meta.total should reflect the merged count');
 
-    // Sanity: exactly two HTTP calls — primary + sidecar (SWR dedupes within a session).
+    // Sanity: exactly two HTTP calls — primary (/api/shop) + sidecar (/api/products).
+    // The sidecar moved to /api/products on 2026-05-11 because /api/shop drops
+    // every `pack_type=value_pack` row on the source=compatible filter — the
+    // KCMY/CMY compat packs (CPGI650KCMY, CCLI671KCMY, etc.) were silently
+    // hidden from chip drilldowns. /api/products keeps them.
     const shopCalls = calls.filter(c => /\/api\/shop\?/.test(c.url));
-    assert.equal(shopCalls.length, 2, `expected 2 /api/shop calls, got ${shopCalls.map(c => c.url).join(' | ')}`);
+    const productsCalls = calls.filter(c => /\/api\/products\?/.test(c.url));
+    assert.equal(shopCalls.length, 1, `expected 1 /api/shop primary call, got ${shopCalls.map(c => c.url).join(' | ')}`);
+    assert.equal(productsCalls.length, 1, `expected 1 /api/products sidecar call, got ${productsCalls.map(c => c.url).join(' | ')}`);
+    // Sidecar carries the brand+category+source=compatible filter for narrow dedupe.
+    assert.match(productsCalls[0].url, /brand=hp/);
+    assert.match(productsCalls[0].url, /category=ink/);
+    assert.match(productsCalls[0].url, /source=compatible/);
 });
 
 test('getShopData — code=564: existing genuines stay; compatibles are appended without duplication', async () => {
@@ -362,7 +372,9 @@ test('getShopData — source=genuine: sidecar fetch is skipped', async () => {
     });
     await API.getShopData({ brand: 'hp', category: 'ink', source: 'genuine' });
     const shopCalls = calls.filter(c => /\/api\/shop\?/.test(c.url));
+    const productsCalls = calls.filter(c => /\/api\/products\?/.test(c.url));
     assert.equal(shopCalls.length, 1, 'source=genuine must NOT trigger sidecar fetch');
+    assert.equal(productsCalls.length, 0, 'source=genuine must NOT fire the /api/products sidecar');
 });
 
 test('getShopData — no brand: sidecar fetch is skipped', async () => {
@@ -372,7 +384,9 @@ test('getShopData — no brand: sidecar fetch is skipped', async () => {
     });
     await API.getShopData({ category: 'ink' });
     const shopCalls = calls.filter(c => /\/api\/shop\?/.test(c.url));
+    const productsCalls = calls.filter(c => /\/api\/products\?/.test(c.url));
     assert.equal(shopCalls.length, 1);
+    assert.equal(productsCalls.length, 0);
 });
 
 test('getShopData — search param: sidecar fetch is skipped', async () => {
@@ -382,7 +396,9 @@ test('getShopData — search param: sidecar fetch is skipped', async () => {
     });
     await API.getShopData({ brand: 'hp', category: 'ink', search: '02' });
     const shopCalls = calls.filter(c => /\/api\/shop\?/.test(c.url));
+    const productsCalls = calls.filter(c => /\/api\/products\?/.test(c.url));
     assert.equal(shopCalls.length, 1, 'search= triggers a different code path; recovery off');
+    assert.equal(productsCalls.length, 0, 'search= must not fire the /api/products sidecar either');
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

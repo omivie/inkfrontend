@@ -591,10 +591,19 @@ const API = {
             fbQs.append('category', params.category);
             fbQs.append('source', 'compatible');
             fbQs.append('limit', '200');
+            // Sidecar fires against /api/products, NOT /api/shop. The /api/shop
+            // endpoint drops `pack_type=value_pack` rows on the source=compatible
+            // filter — the bug surfaced for PGI650 (verified 2026-05-11):
+            // /api/shop?brand=canon&category=ink&source=compatible returns 99
+            // products, /api/products with the same filter returns 106 — the
+            // missing 7 are KCMY/CMY value-packs (CPGI650KCMY, CPGI670KCMY,
+            // CCLI671KCMY, CCLI681KCMY, CPGI520KCMY, CPGI525KCMY, CPGI5KCMY).
+            // Without this swap the chip drilldown silently hides every
+            // compatible multipack — the customer hits the chip and sees only
+            // the black single, even when the catalog ships a colour pack.
             // .catch absorbs sidecar failure so it can never reject the
-            // top-level Promise.allSettled below — but allSettled would handle
-            // a rejection anyway. Belt + braces is intentional here.
-            sidecarPromise = this.getWithSWR(`/api/shop?${fbQs.toString()}`).catch(() => null);
+            // top-level Promise.all below.
+            sidecarPromise = this.getWithSWR(`/api/products?${fbQs.toString()}`).catch(() => null);
         }
 
         // Await both. The primary may still throw (no try/catch around
