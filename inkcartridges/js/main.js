@@ -22,6 +22,7 @@
 
 document.addEventListener('DOMContentLoaded', function() {
     initNavigation();
+    initActiveNavLink();
     initSearch();
     initCurrentYear();
     initDropdowns();
@@ -29,6 +30,39 @@ document.addEventListener('DOMContentLoaded', function() {
     initCartBadgeFromStorage();
     captureGclid();
 });
+
+/**
+ * Light up the nav item that matches the current URL.
+ *
+ * Each `.nav-menu__link` declares the path prefixes it owns via
+ * `data-nav-match` (comma-separated, with "/" matching the home page only).
+ * The longest matching prefix wins, so `/products/...` activates Shop rather
+ * than the generic `/` home rule. This lives in JS so every page can ship
+ * the same byte-identical navbar markup (see project_navbar_parity_may2026).
+ */
+function initActiveNavLink() {
+    const links = document.querySelectorAll('.primary-nav [data-nav-match]');
+    if (!links.length) return;
+    const path = (window.location.pathname || '/').replace(/\/+$/, '') || '/';
+
+    let best = null;
+    let bestLen = -1;
+    links.forEach(function(link) {
+        const patterns = (link.getAttribute('data-nav-match') || '').split(',');
+        patterns.forEach(function(raw) {
+            const pat = raw.trim();
+            if (!pat) return;
+            const matches = (pat === '/')
+                ? path === '/'
+                : (path === pat || path.startsWith(pat + '/'));
+            if (matches && pat.length > bestLen) {
+                best = link;
+                bestLen = pat.length;
+            }
+        });
+    });
+    if (best) best.classList.add('nav-menu__link--active');
+}
 
 /**
  * Capture Google Ads click ID (gclid) from URL and store in localStorage.

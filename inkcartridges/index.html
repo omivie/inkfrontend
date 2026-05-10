@@ -179,8 +179,8 @@
 
                 <div class="logo-block">
                     <a href="/" class="logo" aria-label="InkCartridges.co.nz Home">
-                                <span class="logo__text">Ink<span>Cartridges</span>.co.nz</span>
-                            </a>
+                        <span class="logo__text">Ink<span>Cartridges</span>.co.nz</span>
+                    </a>
                     <a href="/" class="logo__tagline">Get the full picture on image quality</a>
                 </div>
 
@@ -217,47 +217,31 @@
 
                 <ul id="nav-menu" class="nav-menu">
                     <li class="nav-menu__item">
-                        <a href="/" class="nav-menu__link nav-menu__link--active">Home</a>
+                        <a href="/" class="nav-menu__link" data-nav-match="/">Home</a>
                     </li>
                     <li class="nav-menu__item">
-                        <a href="/shop" class="nav-menu__link">Shop</a>
+                        <a href="/shop" class="nav-menu__link" data-nav-match="/shop,/search,/product,/products">Shop</a>
                     </li>
                     <li class="nav-menu__item">
                         <a href="/?scroll=ink-finder" class="nav-menu__link">Printer Models</a>
                     </li>
                     <li class="nav-menu__item nav-menu__item--mega">
-                        <button class="nav-menu__link nav-mega-toggle"
-                                type="button"
-                                aria-haspopup="true"
-                                aria-expanded="false"
-                                aria-controls="brands-mega">
+                        <button class="nav-menu__link nav-mega-toggle" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="brands-mega">
                             Cartridge Brands
                             <svg class="nav-menu__arrow" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
                         </button>
                     </li>
                     <li class="nav-menu__item nav-menu__item--mega">
-                        <button class="nav-menu__link nav-ribbons-toggle"
-                                type="button"
-                                aria-haspopup="true"
-                                aria-expanded="false"
-                                aria-controls="ribbons-mega">
+                        <button class="nav-menu__link nav-ribbons-toggle" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="ribbons-mega" data-nav-match="/ribbons">
                             Typewriter and Printer Ribbons
                             <svg class="nav-menu__arrow" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
                         </button>
                     </li>
                 </ul>
 
-                <form class="search-form search-form--nav" action="/shop" method="GET" role="search">
+                <form class="search-form search-form--nav" id="site-search-form" action="/shop" method="GET" role="search">
                     <label for="search-input" class="visually-hidden">Search for products</label>
-                    <input
-                        type="search"
-                        id="search-input"
-                        name="q"
-                        class="search-form__input"
-                        placeholder="Search..."
-                        autocomplete="off"
-                        maxlength="200"
-                    >
+                    <input type="search" id="search-input" name="q" class="search-form__input" placeholder="Search..." autocomplete="off" maxlength="200">
                     <button type="submit" class="search-form__button" aria-label="Search">
                         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
                     </button>
@@ -580,7 +564,7 @@
     <script defer src="/js/auth.js?v=42a58e72"></script>
     <script defer src="/js/products.js?v=28bbbea5"></script>
     <script defer src="/js/search.js?v=085298ce"></script>
-    <script defer src="/js/main.js?v=12e32cfd"></script>
+    <script defer src="/js/main.js?v=navbar-parity-may2026"></script>
     <script defer src="/js/footer.js?v=retail-may2026"></script>
     <script defer src="/js/mega-nav.js?v=2d5bc155"></script>
     <script defer src="/js/landing.js?v=98f7fd41"></script>

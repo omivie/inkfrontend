@@ -373,6 +373,10 @@ test('search-normalize.js — slimmed to ≤120 lines (was 481 before audit)', (
 
 test('main.js — slimmed (initBasicAutocomplete deletion takes ~210 lines)', () => {
     const lines = MAIN_JS.split('\n').length;
-    assert.ok(lines <= 520,
-        `main.js is ${lines} lines; expected ≤520 after deleting initBasicAutocomplete.`);
+    // 520 floor was set after the May 2026 search-thin-frontend audit; the
+    // navbar-parity rollout (May 2026) added initActiveNavLink (~33 lines)
+    // so the new ceiling is 555. If main.js grows past this, audit before
+    // bumping — the spirit of this test is "don't re-grow what we deleted".
+    assert.ok(lines <= 555,
+        `main.js is ${lines} lines; expected ≤555. If you've added a load-bearing feature, document it; if you've re-introduced deleted search logic, see readfirst/SEARCH_AUDIT.md.`);
 });

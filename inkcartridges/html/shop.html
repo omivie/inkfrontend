@@ -31,7 +31,7 @@
     <link rel="stylesheet" href="/css/layout.css?v=2c8b28f0">
     <link rel="stylesheet" href="/css/components.css?v=category-chips-may2026">
     <link rel="stylesheet" href="/css/modern-effects.css?v=ade3173d">
-    <link rel="stylesheet" href="/css/pages.css?v=white-cards-may2026">
+    <link rel="stylesheet" href="/css/pages.css?v=shipping-inline-may2026">
     <link rel="stylesheet" href="/css/search.css?v=white-cards-may2026">
 
     <script type="application/ld+json" id="shop-schema">
@@ -70,8 +70,8 @@
 
                 <div class="logo-block">
                     <a href="/" class="logo" aria-label="InkCartridges.co.nz Home">
-                                <span class="logo__text">Ink<span>Cartridges</span>.co.nz</span>
-                            </a>
+                        <span class="logo__text">Ink<span>Cartridges</span>.co.nz</span>
+                    </a>
                     <a href="/" class="logo__tagline">Get the full picture on image quality</a>
                 </div>
 
@@ -108,55 +108,35 @@
 
                 <ul id="nav-menu" class="nav-menu">
                     <li class="nav-menu__item">
-                        <a href="/" class="nav-menu__link">Home</a>
+                        <a href="/" class="nav-menu__link" data-nav-match="/">Home</a>
                     </li>
                     <li class="nav-menu__item">
-                        <a href="/shop" class="nav-menu__link nav-menu__link--active">Shop</a>
+                        <a href="/shop" class="nav-menu__link" data-nav-match="/shop,/search,/product,/products">Shop</a>
                     </li>
                     <li class="nav-menu__item">
                         <a href="/?scroll=ink-finder" class="nav-menu__link">Printer Models</a>
                     </li>
                     <li class="nav-menu__item nav-menu__item--mega">
-                        <button class="nav-menu__link nav-mega-toggle" type="button"
-                                aria-haspopup="true" aria-expanded="false" aria-controls="brands-mega">
+                        <button class="nav-menu__link nav-mega-toggle" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="brands-mega">
                             Cartridge Brands
                             <svg class="nav-menu__arrow" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
                         </button>
                     </li>
                     <li class="nav-menu__item nav-menu__item--mega">
-                        <button class="nav-menu__link nav-ribbons-toggle"
-                                type="button"
-                                aria-haspopup="true"
-                                aria-expanded="false"
-                                aria-controls="ribbons-mega">
+                        <button class="nav-menu__link nav-ribbons-toggle" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="ribbons-mega" data-nav-match="/ribbons">
                             Typewriter and Printer Ribbons
                             <svg class="nav-menu__arrow" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
                         </button>
                     </li>
                 </ul>
 
-                <div class="search-wrapper">
-                    <form class="search-form search-form--nav" id="shop-search-form" action="/shop" method="GET" role="search">
-                        <label for="search-input" class="visually-hidden">Search for products</label>
-                        <input
-                            type="search"
-                            id="search-input"
-                            name="q"
-                            class="search-form__input"
-                            placeholder="Search..."
-                            autocomplete="off"
-                            maxlength="200"
-                        >
-                        <input type="hidden" id="search-preserve-brand" name="brand" value="" disabled>
-                        <input type="hidden" id="search-preserve-type" name="type" value="" disabled>
-                        <button type="submit" class="search-form__button" aria-label="Search">
-                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-                        </button>
-                    </form>
-                    <div class="search-results" id="search-results" hidden>
-                        <ul class="search-results__list" id="search-results-list"></ul>
-                    </div>
-                </div>
+                <form class="search-form search-form--nav" id="site-search-form" action="/shop" method="GET" role="search">
+                    <label for="search-input" class="visually-hidden">Search for products</label>
+                    <input type="search" id="search-input" name="q" class="search-form__input" placeholder="Search..." autocomplete="off" maxlength="200">
+                    <button type="submit" class="search-form__button" aria-label="Search">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                    </button>
+                </form>
             </div>
         </nav>
 
@@ -196,19 +176,20 @@
                         </nav>
                         <span class="drilldown-header__product-type" id="product-type-label" hidden></span>
                     </div>
-                    <div class="drilldown-header__right" id="yield-banner" hidden>
-                        <strong>Page Yield:</strong>
-                        <span id="yield-value"></span>
+                    <div class="drilldown-header__right-group">
+                        <div class="drilldown-header__right" id="yield-banner" hidden>
+                            <strong>Page Yield:</strong>
+                            <span id="yield-value"></span>
+                        </div>
+                        <div class="shipping-info-bar shipping-info-bar--inline" data-shipping-info-bar>
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="1" y="3" width="15" height="13"/><polygon points="16 8 20 8 23 11 23 16 16 16 16 8"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/></svg>
+                            Free shipping on orders over $100 &nbsp;&bull;&nbsp; Fast NZ-wide delivery
+                        </div>
                     </div>
                 </div>
 
 
                 <h1 class="drilldown-title" id="drilldown-title">Shop Ink Cartridges &amp; Toner NZ</h1>
-
-                <div class="shipping-info-bar">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="1" y="3" width="15" height="13"/><polygon points="16 8 20 8 23 11 23 16 16 16 16 8"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/></svg>
-                    Free shipping on orders over $100 &nbsp;&bull;&nbsp; Fast NZ-wide delivery
-                </div>
 
                 <section class="drilldown-content">
                     <div class="drilldown-level" id="level-brands">
@@ -359,7 +340,7 @@
         </section>
     </main>
 
-    <script defer src="/js/shop-page.js?v=bfcache0510"></script>
+    <script defer src="/js/shop-page.js?v=navbar-parity-may2026"></script>
 
     <footer class="site-footer"><noscript><p>InkCartridges.co.nz &mdash; Phone: <a href="tel:0274740115">027 474 0115</a> &mdash; Email: inkandtoner@windowslive.com &mdash; 37A Archibald Road, Kelston, Auckland 0602, NZ</p></noscript></footer>
 
@@ -375,7 +356,7 @@
     <script defer src="/js/products.js?v=28bbbea5"></script>
     <script defer src="/js/search-normalize.js?v=bc97ebe6"></script>
     <script defer src="/js/search.js?v=085298ce"></script>
-    <script defer src="/js/main.js?v=12e32cfd"></script>
+    <script defer src="/js/main.js?v=navbar-parity-may2026"></script>
     <script defer src="/js/footer.js?v=retail-may2026"></script>
     <script defer src="/js/mega-nav.js?v=2d5bc155"></script>
     <script defer src="/js/modern-effects.js?v=ad8bff1e"></script>

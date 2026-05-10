@@ -242,25 +242,31 @@
             });
         },
 
-        // Set up search form to preserve filters when searching
+        // Reuses the site-wide nav search form. Hidden brand/type inputs are
+        // injected at submit time so the navbar markup stays byte-identical
+        // across every page (see project_navbar_parity_may2026).
         setupSearchForm() {
-            const searchForm = document.getElementById('shop-search-form');
+            const searchForm = document.getElementById('site-search-form');
             if (!searchForm) return;
 
-            const brandField = document.getElementById('search-preserve-brand');
-            const typeField = document.getElementById('search-preserve-type');
+            const upsertHidden = (name, value) => {
+                let field = searchForm.querySelector(`input[type="hidden"][name="${name}"]`);
+                if (value == null || value === '') {
+                    if (field) field.remove();
+                    return;
+                }
+                if (!field) {
+                    field = document.createElement('input');
+                    field.type = 'hidden';
+                    field.name = name;
+                    searchForm.appendChild(field);
+                }
+                field.value = value;
+            };
 
-            searchForm.addEventListener('submit', (e) => {
-                // Enable and populate hidden fields with current filter state
-                if (this.state.brand && brandField) {
-                    brandField.value = this.state.brand;
-                    brandField.disabled = false;
-                }
-                if (this.state.type && typeField) {
-                    typeField.value = this.state.type;
-                    typeField.disabled = false;
-                }
-                // Form will submit naturally with preserved filters
+            searchForm.addEventListener('submit', () => {
+                upsertHidden('brand', this.state.brand);
+                upsertHidden('type', this.state.type);
             });
         },
 
