@@ -769,3 +769,129 @@ mark.smart-ac__mark {
         padding: 8px;
     }
 }
+
+
+/* ==========================================================================
+   SEARCH RESULTS PAGINATION
+   Renders beneath compatible+genuine grids on /search?q=... when the result
+   set exceeds one page (backend caps `limit` at 100). Markup built in
+   shop-page.js renderSearchPagination.
+   ========================================================================== */
+
+.search-pagination {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 12px;
+    margin: 32px 0 8px;
+    padding: 24px 16px 8px;
+    border-top: 1px solid var(--color-border-light, #e5e7eb);
+}
+
+.search-pagination .pagination__info {
+    margin: 0;
+    font-size: 14px;
+    color: var(--text-secondary, #475569);
+    text-align: center;
+}
+
+.search-pagination .pagination__controls {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+}
+
+.search-pagination .pagination__btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    min-width: 40px;
+    height: 40px;
+    padding: 0 12px;
+    font-family: inherit;
+    font-size: 14px;
+    font-weight: 600;
+    line-height: 1;
+    color: var(--color-text, #0f172a);
+    background: #fff;
+    border: 1px solid var(--color-border, #d1d5db);
+    border-radius: 8px;
+    cursor: pointer;
+    transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease, transform 0.05s ease;
+    -webkit-appearance: none;
+    appearance: none;
+}
+
+.search-pagination .pagination__btn:hover:not(:disabled) {
+    background: var(--color-background-alt, #f3f4f6);
+    border-color: var(--color-border-dark, #9ca3af);
+}
+
+.search-pagination .pagination__btn:active:not(:disabled) {
+    transform: translateY(1px);
+}
+
+.search-pagination .pagination__btn:focus-visible {
+    outline: 2px solid var(--cyan-primary, #2563eb);
+    outline-offset: 2px;
+}
+
+.search-pagination .pagination__btn.active,
+.search-pagination .pagination__btn[aria-current="page"] {
+    background: var(--cyan-primary, #2563eb);
+    border-color: var(--cyan-primary, #2563eb);
+    color: #fff;
+    cursor: default;
+}
+
+.search-pagination .pagination__btn.active:hover,
+.search-pagination .pagination__btn[aria-current="page"]:hover {
+    background: var(--cyan-primary, #2563eb);
+    border-color: var(--cyan-primary, #2563eb);
+}
+
+.search-pagination .pagination__btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+.search-pagination .pagination__btn--prev svg,
+.search-pagination .pagination__btn--next svg {
+    flex: 0 0 auto;
+    width: 16px;
+    height: 16px;
+}
+
+.search-pagination .pagination__ellipsis {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 28px;
+    height: 40px;
+    color: var(--text-secondary, #6b7280);
+    user-select: none;
+}
+
+@media (max-width: 640px) {
+    .search-pagination {
+        gap: 10px;
+        padding-top: 20px;
+    }
+
+    .search-pagination .pagination__btn {
+        min-width: 36px;
+        height: 36px;
+        padding: 0 10px;
+        font-size: 13px;
+    }
+
+    /* Hide the verbose Prev/Next labels on narrow viewports — the chevron
+       icons carry the meaning, freeing space for page numbers. */
+    .search-pagination .pagination__btn--prev span,
+    .search-pagination .pagination__btn--next span {
+        display: none;
+    }
+}

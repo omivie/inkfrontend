@@ -10,7 +10,8 @@
             code: null,
             printer: null,      // For printer-based product lookup
             printerName: null,  // Display name for the printer
-            type: null          // 'genuine' or 'compatible' filter
+            type: null,         // 'genuine' or 'compatible' filter
+            page: 1             // Pagination — only meaningful on search-results level
         },
 
         // Navigation version to prevent race conditions
@@ -286,7 +287,8 @@
                 printerModel: null,
                 printerModelDisplay: null,
                 search: null,
-                type: null
+                type: null,
+                page: 1
             };
 
             // Clear URL
@@ -305,6 +307,7 @@
                     break;
                 case 'search':
                     this.state.search = null;
+                    this.state.page = 1;
                     // If we were in search-results, go back to brands or current nav level
                     if (this.state.level === 'search-results') {
                         if (this.state.code) {
@@ -390,7 +393,10 @@
             const params = new URLSearchParams(window.location.search);
             this.state.brand = params.get('brand');
             this.state.category = params.get('category');
-            this.state.code = params.get('code');
+            const _rawCode = params.get('code');
+            this.state.code = (typeof window !== 'undefined' && window.SeriesCodes && _rawCode)
+                ? window.SeriesCodes.collapseYieldSuffix(_rawCode)
+                : _rawCode;
             // Canonical printer query param is `printer_slug` per
             // docs: search-dropdown-routing.md (May 2026). The legacy
             // `printer` form is still accepted to keep bookmarks, cached
@@ -402,6 +408,10 @@
             this.state.printerBrand = params.get('printer_brand'); // Brand of printer (for display, not filtering)
             this.state.search = params.get('search') || params.get('q'); // Support both 'search' and 'q' params
             this.state.type = params.get('type'); // Support 'type' param for genuine/compatible filtering
+            // Pagination — `page` only applies on the search-results level, but
+            // we parse it unconditionally so popstate restores the right page.
+            const rawPage = parseInt(params.get('page'), 10);
+            this.state.page = (Number.isInteger(rawPage) && rawPage > 0) ? rawPage : 1;
 
             // Ribbons category → redirect to dedicated ribbons page
             if (this.state.category === 'ribbons' && this.state.brand) {
@@ -438,6 +448,12 @@
             if (this.state.code) params.set('code', this.state.code);
             if (this.state.type) params.set('type', this.state.type);
             if (this.state.search) params.set('q', this.state.search);
+            // `page` is meaningful only on search-results and only beyond p1;
+            // omitting it on p1 keeps the canonical URL clean and the browser
+            // history short.
+            if (this.state.search && this.state.level === 'search-results' && this.state.page > 1) {
+                params.set('page', String(this.state.page));
+            }
 
             const newURL = params.toString()
                 ? `${window.location.pathname}?${params.toString()}`
@@ -919,7 +935,7 @@
                 // v5 (legacy): /api/shop endpoint for server-side series extraction.
                 const typeKey = this.state.type || 'all';
                 const categoryId = this.state.category;
-                const cacheKey = `${this.state.brand}-${categoryId}-${typeKey}-codes-v6`;
+                const cacheKey = `${this.state.brand}-${categoryId}-${typeKey}-codes-v7`;
                 const codesCacheKey = `${cacheKey}-final`;
 
                 // Check if we have cached codes with counts already
@@ -1063,6 +1079,17 @@
 
                     if (navVersion !== undefined && this.navigationVersion !== navVersion) return;
                     codes = this.extractProductCodes(allProducts);
+                }
+
+                // Collapse XL/XXL/XXXL yield variants into their base chip so
+                // the customer sees one tile per series (200/200XL → 200,
+                // 604/604XL → 604, T312/T312XL → T312). Each consolidated
+                // chip carries `aliases` so loadProducts can fan out to
+                // /api/shop?code=<alias> for every yield level — backend
+                // filters strictly on series_codes contains, so a "604" chip
+                // alone misses 604XL genuines.
+                if (typeof window !== 'undefined' && window.SeriesCodes) {
+                    codes = window.SeriesCodes.collapseChipList(codes);
                 }
 
                 // Cache the final codes with counts
@@ -1714,6 +1741,22 @@
             });
         },
 
+        // Lookup the raw yield aliases (e.g. ['604', '604XL']) that collapsed
+        // into the given consolidated chip code. Returns null when no chip
+        // cache is populated yet — caller falls back to a single-code request.
+        _codeAliasesFor(collapsedCode) {
+            if (!collapsedCode) return null;
+            const target = String(collapsedCode).trim().toUpperCase();
+            const categoryId = this.state.category;
+            const typeKey = this.state.type || 'all';
+            const cacheKey = `${this.state.brand}-${categoryId}-${typeKey}-codes-v7-final`;
+            const cached = this.cache.products[cacheKey];
+            if (!Array.isArray(cached)) return null;
+            const entry = cached.find(c => c && c.code && String(c.code).toUpperCase() === target);
+            if (!entry || !Array.isArray(entry.aliases) || entry.aliases.length === 0) return null;
+            return entry.aliases.slice();
+        },
+
         async loadProducts(navVersion) {
             this.showLoading(true);
 
@@ -1729,12 +1772,13 @@
 
                 if (mergedProducts.length === 0) {
                     // Try the codes cache, newest first
-                    // (v6 May 2026, v5 /api/shop legacy, v4 client-side legacy).
+                    // (v7 May 2026 yield-collapse, v6 specialty collapse, v5 /api/shop legacy, v4 client-side legacy).
+                    const codesCacheKey7 = `${this.state.brand}-${categoryId}-${typeKey}-codes-v7-final`;
                     const codesCacheKey6 = `${this.state.brand}-${categoryId}-${typeKey}-codes-v6-final`;
                     const codesCacheKey5 = `${this.state.brand}-${categoryId}-${typeKey}-codes-v5-final`;
                     const codesCacheKey4 = `${this.state.brand}-${categoryId}-${typeKey}-codes-v4-final`;
 
-                    for (const cacheKey of [codesCacheKey6, codesCacheKey5, codesCacheKey4]) {
+                    for (const cacheKey of [codesCacheKey7, codesCacheKey6, codesCacheKey5, codesCacheKey4]) {
                         if (this.cache.products[cacheKey]) {
                             const codeEntry = this.cache.products[cacheKey].find(c => c.code === code);
                             if (codeEntry?.products) {
@@ -1745,21 +1789,42 @@
                     }
                 }
 
-                // If still no products, fetch via /api/shop or legacy
+                // If still no products, fetch via /api/shop or legacy.
+                //
+                // Yield-variant fan-out: a chip's `aliases` list contains
+                // every raw code that collapsed into it (e.g. chip "604"
+                // → aliases ['604', '604XL']). The /api/shop?code=X filter
+                // is strict — series_codes must contain X exactly — so to
+                // populate the consolidated tile we issue one request per
+                // alias in parallel. Falls back to a single request with
+                // the bare collapsed code when the chip cache hasn't been
+                // populated yet (deep-link / hard refresh path).
                 if (mergedProducts.length === 0) {
                     if (this._shopEndpointAvailable) {
                         const loadCategoryConfig = this.categories.find(c => c.id === this.state.category);
                         const loadApiCategory = loadCategoryConfig?.apiCategory || this.state.category;
-                        const response = await API.getShopData({
-                            brand: this.state.brand,
-                            category: loadApiCategory,
-                            code: code,
-                            limit: 200
-                        });
+
+                        const aliases = this._codeAliasesFor(code) || [code];
+                        const responses = await Promise.all(aliases.map(alias =>
+                            API.getShopData({
+                                brand: this.state.brand,
+                                category: loadApiCategory,
+                                code: alias,
+                                limit: 200
+                            }).catch(() => null)
+                        ));
                         if (navVersion !== undefined && this.navigationVersion !== navVersion) return;
 
-                        if (response.ok && response.data?.products) {
-                            mergedProducts = response.data.products;
+                        const seenIds = new Set();
+                        for (const response of responses) {
+                            if (response && response.ok && response.data?.products) {
+                                for (const p of response.data.products) {
+                                    const key = (p && (p.id || p.sku)) || null;
+                                    if (key == null || seenIds.has(key)) continue;
+                                    seenIds.add(key);
+                                    mergedProducts.push(p);
+                                }
+                            }
                         }
                     }
 
@@ -1769,10 +1834,11 @@
                         this.elements.levelCodes.hidden = true;
                         if (navVersion !== undefined && this.navigationVersion !== navVersion) return;
 
+                        const codesCacheKey7 = `${this.state.brand}-${categoryId}-${typeKey}-codes-v7-final`;
                         const codesCacheKey6 = `${this.state.brand}-${categoryId}-${typeKey}-codes-v6-final`;
                         const codesCacheKey5 = `${this.state.brand}-${categoryId}-${typeKey}-codes-v5-final`;
                         const codesCacheKey4 = `${this.state.brand}-${categoryId}-${typeKey}-codes-v4-final`;
-                        for (const cacheKey of [codesCacheKey6, codesCacheKey5, codesCacheKey4]) {
+                        for (const cacheKey of [codesCacheKey7, codesCacheKey6, codesCacheKey5, codesCacheKey4]) {
                             if (this.cache.products[cacheKey]) {
                                 const codeEntry = this.cache.products[cacheKey].find(c => c.code === code);
                                 if (codeEntry?.products) {
@@ -2313,6 +2379,14 @@
 
             try {
                 const searchQuery = this.state.search;
+                // Page-based pagination — backend caps `limit` at 100 on every
+                // search endpoint, so to surface the full result set ("compat"
+                // returns 600+ rows) the frontend has to walk pages. We always
+                // request `limit: 100` and pass `state.page` straight through;
+                // the page number arrives via the URL and is wired through
+                // parseURLState/updateURL so the back button works.
+                const SEARCH_PAGE_SIZE = 100;
+                const requestedPage = Math.max(1, parseInt(this.state.page, 10) || 1);
 
                 // ─────────────────────────────────────────────────────────────
                 // Branch decision: which API path do we take?
@@ -2347,12 +2421,18 @@
                 // Smart-search envelope (matched_printer / did_you_mean / corrected_from /
                 // facets / pagination / intent / recovery). Populated only on the free-text path.
                 let smartData = null;
+                // Pagination envelope normalised to the smart-search shape
+                // ({ total, page, limit, total_pages, has_next, has_prev })
+                // regardless of which branch produced it. Null when the branch
+                // gave no usable pagination metadata; the pager hides itself.
+                let pagination = null;
 
                 if (typeDetect) {
                     // Type-aware fetch: getProducts + (if ribbons) getRibbons in parallel.
                     isTypeQuery = true;
-                    const promises = [API.getProducts({ ...typeDetect.productParams, limit: 200 })];
+                    const promises = [API.getProducts({ ...typeDetect.productParams, limit: SEARCH_PAGE_SIZE, page: requestedPage })];
                     if (typeDetect.fetchRibbons) {
+                        // Ribbons table is small — fetch all in one shot.
                         promises.push(API.getRibbons({ limit: 200 }));
                     }
                     const results = await Promise.allSettled(promises);
@@ -2360,9 +2440,21 @@
                     if (navVersion !== undefined && this.navigationVersion !== navVersion) return;
 
                     if (results[0].status === 'fulfilled' && results[0].value.ok && results[0].value.data) {
-                        const data = results[0].value.data;
+                        const value = results[0].value;
+                        const data = value.data;
                         const prods = data.products || data || [];
                         if (Array.isArray(prods)) products = prods;
+                        // /api/products returns pagination on `meta`, not on data.
+                        if (value.meta && value.meta.total_pages != null) {
+                            pagination = {
+                                total: value.meta.total,
+                                page: value.meta.page,
+                                limit: value.meta.limit,
+                                total_pages: value.meta.total_pages,
+                                has_next: !!value.meta.has_next,
+                                has_prev: !!value.meta.has_prev,
+                            };
+                        }
                     }
 
                     if (typeDetect.fetchRibbons && results[1] && results[1].status === 'fulfilled'
@@ -2396,21 +2488,35 @@
                     }
                 } else if (sourceKeyword) {
                     // genuine / compatible single-word: filter by source instead of text search.
-                    const response = await API.getProducts({ source: sourceKeyword, limit: 200 });
+                    const response = await API.getProducts({ source: sourceKeyword, limit: SEARCH_PAGE_SIZE, page: requestedPage });
                     if (navVersion !== undefined && this.navigationVersion !== navVersion) return;
                     products = (response.ok && response.data?.products) ? response.data.products : [];
+                    if (response.ok && response.meta && response.meta.total_pages != null) {
+                        pagination = {
+                            total: response.meta.total,
+                            page: response.meta.page,
+                            limit: response.meta.limit,
+                            total_pages: response.meta.total_pages,
+                            has_next: !!response.meta.has_next,
+                            has_prev: !!response.meta.has_prev,
+                        };
+                    }
                 } else {
                     // Free-text search path. The backend's /smart endpoint handles
                     // separator normalization, synonyms, model-number splitting,
                     // did-you-mean rerun, printer-compat expansion, and pack-first
                     // ordering — frontend just renders what comes back.
                     const response = await API.smartSearch(searchQuery, {
-                        limit: 100,
+                        limit: SEARCH_PAGE_SIZE,
+                        page: requestedPage,
                         include: 'compat,description'
                     });
                     if (navVersion !== undefined && this.navigationVersion !== navVersion) return;
                     smartData = (response && response.ok) ? (response.data || null) : null;
                     products = (smartData && Array.isArray(smartData.products)) ? smartData.products : [];
+                    if (smartData && smartData.pagination && smartData.pagination.total_pages != null) {
+                        pagination = smartData.pagination;
+                    }
 
                     // When backend ships data.intent, prefer it over the local shim.
                     // (We refire if intent says ribbon-shape but /smart didn't
@@ -2462,19 +2568,58 @@
                         await this.loadPrinterProducts(navVersion);
                         return;
                     }
-                    // /smart can miss on short / numeric-only queries (e.g. "664")
-                    // even when /products?search= and /suggest find matches —
+                    // /smart can miss on short / numeric-only queries (e.g. "664",
+                    // "650") even when /products?search= and /suggest find matches —
                     // backend's smart pipeline rejects them as too ambiguous and
-                    // sometimes attaches a misleading did_you_mean. Fall back to
-                    // the plain product-search endpoint so the results page
-                    // matches what the dropdown shows.
-                    if (products.length === 0 && !smartData?.matched_printer) {
-                        const fallback = await API.getProducts({ search: searchQuery, limit: 100 });
+                    // sometimes attaches a misleading did_you_mean. The fallback
+                    // fires in two scenarios:
+                    //
+                    //   1. Hard miss — smart returned no products at all.
+                    //   2. Soft miss — query looks like a cartridge code (contains
+                    //      digits) AND smart returned a small set with no
+                    //      matched_printer. Empirically: searching "650" makes smart
+                    //      return only the 15 cartridges with "(650 pages)" in
+                    //      their copy — Epson 273XL, 302, 410, HP 937E — and zero
+                    //      Canon PGI650 results. /api/products?search=650 ships 50
+                    //      including PGI650/PGI650XL because it does substring
+                    //      matching on name+sku. We swap to that path so customers
+                    //      typing a series number land on the cartridges they
+                    //      mean, not on a wall of unrelated yield-page hits.
+                    const queryHasDigits = /\d/.test(String(searchQuery || ''));
+                    const smartCount = products.length;
+                    const SOFT_MISS_THRESHOLD = 50;
+                    const softMiss = queryHasDigits
+                        && smartCount > 0
+                        && smartCount < SOFT_MISS_THRESHOLD
+                        && !smartData?.matched_printer
+                        && !smartData?.did_you_mean;
+                    const hardMiss = products.length === 0 && !smartData?.matched_printer;
+                    if (hardMiss || softMiss) {
+                        const fallback = await API.getProducts({ search: searchQuery, limit: SEARCH_PAGE_SIZE, page: requestedPage });
                         if (navVersion !== undefined && this.navigationVersion !== navVersion) return;
                         const fallbackProducts = (fallback?.ok && fallback.data?.products) ? fallback.data.products : [];
-                        if (fallbackProducts.length > 0) {
+                        // For hard miss: take whatever fallback gives us.
+                        // For soft miss: only take fallback if it strictly beats
+                        // smart's count (otherwise the swap costs us smart's
+                        // ranking with no benefit).
+                        const shouldUseFallback = hardMiss
+                            ? fallbackProducts.length > 0
+                            : fallbackProducts.length > smartCount;
+                        if (shouldUseFallback) {
                             products = fallbackProducts;
                             smartData = null;
+                            if (fallback.meta && fallback.meta.total_pages != null) {
+                                pagination = {
+                                    total: fallback.meta.total,
+                                    page: fallback.meta.page,
+                                    limit: fallback.meta.limit,
+                                    total_pages: fallback.meta.total_pages,
+                                    has_next: !!fallback.meta.has_next,
+                                    has_prev: !!fallback.meta.has_prev,
+                                };
+                            } else {
+                                pagination = null;
+                            }
                         }
                     }
                 }
@@ -2516,7 +2661,17 @@
                         //   const intentBrand = smartData?.intent?.matched_brand_slug;
                         // and drop the first-product fallback.
                         const intentBrand = smartData?.intent?.matched_brand_slug;
-                        const firstBrandSlug = products[0]?.brand?.slug;
+                        // The "first product's brand" fallback only makes sense
+                        // when smart's relevance ranking is trustworthy. When
+                        // the soft-miss swap fired (smartData is null because
+                        // we replaced smart's results with /api/products
+                        // substring matches), product order is unranked — so
+                        // the first product is just whichever row the database
+                        // returned first. Treating that as a brand signal
+                        // narrowed `q=650` to Epson and dropped Canon PGI650
+                        // entirely. We now only apply the first-product
+                        // fallback when smartData is non-null.
+                        const firstBrandSlug = smartData ? products[0]?.brand?.slug : null;
                         const candidate = intentBrand || (firstBrandSlug && this.brandInfo[firstBrandSlug] ? firstBrandSlug : null);
                         if (candidate && this.brandInfo[candidate]) {
                             const targetSlug = candidate;
@@ -2574,11 +2729,14 @@
                     this.renderProducts(genuine, this.elements.genuineProducts, this.elements.genuineSection, false);
 
                     if (genuine.length === 0 && compatible.length === 0) {
+                        this.renderSearchPagination(null);
                         await this.renderZeroResultsRecovery(searchQuery, navVersion, smartData);
                     } else {
                         this.elements.levelProducts.hidden = false;
+                        this.renderSearchPagination(pagination);
                     }
                 } else {
+                    this.renderSearchPagination(null);
                     await this.renderZeroResultsRecovery(searchQuery, navVersion, smartData);
                 }
             } catch (error) {
@@ -2588,6 +2746,97 @@
             }
 
             this.showLoading(false);
+        },
+
+        // Render the search-results pager beneath the genuine/compatible
+        // grids. Backend caps `limit` at 100 on every search endpoint, so
+        // queries with more than 100 hits ("compat" → 600+) need a real
+        // pager — without one only the first 100 cards are reachable.
+        //
+        // Pagination shape is normalised in loadSearchResults to the
+        // smart-search envelope: { total, page, limit, total_pages,
+        // has_next, has_prev }. Pass `null` to tear down any existing pager.
+        renderSearchPagination(pagination) {
+            const existing = document.getElementById('search-pagination');
+            if (existing) existing.remove();
+
+            // Hide pager when there's only one page or no metadata.
+            if (!pagination || pagination.total_pages == null || pagination.total_pages <= 1) return;
+
+            const current = pagination.page;
+            const total = pagination.total_pages;
+            const limit = pagination.limit || 100;
+            const totalItems = pagination.total != null ? pagination.total : 0;
+
+            // Page-number range (1, 2, 3, …, last) — same algorithm as
+            // products.js Products.renderPagination so the look matches the
+            // shop pager.
+            const range = (() => {
+                if (total <= 7) return Array.from({ length: total }, (_, i) => i + 1);
+                if (current <= 3) return [1, 2, 3, 4, 5, '...', total];
+                if (current >= total - 2) return [1, '...', total - 4, total - 3, total - 2, total - 1, total];
+                return [1, '...', current - 1, current, current + 1, '...', total];
+            })();
+
+            const start = (current - 1) * limit + 1;
+            const end = Math.min(current * limit, totalItems);
+
+            const nav = document.createElement('nav');
+            nav.id = 'search-pagination';
+            nav.className = 'pagination search-pagination';
+            nav.setAttribute('aria-label', 'Search results pagination');
+
+            const pageButtons = range.map(p => {
+                if (p === '...') return '<span class="pagination__ellipsis" aria-hidden="true">…</span>';
+                const isActive = p === current;
+                const ariaCurrent = isActive ? ' aria-current="page"' : '';
+                return `<button type="button" class="pagination__btn pagination__btn--page${isActive ? ' active' : ''}" data-page="${p}"${ariaCurrent}>${p}</button>`;
+            }).join('');
+
+            nav.innerHTML = `
+                <p class="pagination__info">
+                    Showing ${start}–${end} of ${totalItems} products
+                </p>
+                <div class="pagination__controls">
+                    <button type="button" class="pagination__btn pagination__btn--prev" data-page="${current - 1}"${pagination.has_prev ? '' : ' disabled'} aria-label="Previous page">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><polyline points="15 18 9 12 15 6"></polyline></svg>
+                        <span>Previous</span>
+                    </button>
+                    ${pageButtons}
+                    <button type="button" class="pagination__btn pagination__btn--next" data-page="${current + 1}"${pagination.has_next ? '' : ' disabled'} aria-label="Next page">
+                        <span>Next</span>
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><polyline points="9 18 15 12 9 6"></polyline></svg>
+                    </button>
+                </div>
+            `;
+
+            // Mount inside #level-products so the pager sits under both the
+            // compatible and genuine sections, and so it gets cleared along
+            // with the rest of the search-level DOM on the next navigation.
+            this.elements.levelProducts.appendChild(nav);
+
+            nav.querySelectorAll('.pagination__btn[data-page]').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    if (btn.disabled) return;
+                    const targetPage = parseInt(btn.dataset.page, 10);
+                    if (!Number.isInteger(targetPage) || targetPage < 1) return;
+                    if (targetPage === this.state.page) return;
+                    this.state.page = targetPage;
+                    this.updateURL();
+                    this.navigationVersion++;
+                    const v = this.navigationVersion;
+                    // Scroll to the top of the results so the pager click
+                    // doesn't leave the user mid-grid on the previous page.
+                    const anchor = document.getElementById('search-banners')
+                        || this.elements.levelProducts;
+                    if (anchor && anchor.scrollIntoView) {
+                        anchor.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                    } else {
+                        window.scrollTo({ top: 0, behavior: 'smooth' });
+                    }
+                    this.loadSearchResults(v);
+                });
+            });
         },
 
         // Spec §2.2 / §3.1 — render the corrected_from / did_you_mean /

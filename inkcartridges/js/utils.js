@@ -1175,6 +1175,163 @@ const ProductSort = (function() {
 // Make ProductSort available globally so non-module callers can use byColor.
 if (typeof window !== 'undefined') window.ProductSort = ProductSort;
 
+// ─────────────────────────────────────────────────────────────────────────────
+// SeriesCodes — yield-suffix collapse for the /shop chip drilldown.
+//
+// One series, one chip. Yield variants (XL, XXL, XXXL) are the same family at
+// a different page count — they MUST share a chip. Without collapsing, the
+// /shop?brand=epson&category=ink grid splits "604 / 604XL", "676 / 676XL",
+// "212 / 212XL" etc. across separate tiles, doubling the customer's hunt.
+//
+// Live evidence (2026-05-10):
+//   /api/shop?brand=epson&category=ink — backend ships 604, 200, 212, 220,
+//   252, 273, 676 with no XL variant; the compat-recovery sidecar in
+//   api.js (see catalog-defects-may2026.md §6) injects '200XL'/'604XL'/etc.
+//   chips because compat products in the catalog ship
+//   `series_codes: ['604XL']` from the canonical extractor. Frontend has to
+//   collapse on render or the customer sees doubled tiles.
+//
+// Suffixes that ARE yield (collapsed):
+//   X{1,3}L   → 200XL → 200, 812XXL → 812, T312XL → T312, LC133XL → LC133.
+//
+// Suffixes that are NOT yield (preserved):
+//   N (Epson regional code, 73N/81N), S (46S), ML (26ML / 80ML), HY/H
+//   (Brother high-yield carries an XL alias and ships under that name; never
+//   bare H today — re-evaluate when /api/shop adds bare H suffix).
+// ─────────────────────────────────────────────────────────────────────────────
+const SeriesCodes = (function () {
+    'use strict';
+
+    // ^([A-Z]*\d+)(X{1,3}L)$ — anchor whole string so partial codes like
+    // "604XLBK" (a SKU body) do NOT match (we only collapse already-extracted
+    // canonical codes, never raw SKUs). Letters-then-digits prefix covers
+    // 200/604/812 (Epson bare-numeric), T312/T200 (Epson T-series), LC133
+    // (Brother LC), PGI645 (Canon PGI), CART069 (Canon toner).
+    const YIELD_SUFFIX = /^([A-Z]*\d+)(X{1,3}L)$/;
+
+    function normalize(code) {
+        if (code == null) return '';
+        return String(code).trim().toUpperCase().replace(/[\s-]/g, '');
+    }
+
+    /**
+     * Collapse the yield suffix on a single series code.
+     *
+     * @param {string} code - canonical series code (post-normalizeCode, not raw SKU).
+     * @returns {string} collapsed code, or '' on falsy input.
+     */
+    function collapseYieldSuffix(code) {
+        const upper = normalize(code);
+        if (!upper) return '';
+        return upper.replace(YIELD_SUFFIX, '$1');
+    }
+
+    /**
+     * Returns true when the code carries a yield suffix that would collapse.
+     */
+    function hasYieldSuffix(code) {
+        const upper = normalize(code);
+        return !!upper && YIELD_SUFFIX.test(upper);
+    }
+
+    /**
+     * Collapse a list of series codes: dedupe + drop yield suffixes.
+     *
+     * @param {string[]} list
+     * @returns {string[]} collapsed unique codes, in first-seen order.
+     */
+    function collapseList(list) {
+        if (!Array.isArray(list)) return [];
+        const out = [];
+        const seen = new Set();
+        for (const c of list) {
+            const collapsed = collapseYieldSuffix(c);
+            if (!collapsed || seen.has(collapsed)) continue;
+            seen.add(collapsed);
+            out.push(collapsed);
+        }
+        return out;
+    }
+
+    /**
+     * Merge a chip list by collapsed base code. Each input chip is shaped
+     * `{ code, count, products?, ... }` (matching what /api/shop ships and
+     * what shop-page.js::extractProductCodes builds locally).
+     *
+     * Output preserves first-seen entry order. Each consolidated chip carries
+     * `aliases` — the raw codes that collapsed into it — so the click handler
+     * can fan out to every yield variant when filtering by code.
+     *
+     * Counts sum across collapsed siblings (200 count=16 + 200XL count=4 → 20).
+     * Per-chip `products` arrays are concatenated and de-duped by id/sku so
+     * the legacy code path (extractProductCodes) keeps drilldown working.
+     *
+     * @param {Array<{code:string,count?:number,products?:any[]}>} chips
+     * @returns {Array<{code:string,count:number,aliases:string[],products?:any[]}>}
+     */
+    function collapseChipList(chips) {
+        if (!Array.isArray(chips)) return [];
+        const byBase = new Map();
+        const order = [];
+        for (const chip of chips) {
+            if (!chip || !chip.code) continue;
+            const base = collapseYieldSuffix(chip.code);
+            if (!base) continue;
+            if (!byBase.has(base)) {
+                const entry = {
+                    code: base,
+                    count: 0,
+                    aliases: [],
+                    _seenAliases: new Set()
+                };
+                if (Array.isArray(chip.products)) {
+                    entry.products = [];
+                    entry._seenProducts = new Set();
+                }
+                byBase.set(base, entry);
+                order.push(base);
+            }
+            const entry = byBase.get(base);
+            // Track every raw code that collapsed into this base so click
+            // handlers can fan out to each (the backend filters /api/shop?code=X
+            // by exact match in series_codes, so we must request 604 AND 604XL
+            // to get every product the consolidated chip implies).
+            const rawUpper = String(chip.code).trim().toUpperCase().replace(/[\s-]/g, '');
+            if (rawUpper && !entry._seenAliases.has(rawUpper)) {
+                entry._seenAliases.add(rawUpper);
+                entry.aliases.push(rawUpper);
+            }
+            entry.count += Number(chip.count) || 0;
+            if (entry.products && Array.isArray(chip.products)) {
+                for (const p of chip.products) {
+                    const key = (p && (p.id || p.sku)) || null;
+                    if (key == null || entry._seenProducts.has(key)) continue;
+                    entry._seenProducts.add(key);
+                    entry.products.push(p);
+                }
+            }
+        }
+        // Strip private bookkeeping; preserve aliases (used by loadProducts
+        // fan-out) and products (legacy path).
+        return order.map(base => {
+            const e = byBase.get(base);
+            const out = { code: e.code, count: e.count, aliases: e.aliases };
+            if (e.products) out.products = e.products;
+            return out;
+        });
+    }
+
+    return {
+        collapseYieldSuffix,
+        hasYieldSuffix,
+        collapseList,
+        collapseChipList,
+        YIELD_SUFFIX_PATTERN: YIELD_SUFFIX
+    };
+})();
+
+if (typeof window !== 'undefined') window.SeriesCodes = SeriesCodes;
+
 // Export for module use (if needed in future)
 if (typeof module !== 'undefined' && module.exports) {
     module.exports = {
@@ -1185,6 +1342,7 @@ if (typeof module !== 'undefined' && module.exports) {
         esc, escAttr,
         buildPrinterUrl,
         ProductColors,
-        ProductSort
+        ProductSort,
+        SeriesCodes
     };
 }
