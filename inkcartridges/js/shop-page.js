@@ -85,6 +85,13 @@
             loading: document.getElementById('drilldown-loading'),
             empty: document.getElementById('drilldown-empty'),
             emptyMessage: document.getElementById('empty-message'),
+            // shop-transient-failure-recovery-may2026.md — separate error pane
+            // (with Retry button) so a real failure is visually distinct from
+            // "no products in this category" and doesn't look terminal to the
+            // user when api.js's transient retry was exhausted.
+            error: document.getElementById('drilldown-error'),
+            errorMessage: document.getElementById('error-message'),
+            errorRetryBtn: document.getElementById('drilldown-retry-btn'),
             // Skeleton elements
             skeletonBrands: document.getElementById('skeleton-brands'),
             skeletonCategories: document.getElementById('skeleton-categories'),
@@ -144,6 +151,7 @@
                 this._unloading = false;
                 if (!e.persisted) return;
                 if (this.elements.empty) this.elements.empty.hidden = true;
+                if (this.elements.error) this.elements.error.hidden = true;
                 this.parseURLState();
                 this.navigationVersion++;
                 this.loadCurrentLevel(this.navigationVersion);
@@ -539,6 +547,7 @@
             this.elements.levelCodes.hidden = true;
             this.elements.levelProducts.hidden = true;
             this.elements.empty.hidden = true;
+            if (this.elements.error) this.elements.error.hidden = true;
             const colorPacksSection = document.getElementById('color-packs-section');
             if (colorPacksSection) colorPacksSection.hidden = true;
         },
@@ -585,6 +594,59 @@
             if (this._unloading) return;
             this.elements.emptyMessage.textContent = message;
             this.elements.empty.hidden = false;
+            if (this.elements.error) this.elements.error.hidden = true;
+        },
+
+        // shop-transient-failure-recovery-may2026.md
+        // Distinct-from-empty pane. Use this on a real fetch failure (api.js
+        // exhausted its transient retries, or a non-5xx error like a 502 that
+        // doesn't fit the retry classifier) instead of dumping the user into
+        // .drilldown-empty with "Failed to load products…" text — which looks
+        // like a permanent "no products" state and offers no recovery path.
+        //
+        // The Retry button re-runs the supplied loader against the current
+        // navigationVersion, keeping the skeleton visible during the retry
+        // (so the user gets immediate visual feedback, not a flash to empty
+        // and back). bfcache guard: same `_unloading` check as showEmpty so a
+        // mid-unload reject can't poison the snapshot.
+        showError(message, onRetry) {
+            if (this._unloading) return;
+            if (!this.elements.error) {
+                // Defensive fallback for legacy DOMs that haven't picked up
+                // the new pane yet — degrade to the empty state rather than
+                // showing nothing.
+                this.showEmpty(message || 'Failed to load products. Please try again.');
+                return;
+            }
+            if (this.elements.errorMessage && message) {
+                this.elements.errorMessage.textContent = message;
+            }
+            this.elements.empty.hidden = true;
+            this.elements.error.hidden = false;
+
+            const btn = this.elements.errorRetryBtn;
+            if (btn && typeof onRetry === 'function') {
+                // Replace the click handler each time so successive showError
+                // calls don't stack listeners. Cloning is cheaper than tracking
+                // listener identity by hand.
+                const fresh = btn.cloneNode(true);
+                btn.parentNode.replaceChild(fresh, btn);
+                this.elements.errorRetryBtn = fresh;
+                fresh.addEventListener('click', async () => {
+                    if (this._unloading) return;
+                    fresh.disabled = true;
+                    try {
+                        if (this.elements.error) this.elements.error.hidden = true;
+                        this.showLoading(true);
+                        // Bump nav version so any zombie in-flight fetch from the
+                        // first attempt can't paint over the retry's result.
+                        this.navigationVersion++;
+                        await onRetry(this.navigationVersion);
+                    } finally {
+                        fresh.disabled = false;
+                    }
+                });
+            }
         },
 
         // =========================================
@@ -1149,7 +1211,16 @@
                 DebugLog.error('Failed to load product codes:', error);
                 // Check if navigation changed
                 if (navVersion !== undefined && this.navigationVersion !== navVersion) return;
-                this.showEmpty('Failed to load products. Please try again.');
+                // shop-transient-failure-recovery-may2026.md — api.js already
+                // retried 5xx/network/timeout on idempotent GETs; reaching here
+                // means the backend is truly unavailable (or returned a
+                // structured error we don't classify as retryable). Show a
+                // recoverable error state with a Retry button instead of the
+                // permanent-looking "No products found / Failed to load…" pane.
+                this.showError(
+                    "We couldn't load products. The server may be warming up — please try again.",
+                    (v) => this.loadProductCodes(v)
+                );
             }
 
             this.showLoading(false);
@@ -1891,7 +1962,10 @@
                 DebugLog.error('Failed to load products:', error);
                 // Check if navigation changed
                 if (navVersion !== undefined && this.navigationVersion !== navVersion) return;
-                this.showEmpty('Failed to load products. Please try again.');
+                this.showError(
+                    "We couldn't load products for this code. The server may be warming up — please try again.",
+                    (v) => this.loadProducts(v)
+                );
             }
 
             this.showLoading(false);
@@ -1976,7 +2050,10 @@
                         this.loadColorPacks(this.state.printer);
                     }
                 } else {
-                    this.showEmpty('Failed to load compatible products for this printer.');
+                    this.showError(
+                        "We couldn't load compatible products for this printer. The server may be warming up — please try again.",
+                        (v) => this.loadPrinterProducts(v)
+                    );
                 }
             } catch (error) {
                 DebugLog.error('Failed to load printer products:', error);
@@ -1986,7 +2063,10 @@
                     window.location.replace('/shop');
                     return;
                 }
-                this.showEmpty('Failed to load products. Please try again.');
+                this.showError(
+                    "We couldn't load products for this printer. The server may be warming up — please try again.",
+                    (v) => this.loadPrinterProducts(v)
+                );
             }
 
             this.showLoading(false);
@@ -2362,13 +2442,19 @@
                         this.elements.levelProducts.hidden = false;
                     }
                 } else {
-                    this.showEmpty(`Failed to load compatible products for ${this.state.printerModel}.`);
+                    this.showError(
+                        `We couldn't load compatible products for ${this.state.printerModel}. The server may be warming up — please try again.`,
+                        (v) => this.loadPrinterModelProducts(v)
+                    );
                 }
             } catch (error) {
                 DebugLog.error('Failed to load printer model products:', error);
                 // Check if navigation changed
                 if (navVersion !== undefined && this.navigationVersion !== navVersion) return;
-                this.showEmpty('Failed to load products. Please try again.');
+                this.showError(
+                    "We couldn't load products for this printer model. The server may be warming up — please try again.",
+                    (v) => this.loadPrinterModelProducts(v)
+                );
             }
 
             this.showLoading(false);
@@ -2392,8 +2478,8 @@
                 // Branch decision: which API path do we take?
                 //
                 // Source of truth is the backend's `data.intent` field on
-                // /api/search/smart (see readfirst/backend-passover.md, "Search —
-                // thin-frontend contract", task 1). When backend ships intent,
+                // /api/search/smart (see handoffs/backend-handoff.md §4, "Search —
+                // thin-frontend contract", task 4.1). When backend ships intent,
                 // we fire /smart unconditionally and read the type/source flags
                 // off the response.
                 //
@@ -2645,7 +2731,7 @@
                     // "brother toner"), narrow the result set to that brand.
                     //
                     // Source of truth is `data.intent.matched_brand_slug` from
-                    // the backend (see backend-passover task 1). Until backend
+                    // the backend (see handoffs/backend-handoff.md §4 task 4.1). Until backend
                     // ships, we read `product.brand?.slug` from the first
                     // product as a coarse heuristic — products are already
                     // ranked, so the first hit is the most relevant brand.
@@ -2742,7 +2828,10 @@
             } catch (error) {
                 DebugLog.error('Failed to search products:', error);
                 if (navVersion !== undefined && this.navigationVersion !== navVersion) return;
-                this.showEmpty('Failed to search products. Please try again.');
+                this.showError(
+                    "We couldn't load search results. The server may be warming up — please try again.",
+                    (v) => this.loadSearchResults(v)
+                );
             }
 
             this.showLoading(false);
@@ -2936,7 +3025,7 @@
             // Pick which rails to fire.
             //
             // Source of truth is `smartData.recovery.rails` from the backend
-            // (see backend-passover task 3): backend tells us exactly which
+            // (see handoffs/backend-handoff.md §4 task 4.3): backend tells us exactly which
             // rails will produce results, so we don't fire requests we know
             // will be empty.
             //

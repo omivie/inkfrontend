@@ -54,17 +54,27 @@ const API = {
      */
     MAX_AUTH_RETRIES: 2,
     MAX_RATE_LIMIT_RETRIES: 2,
+    // Transient retry (shop-transient-failure-recovery-may2026.md): Render free-tier
+    // cold-starts and brief network blips made the first /api/shop?... call on a
+    // cold visit reject — the codes drilldown then painted "Failed to load products.
+    // Please try again." even though a reload-second-later succeeded. Two retries
+    // (3 total attempts) cover ≥95% of cold-start cases; 300ms × 3ⁿ keeps the
+    // user-visible delay under a second when the first attempt fails fast.
+    MAX_TRANSIENT_RETRIES: 2,
+    TRANSIENT_RETRY_BASE_MS: 300,
 
     async _fetchWithAuth(url, fetchOptions = {}, opts = {}) {
         const timeoutMs = opts.timeoutMs || this.REQUEST_TIMEOUT_MS;
         const retryCount = opts.retryCount || 0;
         const rateLimitRetry = opts.rateLimitRetry || 0;
+        const transientRetry = opts.transientRetry || 0;
+        const method = (fetchOptions.method || 'GET').toUpperCase();
+        const isIdempotent = method === 'GET' || method === 'HEAD';
 
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
         try {
-            const method = (fetchOptions.method || 'GET').toUpperCase();
             const cacheMode = method === 'GET' ? 'default' : 'no-store';
             const response = await fetch(url, {
                 ...fetchOptions,
@@ -76,7 +86,6 @@ const API = {
 
             // Handle rate limiting — only retry idempotent GET requests (never retry mutations)
             if (response.status === 429) {
-                const method = (fetchOptions.method || 'GET').toUpperCase();
                 if (method === 'GET' && rateLimitRetry < this.MAX_RATE_LIMIT_RETRIES) {
                     const retryAfter = response.headers.get('Retry-After');
                     const delay = retryAfter ? parseInt(retryAfter, 10) * 1000 : 1000 * Math.pow(2, rateLimitRetry);
@@ -86,6 +95,21 @@ const API = {
                 }
                 DebugLog.warn(`Rate limited on ${url}${method !== 'GET' ? ' (non-GET, not retrying)' : ', max retries exceeded'}`);
                 throw new Error('Too many requests. Please wait a moment.');
+            }
+
+            // Transient 5xx — retry idempotent GETs only. POSTs/PUTs/DELETEs are
+            // NEVER retried automatically (could double-charge, double-mutate);
+            // the caller's mapError flow surfaces them. The 401-auth-refresh
+            // branch below runs first when the original response is 401, so a
+            // 401 won't be misclassified as transient.
+            if (isIdempotent
+                && response.status >= 500
+                && response.status < 600
+                && transientRetry < this.MAX_TRANSIENT_RETRIES) {
+                const delay = this.TRANSIENT_RETRY_BASE_MS * Math.pow(3, transientRetry);
+                DebugLog.warn(`Transient ${response.status} on ${url}, retrying in ${delay}ms (attempt ${transientRetry + 1}/${this.MAX_TRANSIENT_RETRIES})`);
+                await new Promise(r => setTimeout(r, delay));
+                return this._fetchWithAuth(url, fetchOptions, { ...opts, transientRetry: transientRetry + 1 });
             }
 
             // Handle unauthorized — refresh token and retry with backoff
@@ -114,7 +138,24 @@ const API = {
             return response;
         } catch (error) {
             clearTimeout(timeoutId);
-            if (error.name === 'AbortError') {
+            // Transient network/timeout — retry idempotent GETs only. We mirror
+            // the 5xx branch above: TypeError is fetch()'s signal for "could
+            // not reach the server" (DNS, TLS, connection refused, offline),
+            // and AbortError fires when our REQUEST_TIMEOUT_MS guard trips
+            // before Render's cold start finishes warming. Both classes are
+            // safe to replay for a GET. Anything else (or any non-idempotent
+            // method) propagates without replay.
+            const isAbort = error && error.name === 'AbortError';
+            const isNetwork = error && error.name === 'TypeError';
+            if (isIdempotent
+                && (isAbort || isNetwork)
+                && transientRetry < this.MAX_TRANSIENT_RETRIES) {
+                const delay = this.TRANSIENT_RETRY_BASE_MS * Math.pow(3, transientRetry);
+                DebugLog.warn(`Transient ${isAbort ? 'timeout' : 'network error'} on ${url}, retrying in ${delay}ms (attempt ${transientRetry + 1}/${this.MAX_TRANSIENT_RETRIES})`);
+                await new Promise(r => setTimeout(r, delay));
+                return this._fetchWithAuth(url, fetchOptions, { ...opts, transientRetry: transientRetry + 1 });
+            }
+            if (isAbort) {
                 throw new Error('Request timed out. Please check your connection and try again.');
             }
             throw error;
@@ -813,7 +854,7 @@ const API = {
      * Why this fallback exists: the singular endpoint has been observed to
      * return 500 INTERNAL_ERROR for specific product families (most notably
      * the Epson Genuine 200 ink series — see errors.md for repro and the
-     * backend-passover note). The fallback keeps user-facing product pages
+     * handoffs/backend-handoff.md note). The fallback keeps user-facing product pages
      * loading even when the canonical endpoint regresses. A genuine NOT_FOUND
      * (404 envelope, code === 'NOT_FOUND') is preserved as-is — we only
      * shadow server-side errors, never legitimate "this SKU doesn't exist"
@@ -1200,7 +1241,7 @@ const API = {
      *
      * Spec: readfirst/ink-finder-may2026.md (May 2026 wiring contract);
      * docs/storefront/value-pack-and-product-url-contract.md §4.2.1
-     * (backend-passover task 5).
+     * (handoffs/backend-handoff.md §4 task 4.5 — shipped).
      *
      * @param {string} brand - Brand slug (e.g. "canon"). Lower-cased + URL-encoded.
      * @param {{ grouped?: boolean }} [opts] - { grouped: false } for the flat fallback.

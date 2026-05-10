@@ -10354,6 +10354,73 @@ body.page-shop {
     margin: 0;
 }
 
+/* Error State (shop-transient-failure-recovery-may2026.md)
+   Separate pane from .drilldown-empty so a real failure (server cold-start,
+   network blip) is visually distinct from "no products in this category" and
+   carries a Retry CTA. Visually parented to .drilldown-empty so identical
+   metrics carry over (same container chrome, same vertical rhythm). */
+.drilldown-error {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: var(--spacing-3xl);
+    text-align: center;
+    background: var(--white-primary);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-sm);
+}
+
+.drilldown-error svg {
+    color: var(--color-text-muted);
+    margin-bottom: var(--spacing-lg);
+}
+
+.drilldown-error h3 {
+    font-size: var(--font-size-xl);
+    color: var(--color-text-heading);
+    margin: 0 0 var(--spacing-sm) 0;
+}
+
+.drilldown-error p {
+    color: var(--color-text-muted);
+    margin: 0 0 var(--spacing-lg) 0;
+    max-width: 36rem;
+}
+
+.drilldown-error__btn {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--spacing-sm);
+    padding: var(--spacing-sm) var(--spacing-xl);
+    font-size: var(--font-size-base);
+    font-weight: 600;
+    color: var(--white-primary);
+    background: var(--color-primary, #0066cc);
+    border: 0;
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    transition: background-color 120ms ease, transform 80ms ease;
+}
+
+.drilldown-error__btn:hover {
+    background: var(--color-primary-dark, #004a99);
+}
+
+.drilldown-error__btn:active {
+    transform: translateY(1px);
+}
+
+.drilldown-error__btn:focus-visible {
+    outline: 2px solid var(--color-primary, #0066cc);
+    outline-offset: 2px;
+}
+
+.drilldown-error__btn[disabled] {
+    opacity: 0.6;
+    cursor: progress;
+}
+
 /* Responsive - Drill-down Navigation */
 @media (max-width: 1200px) {
     .drilldown-grid--brands {

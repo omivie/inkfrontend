@@ -3,8 +3,8 @@
  * ================================================
  *
  * Pins the contract documented in
- *   readfirst/backend-passover.md
- *     ("Printer-detail empty state — verified, redirect on bad slug shipped")
+ *   handoffs/backend-handoff.md §3
+ *     ("Sitemap cleanup — sitemap-printers.xml")
  *
  * Why this exists: the backend's `sitemap-printers.xml` ships ~4,479 printer
  * slugs, and a non-trivial fraction are artefacts that either don't resolve
@@ -47,7 +47,7 @@ const API_JS_PATH = path.join(ROOT, 'inkcartridges', 'js', 'api.js');
 
 test('shop-page.js — defines isPrinterNotFound predicate matching NOT_FOUND error messages', () => {
     assert.match(SHOP_PAGE_JS, /const\s+isPrinterNotFound\s*=\s*\(err\)\s*=>/,
-        'isPrinterNotFound predicate missing — see backend-passover.md "Printer-detail empty state"');
+        'isPrinterNotFound predicate missing — see handoffs/backend-handoff.md §3 "Sitemap cleanup"');
     // Regex must catch both the human message and the bare error code.
     assert.match(SHOP_PAGE_JS, /isPrinterNotFound[\s\S]{0,200}NOT_FOUND/,
         'isPrinterNotFound regex must include NOT_FOUND token (the bare error code from envelope.error.code)');
@@ -102,15 +102,27 @@ test('shop-page.js — loadPrinterProducts redirects to /shop on bad printer slu
         'outer catch must redirect on NOT_FOUND — otherwise a 404 raised by the retry call surfaces as "Failed to load products. Please try again."');
 });
 
-test('shop-page.js — loadPrinterProducts retains a "Please try again" empty state for genuine network failures', () => {
-    // Regression guard: the redirect should not have *replaced* the existing
-    // "Failed to load" empty state — that's still the right UX for actual
-    // 5xx / network failures (cold-start on Render, dropped connection).
+test('shop-page.js — loadPrinterProducts surfaces a retryable error pane for genuine network failures', () => {
+    // Regression guard: the redirect must not have *replaced* the recovery UI
+    // for actual 5xx / network failures (cold-start on Render, dropped
+    // connection). Updated May 2026 per
+    // readfirst/shop-transient-failure-recovery-may2026.md — the old
+    // showEmpty("Failed to load products. Please try again.") wording was
+    // replaced with showError(...) pointing at the new #drilldown-error pane
+    // (with Retry button). The contract that survives: a non-NOT_FOUND
+    // failure must show a recoverable error message + a () => loadPrinterProducts
+    // retry callback (not a redirect to /shop).
     const fn = extractFunction(SHOP_PAGE_JS, 'loadPrinterProducts');
-    assert.match(fn, /Failed to load products\. Please try again\./,
-        'outer catch must still showEmpty("Failed to load products. Please try again.") for non-NOT_FOUND errors — only NOT_FOUND redirects');
-    assert.match(fn, /Failed to load compatible products for this printer\./,
-        'response.ok === false (non-NOT_FOUND, non-VALIDATION_FAILED) must still surface a clear empty message — only the slug-validation codes redirect');
+    assert.match(
+        fn,
+        /showError\s*\([\s\S]{0,400}server may be warming up[\s\S]{0,400}=>\s*this\.loadPrinterProducts\s*\(/,
+        'outer catch must call showError with a "server warming up" message + a () => this.loadPrinterProducts retry callback — only NOT_FOUND redirects'
+    );
+    assert.match(
+        fn,
+        /showError\s*\([\s\S]{0,400}compatible products for this printer[\s\S]{0,400}=>\s*this\.loadPrinterProducts\s*\(/,
+        'response.ok === false (non-NOT_FOUND, non-VALIDATION_FAILED) must still surface a recoverable error pane — only the slug-validation codes redirect'
+    );
 });
 
 test('shop-page.js — "No compatible products found for this printer." stays for valid-slug-but-no-products case', () => {
