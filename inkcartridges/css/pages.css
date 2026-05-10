@@ -9678,6 +9678,18 @@
     font-size: var(--font-size-sm);
 }
 
+/* Wraps yield-banner + inline shipping pill so both live to the right of
+   the breadcrumb and lift the H1 above the fold. Contract pinned by
+   tests/shipping-bar-inline-may2026.test.js. */
+.drilldown-header__right-group {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: var(--spacing-sm);
+    justify-content: flex-end;
+    margin-left: auto;
+}
+
 .drilldown-header__right strong {
     color: var(--cyan-dark, #1a5a7a);
 }
@@ -10390,6 +10402,22 @@ body.page-shop {
         margin-bottom: var(--spacing-1);
     }
 
+    /* When the breadcrumb wraps onto its own row, drop the inline pill to a
+       full-width strip rather than leaving it stranded right-aligned on a
+       half-empty row. The 480px rules go further (column stack); these
+       cover the tablet middle ground. */
+    .drilldown-header__right-group {
+        width: 100%;
+        margin-left: 0;
+        justify-content: flex-start;
+    }
+
+    .shipping-info-bar--inline {
+        flex: 1 1 auto;
+        justify-content: center;
+        white-space: normal;
+    }
+
     .drilldown-grid--brands {
         grid-template-columns: repeat(2, 1fr);
     }
@@ -10479,6 +10507,21 @@ body.page-shop {
         width: 100%;
         justify-content: center;
         margin-top: var(--spacing-xs);
+    }
+
+    .drilldown-header__right-group {
+        width: 100%;
+        margin-left: 0;
+        flex-direction: column;
+        align-items: stretch;
+        gap: var(--spacing-xs);
+    }
+
+    .shipping-info-bar--inline {
+        width: 100%;
+        justify-content: center;
+        white-space: normal;
+        text-align: center;
     }
 
     .drilldown-header__product-type {
@@ -11517,6 +11560,23 @@ body.page-shop {
     color: #166534;
     font-weight: 600;
     text-decoration: underline;
+}
+
+/* Inline variant: lives inside .drilldown-header__right-group on /shop,
+   sits to the right of the breadcrumb so the H1 lifts up. Compact padding
+   matches the breadcrumb height; margin is removed because the parent
+   .drilldown-header already owns vertical rhythm. */
+.shipping-info-bar--inline {
+    margin: 0;
+    padding: 6px 12px;
+    font-size: var(--font-size-xs, 0.8125rem);
+    line-height: 1.2;
+    white-space: nowrap;
+}
+
+.shipping-info-bar--inline svg {
+    width: 14px;
+    height: 14px;
 }
 
 .product-shipping-note {
