@@ -75,7 +75,6 @@ const Products = {
      * @returns {string} HTML string
      */
     renderCard(product, index) {
-        const sourceBadge = getSourceBadge(product.source);
         const stockInfo = getStockStatus(product);
         const resolvedImage = typeof storageUrl === 'function' ? storageUrl(product.image_url) : (product.image_url || '');
         const priority = typeof index === 'number' && index < 4;
@@ -114,23 +113,20 @@ const Products = {
             return '#';
         })();
 
-        // category-page-contract-may2026.md §1 — every list-view card
-        // ships a top-left COMPATIBLE/GENUINE chip driven by product.source.
-        // The source chip + discount chip + fits-printer chip share the
-        // top-left corner via .product-card__chip-stack so they stack
-        // vertically without overlapping (acceptance: "FITS YOUR PRINTER
-        // chip stacks above or beside the source chip without overlapping").
-        const sourceBadgeHTML = sourceBadge
-            ? `<span class="product-card__badge ${sourceBadge.class}">${sourceBadge.text}</span>`
-            : '';
+        // source-chip-removal-may2026.md — the per-card COMPATIBLE/GENUINE
+        // chip is retired. Section headings ("Brother Compatible Inkjet
+        // Cartridges") + the product name itself ("LC39BK Compatible Ink…"
+        // / "Brother Genuine LC39…") already convey source, so the chip was
+        // pure redundancy. The chip-stack lives on for fits-printer +
+        // save-discount badges, which still want the top-left corner.
         const discountBadgeHTML = (showDiscount && (this._isPack(product) ? discountAmount != null : discountPercent))
             ? `<span class="product-card__badge product-card__badge--discount">${this._isPack(product) ? `Save ${formatPrice(discountAmount)}` : `Save ${discountPercent}%`}</span>`
             : '';
         const fitsPrinterBadgeHTML = product._fitsPrinter
             ? `<span class="product-card__badge product-card__badge--fits-printer" title="Fits ${Security.escapeAttr(product._fitsPrinter)}">Fits Your Printer</span>`
             : '';
-        const chipStackHTML = (sourceBadgeHTML || discountBadgeHTML || fitsPrinterBadgeHTML)
-            ? `<div class="product-card__chip-stack">${sourceBadgeHTML}${fitsPrinterBadgeHTML}${discountBadgeHTML}</div>`
+        const chipStackHTML = (discountBadgeHTML || fitsPrinterBadgeHTML)
+            ? `<div class="product-card__chip-stack">${fitsPrinterBadgeHTML}${discountBadgeHTML}</div>`
             : '';
 
         return `

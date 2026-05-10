@@ -1,15 +1,27 @@
 /**
- * Storefront Category & Search Page Contract — May 2026
- * ======================================================
+ * Storefront Category & Search Page Contract — May 2026 (rev 2)
+ * ==============================================================
  *
- * Pins the rules from `readfirst/category-page-contract-may2026.md`:
+ * Pins three rules:
  *
- *   §1  Every product card on a list view (catalog, printer products,
- *       search, brand, category) renders a top-left COMPATIBLE/GENUINE
- *       chip — yellow for compatible, blue for genuine.
+ *   §1  Every list-view product card (shop, search, printer products,
+ *       brand pages, category pages, ribbons, landing-page featured grid)
+ *       renders NO per-card COMPATIBLE/GENUINE chip. The section heading
+ *       above the grid (e.g. "Brother Compatible Inkjet Cartridges") and
+ *       the product name itself ("LC39BK Compatible Ink Cartridge…")
+ *       already declare source — the chip was redundant. The chip-stack
+ *       container survives for fits-printer + save-discount badges.
+ *
+ *       PDP related-products section heading still ships its own
+ *       `.badge.badge-compatible/genuine` chip (it's the heading the user
+ *       reads, not a per-card chip). Cart, checkout, favourites, order
+ *       detail line-items keep their `.source-badge` (different element,
+ *       different layout, no section heading present in those views).
+ *
  *   §2  The aggregated "For Use In: Epson XP100, …" block is gone from
  *       every list page (shop, search, printer products, printer detail).
  *       It belongs ONLY on the PDP.
+ *
  *   §3  When the API returns `did_you_mean: <string>`, the banner reads
  *       "Did you mean <string>?" with the suggestion linking to
  *       /search?q=<encoded>. The "Showing similar results. Search instead
@@ -56,103 +68,128 @@ const RIBBONS_CODE  = stripComments(RIBBONS_SRC);
 const SHOP_HTML_CODE = stripComments(SHOP_HTML);
 
 // ─────────────────────────────────────────────────────────────────────────────
-// §1 — Per-card source chip
+// §1 — Per-card source chip is RETIRED from list views
 // ─────────────────────────────────────────────────────────────────────────────
 
-test('§1 getSourceBadge returns uppercase short labels (COMPATIBLE / GENUINE)', () => {
-    // The card chip must read "COMPATIBLE" / "GENUINE" — uppercase, no "OEM"
-    // suffix. This is what the spec acceptance criteria assert (e.g.
-    // "Every Epson 200 single shows a yellow COMPATIBLE chip").
-    assert.match(API_SRC, /text:\s*['"]COMPATIBLE['"]/,
-        'getSourceBadge must emit "COMPATIBLE" (uppercase)');
-    assert.match(API_SRC, /text:\s*['"]GENUINE['"]/,
-        'getSourceBadge must emit "GENUINE" (uppercase, no "OEM" suffix)');
-});
-
-test('§1 getSourceBadge maps source to BEM-correct chip class names', () => {
-    // Class names must match the CSS rules in components.css. The spec's
-    // colour mapping (yellow=compatible, blue=genuine) lives in CSS and
-    // is keyed to these exact class names.
-    assert.match(API_SRC, /class:\s*['"]product-card__badge--compatible['"]/,
-        'compatible badge must use the .product-card__badge--compatible class');
-    assert.match(API_SRC, /class:\s*['"]product-card__badge--genuine['"]/,
-        'genuine badge must use the .product-card__badge--genuine class');
-});
-
-test('§1 components.css defines the yellow/blue source-chip variants', () => {
-    // Yellow background for compatible.
-    assert.match(
-        COMPONENTS_CSS,
-        /\.product-card__badge--compatible\s*\{[^}]*background-color:\s*var\(--yellow-primary\)/,
-        '.product-card__badge--compatible must paint yellow'
+test('§1 getSourceBadge helper is removed from api.js (no callers left)', () => {
+    // The per-card chip helper is dead weight after the May 2026 rev-2
+    // contract — every list-view renderer stopped calling it. Keep this
+    // assertion as a regression guard: re-introducing the helper is a
+    // strong signal someone is about to re-add the chip.
+    assert.ok(
+        !/function\s+getSourceBadge\b/.test(API_CODE),
+        'api.js must not declare getSourceBadge (helper retired with the chip)'
     );
-    // Cyan/blue for genuine. The cyan-primary token is the project's
-    // canonical "blue" colour (see base.css).
-    assert.match(
-        COMPONENTS_CSS,
-        /\.product-card__badge--genuine\s*\{[^}]*background-color:\s*var\(--cyan-primary\)/,
-        '.product-card__badge--genuine must paint blue (cyan-primary)'
+    assert.ok(
+        !/window\.getSourceBadge\s*=/.test(API_CODE),
+        'api.js must not export window.getSourceBadge'
     );
 });
 
-test('§1 components.css defines the chip-stack container that prevents overlap', () => {
-    // The stack is the absolute anchor; chips inside lose absolute
-    // positioning and flow vertically (acceptance: "FITS YOUR PRINTER chip
-    // stacks above or beside the source chip without overlapping").
-    assert.match(
-        COMPONENTS_CSS,
-        /\.product-card__chip-stack\s*\{[\s\S]*?position:\s*absolute/,
-        '.product-card__chip-stack must be absolutely positioned'
-    );
-    assert.match(
-        COMPONENTS_CSS,
-        /\.product-card__chip-stack\s*\{[\s\S]*?display:\s*flex/,
-        '.product-card__chip-stack must use flex layout'
-    );
-    assert.match(
-        COMPONENTS_CSS,
-        /\.product-card__chip-stack\s+\.product-card__badge\s*\{[\s\S]*?position:\s*static/,
-        'chips inside the stack must drop their absolute positioning'
-    );
-});
-
-test('§1 every list-view card renderer emits a chip-stack with the source chip', () => {
-    // The chip-stack wraps the source chip on each list-view renderer.
-    // We grep the source for "product-card__chip-stack" — its presence
-    // is the contract the spec pins.
+test('§1 list-view renderers do NOT call getSourceBadge', () => {
     for (const [label, code] of [
         ['products.js (Products.renderCard)',     PRODUCTS_CODE],
         ['shop-page.js (Shop.createProductCard)', SHOP_CODE],
         ['landing.js (featured-products grid)',   LANDING_CODE],
         ['ribbons-page.js (createRibbonCard)',    RIBBONS_CODE],
     ]) {
-        assert.match(code, /product-card__chip-stack/,
-            `${label}: must wrap top-left chips in .product-card__chip-stack`);
-        assert.match(code, /getSourceBadge/,
-            `${label}: must call getSourceBadge to drive the chip`);
+        assert.ok(
+            !/getSourceBadge\s*\(/.test(code),
+            `${label}: must not call getSourceBadge()`
+        );
     }
 });
 
-test('§1 PDP does NOT add a per-card source chip (PDP excluded from spec)', () => {
-    // The spec is explicit: per-card source chips do NOT appear on the PDP
-    // because the heading copy ("HP Genuine 72…") already conveys source.
-    // We allow .badge-genuine / .badge-compatible (PDP "related products"
-    // section header) but reject .product-card__chip-stack on the PDP buy
-    // box itself.
-    //
-    // The PDP's _renderRelated section uses its own .badge.badge-genuine
-    // chip on a section heading — that's allowed (it's the section header
-    // chip referenced by spec §1, "existing chip placement"). The chip-
-    // stack class is reserved for list-view cards.
-    const buyBox = PDP_CODE.split('renderRelated')[0] || PDP_CODE;
+test('§1 list-view renderers do NOT emit the per-card source chip classes', () => {
+    // The chip used .product-card__badge--compatible / .product-card__badge--genuine.
+    // Those classes must not appear anywhere in the list-card source.
+    for (const [label, code] of [
+        ['products.js',     PRODUCTS_CODE],
+        ['shop-page.js',    SHOP_CODE],
+        ['landing.js',      LANDING_CODE],
+        ['ribbons-page.js', RIBBONS_CODE],
+    ]) {
+        assert.ok(
+            !/product-card__badge--compatible/.test(code),
+            `${label}: must not emit product-card__badge--compatible`
+        );
+        assert.ok(
+            !/product-card__badge--genuine/.test(code),
+            `${label}: must not emit product-card__badge--genuine`
+        );
+    }
+});
+
+test('§1 components.css drops the dead per-card source-chip rules', () => {
+    // The CSS variants for the retired chip are gone. Keeping them would
+    // be cargo-cult: the JS no longer emits the class names that key them.
     assert.ok(
-        !/product-card__chip-stack/.test(buyBox),
-        'PDP buy box must not render the list-view chip-stack'
+        !/\.product-card__badge--compatible\s*\{/.test(COMPONENTS_CSS),
+        'components.css must not define .product-card__badge--compatible'
+    );
+    assert.ok(
+        !/\.product-card__badge--genuine\s*\{/.test(COMPONENTS_CSS),
+        'components.css must not define .product-card__badge--genuine'
     );
 });
 
+test('§1 chip-stack survives for fits-printer + save-discount badges', () => {
+    // The stack container is still useful — fits-printer + save-discount
+    // chips share the top-left and need the flex column to avoid overlap.
+    // products.js + shop-page.js still emit the wrapper.
+    assert.match(PRODUCTS_CODE, /product-card__chip-stack/,
+        'products.js must keep the .product-card__chip-stack wrapper for remaining chips');
+    assert.match(SHOP_CODE, /product-card__chip-stack/,
+        'shop-page.js must keep the .product-card__chip-stack wrapper for remaining chips');
+    // The CSS rules for the stack itself stay — the geometry contract
+    // (absolute, top-left, flex column) is still load-bearing.
+    assert.match(
+        COMPONENTS_CSS,
+        /\.product-card__chip-stack\s*\{[\s\S]*?position:\s*absolute/,
+        '.product-card__chip-stack must remain absolutely positioned'
+    );
+    assert.match(
+        COMPONENTS_CSS,
+        /\.product-card__chip-stack\s*\{[\s\S]*?display:\s*flex/,
+        '.product-card__chip-stack must remain a flex container'
+    );
+});
+
+test('§1 PDP related-products SECTION HEADING keeps its source badge', () => {
+    // The PDP renders related products grouped by source with a heading
+    // chip ("[COMPATIBLE] Brother Compatible Inkjet Cartridges"). That
+    // chip belongs to the heading itself — it IS the heading the §1 rule
+    // points at, not a per-card chip. It must survive.
+    assert.match(PDP_CODE, /badge-compatible/,
+        'PDP related-products heading chip must keep .badge-compatible class');
+    assert.match(PDP_CODE, /badge-genuine/,
+        'PDP related-products heading chip must keep .badge-genuine class');
+    assert.match(PDP_CODE, /related-products__group-heading/,
+        'PDP must keep the related-products group heading container');
+});
+
+test('§1 cart / checkout / favourites / order-detail keep .source-badge line-item chips', () => {
+    // These views render line-items, not cards on a heading-led grid, so
+    // the source label still adds signal (a single line of "LC39BK Compatible…"
+    // mid-cart can blur with adjacent items). Different element entirely
+    // (.source-badge, not .product-card__badge--*).
+    const CART_CODE       = stripComments(READ(JS('cart.js')));
+    const CHECKOUT_CODE   = stripComments(READ(JS('checkout-page.js')));
+    const FAVS_CODE       = stripComments(READ(JS('favourites.js')));
+    const ORDER_CODE      = stripComments(READ(JS('order-detail-page.js')));
+    for (const [label, code] of [
+        ['cart.js',              CART_CODE],
+        ['checkout-page.js',     CHECKOUT_CODE],
+        ['favourites.js',        FAVS_CODE],
+        ['order-detail-page.js', ORDER_CODE],
+    ]) {
+        assert.match(code, /source-badge--/,
+            `${label}: must keep its line-item .source-badge chip`);
+    }
+});
+
 // ─────────────────────────────────────────────────────────────────────────────
-// §1 RUNTIME — Products.renderCard injects the chip into the chip-stack
+// §1 RUNTIME — Products.renderCard verification
 // ─────────────────────────────────────────────────────────────────────────────
 
 function loadProducts() {
@@ -177,13 +214,6 @@ function loadProducts() {
             isPlaceholderSwatchImage() { return false; },
         },
         getStockStatus: () => ({ class: 'in-stock', text: 'In stock' }),
-        // Mirror the production getSourceBadge contract — chips use the
-        // BEM class + uppercase short label.
-        getSourceBadge: (s) => {
-            if (s === 'genuine')    return { class: 'product-card__badge--genuine',    text: 'GENUINE' };
-            if (s === 'compatible') return { class: 'product-card__badge--compatible', text: 'COMPATIBLE' };
-            return null;
-        },
         qualifiesForFreeShipping: () => false,
         formatPrice: (n) => '$' + Number(n || 0).toFixed(2),
         calculateGST: (n) => Number(n || 0) * 0.15 / 1.15,
@@ -212,56 +242,68 @@ const BASE_PRODUCT = {
     in_stock: true,
 };
 
-test('§1 runtime: compatible product card emits yellow COMPATIBLE chip in chip-stack', () => {
+test('§1 runtime: compatible product card emits NO source chip', () => {
     const Products = loadProducts();
     const html = Products.renderCard({ ...BASE_PRODUCT, source: 'compatible' }, 0);
 
-    assert.match(html, /<div class="product-card__chip-stack">/,
-        'compatible card must render a chip-stack');
-    assert.match(html, /class="product-card__badge product-card__badge--compatible">COMPATIBLE</,
-        'compatible card must render the yellow COMPATIBLE chip text');
+    assert.doesNotMatch(html, /product-card__badge--compatible/,
+        'compatible card must not render a yellow COMPATIBLE chip');
+    assert.doesNotMatch(html, />COMPATIBLE</,
+        'compatible card must not render the COMPATIBLE text label');
 });
 
-test('§1 runtime: genuine product card emits blue GENUINE chip in chip-stack', () => {
+test('§1 runtime: genuine product card emits NO source chip', () => {
     const Products = loadProducts();
     const html = Products.renderCard({ ...BASE_PRODUCT, source: 'genuine' }, 0);
 
-    assert.match(html, /<div class="product-card__chip-stack">/,
-        'genuine card must render a chip-stack');
-    assert.match(html, /class="product-card__badge product-card__badge--genuine">GENUINE</,
-        'genuine card must render the blue GENUINE chip text');
+    assert.doesNotMatch(html, /product-card__badge--genuine/,
+        'genuine card must not render a blue GENUINE chip');
+    assert.doesNotMatch(html, />GENUINE</,
+        'genuine card must not render the GENUINE text label');
 });
 
-test('§1 runtime: chip-stack precedes the lowest-price chip in the DOM order', () => {
-    // The chip-stack lives at top-left; the lowest-price chip lives at
-    // top-right. They must render as siblings inside the image-wrapper —
-    // not stacked on top of one another.
+test('§1 runtime: chip-stack still appears when fits-printer chip is present', () => {
+    // Regression guard — removing the source chip must not collapse the
+    // stack wrapper when other chips are still active.
+    const Products = loadProducts();
+    const html = Products.renderCard({
+        ...BASE_PRODUCT,
+        source: 'genuine',
+        _fitsPrinter: 'Brother MFC-J6920DW',
+    }, 0);
+
+    assert.match(html, /product-card__chip-stack/,
+        'card with fits-printer must wrap the chip in .product-card__chip-stack');
+    assert.match(html, /product-card__badge--fits-printer/,
+        'card with fits-printer must render the fits-printer chip');
+});
+
+test('§1 runtime: chip-stack still appears when discount chip is present', () => {
     const Products = loadProducts();
     const html = Products.renderCard({
         ...BASE_PRODUCT,
         source: 'compatible',
-        is_lowest_in_market: true,
-        market_position: { price_diff_percent: 5, lowest_competitor_name: 'Other' },
+        original_price: 60,
+        retail_price: 50,
+        discount_amount: 10,
+        discount_percent: 17,
     }, 0);
 
-    const chipStackIdx = html.indexOf('product-card__chip-stack');
-    const lowestIdx    = html.indexOf('product-card__badge--lowest-price');
-    assert.ok(chipStackIdx > 0, 'chip-stack must render');
-    assert.ok(lowestIdx > 0,    'lowest-price chip must render');
-    assert.ok(chipStackIdx < lowestIdx,
-        'chip-stack must precede the top-right lowest-price chip in DOM order');
+    assert.match(html, /product-card__chip-stack/,
+        'card with discount must wrap the chip in .product-card__chip-stack');
+    assert.match(html, /product-card__badge--discount/,
+        'card with discount must render the save-discount chip');
 });
 
-test('§1 runtime: card with no source field renders no chip (no broken empty span)', () => {
-    // Defensive: legacy products without product.source should render
-    // cleanly — no source chip, no empty stack wrapper.
+test('§1 runtime: card with no chip-driving fields renders no chip-stack at all', () => {
+    // No source chip, no fits-printer, no discount → no stack wrapper.
+    // Regression guard against an empty <div class="product-card__chip-stack"></div>
+    // being painted on every card.
     const Products = loadProducts();
-    const html = Products.renderCard({ ...BASE_PRODUCT, source: undefined }, 0);
+    const html = Products.renderCard({ ...BASE_PRODUCT, source: 'genuine' }, 0);
 
-    assert.doesNotMatch(html, /product-card__badge--compatible/,
-        'no source = no compatible chip');
-    assert.doesNotMatch(html, /product-card__badge--genuine/,
-        'no source = no genuine chip');
+    assert.doesNotMatch(html, /product-card__chip-stack/,
+        'card with no fits-printer + no discount must not paint an empty chip-stack');
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -269,9 +311,6 @@ test('§1 runtime: card with no source field renders no chip (no broken empty sp
 // ─────────────────────────────────────────────────────────────────────────────
 
 test('§2 shop.html does NOT ship the page-level "For Use In:" banner element', () => {
-    // The banner element used to live at #printers-banner inside
-    // #level-products. It has been retired — list pages render no
-    // aggregated printer block.
     assert.ok(
         !/id=["']printers-banner["']/.test(SHOP_HTML),
         'shop.html must not ship #printers-banner (For Use In aggregation retired)'
@@ -283,9 +322,6 @@ test('§2 shop.html does NOT ship the page-level "For Use In:" banner element', 
 });
 
 test('§2 shop-page.js no longer fetches/renders the page-level printers list', () => {
-    // The shop controller used to grab this.elements.printersBanner /
-    // printersList and populate them inside displayProductInfo. After
-    // the May 2026 contract those references are gone.
     assert.ok(
         !/elements\.printersBanner\.hidden\s*=\s*false/.test(SHOP_CODE),
         'shop-page.js must not unhide a #printers-banner element'
@@ -294,8 +330,6 @@ test('§2 shop-page.js no longer fetches/renders the page-level printers list', 
         !/elements\.printersList\.innerHTML/.test(SHOP_CODE),
         'shop-page.js must not write into #printers-list'
     );
-    // Defensive: the controller must not reach into the dead DOM nodes
-    // via the legacy element bindings.
     assert.ok(
         !/getElementById\(['"]printers-banner['"]\)/.test(SHOP_CODE),
         'shop-page.js must not bind the #printers-banner element'
@@ -307,9 +341,6 @@ test('§2 shop-page.js no longer fetches/renders the page-level printers list', 
 });
 
 test('§2 PDP retains its own per-product printer banner (regression guard)', () => {
-    // The PDP keeps the same .product-printers-banner container — it
-    // renders compatible printers FOR THE CURRENT PRODUCT, which is the
-    // one place this UI belongs.
     assert.match(PDP_CODE, /product-printers-banner/,
         'PDP must keep its per-product "For Use In:" banner');
     assert.match(PDP_CODE, /For Use In:/,
@@ -321,9 +352,6 @@ test('§2 PDP retains its own per-product printer banner (regression guard)', ()
 // ─────────────────────────────────────────────────────────────────────────────
 
 test('§3 shop-page.js renderSearchBanners renders "Did you mean X?" with /search link', () => {
-    // The banner must read "Did you mean <link>didYouMean</link>?". The
-    // link must point at /search?q=<encoded suggestion> — the canonical
-    // search URL.
     assert.match(
         SHOP_CODE,
         /search-did-you-mean[\s\S]{0,500}?Did you mean[\s\S]{0,200}?\/search\?q=\$\{[^}]*didYouMean[^}]*\}/,
@@ -332,9 +360,6 @@ test('§3 shop-page.js renderSearchBanners renders "Did you mean X?" with /searc
 });
 
 test('§3 shop-page.js does NOT emit the retired "Showing similar results" copy', () => {
-    // Comments still reference the retired copy (explanatory) but no
-    // template literal must emit it. We assert: no occurrence of the
-    // copy outside a comment.
     assert.ok(
         !/`[^`]*Showing similar results[^`]*`/.test(SHOP_CODE),
         'no template literal may emit "Showing similar results."'
@@ -350,10 +375,6 @@ test('§3 shop-page.js does NOT emit the retired "Showing similar results" copy'
 });
 
 test('§3 shop-page.js retires the search-correction-banner DOM class', () => {
-    // The banner that used to render "Showing similar results … Search
-    // instead for X" used the .search-correction-banner class. With the
-    // honest-banner spec it is dead — we no longer emit that class from
-    // shop-page.js.
     assert.ok(
         !/className\s*=\s*['"]search-correction-banner['"]/.test(SHOP_CODE),
         'shop-page.js must not assign className="search-correction-banner"'

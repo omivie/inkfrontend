@@ -706,7 +706,9 @@ mark.smart-ac__mark {
     min-height: 0;
     font-weight: 600;
 }
-/* Hide the corner source badge — image already overlays COMPATIBLE/GENUINE text */
+/* Smart-AC dropdown cards run in a tight grid — the top-left chips
+   (Save / Fits Your Printer / Lowest Price) crowd the thumbnail in
+   that footprint, so we hide them dropdown-side only. */
 .smart-ac__grid .product-card__badge {
     display: none;
 }

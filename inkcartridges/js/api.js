@@ -2394,34 +2394,11 @@ function qualifiesForFreeShipping(product) {
     return product.retail_price >= threshold;
 }
 
-/**
- * Get source badge — short, uppercase chip used at the top-left of every
- * product card on list views (shop, search, printer products, brand pages).
- *
- * Per category-page-contract-may2026.md §1: every card MUST display either
- * a yellow COMPATIBLE chip or a blue GENUINE chip at the top-left.
- * The chip class names map to .product-card__badge--{compatible,genuine}
- * in components.css.
- *
- * @param {string} source - Product source (genuine/compatible)
- * @returns {object|null} Badge info ({ class, text }) or null when source is unknown
- */
-function getSourceBadge(source) {
-    if (source === 'genuine') {
-        return { class: 'product-card__badge--genuine', text: 'GENUINE' };
-    }
-    if (source === 'compatible') {
-        return { class: 'product-card__badge--compatible', text: 'COMPATIBLE' };
-    }
-    return null;
-}
-
 // Make API available globally
 window.API = API;
 window.formatPrice = formatPrice;
 window.getStockStatus = getStockStatus;
 window.qualifiesForFreeShipping = qualifiesForFreeShipping;
-window.getSourceBadge = getSourceBadge;
 window.calculateGST = calculateGST;
 // Test hook — used by __tests__/search-enrichment.test.js. Not part of the
 // public API surface; do not call from product code.

@@ -197,15 +197,12 @@
                         ? `/products/${encodeURIComponent(p.slug)}/${encodeURIComponent(p.sku)}`
                         : `/p/${encodeURIComponent(p.sku || '')}`;
                 })();
-                // category-page-contract-may2026.md §1 — every list-view
-                // card carries a top-left COMPATIBLE/GENUINE chip.
-                const sourceBadge = typeof getSourceBadge === 'function' ? getSourceBadge(p.source) : null;
-                const chipStackHTML = sourceBadge
-                    ? `<div class="product-card__chip-stack"><span class="product-card__badge ${sourceBadge.class}">${sourceBadge.text}</span></div>`
-                    : '';
+                // source-chip-removal-may2026.md — featured-grid cards no
+                // longer ship a per-card COMPATIBLE/GENUINE chip. Source is
+                // already conveyed by the product name on the card.
                 return `
                     <a href="${Security.escapeAttr(cardHref)}" class="product-card">
-                        <div class="product-card__image-wrapper">${imageHtml}${chipStackHTML}</div>
+                        <div class="product-card__image-wrapper">${imageHtml}</div>
                         <div class="product-card__info">
                             <span class="product-card__brand">${Security.escapeHtml(brandName)}</span>
                             <h3 class="product-card__name">${Security.escapeHtml(name)}</h3>

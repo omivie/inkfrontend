@@ -645,26 +645,12 @@
     font-size: 9px;
 }
 
-/* Per-card source chip — every list-view card carries a top-left
-   COMPATIBLE/GENUINE chip per category-page-contract-may2026.md §1.
-   Yellow for compatible, blue (cyan) for genuine. */
-.product-card__badge--compatible {
-    background-color: var(--yellow-primary);
-    color: var(--black-primary);
-}
-
-.product-card__badge--genuine {
-    background-color: var(--cyan-primary);
-    color: var(--white-primary);
-}
-
-/* Top-left chip stack — the COMPATIBLE/GENUINE source chip, the
-   FITS YOUR PRINTER chip, and the SAVE discount chip all want the
-   top-left corner. Stacking them via flex prevents overlap and lets
-   them flow together (per category-page-contract-may2026.md §1
-   acceptance: "the FITS YOUR PRINTER chip stacks above or beside the
-   source chip without overlapping"). Chips inside the stack drop
-   their absolute positioning; the stack itself is the absolute anchor. */
+/* Top-left chip stack — the FITS YOUR PRINTER chip and the SAVE
+   discount chip share the top-left corner. Stacking them via flex
+   prevents overlap. The per-card COMPATIBLE/GENUINE chip was retired
+   (source-chip-removal-may2026.md) — section headings + product names
+   already declare source. Chips inside the stack drop their absolute
+   positioning; the stack itself is the absolute anchor. */
 .product-card__chip-stack {
     position: absolute;
     top: var(--spacing-3);

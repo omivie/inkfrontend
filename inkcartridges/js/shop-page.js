@@ -2972,15 +2972,12 @@
                 ? `<span class="product-card__badge product-card__badge--fits-printer" title="Fits ${Security.escapeAttr(product._fitsPrinter)}">Fits Your Printer</span>`
                 : '';
 
-            // category-page-contract-may2026.md §1 — every list-view card
-            // ships a top-left COMPATIBLE/GENUINE chip driven by product.source.
-            // Yellow for compatible, blue for genuine. The chip is additive to
-            // the section header chip above the grid; mixed-source search
-            // results stay scannable card-by-card.
-            const sourceBadge = typeof getSourceBadge === 'function' ? getSourceBadge(product.source) : null;
-            const sourceBadgeHTML = sourceBadge
-                ? `<span class="product-card__badge ${sourceBadge.class}">${sourceBadge.text}</span>`
-                : '';
+            // source-chip-removal-may2026.md — the per-card
+            // COMPATIBLE/GENUINE chip is retired. The section heading above
+            // each grid (e.g. "Brother Compatible Inkjet Cartridges") and
+            // the product name itself already declare source; the per-card
+            // chip was redundant. The fits-printer chip keeps the top-left
+            // chip-stack alive on its own.
 
             // Spec §4 — bundle-pack visual differentiation.
             const packTypeRibbon = (() => {
@@ -3024,7 +3021,7 @@
                 <a href="${Security.escapeAttr(cardHref)}" class="product-card__link">
                     <div class="product-card__image-wrapper">
                         ${imageContent}
-                        ${(sourceBadgeHTML || fitsPrinterBadge) ? `<div class="product-card__chip-stack">${sourceBadgeHTML}${fitsPrinterBadge}</div>` : ''}
+                        ${fitsPrinterBadge ? `<div class="product-card__chip-stack">${fitsPrinterBadge}</div>` : ''}
                         ${product.is_lowest_in_market ? `<span class="product-card__badge product-card__badge--lowest-price" title="${product.market_position ? Security.escapeAttr(product.market_position.price_diff_percent + '% less than ' + product.market_position.lowest_competitor_name) : ''}">Lowest Price</span>` : ''}
                         ${packTypeRibbon}
                     </div>

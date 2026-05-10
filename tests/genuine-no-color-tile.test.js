@@ -306,9 +306,10 @@ test('runtime: genuine pack with image_url=NULL renders placeholder, NOT a color
     // … and must NOT render a colored tile div.
     assert.doesNotMatch(html, /class="product-card__color-block"/,
         'genuine pack with image_url=null must NOT render a product-card__color-block');
-    // The GENUINE source badge stays visible.
-    assert.match(html, /product-card__badge[^>]*genuine[^>]*>\s*GENUINE/i,
-        'GENUINE source badge must still render on the placeholder card');
+    // Per source-chip-removal-may2026.md the per-card source chip is
+    // retired — section heading + product name already declare source.
+    assert.doesNotMatch(html, /product-card__badge--genuine/,
+        'per-card GENUINE chip must NOT render (retired May 2026)');
 });
 
 test('runtime: compatible pack with image_url=NULL renders the color block (regression guard)', () => {
@@ -319,8 +320,8 @@ test('runtime: compatible pack with image_url=NULL renders the color block (regr
     // It must NOT also render the placeholder (one tile per card).
     assert.doesNotMatch(html, /placeholder-product\.svg/,
         'compatible color-block path must not also render the placeholder');
-    assert.match(html, /product-card__badge[^>]*compatible[^>]*>\s*COMPATIBLE/i,
-        'COMPATIBLE source badge must render alongside the color block');
+    assert.doesNotMatch(html, /product-card__badge--compatible/,
+        'per-card COMPATIBLE chip must NOT render (retired May 2026)');
 });
 
 test('runtime: genuine single (color="Black", image_url=null) also gets placeholder, not black tile', () => {
