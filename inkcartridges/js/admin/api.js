@@ -396,7 +396,15 @@ const AdminAPI = {
             msg += ': ' + resp.details;
           }
         }
-        throw new Error(msg);
+        // Append the 8-char Render request_id so admins can grep stderr when
+        // the backend returns a generic 500 (e.g. the source='ribbon' rows
+        // that 500 on every PUT — see readfirst/admin-ribbon-row-blocked-may2026.md).
+        if (resp.request_id) msg += ` (ref ${String(resp.request_id).slice(0, 8)})`;
+        const err = new Error(msg);
+        err.code = resp.code;
+        err.status = resp.status;
+        err.request_id = resp.request_id;
+        throw err;
       }
       return resp?.data ?? null;
     } catch (e) {

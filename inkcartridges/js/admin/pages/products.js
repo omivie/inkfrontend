@@ -1105,6 +1105,21 @@ function buildProductModalTabs(modal, full, isOwner) {
     `<div class="admin-product-modal__tab-panel${i === 0 ? ' active' : ''}" data-panel="${i}">${content}</div>`
   ).join('');
 
+  // Legacy-source banner: warn when source ∉ {genuine, compatible}. The backend
+  // PUT /api/admin/products/:id Joi enum is `[genuine, compatible]`, AND the
+  // SQL UPDATE itself 500s on these rows (e.g. source='ribbon' carry-overs).
+  // Spec + handoff at readfirst/admin-ribbon-row-blocked-may2026.md.
+  const ALLOWED_SOURCE = new Set(['genuine', 'compatible']);
+  const currentSource = (full.source || '').toString().toLowerCase();
+  if (currentSource && !ALLOWED_SOURCE.has(currentSource)) {
+    const banner = document.createElement('div');
+    banner.className = 'admin-product-modal__legacy-banner';
+    banner.setAttribute('data-legacy-source', currentSource);
+    banner.style.cssText = 'margin:0 0 16px;padding:12px 14px;border-radius:var(--radius);background:#fff7ed;border:1px solid #fdba74;color:#7c2d12;font-size:13px;line-height:1.5';
+    banner.innerHTML = `<strong>Legacy <code style="background:#fed7aa;padding:1px 5px;border-radius:3px">source = "${esc(currentSource)}"</code></strong> — backend currently rejects writes for this row. Saves will fail until either the backend ribbon route is repaired or this row is migrated to <code style="background:#fed7aa;padding:1px 5px;border-radius:3px">compatible</code>. <a href="/readfirst/admin-ribbon-row-blocked-may2026.md" style="color:#9a3412;text-decoration:underline" target="_blank" rel="noopener">Why is this happening?</a>`;
+    panelsEl.parentNode.insertBefore(banner, panelsEl);
+  }
+
   // Mount rich text editors
   const descMount = modal.querySelector('#desc-editor-mount');
   if (descMount) {
@@ -2175,7 +2190,18 @@ function bindProductModalActions(modal, product) {
       if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = 'Save Changes'; }
       loadProducts();
     } catch (e) {
-      Toast.error(`Save failed: ${e.message}`);
+      // Special-case the legacy-ribbon-row 500: the backend's PUT handler can't
+      // write any field on rows where source ∉ {genuine, compatible}. Show the
+      // admin a useful message instead of the generic "Failed to update product".
+      const ALLOWED_SOURCE = new Set(['genuine', 'compatible']);
+      const legacySource = (product.source || '').toString().toLowerCase();
+      const isLegacyRow = legacySource && !ALLOWED_SOURCE.has(legacySource);
+      const isInternal = e.code === 'INTERNAL_ERROR' || e.status === 500;
+      if (isLegacyRow && isInternal) {
+        Toast.error(`This row has a legacy source ("${legacySource}") that the backend can't write. See readfirst/admin-ribbon-row-blocked-may2026.md.${e.request_id ? ' Ref ' + String(e.request_id).slice(0, 8) : ''}`);
+      } else {
+        Toast.error(`Save failed: ${e.message}`);
+      }
       const saveBtn = modal.querySelector('[data-action="save"]');
       if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = 'Save Changes'; }
     }
