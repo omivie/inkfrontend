@@ -66,7 +66,7 @@ let _stockFilter = '';
 let _brands = [];
 let _diagnostics = null;
 let _bulkBar = null;
-let _activeProductTab = 'products'; // products | ribbons | review
+let _activeProductTab = 'products'; // products | printers
 let _subProductModule = null;
 const DIAG_CACHE_KEY = 'admin_product_diagnostics';
 
@@ -2609,7 +2609,7 @@ async function bulkDelete() {
   });
 }
 
-// ---- Tab switching for Products / Ribbons / Review ----
+// ---- Tab switching for Products / Printers ----
 async function switchProductTab(tab) {
   if (tab === _activeProductTab) return;
 
@@ -2631,15 +2631,6 @@ async function switchProductTab(tab) {
   if (tab === 'products') {
     content.innerHTML = '';
     await renderProductsContent(content);
-  } else if (tab === 'ribbons') {
-    try {
-      const mod = await import('./ribbons.js');
-      _subProductModule = mod.default;
-      content.innerHTML = '';
-      await _subProductModule.init(content);
-    } catch (e) {
-      content.innerHTML = `<div class="admin-empty"><div class="admin-empty__title">Failed to load Ribbons</div><div class="admin-empty__text">${esc(e.message)}</div></div>`;
-    }
   } else if (tab === 'printers') {
     try {
       const mod = await import('./printers.js');
@@ -3018,7 +3009,6 @@ export default {
     tabBar.className = 'admin-tabs';
     tabBar.innerHTML = `
       <button class="admin-tab active" data-prod-tab="products">All Products</button>
-      <button class="admin-tab" data-prod-tab="ribbons">Ribbons</button>
       <button class="admin-tab" data-prod-tab="printers">Printers</button>
     `;
     container.appendChild(tabBar);

@@ -74,7 +74,7 @@ const NAV_ITEMS = [
 // Legacy route redirects — old pages now merged into parent pages
 const ROUTE_REDIRECTS = {
   'refunds': 'orders',
-  'ribbons': 'products',
+  'ribbons': 'products', // retired May 2026 — preserved so old bookmarks land on Products
   'reviews': 'customers',
   'margin': 'analytics',
   'financial-health': 'analytics',
