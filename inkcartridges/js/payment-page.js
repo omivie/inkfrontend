@@ -205,7 +205,7 @@
                 const response = await API.getCart();
 
                 if (!response.ok || !response.data) {
-                    throw new Error(response.error || 'Failed to load cart');
+                    throw new Error(API.extractErrorMessage(response, 'Failed to load cart'));
                 }
 
                 const cartData = response.data;
@@ -1089,7 +1089,7 @@
                             self.showEmailVerificationRequired();
                             throw new Error('EMAIL_NOT_VERIFIED');
                         }
-                        throw new Error(response.error || 'Failed to create PayPal order');
+                        throw new Error(API.extractErrorMessage(response, 'Failed to create PayPal order'));
                     }
 
                     const data = response.data;

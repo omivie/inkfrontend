@@ -116,7 +116,7 @@
                                 ? API.mapError(res).message
                                 : 'Server hiccup — please try again.';
                         } else {
-                            fieldMsg = res.error || 'Could not subscribe. Please try again.';
+                            fieldMsg = API.extractErrorMessage(res, 'Could not subscribe. Please try again.');
                         }
                         if (res.request_id) {
                             // Always log to console so dev tools / customer screenshots include

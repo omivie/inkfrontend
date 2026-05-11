@@ -39,13 +39,12 @@
             // Short SKU URL: /p/:sku — in production this is rewritten to the
             // backend's 301 handler, but on localhost (and as a resilience
             // fallback if the backend is unreachable) we resolve client-side.
-            // After the product loads we canonicalise the URL bar.
-            let cameFromShortUrl = false;
+            // After the product loads the canonical-path normaliser below
+            // rewrites the URL bar to the polished /products/:slug/:sku form.
             if (!sku) {
                 const shortPath = window.location.pathname.match(/^\/p\/(.+)$/);
                 if (shortPath) {
                     sku = decodeURIComponent(shortPath[1]);
-                    cameFromShortUrl = true;
                 }
             }
 
@@ -102,7 +101,13 @@
                     // it so users see "temporarily unavailable" + a Try Again
                     // button rather than a misleading "not found" for what is
                     // actually a server hiccup.
-                    this.showError(response.error || 'Product not found');
+                    //
+                    // response.error may be a string (legacy path) or the
+                    // backend's typed `{ code, message }` object. Funnel through
+                    // API.extractErrorMessage so the renderer never paints
+                    // "[object Object]" — see errors.md "[object Object] on
+                    // product 404" for the regression this guards against.
+                    this.showError(API.extractErrorMessage(response, 'Product not found'));
                     return;
                 }
 
@@ -134,20 +139,26 @@
                     return;
                 }
 
-                if (cameFromShortUrl) {
-                    const canonicalPath = (() => {
-                        if (this.product.canonical_url) {
-                            try { return new URL(this.product.canonical_url).pathname; }
-                            catch (_) { return null; }
-                        }
-                        if (this.product.slug && this.product.sku) {
-                            return `/products/${encodeURIComponent(this.product.slug)}/${encodeURIComponent(this.product.sku)}`;
-                        }
-                        return null;
-                    })();
-                    if (canonicalPath) {
-                        window.history.replaceState({}, '', canonicalPath + window.location.search + window.location.hash);
+                // Normalize URL bar to the polished canonical slug whenever the
+                // current path differs — covers /p/:sku entries, /products/<loser>/<sku>
+                // entries, and legacy /product/:slug entries. Bots that render JS
+                // observe the canonical URL; bots that don't still consume the
+                // <link rel="canonical"> tag rendered below. The hard 301 for
+                // loser slugs is enforced by the backend's prerender route on
+                // /p/:sku and /html/products/:slug/:sku — this is the
+                // client-side companion that handles direct SPA entries.
+                const canonicalPath = (() => {
+                    if (this.product.canonical_url) {
+                        try { return new URL(this.product.canonical_url).pathname; }
+                        catch (_) { return null; }
                     }
+                    if (this.product.slug && this.product.sku) {
+                        return `/products/${encodeURIComponent(this.product.slug)}/${encodeURIComponent(this.product.sku)}`;
+                    }
+                    return null;
+                })();
+                if (canonicalPath && canonicalPath !== window.location.pathname) {
+                    window.history.replaceState({}, '', canonicalPath + window.location.search + window.location.hash);
                 }
 
                 this.renderProduct();
@@ -1628,8 +1639,14 @@
             // showing a phantom-broken product page when the user
             // presses Back. The pageshow/persisted handler refetches.
             if (this._unloading) return;
+            // Defense-in-depth: even if a caller forgets to unwrap the
+            // backend's `{ code, message }` error envelope, never paint
+            // "[object Object]" — coerce via API.extractErrorMessage.
+            const safeMessage = (typeof API !== 'undefined' && API.extractErrorMessage)
+                ? API.extractErrorMessage(message, 'Product not found')
+                : (typeof message === 'string' ? message : 'Product not found');
             // Update title
-            document.getElementById('product-title').textContent = message;
+            document.getElementById('product-title').textContent = safeMessage;
             document.getElementById('product-sku').textContent = '';
             document.getElementById('product-price').textContent = '';
 
@@ -1646,7 +1663,7 @@
                         <line x1="12" y1="8" x2="12" y2="12"/>
                         <line x1="12" y1="16" x2="12.01" y2="16"/>
                     </svg>
-                    <p>${Security.escapeHtml(message)}</p>
+                    <p>${Security.escapeHtml(safeMessage)}</p>
                     <button class="btn btn--secondary" data-action="reload">Try Again</button>
                     <a href="/shop" class="btn btn--outline">Browse All Products</a>
                 </div>

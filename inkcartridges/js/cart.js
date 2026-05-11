@@ -635,7 +635,7 @@ const Cart = {
                 // Non-ok API response = infrastructure error (auth, Turnstile, server failure).
                 // Stock/availability errors always come via data.issues in an ok: true response.
                 // Re-throw so the checkout handler's catch block allows proceeding.
-                throw new Error(response.error || 'Cart validation failed');
+                throw new Error(API.extractErrorMessage(response, 'Cart validation failed'));
             }
         } catch (error) {
             DebugLog.error('Cart validation error:', error);
@@ -1158,7 +1158,7 @@ const Cart = {
                     this.saveToLocalStorage();
                     this.updateUI();
                     if (typeof showToast === 'function') {
-                        showToast(response.error || 'Failed to add item to cart', 'error');
+                        showToast(API.extractErrorMessage(response, 'Failed to add item to cart'), 'error');
                     }
                     return;
                 }

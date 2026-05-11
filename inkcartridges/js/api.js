@@ -433,6 +433,55 @@ const API = {
     },
 
     /**
+     * Extract a plain user-facing string from any of the error shapes the
+     * frontend deals with. The May-2026 backend ships `{ ok: false, error: {
+     * code, message, request_id } }` for typed errors, but older endpoints
+     * still return `{ ok: false, error: '<string>' }`. Without this helper,
+     * page controllers that did `showError(response.error || 'fallback')`
+     * coerced the object via .toString() and painted "[object Object]"
+     * (most visibly on product 404 — see errors.md "[object Object] on
+     * product 404" entry).
+     *
+     * Shapes handled, in order:
+     *   - falsy / undefined                  → fallback
+     *   - plain string                       → string
+     *   - Error instance                     → err.message || fallback
+     *   - { message: '...' }                 → message
+     *   - { error: '...' }                   → error
+     *   - { error: { message: '...' } }      → error.message
+     *   - { error: { code, ... }, ... }      → code (last resort, never object)
+     *   - anything else                      → fallback (never object→string coerce)
+     *
+     * @param {*} errorOrResponse - any of the above shapes
+     * @param {string} [fallback='Something went wrong. Please try again.']
+     * @returns {string} A safe-to-render string. Never returns "[object Object]".
+     */
+    extractErrorMessage(errorOrResponse, fallback = 'Something went wrong. Please try again.') {
+        if (errorOrResponse == null) return fallback;
+        if (typeof errorOrResponse === 'string') return errorOrResponse || fallback;
+        // Error instance (thrown from request() or _fetchWithAuth())
+        if (errorOrResponse instanceof Error) {
+            return (errorOrResponse.message && String(errorOrResponse.message)) || fallback;
+        }
+        if (typeof errorOrResponse !== 'object') return fallback;
+        // Direct .message on the envelope (e.g. mapError() return value)
+        if (typeof errorOrResponse.message === 'string' && errorOrResponse.message) {
+            return errorOrResponse.message;
+        }
+        // .error nested: string or { code, message }
+        const inner = errorOrResponse.error;
+        if (typeof inner === 'string' && inner) return inner;
+        if (inner && typeof inner === 'object') {
+            if (typeof inner.message === 'string' && inner.message) return inner.message;
+            // Last resort: surface the machine code rather than letting an
+            // object coerce. mapError() can later upgrade this to a friendly
+            // sentence; the contract here is "never paint [object Object]".
+            if (typeof inner.code === 'string' && inner.code) return inner.code;
+        }
+        return fallback;
+    },
+
+    /**
      * Show a toast (or fall back to alert) for a backend error response.
      * Use when you don't have a dedicated inline display target — e.g. cross-page
      * cart mutations, login-required actions, idempotency conflicts.
@@ -670,12 +719,45 @@ const API = {
         try {
             // Enrich every compatible with derived series_codes (in place, on
             // the SWR-cloned objects we own — _swrClone deep-copies on every
-            // read).
+            // read). _enrichSeriesCodes returns true when codes had to be
+            // derived from name/sku (backend hadn't supplied them) and false
+            // when the backend's series_codes array was already populated.
+            //
+            // Why we track the per-product enrichment flag (May 2026 fix):
+            // The backend now ships `series_codes` on every product via /api/shop
+            // AND /api/products (commit 5c99462 — see
+            // project_series_codes_thin_extractor_may2026). That means the primary
+            // /api/shop response's series[].count ALREADY includes every compatible
+            // the sidecar would surface. Counting the sidecar's compats again in
+            // the drilldown branch double-counts every chip:
+            //
+            //   /api/shop?brand=epson&category=ink  → series.81N.count = 8 (8 compats)
+            //   /api/products?...&source=compatible → 8 more 81N compats (same rows)
+            //   merged FE chip → 8 + 8 = 16 ❌ (customer saw 16; clicked → 8 products)
+            //
+            // The merge must skip products whose codes the backend already used.
+            // The only safe signal we have for that is the existence of backend
+            // series_codes BEFORE we enrich: if the array was populated, backend
+            // had already classified the row and used it in its count; if empty,
+            // backend skipped it and the sidecar count is the only thing pulling
+            // that chip onto the grid. Enrichment-true is therefore both the
+            // necessary signal that we own the count, and a defense-in-depth
+            // recovery path if backend regresses on a future product.
             const compats = sidecar.data.products;
-            for (const p of compats) this._enrichSeriesCodes(p);
+            const enrichedSet = new Set();
+            for (const p of compats) {
+                if (this._enrichSeriesCodes(p)) enrichedSet.add(p);
+            }
 
             if (params.code) {
                 // Code-filtered request: merge missing compatibles for that code.
+                // The seen-set dedupe handles the double-count question here —
+                // products already in primary (whether matched on backend
+                // series_codes or recovered) are skipped regardless of enrichment.
+                // We still consider ALL compats (not just enriched ones) because
+                // /api/shop?code=X is known to drop value-pack rows on the
+                // source=compatible filter; the sidecar is the recovery path for
+                // those even when their series_codes were backend-supplied.
                 const wanted = String(params.code).toUpperCase();
                 const seen = new Set();
                 for (const p of (primary.data.products || [])) {
@@ -695,8 +777,10 @@ const API = {
                 }
             } else {
                 // Codes drilldown request: merge compat counts into series[]
-                // so chips for compatible-only series show up and counts add
-                // together.
+                // so chips for compatible-only series that backend missed show
+                // up. Only enriched compats (backend `series_codes` was empty)
+                // contribute counts — backend-classified compats are already
+                // in primary.series[].count and would double-count otherwise.
                 const seriesByCode = new Map();
                 const seriesArr = Array.isArray(primary.data.series) ? primary.data.series : [];
                 primary.data.series = seriesArr;
@@ -705,6 +789,7 @@ const API = {
                 }
                 for (const p of compats) {
                     if (!p || p.source !== 'compatible') continue;
+                    if (!enrichedSet.has(p)) continue; // backend already counted this row
                     const codes = p.series_codes || [];
                     // Per-product dedupe in case enrichment yielded multiples
                     // for the same family (eg a multi-printer compat naming
@@ -764,9 +849,14 @@ const API = {
      *
      * Mutates `product.series_codes` in place when at least one code is found.
      * No-op when the array is already populated (we trust the backend).
+     *
+     * @returns {boolean} true when codes were derived locally from name/sku,
+     *   false when backend already supplied them (codes are still normalized)
+     *   or when no codes could be derived. Callers (`getShopData`) use this
+     *   to avoid double-counting compats the backend has already classified.
      */
     _enrichSeriesCodes(product) {
-        if (!product || typeof product !== 'object') return;
+        if (!product || typeof product !== 'object') return false;
         const existing = Array.isArray(product.series_codes)
             ? product.series_codes.filter(c => c != null && String(c).trim())
             : [];
@@ -774,7 +864,7 @@ const API = {
             // Normalize casing/whitespace even for backend-supplied values so
             // downstream comparisons (case-insensitive) hit consistently.
             product.series_codes = existing.map(c => String(c).trim().toUpperCase());
-            return;
+            return false; // backend supplied — not enriched locally
         }
 
         const codes = new Set();
@@ -830,7 +920,11 @@ const API = {
             }
         }
 
-        if (codes.size) product.series_codes = [...codes];
+        if (codes.size) {
+            product.series_codes = [...codes];
+            return true;
+        }
+        return false;
     },
 
     /**
@@ -881,7 +975,10 @@ const API = {
         // Genuine 404 / not-found envelope: do NOT fall back. Surfacing a
         // fuzzy near-neighbor here would mislead the user into thinking they
         // reached the real product page for a SKU that doesn't exist.
-        const code = primary.body && primary.body.error && primary.body.error.code;
+        // Code comparison is case-insensitive — backend ships `not_found`
+        // today and the historical contract is `NOT_FOUND`; either matches.
+        const rawCode = primary.body && primary.body.error && primary.body.error.code;
+        const code = typeof rawCode === 'string' ? rawCode.toUpperCase() : rawCode;
         const isGenuineMissing = primary.kind === 'http-error' && (primary.status === 404 || code === 'NOT_FOUND');
         if (isGenuineMissing) {
             return primary.body || { ok: false, error: 'Product not found' };
@@ -958,23 +1055,19 @@ const API = {
     },
 
     /**
-     * Get products compatible with a printer
-     * @param {string} printerSlug - Printer slug
-     */
-    async getProductsByPrinter(printerSlug) {
-        return this.get(`/api/products/printer/${encodeURIComponent(printerSlug)}`);
-    },
-
-    /**
-     * Get products strictly compatible with a printer (via product_compatibility table).
-     * Uses the dedicated printer-products endpoint which returns only products linked
-     * to the exact printer — no fuzzy name matching.
+     * Get products compatible with a printer — strict, via product_compatibility.
+     *
+     * Canonical endpoint per backend (2026-05-11): `/api/products/printer/:slug`
+     * carries the full enrich + sanitize + pack-guard + cousin-collapse
+     * pipeline. The previously-aliased `/api/printers/:slug/products` is
+     * deprecated and was retired from the frontend on 2026-05-12.
+     *
      * @param {string} printerSlug - Printer slug (e.g. "brother-mfc-j6945dw")
      * @param {object} [params] - Optional { page, limit, type, source }
      */
-    async getPrinterProducts(printerSlug, params = {}) {
+    async getProductsByPrinter(printerSlug, params = {}) {
         const query = new URLSearchParams(params).toString();
-        const url = `/api/printers/${encodeURIComponent(printerSlug)}/products${query ? `?${query}` : ''}`;
+        const url = `/api/products/printer/${encodeURIComponent(printerSlug)}${query ? `?${query}` : ''}`;
         return this.get(url);
     },
 

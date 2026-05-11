@@ -32,7 +32,7 @@
                             resendBtn.textContent = 'Resend Verification Email';
                         }, 30000);
                     } else {
-                        resendStatus.textContent = response.error || 'Failed to send email. Please try again.';
+                        resendStatus.textContent = API.extractErrorMessage(response, 'Failed to send email. Please try again.');
                         resendStatus.style.display = '';
                         resendBtn.disabled = false;
                         resendBtn.textContent = 'Resend Verification Email';

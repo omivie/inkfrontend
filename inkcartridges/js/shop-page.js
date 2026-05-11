@@ -2114,16 +2114,18 @@
                     }
                 }
 
-                // Use dedicated endpoint with the resolved slug — strict compatibility filter
+                // Use canonical printer-products endpoint with the resolved slug —
+                // strict compatibility filter (no fuzzy name matching).
                 if (resolvedSlug) {
                     try {
-                        const resp = await API.getPrinterProducts(resolvedSlug, { limit: 200 });
+                        const resp = await API.getProductsByPrinter(resolvedSlug, { limit: 200 });
                         if (resp.ok && resp.data) {
                             const list = resp.data.compatible_products || resp.data.products || [];
                             if (Array.isArray(list) && list.length > 0) {
-                                // /api/printers/:slug/products returns brand as a bare
-                                // string; other endpoints return { name, slug }. Normalize
-                                // so card rendering (product.brand?.name) works uniformly.
+                                // Belt-and-suspenders: the canonical endpoint returns
+                                // brand as { name, slug }, but legacy responses ship
+                                // brand as a bare string. Normalize so card rendering
+                                // (product.brand?.name) works uniformly.
                                 allProducts = list.map(p => {
                                     const brandObj = (typeof p.brand === 'string')
                                         ? { name: p.brand, slug: null }

@@ -1140,7 +1140,7 @@
                         } else if (res.code === 'EMAIL_NOT_VERIFIED') {
                             setHint('Verify your email to use coupons.', 'error');
                         } else {
-                            setHint(res.error || 'Coupon not valid for this cart', 'error');
+                            setHint(API.extractErrorMessage(res, 'Coupon not valid for this cart'), 'error');
                         }
                         return;
                     }
@@ -1256,7 +1256,7 @@
                         const fieldMsg = Array.isArray(response.details) && response.details[0]?.message
                             ? response.details[0].message
                             : null;
-                        throw new Error(fieldMsg || response.error || 'Invalid coupon code');
+                        throw new Error(fieldMsg || API.extractErrorMessage(response, 'Invalid coupon code'));
                     }
                 } catch (error) {
                     DebugLog.error('Coupon error:', error);

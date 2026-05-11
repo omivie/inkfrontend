@@ -126,11 +126,17 @@ test('product-detail-page.js init() handles /p/:sku', () => {
     );
 });
 
-test('product-detail-page.js canonicalises the URL bar after loading from /p/:sku', () => {
-    // After a successful load from a /p/<sku> short link we replaceState to
-    // the canonical /products/<slug>/<sku> so reloads, sharing, and back
-    // navigation all use the SEO URL.
-    assert.match(SRC, /cameFromShortUrl/);
+test('product-detail-page.js canonicalises the URL bar whenever path differs from canonical', () => {
+    // After every successful load (whether entry was /p/<sku>, /products/<loser>/<sku>,
+    // /product/<slug>, or ?sku=<sku>) we replaceState to the canonical
+    // /products/<polished-slug>/<sku> so reloads, sharing, back navigation, and
+    // SEO signal all use the polished URL. The replaceState block lives next to
+    // `canonicalPath !== window.location.pathname` so it no-ops when the path
+    // is already canonical (avoid history spam).
+    //
+    // Pinned contract — see tests/polished-slugs-may2026.test.js §3.
+    assert.match(SRC, /this\.product\.canonical_url/);
+    assert.match(SRC, /canonicalPath\s*!==\s*window\.location\.pathname/);
     assert.match(SRC, /window\.history\.replaceState\(/);
 });
 
