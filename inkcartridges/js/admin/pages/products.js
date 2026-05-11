@@ -1446,13 +1446,14 @@ function toggleHtml(id, checked) {
 }
 
 function bindProductModalActions(modal, product) {
-  // Enter key triggers save (except in textareas)
+  // Enter key triggers save (except in textareas and contenteditable rich-text fields)
   modal.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' && e.target.tagName !== 'TEXTAREA') {
-      e.preventDefault();
-      e.stopPropagation();
-      modal.querySelector('[data-action="save"]')?.click();
-    }
+    if (e.key !== 'Enter') return;
+    if (e.target.tagName === 'TEXTAREA') return;
+    if (e.target.isContentEditable) return;
+    e.preventDefault();
+    e.stopPropagation();
+    modal.querySelector('[data-action="save"]')?.click();
   });
 
   // Compatibility management
