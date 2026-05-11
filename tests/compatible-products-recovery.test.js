@@ -517,6 +517,154 @@ test('getShopData — primary 5xx rejects: error propagates so caller can fall b
     assert.equal(resp.code, 'INTERNAL_ERROR');
 });
 
+// ─────────────────────────────────────────────────────────────────────────────
+// 7. Double-count guard — backend now ships `series_codes` on every product
+//    (commit 5c99462, May 2026). The primary /api/shop response's
+//    `series[].count` already includes every compatible the sidecar would
+//    surface, so adding the sidecar's compats again doubles the chip count.
+//    Real-world repro (2026-05-12): /shop?brand=epson&category=ink showed
+//    "81N — 16 products" while the actual filtered grid had 8. Same offset
+//    on 73N (13 → 7), 103/133/138 (12 → 6), 200 (21 → 16), 273 (21 → 14),
+//    604 (24 → 18) — the diff equaled the compat count every time, the
+//    fingerprint of a +1 per sidecar row. Gate: `_enrichSeriesCodes` returns
+//    a flag, and only enriched compats (backend was missing their codes)
+//    contribute to chip counts. Backend-classified compats are skipped.
+// ─────────────────────────────────────────────────────────────────────────────
+
+test('_enrichSeriesCodes — returns false when backend already supplied series_codes', () => {
+    const { API } = loadApi({ fetchImpl: () => mockResponse({}) });
+    const p = { sku: 'C81NBK', name: '81NBK Compatible Ink Cartridge for Epson 81N Black', series_codes: ['81N'], source: 'compatible' };
+    const enriched = API._enrichSeriesCodes(p);
+    assert.equal(enriched, false, 'backend-supplied series_codes must not be flagged as enriched');
+    assert.deepEqual(p.series_codes, ['81N']);
+});
+
+test('_enrichSeriesCodes — returns true when codes were derived locally from name/sku', () => {
+    const { API } = loadApi({ fetchImpl: () => mockResponse({}) });
+    const p = { sku: 'C81NBK', name: '81NBK Compatible Ink Cartridge for Epson 81N Black', series_codes: [], source: 'compatible' };
+    const enriched = API._enrichSeriesCodes(p);
+    assert.equal(enriched, true, 'locally-derived codes must be flagged as enriched');
+    assert.ok(p.series_codes.includes('81N'));
+});
+
+test('_enrichSeriesCodes — returns false when nothing could be derived', () => {
+    const { API } = loadApi({ fetchImpl: () => mockResponse({}) });
+    const p = { sku: '', name: 'Compatible something somewhere', series_codes: [] };
+    const enriched = API._enrichSeriesCodes(p);
+    assert.equal(enriched, false, 'no extractable codes must return false');
+});
+
+test('getShopData — 81N regression: backend-classified compats do NOT double-count', async () => {
+    // Repro of the live 2026-05-12 bug: backend /api/shop reports series.81N.count=8
+    // (it already counts the 8 compats); sidecar returns those same 8 compats
+    // with backend-supplied series_codes=['81N']. Pre-fix the merge added +8 →
+    // chip showed 16, drilldown showed 8. Post-fix the chip stays at 8.
+    const primary = shopEnvelope({
+        products: [], // /api/shop ships max-limit subset; series counts are catalog-wide
+        series: [{ code: '81N', count: 8 }],
+    });
+    const sidecar = shopEnvelope({
+        products: Array.from({ length: 8 }, (_, i) => ({
+            id: `c81n-${i}`,
+            sku: `C81N-${i}`,
+            name: '81NBK Compatible Ink Cartridge for Epson 81N',
+            source: 'compatible',
+            series_codes: ['81N'], // backend-classified
+        })),
+    });
+    const { API } = loadApi({
+        fetchImpl: (url) => mockResponse({ status: 200, body: url.includes('source=compatible') ? sidecar : primary }),
+    });
+    const resp = await API.getShopData({ brand: 'epson', category: 'ink' });
+    const chip = resp.data.series.find(s => s.code === '81N');
+    assert.equal(chip.count, 8,
+        `81N chip count must remain 8 (backend already counted the 8 compats); got ${chip.count}. ` +
+        `This was the 2026-05-12 double-count bug — see project_chip_count_double_count_may2026.md`);
+});
+
+test('getShopData — mixed catalog: only enrichment-recovered compats contribute to series count', async () => {
+    // Half the sidecar compats have backend series_codes (already counted by
+    // backend), half don't (backend skipped them — sidecar is the only path
+    // that puts them on the grid). Only the latter should bump the chip count.
+    const primary = shopEnvelope({
+        products: [],
+        series: [{ code: '604', count: 18 }], // 18 already includes the 6 backend-classified compats
+    });
+    const sidecar = shopEnvelope({
+        products: [
+            // 6 backend-classified — must NOT add to count
+            ...Array.from({ length: 6 }, (_, i) => ({
+                id: `c604-be-${i}`, sku: `C604-${i}`,
+                name: '604BK Compatible Ink Cartridge for Epson 604 Black',
+                source: 'compatible', series_codes: ['604'],
+            })),
+            // 3 NOT backend-classified — recovery path, MUST add to count
+            ...Array.from({ length: 3 }, (_, i) => ({
+                id: `c604-bf-${i}`, sku: `C604BK-${i}`,
+                name: '604BK Compatible Ink Cartridge for Epson 604 Black',
+                source: 'compatible', series_codes: [],
+            })),
+        ],
+    });
+    const { API } = loadApi({
+        fetchImpl: (url) => mockResponse({ status: 200, body: url.includes('source=compatible') ? sidecar : primary }),
+    });
+    const resp = await API.getShopData({ brand: 'epson', category: 'ink' });
+    const chip = resp.data.series.find(s => s.code === '604');
+    assert.equal(chip.count, 21, 'chip should be 18 (backend) + 3 (enrichment recovery), NOT 18 + 6 + 3 = 27');
+});
+
+test('getShopData — compatible-only series chip still appears when ALL compats need enrichment', async () => {
+    // Defense-in-depth: if backend regresses and ships series_codes:[] for an
+    // entire compatible-only family, the sidecar must still surface that chip.
+    // (This was the original purpose of the recovery sidecar back in
+    // May 2026 — pre-commit 5c99462. Today the path is exercised only as
+    // fallback insurance, but its contract still holds.)
+    const primary = shopEnvelope({
+        products: [],
+        series: [{ code: 'LC67', count: 6 }], // backend lists LC67 (genuine-only)
+    });
+    const sidecar = shopEnvelope({
+        products: Array.from({ length: 5 }, (_, i) => ({
+            id: `c02-${i}`, sku: `C02BK-${i}`,
+            name: '02BK Compatible Ink Cartridge for HP 02 Black',
+            source: 'compatible', series_codes: [], // backend missed them
+        })),
+    });
+    const { API } = loadApi({
+        fetchImpl: (url) => mockResponse({ status: 200, body: url.includes('source=compatible') ? sidecar : primary }),
+    });
+    const resp = await API.getShopData({ brand: 'hp', category: 'ink' });
+    const chip = resp.data.series.find(s => s.code === '02');
+    assert.ok(chip, 'compatible-only chip "02" must be added by recovery');
+    assert.equal(chip.count, 5, '5 enriched compats should yield a chip count of 5');
+});
+
+test('getShopData — code=81N: backend-classified compats still surface in code-filtered grid', async () => {
+    // The code-filtered branch uses seen-set dedupe regardless of enrichment,
+    // so even backend-classified compats that primary dropped (eg value-packs
+    // /api/shop loses on the compatible source filter) are recovered. This
+    // pins the orthogonal behavior — gating the codes-drilldown branch on
+    // enrichment must NOT regress the code-filtered recovery path.
+    const primary = shopEnvelope({
+        products: [
+            { id: 'g1', sku: 'GHP650', source: 'genuine', series_codes: ['PGI650'] },
+        ],
+        meta: { page: 1, limit: 200, total: 1, total_pages: 1, has_next: false, has_prev: false },
+    });
+    const sidecar = shopEnvelope({
+        products: [
+            { id: 'c-pack', sku: 'CPGI650KCMY', name: 'CPGI650KCMY Compatible Pack', source: 'compatible', series_codes: ['PGI650'] },
+        ],
+    });
+    const { API } = loadApi({
+        fetchImpl: (url) => mockResponse({ status: 200, body: url.includes('source=compatible') ? sidecar : primary }),
+    });
+    const resp = await API.getShopData({ brand: 'canon', category: 'ink', code: 'PGI650' });
+    assert.equal(resp.data.products.length, 2, 'value-pack must be recovered even though backend classified it');
+    assert.deepEqual(resp.data.products.map(p => p.id).sort(), ['c-pack', 'g1']);
+});
+
 test('getShopData — sidecar rejects: primary returned unchanged (fail-open)', async () => {
     const primary = shopEnvelope({
         products: [],
