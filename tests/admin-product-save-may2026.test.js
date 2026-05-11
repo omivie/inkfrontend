@@ -7,7 +7,9 @@
  * `Save failed: Failed to update product`. Root cause was a backend bug —
  * `PUT /api/admin/products/:id` returns 500 INTERNAL_ERROR for every one
  * of the 34 legacy rows that carry `source = 'ribbon'`, regardless of
- * payload (full handoff at `readfirst/admin-ribbon-row-blocked-may2026.md`).
+ * payload. Backend repair via `scripts/repair-source-ribbon-rows.js`
+ * (per backend dev reply 2026-05-11). Reproduction in
+ * `.claude/memory/errors.md` ("Admin product Save fails…").
  *
  * The frontend cannot fix the underlying SQL bug, but it shipped four
  * mitigations to stop silent data corruption and to give admins a
@@ -44,7 +46,6 @@ const READ = (rel) => fs.readFileSync(path.join(ROOT, rel), 'utf8');
 
 const PRODUCTS_SRC = READ('inkcartridges/js/admin/pages/products.js');
 const ADMIN_API_SRC = READ('inkcartridges/js/admin/api.js');
-const SPEC_SRC = READ('readfirst/admin-ribbon-row-blocked-may2026.md');
 
 // Shared esc stub matching the production helper (Security.escapeAttr-equivalent).
 const esc = (s) => String(s ?? '')
@@ -174,8 +175,10 @@ test('buildProductModalTabs injects a legacy-source banner when source ∉ {genu
     'the legacy-source banner CSS class must be present in the modal builder');
   assert.match(PRODUCTS_SRC, /new Set\(\[['"]genuine['"],\s*['"]compatible['"]\]\)/,
     'the allowed-source set must be {genuine, compatible} (mirrors backend Joi enum)');
-  assert.match(PRODUCTS_SRC, /readfirst\/admin-ribbon-row-blocked-may2026\.md/,
-    'the banner must link to the backend handoff spec');
+  // Banner copy must surface the operator action so admins know what unblocks
+  // saves — without the script name they have no actionable lever.
+  assert.match(PRODUCTS_SRC, /repair-source-ribbon-rows\.js/,
+    'the banner must name the backend repair script (operator action) so admins know what unblocks saves');
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -191,22 +194,16 @@ test('Save catch detects INTERNAL_ERROR/500 on legacy-source rows and shows a sp
     'Save catch must combine isLegacyRow and isInternal flags');
   assert.match(PRODUCTS_SRC, /e\.code\s*===\s*['"]INTERNAL_ERROR['"]/,
     'Save catch must check e.code === "INTERNAL_ERROR"');
-  assert.match(PRODUCTS_SRC, /admin-ribbon-row-blocked-may2026\.md/,
-    'Save toast must reference the spec doc so admins can self-serve');
+  assert.match(PRODUCTS_SRC, /Pending operator fix/,
+    'Save toast must name the pending operator action so admins know who to ping (not surface a generic 500 message)');
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// E. Spec doc anchors the contract
+// E. Reproduction breadcrumb stays in errors.md
 // ─────────────────────────────────────────────────────────────────────────────
-
-test('handoff spec exists and documents the affected row count + reproduction', () => {
-  // Spot-check the spec stays anchored to the live evidence so future readers
-  // can re-verify against the backend.
-  assert.match(SPEC_SRC, /34/, 'spec must cite the 34 affected rows');
-  assert.match(SPEC_SRC, /93560715-6603-46b6-b5c0-72f5711f1b8e/,
-    'spec must include the canonical reproduction product id');
-  assert.match(SPEC_SRC, /PUT \/api\/admin\/products\/:id/,
-    'spec must name the failing endpoint');
-  assert.match(SPEC_SRC, /Required backend fix/,
-    'spec must propose a backend fix');
-});
+//
+// The standalone handoff doc was delivered to the backend dev and removed
+// 2026-05-11 (per project_backend_handoff_docs_delivered_may2026 memo). The
+// reproduction lives in `.claude/memory/errors.md` ("Admin product Save
+// fails…") which is outside the repo, so this file no longer asserts on the
+// spec's existence — only on the in-repo mitigations above.

@@ -102,7 +102,7 @@
      * Backend returns the dropdown shape directly: groups alphabetised, "Other
      * Models" pinned last, models natural-sorted, label makers/scanners/dot
      * matrix excluded server-side. Spec: docs/storefront/value-pack-and-
-     * product-url-contract.md §4.2.1 (backend-passover task 5, May 2026).
+     * product-url-contract.md §4.2.1 (grouped endpoint shipped May 2026).
      *
      * History: pre-May-2026 the frontend pulled a flat printer list and ran
      * its own ~600-line series taxonomy + ink/toner classifier (printer-data.js

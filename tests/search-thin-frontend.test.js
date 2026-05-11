@@ -2,9 +2,8 @@
  * Search — thin-frontend contract tests
  * ======================================
  *
- * Pins the contract documented in
- *   readfirst/SEARCH_AUDIT.md (frontend audit, 2026-05-03)
- *   readfirst/backend-passover.md ("Search — thin-frontend contract")
+ * Pins the search-bar audit outcome (2026-05-03 audit + 2026-05-11 backend
+ * thin-contract delivery). Durable spec lives in this file's assertions.
  *
  * Every test below is a *regression guard* for the audit's outcome:
  *
@@ -44,13 +43,14 @@ function stripComments(src) {
 }
 
 // Cached source reads. The *_CODE variants have comments stripped.
-const SEARCH_NORMALIZE_JS = READ('search-normalize.js');
+// Note: js/search-normalize.js was deleted 2026-05-11 once backend shipped
+// data.intent (the last live caller went away). The deletion is asserted
+// directly below — no source read needed.
 const SHOP_PAGE_JS        = READ('shop-page.js');
 const MAIN_JS             = READ('main.js');
 const INK_FINDER_JS       = READ('ink-finder.js');
 const ACCOUNT_JS          = READ('account.js');
 
-const SEARCH_NORMALIZE_CODE = stripComments(SEARCH_NORMALIZE_JS);
 const SHOP_PAGE_CODE        = stripComments(SHOP_PAGE_JS);
 const MAIN_CODE             = stripComments(MAIN_JS);
 const INK_FINDER_CODE       = stripComments(INK_FINDER_JS);
@@ -60,29 +60,20 @@ const ACCOUNT_CODE          = stripComments(ACCOUNT_JS);
 // Bucket B regression guards — dead code stays deleted
 // ─────────────────────────────────────────────────────────────────────────────
 
-test('search-normalize.js — dead code (normalize, correctSpelling, detectPrinterModel, getSpellingAlternative) is deleted', () => {
-    // The full audit lives in readfirst/SEARCH_AUDIT.md. These four functions
-    // were never called from anywhere in the codebase yet shipped on every
-    // one of 42 HTML pages. detectProductType is the only one that stays
-    // (until backend-passover task 1 ships `data.intent`).
-    const banned = [
-        /\bfunction\s+normalize\b/,
-        /\bfunction\s+correctSpelling\b/,
-        /\bfunction\s+detectPrinterModel\b/,
-        /\bfunction\s+getSpellingAlternative\b/,
-        /\bdamerauLevenshtein\b/,
-        /\bMISSPELLINGS\b/,
-        /\bSPELLING_PAIRS\b/,
-        /\bCODE_PATTERNS\b/,
-        /\bABBREVIATIONS\b/,
-    ];
-    for (const re of banned) {
-        assert.doesNotMatch(SEARCH_NORMALIZE_CODE, re,
-            `search-normalize.js must not contain ${re} — it was dead code; backend already does this work`);
-    }
-    // The one survivor:
-    assert.match(SEARCH_NORMALIZE_CODE, /\bfunction\s+detectProductType\b/,
-        'detectProductType stays as a shim until backend ships data.intent (see backend-passover task 1)');
+test('search-normalize.js module is fully deleted (zero callers after backend intent shipped)', () => {
+    // 2026-05-11: backend `/smart` and `/suggest` now emit `data.intent`,
+    // so the last live caller in shop-page.js (`detectProductType`) was
+    // removed. The whole module deletes — no FE file imports SearchNormalize
+    // and no script tag loads it. This guard prevents accidental
+    // resurrection.
+    const file = path.join(ROOT, 'inkcartridges', 'js', 'search-normalize.js');
+    assert.strictEqual(fs.existsSync(file), false,
+        'inkcartridges/js/search-normalize.js must stay deleted — backend owns intent classification');
+    assert.doesNotMatch(SHOP_PAGE_CODE, /\bSearchNormalize\b/,
+        'shop-page.js must not reference SearchNormalize — read smartData.intent.type instead');
+    const SHOP_HTML = fs.readFileSync(path.join(ROOT, 'inkcartridges', 'html', 'shop.html'), 'utf8');
+    assert.doesNotMatch(SHOP_HTML, /search-normalize\.js/,
+        'shop.html must not load search-normalize.js — module is deleted');
 });
 
 test('shop-page.js — _inferCorrectedTerm heuristic is deleted', () => {
@@ -209,9 +200,9 @@ test('shop-page.js loadBrandProducts — brand text-match fallback is replaced b
         'shop-page.js loadBrandProducts: source-prefix stripping fallback deleted');
 });
 
-test('html — search-normalize.js loads only on shop.html (the one consumer)', () => {
-    // search-normalize.js is consumed by shop-page.js's loadSearchResults
-    // exclusively. Loading it on every other page was wasted bandwidth.
+test('html — no page loads search-normalize.js (module deleted 2026-05-11)', () => {
+    // search-normalize.js was retired once backend shipped data.intent;
+    // every script tag must be gone or shop.html will 404 on load.
     const fs = require('node:fs');
     const path = require('node:path');
     function listHtml(dir, acc = []) {
@@ -226,8 +217,8 @@ test('html — search-normalize.js loads only on shop.html (the one consumer)', 
     const htmls = listHtml(path.join(ROOT, 'inkcartridges'));
     const loaders = htmls.filter(p => /<script[^>]*src="\/js\/search-normalize\.js/.test(fs.readFileSync(p, 'utf8')));
     const rels = loaders.map(p => path.relative(path.join(ROOT, 'inkcartridges'), p)).sort();
-    assert.deepStrictEqual(rels, ['html/shop.html'],
-        `Only shop.html should load search-normalize.js. Found loaders: ${rels.join(', ')}`);
+    assert.deepStrictEqual(rels, [],
+        `search-normalize.js must not be loaded anywhere. Found loaders: ${rels.join(', ')}`);
 });
 
 test('ink-finder.js — direct Supabase query path is deleted', () => {
@@ -259,22 +250,28 @@ test('shop-page.js — reads smartData.intent.matched_brand_slug for brand narro
         'shop-page.js must prefer intent.matched_brand_slug from backend (passover task 1) over local heuristic');
 });
 
-test('shop-page.js — re-fires getRibbons only when smartData.intent.type === "ribbon"', () => {
-    // The intent-driven re-fire is a forward-compat shim. Once backend ships
-    // task 4 (ribbons in /smart natively), this branch becomes unreachable.
-    // Asserting on the literal string locks the contract field name.
-    assert.match(SHOP_PAGE_CODE, /smartData\?\.intent\?\.type\s*===\s*['"]ribbon['"]/,
-        'shop-page.js must read intent.type === "ribbon" from backend response (passover task 1)');
+test('shop-page.js — does NOT re-fire getRibbons on the search-results path (backend includes ribbons inline)', () => {
+    // 2026-05-11: backend `/smart` returns ribbon-typed rows inline at score
+    // 150 when intent.type==='ribbon'. The parallel API.getRibbons fallback
+    // was deleted from loadSearchResults — the only remaining API.getRibbons
+    // call is the ribbon-page count probe at the top of shop-page.js.
+    const body = loadSearchResultsBody();
+    assert.doesNotMatch(body, /API\.getRibbons/,
+        'loadSearchResults must not call API.getRibbons — backend ships ribbons inline in /smart');
+    // The looksLikeSku heuristic also retired the same day.
+    assert.doesNotMatch(SHOP_PAGE_CODE, /\blooksLikeSku\b/,
+        'looksLikeSku heuristic deleted — backend `data.recovery.rails` is the source of truth');
 });
 
-test('shop-page.js — reads smartData.recovery.rails when present', () => {
-    // Forward-compat for backend-passover task 3: backend tells frontend
-    // which zero-result rails to fire so we don't probe with looksLikeSku.
+test('shop-page.js — reads smartData.recovery.rails as the source of truth', () => {
+    // Backend `data.recovery.rails[]` lists exactly which rails to fire.
+    // We trust the list directly — no probing fallback.
     assert.match(SHOP_PAGE_CODE, /smartData\?\.recovery\?\.rails/,
-        'shop-page.js must read recovery.rails from backend (passover task 3) before falling back to looksLikeSku');
-    // Sanity: looksLikeSku still exists as the fallback path.
-    assert.match(SHOP_PAGE_CODE, /\blooksLikeSku\b/,
-        'looksLikeSku stays as the legacy heuristic until backend ships recovery.rails');
+        'shop-page.js must read recovery.rails from backend');
+    // The `compat-printers` rail ships printers inline so we skip the
+    // round-trip when present.
+    assert.match(SHOP_PAGE_CODE, /Array\.isArray\(rail\.printers\)/,
+        'shop-page.js must use rail.printers inline when present (backend ships them in the rail payload)');
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -294,82 +291,8 @@ test('search.js — debounce / abort / recent-cache / trending-cache stay on fro
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Behavior — the slimmed search-normalize.js still works for its one caller
+// File-size sanity — main.js stays slim after the autocomplete deletion
 // ─────────────────────────────────────────────────────────────────────────────
-
-function loadSearchNormalize() {
-    // search-normalize.js writes the global as `window.SearchNormalize = ...`,
-    // so we read it back from the sandbox's `window`. We then JSON-roundtrip
-    // any returned object so it crosses the vm context boundary cleanly
-    // (otherwise deepStrictEqual fails on differing prototypes).
-    const sandbox = { window: {}, console };
-    sandbox.globalThis = sandbox;
-    vm.createContext(sandbox);
-    vm.runInContext(SEARCH_NORMALIZE_JS, sandbox, { filename: 'search-normalize.js' });
-    const SN = sandbox.window.SearchNormalize;
-    return {
-        detectProductType: (q) => {
-            const r = SN.detectProductType(q);
-            return r == null ? r : JSON.parse(JSON.stringify(r));
-        },
-        keys: () => Object.keys(SN).sort(),
-    };
-}
-
-test('SearchNormalize.detectProductType — single-word ribbon matches', () => {
-    const SN = loadSearchNormalize();
-    const got = SN.detectProductType('ribbon');
-    assert.deepStrictEqual(got, { keyword: 'ribbon', productParams: { type: 'ribbon' }, fetchRibbons: true });
-});
-
-test('SearchNormalize.detectProductType — single-word toner matches', () => {
-    const SN = loadSearchNormalize();
-    const got = SN.detectProductType('toner');
-    assert.deepStrictEqual(got, { keyword: 'toner', productParams: { category: 'toner' }, fetchRibbons: false });
-});
-
-test('SearchNormalize.detectProductType — multi-word query returns null (not a type keyword)', () => {
-    const SN = loadSearchNormalize();
-    assert.equal(SN.detectProductType('brother toner'), null);
-    assert.equal(SN.detectProductType('hp ink'), null);
-});
-
-test('SearchNormalize.detectProductType — non-keyword returns null', () => {
-    const SN = loadSearchNormalize();
-    assert.equal(SN.detectProductType('canon'), null);
-    assert.equal(SN.detectProductType('brother mfc-l2750dw'), null);
-});
-
-test('SearchNormalize.detectProductType — empty / nullish input returns null', () => {
-    const SN = loadSearchNormalize();
-    assert.equal(SN.detectProductType(''), null);
-    assert.equal(SN.detectProductType(null), null);
-    assert.equal(SN.detectProductType(undefined), null);
-    assert.equal(SN.detectProductType(123), null);
-});
-
-test('SearchNormalize.detectProductType — case insensitive', () => {
-    const SN = loadSearchNormalize();
-    const got = SN.detectProductType('RIBBON');
-    assert.equal(got?.keyword, 'ribbon');
-});
-
-test('SearchNormalize — only detectProductType is exported (everything else deleted)', () => {
-    const SN = loadSearchNormalize();
-    assert.deepStrictEqual(SN.keys(), ['detectProductType'],
-        'SearchNormalize should export only detectProductType after the audit');
-});
-
-// ─────────────────────────────────────────────────────────────────────────────
-// File-size sanity — the slim search-normalize.js should be ~80 lines, not 481
-// ─────────────────────────────────────────────────────────────────────────────
-
-test('search-normalize.js — slimmed to ≤120 lines (was 481 before audit)', () => {
-    const lines = SEARCH_NORMALIZE_JS.split('\n').length;
-    assert.ok(lines <= 120,
-        `search-normalize.js is ${lines} lines; expected ≤120 after the audit. ` +
-        `If you added back logic that backend should own, see readfirst/SEARCH_AUDIT.md.`);
-});
 
 test('main.js — slimmed (initBasicAutocomplete deletion takes ~210 lines)', () => {
     const lines = MAIN_JS.split('\n').length;

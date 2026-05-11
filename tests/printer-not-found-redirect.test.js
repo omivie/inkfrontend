@@ -2,9 +2,7 @@
  * Printer-detail empty state — redirect contract
  * ================================================
  *
- * Pins the contract documented in
- *   handoffs/backend-handoff.md §3
- *     ("Sitemap cleanup — sitemap-printers.xml")
+ * Pins the printer-detail empty-state contract.
  *
  * Why this exists: the backend's `sitemap-printers.xml` ships ~4,479 printer
  * slugs, and a non-trivial fraction are artefacts that either don't resolve
@@ -47,7 +45,7 @@ const API_JS_PATH = path.join(ROOT, 'inkcartridges', 'js', 'api.js');
 
 test('shop-page.js — defines isPrinterNotFound predicate matching NOT_FOUND error messages', () => {
     assert.match(SHOP_PAGE_JS, /const\s+isPrinterNotFound\s*=\s*\(err\)\s*=>/,
-        'isPrinterNotFound predicate missing — see handoffs/backend-handoff.md §3 "Sitemap cleanup"');
+        'isPrinterNotFound predicate missing — required to redirect bad sitemap-printer slugs to /shop');
     // Regex must catch both the human message and the bare error code.
     assert.match(SHOP_PAGE_JS, /isPrinterNotFound[\s\S]{0,200}NOT_FOUND/,
         'isPrinterNotFound regex must include NOT_FOUND token (the bare error code from envelope.error.code)');

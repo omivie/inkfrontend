@@ -854,7 +854,7 @@ const API = {
      * Why this fallback exists: the singular endpoint has been observed to
      * return 500 INTERNAL_ERROR for specific product families (most notably
      * the Epson Genuine 200 ink series — see errors.md for repro and the
-     * handoffs/backend-handoff.md note). The fallback keeps user-facing product pages
+     * see .claude/memory/errors.md). The fallback keeps user-facing product pages
      * loading even when the canonical endpoint regresses. A genuine NOT_FOUND
      * (404 envelope, code === 'NOT_FOUND') is preserved as-is — we only
      * shadow server-side errors, never legitimate "this SKU doesn't exist"
@@ -1241,7 +1241,7 @@ const API = {
      *
      * Spec: readfirst/ink-finder-may2026.md (May 2026 wiring contract);
      * docs/storefront/value-pack-and-product-url-contract.md §4.2.1
-     * (handoffs/backend-handoff.md §4 task 4.5 — shipped).
+     * (grouped endpoint shipped May 2026).
      *
      * @param {string} brand - Brand slug (e.g. "canon"). Lower-cased + URL-encoded.
      * @param {{ grouped?: boolean }} [opts] - { grouped: false } for the flat fallback.

@@ -92,17 +92,13 @@ test('smartSearch call passes page + limit', () => {
     assert.match(slice, /page:\s*requestedPage/);
 });
 
-test('typeDetect getProducts call passes page + limit (no more limit:200)', () => {
-    const re = /API\.getProducts\(\{\s*\.\.\.typeDetect\.productParams,\s*limit:\s*SEARCH_PAGE_SIZE,\s*page:\s*requestedPage\s*\}\)/;
-    assert.match(SHOP_CODE, re);
-});
+// Pre-2026-05-11 the loader had typeDetect/sourceKeyword preflight branches
+// that fired API.getProducts({type:…}) and API.getProducts({source:…}) before
+// /smart. Backend `data.intent` retired both shims (verified live: `q=ribbon`
+// returns 116 inline, `q=genuine`/`q=compatible` return source-filtered sets).
+// The only surviving API.getProducts path is the digit-query soft-miss fallback.
 
-test('sourceKeyword getProducts call passes page + limit', () => {
-    const re = /API\.getProducts\(\{\s*source:\s*sourceKeyword,\s*limit:\s*SEARCH_PAGE_SIZE,\s*page:\s*requestedPage\s*\}\)/;
-    assert.match(SHOP_CODE, re);
-});
-
-test('zero-result fallback getProducts call passes page + limit', () => {
+test('soft-miss fallback getProducts call passes page + limit', () => {
     const re = /API\.getProducts\(\{\s*search:\s*searchQuery,\s*limit:\s*SEARCH_PAGE_SIZE,\s*page:\s*requestedPage\s*\}\)/;
     assert.match(SHOP_CODE, re);
 });
@@ -115,10 +111,13 @@ test('smart-search pagination is read from data.pagination', () => {
     assert.match(SHOP_CODE, /smartData\.pagination[\s\S]{0,80}pagination\s*=\s*smartData\.pagination/);
 });
 
-test('getProducts pagination is read from response.meta', () => {
-    assert.match(SHOP_CODE, /response\.meta\.total_pages\s*!=\s*null/);
-    assert.match(SHOP_CODE, /total_pages:\s*response\.meta\.total_pages/);
-    assert.match(SHOP_CODE, /has_next:\s*!!response\.meta\.has_next/);
+test('getProducts pagination is read from .meta on the soft-miss fallback', () => {
+    // /smart returns pagination on data.pagination; /api/products returns it
+    // on the top-level meta envelope. The soft-miss fallback (digit queries)
+    // hits /products, so we read fallback.meta.*.
+    assert.match(SHOP_CODE, /fallback\.meta\.total_pages\s*!=\s*null/);
+    assert.match(SHOP_CODE, /total_pages:\s*fallback\.meta\.total_pages/);
+    assert.match(SHOP_CODE, /has_next:\s*!!fallback\.meta\.has_next/);
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

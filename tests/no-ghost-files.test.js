@@ -14,7 +14,9 @@
  *   • The .playwright-mcp/ debug directory
  *   • Any *.png inside audit-output/ (only audit-output/report.json is tracked)
  *   • Top-level *-report.html one-off reports
- *   • The duplicate root copy of backend-passover.md (canonical lives in readfirst/)
+ *   • Any backend-handoff.md / per-task spec markdown files re-appearing
+ *     after the 2026-05-11 hand-off to backend (all readfirst/ specs +
+ *     handoffs/backend-handoff.md were delivered and deleted)
  *   • Any .DS_Store file anywhere in the tree
  *
  * Run with: node --test tests/no-ghost-files.test.js
@@ -99,17 +101,33 @@ test('audit-output/ holds only report.json (no orphan screenshots)', () => {
   );
 });
 
-test('no duplicate root backend-passover.md (canonical in readfirst/)', () => {
-  const root = path.join(ROOT, 'backend-passover.md');
-  const canonical = path.join(ROOT, 'readfirst', 'backend-passover.md');
-  assert.strictEqual(
-    fs.existsSync(root), false,
-    'Root-level backend-passover.md was a duplicate of readfirst/backend-passover.md. ' +
-    'Use readfirst/backend-passover.md only.'
-  );
-  assert.strictEqual(
-    fs.existsSync(canonical), true,
-    'readfirst/backend-passover.md is the canonical handoff doc and must exist.'
+test('backend handoff / per-task spec markdown is not re-introduced', () => {
+  // 2026-05-11: all backend-handoff content + per-task readfirst/ specs
+  // were delivered to the backend dev and deleted from the repo. Spec
+  // detail now lives only in code + tests (the durable source of truth).
+  // If anyone re-adds these files, the doc-sprawl is starting again.
+  const banned = [
+    'backend-handoff.md',                                     // repo root
+    'backend-passover.md',                                    // repo root
+    'handoffs/backend-handoff.md',                            // pre-cleanup canonical
+    'readfirst/backend-passover.md',                          // pre-2026-05-11 location
+    'readfirst/admin-ribbon-row-blocked-may2026.md',          // per-task handoff
+    'readfirst/admin-ribbon-source-filter-may2026.md',
+    'readfirst/legal-content-cms-may2026.md',
+    'readfirst/product-surface-consistency-may2026.md',
+    'readfirst/search-pagination-may2026.md',
+    'readfirst/series-base-merge-may2026.md',
+    'readfirst/shop-transient-failure-recovery-may2026.md',
+    'readfirst/source-chip-removal-may2026.md',
+    'inkcartridges/backend-handoff.md',                       // wrong tree
+    'inkcartridges/readfirst/backend-handoff.md',             // wrong tree
+  ];
+  const offenders = banned.filter(rel => fs.existsSync(path.join(ROOT, rel)));
+  assert.deepStrictEqual(
+    offenders, [],
+    `Per-task handoff/spec markdown re-appeared: ${offenders.join(', ')}. ` +
+    'These were delivered to the backend dev on 2026-05-11 and removed; ' +
+    'durable spec info belongs in code + tests, not in standalone .md files.'
   );
 });
 

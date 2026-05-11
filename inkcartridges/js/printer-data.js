@@ -10,8 +10,9 @@
  * grouped=true&exclude_non_ink=true` returns the dropdown shape directly with
  * the same patterns. Only BRAND_NAMES survives because the account printer-
  * save form still needs to write the human-readable brand back into the
- * printer record. See backend-passover task 5 / docs/storefront/value-pack-
- * and-product-url-contract.md §4.2.1.
+ * printer record. The grouping endpoint
+ * `/api/printers/by-brand/:brand?grouped=true&exclude_non_ink=true` shipped
+ * May 2026 — pinned by tests/ink-finder-grouped.test.js.
  */
 
 'use strict';

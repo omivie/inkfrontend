@@ -2,7 +2,7 @@
  * Ink-finder — grouped-by-brand contract tests
  * =============================================
  *
- * Pins the contract from backend-passover task 5 (May 2026):
+ * Pins the contract from grouped printer endpoint shipped May 2026 (May 2026):
  *   GET /api/printers/by-brand/<brand>?grouped=true&exclude_non_ink=true
  *   → { ok, data: { brand, series_groups: [{ id, name, model_count,
  *       models: [{ id, model_name, full_name, slug, series }] }],
@@ -58,7 +58,7 @@ const PRINTER_DATA_CODE = stripComments(PRINTER_DATA_JS);
 
 test('api.js getPrintersByBrand — uses /api/printers/by-brand/<slug>', () => {
     assert.match(API_CODE, /\/api\/printers\/by-brand\//,
-        'getPrintersByBrand must hit /api/printers/by-brand/<brand> (backend-passover task 5)');
+        'getPrintersByBrand must hit /api/printers/by-brand/<brand> (grouped printer endpoint shipped May 2026)');
     assert.doesNotMatch(API_CODE, /\/api\/printers\/search\?q=\*/,
         'old /api/printers/search?q=* path must be deleted — grouping was happening client-side');
 });
@@ -190,7 +190,7 @@ test('printer-data.js — slimmed to ≤60 lines (was 788 before May 2026 passov
     const lines = PRINTER_DATA_JS.split('\n').length;
     assert.ok(lines <= 60,
         `printer-data.js is ${lines} lines; expected ≤60 after deleting the client-side taxonomy. ` +
-        `If you added back logic that backend should own, see backend-passover task 5.`);
+        `If you added back logic that backend should own, see grouped printer endpoint shipped May 2026.`);
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

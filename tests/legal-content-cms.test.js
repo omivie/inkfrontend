@@ -23,7 +23,6 @@ const HTML = (rel) => path.join(ROOT, 'inkcartridges', 'html', rel);
 const JS   = (rel) => path.join(ROOT, 'inkcartridges', 'js', rel);
 const READ = (p)   => fs.readFileSync(p, 'utf8');
 
-const SPEC      = path.join(ROOT, 'readfirst', 'legal-content-cms-may2026.md');
 const PAGE_JS   = READ(JS('legal-page.js'));
 const ADMIN_APP = READ(JS('admin/app.js'));
 const ADMIN_LC  = READ(JS('admin/pages/legal-content.js'));
@@ -32,42 +31,27 @@ const LEGAL_PAGES = ['terms.html', 'privacy.html', 'returns.html', 'shipping.htm
 const SLUGS       = ['terms',      'privacy',      'returns',      'shipping',      'about',      'faq',      'contact'];
 
 // ─────────────────────────────────────────────────────────────────────────────
-// §1 — Spec exists and documents the migration + override-key format
+// §1 — Override-key contract (every recognised site_facts configKey)
+//
+// (Pre-2026-05-11 this section also asserted the SQL migration and namespace
+//  table existed in `readfirst/legal-content-cms-may2026.md`. That spec was
+//  delivered to the backend dev and removed from the repo; the override-key
+//  list moved here so the contract still has a regression guard.)
 // ─────────────────────────────────────────────────────────────────────────────
 
-test('§1 spec doc exists at readfirst/legal-content-cms-may2026.md', () => {
-    assert.ok(fs.existsSync(SPEC), 'spec must live at readfirst/legal-content-cms-may2026.md');
-});
+const REQUIRED_SITE_FACT_KEYS = [
+    'tradingName', 'legalEntity', 'gstNumber', 'nzbn',
+    'phoneDisplay', 'phoneE164', 'email',
+    'hoursDisplay', 'responseSLA',
+    'freeShippingThreshold', 'policyEffectiveDate', 'policyVersion',
+    'address.street', 'address.suburb', 'address.city', 'address.postcode', 'address.country',
+    'privacyOfficerName', 'privacyOfficerEmail',
+];
 
-test('§1 spec contains the SQL migration (table + RLS + indexes)', () => {
-    const src = READ(SPEC);
-    assert.match(src, /CREATE TABLE[\s\S]*public\.legal_content_overrides/i, 'spec must include the CREATE TABLE block');
-    assert.match(src, /ENABLE ROW LEVEL SECURITY/i,                          'spec must enable RLS');
-    assert.match(src, /Public read legal_content_overrides[\s\S]*FOR SELECT USING \(true\)/i,
-        'spec must declare a public-read RLS policy');
-    assert.match(src, /Authenticated write legal_content_overrides/i,        'spec must declare an authenticated-write RLS policy');
-    assert.match(src, /legal_content_overrides_updated_at_idx/i,             'spec must include the updated_at index');
-});
-
-test('§1 spec documents all three override-key namespaces', () => {
-    const src = READ(SPEC);
-    assert.match(src, /<page>\.hero/,                  'spec must describe the <page>.hero namespace');
-    assert.match(src, /<page>\.section\.<sectionId>/,  'spec must describe the section namespace');
-    assert.match(src, /site_facts\.<configKey>/,       'spec must describe the site_facts namespace');
-});
-
-test('§1 spec lists every recognised site-fact configKey', () => {
-    const src = READ(SPEC);
-    const required = [
-        'tradingName', 'legalEntity', 'gstNumber', 'nzbn',
-        'phoneDisplay', 'phoneE164', 'email',
-        'hoursDisplay', 'responseSLA',
-        'freeShippingThreshold', 'policyEffectiveDate', 'policyVersion',
-        'address.street', 'address.suburb', 'address.city', 'address.postcode', 'address.country',
-        'privacyOfficerName', 'privacyOfficerEmail',
-    ];
-    for (const k of required) {
-        assert.ok(src.includes(k), `spec must list ${k} as an editable site_facts key`);
+test('§1 admin/pages/legal-content.js recognises every site_facts configKey', () => {
+    for (const k of REQUIRED_SITE_FACT_KEYS) {
+        assert.ok(ADMIN_LC.includes(k),
+            `admin/pages/legal-content.js must surface site_facts key ${k} in the editor — without it admins can't override it`);
     }
 });
 

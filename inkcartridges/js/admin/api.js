@@ -398,7 +398,8 @@ const AdminAPI = {
         }
         // Append the 8-char Render request_id so admins can grep stderr when
         // the backend returns a generic 500 (e.g. the source='ribbon' rows
-        // that 500 on every PUT — see readfirst/admin-ribbon-row-blocked-may2026.md).
+        // that 500 on every PUT — see .claude/memory/errors.md
+        // "Admin product Save fails…").
         if (resp.request_id) msg += ` (ref ${String(resp.request_id).slice(0, 8)})`;
         const err = new Error(msg);
         err.code = resp.code;
@@ -670,6 +671,13 @@ const AdminAPI = {
   },
 
   async setImageAuditStatus(productId, status) {
+    // Backend `PUT /api/admin/image-audit/:id/status` accepts only
+    // `pending | checked_clean` — the third state `replaced` is set by
+    // the dedicated `/replace` endpoint (per backend dev note 2026-05-11).
+    // Fail fast on the wrong shape so callers can't silently no-op.
+    if (status !== 'pending' && status !== 'checked_clean') {
+      throw new Error(`setImageAuditStatus: status must be 'pending' or 'checked_clean' (got "${status}"). For 'replaced' use the /replace endpoint.`);
+    }
     try {
       const resp = await window.API.put(
         `/api/admin/image-audit/${encodeURIComponent(productId)}/status`,

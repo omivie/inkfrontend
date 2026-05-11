@@ -136,15 +136,17 @@ test('§2 PDP related products fetch uses limit ≥ 200', () => {
 });
 
 test('§2 free-text smart search caps at limit ≥ 100', () => {
-    // shop-page.js hits API.smartSearch with `limit: 100` for the free-text
-    // search path. Even with denser packs, 100 covers any realistic search
-    // result page; results overflow into "no more results" rather than
-    // silently truncating mid-series.
-    const m = SHOP_CODE.match(/API\.smartSearch\s*\(\s*searchQuery\s*,\s*\{[\s\S]*?limit:\s*(\d+)/);
-    assert.ok(m, 'free-text smartSearch call must specify a limit');
+    // shop-page.js hits API.smartSearch with `limit: SEARCH_PAGE_SIZE` (=100)
+    // for the free-text search path. Even with denser packs, 100 covers any
+    // realistic search result page; results overflow into "no more results"
+    // rather than silently truncating mid-series.
+    assert.match(SHOP_CODE, /API\.smartSearch\s*\(\s*searchQuery\s*,\s*\{[\s\S]*?limit:\s*SEARCH_PAGE_SIZE/,
+        'free-text smartSearch call must pass limit: SEARCH_PAGE_SIZE');
+    const m = SHOP_CODE.match(/const\s+SEARCH_PAGE_SIZE\s*=\s*(\d+)/);
+    assert.ok(m, 'SEARCH_PAGE_SIZE constant must be defined inline near the loader');
     const limit = parseInt(m[1], 10);
     assert.ok(limit >= 100,
-        `free-text smart search limit must be ≥ 100; saw ${limit}`);
+        `SEARCH_PAGE_SIZE must be ≥ 100; saw ${limit}`);
 });
 
 test('§2 recovery rails are slice-bounded (≤ 6 by-printer entries)', () => {
