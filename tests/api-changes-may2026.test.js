@@ -210,14 +210,17 @@ test('§2 Card renderers expose data-product-source', () => {
 // §4 Series chip cache — v6 invalidates stale Epson chip counts
 // ─────────────────────────────────────────────────────────────────────────────
 
-test('§4 series chip-grid cache key is bumped to v6', () => {
-    // Active key is v6.
-    assert.match(SHOP_CODE, /codes-v6/,
-        'shop-page must use codes-v6 cache key (May 2026 Epson chip changes)');
-    // Lookup loop tries v6 first, falls back to v5/v4 to avoid losing
-    // pre-warmed entries during the same SPA session.
-    assert.match(SHOP_CODE, /codesCacheKey6.*codesCacheKey5.*codesCacheKey4/,
-        'lookup loop must try v6 before v5 before v4');
+test('§4 series chip-grid cache key is bumped to v8 (series_codes-only extractor)', () => {
+    // v6 was the May 2026 Epson chip change; v7 the yield-collapse; v8 (May 2026
+    // series-codes-thin-extractor, backend commit 5c99462) makes
+    // /api/products series_codes-authoritative and lets us delete the
+    // client-side fallback ladder. The active write key is v8; the read
+    // ladder falls through v8→v7→v6→v5→v4 so in-flight SPA sessions don't
+    // lose pre-warmed entries when this code first deploys.
+    assert.match(SHOP_CODE, /codes-v8/,
+        'shop-page must use codes-v8 cache key (May 2026 series-codes-thin-extractor)');
+    assert.match(SHOP_CODE, /codesCacheKey8.*codesCacheKey7.*codesCacheKey6.*codesCacheKey5.*codesCacheKey4/,
+        'lookup loop must try v8 before v7 before v6 before v5 before v4');
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

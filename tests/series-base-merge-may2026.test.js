@@ -269,13 +269,16 @@ test('collapseChipList survives malformed / missing-code input', () => {
 // 4. shop-page.js wiring — chip cache version + collapse application
 // ─────────────────────────────────────────────────────────────────────────────
 
-test('shop-page.js bumps chip cache to v7 (invalidates v6 split chips)', () => {
-    // The active cache key written in loadProductCodes
-    assert.match(SHOP_CODE, /codes-v7['`]/,
-        'shop-page.js must write the v7 cache key after collapsing chips');
-    // Read-side fallback chain: v7 first, then v6/v5/v4 for backward compat
-    assert.match(SHOP_CODE, /codes-v7-final[\s\S]*codes-v6-final[\s\S]*codes-v5-final[\s\S]*codes-v4-final/,
-        'loadProducts must read v7 cache first, fall through to legacy versions');
+test('shop-page.js bumps chip cache to v8 (invalidates v7 phantom-combo chips)', () => {
+    // The active cache key written in loadProductCodes — bumped from v7 → v8
+    // when backend commit 5c99462 made /api/products series_codes-authoritative
+    // and the client-side fallback ladder was deleted. v8 invalidates any
+    // in-memory v7 entries that still carry phantoms like LC37LC57 / IB3757.
+    assert.match(SHOP_CODE, /codes-v8['`]/,
+        'shop-page.js must write the v8 cache key after collapsing chips');
+    // Read-side fallback chain: v8 first, then v7/v6/v5/v4 for backward compat
+    assert.match(SHOP_CODE, /codes-v8-final[\s\S]*codes-v7-final[\s\S]*codes-v6-final[\s\S]*codes-v5-final[\s\S]*codes-v4-final/,
+        'loadProducts must read v8 cache first, fall through to legacy versions');
 });
 
 test('shop-page.js feeds the chip list through SeriesCodes.collapseChipList', () => {

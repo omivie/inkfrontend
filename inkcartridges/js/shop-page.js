@@ -990,14 +990,18 @@
                 const brandName = this.brandInfo[this.state.brand]?.name || this.state.brand;
 
                 // Include type filter in cache key to prevent stale results when switching genuine/compatible.
-                // v6 (May 2026 catalog overhaul): Epson specialty colors collapse into base T-series
-                // chips (T3127/T3128/T3129 → T312) and bare-numeric Epson chips (212, 802, 46S, 604)
-                // appear as first-class chips. Bumping the key invalidates any stale v5 chip counts
-                // sitting in this in-memory cache from a previous SPA navigation.
+                // v8 (May 2026 series-codes-thin-extractor): backend commit 5c99462
+                // now projects `series_codes` on /api/products responses too, so
+                // PRIORITY 0 is authoritative and the legacy regex/IB-combo/B-code
+                // fallback branches are deleted. Bumping invalidates any in-memory
+                // v7 chip counts that may still carry phantom combo chips
+                // (LC37LC57, IB3757, LC39KCMY2) from the old fallback paths.
+                // v7 (May 2026 yield-collapse): XL/XXL collapse into base chip.
+                // v6 (May 2026 catalog overhaul): Epson specialty → base T-series.
                 // v5 (legacy): /api/shop endpoint for server-side series extraction.
                 const typeKey = this.state.type || 'all';
                 const categoryId = this.state.category;
-                const cacheKey = `${this.state.brand}-${categoryId}-${typeKey}-codes-v7`;
+                const cacheKey = `${this.state.brand}-${categoryId}-${typeKey}-codes-v8`;
                 const codesCacheKey = `${cacheKey}-final`;
 
                 // Check if we have cached codes with counts already
@@ -1277,14 +1281,25 @@
                 // Collect ALL codes found in this product
                 const foundCodes = new Set();
 
-                // PRIORITY 0: Trust backend-supplied `series_codes` when present.
-                // The May 2026 catalog overhaul (api-changes-may2026.md §2)
-                // ships `series_codes: string[]` on shop responses; the backend
-                // uses the canonical `extractSeriesCodes` we'd otherwise try to
-                // mimic with the per-brand regex below. This legacy path only
-                // runs when /api/shop fails over to the client-side computation,
-                // so series_codes will normally already be populated from the
-                // failed-over response or upstream cache.
+                // Trust backend-supplied `series_codes` (the only path now).
+                //
+                // The May 2026 catalog overhaul (api-changes-may2026.md §2) ships
+                // `series_codes: string[]` on /api/shop responses, and backend
+                // commit 5c99462 (series-codes-thin-extractor, May 2026) extends
+                // the same projection to /api/products. Both endpoints now run
+                // the canonical server-side `extractSeriesCodes`, so the legacy
+                // client-side fallback ladder (per-brand name/MPN regex,
+                // IB-combo splitter, B-code inference, SKU-prefix-strip,
+                // boilerplate name-split) has been deleted — those branches
+                // generated phantom chips like `LC37LC57`, `IB3757`, and
+                // `LC39KCMY2` whenever the regex over-matched a multi-code
+                // pack name. With backend authoritative, the cache key is
+                // bumped to v8 to invalidate any stale in-memory chip counts
+                // from the previous SPA navigation. The additive SKU regex
+                // below is preserved as a no-op safety net (it only adds
+                // codes the per-brand pattern already matches; with v8 it
+                // should never fire because series_codes already covers
+                // every product the regex would match).
                 if (Array.isArray(product.series_codes) && product.series_codes.length) {
                     for (const raw of product.series_codes) {
                         const code = this.normalizeCode(String(raw || ''), brand);
@@ -1292,28 +1307,11 @@
                     }
                 }
 
-                // ALWAYS extract ALL codes from product name first
-                // This is critical for products compatible with multiple series (e.g., LC77 LC73 LC40)
-                if (pattern && foundCodes.size === 0) {
-                    const nameMatches = name.matchAll(pattern);
-                    for (const match of nameMatches) {
-                        const code = this.normalizeCode(match[0], brand);
-                        if (code && code.length >= 2) {
-                            foundCodes.add(code);
-                        }
-                    }
-                }
-
-                // Also check manufacturer_part_number (only if name didn't yield codes,
-                // to avoid bogus codes like LC33173 from MPN "LC33173PK" when name has LC3317)
-                if (mpn && foundCodes.size === 0) {
-                    const normalizedMpn = this.normalizeCode(mpn, brand);
-                    if (normalizedMpn && normalizedMpn.length >= 2) {
-                        foundCodes.add(normalizedMpn);
-                    }
-                }
-
-                // Also check SKU for additional codes
+                // Defensive SKU sweep — kept intentionally un-gated so a
+                // product without series_codes (transient backend issue) still
+                // surfaces something parseable from its SKU. Backend canonical
+                // path covers this in steady state; series_codes coverage on
+                // /api/products went live with backend commit 5c99462.
                 if (pattern && sku) {
                     pattern.lastIndex = 0;
                     const skuMatches = sku.matchAll(pattern);
@@ -1322,194 +1320,6 @@
                         if (code && code.length >= 2) {
                             foundCodes.add(code);
                         }
-                    }
-                }
-
-                // For Brother: recognize IB combo codes (e.g., "IB3757" → LC37 + LC57)
-                // These are internal codes that concatenate two series numbers
-                if (foundCodes.size === 0 && brand === 'brother') {
-                    const ibComboPattern = /\bIB(\d{4,})\b/gi;
-                    const ibMatches = name.matchAll(ibComboPattern);
-                    for (const match of ibMatches) {
-                        const digits = match[1];
-                        // Split evenly into two series codes (e.g., "3757" → "37" + "57")
-                        if (digits.length % 2 === 0) {
-                            const mid = digits.length / 2;
-                            const code1 = 'LC' + digits.substring(0, mid);
-                            const code2 = 'LC' + digits.substring(mid);
-                            const norm1 = this.normalizeCode(code1, brand);
-                            const norm2 = this.normalizeCode(code2, brand);
-                            if (norm1) foundCodes.add(norm1);
-                            if (norm2) foundCodes.add(norm2);
-                        }
-                    }
-                }
-
-                // For Brother: recognize internal B-codes (e.g., "B131" → "LC131")
-                // These appear in value pack products that use internal naming
-                if (foundCodes.size === 0 && brand === 'brother') {
-                    const bCodePattern = /\bB(\d{2,5}(?:XL)?)\b/gi;
-                    const bMatches = name.matchAll(bCodePattern);
-                    const productType = (product.product_type || '').toLowerCase();
-                    const category = this.state.category || '';
-                    for (const match of bMatches) {
-                        const num = match[1].toUpperCase();
-                        let mfgCode = null;
-                        if (productType === 'ink_cartridge' || productType === 'ink_bottle' || category === 'ink') {
-                            mfgCode = 'LC' + num;
-                        } else if (productType === 'toner_cartridge' || category === 'toner') {
-                            mfgCode = 'TN' + num;
-                        } else if (productType === 'drum_unit' || category === 'consumable') {
-                            mfgCode = 'DR' + num;
-                        }
-                        if (mfgCode) {
-                            const normalized = this.normalizeCode(mfgCode, brand);
-                            if (normalized) foundCodes.add(normalized);
-                        }
-                    }
-                }
-
-                // Also extract B-codes or IB combo codes from SKUs (e.g., GEN-PACK-BRO-B131-CMY, COMP-PACK-BRO-IB3757-KCMY)
-                if (foundCodes.size === 0 && brand === 'brother' && sku) {
-                    const skuUpper = sku.toUpperCase();
-                    const productType = (product.product_type || '').toLowerCase();
-                    const category = this.state.category || '';
-
-                    // Check for IB combo codes in SKU (e.g., BRO-IB3757)
-                    const skuIBCombo = skuUpper.match(/BRO-IB(\d{4,})/);
-                    if (skuIBCombo) {
-                        const digits = skuIBCombo[1];
-                        if (digits.length % 2 === 0) {
-                            const mid = digits.length / 2;
-                            const norm1 = this.normalizeCode('LC' + digits.substring(0, mid), brand);
-                            const norm2 = this.normalizeCode('LC' + digits.substring(mid), brand);
-                            if (norm1) foundCodes.add(norm1);
-                            if (norm2) foundCodes.add(norm2);
-                        }
-                    }
-
-                    // Check for B-codes in SKU (e.g., BRO-B131)
-                    if (foundCodes.size === 0) {
-                        const skuBCode = skuUpper.match(/BRO-B(\d{2,5}(?:XL)?)/);
-                        if (skuBCode) {
-                            const num = skuBCode[1];
-                            let mfgCode = null;
-                            if (productType === 'ink_cartridge' || productType === 'ink_bottle' || category === 'ink') {
-                                mfgCode = 'LC' + num;
-                            } else if (productType === 'toner_cartridge' || category === 'toner') {
-                                mfgCode = 'TN' + num;
-                            } else if (productType === 'drum_unit' || category === 'consumable') {
-                                mfgCode = 'DR' + num;
-                            }
-                            if (mfgCode) {
-                                const normalized = this.normalizeCode(mfgCode, brand);
-                                if (normalized) foundCodes.add(normalized);
-                            }
-                        }
-                    }
-                }
-
-                // Fallback if no codes found - try generic pattern on name
-                if (foundCodes.size === 0) {
-                    const fallbackPattern = /\b[A-Z]{1,3}[-]?\d{1,4}(?:XL)?[A-Z]{0,3}\b/gi;
-                    const paperSizes = new Set(['A0', 'A1', 'A2', 'A3', 'A4', 'A5', 'A6', 'B4', 'B5']);
-                    const fallbackMatches = name.matchAll(fallbackPattern);
-                    for (const match of fallbackMatches) {
-                        if (paperSizes.has(match[0].toUpperCase())) continue;
-                        const code = this.normalizeCode(match[0], brand);
-                        if (code && code.length >= 2) {
-                            foundCodes.add(code);
-                        }
-                    }
-                }
-
-                // PRIORITY 5: Infer manufacturer code from SKU
-                // SKUs like "B431B" should become "LC431" for Brother ink cartridges
-                if (foundCodes.size === 0 && sku) {
-                    let skuCode = sku.toUpperCase();
-                    const prefix = brandPrefixes[brand];
-
-                    // Strip the brand prefix from SKU (e.g., B for Brother)
-                    if (prefix && skuCode.startsWith(prefix)) {
-                        skuCode = skuCode.substring(1);
-                    }
-
-                    // Strip "IB" prefix if present (internal code)
-                    if (skuCode.startsWith('IB')) {
-                        skuCode = skuCode.substring(2);
-                    }
-
-                    // Infer the manufacturer code prefix based on brand and product type
-                    const productType = (product.product_type || '').toLowerCase();
-                    const category = this.state.category || '';
-
-                    // For Brother products, add the appropriate series prefix
-                    if (brand === 'brother') {
-                        // Check if code already has a known prefix
-                        if (!skuCode.startsWith('LC') && !skuCode.startsWith('TN') && !skuCode.startsWith('DR')) {
-                            if (productType === 'ink_cartridge' || productType === 'ink_bottle' || category === 'ink') {
-                                skuCode = 'LC' + skuCode;
-                            } else if (productType === 'toner_cartridge' || category === 'toner') {
-                                skuCode = 'TN' + skuCode;
-                            } else if (productType === 'drum_unit' || category === 'consumable') {
-                                skuCode = 'DR' + skuCode;
-                            }
-                        }
-                    }
-                    // For Canon products
-                    else if (brand === 'canon') {
-                        if (!skuCode.startsWith('PG') && !skuCode.startsWith('CL') &&
-                            !skuCode.startsWith('PGI') && !skuCode.startsWith('CLI') &&
-                            !skuCode.startsWith('BCI') && !skuCode.startsWith('GI') &&
-                            !skuCode.startsWith('PFI') && !skuCode.startsWith('CART') &&
-                            !skuCode.startsWith('FX')) {
-                            // Canon ink cartridges have diverse prefixes
-                            // Without knowing the series, we can't reliably add prefix
-                        }
-                    }
-                    // For Epson products
-                    else if (brand === 'epson') {
-                        if (!skuCode.startsWith('T') && !skuCode.startsWith('C13')) {
-                            if (productType === 'ink_cartridge' || productType === 'ink_bottle' || category === 'ink') {
-                                // Epson codes typically start with T
-                                if (/^\d/.test(skuCode)) {
-                                    skuCode = 'T' + skuCode;
-                                }
-                            }
-                        }
-                    }
-                    // For OKI products: SKU like O831Y → strip O prefix + color suffix → 831 → C831
-                    else if (brand === 'oki') {
-                        const okiModelMatch = skuCode.match(/^(\d{3,4})/);
-                        if (okiModelMatch) {
-                            skuCode = 'C' + okiModelMatch[1];
-                        }
-                    }
-
-                    // Normalize the code to strip color suffixes and get base code
-                    skuCode = this.normalizeCode(skuCode, brand);
-                    if (skuCode) {
-                        foundCodes.add(skuCode);
-                    }
-                }
-
-                // PRIORITY 6: Last resort — use product name. Strips both the
-                // legacy "<Brand> Compatible <Code>" leading prefix and the
-                // May 2026 "Compatible <Type> Cartridge Replacement for
-                // <Brand> <Code>" prefix so the first 3 surviving tokens are
-                // meaningful (model + color, typically) rather than the
-                // boilerplate "INK-CARTRIDGE-REPLACEMENT".
-                if (foundCodes.size === 0) {
-                    const nameCode = name
-                        .replace(/^Compatible\s+[A-Za-z\s]+?\s+for\s+/i, '')
-                        .replace(/^(Compatible|Genuine)\s*/i, '')
-                        .split(/\s+/)
-                        .slice(0, 3)
-                        .join('-')
-                        .toUpperCase()
-                        .substring(0, 20);
-                    if (nameCode) {
-                        foundCodes.add(nameCode);
                     }
                 }
 
@@ -1820,7 +1630,7 @@
             const target = String(collapsedCode).trim().toUpperCase();
             const categoryId = this.state.category;
             const typeKey = this.state.type || 'all';
-            const cacheKey = `${this.state.brand}-${categoryId}-${typeKey}-codes-v7-final`;
+            const cacheKey = `${this.state.brand}-${categoryId}-${typeKey}-codes-v8-final`;
             const cached = this.cache.products[cacheKey];
             if (!Array.isArray(cached)) return null;
             const entry = cached.find(c => c && c.code && String(c.code).toUpperCase() === target);
@@ -1843,13 +1653,15 @@
 
                 if (mergedProducts.length === 0) {
                     // Try the codes cache, newest first
-                    // (v7 May 2026 yield-collapse, v6 specialty collapse, v5 /api/shop legacy, v4 client-side legacy).
+                    // (v8 May 2026 series_codes-only extractor, v7 yield-collapse,
+                    //  v6 specialty collapse, v5 /api/shop legacy, v4 client-side legacy).
+                    const codesCacheKey8 = `${this.state.brand}-${categoryId}-${typeKey}-codes-v8-final`;
                     const codesCacheKey7 = `${this.state.brand}-${categoryId}-${typeKey}-codes-v7-final`;
                     const codesCacheKey6 = `${this.state.brand}-${categoryId}-${typeKey}-codes-v6-final`;
                     const codesCacheKey5 = `${this.state.brand}-${categoryId}-${typeKey}-codes-v5-final`;
                     const codesCacheKey4 = `${this.state.brand}-${categoryId}-${typeKey}-codes-v4-final`;
 
-                    for (const cacheKey of [codesCacheKey7, codesCacheKey6, codesCacheKey5, codesCacheKey4]) {
+                    for (const cacheKey of [codesCacheKey8, codesCacheKey7, codesCacheKey6, codesCacheKey5, codesCacheKey4]) {
                         if (this.cache.products[cacheKey]) {
                             const codeEntry = this.cache.products[cacheKey].find(c => c.code === code);
                             if (codeEntry?.products) {
@@ -1905,11 +1717,12 @@
                         this.elements.levelCodes.hidden = true;
                         if (navVersion !== undefined && this.navigationVersion !== navVersion) return;
 
+                        const codesCacheKey8 = `${this.state.brand}-${categoryId}-${typeKey}-codes-v8-final`;
                         const codesCacheKey7 = `${this.state.brand}-${categoryId}-${typeKey}-codes-v7-final`;
                         const codesCacheKey6 = `${this.state.brand}-${categoryId}-${typeKey}-codes-v6-final`;
                         const codesCacheKey5 = `${this.state.brand}-${categoryId}-${typeKey}-codes-v5-final`;
                         const codesCacheKey4 = `${this.state.brand}-${categoryId}-${typeKey}-codes-v4-final`;
-                        for (const cacheKey of [codesCacheKey7, codesCacheKey6, codesCacheKey5, codesCacheKey4]) {
+                        for (const cacheKey of [codesCacheKey8, codesCacheKey7, codesCacheKey6, codesCacheKey5, codesCacheKey4]) {
                             if (this.cache.products[cacheKey]) {
                                 const codeEntry = this.cache.products[cacheKey].find(c => c.code === code);
                                 if (codeEntry?.products) {
@@ -2477,121 +2290,23 @@
                 // ─────────────────────────────────────────────────────────────
                 // Branch decision: which API path do we take?
                 //
-                // Source of truth is the backend's `data.intent` field on
-                // /api/search/smart (see handoffs/backend-handoff.md §4, "Search —
-                // thin-frontend contract", task 4.1). When backend ships intent,
-                // we fire /smart unconditionally and read the type/source flags
-                // off the response.
-                //
-                // Until backend ships intent, we keep two pre-flight shims:
-                //   1. SearchNormalize.detectProductType — single-word
-                //      ribbon/toner/ink → fire getProducts(type=…) + getRibbons()
-                //      because /smart doesn't include ribbons (task 4).
-                //   2. searchQuery in {'genuine', 'compatible'} → fire
-                //      getProducts(source=…) since the term as free-text would
-                //      not match anything useful (task 1).
-                //
-                // Both shims delete once `data.intent` arrives.
-                // ─────────────────────────────────────────────────────────────
-                // TODO(backend-search-passover task 1+4): delete this shim.
-                const typeDetect = typeof SearchNormalize !== 'undefined'
-                    ? SearchNormalize.detectProductType(searchQuery)
-                    : null;
-                // TODO(backend-search-passover task 1): delete this shim.
-                const sourceKeyword = (searchQuery
-                    && (searchQuery.toLowerCase() === 'genuine' || searchQuery.toLowerCase() === 'compatible'))
-                    ? searchQuery.toLowerCase() : null;
-
+                // Single-path search: backend /smart owns intent classification
+                // (`data.intent.type/category/source/matched_brand_slug`),
+                // ribbon inclusion (intent.type==='ribbon' returns ribbon rows
+                // inline at score 150), and source filtering (intent.source
+                // populated from `genuine`/`compatible` queries — `q=genuine`
+                // returns 1000 source=genuine rows). The pre-flight type-detect
+                // and source-keyword shims plus the parallel `getRibbons`
+                // refetch were retired 2026-05-11 once the backend search
+                // contract shipped (Vieland verified live: ribbon=116 inline,
+                // genuine=1000, compatible=911).
                 let products = [];
-                let isTypeQuery = false;
-                // Smart-search envelope (matched_printer / did_you_mean / corrected_from /
-                // facets / pagination / intent / recovery). Populated only on the free-text path.
+                // Smart-search envelope (matched_printer / did_you_mean /
+                // corrected_from / facets / pagination / intent / recovery).
                 let smartData = null;
-                // Pagination envelope normalised to the smart-search shape
-                // ({ total, page, limit, total_pages, has_next, has_prev })
-                // regardless of which branch produced it. Null when the branch
-                // gave no usable pagination metadata; the pager hides itself.
                 let pagination = null;
 
-                if (typeDetect) {
-                    // Type-aware fetch: getProducts + (if ribbons) getRibbons in parallel.
-                    isTypeQuery = true;
-                    const promises = [API.getProducts({ ...typeDetect.productParams, limit: SEARCH_PAGE_SIZE, page: requestedPage })];
-                    if (typeDetect.fetchRibbons) {
-                        // Ribbons table is small — fetch all in one shot.
-                        promises.push(API.getRibbons({ limit: 200 }));
-                    }
-                    const results = await Promise.allSettled(promises);
-
-                    if (navVersion !== undefined && this.navigationVersion !== navVersion) return;
-
-                    if (results[0].status === 'fulfilled' && results[0].value.ok && results[0].value.data) {
-                        const value = results[0].value;
-                        const data = value.data;
-                        const prods = data.products || data || [];
-                        if (Array.isArray(prods)) products = prods;
-                        // /api/products returns pagination on `meta`, not on data.
-                        if (value.meta && value.meta.total_pages != null) {
-                            pagination = {
-                                total: value.meta.total,
-                                page: value.meta.page,
-                                limit: value.meta.limit,
-                                total_pages: value.meta.total_pages,
-                                has_next: !!value.meta.has_next,
-                                has_prev: !!value.meta.has_prev,
-                            };
-                        }
-                    }
-
-                    if (typeDetect.fetchRibbons && results[1] && results[1].status === 'fulfilled'
-                        && results[1].value.ok && results[1].value.data) {
-                        const data = results[1].value.data;
-                        let ribbons = data.ribbons || data.products || (Array.isArray(data) ? data : []);
-                        if (!Array.isArray(ribbons)) ribbons = [];
-
-                        // Normalize ribbon fields to match product schema
-                        for (const ribbon of ribbons) {
-                            ribbon._isRibbon = true;
-                            if (!ribbon.image_url && ribbon.image_path) {
-                                ribbon.image_url = ribbon.image_path;
-                            }
-                            if (ribbon.retail_price == null && ribbon.sale_price != null) {
-                                ribbon.retail_price = ribbon.sale_price;
-                            }
-                            ribbon.in_stock = true;
-                            if (typeof ribbon.brand === 'string') {
-                                ribbon.brand = { name: ribbon.brand };
-                            }
-                        }
-
-                        const existingSkus = new Set(products.map(p => p.sku));
-                        for (const ribbon of ribbons) {
-                            if (ribbon.sku && !existingSkus.has(ribbon.sku)) {
-                                existingSkus.add(ribbon.sku);
-                                products.push(ribbon);
-                            }
-                        }
-                    }
-                } else if (sourceKeyword) {
-                    // genuine / compatible single-word: filter by source instead of text search.
-                    const response = await API.getProducts({ source: sourceKeyword, limit: SEARCH_PAGE_SIZE, page: requestedPage });
-                    if (navVersion !== undefined && this.navigationVersion !== navVersion) return;
-                    products = (response.ok && response.data?.products) ? response.data.products : [];
-                    if (response.ok && response.meta && response.meta.total_pages != null) {
-                        pagination = {
-                            total: response.meta.total,
-                            page: response.meta.page,
-                            limit: response.meta.limit,
-                            total_pages: response.meta.total_pages,
-                            has_next: !!response.meta.has_next,
-                            has_prev: !!response.meta.has_prev,
-                        };
-                    }
-                } else {
-                    // Free-text search path. The backend's /smart endpoint handles
-                    // separator normalization, synonyms, model-number splitting,
-                    // did-you-mean rerun, printer-compat expansion, and pack-first
-                    // ordering — frontend just renders what comes back.
+                {
                     const response = await API.smartSearch(searchQuery, {
                         limit: SEARCH_PAGE_SIZE,
                         page: requestedPage,
@@ -2602,34 +2317,6 @@
                     products = (smartData && Array.isArray(smartData.products)) ? smartData.products : [];
                     if (smartData && smartData.pagination && smartData.pagination.total_pages != null) {
                         pagination = smartData.pagination;
-                    }
-
-                    // When backend ships data.intent, prefer it over the local shim.
-                    // (We refire if intent says ribbon-shape but /smart didn't
-                    // include ribbons. Once task 4 ships, /smart includes ribbons
-                    // natively and this re-fire branch becomes unreachable.)
-                    if (smartData?.intent?.type === 'ribbon' && !products.some(p => p._isRibbon || p.product_type === 'ribbon')) {
-                        const r = await API.getRibbons({ limit: 200 });
-                        if (navVersion !== undefined && this.navigationVersion !== navVersion) return;
-                        if (r?.ok && r.data) {
-                            let ribbons = r.data.ribbons || r.data.products || (Array.isArray(r.data) ? r.data : []);
-                            if (!Array.isArray(ribbons)) ribbons = [];
-                            for (const ribbon of ribbons) {
-                                ribbon._isRibbon = true;
-                                if (!ribbon.image_url && ribbon.image_path) ribbon.image_url = ribbon.image_path;
-                                if (ribbon.retail_price == null && ribbon.sale_price != null) ribbon.retail_price = ribbon.sale_price;
-                                ribbon.in_stock = true;
-                                if (typeof ribbon.brand === 'string') ribbon.brand = { name: ribbon.brand };
-                            }
-                            const existingSkus = new Set(products.map(p => p.sku));
-                            for (const ribbon of ribbons) {
-                                if (ribbon.sku && !existingSkus.has(ribbon.sku)) {
-                                    existingSkus.add(ribbon.sku);
-                                    products.push(ribbon);
-                                }
-                            }
-                        }
-                        if (smartData.intent.type === 'ribbon') isTypeQuery = true;
                     }
 
                     // matched_printer with no products → user typed a printer
@@ -2724,52 +2411,33 @@
                     for (const p of products) p._fitsPrinter = printerName;
                 }
 
+                // Backend intent: type/source/matched_brand_slug come from
+                // /smart's `data.intent`. `isTypeQuery` is true when the user
+                // typed a category-shaped query (`ribbon`, `toner`, …) — used
+                // below to switch section titles to "Compatible Toner Products"
+                // instead of "Compatible Products for 'toner'".
+                const isTypeQuery = !!(smartData?.intent?.type);
+
                 if (products.length > 0) {
                     let filteredProducts = products;
 
-                    // Brand-narrowing: when the query named a single brand (e.g.
-                    // "brother toner"), narrow the result set to that brand.
-                    //
-                    // Source of truth is `data.intent.matched_brand_slug` from
-                    // the backend (see handoffs/backend-handoff.md §4 task 4.1). Until backend
-                    // ships, we read `product.brand?.slug` from the first
-                    // product as a coarse heuristic — products are already
-                    // ranked, so the first hit is the most relevant brand.
-                    //
-                    // The previous implementation walked every product, lower-
-                    // cased and stripped its `name`, then substring-matched
-                    // every brand keyword — that was O(products × brands) of
-                    // string work to recompute information that's already on
-                    // each product as a structured field.
+                    // Brand-narrowing: when /smart's intent classifier said the
+                    // query named a single brand (e.g. "brother toner"), narrow
+                    // the result set to that brand. The first-product fallback
+                    // (used pre-2026-05-11) is gone — backend classifier is the
+                    // single source of truth, so unranked soft-miss results
+                    // never get spuriously brand-narrowed.
                     let detectedBrand = null;
                     if (!isTypeQuery) {
-                        // TODO(backend-search-passover task 1): replace with
-                        //   const intentBrand = smartData?.intent?.matched_brand_slug;
-                        // and drop the first-product fallback.
                         const intentBrand = smartData?.intent?.matched_brand_slug;
-                        // The "first product's brand" fallback only makes sense
-                        // when smart's relevance ranking is trustworthy. When
-                        // the soft-miss swap fired (smartData is null because
-                        // we replaced smart's results with /api/products
-                        // substring matches), product order is unranked — so
-                        // the first product is just whichever row the database
-                        // returned first. Treating that as a brand signal
-                        // narrowed `q=650` to Epson and dropped Canon PGI650
-                        // entirely. We now only apply the first-product
-                        // fallback when smartData is non-null.
-                        const firstBrandSlug = smartData ? products[0]?.brand?.slug : null;
-                        const candidate = intentBrand || (firstBrandSlug && this.brandInfo[firstBrandSlug] ? firstBrandSlug : null);
-                        if (candidate && this.brandInfo[candidate]) {
-                            const targetSlug = candidate;
-                            const narrowed = products.filter(p => p.brand?.slug === targetSlug);
+                        if (intentBrand && this.brandInfo[intentBrand]) {
+                            const narrowed = products.filter(p => p.brand?.slug === intentBrand);
                             // Only narrow if the candidate brand actually
-                            // dominates the result set (≥40% — same threshold
-                            // as the old `_inferCorrectedTerm` used). This
-                            // prevents a single relevant Brother result in a
-                            // mostly-Canon page from filtering out the Canon
-                            // products.
+                            // dominates the result set (≥40%). Prevents a single
+                            // Brother result in a mostly-Canon page from
+                            // filtering out the Canon products.
                             if (narrowed.length >= Math.max(2, products.length * 0.4)) {
-                                detectedBrand = targetSlug;
+                                detectedBrand = intentBrand;
                                 filteredProducts = narrowed;
                             }
                         }
@@ -3021,64 +2689,43 @@
             const railsHost = panel.querySelector('.search-recovery__rails');
             this.elements.levelProducts.appendChild(panel);
 
-            // ─────────────────────────────────────────────────────────────
-            // Pick which rails to fire.
-            //
-            // Source of truth is `smartData.recovery.rails` from the backend
-            // (see handoffs/backend-handoff.md §4 task 4.3): backend tells us exactly which
-            // rails will produce results, so we don't fire requests we know
-            // will be empty.
-            //
-            // Until backend ships, fall back to the legacy heuristic: a
-            // SKU-shaped query gets the compat-printers rail, every query
-            // gets the by-printer rail.
-            // ─────────────────────────────────────────────────────────────
-            const looksLikeSku = (q) => {
-                const t = (q || '').trim();
-                if (!t || /\s/.test(t)) return false;
-                if (t.length < 4) return false;
-                return /[A-Za-z]/.test(t) && /\d/.test(t);
-            };
-
-            // TODO(backend-search-passover task 3): once backend ships,
-            // delete the heuristic branch and use only `backendRails`.
+            // Backend `data.recovery.rails[]` lists exactly which rails to
+            // fire (compat-printers when SKU lookup hit ≥1 printer, by-printer
+            // when /by-printer would return ≥1 product). Pre-2026-05-11 we
+            // ran a `looksLikeSku` regex + always-fire-by-printer heuristic;
+            // both retired now that backend tells us upfront.
             const backendRails = Array.isArray(smartData?.recovery?.rails)
                 ? smartData.recovery.rails
-                : null;
+                : [];
 
+            // The compat-printers rail ships its `printers: [...]` inline, so
+            // we skip the second `API.getCompatiblePrinters` round-trip when
+            // the payload is present. Same for `popular` (products inline).
+            // by-printer still needs a follow-up fetch for the product cards.
             const railPromises = [];
-            if (backendRails) {
-                for (const rail of backendRails) {
-                    if (rail.kind === 'compat-printers') {
+            for (const rail of backendRails) {
+                if (rail.kind === 'compat-printers') {
+                    if (Array.isArray(rail.printers)) {
+                        railPromises.push(Promise.resolve({ kind: 'compat', data: { compatible_printers: rail.printers } }));
+                    } else {
                         const sku = rail.sku || query;
                         railPromises.push(
                             API.getCompatiblePrinters(sku)
                                 .then(r => ({ kind: 'compat', data: r?.ok ? r.data : null }))
                                 .catch(() => ({ kind: 'compat', data: null }))
                         );
-                    } else if (rail.kind === 'by-printer') {
-                        const q = rail.query || query;
-                        railPromises.push(
-                            API.searchByPrinter(q, { limit: 6 })
-                                .then(r => ({ kind: 'by-printer', data: r?.ok ? r.data : null }))
-                                .catch(() => ({ kind: 'by-printer', data: null }))
-                        );
                     }
-                    // 'popular' rail is rendered unconditionally below as the safety net.
-                }
-            } else {
-                if (looksLikeSku(query)) {
+                } else if (rail.kind === 'by-printer') {
+                    const q = rail.query || query;
                     railPromises.push(
-                        API.getCompatiblePrinters(query)
-                            .then(r => ({ kind: 'compat', data: r?.ok ? r.data : null }))
-                            .catch(() => ({ kind: 'compat', data: null }))
+                        API.searchByPrinter(q, { limit: 6 })
+                            .then(r => ({ kind: 'by-printer', data: r?.ok ? r.data : null }))
+                            .catch(() => ({ kind: 'by-printer', data: null }))
                     );
                 }
-                railPromises.push(
-                    API.searchByPrinter(query, { limit: 6 })
-                        .then(r => ({ kind: 'by-printer', data: r?.ok ? r.data : null }))
-                        .catch(() => ({ kind: 'by-printer', data: null }))
-                );
+                // 'popular' rail handled below as the safety net (backend may
+                // also ship `rail.products` inline; we render the curated
+                // category tiles regardless).
             }
 
             const results = await Promise.all(railPromises);
