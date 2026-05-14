@@ -3051,7 +3051,12 @@
                                             Contact us
                                         </button>`;
                                     }
-                                    return `<button class="btn btn--primary btn--sm product-card__cart-btn"
+                                    // type="button" — defensive against any future surface
+                                    // (search dropdown, modal) that mounts the shop card list
+                                    // inside a <form>. Bare <button> defaults to type="submit"
+                                    // and would become an implicit-Enter target.
+                                    // Pinned by tests/search-enter-key-may2026.test.js.
+                                    return `<button type="button" class="btn btn--primary btn--sm product-card__cart-btn"
                                             data-product-id="${product.id}"
                                             aria-label="Add ${Security.escapeAttr(displayName)} to cart">
                                         Add to Cart

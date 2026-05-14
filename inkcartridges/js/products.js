@@ -179,7 +179,14 @@ const Products = {
                                         </button>`;
                                     }
                                     const disabled = product.retail_price == null;
-                                    return `<button class="product-card__add-btn btn btn--primary"
+                                    // type="button" is load-bearing: SmartSearch mounts the
+                                    // autocomplete dropdown INSIDE the search <form>, and a
+                                    // bare <button> defaults to type="submit" per HTML5.
+                                    // Without this, every in-dropdown card becomes an
+                                    // implicit-submit candidate (HTML5 default-button rule)
+                                    // and the click handler's preventDefault swallows Enter.
+                                    // Pinned by tests/search-enter-key-may2026.test.js.
+                                    return `<button type="button" class="product-card__add-btn btn btn--primary"
                                         ${disabled ? 'disabled' : ''}
                                         data-product-id="${Security.escapeAttr(product.id)}"
                                         data-product-sku="${Security.escapeAttr(product.sku)}"

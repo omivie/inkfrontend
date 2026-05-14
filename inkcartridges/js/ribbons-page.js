@@ -555,7 +555,7 @@ const RibbonsPage = {
                                 <span class="product-card__price">${formatPrice(price)}</span>
                             </div>
                             ${inStock
-                                ? `<button class="btn btn--primary btn--sm product-card__cart-btn"
+                                ? `<button type="button" class="btn btn--primary btn--sm product-card__cart-btn"
                                         data-product-id="${ribbonId}"
                                         aria-label="Add ${Security.escapeAttr(displayName)} to cart">
                                     Add to Cart
