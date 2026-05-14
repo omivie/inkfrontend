@@ -57,12 +57,16 @@ vm.runInContext(
 
 // ─── Constants ──────────────────────────────────────────────────────────────
 
-test('STRIPE_RATE_DERIVE is 2.9% (NZ domestic card)', () => {
-  assert.equal(sandbox.STRIPE_RATE_DERIVE, 0.029);
+test('STRIPE_RATE_DERIVE is 2.65% (NZ domestic card, stripe.com/nz/pricing)', () => {
+  assert.equal(sandbox.STRIPE_RATE_DERIVE, 0.0265);
 });
 
 test('STRIPE_FIXED_DERIVE is $0.30 per transaction', () => {
   assert.equal(sandbox.STRIPE_FIXED_DERIVE, 0.30);
+});
+
+test('STRIPE_FEE_GST_DERIVE is 15% (GST Stripe charges on top of its fee)', () => {
+  assert.equal(sandbox.STRIPE_FEE_GST_DERIVE, 0.15);
 });
 
 test('GST_FRACTION_OF_GROSS is 3/23 — output GST embedded in incl-GST sale', () => {
@@ -79,13 +83,14 @@ test('COST_GST_GROSS_UP is 1.15 — supplier paid incl-GST', () => {
 
 // ─── deriveStripe / deriveGst ────────────────────────────────────────────────
 
-test('deriveStripe: 31 orders × $1,277.36 → 2.9% + 31 × $0.30 = ~$46.34', () => {
+test('deriveStripe: 31 orders × $1,277.36 → (2.65% + 31 × $0.30) × 1.15 ≈ $49.62', () => {
   // Matches the dashboard fixture in the user screenshot (3m window).
+  // 1277.36 * 0.0265   = 33.8500
+  // 31 * 0.30          =  9.30
+  // base               = 43.1500
+  // × 1.15 (GST on fee) = 49.6225
   const fee = sandbox.deriveStripe(1277.36, 31);
-  // 1277.36 * 0.029 = 37.04344
-  // 31 * 0.30 = 9.30
-  // total = 46.34344
-  assert.ok(Math.abs(fee - 46.343) < 0.01, `expected ~$46.34, got ${fee}`);
+  assert.ok(Math.abs(fee - 49.6225) < 0.01, `expected ~$49.62, got ${fee}`);
 });
 
 test('deriveStripe: zero revenue + zero orders → $0', () => {
@@ -94,7 +99,9 @@ test('deriveStripe: zero revenue + zero orders → $0', () => {
 
 test('deriveStripe: 0 orders does not add the $0.30 fixed fee', () => {
   // No transactions, no fixed fee. Real-world: an empty bucket.
-  assert.equal(sandbox.deriveStripe(100, 0), 100 * 0.029);
+  // Fee is still grossed up by 1.15 for GST on the fee.
+  const expected = 100 * sandbox.STRIPE_RATE_DERIVE * 1.15;
+  assert.ok(Math.abs(sandbox.deriveStripe(100, 0) - expected) < 1e-9);
 });
 
 test('deriveGst: $1,277.36 gross → ~$166.61 (matches dashboard chip)', () => {
@@ -245,6 +252,10 @@ test('assembleBucketExpense: P&L cogs trumps revenue-distributed cogs', () => {
 
 test('assembleBucketExpense: derived path when P&L is empty', () => {
   // Matches the dashboard fixture: rev $1,277.36 across 31 orders, no P&L data.
+  // Stripe (new convention) = (1277.36 × 0.0265 + 31 × 0.30) × 1.15 ≈ 49.62
+  // GST                     = 1277.36 × 3/23                        ≈ 166.612
+  // COGS                    =                                       = 719.88
+  // Expenses total          ≈ 936.11; Net ≈ 341.25 (a profit).
   const b = {
     revenue: 1277.36, orders: 31,
     pnlCogs: 0, hasPnlCogs: false, cogsDerived: 719.88,
@@ -256,17 +267,19 @@ test('assembleBucketExpense: derived path when P&L is empty', () => {
   sandbox.assembleBucketExpense(b);
   assert.equal(b.cogsTotal, 719.88);
   assert.equal(b.opexTotal, 0);
-  assert.ok(Math.abs(b.stripeTotal - 46.343) < 0.01);
+  assert.ok(Math.abs(b.stripeTotal - 49.6225) < 0.01);
   assert.ok(Math.abs(b.gstTotal    - 166.612) < 0.01);
-  // Total expenses ≈ 719.88 + 0 + 46.34 + 166.61 = 932.83
-  assert.ok(Math.abs(b.expenses - 932.835) < 0.05);
-  // Net ≈ 1277.36 - 932.83 = 344.53 (a profit)
-  assert.ok(b.net > 340 && b.net < 350, `expected profit ~$344.53, got ${b.net}`);
+  assert.ok(Math.abs(b.expenses - 936.11) < 0.05);
+  assert.ok(b.net > 335 && b.net < 345, `expected profit ~$341.25, got ${b.net}`);
   assert.equal(b.hasExpense, true);
 });
 
 test('assembleBucketExpense: opex logged on the same day shows up', () => {
   // The user's 3 May supplier purchase scenario.
+  // Stripe (new) = (358.24 × 0.0265 + 1 × 0.30) × 1.15 ≈ 11.26
+  // GST          = 358.24 × 3/23                       ≈ 46.73
+  // Expenses     = 220 + 250 + 11.26 + 46.73           ≈ 527.99
+  // Net          = 358.24 − 527.99                     ≈ −170 (loss)
   const b = {
     revenue: 358.24, orders: 1,
     pnlCogs: 0, hasPnlCogs: false, cogsDerived: 220,
@@ -277,8 +290,6 @@ test('assembleBucketExpense: opex logged on the same day shows up', () => {
   };
   sandbox.assembleBucketExpense(b);
   assert.equal(b.opexTotal, 250);
-  // Expenses = 220 cogs + 250 opex + ~10.69 stripe + ~46.73 gst = ~527.42
-  // Revenue 358.24 → loss of ~$169
   assert.ok(b.net < 0, `expected a loss when opex blows past revenue, got net=${b.net}`);
 });
 
@@ -331,13 +342,13 @@ test('sumTrendTotals: empty / nullish series returns zeros, no crash', () => {
 
 test('integration: dashboard 3m window matches the user-visible totals', () => {
   // Reproduce the screenshot fixture: revenue $1,277.36, gross_profit $557.48,
-  // 31 orders, no logged opex. Expect:
-  //   COGS   = 1277.36 − 557.48 = 719.88
-  //   Stripe = 1277.36 × 0.029 + 31 × 0.30 = ~46.34
-  //   GST    = 1277.36 × (3/23) = ~166.61
+  // 31 orders, no logged opex. With the 2026-05-12 Stripe convention:
+  //   COGS   = 1277.36 − 557.48                        = 719.88
+  //   Stripe = (1277.36 × 0.0265 + 31 × 0.30) × 1.15   ≈ 49.62
+  //   GST    = 1277.36 × (3/23)                        ≈ 166.61
   //   Opex   = 0 (none logged)
-  //   Total  ≈ 932.83
-  //   Net    ≈ 344.53 profit
+  //   Total  ≈ 936.11
+  //   Net    ≈ 341.25 profit
   const buckets = [
     { revenue: 1277.36, orders: 31,
       pnlCogs: 0, hasPnlCogs: false, cogsDerived: 0,
@@ -354,13 +365,12 @@ test('integration: dashboard 3m window matches the user-visible totals', () => {
 
   assert.ok(Math.abs(totals.cogs   - 719.88)  < 0.01, `cogs=${totals.cogs}`);
   assert.equal(totals.opex, 0);
-  assert.ok(Math.abs(totals.stripe - 46.343)  < 0.01, `stripe=${totals.stripe}`);
+  assert.ok(Math.abs(totals.stripe - 49.6225) < 0.01, `stripe=${totals.stripe}`);
   assert.ok(Math.abs(totals.gst    - 166.612) < 0.01, `gst=${totals.gst}`);
-  // Total expenses: 932.835. Note: the previous version of the chart would
-  // have shown 215.66 here (the broken cogs=0 path), so this assertion is
-  // the regression guard against that bug.
-  assert.ok(Math.abs(totals.expenses - 932.835) < 0.05,
-    `expected ~$932.84 expenses, got ${totals.expenses}`);
+  // Regression guard: the previous version of the chart would have shown
+  // ~$215.66 (the broken cogs=0 path); expenses must include cogs.
+  assert.ok(Math.abs(totals.expenses - 936.11) < 0.05,
+    `expected ~$936.11 expenses, got ${totals.expenses}`);
   assert.ok(totals.expenses > 900, `regression guard: expenses must include cogs (was $215.66 before fix)`);
 });
 
@@ -764,12 +774,12 @@ test('integration: 4 May order single-bucket — expenses match cost+stripe+gst 
   //   "How can the expenses be $209 for the order on the 4th of may if just
   //   the costs for the products are $198.65 before gst."
   //
-  // After the fix, the 4 May bucket must show:
-  //   Cost incl-GST: 198.65 × 1.15 = 228.4475
-  //   Stripe:        358.24 × 0.029 + 1 × 0.30 = 10.6890
-  //   GST output:    358.24 × 3/23           = 46.7270
-  //   ─────────────────────────────────────────────────
-  //   Total:                                  ~ 285.86
+  // After the fix, the 4 May bucket must show (2026-05-12 Stripe convention):
+  //   Cost incl-GST: 198.65 × 1.15                    = 228.4475
+  //   Stripe:        (358.24 × 0.0265 + 1 × 0.30) × 1.15 ≈ 11.262
+  //   GST output:    358.24 × 3/23                     ≈ 46.727
+  //   ─────────────────────────────────────────────────────────
+  //   Total:                                           ≈ 286.44
   //
   // The chart used to show $208.99 on this bucket. Anything below $285 means
   // the 1.15 gross-up was lost again or per-order COGS regressed.

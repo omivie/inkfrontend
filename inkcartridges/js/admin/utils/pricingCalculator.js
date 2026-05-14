@@ -4,9 +4,11 @@
  * preview without round-trips and the server tests stay in lockstep with FE
  * tests (see tests/pricingCalculator.test.js, golden pairs from spec §12).
  *
- * GST_RATE  : NZ GST 15% (always applied on top of cost × multiplier).
- * STRIPE_RATE: Stripe NZ domestic card rate (per-unit; the $0.30 fixed fee
- *             is order-level, applied in profitability.js).
+ * GST_RATE       : NZ GST 15% (always applied on top of cost × multiplier).
+ * STRIPE_RATE    : Stripe NZ domestic card rate (per-unit; the $0.30 fixed fee
+ *                  is order-level, applied in profitability.js).
+ * STRIPE_FEE_GST : 15% GST Stripe charges on its fee (real cash outflow, see
+ *                  2026-05-12 convention in profitability.js).
  *
  * snapPriceCeil rounds .49/.79/.99 ceiling — same psychology pricing the
  * server uses, so retail figures match commit-time exactly.
@@ -16,7 +18,8 @@
  */
 
 const GST_RATE = 0.15;
-const STRIPE_RATE = 0.029;
+const STRIPE_RATE = 0.0265;
+const STRIPE_FEE_GST = 0.15;
 
 const DEFAULT_TIERS = {
   genuine: {
@@ -99,7 +102,10 @@ function calcRetail(cost, source, tiers) {
 function netMarginPct(retail, cost) {
   if (retail <= 0) return -1;
   const netRev = retail / (1 + GST_RATE);
-  const fee = (retail * STRIPE_RATE) / (1 + GST_RATE);
+  // Fee in nominal dollars (cash leaving the company): Stripe rate on gross
+  // retail, multiplied by (1 + STRIPE_FEE_GST) for the 15% GST Stripe charges
+  // on its fee. Deducted directly from ex-GST revenue.
+  const fee = retail * STRIPE_RATE * (1 + STRIPE_FEE_GST);
   return Math.round(((netRev - cost - fee) / netRev) * 10000) / 100;
 }
 
@@ -130,6 +136,7 @@ function validateTierMap(map, source) {
 const PricingCalc = {
   GST_RATE,
   STRIPE_RATE,
+  STRIPE_FEE_GST,
   DEFAULT_TIERS,
   COARSE_4_TIER_PRESET,
   GENUINE_TIER_KEYS,
@@ -148,6 +155,7 @@ const PricingCalc = {
 export {
   GST_RATE,
   STRIPE_RATE,
+  STRIPE_FEE_GST,
   DEFAULT_TIERS,
   COARSE_4_TIER_PRESET,
   GENUINE_TIER_KEYS,

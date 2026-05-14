@@ -261,7 +261,7 @@ function renderResults() {
   if (!data) {
     wrap.innerHTML = `<div class="admin-card cc2-pricing__empty">
       <p>${esc(COPY.empty_help)}</p>
-      <p class="cc2-pricing__legend">Net margin = profit after GST + Stripe ${(STRIPE_RATE * 100).toFixed(1)}% as a share of ex-GST revenue.<br>Gross markup = ex-GST retail vs. cost (no fees, the "100% markup" yardstick).</p>
+      <p class="cc2-pricing__legend">Net margin = profit after GST + Stripe ${(STRIPE_RATE * 100).toFixed(2)}% (incl. 15% GST on fee) as a share of ex-GST revenue.<br>Gross markup = ex-GST retail vs. cost (no fees, the "100% markup" yardstick).</p>
     </div>`;
     return;
   }

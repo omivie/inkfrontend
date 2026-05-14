@@ -1,34 +1,40 @@
 /**
- * Admin product Save — May 2026 contract pin
- * ===========================================
+ * Admin product Save — May 2026 contract pin (rev 2: 2026-05-12)
+ * ===============================================================
  *
  * 2026-05-11 incident: editing the price of "Amano Compatible 78000.02 FN
  * Black/Red Printer Ribbon" (sku 78000.02) in /admin#products failed with
- * `Save failed: Failed to update product`. Root cause was a backend bug —
- * `PUT /api/admin/products/:id` returns 500 INTERNAL_ERROR for every one
- * of the 34 legacy rows that carry `source = 'ribbon'`, regardless of
- * payload. Backend repair via `scripts/repair-source-ribbon-rows.js`
- * (per backend dev reply 2026-05-11). Reproduction in
- * `.claude/memory/errors.md` ("Admin product Save fails…").
+ * `Save failed: Failed to update product`. Root cause was a backend CHECK
+ * constraint that re-evaluated against the NEW row state and rejected
+ * EVERY update on the 34 legacy rows where `source = 'ribbon'`.
  *
- * The frontend cannot fix the underlying SQL bug, but it shipped four
- * mitigations to stop silent data corruption and to give admins a
- * deterministic experience. This file pins those mitigations:
+ * Backend dev shipped the SQL fix on 2026-05-12 — PUT now succeeds on
+ * those rows (verified live: `PUT /api/admin/products/<ribbon-id>` with
+ * `{retail_price: 99.99}` returns 200). The Joi enum on `source` still
+ * rejects `'ribbon'` writes (must be one of `[genuine, compatible]`),
+ * but reading/keeping the legacy value is fine.
+ *
+ * Two FE shims were retired alongside the backend fix:
+ *   • `admin-product-modal__legacy-banner` — actively misleading once
+ *     saves work on those rows.
+ *   • INTERNAL_ERROR-aware Save toast — generic toast carries the
+ *     `(ref XXXXXXXX)` already, no special case needed.
+ *
+ * Two FE pieces stayed permanent (this file pins them):
  *
  *   A. `buildSelect` preserves legacy values. Without this, opening a
  *      ribbon product silently auto-selected `source='genuine'` (first
- *      <option>) and Save would have written that wrong value back.
+ *      <option>) and Save would have written that wrong value back —
+ *      historic bug that almost shipped silent data corruption.
+ *      Stays as a safety net for any future enum drift.
  *
  *   B. `AdminAPI.updateProduct` surfaces the Render `x-request-id` in the
- *      thrown error so the toast carries an 8-char correlation ref to grep
- *      stderr against (matches `reference_request_id_correlation` contract).
+ *      thrown error so the toast carries an 8-char correlation ref. CORS
+ *      `Access-Control-Expose-Headers` shipped 2026-05-11 so this works
+ *      cross-origin (verified end-to-end: `Save failed: Validation
+ *      failed: ... (ref e72595af)`).
  *
- *   C. The product modal renders an orange `admin-product-modal__legacy-banner`
- *      whenever `source ∉ {genuine, compatible}`, warning the admin that
- *      saves will fail.
- *
- *   D. The Save handler shows a specific toast for the
- *      INTERNAL_ERROR-on-legacy-row case, citing this spec.
+ * Reproduction history in `.claude/memory/errors.md`.
  *
  * Run: `node --test tests/admin-product-save-may2026.test.js`
  */
@@ -70,7 +76,7 @@ function loadFn(source, name) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// A. buildSelect preserves legacy values (no silent data corruption)
+// A. buildSelect preserves legacy values (permanent safety net)
 // ─────────────────────────────────────────────────────────────────────────────
 
 test('buildSelect: canonical match selects the matching <option> only', () => {
@@ -142,9 +148,9 @@ test('buildSelect: object-form options ({value,label}) preserve legacy values to
 // ─────────────────────────────────────────────────────────────────────────────
 
 test('AdminAPI.updateProduct rethrows with code/status/request_id attached', () => {
-  // Pin the mitigation: the toast must be able to read e.code === "INTERNAL_ERROR"
-  // and e.request_id, so the legacy-row catch in products.js can show the
-  // dedicated message instead of the generic "Failed to update product".
+  // Pin the contract: the toast and any caller can read e.code, e.status,
+  // and e.request_id from the thrown Error. Backend CORS exposes
+  // x-request-id cross-origin, so request_id is now reliably populated.
   assert.match(ADMIN_API_SRC, /err\.code\s*=\s*resp\.code/,
     'updateProduct must attach resp.code to the thrown Error');
   assert.match(ADMIN_API_SRC, /err\.status\s*=\s*resp\.status/,
@@ -154,9 +160,8 @@ test('AdminAPI.updateProduct rethrows with code/status/request_id attached', () 
 });
 
 test('AdminAPI.updateProduct error message includes the 8-char request_id ref when present', () => {
-  // The api.js shared `request()` helper attaches request_id to error envelopes
-  // (see reference_request_id_correlation.md). updateProduct must thread it
-  // into the thrown message string so the toast carries the ref.
+  // Verified end-to-end 2026-05-12 against prod: a 400 VALIDATION_FAILED
+  // surfaced as `Save failed: ... (ref e72595af)` in the admin toast.
   assert.match(ADMIN_API_SRC, /String\(resp\.request_id\)\.slice\(0,\s*8\)/,
     'updateProduct must slice request_id to 8 chars when appending to the message');
   assert.match(ADMIN_API_SRC, /\(ref \$\{[^}]+\}\)/,
@@ -164,46 +169,29 @@ test('AdminAPI.updateProduct error message includes the 8-char request_id ref wh
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// C. Pre-flight banner renders for non-canonical source values
+// C. The legacy-source banner + INTERNAL_ERROR-toast were RETIRED 2026-05-12
 // ─────────────────────────────────────────────────────────────────────────────
 
-test('buildProductModalTabs injects a legacy-source banner when source ∉ {genuine, compatible}', () => {
-  // The banner is rendered as a sibling of #pm-panels with the
-  // .admin-product-modal__legacy-banner class. We don't run the full modal —
-  // we just verify the source contains the gating logic and the marker class.
-  assert.match(PRODUCTS_SRC, /admin-product-modal__legacy-banner/,
-    'the legacy-source banner CSS class must be present in the modal builder');
-  assert.match(PRODUCTS_SRC, /new Set\(\[['"]genuine['"],\s*['"]compatible['"]\]\)/,
-    'the allowed-source set must be {genuine, compatible} (mirrors backend Joi enum)');
-  // Banner copy must surface the operator action so admins know what unblocks
-  // saves — without the script name they have no actionable lever.
-  assert.match(PRODUCTS_SRC, /repair-source-ribbon-rows\.js/,
-    'the banner must name the backend repair script (operator action) so admins know what unblocks saves');
+test('legacy-source banner is gone from the modal builder (backend SQL fix shipped)', () => {
+  // The orange `admin-product-modal__legacy-banner` was a placeholder while
+  // backend ribbon-row writes 500'd. They no longer 500 (verified live).
+  // Keeping the banner would actively mislead admins.
+  assert.doesNotMatch(PRODUCTS_SRC, /admin-product-modal__legacy-banner/,
+    'legacy-source banner CSS class must be deleted — saves work on those rows now');
+  assert.doesNotMatch(PRODUCTS_SRC, /repair-source-ribbon-rows\.js/,
+    'banner copy referencing the backend repair script must be deleted — script ran, fix shipped');
 });
 
-// ─────────────────────────────────────────────────────────────────────────────
-// D. Save catch shows the specific toast for INTERNAL_ERROR on legacy rows
-// ─────────────────────────────────────────────────────────────────────────────
-
-test('Save catch detects INTERNAL_ERROR/500 on legacy-source rows and shows a specific toast', () => {
-  // The catch block must:
-  //  - read product.source against the allowed set
-  //  - check for code === 'INTERNAL_ERROR' OR status === 500
-  //  - show a toast that mentions the legacy source and the spec doc
-  assert.match(PRODUCTS_SRC, /isLegacyRow\s*&&\s*isInternal/,
-    'Save catch must combine isLegacyRow and isInternal flags');
-  assert.match(PRODUCTS_SRC, /e\.code\s*===\s*['"]INTERNAL_ERROR['"]/,
-    'Save catch must check e.code === "INTERNAL_ERROR"');
-  assert.match(PRODUCTS_SRC, /Pending operator fix/,
-    'Save toast must name the pending operator action so admins know who to ping (not surface a generic 500 message)');
+test('Save catch is the simple generic toast — no INTERNAL_ERROR special case', () => {
+  // Pre-2026-05-12 the catch had a `if (isLegacyRow && isInternal)` branch
+  // that swapped the toast for a custom message about the backend repair.
+  // That path is dead now; the generic toast carries the validation details
+  // and `(ref XXXXXXXX)` automatically via AdminAPI.updateProduct.
+  assert.doesNotMatch(PRODUCTS_SRC, /isLegacyRow\s*&&\s*isInternal/,
+    'Save catch must not retain the legacy-row INTERNAL_ERROR special case');
+  assert.doesNotMatch(PRODUCTS_SRC, /Pending operator fix/,
+    'Save catch must not retain the "Pending operator fix" copy — backend fix shipped');
+  // Generic toast still present
+  assert.match(PRODUCTS_SRC, /Toast\.error\(`Save failed: \$\{e\.message\}`\)/,
+    'Save catch must keep the generic `Save failed: ${e.message}` toast');
 });
-
-// ─────────────────────────────────────────────────────────────────────────────
-// E. Reproduction breadcrumb stays in errors.md
-// ─────────────────────────────────────────────────────────────────────────────
-//
-// The standalone handoff doc was delivered to the backend dev and removed
-// 2026-05-11 (per project_backend_handoff_docs_delivered_may2026 memo). The
-// reproduction lives in `.claude/memory/errors.md` ("Admin product Save
-// fails…") which is outside the repo, so this file no longer asserts on the
-// spec's existence — only on the in-repo mitigations above.

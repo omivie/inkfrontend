@@ -8,11 +8,14 @@
  * fees, and GST remitted — so each helper is named after the loss line it
  * builds.
  *
- * Conventions (set by user 2026-05-04, see project_profit_calc.md):
+ * Conventions (revised by user 2026-05-12, see project_profit_calc.md):
  *   - Order totals on this dashboard are gross (incl-GST). Output GST embedded
  *     in a gross sale = gross × 3/23.
  *   - Cost is grossed up by 1.15 since we pay the supplier incl-GST.
- *   - Stripe NZ domestic card = gross × 2.9% + $0.30 per transaction.
+ *   - Stripe NZ domestic card = gross × 2.65% + $0.30 per transaction, ALL
+ *     multiplied by 1.15 (Stripe charges 15% GST on its fee; treat as cash
+ *     outflow). Fee base on this dashboard is bucket gross revenue (already
+ *     incl-GST + shipping per `o.total`).
  *
  * COGS source-of-truth (set by user 2026-05-08):
  *   - Backend /api/admin/analytics/pnl rarely populates per-period cogs.
@@ -29,8 +32,9 @@
  *     purchase shows on 3 May, not smeared across the month.
  */
 
-export const STRIPE_RATE_DERIVE  = 0.029;
+export const STRIPE_RATE_DERIVE  = 0.0265;
 export const STRIPE_FIXED_DERIVE = 0.30;
+export const STRIPE_FEE_GST_DERIVE = 0.15;
 export const GST_FRACTION_OF_GROSS = 3 / 23;
 export const COST_GST_GROSS_UP = 1.15;
 
@@ -292,9 +296,12 @@ function safeNum(v) {
 }
 
 // Per-bucket Stripe fee derived from gross revenue + order count.
+// 2.65% × gross + $0.30 × orders, then × 1.15 for the GST Stripe charges on its
+// fee (real cash outflow per the 2026-05-12 convention).
 export function deriveStripe(revenue, orders) {
-  return safeNum(revenue) * STRIPE_RATE_DERIVE
-       + safeNum(orders)  * STRIPE_FIXED_DERIVE;
+  const base = safeNum(revenue) * STRIPE_RATE_DERIVE
+             + safeNum(orders)  * STRIPE_FIXED_DERIVE;
+  return base * (1 + STRIPE_FEE_GST_DERIVE);
 }
 
 // Per-bucket output GST embedded in gross-incl-GST revenue.

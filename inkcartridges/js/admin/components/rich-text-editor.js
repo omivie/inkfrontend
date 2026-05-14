@@ -1,6 +1,11 @@
 /**
  * RichTextEditor — Simple WYSIWYG with contentEditable
  * Toolbar: Bold, Italic, Underline, OL, UL, Link, Source toggle
+ *
+ * Source mode contract (May 2026): the </> view shows real HTML — loose text
+ * runs are wrapped in <p>, browser-inserted <div> line wrappers are promoted
+ * to <p>, and block elements are pretty-printed one per line. Saves persist
+ * the same normalized HTML so the source view round-trips.
  */
 
 const esc = (s) => typeof Security !== 'undefined' ? Security.escapeHtml(String(s)) : String(s);
@@ -30,6 +35,76 @@ function sanitizeHTML(html) {
   });
 
   return tmp.innerHTML;
+}
+
+const BLOCK_TAGS = new Set(['p', 'div', 'ul', 'ol', 'li', 'blockquote', 'pre', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6']);
+
+/**
+ * Wrap loose top-level inline / text runs in <p>, promote stray <div> line
+ * wrappers to <p>, and drop trailing <br> inside paragraphs. Result is HTML
+ * the source view can render as real structural markup.
+ */
+function normalizeBlocks(html) {
+  const src = document.createElement('div');
+  src.innerHTML = html;
+
+  // Promote stray <div> line wrappers to <p>.
+  src.querySelectorAll('div').forEach(div => {
+    const p = document.createElement('p');
+    while (div.firstChild) p.appendChild(div.firstChild);
+    div.replaceWith(p);
+  });
+
+  // Walk top-level nodes; group consecutive inline runs into a <p>.
+  const out = document.createElement('div');
+  let runP = null;
+  const isInlineLike = (n) => {
+    if (n.nodeType === Node.TEXT_NODE) return true;
+    if (n.nodeType !== Node.ELEMENT_NODE) return false;
+    return !BLOCK_TAGS.has(n.tagName.toLowerCase());
+  };
+  const isMeaningful = (p) => {
+    if (!p) return false;
+    if (p.textContent.replace(/\s| /g, '') !== '') return true;
+    return !!p.querySelector('img, a[href]');
+  };
+  const flushRun = () => {
+    if (runP && isMeaningful(runP)) out.appendChild(runP);
+    runP = null;
+  };
+
+  Array.from(src.childNodes).forEach(node => {
+    if (isInlineLike(node)) {
+      if (!runP) runP = document.createElement('p');
+      runP.appendChild(node);
+    } else {
+      flushRun();
+      out.appendChild(node);
+    }
+  });
+  flushRun();
+
+  // Strip trailing <br> inside each <p>.
+  out.querySelectorAll('p').forEach(p => {
+    while (p.lastChild && p.lastChild.nodeType === Node.ELEMENT_NODE && p.lastChild.tagName.toLowerCase() === 'br') {
+      p.removeChild(p.lastChild);
+    }
+  });
+
+  return out.innerHTML;
+}
+
+/**
+ * Pretty-print HTML so block elements appear on their own line. Read-only
+ * formatting for the source textarea — does not change semantics.
+ */
+function prettyPrintHTML(html) {
+  if (!html) return '';
+  let out = html;
+  out = out.replace(/(<(p|div|ul|ol|li|blockquote|pre|h[1-6])(\s[^>]*)?>)/gi, '\n$1');
+  out = out.replace(/(<\/(p|div|ul|ol|li|blockquote|pre|h[1-6])>)/gi, '$1\n');
+  out = out.replace(/\n{2,}/g, '\n').trim();
+  return out;
 }
 
 class RichTextEditor {
@@ -76,11 +151,18 @@ class RichTextEditor {
     if (placeholder) editor.dataset.placeholder = placeholder;
     if (initialValue) editor.innerHTML = initialValue;
 
-    // Source textarea (hidden by default)
+    // Force <p> as the default paragraph wrapper so Enter creates structural
+    // markup rather than <div> (Chrome) or naked text (Safari).
+    try { document.execCommand('defaultParagraphSeparator', false, 'p'); } catch (_) {}
+
+    // Source textarea (hidden by default) — monospace so HTML reads as code.
     const source = document.createElement('textarea');
     source.className = 'rte-source';
     source.style.minHeight = `${minHeight}px`;
     source.style.display = 'none';
+    source.style.fontFamily = 'ui-monospace, SFMono-Regular, Menlo, monospace';
+    source.style.whiteSpace = 'pre';
+    source.setAttribute('spellcheck', 'false');
 
     wrap.appendChild(toolbar);
     wrap.appendChild(editor);
@@ -147,14 +229,20 @@ class RichTextEditor {
     const srcBtn = this._toolbar.querySelector('[data-cmd="source"]');
 
     if (this._sourceMode) {
-      this._source.value = this._editor.innerHTML;
+      // Normalize first so the source view shows real <p> tags around loose
+      // content, then pretty-print so each block sits on its own line.
+      const normalized = normalizeBlocks(sanitizeHTML(this._editor.innerHTML));
+      this._editor.innerHTML = normalized;
+      this._source.value = prettyPrintHTML(normalized);
       this._editor.style.display = 'none';
       this._source.style.display = 'block';
       srcBtn.classList.add('active');
-      // Disable formatting buttons in source mode
       this._toolbar.querySelectorAll('.rte-btn:not([data-cmd="source"])').forEach(b => b.disabled = true);
     } else {
-      this._editor.innerHTML = this._source.value;
+      // Source → WYSIWYG: collapse the cosmetic newlines so they don't render
+      // as extra whitespace, then push back into the editor.
+      const html = this._source.value.replace(/>\s+</g, '><').trim();
+      this._editor.innerHTML = html;
       this._source.style.display = 'none';
       this._editor.style.display = 'block';
       srcBtn.classList.remove('active');
@@ -168,20 +256,24 @@ class RichTextEditor {
   }
 
   getValue() {
-    if (this._sourceMode) return this._source.value;
-    let html = this._editor.innerHTML;
+    let html;
+    if (this._sourceMode) {
+      // Strip cosmetic whitespace between tags so saved HTML is compact.
+      html = this._source.value.replace(/>\s+</g, '><').trim();
+    } else {
+      html = this._editor.innerHTML;
+    }
     // Strip trailing empty paragraphs/divs that contentEditable inserts
     html = html.replace(/(<p>(\s|<br\s*\/?>|&nbsp;)*<\/p>|<div>(\s|<br\s*\/?>|&nbsp;)*<\/div>)+$/gi, '');
     html = html.trim();
-    // Treat empty-looking content as empty string
     if (!html || html === '<br>' || html === '<div><br></div>') return '';
-    // Sanitize: strip any inline styles that snuck in
     return sanitizeHTML(html);
   }
 
   setValue(html) {
-    this._editor.innerHTML = html || '';
-    this._source.value = html || '';
+    const normalized = normalizeBlocks(sanitizeHTML(html || ''));
+    this._editor.innerHTML = normalized;
+    this._source.value = prettyPrintHTML(normalized);
     this._fireChange();
   }
 

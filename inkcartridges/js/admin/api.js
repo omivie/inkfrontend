@@ -397,9 +397,8 @@ const AdminAPI = {
           }
         }
         // Append the 8-char Render request_id so admins can grep stderr when
-        // the backend returns a generic 500 (e.g. the source='ribbon' rows
-        // that 500 on every PUT — see .claude/memory/errors.md
-        // "Admin product Save fails…").
+        // the backend returns a generic 500. Cross-origin exposure of
+        // x-request-id shipped 2026-05-11 (CORS allowlist now includes it).
         if (resp.request_id) msg += ` (ref ${String(resp.request_id).slice(0, 8)})`;
         const err = new Error(msg);
         err.code = resp.code;

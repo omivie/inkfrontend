@@ -872,8 +872,20 @@ const API = {
         const name = (product.name || '').toString().trim();
 
         // Color/pack suffixes that trail a compatible's SKU body or name lead.
-        // Order matters: longer suffixes first so PBK doesn't match BK then leave 'P'.
-        const COLOR_SUFFIX = /(?:KCMY|CMYK|CMY|PBK|PCY|PMG|PYL|CLR|BK|CY|MG|YL|LC|LM|RD|GN|BL|VT|GR|WH|OR|PK)$/;
+        // Order matters: longer suffixes first so PBK doesn't match BK then leave 'P',
+        // MG/CY/YL beat the 1-char canon, and pack tokens (KCMY/CMYK/BCMY/CMY/MK)
+        // win before single-letter colors so MK doesn't shred to "M" leaving a stray K.
+        //
+        // 1-char canon (K/C/M/Y) added May 2026 when backend collapsed the color
+        // suffix (GLC73MG → GLC73M, GLC73CY → GLC73C). Without it the new SKUs fall
+        // through and series_codes pick up "LC73M" instead of "LC73", breaking
+        // compat grouping.
+        //
+        // The (?<!X)LC / (?<!X)LM lookbehinds keep "LC"/"LM" (light-cyan / light-
+        // magenta specialty colors) from eating the "L" of an "XL" high-yield
+        // body — e.g. "200XLC" must strip just the trailing "C", leaving "200XL",
+        // not "200X". "200LC" still strips "LC" (preceded by a digit, not X).
+        const COLOR_SUFFIX = /(?:KCMY|CMYK|BCMY|CMY|PBK|PCY|PMG|PYL|VLM|MK|PB|PC|PM|PY|MB|(?<!X)LC|(?<!X)LM|BK|CY|MG|YL|RD|GN|BL|VT|GR|WH|OR|PK|K|C|M|Y)$/;
 
         const stripSuffix = (token) => {
             if (!token) return '';

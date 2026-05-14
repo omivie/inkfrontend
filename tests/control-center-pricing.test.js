@@ -67,9 +67,10 @@ const bundle  = loadModule(BUNDLE_PATH);
 
 // ─── Constants & defaults ───────────────────────────────────────────────────
 
-test('GST_RATE is 15% and STRIPE_RATE is 2.9%', () => {
+test('GST_RATE is 15%, STRIPE_RATE is 2.65%, STRIPE_FEE_GST is 15%', () => {
   assert.equal(pricing.GST_RATE, 0.15);
-  assert.equal(pricing.STRIPE_RATE, 0.029);
+  assert.equal(pricing.STRIPE_RATE, 0.0265);
+  assert.equal(pricing.STRIPE_FEE_GST, 0.15);
 });
 
 test('DEFAULT_TIERS has all genuine + compatible tier keys from spec §6', () => {
@@ -174,10 +175,11 @@ for (const g of GOLDENS) {
 // ─── Margin & markup math ───────────────────────────────────────────────────
 
 test('netMarginPct returns >0 for healthy retail and 0 for break-even', () => {
-  // Compatible $4 → retail $8.79. ex-GST = 7.6435; stripe ex-GST = 0.2217;
-  // profit = 7.6435 - 4 - 0.2217 = 3.4218; margin = 3.4218 / 7.6435 ≈ 44.77%
+  // Compatible $4 → retail $8.79. ex-GST = 7.6435;
+  // fee = 8.79 × 0.0265 × 1.15 ≈ 0.2679 (full cash to Stripe incl. GST on fee).
+  // profit = 7.6435 - 4 - 0.2679 = 3.3756; margin = 3.3756 / 7.6435 ≈ 44.16%
   const m = pricing.netMarginPct(8.79, 4.00);
-  assert.ok(m > 44 && m < 46, `expected ~45%, got ${m}`);
+  assert.ok(m > 43 && m < 46, `expected ~44%, got ${m}`);
 });
 
 test('netMarginPct flags non-positive retail with -1 sentinel', () => {

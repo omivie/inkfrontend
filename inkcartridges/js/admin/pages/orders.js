@@ -330,11 +330,12 @@ function buildOrderModalContent(modal, o, events, breakdown) {
         ${showCost ? `<td class="mono">${item.supplier_cost_snapshot != null ? formatPrice(item.supplier_cost_snapshot) : MISSING}</td><td></td>` : ''}
       </tr>`;
     }
-    const profit = computeOrderProfit(totalPrice, totalCost);
+    const customerPaidInclGst = breakdown?.total_incl_gst ?? o.total_amount ?? o.total ?? null;
+    const profit = computeOrderProfit(totalPrice, totalCost, { customerPaidInclGst });
     itemsHtml += `</tbody><tfoot><tr class="admin-order-items__total">
       <td colspan="3"></td>
       <td class="mono"><strong>${formatPrice(totalPrice)}</strong></td>
-      ${showCost ? `<td class="mono"><strong>${formatPrice(totalCost)}</strong></td><td class="mono" style="color:var(--success-text,#15803d)" title="Net profit: ex-GST revenue minus cost (incl. GST) minus Stripe fee gross (2.9% + $0.30)"><strong>${profit != null ? formatPrice(profit) : MISSING}</strong></td>` : ''}
+      ${showCost ? `<td class="mono"><strong>${formatPrice(totalCost)}</strong></td><td class="mono" style="color:var(--success-text,#15803d)" title="Net profit: ex-GST revenue minus cost (incl. GST) minus Stripe fee (2.65% + $0.30, incl. 15% GST on fee) on the full charged amount"><strong>${profit != null ? formatPrice(profit) : MISSING}</strong></td>` : ''}
     </tr></tfoot></table>`;
   } else {
     itemsHtml += `<p class="admin-text-muted">${MISSING} No items</p>`;

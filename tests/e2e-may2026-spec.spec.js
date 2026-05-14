@@ -63,7 +63,10 @@ test.describe('May 2026 storefront contract — live', () => {
     });
 
     test('Compatible no-sale PDP omits Was/Save line', async ({ page }) => {
-        await page.goto(`${BASE_URL}/products/brother-compatible-lc233-ink-cartridge-black/C-BRO-LC233-INK-BK`);
+        // SKU updated 2026-05-12: backend collapsed the trailing 2-char color
+        // suffix to 1 char (C-BRO-LC233-INK-BK → C-BRO-LC233-INK-K). The slug
+        // is decorative; backend 301-redirects stale slugs via slug_redirects.
+        await page.goto(`${BASE_URL}/products/brother-compatible-lc233-ink-cartridge-black/C-BRO-LC233-INK-K`);
         await page.waitForLoadState('networkidle');
         // No strikethrough / no "Save $" — but the price itself ($8.99) should be visible.
         await expect(page.locator('.product-detail__compare-price, text=/Was \\$/')).toHaveCount(0);

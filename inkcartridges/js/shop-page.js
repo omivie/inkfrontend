@@ -2660,9 +2660,6 @@
             if (host) host.insertBefore(wrap, host.firstChild);
         },
 
-        // (`_inferCorrectedTerm` removed 2026-05-03 — backend now owns the
-        //  corrected-term copy. Search audit: readfirst/SEARCH_AUDIT.md.)
-
         // Spec §2.3 — recovery rails when /smart returns no products.
         // Three rails: (1) compatible printers for SKU-shaped queries,
         // (2) cartridges-for-your-printer via /by-printer,
