@@ -312,16 +312,36 @@ test('§7 contact.html loads the Cloudflare Turnstile script', () => {
     assert.match(src, /id="contact-turnstile"/, 'contact.html must render the Turnstile container element');
 });
 
-test('§7 no surviving links to the non-existent /business/apply page', () => {
-    // The /business/apply rewrite in vercel.json points to a page that
-    // doesn't exist on disk; we removed the storefront-side links to it.
-    // Re-introducing one would surface a 404 to users.
+test('§7 the Business Accounts surface is fully retired', () => {
+    // Three layers must all be clean:
+    //   1. No customer page links to /business/apply (404 — page never existed).
+    //   2. No customer page links to the prefilled-contact alias
+    //      /contact?subject=Business...  (UI was retired 2026-05-15 —
+    //      it just opened the contact form with a pre-filled subject;
+    //      collapsed because it duplicated /contact and implied a
+    //      product surface we don't actually run).
+    //   3. footer.js must not re-introduce either form.
+    //   4. vercel.json must not carry the dead /business/apply rewrite —
+    //      keeping it around invited the orphan link to come back.
+    const businessApplyRe   = /href="\/business\/apply"/;
+    const businessSubjectRe = /href="\/contact\?subject=Business/i;
+
     for (const p of PAGES) {
-        assert.ok(!/href="\/business\/apply"/.test(SRC[p]),
+        assert.ok(!businessApplyRe.test(SRC[p]),
             `${p}: must not link to /business/apply (page does not exist)`);
+        assert.ok(!businessSubjectRe.test(SRC[p]),
+            `${p}: must not link to /contact?subject=Business... (Business Accounts CTA was retired)`);
     }
-    assert.ok(!/href="\/business\/apply"/.test(FOOTER_JS),
+    assert.ok(!businessApplyRe.test(FOOTER_JS),
         'footer.js must not link to /business/apply (page does not exist)');
+    assert.ok(!businessSubjectRe.test(FOOTER_JS),
+        'footer.js must not link to /contact?subject=Business... — that footer item was deleted on 2026-05-15');
+    assert.ok(!/Business Accounts/.test(FOOTER_JS),
+        'footer.js must not contain the "Business Accounts" label — link + label retired together');
+
+    const VERCEL = fs.readFileSync(path.join(ROOT, 'inkcartridges', 'vercel.json'), 'utf8');
+    assert.ok(!/\/business\/apply/.test(VERCEL),
+        'vercel.json must not carry the /business/apply rewrite — destination page does not exist and the customer-facing link is gone');
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
