@@ -1329,6 +1329,39 @@ const API = {
     },
 
     /**
+     * Typeahead suggest — the literal-substring search the dropdown uses.
+     *
+     * This is the SAME endpoint search.js's fetchSuggest hits, surfaced on
+     * the API object so the full results page can reconcile against it.
+     * /api/search/smart classifies "intent" and will autocorrect a query it
+     * judges ambiguous (q=511 → "Lexmark MX 511"); /api/search/suggest does a
+     * plain substring match and returns exactly what the dropdown shows.
+     * loadSearchResults unions this shortlist into its fallback so the two
+     * surfaces can never disagree. Pinned by
+     * tests/search-results-parity-may2026.test.js.
+     *
+     * Returns a bare array of suggestion rows (never throws — yields [] on
+     * any failure so the caller's reconcile path degrades gracefully). The
+     * backend caps `limit` low (≈20); values above that return an empty set,
+     * so callers should request 20 or fewer.
+     *
+     * @param {string} query - Raw user query.
+     * @param {number} limit - Max rows (default 10, keep <= 20).
+     * @returns {Promise<Array>} suggestion rows, or [] on miss/failure.
+     */
+    async searchSuggest(query, limit = 10) {
+        if (!query || String(query).trim().length < 2) return [];
+        try {
+            const params = new URLSearchParams({ q: query, limit: String(limit) });
+            const res = await this.get(`/api/search/suggest?${params}`);
+            if (res && res.ok && res.data && Array.isArray(res.data.suggestions)) {
+                return res.data.suggestions;
+            }
+        } catch (_) { /* swallow — caller treats [] as "no suggest data" */ }
+        return [];
+    },
+
+    /**
      * Get printers for a brand, already grouped by series.
      *
      * Returns `{ ok, data: { brand, series_groups: [{ id, name, model_count,

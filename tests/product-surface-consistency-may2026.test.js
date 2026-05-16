@@ -147,12 +147,16 @@ test('soft-miss threshold is 50 and the branch checks for missing matched_printe
     assert.match(slice, /!smartData\?\.did_you_mean/);
 });
 
-test('soft-miss only swaps when /api/products strictly beats smart count', () => {
-    // The whole point of the soft miss: don't swap if products doesn't have
-    // strictly more results — otherwise the swap costs us smart's relevance
-    // ranking with no upside.
+test('soft-miss only swaps when the literal set strictly beats smart count', () => {
+    // The whole point of the soft miss: don't swap if the literal set
+    // doesn't have strictly more results — otherwise the swap costs us
+    // smart's relevance ranking with no upside. (The hard-miss / hijack
+    // branch swaps on any literal hit; the soft-miss branch is the `:` arm.)
+    // search-results-parity-may2026 folded the soft-miss swap into a shared
+    // reconcile that also covers hijack, and renamed `fallbackProducts` →
+    // `merged` (dropdown shortlist unioned with the full literal set).
     assert.match(SHOP_CODE,
-        /shouldUseFallback\s*=\s*hardMiss[\s\S]{0,150}fallbackProducts\.length\s*>\s*smartCount/);
+        /shouldUseFallback\s*=\s*\(hijack\s*\|\|\s*hardMiss\)[\s\S]{0,150}merged\.length\s*>\s*smartCount/);
 });
 
 test('fallback path still uses SEARCH_PAGE_SIZE + page so pagination keeps working', () => {
@@ -167,7 +171,7 @@ test('fallback path still uses SEARCH_PAGE_SIZE + page so pagination keeps worki
 
 test('fallback path normalises /api/products meta into the shared pagination shape', () => {
     const idx = SHOP_CODE.indexOf('hardMiss || softMiss');
-    const slice = SHOP_CODE.slice(idx, idx + 1500);
+    const slice = SHOP_CODE.slice(idx, idx + 3000);
     assert.match(slice, /total_pages:\s*fallback\.meta\.total_pages/);
     assert.match(slice, /has_next:\s*!!fallback\.meta\.has_next/);
     assert.match(slice, /has_prev:\s*!!fallback\.meta\.has_prev/);

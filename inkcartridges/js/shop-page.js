@@ -1,4 +1,117 @@
     // ============================================
+    // SEARCH RESULT RECONCILIATION HELPERS
+    // ============================================
+    // The typeahead dropdown (search.js → /api/search/suggest) and the full
+    // results page (/search → /api/search/smart) hit different backend
+    // endpoints, so they could disagree: /smart classifies "intent" and will
+    // autocorrect a query it judges ambiguous, while /suggest does a plain
+    // literal-substring match. For numeric cartridge codes the /smart
+    // autocorrect misfires hard — q=511 became "Lexmark MX 511" and returned
+    // four Lexmark products that contain "511" nowhere, while the dropdown
+    // correctly showed the CL511 / CT3511xx family. These helpers let
+    // loadSearchResults detect that divergence and reconcile the results page
+    // back to what the dropdown promised. Pinned by
+    // tests/search-results-parity-may2026.test.js.
+
+    // Lowercase + strip every non-alphanumeric char so "CT-351101", "CL511"
+    // and "165.11" all compare on their bare token. Pure (no external refs)
+    // so it stays unit-testable via the window hook below.
+    function normalizeForMatch(s) {
+        return String(s == null ? '' : s).toLowerCase().replace(/[^a-z0-9]+/g, '');
+    }
+
+    // True when `product` literally contains what the user typed — the same
+    // notion of "match" the dropdown uses. Single-token queries must appear
+    // as a contiguous substring of name+sku; multi-token queries must have
+    // every token (length >= 2) present somewhere. This is the gate that
+    // separates a genuine typo ("cannon" — no literal hit anywhere in the
+    // catalog) from a mis-autocorrected valid query ("511" — hits CL511).
+    function productMatchesQuery(product, query) {
+        if (!product) return false;
+        const q = normalizeForMatch(query);
+        if (!q) return false;
+        const hay = normalizeForMatch((product.name || '') + ' ' + (product.sku || ''));
+        if (!hay) return false;
+        if (hay.includes(q)) return true;
+        const tokens = String(query == null ? '' : query)
+            .toLowerCase().split(/[^a-z0-9]+/).filter(t => t.length >= 2);
+        if (tokens.length > 1) return tokens.every(t => hay.includes(t));
+        return false;
+    }
+
+    // Adapt a /suggest payload row to the product shape the card renderer
+    // expects. Mirrors search.js's adaptForCard — /suggest sends `price` +
+    // `is_genuine`; the shop cards read `retail_price` + `source`.
+    function adaptSuggestProduct(p) {
+        return Object.assign({}, p, {
+            retail_price: p.retail_price != null ? p.retail_price : p.price,
+            sku: p.sku || '',
+            source: p.source || (p.is_genuine ? 'genuine' : 'compatible'),
+            brand: p.brand || null,
+            category: p.category || null,
+        });
+    }
+
+    // Union the dropdown's ranked shortlist (/suggest) with the full literal
+    // search set (/api/products?search=). Dropdown order is preserved first,
+    // then any products-search rows the dropdown did not surface. Deduped by
+    // id, then sku, then normalized name. When the same product appears in
+    // both lists the richer /api/products object wins the slot (it carries
+    // canonical_url + discount fields the /suggest payload omits) but keeps
+    // the dropdown's position. Guarantees the results page is a superset of —
+    // never a subset of — what the dropdown showed.
+    function mergeLiteralResults(suggestList, fallbackProducts) {
+        const fallback = Array.isArray(fallbackProducts) ? fallbackProducts : [];
+        const suggest = Array.isArray(suggestList) ? suggestList : [];
+        const byId = new Map();
+        const bySku = new Map();
+        for (const p of fallback) {
+            if (p && p.id != null && p.id !== '') byId.set(String(p.id), p);
+            if (p && p.sku) bySku.set(String(p.sku).toUpperCase(), p);
+        }
+        const seen = new Set();
+        const out = [];
+        const used = new Set();
+        const mark = (p) => {
+            if (p && p.id != null && p.id !== '') seen.add('id:' + String(p.id));
+            if (p && p.sku) seen.add('sku:' + String(p.sku).toUpperCase());
+            const n = normalizeForMatch(p && p.name);
+            if (n) seen.add('name:' + n);
+        };
+        const isSeen = (p) => {
+            if (p && p.id != null && p.id !== '' && seen.has('id:' + String(p.id))) return true;
+            if (p && p.sku && seen.has('sku:' + String(p.sku).toUpperCase())) return true;
+            const n = normalizeForMatch(p && p.name);
+            return !!n && seen.has('name:' + n);
+        };
+        for (const s of suggest) {
+            const adapted = adaptSuggestProduct(s);
+            const richer = (adapted.id != null && byId.get(String(adapted.id)))
+                || (adapted.sku && bySku.get(adapted.sku.toUpperCase()))
+                || null;
+            const row = richer || adapted;
+            if (isSeen(row)) continue;
+            mark(row);
+            if (richer) used.add(richer);
+            out.push(row);
+        }
+        for (const p of fallback) {
+            if (used.has(p) || isSeen(p)) continue;
+            mark(p);
+            out.push(p);
+        }
+        return out;
+    }
+
+    // Test hook — exercised by tests/search-results-parity-may2026.test.js.
+    // Not a public surface; product code calls the locals directly.
+    if (typeof window !== 'undefined') {
+        window._searchParityHelpers = {
+            normalizeForMatch, productMatchesQuery, adaptSuggestProduct, mergeLiteralResults,
+        };
+    }
+
+    // ============================================
     // DRILL-DOWN NAVIGATION STATE MACHINE
     // ============================================
     const DrilldownNav = {
@@ -2343,45 +2456,79 @@
                         await this.loadPrinterProducts(navVersion);
                         return;
                     }
-                    // /smart can miss on short / numeric-only queries (e.g. "664",
-                    // "650") even when /products?search= and /suggest find matches —
-                    // backend's smart pipeline rejects them as too ambiguous and
-                    // sometimes attaches a misleading did_you_mean. The fallback
-                    // fires in two scenarios:
+                    // ── Reconcile /smart against the literal query ──────────
+                    // /smart classifies "intent" and will autocorrect a query
+                    // it judges ambiguous. The typeahead dropdown hits a
+                    // different endpoint (/api/search/suggest — plain literal
+                    // substring match), so the two surfaces could disagree.
+                    // For numeric / short cartridge codes /smart's autocorrect
+                    // misfires hard: q=511 → corrected_from:"511",
+                    // did_you_mean:"Lexmark MX 511", and a result set of four
+                    // Lexmark products that contain "511" NOWHERE — while the
+                    // dropdown correctly shows the CL511 / CT3511xx family.
+                    // We reconcile here so the results page shows what the
+                    // dropdown promised. Pinned by
+                    // tests/search-results-parity-may2026.test.js.
                     //
-                    //   1. Hard miss — smart returned no products at all.
-                    //   2. Soft miss — query looks like a cartridge code (contains
-                    //      digits) AND smart returned a small set with no
-                    //      matched_printer. Empirically: searching "650" makes smart
-                    //      return only the 15 cartridges with "(650 pages)" in
-                    //      their copy — Epson 273XL, 302, 410, HP 937E — and zero
-                    //      Canon PGI650 results. /api/products?search=650 ships 50
-                    //      including PGI650/PGI650XL because it does substring
-                    //      matching on name+sku. We swap to that path so customers
-                    //      typing a series number land on the cartridges they
-                    //      mean, not on a wall of unrelated yield-page hits.
+                    // Fallback fires in three cases, all routed through the
+                    // same literal-substring path the dropdown uses:
+                    //   hardMiss — /smart returned no products at all.
+                    //   softMiss — digit query, /smart returned a thin (<50)
+                    //              set with no printer match. Empirically
+                    //              "650" makes /smart return only the ~15
+                    //              cartridges with "(650 pages)" in their copy
+                    //              and zero Canon PGI650 rows; /api/products
+                    //              ?search=650 ships PGI650/PGI650XL via
+                    //              substring matching on name+sku.
+                    //   hijack   — /smart admits it corrected the query AND
+                    //              none of its products literally match the
+                    //              original input. A genuine typo ("cannon")
+                    //              also trips this, but the literal endpoints
+                    //              return zero rows for a typo so the swap is
+                    //              declined and /smart's correction stands.
                     const queryHasDigits = /\d/.test(String(searchQuery || ''));
                     const smartCount = products.length;
                     const SOFT_MISS_THRESHOLD = 50;
+                    const smartHasLiteralMatch = products.some(p => productMatchesQuery(p, searchQuery));
+                    const smartCorrected = !!(smartData?.corrected_from || smartData?.did_you_mean);
+                    const hardMiss = products.length === 0 && !smartData?.matched_printer;
                     const softMiss = queryHasDigits
                         && smartCount > 0
                         && smartCount < SOFT_MISS_THRESHOLD
                         && !smartData?.matched_printer
                         && !smartData?.did_you_mean;
-                    const hardMiss = products.length === 0 && !smartData?.matched_printer;
-                    if (hardMiss || softMiss) {
-                        const fallback = await API.getProducts({ search: searchQuery, limit: SEARCH_PAGE_SIZE, page: requestedPage });
+                    const hijack = smartCorrected
+                        && smartCount > 0
+                        && !smartHasLiteralMatch
+                        && !smartData?.matched_printer;
+                    if (hardMiss || softMiss || hijack) {
+                        // /api/products?search= → the full, paginated literal
+                        // set. /api/search/suggest → the dropdown's exact
+                        // ranked shortlist (incl. loose digit matches that
+                        // /products misses, e.g. the "165.11" ribbon for
+                        // q=511). Fired in parallel; suggest only on page 1
+                        // (it is a typeahead endpoint with no pager).
+                        const [fallback, suggestList] = await Promise.all([
+                            API.getProducts({ search: searchQuery, limit: SEARCH_PAGE_SIZE, page: requestedPage }),
+                            requestedPage === 1
+                                ? API.searchSuggest(searchQuery, 20)
+                                : Promise.resolve([]),
+                        ]);
                         if (navVersion !== undefined && this.navigationVersion !== navVersion) return;
                         const fallbackProducts = (fallback?.ok && fallback.data?.products) ? fallback.data.products : [];
-                        // For hard miss: take whatever fallback gives us.
-                        // For soft miss: only take fallback if it strictly beats
-                        // smart's count (otherwise the swap costs us smart's
-                        // ranking with no benefit).
-                        const shouldUseFallback = hardMiss
-                            ? fallbackProducts.length > 0
-                            : fallbackProducts.length > smartCount;
+                        // Union dropdown shortlist + full literal set, dropdown
+                        // order first, deduped — guarantees the results page is
+                        // a superset of (never a subset of) the dropdown.
+                        const merged = mergeLiteralResults(suggestList, fallbackProducts);
+                        // hijack / hardMiss: any literal hit beats /smart's set
+                        // (it is empty or provably wrong). softMiss: only swap
+                        // when the literal set strictly out-counts /smart, so
+                        // we never trade away a good ranking for a flat one.
+                        const shouldUseFallback = (hijack || hardMiss)
+                            ? merged.length > 0
+                            : merged.length > smartCount;
                         if (shouldUseFallback) {
-                            products = fallbackProducts;
+                            products = merged;
                             smartData = null;
                             if (fallback.meta && fallback.meta.total_pages != null) {
                                 pagination = {
@@ -2403,7 +2550,20 @@
                 // Spec §2.2 — banners for did-you-mean / corrected_from /
                 // matched_printer must show on results AND on the empty state,
                 // so render before either branch.
-                this.renderSearchBanners(smartData, searchQuery);
+                //
+                // did_you_mean sanity: when /smart kept its own products AND
+                // those products literally match the query (e.g. q=664 →
+                // real T664 cartridges plus a spurious did_you_mean:
+                // "Triumph-Adler 64"), the correction banner contradicts the
+                // results. Drop it — clone first so the SWR-cached envelope is
+                // never mutated.
+                let bannerData = smartData;
+                if (smartData && smartData.did_you_mean && !smartData.matched_printer
+                    && Array.isArray(smartData.products)
+                    && smartData.products.some(p => productMatchesQuery(p, searchQuery))) {
+                    bannerData = Object.assign({}, smartData, { did_you_mean: null });
+                }
+                this.renderSearchBanners(bannerData, searchQuery);
 
                 // Spec §3.3 Case A — when /smart matched a printer, every
                 // product in the pool is fits-the-printer. Tag for the card

@@ -17,14 +17,18 @@
  *     outflow). Fee base on this dashboard is bucket gross revenue (already
  *     incl-GST + shipping per `o.total`).
  *
- * COGS source-of-truth (set by user 2026-05-08):
+ * COGS source-of-truth (set by user 2026-05-08, formula corrected 2026-05-16):
  *   - Backend /api/admin/analytics/pnl rarely populates per-period cogs.
- *   - The KPI summary RPC (analytics_kpi_summary) reliably returns gross_profit
- *     for the visible window.
- *   - So total COGS = revenue − gross_profit, distributed across buckets in
- *     proportion to each bucket's revenue. Totals match exactly; per-bucket
- *     shape mirrors the revenue shape (best available approximation absent a
- *     daily-cost-series RPC).
+ *   - The KPI summary RPC (analytics_kpi_summary) reliably returns `revenue`
+ *     (GROSS, incl-GST) and `gross_profit` for the visible window.
+ *   - `gross_profit` follows the canonical profitability.js convention:
+ *         gross_profit = revenue_ex_gst − cost_incl_gst
+ *     so the incl-GST cost is recovered WITHOUT any further gross-up:
+ *         cost_incl_gst = revenue_ex_gst − gross_profit
+ *                       = (revenue_gross / 1.15) − gross_profit
+ *   - That total COGS is distributed across buckets in proportion to each
+ *     bucket's revenue. Totals match exactly; per-bucket shape mirrors the
+ *     revenue shape (best approximation absent a daily-cost-series RPC).
  *
  * Operating expenses source-of-truth:
  *   - /api/admin/analytics/expenses returns manually-logged spend with a date
@@ -37,6 +41,18 @@ export const STRIPE_FIXED_DERIVE = 0.30;
 export const STRIPE_FEE_GST_DERIVE = 0.15;
 export const GST_FRACTION_OF_GROSS = 3 / 23;
 export const COST_GST_GROSS_UP = 1.15;
+
+// Order statuses that never produced a cleared card charge: `pending` is not
+// yet paid, the rest never collected. The bulk /orders endpoint returns every
+// status but analytics_kpi_summary counts sales only — filtering raw orders
+// through `isRevenueOrder` keeps the dashboard's order tally + Stripe
+// fixed-fee derivation consistent with the KPI summary.
+export const NON_REVENUE_ORDER_STATUSES = ['pending', 'cancelled', 'failed', 'abandoned'];
+
+export function isRevenueOrder(order) {
+  const s = String(order?.status || '').toLowerCase();
+  return !NON_REVENUE_ORDER_STATUSES.includes(s);
+}
 
 // Pick a date string off an expense row. Backend keys vary, so we try the
 // canonical names in order.
@@ -207,13 +223,10 @@ export function bucketOperatingExpenses(buckets, expenseRows, indexFor) {
 // Distribute total COGS across buckets in proportion to each bucket's revenue.
 // Mutates `buckets[].cogsDerived`. No-op if revenue is zero or COGS is invalid.
 //
-// IMPORTANT: callers must pass `totalCogs` already grossed up to incl-GST
-// (× 1.15). The KPI summary RPC's `gross_profit` follows the canonical
-// profitability.js convention `revenue_ex_gst − cost_incl_gst`, so the value
-// `revenue − gross_profit` is naturally cost-incl-GST when revenue is also
-// gross. But order totals on this dashboard are gross-incl-GST while the
-// stored `cost_price` is ex-GST — multiply by COST_GST_GROSS_UP at the call
-// site to capture real cash to suppliers. See `kpiCogsInclGst` helper below.
+// IMPORTANT: callers must pass `totalCogs` already in incl-GST terms (real
+// cash to suppliers). Use `kpiCogsInclGst` below to derive it from the KPI
+// summary — that helper already returns the incl-GST figure, so no further
+// gross-up is applied here.
 export function distributeCogsByRevenue(buckets, totalCogs) {
   if (!Number.isFinite(totalCogs) || totalCogs <= 0) return buckets;
   const totalRev = buckets.reduce((s, b) => s + (b.revenue || 0), 0);
@@ -226,14 +239,26 @@ export function distributeCogsByRevenue(buckets, totalCogs) {
 }
 
 // Compute total COGS (incl-GST, real cash to suppliers) from the KPI summary.
-// `revenue − gross_profit` gives ex-GST COGS per the profitability convention;
-// gross-up by 1.15 to match what the company actually paid out.
+//
+// The KPI summary RPC reports `revenue` GROSS (incl-GST) and `gross_profit`
+// per the canonical profitability.js convention:
+//     gross_profit = revenue_ex_gst − cost_incl_gst
+// So the incl-GST cost is recovered by taking revenue back to its ex-GST base
+// and subtracting gross profit — NO further gross-up:
+//     cost_incl_gst = revenue_ex_gst − gross_profit
+//                   = revenue_gross × (1 − 3/23) − gross_profit
+// (1 − 3/23 = 20/23 = 1/1.15.)
+//
+// Bug fixed 2026-05-16: this previously did `(revenue − gross_profit) × 1.15`.
+// But `revenue_gross − gross_profit` already equals `output_GST + cost_incl_gst`
+// (substitute the convention above), so the × 1.15 inflated COGS by ~38% — the
+// chart showed $873.59 of COGS where the true figure was $583.02.
 export function kpiCogsInclGst(kpiRevenue, kpiGrossProfit) {
   const rev = Number(kpiRevenue);
   const gp  = Number(kpiGrossProfit);
   if (!Number.isFinite(rev) || !Number.isFinite(gp)) return 0;
-  const exGst = Math.max(0, rev - gp);
-  return exGst * COST_GST_GROSS_UP;
+  const revenueExGst = rev * (1 - GST_FRACTION_OF_GROSS);
+  return Math.max(0, revenueExGst - gp);
 }
 
 // Sum cost (incl-GST cash to supplier) for a single order's line items.

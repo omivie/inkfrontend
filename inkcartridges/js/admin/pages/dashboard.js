@@ -7,7 +7,7 @@ import {
   STRIPE_RATE_DERIVE, STRIPE_FIXED_DERIVE, GST_FRACTION_OF_GROSS,
   bucketOperatingExpenses, distributeCogsByRevenue, assembleBucketExpense,
   sumTrendTotals, bucketCogsFromOrders, kpiCogsInclGst,
-  expandRecurringExpenses,
+  expandRecurringExpenses, isRevenueOrder,
 } from '../utils/trend-math.js';
 import { Charts } from '../components/charts.js';
 
@@ -62,6 +62,12 @@ function firstArray(obj, keys) {
 function safeDiv(a, b) {
   if (!b || b === 0 || a == null) return null;
   return a / b;
+}
+
+// Keep only orders that produced a cleared charge — see `isRevenueOrder` /
+// NON_REVENUE_ORDER_STATUSES in trend-math.js for the rationale.
+function revenueGeneratingOrders(rawOrders) {
+  return firstArray(rawOrders, ['orders', 'data']).filter(isRevenueOrder);
 }
 
 // ---------- data loading ----------
@@ -325,16 +331,25 @@ function renderForecastCard(d) {
     ? `${forecastConf}% confidence`
     : (typeof forecastConf === 'string' && forecastConf
         ? `${forecastConf.charAt(0).toUpperCase()}${forecastConf.slice(1)} confidence`
-        : 'Projected revenue');
+        : 'Projected');
   const summary = forecastRevenue != null ? formatPrice(forecastRevenue) : MISSING;
+
+  // Projected net profit = forecast revenue × the window's net-profit margin.
+  const netMargin = _forecastData?.netMargin ?? null;
+  const forecastProfit = (forecastRevenue != null && netMargin != null)
+    ? forecastRevenue * netMargin
+    : null;
+  const profitStr = forecastProfit != null
+    ? `${forecastProfit >= 0 ? '+' : '−'}${formatPrice(Math.abs(forecastProfit))} profit`
+    : '';
 
   return `
     <div class="admin-dash__cell--6 admin-card">
       <div class="admin-card__title">
         <span>30-day Forecast <small>${esc(rangeLabel())} + projection</small></span>
         <div class="admin-forecast-summary">
-          <span class="admin-forecast-summary__value">${esc(summary)}</span>
-          <span class="admin-forecast-summary__sub">${esc(confStr)}</span>
+          <span class="admin-forecast-summary__value">${esc(summary)} <small class="admin-forecast-summary__rev-tag">revenue</small></span>
+          <span class="admin-forecast-summary__sub">${esc([profitStr, confStr].filter(Boolean).join(' · '))}</span>
         </div>
       </div>
       <div class="admin-chart-box admin-chart-box--mid"><canvas id="chart-forecast"></canvas></div>
@@ -495,8 +510,10 @@ function buildTrendSeries(d) {
     buckets[i].hasRevenue = true;
   }
 
-  // 2. Raw orders — count per bucket + fallback revenue
-  const rawOrders = firstArray(d.rawOrders, ['orders', 'data']);
+  // 2. Raw orders — count per bucket + fallback revenue. Only revenue-
+  // generating statuses count, so the order tally + Stripe fixed-fee match
+  // the KPI summary (which counts sales, not pending/cancelled rows).
+  const rawOrders = revenueGeneratingOrders(d.rawOrders);
   for (const o of rawOrders) {
     const ts = Date.parse(o.created_at || o.createdAt || '');
     if (isNaN(ts)) continue;
@@ -582,10 +599,10 @@ function buildTrendSeries(d) {
   //   (c) If neither is available, fall back to pure revenue-share
   //       distribution of the full grossed-up KPI cost.
   //
-  // The 1.15 gross-up matters: the KPI's gross_profit follows the canonical
-  // profitability convention (`revenue_ex_gst − cost_incl_gst`), so when the
-  // chart's revenue tile is gross-incl-GST, `revenue − gross_profit` gives
-  // ex-GST cost. Real cash to suppliers is that × 1.15.
+  // COGS basis: the KPI's gross_profit follows the canonical profitability
+  // convention (`revenue_ex_gst − cost_incl_gst`). `kpiCogsInclGst` recovers
+  // the incl-GST cost as `revenue_gross/1.15 − gross_profit` — no extra
+  // gross-up (see the helper's comment for why × 1.15 was a bug).
   const kpiCur = d.kpis?.current || {};
   const totalCogsInclGst = kpiCogsInclGst(kpiCur.revenue, kpiCur.gross_profit);
   const hasAnyPnlCogs = buckets.some(b => b.hasPnlCogs);
@@ -855,7 +872,16 @@ function buildForecastSeries(d) {
     .filter(x => !isNaN(x.ts))
     .sort((a, b) => a.ts - b.ts);
 
-  return { historical, prior, cfg, avg30, avg60, avg90, f30, f60, f90, horizonDays };
+  // Net-profit margin for the visible window — used to project a profit line
+  // alongside the revenue forecast. _trendData is built immediately before
+  // this function in render(), so its totals are the corrected COGS/expense
+  // figures. Net = revenue − expenses; margin = net / revenue.
+  const trendTotals = sumTrendTotals(Array.isArray(_trendData) ? _trendData : []);
+  const netMargin = trendTotals.revenue > 0
+    ? (trendTotals.revenue - trendTotals.expenses) / trendTotals.revenue
+    : 0;
+
+  return { historical, prior, cfg, avg30, avg60, avg90, f30, f60, f90, horizonDays, netMargin };
 }
 
 function drawForecastChart() {
@@ -902,10 +928,21 @@ function drawForecastChart() {
   const actualData   = points.map(p => p.type === 'actual'   ? p.value : null);
   const forecastData = points.map(p => p.type === 'forecast' ? p.value : null);
 
-  // Bridge: repeat last actual as first forecast point so line is continuous.
+  // Profit lines: revenue × the window's net-profit margin. Daily COGS is not
+  // available per-day, so historical profit is the margin applied to actual
+  // daily revenue — labelled "estimate" in the legend so it's not mistaken
+  // for booked profit. The forecast profit shares the revenue forecast's
+  // flat daily average.
+  const netMargin = (state.netMargin != null && Number.isFinite(state.netMargin))
+    ? state.netMargin : 0;
+  const actualProfit   = points.map(p => p.type === 'actual'   ? p.value * netMargin : null);
+  const forecastProfit = points.map(p => p.type === 'forecast' ? p.value * netMargin : null);
+
+  // Bridge: repeat last actual as first forecast point so each line is continuous.
   const lastActualIdx = points.findIndex(p => p.type === 'forecast') - 1;
   if (lastActualIdx >= 0) {
-    forecastData[lastActualIdx] = actualData[lastActualIdx];
+    forecastData[lastActualIdx]   = actualData[lastActualIdx];
+    forecastProfit[lastActualIdx] = actualProfit[lastActualIdx];
   }
 
   // Prior forecasts: align each snapshot's implied daily avg to its snapshot_date bucket.
@@ -923,10 +960,10 @@ function drawForecastChart() {
 
   const datasets = [
     {
-      label: 'Actual',
+      label: 'Revenue (actual)',
       data: actualData,
       borderColor: colors.success,
-      backgroundColor: hexToRgba(colors.success, 0.18),
+      backgroundColor: hexToRgba(colors.success, 0.16),
       borderWidth: 2,
       fill: true,
       tension: 0.35,
@@ -936,10 +973,10 @@ function drawForecastChart() {
       order: 2,
     },
     {
-      label: 'Forecast',
+      label: 'Revenue (forecast)',
       data: forecastData,
-      borderColor: colors.cyan,
-      backgroundColor: hexToRgba(colors.cyan, 0.14),
+      borderColor: colors.success,
+      backgroundColor: hexToRgba(colors.success, 0.10),
       borderWidth: 2,
       borderDash: [5, 4],
       fill: true,
@@ -948,6 +985,33 @@ function drawForecastChart() {
       pointHoverRadius: 3,
       spanGaps: false,
       order: 2,
+    },
+    {
+      label: 'Profit (actual est.)',
+      data: actualProfit,
+      borderColor: colors.cyan,
+      backgroundColor: 'transparent',
+      borderWidth: 2,
+      fill: false,
+      tension: 0.35,
+      pointRadius: 0,
+      pointHoverRadius: 3,
+      spanGaps: false,
+      order: 1,
+    },
+    {
+      label: 'Profit (forecast)',
+      data: forecastProfit,
+      borderColor: colors.cyan,
+      backgroundColor: 'transparent',
+      borderWidth: 2,
+      borderDash: [5, 4],
+      fill: false,
+      tension: 0.25,
+      pointRadius: 0,
+      pointHoverRadius: 3,
+      spanGaps: false,
+      order: 1,
     },
   ];
 
@@ -989,7 +1053,13 @@ function drawForecastChart() {
       },
       scales: {
         x: { ticks: { maxTicksLimit: 8 } },
-        y: { beginAtZero: true, ticks: { callback: (v) => formatPrice(v) } },
+        y: {
+          // Drop the zero floor only if a loss window pushes profit negative,
+          // so the profit line stays visible instead of clipping at the axis.
+          beginAtZero: !(actualProfit.some(v => v != null && v < 0)
+                      || forecastProfit.some(v => v != null && v < 0)),
+          ticks: { callback: (v) => formatPrice(v) },
+        },
       },
     },
   });
@@ -1454,7 +1524,7 @@ function drawSparklines(d) {
   // Orders sparkline from raw orders grouped by date within the revSeries window
   if (revSeries.length) {
     const colors = Charts.getThemeColors();
-    const rawOrders = firstArray(d.rawOrders, ['orders', 'data']);
+    const rawOrders = revenueGeneratingOrders(d.rawOrders);
     const countByDate = {};
     for (const o of rawOrders) {
       const date = (o.created_at || '').slice(0, 10);

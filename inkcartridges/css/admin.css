@@ -2967,6 +2967,10 @@ button.admin-active-dot--clickable:hover::after { opacity: 1; }
   font-variant-numeric: tabular-nums; color: var(--text);
 }
 .admin-forecast-summary__sub { font-size: 10.5px; color: var(--text-muted); }
+.admin-forecast-summary__rev-tag {
+  font-family: var(--font-sans); font-weight: 500; font-size: 9.5px;
+  text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-muted);
+}
 
 /* ---- Toggle pills (Revenue | Profit | Orders) ---- */
 .admin-pills {

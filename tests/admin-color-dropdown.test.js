@@ -102,9 +102,18 @@ test('ProductColors.OPTIONS includes every PascalCase color the backend stores i
     // not represented by an option.) New values entering production must
     // be added here AND to ProductColors.OPTIONS — keeping admin and
     // storefront in lockstep is the whole point of this list.
+    //
+    // 'Tri-Colour' is the canonical PascalCase value for a SINGLE cartridge
+    // that prints C/M/Y from one body (HP 22, HP 67 Tri-Colour, Canon CL-541).
+    // ProductSort.COLOR_RANK['tri-colour'] = 11, separate from CMY 3-Pack
+    // (rank 20). Pinned by tests/sort-hierarchy-may2026.test.js and
+    // tests/stale-color-swatch.test.js — admin OPTIONS must expose it so
+    // editors can categorise these products correctly instead of forcing
+    // them into the CMY pack bucket.
     const required = [
         'Black', 'Cyan', 'Magenta', 'Yellow',
         'CMY', 'KCMY',
+        'Tri-Colour',
         'Photo',
         'Black/Red',
         'Value Pack',
@@ -115,6 +124,58 @@ test('ProductColors.OPTIONS includes every PascalCase color the backend stores i
         assert.ok(values.includes(need),
             `ProductColors.OPTIONS must include '${need}' (observed in production data)`);
     }
+});
+
+test('ProductColors.OPTIONS — CMY and Tri-Colour are distinct entries with disambiguating labels', () => {
+    // CMY (rank 20) is a 3-Pack of three separate cartridges.
+    // Tri-Colour (rank 11) is a single cartridge holding all three inks.
+    // Customers, the admin editor, and the storefront sort all depend on
+    // these being two different stored values — never collapse them.
+    const opts = ProductColors.OPTIONS;
+    const cmy = opts.find(o => o.value === 'CMY');
+    const tri = opts.find(o => o.value === 'Tri-Colour');
+
+    assert.ok(cmy, "CMY entry must exist");
+    assert.ok(tri, "Tri-Colour entry must exist");
+    assert.notEqual(cmy.value, tri.value, 'CMY and Tri-Colour must be distinct values');
+
+    // Labels must signal "how many cartridges?" so editors choose correctly.
+    // We require an explicit reference to multiple/separate cartridges on
+    // CMY and to a single cartridge on Tri-Colour. Exact wording can evolve
+    // but the cartridge-count hint cannot vanish.
+    assert.match(cmy.label, /pack|separate|three\s+cartridges|3\s*[-]?\s*pack/i,
+        `CMY label must signal a multi-cartridge pack; got "${cmy.label}"`);
+    assert.match(tri.label, /single\s+cartridge|1\s+cartridge|one\s+cartridge/i,
+        `Tri-Colour label must signal a single cartridge; got "${tri.label}"`);
+});
+
+test('ProductColors.OPTIONS — Tri-Colour sits between KCMY (packs) and Red (specialty) so multi-colour options group visually', () => {
+    // UX rule: an admin scanning for "tri-colour" options should see CMY
+    // (3-Pack) → KCMY (4-Pack) → Tri-Colour (single) in one neighbourhood,
+    // ahead of the chromatic specialty singles (Red/Blue/Green/etc.).
+    // The storefront sort doesn't depend on dropdown order, but this
+    // grouping is what makes the dropdown legible to the editor.
+    const values = ProductColors.OPTIONS.map(o => o.value);
+    const i = (v) => values.indexOf(v);
+    assert.ok(i('CMY')        < i('KCMY'),       'CMY before KCMY');
+    assert.ok(i('KCMY')       < i('Tri-Colour'), 'KCMY before Tri-Colour (keeps multi-colour cluster contiguous)');
+    assert.ok(i('Tri-Colour') < i('Red'),        'Tri-Colour before Red (multi-colour options precede chromatic specialty)');
+});
+
+test('ProductColors — Tri-Colour storefront swatch resolves to the tri-stripe gradient (canonical PascalCase round-trips)', () => {
+    // Editors store the PascalCase value `Tri-Colour` via the admin
+    // dropdown; storefront card renderers call ProductColors.getStyle /
+    // getProductStyle which lowercase the key before lookup. The swatch
+    // must come back as the same C-M-Y tri-stripe gradient the CMY 3-Pack
+    // uses, so the visual identity reads correctly on cards and PDP even
+    // before a real image_url is uploaded.
+    const styleFromColor = ProductColors.getStyle('Tri-Colour');
+    assert.match(styleFromColor || '', /linear-gradient\(to right, #00bcd4/,
+        'Tri-Colour must render the C/M/Y tri-stripe gradient');
+
+    const styleFromProduct = ProductColors.getProductStyle({ color: 'Tri-Colour', name: 'HP 22 Tri-Colour' });
+    assert.match(styleFromProduct || '', /linear-gradient\(to right, #00bcd4/,
+        'getProductStyle({color:"Tri-Colour"}) must render the gradient');
 });
 
 test('ProductColors.OPTIONS opens with K → C → M → Y → CMY → KCMY in that order', () => {

@@ -176,8 +176,12 @@ test('search.css responsive collapse hides Prev/Next labels under 640px', () => 
 // HTML — the cache key is bumped so the new CSS lands for returning visitors
 // ─────────────────────────────────────────────────────────────────────────────
 
-test('shop.html bumps the search.css cache key for the pager release', () => {
+test('shop.html bumps the search.css cache key so the pager CSS lands', () => {
     const shopHtml = fs.readFileSync(path.join(ROOT, 'inkcartridges', 'html', 'shop.html'), 'utf8');
-    assert.match(shopHtml, /search\.css\?v=search-pagination-may2026/);
-    assert.doesNotMatch(shopHtml, /search\.css\?v=white-cards-may2026/);
+    // The cache key rides forward with every CSS rollout. It was
+    // search-pagination-may2026 when the pager shipped; the 4-line title
+    // clamp release (May 2026) bumped it again. The guarantee here is
+    // simply that shop.html requests the *current* search.css build.
+    assert.match(shopHtml, /search\.css\?v=4line-clamp-may2026/);
+    assert.doesNotMatch(shopHtml, /search\.css\?v=search-pagination-may2026/);
 });

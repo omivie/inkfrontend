@@ -247,6 +247,13 @@ const ProductColors = {
     // Order mirrors ProductSort COLOR_ORDER (K → C → M → Y → CMY → KCMY → specialty).
     // Single source of truth — admin dropdowns and the dropdown contract test
     // both bind to this list. Extending it requires no admin/UI change.
+    //
+    // Tri-Colour vs CMY: 'CMY' is a 3-Pack of three *separate* cartridges
+    // (rank 20 in ProductSort). 'Tri-Colour' is a SINGLE cartridge that
+    // holds all three inks in one body (HP 22, HP 67 Tri-Colour, Canon
+    // CL-541, etc.) and sits at rank 11 alongside other specialty singles.
+    // The two are deliberately distinct dropdown entries — they have
+    // different prices, different print yields, and different fitments.
     OPTIONS: [
         { value: 'Black',         label: 'Black' },
         { value: 'Photo Black',   label: 'Photo Black' },
@@ -258,8 +265,9 @@ const ProductColors = {
         { value: 'Photo Magenta', label: 'Photo Magenta' },
         { value: 'Light Magenta', label: 'Light Magenta' },
         { value: 'Yellow',        label: 'Yellow' },
-        { value: 'CMY',           label: 'CMY (Tri-Colour)' },
-        { value: 'KCMY',          label: 'KCMY (4-Colour Pack)' },
+        { value: 'CMY',           label: 'CMY (3-Pack — three separate cartridges)' },
+        { value: 'KCMY',          label: 'KCMY (4-Pack — four separate cartridges)' },
+        { value: 'Tri-Colour',    label: 'Tri-Colour (single cartridge with C/M/Y)' },
         { value: 'Photo',         label: 'Photo' },
         { value: 'Red',           label: 'Red' },
         { value: 'Blue',          label: 'Blue' },

@@ -2,16 +2,17 @@
  * Product-card title line-clamp contract
  * =======================================
  *
- * Pin every product-card / product-box title clamp at THREE lines.
+ * Pin every product-card / product-box title clamp at FOUR lines.
  *
  * Background: long compatible-cartridge names ("Compatible Ink Cartridge
- * Replacement for Epson 81N Light Cyan …") were being truncated at two
- * lines, which dropped the SKU and made cards in the same row visually
- * indistinguishable. The fix bumps every clamp to 3 lines and the
- * matching min-height calc on the search-page card so card heights stay
- * consistent.
+ * Replacement for Epson 81N Light Cyan …") and verbose genuine names
+ * ("OKI Genuine MB451HYBK Toner Cartridge MB451HY High-Yield …") were
+ * being truncated at three lines, which dropped the trailing SKU /
+ * yield / page-count and forced a hover to read the full name. The fix
+ * bumps every clamp to 4 lines and the matching min-height calc on the
+ * search-page card so card heights stay consistent across a row.
  *
- * If anyone re-introduces a 2-line clamp (or forgets to bump the
+ * If anyone re-introduces a 2- or 3-line clamp (or forgets to bump the
  * min-height multiplier), these tests fail.
  *
  * Run with: node --test tests/product-card-title-clamp.test.js
@@ -51,13 +52,13 @@ function clampValue(body) {
 
 // ─── Product card titles (catalog grids, search results, smart dropdown) ────
 
-test('components.css — .product-card__title clamps to 3 lines', () => {
+test('components.css — .product-card__title clamps to 4 lines', () => {
     const css = loadCss('components.css');
     const body = ruleBody(css, '.product-card__title {');
-    assert.equal(clampValue(body), 3, 'main product-card title must clamp at 3');
+    assert.equal(clampValue(body), 4, 'main product-card title must clamp at 4');
 });
 
-test('pages.css — .product-card__title (search-page override) clamps to 3 lines', () => {
+test('pages.css — .product-card__title (search-page override) clamps to 4 lines', () => {
     const css = loadCss('pages.css');
     // pages.css contains a .product-card__title override scoped to the
     // search/shop list view. Find it by looking for the min-height calc
@@ -69,80 +70,123 @@ test('pages.css — .product-card__title (search-page override) clamps to 3 line
     const open = css.indexOf('{', ruleStart);
     const close = css.indexOf('}', open);
     const body = css.slice(open + 1, close);
-    assert.equal(clampValue(body), 3, 'search-page product-card title must clamp at 3');
+    assert.equal(clampValue(body), 4, 'search-page product-card title must clamp at 4');
     assert.match(
         body,
-        /min-height:\s*calc\(var\(--font-size-xs\)\s*\*\s*1\.3\s*\*\s*3\)/,
-        'min-height multiplier must match the 3-line clamp',
+        /min-height:\s*calc\(var\(--font-size-xs\)\s*\*\s*1\.3\s*\*\s*4\)/,
+        'min-height multiplier must match the 4-line clamp',
     );
 });
 
-test('search.css — .smart-ac__grid .product-card__title clamps to 3 lines', () => {
+test('pages.css — .product-card__title reveals the full name on hover', () => {
+    const css = loadCss('pages.css');
+    const body = ruleBody(css, '.product-card:hover .product-card__title {');
+    assert.match(
+        body,
+        /-webkit-line-clamp\s*:\s*unset/,
+        'hover must lift the clamp so the whole name is readable',
+    );
+});
+
+test('search.css — .smart-ac__grid .product-card__title clamps to 4 lines', () => {
     const css = loadCss('search.css');
     const body = ruleBody(css, '.smart-ac__grid .product-card__title {');
-    assert.equal(clampValue(body), 3, 'dropdown grid product card title must clamp at 3');
+    assert.equal(clampValue(body), 4, 'dropdown grid product card title must clamp at 4');
 });
 
 // ─── Product list / box titles (legacy product-box variant) ────────────────
 
-test('pages.css — .product-box__title clamps to 3 lines', () => {
+test('pages.css — .product-box__title clamps to 4 lines', () => {
     const css = loadCss('pages.css');
     const body = ruleBody(css, '.product-box__title {');
-    assert.equal(clampValue(body), 3);
+    assert.equal(clampValue(body), 4);
 });
 
 // ─── Smart autocomplete row title (list view, not grid) ────────────────────
 
-test('search.css — .smart-ac__name clamps to 3 lines', () => {
+test('search.css — .smart-ac__name clamps to 4 lines', () => {
     const css = loadCss('search.css');
     const body = ruleBody(css, '.smart-ac__name {');
-    assert.equal(clampValue(body), 3);
+    assert.equal(clampValue(body), 4);
 });
 
 // ─── Cross-sell modal product list ─────────────────────────────────────────
 
-test('components.css — .crosssell-modal__name clamps to 3 lines', () => {
+test('components.css — .crosssell-modal__name clamps to 4 lines', () => {
     const css = loadCss('components.css');
     const body = ruleBody(css, '.crosssell-modal__name {');
-    assert.equal(clampValue(body), 3);
+    assert.equal(clampValue(body), 4);
 });
 
 // ─── Favourites grid (account/favourites) ──────────────────────────────────
 
-test('components.css — .favourite-item__name clamps to 3 lines', () => {
+test('components.css — .favourite-item__name clamps to 4 lines', () => {
     const css = loadCss('components.css');
     const body = ruleBody(css, '.favourite-item__name {');
-    assert.equal(clampValue(body), 3);
+    assert.equal(clampValue(body), 4);
 });
 
-test('pages.css — .dash-fav-card__name clamps to 3 lines', () => {
+test('pages.css — .dash-fav-card__name clamps to 4 lines', () => {
     const css = loadCss('pages.css');
     const body = ruleBody(css, '.dash-fav-card__name {');
-    assert.equal(clampValue(body), 3);
+    assert.equal(clampValue(body), 4);
 });
 
-// ─── Sanity check: no orphan 2-line clamps left in product-card scopes ─────
+// ─── Sanity check: no orphan 2/3-line clamps left in product-card scopes ───
 
-test('no .product-card / .product-box / .smart-ac selector still clamps at 2 lines', () => {
+test('no .product-card / .product-box / .smart-ac selector still clamps below 4 lines', () => {
     const files = ['components.css', 'pages.css', 'search.css'];
     for (const file of files) {
         const css = loadCss(file);
         // Walk every selector block and flag any product-facing card that
-        // still says line-clamp: 2. We allow .smart-ac__grid sub-selectors
+        // still clamps below 4 lines. We allow .smart-ac__grid sub-selectors
         // that don't touch the title (none currently use clamp).
         const ruleRe = /([^{}]+)\{([^{}]*)\}/g;
         let m;
         while ((m = ruleRe.exec(css)) !== null) {
             const selector = m[1].trim();
             const body = m[2];
-            if (!/-webkit-line-clamp\s*:\s*2\b/.test(body)) continue;
+            if (!/-webkit-line-clamp\s*:\s*[23]\b/.test(body)) continue;
             const productFacing = /\b(product-card|product-box|smart-ac__name|smart-ac__grid|favourite-item|dash-fav-card|crosssell-modal__name)\b/.test(
                 selector,
             );
             assert.ok(
                 !productFacing,
-                `${file}: product-facing rule still clamps at 2 lines → ${selector}`,
+                `${file}: product-facing rule clamps below 4 lines → ${selector}`,
             );
         }
     }
+});
+
+// ─── Cache-bust: every HTML page must request the bumped CSS build ─────────
+
+test('all HTML pages cache-bust the three card CSS files to v=4line-clamp-may2026', () => {
+    const htmlRoot = path.join(ROOT, 'inkcartridges');
+    const htmlFiles = [];
+    (function walk(dir) {
+        for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+            const full = path.join(dir, entry.name);
+            if (entry.isDirectory()) {
+                if (entry.name === 'node_modules') continue;
+                walk(full);
+            } else if (entry.name.endsWith('.html')) {
+                htmlFiles.push(full);
+            }
+        }
+    })(htmlRoot);
+
+    const stale = [];
+    for (const file of htmlFiles) {
+        const html = fs.readFileSync(file, 'utf8');
+        for (const cssName of ['components.css', 'pages.css', 'search.css']) {
+            const re = new RegExp(`${cssName}\\?v=([a-zA-Z0-9-]+)`, 'g');
+            let m;
+            while ((m = re.exec(html)) !== null) {
+                if (m[1] !== '4line-clamp-may2026') {
+                    stale.push(`${path.relative(ROOT, file)} → ${cssName}?v=${m[1]}`);
+                }
+            }
+        }
+    }
+    assert.deepEqual(stale, [], `stale CSS cache-bust tokens:\n${stale.join('\n')}`);
 });

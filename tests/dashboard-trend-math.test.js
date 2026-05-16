@@ -117,9 +117,10 @@ test('deriveGst: handles non-numeric input safely', () => {
 
 // ─── distributeCogsByRevenue ────────────────────────────────────────────────
 
-test('distributeCogsByRevenue: $720 split across buckets in revenue proportion', () => {
-  // Matches the user screenshot: revenue $1,277.36 - gross_profit $557.48
-  // = $719.88 of COGS to spread across the visible window.
+test('distributeCogsByRevenue: total COGS split across buckets in revenue proportion', () => {
+  // Corrected COGS for the screenshot fixture: kpiCogsInclGst(1277.36, 557.48)
+  // = 1277.36/1.15 − 557.48 ≈ $553.27 to spread across the visible window.
+  const COGS = 553.27;
   const buckets = [
     { revenue: 358.24, cogsDerived: 0 },  // 3 May
     { revenue: 358.24, cogsDerived: 0 },  // 5 Apr
@@ -127,15 +128,15 @@ test('distributeCogsByRevenue: $720 split across buckets in revenue proportion',
     { revenue: 117.97, cogsDerived: 0 },
     { revenue: 277.91, cogsDerived: 0 },
   ];
-  sandbox.distributeCogsByRevenue(buckets, 719.88);
+  sandbox.distributeCogsByRevenue(buckets, COGS);
   const totalRev = 358.24 + 358.24 + 165 + 117.97 + 277.91;
   for (const b of buckets) {
-    const expected = 719.88 * (b.revenue / totalRev);
+    const expected = COGS * (b.revenue / totalRev);
     assert.ok(Math.abs(b.cogsDerived - expected) < 0.01,
       `bucket rev=${b.revenue}: expected ${expected}, got ${b.cogsDerived}`);
   }
   const sumDerived = buckets.reduce((s, b) => s + b.cogsDerived, 0);
-  assert.ok(Math.abs(sumDerived - 719.88) < 0.01,
+  assert.ok(Math.abs(sumDerived - COGS) < 0.01,
     `derived sum should equal total cogs, got ${sumDerived}`);
 });
 
@@ -254,23 +255,23 @@ test('assembleBucketExpense: derived path when P&L is empty', () => {
   // Matches the dashboard fixture: rev $1,277.36 across 31 orders, no P&L data.
   // Stripe (new convention) = (1277.36 × 0.0265 + 31 × 0.30) × 1.15 ≈ 49.62
   // GST                     = 1277.36 × 3/23                        ≈ 166.612
-  // COGS                    =                                       = 719.88
-  // Expenses total          ≈ 936.11; Net ≈ 341.25 (a profit).
+  // COGS  = kpiCogsInclGst(1277.36, 557.48) = 1277.36/1.15 − 557.48  ≈ 553.27
+  // Expenses total          ≈ 769.50; Net ≈ 507.86 (a profit).
   const b = {
     revenue: 1277.36, orders: 31,
-    pnlCogs: 0, hasPnlCogs: false, cogsDerived: 719.88,
+    pnlCogs: 0, hasPnlCogs: false, cogsDerived: 553.27,
     pnlOpex: 0, hasPnlOpex: false, opexLogged: 0,
     pnlStripe: 0, hasPnlStripe: false,
     pnlGst: 0, hasPnlGst: false,
     hasNet: false,
   };
   sandbox.assembleBucketExpense(b);
-  assert.equal(b.cogsTotal, 719.88);
+  assert.equal(b.cogsTotal, 553.27);
   assert.equal(b.opexTotal, 0);
   assert.ok(Math.abs(b.stripeTotal - 49.6225) < 0.01);
   assert.ok(Math.abs(b.gstTotal    - 166.612) < 0.01);
-  assert.ok(Math.abs(b.expenses - 936.11) < 0.05);
-  assert.ok(b.net > 335 && b.net < 345, `expected profit ~$341.25, got ${b.net}`);
+  assert.ok(Math.abs(b.expenses - 769.50) < 0.05, `expenses=${b.expenses}`);
+  assert.ok(b.net > 503 && b.net < 513, `expected profit ~$507.86, got ${b.net}`);
   assert.equal(b.hasExpense, true);
 });
 
@@ -342,13 +343,13 @@ test('sumTrendTotals: empty / nullish series returns zeros, no crash', () => {
 
 test('integration: dashboard 3m window matches the user-visible totals', () => {
   // Reproduce the screenshot fixture: revenue $1,277.36, gross_profit $557.48,
-  // 31 orders, no logged opex. With the 2026-05-12 Stripe convention:
-  //   COGS   = 1277.36 − 557.48                        = 719.88
+  // 31 orders, no logged opex. With the corrected COGS formula:
+  //   COGS   = kpiCogsInclGst(1277.36, 557.48) = 1277.36/1.15 − 557.48 ≈ 553.27
   //   Stripe = (1277.36 × 0.0265 + 31 × 0.30) × 1.15   ≈ 49.62
   //   GST    = 1277.36 × (3/23)                        ≈ 166.61
   //   Opex   = 0 (none logged)
-  //   Total  ≈ 936.11
-  //   Net    ≈ 341.25 profit
+  //   Total  ≈ 769.50
+  //   Net    ≈ 507.86 profit
   const buckets = [
     { revenue: 1277.36, orders: 31,
       pnlCogs: 0, hasPnlCogs: false, cogsDerived: 0,
@@ -357,21 +358,25 @@ test('integration: dashboard 3m window matches the user-visible totals', () => {
       pnlGst: 0, hasPnlGst: false,
       hasNet: false },
   ];
-  // Step 1: distribute KPI cogs across (only one) bucket
-  sandbox.distributeCogsByRevenue(buckets, 1277.36 - 557.48);
+  // Step 1: distribute KPI cogs across (only one) bucket. The total COGS comes
+  // from kpiCogsInclGst — NOT a raw `revenue − gross_profit` subtraction.
+  const totalCogs = sandbox.kpiCogsInclGst(1277.36, 557.48);
+  sandbox.distributeCogsByRevenue(buckets, totalCogs);
   // Step 2: assemble
   sandbox.assembleBucketExpense(buckets[0]);
   const totals = sandbox.sumTrendTotals(buckets);
 
-  assert.ok(Math.abs(totals.cogs   - 719.88)  < 0.01, `cogs=${totals.cogs}`);
+  assert.ok(Math.abs(totals.cogs   - 553.27)  < 0.05, `cogs=${totals.cogs}`);
   assert.equal(totals.opex, 0);
   assert.ok(Math.abs(totals.stripe - 49.6225) < 0.01, `stripe=${totals.stripe}`);
   assert.ok(Math.abs(totals.gst    - 166.612) < 0.01, `gst=${totals.gst}`);
-  // Regression guard: the previous version of the chart would have shown
-  // ~$215.66 (the broken cogs=0 path); expenses must include cogs.
-  assert.ok(Math.abs(totals.expenses - 936.11) < 0.05,
-    `expected ~$936.11 expenses, got ${totals.expenses}`);
-  assert.ok(totals.expenses > 900, `regression guard: expenses must include cogs (was $215.66 before fix)`);
+  assert.ok(Math.abs(totals.expenses - 769.50) < 0.05,
+    `expected ~$769.50 expenses, got ${totals.expenses}`);
+  // Regression guard: expenses must still INCLUDE cogs (the broken cogs=0 path
+  // showed only ~$215.66) — but must NOT double-count it via the old ×1.15
+  // over-gross-up (which inflated expenses to ~$936).
+  assert.ok(totals.expenses > 700 && totals.expenses < 800,
+    `regression guard: expenses must include cogs once, got ${totals.expenses}`);
 });
 
 test('integration: a bucket with logged opex flips a profit window into a loss', () => {
@@ -391,15 +396,54 @@ test('integration: a bucket with logged opex flips a profit window into a loss',
   assert.ok(buckets[0].net < 0, 'net must be negative on a loss day');
 });
 
-// ─── kpiCogsInclGst — the 1.15 gross-up ─────────────────────────────────────
+// ─── kpiCogsInclGst — incl-GST cost from the KPI summary ────────────────────
+//
+// Formula corrected 2026-05-16. The KPI summary reports `revenue` GROSS and
+// `gross_profit = revenue_ex_gst − cost_incl_gst`. So:
+//     cost_incl_gst = revenue_ex_gst − gross_profit
+//                   = (revenue_gross / 1.15) − gross_profit
+// The previous `(revenue − gross_profit) × 1.15` over-counted COGS by ~38%
+// because `revenue_gross − gross_profit` already equals
+// `output_GST + cost_incl_gst` — see the regression guards below.
 
-test('kpiCogsInclGst: $1,277.36 revenue − $557.48 GP grossed up to $827.86 cost', () => {
-  // The user's screenshot fixture. revenue − gross_profit gives ex-GST cost
-  // because of the profitability.js convention; multiply by 1.15 to get real
-  // cash paid to suppliers.
+test('kpiCogsInclGst: $1,277.36 revenue − $557.48 GP → $553.27 incl-GST cost', () => {
+  // (1277.36 / 1.15) − 557.48 = 1110.748 − 557.48 = 553.268
   const cogs = sandbox.kpiCogsInclGst(1277.36, 557.48);
-  // (1277.36 − 557.48) × 1.15 = 719.88 × 1.15 = 827.862
-  assert.ok(Math.abs(cogs - 827.862) < 0.01, `expected ~$827.86, got ${cogs}`);
+  assert.ok(Math.abs(cogs - 553.268) < 0.01, `expected ~$553.27, got ${cogs}`);
+});
+
+test('kpiCogsInclGst: current screenshot fixture $1,354.10 / $594.46 → $583.02', () => {
+  // The 2026-05-16 dashboard screenshot: revenue $1,354.10, gross_profit
+  // $594.46. (1354.10 / 1.15) − 594.46 = 1177.478 − 594.46 = 583.018.
+  const cogs = sandbox.kpiCogsInclGst(1354.10, 594.46);
+  assert.ok(Math.abs(cogs - 583.018) < 0.01, `expected ~$583.02, got ${cogs}`);
+});
+
+test('kpiCogsInclGst: regression — never re-introduce the ×1.15 over-gross-up', () => {
+  // The buggy formula gave (1354.10 − 594.46) × 1.15 = $873.59 — a $290
+  // over-count. Guard the corrected value stays well clear of it.
+  const cogs = sandbox.kpiCogsInclGst(1354.10, 594.46);
+  assert.ok(cogs < 600, `COGS must not balloon back toward the $873.59 bug, got ${cogs}`);
+});
+
+test('kpiCogsInclGst: KPI fallback agrees with exact per-order COGS', () => {
+  // The whole point of the fix: when items[] are absent and the chart falls
+  // back to the KPI figure, it must land on the SAME number the per-order
+  // path produces. 4 May order — true cost incl-GST = 198.65 × 1.15 = 228.45.
+  //   revenue gross 358.24, gross_profit = 311.513 − 228.448 = 83.065
+  const perOrder = sandbox.orderCostInclGst({
+    items: [
+      { qty: 1, supplier_cost_snapshot: 18.85 },
+      { qty: 1, supplier_cost_snapshot: 34.95 },
+      { qty: 1, supplier_cost_snapshot: 40.00 },
+      { qty: 1, supplier_cost_snapshot: 34.95 },
+      { qty: 1, supplier_cost_snapshot: 34.95 },
+      { qty: 1, supplier_cost_snapshot: 34.95 },
+    ],
+  });
+  const kpiFallback = sandbox.kpiCogsInclGst(358.24, 83.065);
+  assert.ok(Math.abs(kpiFallback - perOrder) < 0.05,
+    `KPI fallback (${kpiFallback}) must match per-order cost (${perOrder})`);
 });
 
 test('kpiCogsInclGst: NaN inputs return 0, not NaN', () => {
@@ -813,9 +857,9 @@ test('integration: 4 May order single-bucket — expenses match cost+stripe+gst 
     `cogs must equal cost-incl-GST exactly when items[] are present: ${buckets[0].cogsTotal}`);
 });
 
-test('integration: when items[] are absent, KPI fallback grosses up by 1.15', () => {
-  // No items[] → the chart uses the KPI total cogs (revenue − gross_profit) × 1.15
-  // distributed by revenue share. For a single-bucket window this means
+test('integration: when items[] are absent, KPI fallback equals the per-order cost', () => {
+  // No items[] → the chart falls back to the KPI total cogs (kpiCogsInclGst)
+  // distributed by revenue share. For a single-bucket window that means
   // bucket cogs = total kpiCogsInclGst.
   const buckets = [
     { revenue: 358.24, orders: 1,
@@ -827,18 +871,69 @@ test('integration: when items[] are absent, KPI fallback grosses up by 1.15', ()
       pnlGst: 0, hasPnlGst: false,
       hasNet: false },
   ];
-  // Single-order window: revenue = 358.24, gross_profit = 83.07 (per profitability.js)
-  // Cost incl-GST = (358.24 − 83.07) × 1.15 = 275.17 × 1.15 = 316.45
-  // BUT! In a real KPI fixture, gross_profit = revenue_ex_gst − cost_incl_gst.
-  //  = 311.52 − 228.45 = 83.07
-  // So kpiCogsInclGst with revenue=358.24, gp=83.07 = (358.24 − 83.07) × 1.15 = 316.45
-  // That's higher than the true cost ($228.45) because revenue here is gross
-  // not ex-GST. This is why the per-order path is preferred — but the fallback
-  // still produces a number > cost-incl-GST, never lower.
-  const totalCogs = sandbox.kpiCogsInclGst(358.24, 83.07);
+  // Single-order window: revenue gross 358.24, gross_profit per profitability.js
+  // = revenue_ex_gst − cost_incl_gst = 311.513 − 228.448 = 83.065.
+  // Corrected fallback: kpiCogsInclGst(358.24, 83.065)
+  //   = 358.24/1.15 − 83.065 = 311.513 − 83.065 = 228.448
+  // — i.e. EXACTLY the per-order cost. Pre-fix this returned $316.45 (a 38%
+  // over-count); the fallback and the exact path must now agree.
+  const totalCogs = sandbox.kpiCogsInclGst(358.24, 83.065);
   sandbox.distributeCogsByRevenue(buckets, totalCogs);
   sandbox.assembleBucketExpense(buckets[0]);
-  // Sanity: fallback cogs ≥ true cost-incl-GST (no under-counting)
-  assert.ok(buckets[0].cogsTotal >= 228.45,
-    `KPI-fallback COGS must never under-count cost-incl-GST: ${buckets[0].cogsTotal}`);
+  assert.ok(Math.abs(buckets[0].cogsTotal - 228.4475) < 0.1,
+    `KPI-fallback COGS must match the exact per-order cost ($228.45), got ${buckets[0].cogsTotal}`);
+  assert.ok(buckets[0].cogsTotal < 300,
+    `regression guard: fallback must not balloon back to the $316 over-count, got ${buckets[0].cogsTotal}`);
+});
+
+// ─── isRevenueOrder — order-status filter ───────────────────────────────────
+//
+// The dashboard counts orders for the Trends tally + Stripe fixed-fee from the
+// bulk /orders endpoint, which returns every status. analytics_kpi_summary
+// counts sales only — `isRevenueOrder` filters raw orders to match it.
+
+test('isRevenueOrder: paid / shipped / completed / delivered count as sales', () => {
+  for (const status of ['paid', 'shipped', 'completed', 'delivered', 'processing', 'refunded', 'fulfilled']) {
+    assert.equal(sandbox.isRevenueOrder({ status }), true, `${status} should count`);
+  }
+});
+
+test('isRevenueOrder: pending / cancelled / failed / abandoned are excluded', () => {
+  for (const status of ['pending', 'cancelled', 'failed', 'abandoned']) {
+    assert.equal(sandbox.isRevenueOrder({ status }), false, `${status} should be excluded`);
+  }
+});
+
+test('isRevenueOrder: status match is case-insensitive', () => {
+  assert.equal(sandbox.isRevenueOrder({ status: 'CANCELLED' }), false);
+  assert.equal(sandbox.isRevenueOrder({ status: 'Pending' }), false);
+  assert.equal(sandbox.isRevenueOrder({ status: 'PAID' }), true);
+});
+
+test('isRevenueOrder: missing / unknown status defaults to counting', () => {
+  // An order with no status string still represents a placed order; only the
+  // explicit non-revenue statuses are dropped.
+  assert.equal(sandbox.isRevenueOrder({}), true);
+  assert.equal(sandbox.isRevenueOrder({ status: null }), true);
+  assert.equal(sandbox.isRevenueOrder(null), true);
+});
+
+test('NON_REVENUE_ORDER_STATUSES: the excluded set is exactly the 4 known non-sales', () => {
+  assert.deepEqual(
+    [...sandbox.NON_REVENUE_ORDER_STATUSES].sort(),
+    ['abandoned', 'cancelled', 'failed', 'pending'],
+  );
+});
+
+test('isRevenueOrder: a 42-order window with 9 non-sales filters down to 33', () => {
+  // Reproduces the 2026-05-16 screenshot discrepancy: the bulk endpoint
+  // returned 42 orders, the KPI summary counted 33. The 9 extra were
+  // pending/cancelled/failed and inflated the Stripe fixed-fee.
+  const orders = [];
+  for (let i = 0; i < 33; i++) orders.push({ status: 'paid' });
+  for (let i = 0; i < 5; i++)  orders.push({ status: 'pending' });
+  for (let i = 0; i < 3; i++)  orders.push({ status: 'cancelled' });
+  orders.push({ status: 'failed' });
+  const counted = orders.filter(sandbox.isRevenueOrder);
+  assert.equal(counted.length, 33, `expected 33 revenue orders, got ${counted.length}`);
 });
