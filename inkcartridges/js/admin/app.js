@@ -1,7 +1,7 @@
 /**
  * Admin SPA — Entry point, router, shell
  */
-const APP_VERSION = '2026.05.17-cogs';
+const APP_VERSION = '2026.05.17-ribbon-brands-page';
 
 import { AdminAuth } from './auth.js';
 import { FilterState } from './filters.js';
@@ -51,6 +51,7 @@ const NAV_ITEMS = [
   { key: 'website-traffic', label: 'Website Traffic', icon: 'analytics', ownerOnly: true },
   { key: 'orders', label: 'Orders', icon: 'orders' },
   { key: 'products', label: 'Products', icon: 'products' },
+  { key: 'ribbon-brands', label: 'Ribbon Brands', icon: 'products' },
   { key: 'customers', label: 'Customers', icon: 'customers' },
   { divider: true },
   { key: 'planner', label: 'Planner', icon: 'calendar' },

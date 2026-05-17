@@ -17,6 +17,10 @@ const MISSING = '\u2014';
 // (34 rows), but newer ribbons live under source='compatible'/'genuine' with
 // product_type IN these three values (116 rows total). Filtering by source='ribbon'
 // alone misses the 82 newer rows, so we expand the umbrella here.
+//
+// This same list also gates the edit drawer's "Ribbon Brands" assignment
+// section — ribbon-family products link to the ribbon_brands catalogue via the
+// product_ribbon_brands junction (see wireRibbonBrandsSection).
 const RIBBON_PRODUCT_TYPES = ['printer_ribbon', 'typewriter_ribbon', 'correction_tape'];
 
 /** Open a large full-screen preview of a product image. */
@@ -631,6 +635,11 @@ async function openProductDrawer(product) {
   // Build tabbed content
   buildProductModalTabs(modal, full, isOwner);
 
+  // Populate the Ribbon Brands section (ribbon-family products only — no-ops
+  // otherwise). Fire-and-forget: it self-renders into the static shell built
+  // above and parks the selection on modal._ribbonBrandSelection for save.
+  wireRibbonBrandsSection(modal, full);
+
   // Wire action buttons
   bindProductModalActions(modal, full);
 }
@@ -1091,13 +1100,35 @@ function buildProductModalTabs(modal, full, isOwner) {
   `;
 
   // For Use In panel (Rich Text)
-  const forUseInHtml = `
+  let forUseInHtml = `
     <div class="admin-form-group">
       <label>Compatible Devices / For Use In</label>
       <p style="font-size:12px;color:var(--text-muted);margin:0 0 8px">Paste text or HTML listing compatible devices. Formatting is preserved as-is on the product page.</p>
       <div id="compat-editor-mount"></div>
     </div>
   `;
+
+  // Ribbon Brands assignment — only for ribbon-family products. The catalogue
+  // of brands + this product's current assignments load asynchronously in
+  // wireRibbonBrandsSection(); this is just the static shell.
+  if (isManualCompat) {
+    forUseInHtml += `
+    <hr style="margin:22px 0 18px;border:none;border-top:1px solid var(--border)">
+    <div class="admin-form-group" id="ribbon-brands-group">
+      <label>Ribbon Brands</label>
+      <p style="font-size:12px;color:var(--text-muted);margin:0 0 10px">Assign this ribbon to the device brands it fits (e.g. Brother, Olympia, Olivetti). These power the brand filter customers use on the Ribbons page — a ribbon with no brand assigned will never appear under a brand.</p>
+      <div class="admin-ribbon-brands" id="ribbon-brands-chips"><span class="admin-text-muted" style="font-size:13px">Loading…</span></div>
+      <div class="admin-ribbon-brands__controls">
+        <select class="admin-select" id="ribbon-brand-picker" disabled><option value="">Loading…</option></select>
+      </div>
+      <div class="admin-ribbon-brands__new" id="ribbon-brand-new" hidden>
+        <input class="admin-input" id="ribbon-brand-new-name" placeholder="New ribbon brand name…" autocomplete="off" maxlength="80">
+        <button type="button" class="admin-btn admin-btn--primary admin-btn--sm" id="ribbon-brand-new-save">Create</button>
+        <button type="button" class="admin-btn admin-btn--ghost admin-btn--sm" id="ribbon-brand-new-cancel">Cancel</button>
+      </div>
+    </div>
+    `;
+  }
 
   const panelContents = [basicHtml, descHtml, forUseInHtml, pricingHtml, inventoryHtml, seoHtml, advancedHtml,
     ...(isManualCompat ? [] : [compatHtml]), faqHtml];
@@ -1134,6 +1165,186 @@ function buildProductModalTabs(modal, full, isOwner) {
 
   // ── Manual Override Indicators ──────────────────────────────────────────
   applyOverrideBadges(modal, full);
+}
+
+/**
+ * Wires the "Ribbon Brands" section in the For Use In tab. Ribbon-family
+ * products (printer_ribbon / typewriter_ribbon / correction_tape) link to the
+ * `ribbon_brands` catalogue through the `product_ribbon_brands` junction; that
+ * link is what makes a ribbon show up under a brand on the customer /ribbons
+ * page. Before this section existed the API methods (getProductRibbonBrands /
+ * setProductRibbonBrands / createRibbonBrand) had no UI at all, so newly added
+ * ribbons could never be filed under a brand.
+ *
+ * Behaviour:
+ *   • Loads the brand catalogue + this product's current assignments.
+ *   • Renders assigned brands as removable chips and a picker of the rest.
+ *   • The picker's "+ Create new ribbon brand…" row creates a brand inline
+ *     (AdminAPI.createRibbonBrand) and immediately assigns it.
+ *   • Selection lives on modal._ribbonBrandSelection (Map id → {id,name}).
+ *
+ * Safety: modal._ribbonBrandsLoaded is set true ONLY after a clean load. The
+ * save handler persists assignments solely when that flag is true — so if the
+ * initial load fails we never interpret "empty selection" as "remove every
+ * brand" and silently wipe a product's existing assignments.
+ *
+ * No-ops (returns immediately) for non-ribbon products: the #ribbon-brands-group
+ * shell is only rendered when isManualCompat is true.
+ */
+async function wireRibbonBrandsSection(modal, full) {
+  const group = modal.querySelector('#ribbon-brands-group');
+  if (!group) return; // not a ribbon-family product — section not rendered
+
+  const chipsEl   = modal.querySelector('#ribbon-brands-chips');
+  const picker    = modal.querySelector('#ribbon-brand-picker');
+  const newWrap   = modal.querySelector('#ribbon-brand-new');
+  const newInput  = modal.querySelector('#ribbon-brand-new-name');
+  const newSave   = modal.querySelector('#ribbon-brand-new-save');
+  const newCancel = modal.querySelector('#ribbon-brand-new-cancel');
+
+  const selection = new Map(); // id(string) → { id, name }
+  modal._ribbonBrandSelection = selection;
+  modal._ribbonBrandsLoaded = false;
+
+  let allBrands = []; // ribbon_brands catalogue rows
+
+  // Load the brand catalogue + this product's current assignments together.
+  let loadFailed = false;
+  try {
+    const [brands, assigned] = await Promise.all([
+      AdminAPI.getAdminRibbonBrands(),
+      full.id ? AdminAPI.getProductRibbonBrands(full.id) : Promise.resolve([]),
+    ]);
+    allBrands = Array.isArray(brands) ? brands.slice() : [];
+    for (const row of (Array.isArray(assigned) ? assigned : [])) {
+      // getProductRibbonBrands joins the brand row in under `ribbon_brands`.
+      const b = row.ribbon_brands || row;
+      if (b && b.id != null) {
+        selection.set(String(b.id), { id: String(b.id), name: b.name || 'Unnamed brand' });
+      }
+    }
+    modal._ribbonBrandsLoaded = true;
+  } catch (e) {
+    loadFailed = true;
+    if (typeof DebugLog !== 'undefined') DebugLog.warn('[products] ribbon brands load failed:', e.message);
+  }
+
+  // If the modal was closed while the fetch was in flight, bail quietly.
+  if (!modal.isConnected) return;
+
+  allBrands.sort((a, b) =>
+    (a.sort_order ?? 0) - (b.sort_order ?? 0) ||
+    String(a.name || '').localeCompare(String(b.name || '')));
+
+  if (loadFailed) {
+    chipsEl.innerHTML = `<span class="admin-ribbon-brands__error">Couldn’t load ribbon brands — reopen the product to retry. Saving now leaves existing brand assignments untouched.</span>`;
+    if (picker) { picker.innerHTML = '<option value="">Unavailable</option>'; picker.disabled = true; }
+    return;
+  }
+
+  const renderChips = () => {
+    if (selection.size === 0) {
+      chipsEl.innerHTML = `<span class="admin-ribbon-brands__empty">No brands assigned — this ribbon won’t appear under any brand on the Ribbons page.</span>`;
+      return;
+    }
+    chipsEl.innerHTML = [...selection.values()]
+      .sort((a, b) => a.name.localeCompare(b.name))
+      .map(b => `<span class="admin-ribbon-brand-chip">${esc(b.name)}<button type="button" class="admin-ribbon-brand-chip__remove" data-remove-brand="${esc(b.id)}" title="Remove ${esc(b.name)}" aria-label="Remove ${esc(b.name)}">&times;</button></span>`)
+      .join('');
+  };
+
+  const renderPicker = () => {
+    const available = allBrands.filter(b => !selection.has(String(b.id)));
+    let html = `<option value="">${available.length ? 'Add a brand…' : 'All brands assigned'}</option>`;
+    for (const b of available) {
+      html += `<option value="${esc(String(b.id))}">${esc(b.name || 'Unnamed brand')}</option>`;
+    }
+    html += `<option value="__new__">+ Create new ribbon brand…</option>`;
+    picker.innerHTML = html;
+    picker.disabled = false;
+  };
+
+  renderChips();
+  renderPicker();
+
+  // Remove a chip — delegated.
+  chipsEl.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-remove-brand]');
+    if (!btn) return;
+    selection.delete(String(btn.dataset.removeBrand));
+    renderChips();
+    renderPicker();
+  });
+
+  // Picker: assign an existing brand, or open the inline create row.
+  picker.addEventListener('change', () => {
+    const v = picker.value;
+    picker.value = '';
+    if (!v) return;
+    if (v === '__new__') {
+      newWrap.hidden = false;
+      newInput.value = '';
+      newInput.focus();
+      return;
+    }
+    const brand = allBrands.find(b => String(b.id) === v);
+    if (brand) {
+      selection.set(String(brand.id), { id: String(brand.id), name: brand.name || 'Unnamed brand' });
+      renderChips();
+      renderPicker();
+    }
+  });
+
+  // Inline "create new ribbon brand".
+  const slugify = (s) => s.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+  const createBrand = async () => {
+    const name = newInput.value.trim();
+    if (!name) { newInput.focus(); return; }
+
+    // If a brand with that name already exists, just assign it — no duplicate.
+    const dupe = allBrands.find(b => String(b.name || '').toLowerCase() === name.toLowerCase());
+    if (dupe) {
+      selection.set(String(dupe.id), { id: String(dupe.id), name: dupe.name });
+      newWrap.hidden = true;
+      renderChips();
+      renderPicker();
+      Toast.info(`“${dupe.name}” already exists — assigned it.`);
+      return;
+    }
+
+    newSave.disabled = true;
+    newSave.textContent = 'Creating…';
+    try {
+      const maxSort = allBrands.reduce((m, b) => Math.max(m, b.sort_order ?? 0), 0);
+      const created = await AdminAPI.createRibbonBrand({
+        name,
+        slug: slugify(name),
+        is_active: true,
+        sort_order: maxSort + 10,
+      });
+      // createRibbonBrand returns the inserted row; fall back defensively.
+      const row = (created && typeof created === 'object' && created.id != null)
+        ? created
+        : { id: created, name, slug: slugify(name), sort_order: maxSort + 10 };
+      allBrands.push(row);
+      selection.set(String(row.id), { id: String(row.id), name: row.name || name });
+      newWrap.hidden = true;
+      renderChips();
+      renderPicker();
+      Toast.success(`Ribbon brand “${name}” created and assigned`);
+    } catch (e) {
+      Toast.error(`Couldn’t create brand: ${e.message}`);
+    } finally {
+      newSave.disabled = false;
+      newSave.textContent = 'Create';
+    }
+  };
+  newSave.addEventListener('click', createBrand);
+  newInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); createBrand(); }
+    if (e.key === 'Escape') { e.preventDefault(); newWrap.hidden = true; }
+  });
+  newCancel.addEventListener('click', () => { newWrap.hidden = true; });
 }
 
 /**
@@ -2170,6 +2381,19 @@ function bindProductModalActions(modal, product) {
       if (result?.manual_overrides) {
         product.manual_overrides = result.manual_overrides;
       }
+
+      // Persist ribbon-brand assignments (product_ribbon_brands junction).
+      // Gated on _ribbonBrandsLoaded so a failed initial load can never be
+      // mistaken for "no brands" and wipe the product's existing assignments.
+      // A failure here is surfaced but does not block the product save itself.
+      if (modal._ribbonBrandsLoaded && RIBBON_PRODUCT_TYPES.includes(data.product_type)) {
+        try {
+          await AdminAPI.setProductRibbonBrands(product.id, [...modal._ribbonBrandSelection.keys()]);
+        } catch (rbErr) {
+          Toast.error(`Product saved, but ribbon brands didn’t: ${rbErr.message}`);
+        }
+      }
+
       invalidateDiagCache();
       Toast.success('Product updated');
       const saveBtn = modal.querySelector('[data-action="save"]');

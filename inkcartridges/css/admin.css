@@ -1413,6 +1413,48 @@
   color: var(--text-muted); font-size: 13px;
 }
 
+/* ---- Ribbon Brands assignment (product drawer → For Use In tab) ---- */
+.admin-ribbon-brands {
+  display: flex; flex-wrap: wrap; gap: 6px;
+  min-height: 34px; padding: 6px;
+  border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--surface-hover);
+  align-items: center;
+}
+.admin-ribbon-brands__empty,
+.admin-ribbon-brands__error {
+  font-size: 12px; color: var(--text-muted); padding: 2px 4px;
+}
+.admin-ribbon-brands__error { color: var(--danger, #dc2626); }
+.admin-ribbon-brand-chip {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 4px 6px 4px 10px; border-radius: 999px;
+  background: var(--cyan-dim, rgba(34, 211, 238, .12));
+  color: var(--cyan-text, #0891b2);
+  font-size: 12px; font-weight: 600; line-height: 1.4;
+  border: 1px solid var(--cyan, rgba(34, 211, 238, .35));
+}
+.admin-ribbon-brand-chip__remove {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 16px; height: 16px; padding: 0;
+  border: none; border-radius: 50%;
+  background: rgba(0, 0, 0, .08); color: inherit;
+  font-size: 13px; line-height: 1; cursor: pointer;
+  transition: background .12s var(--ease, ease);
+}
+.admin-ribbon-brand-chip__remove:hover {
+  background: var(--danger, #dc2626); color: #fff;
+}
+.admin-ribbon-brands__controls {
+  margin-top: 8px;
+}
+.admin-ribbon-brands__controls .admin-select { max-width: 320px; }
+.admin-ribbon-brands__new {
+  display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; align-items: center;
+}
+.admin-ribbon-brands__new[hidden] { display: none; }
+.admin-ribbon-brands__new .admin-input { flex: 1 1 220px; max-width: 320px; }
+
 /* ---- Image Lightbox ---- */
 .admin-image-lightbox {
   position: fixed; inset: 0; z-index: 10000;
