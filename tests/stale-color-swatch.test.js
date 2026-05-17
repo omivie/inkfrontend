@@ -3,7 +3,7 @@
  * ======================================
  *
  * Pins the rule that whenever a compatible product's `image_url` is one of
- * the legacy hand-uploaded "color-swatch-vN.png" placeholder PNGs, every
+ * the legacy hand-uploaded "color-swatch-vN" placeholder images, every
  * surface MUST drop the static image and render a fresh color block from
  * the canonical `color` field instead.
  *
@@ -24,11 +24,16 @@
  *
  * Detection rule (utils.js ProductColors.isPlaceholderSwatchImage):
  *
- *   /\/color-swatch(?:-v\d+)?\.png(?:\?.*)?$/i
+ *   /\/color-swatch(?:-v\d+)?\.(?:png|jpe?g|webp)(?:\?.*)?$/i
  *
  *   Matches any path ending in `color-swatch.png`, `color-swatch-v4.png`,
- *   `color-swatch-v12.png?cb=…` etc. — that family covers every placeholder
- *   currently in the bucket and every plausible future regen suffix.
+ *   `color-swatch-v12.png?cb=…`, and — since the May 2026 storage migration
+ *   converted 2050 product images to WebP (marketing-audit-may-2026.md §3) —
+ *   the `.webp` / `.jpg` forms too. The `color-swatch` filename stem is the
+ *   real discriminator; the extension is matched loosely so a swatch the DB
+ *   once pointed at as `.png` is still detected after it becomes `.webp`.
+ *   Real product photos are `<sku>-<timestamp>.webp` and never carry the
+ *   `color-swatch` stem, so widening the extension cannot misfire.
  *
  * Surfaces audited:
  *
@@ -119,6 +124,12 @@ test('isPlaceholderSwatchImage matches the legacy placeholder shapes', () => {
         'https://example.com/anything/color-swatch.png',
         'https://example.com/x/color-swatch-v1.png',
         'https://example.com/x/color-swatch-v12.png?cb=1234',
+        // marketing-audit-may-2026.md §3 — the WebP migration may rewrite a
+        // swatch's extension; the stem still has to be detected.
+        'https://lmdlgldjgcanknsjrcxh.supabase.co/storage/v1/object/public/public-assets/images/products/c-can-cl41-ink-rd/color-swatch-v4.webp',
+        'https://example.com/x/color-swatch.webp',
+        'https://example.com/x/color-swatch-v2.jpg',
+        'https://example.com/x/color-swatch-v9.webp?cb=99',
     ];
     for (const url of matches) {
         assert.strictEqual(PC.isPlaceholderSwatchImage(url), true, `should match: ${url}`);

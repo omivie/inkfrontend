@@ -254,6 +254,12 @@ export function distributeCogsByRevenue(buckets, totalCogs) {
 // (substitute the convention above), so the × 1.15 inflated COGS by ~38% — the
 // chart showed $873.59 of COGS where the true figure was $583.02.
 export function kpiCogsInclGst(kpiRevenue, kpiGrossProfit) {
+  // null/undefined ⇒ "unknown", not zero. Number(null) is 0 (a finite value),
+  // so without this explicit check a null gross_profit would slip past the
+  // isFinite guard below and make COGS equal the ENTIRE ex-GST revenue. That
+  // matters on the order-derived KPI fallback, where gross_profit is null
+  // whenever the orders lack supplier-cost data.
+  if (kpiRevenue == null || kpiGrossProfit == null) return 0;
   const rev = Number(kpiRevenue);
   const gp  = Number(kpiGrossProfit);
   if (!Number.isFinite(rev) || !Number.isFinite(gp)) return 0;
@@ -353,8 +359,70 @@ export function assembleBucketExpense(b) {
   return b;
 }
 
+// Reconstruct the dashboard KPI "current" block from the raw orders list when
+// the analytics_kpi_summary RPC is unavailable.
+//
+// Why this exists (ERR-010, recurring): the admin dashboard's headline KPI
+// cards — Revenue, Orders, Avg Order Value, Gross Profit — are fed entirely by
+// the `analytics_kpi_summary` Supabase RPC. That RPC's `GRANT EXECUTE TO
+// authenticated` has been dropped by a backend redeploy more than once
+// (fixed 2026-05-02, recurred 2026-05-17), and when it is the dashboard shows
+// "—" across the whole strip even though the underlying orders are right
+// there. The /api/admin/orders REST endpoint is independent of the analytics
+// RPCs and keeps working, so the dashboard can self-heal its headline numbers
+// instead of going blank.
+//
+// The returned object is shaped like analytics_kpi_summary's `current` block
+// so callers can swap it in transparently:
+//   { revenue, orders, gross_profit, _derived: true }
+//
+//   revenue       Σ o.total over revenue-generating orders. GROSS (incl-GST) —
+//                 matches the RPC's convention (see this file's header).
+//   orders        count of revenue-generating orders (isRevenueOrder filter,
+//                 so pending/cancelled/failed rows don't inflate the tally).
+//   gross_profit  Σ(revenue_ex_gst − cost_incl_gst) — but ONLY when every
+//                 counted order resolved a real supplier cost. If any order is
+//                 missing cost data this is null: a partial cost sum would
+//                 understate COGS and overstate profit, and a confident wrong
+//                 number is worse than an honest "—".
+//   _derived      marker so the UI can flag that these are reconstructed.
+//
+// Returns null when there are no usable orders at all, so callers can tell
+// "RPC down, here are the reconstructed numbers" apart from "RPC down and no
+// orders to reconstruct from either".
+export function deriveKpisFromOrders(rawOrders) {
+  const orders = Array.isArray(rawOrders)
+    ? rawOrders
+    : (Array.isArray(rawOrders?.orders) ? rawOrders.orders
+       : Array.isArray(rawOrders?.data) ? rawOrders.data : []);
+  let revenue = 0;
+  let count = 0;
+  let costInclGst = 0;
+  let everyOrderHasCost = true;
+  for (const o of orders) {
+    if (!isRevenueOrder(o)) continue;
+    const total = Number(o?.total ?? o?.amount);
+    if (!Number.isFinite(total) || total <= 0) continue;
+    revenue += total;
+    count += 1;
+    const cost = orderCostInclGst(o);
+    if (cost > 0) costInclGst += cost;
+    else everyOrderHasCost = false;
+  }
+  if (count === 0) return null;
+  const grossProfit = everyOrderHasCost
+    ? revenue * (1 - GST_FRACTION_OF_GROSS) - costInclGst
+    : null;
+  return { revenue, orders: count, gross_profit: grossProfit, _derived: true };
+}
+
 // Sum every bucket's component totals so the totals strip shows the same
 // picture as the chart bars.
+//
+// `cogsKnown` rides along: it stays true only while every bucket's COGS is
+// known. A single bucket with `cogsKnown === false` poisons the whole strip —
+// the totals line cannot claim a real profit when any slice of the window is
+// missing its cost of goods. See `cogsIsKnown` for how the flag is set.
 export function sumTrendTotals(series) {
   return (series || []).reduce((acc, m) => {
     acc.revenue  += Number(m.revenue || 0);
@@ -364,6 +432,35 @@ export function sumTrendTotals(series) {
     acc.stripe   += Number(m.stripeTotal || 0);
     acc.gst      += Number(m.gstTotal || 0);
     acc.orders   += Number(m.orders || 0);
+    if (m && m.cogsKnown === false) acc.cogsKnown = false;
     return acc;
-  }, { revenue: 0, expenses: 0, cogs: 0, opex: 0, stripe: 0, gst: 0, orders: 0 });
+  }, { revenue: 0, expenses: 0, cogs: 0, opex: 0, stripe: 0, gst: 0, orders: 0, cogsKnown: true });
+}
+
+// Decide whether Cost of Goods Sold is genuinely KNOWN for a trend window —
+// as opposed to being legitimately zero, or simply unavailable.
+//
+// Why this matters: when the analytics RPC is down AND the bulk-orders feed
+// carries no per-item supplier cost, the dashboard has no way to value COGS.
+// `assembleBucketExpense` then sets `cogsTotal = 0` — but that 0 means
+// "unknown", NOT "the goods we sold cost nothing". A profit figure computed
+// off that 0 (revenue − Stripe − GST − opex) silently omits the single
+// largest cost line and dramatically overstates profit. Callers use this flag
+// to refuse a confident profit number — exactly as the KPI strip refuses a
+// Gross Profit card when `deriveKpisFromOrders` can't resolve cost.
+//
+// COGS counts as KNOWN when ANY real source resolved it:
+//   - hasPnlCogs    backend P&L shipped a per-period COGS line
+//   - hasOrderCogs  at least one order resolved exact cost from its items[]
+//   - kpiCogsTotal  the KPI summary's gross_profit yielded a positive cost
+// A window with no revenue has no COGS to know, so it is treated as known —
+// otherwise an empty date range would raise a spurious "cost missing" warning.
+export function cogsIsKnown({
+  windowRevenue = 0,
+  hasPnlCogs = false,
+  hasOrderCogs = false,
+  kpiCogsTotal = 0,
+} = {}) {
+  if (!(Number(windowRevenue) > 0)) return true;
+  return Boolean(hasPnlCogs) || Boolean(hasOrderCogs) || Number(kpiCogsTotal) > 0;
 }

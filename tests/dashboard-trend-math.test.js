@@ -937,3 +937,259 @@ test('isRevenueOrder: a 42-order window with 9 non-sales filters down to 33', ()
   const counted = orders.filter(sandbox.isRevenueOrder);
   assert.equal(counted.length, 33, `expected 33 revenue orders, got ${counted.length}`);
 });
+
+// ─── deriveKpisFromOrders — KPI strip self-heal (ERR-010) ────────────────────
+//
+// The dashboard KPI cards (Revenue, Orders, Avg Order Value, Gross Profit) are
+// fed by the analytics_kpi_summary RPC. That RPC's GRANT EXECUTE has been
+// dropped by a backend redeploy more than once — when it is, the whole strip
+// shows "—" even though /api/admin/orders still returns every order.
+// deriveKpisFromOrders reconstructs the headline numbers from that order feed.
+
+test('deriveKpisFromOrders: non-array / empty input returns null', () => {
+  assert.equal(sandbox.deriveKpisFromOrders(null), null);
+  assert.equal(sandbox.deriveKpisFromOrders(undefined), null);
+  assert.equal(sandbox.deriveKpisFromOrders([]), null);
+  assert.equal(sandbox.deriveKpisFromOrders('nope'), null);
+});
+
+test('deriveKpisFromOrders: a window of only non-revenue orders returns null', () => {
+  const orders = [
+    { status: 'pending', total: 50 },
+    { status: 'cancelled', total: 99 },
+    { status: 'failed', total: 12 },
+  ];
+  assert.equal(sandbox.deriveKpisFromOrders(orders), null);
+});
+
+test('deriveKpisFromOrders: sums o.total over revenue orders for GROSS revenue', () => {
+  const orders = [
+    { status: 'paid', total: 324.74 },
+    { status: 'shipped', total: 53.79 },
+    { status: 'delivered', total: 100.00 },
+  ];
+  const k = sandbox.deriveKpisFromOrders(orders);
+  assert.ok(Math.abs(k.revenue - 478.53) < 0.001, `revenue ${k.revenue}`);
+  assert.equal(k.orders, 3);
+  assert.equal(k._derived, true);
+});
+
+test('deriveKpisFromOrders: pending / cancelled / failed orders are excluded', () => {
+  const orders = [
+    { status: 'paid', total: 200 },
+    { status: 'pending', total: 999 },     // not yet a sale
+    { status: 'cancelled', total: 999 },   // never collected
+    { status: 'paid', total: 100 },
+  ];
+  const k = sandbox.deriveKpisFromOrders(orders);
+  assert.equal(k.revenue, 300);
+  assert.equal(k.orders, 2);
+});
+
+test('deriveKpisFromOrders: o.amount is used when o.total is absent', () => {
+  const k = sandbox.deriveKpisFromOrders([{ status: 'paid', amount: 75.5 }]);
+  assert.equal(k.revenue, 75.5);
+  assert.equal(k.orders, 1);
+});
+
+test('deriveKpisFromOrders: zero / negative / non-numeric totals are skipped', () => {
+  const orders = [
+    { status: 'paid', total: 0 },
+    { status: 'paid', total: -10 },
+    { status: 'paid', total: 'abc' },
+    { status: 'paid', total: 120 },
+  ];
+  const k = sandbox.deriveKpisFromOrders(orders);
+  assert.equal(k.revenue, 120);
+  assert.equal(k.orders, 1);
+});
+
+test('deriveKpisFromOrders: unwraps { orders: [...] } and { data: [...] } envelopes', () => {
+  const rows = [{ status: 'paid', total: 60 }, { status: 'paid', total: 40 }];
+  for (const wrapped of [{ orders: rows }, { data: rows }]) {
+    const k = sandbox.deriveKpisFromOrders(wrapped);
+    assert.equal(k.revenue, 100);
+    assert.equal(k.orders, 2);
+  }
+});
+
+test('deriveKpisFromOrders: gross_profit is null when ANY order lacks cost data', () => {
+  const orders = [
+    { status: 'paid', total: 115, items: [{ supplier_cost_snapshot: 40, qty: 1 }] },
+    { status: 'paid', total: 115 },  // no items[] — cost unknown
+  ];
+  const k = sandbox.deriveKpisFromOrders(orders);
+  assert.equal(k.revenue, 230);
+  assert.equal(k.orders, 2);
+  // A partial cost sum would understate COGS and overstate profit — honest "—".
+  assert.equal(k.gross_profit, null);
+});
+
+test('deriveKpisFromOrders: gross_profit computed when every order has cost data', () => {
+  // $115 gross → $100 ex-GST. Cost ex-GST $40 → incl-GST $46. Profit = $54.
+  const orders = [
+    { status: 'paid', total: 115, items: [{ supplier_cost_snapshot: 40, qty: 1 }] },
+    { status: 'paid', total: 230, items: [{ supplier_cost_snapshot: 40, qty: 2 }] },
+  ];
+  const k = sandbox.deriveKpisFromOrders(orders);
+  // ex-GST revenue 300; cost incl-GST (40 + 80) × 1.15 = 138; profit = 162.
+  assert.ok(Math.abs(k.gross_profit - 162) < 0.001, `gross_profit ${k.gross_profit}`);
+});
+
+test('deriveKpisFromOrders: order-level cost_total_excl_gst counts as cost data', () => {
+  const orders = [
+    { status: 'paid', total: 115, cost_total_excl_gst: 40 },
+  ];
+  const k = sandbox.deriveKpisFromOrders(orders);
+  assert.ok(Math.abs(k.gross_profit - (100 - 46)) < 0.001, `gross_profit ${k.gross_profit}`);
+});
+
+test('deriveKpisFromOrders: reproduces the screenshot — blank strip becomes real numbers', () => {
+  // 8 recent orders from the 2026-05-17 dashboard screenshot window. The KPI
+  // RPC was down (strip showed "—"); the order feed was intact.
+  const orders = [
+    { status: 'paid', total: 324.74 }, { status: 'paid', total: 53.79 },
+    { status: 'paid', total: 210.00 }, { status: 'shipped', total: 88.40 },
+    { status: 'delivered', total: 412.10 }, { status: 'paid', total: 19.99 },
+    { status: 'paid', total: 145.50 }, { status: 'completed', total: 67.25 },
+  ];
+  const k = sandbox.deriveKpisFromOrders(orders);
+  assert.equal(k.orders, 8);
+  assert.ok(k.revenue > 0, 'revenue must be a real positive number, not "—"');
+  const aov = k.revenue / k.orders;
+  assert.ok(aov > 0, 'avg order value derives cleanly from revenue / orders');
+});
+
+// ─── kpiCogsInclGst — null gross_profit must NOT become full-revenue COGS ────
+
+test('kpiCogsInclGst: null gross_profit returns 0, not the entire ex-GST revenue', () => {
+  // Number(null) === 0 (finite) — without an explicit null check this returned
+  // revenueExGst, painting COGS = all revenue on the KPI fallback path.
+  assert.equal(sandbox.kpiCogsInclGst(1678.84, null), 0);
+  assert.equal(sandbox.kpiCogsInclGst(1678.84, undefined), 0);
+  assert.equal(sandbox.kpiCogsInclGst(null, 500), 0);
+  assert.equal(sandbox.kpiCogsInclGst(undefined, undefined), 0);
+});
+
+test('kpiCogsInclGst: real revenue + gross_profit still recovers incl-GST COGS', () => {
+  // $1,150 gross → $1,000 ex-GST. gross_profit $400 → COGS incl-GST $600.
+  const cogs = sandbox.kpiCogsInclGst(1150, 400);
+  assert.ok(Math.abs(cogs - 600) < 0.001, `expected $600 COGS, got ${cogs}`);
+});
+
+// ─── cogsIsKnown — COGS-unknown vs COGS-genuinely-zero ──────────────────────
+//
+// Added 2026-05-17 (ERR-028). When the analytics RPC is down AND the bulk
+// orders feed carries no per-item supplier cost, the dashboard cannot value
+// COGS. `assembleBucketExpense` then leaves cogsTotal at 0 — but that 0 means
+// "unknown", not "the goods cost nothing". `cogsIsKnown` distinguishes the two
+// so renderTrendTotals can refuse to fold a missing cost line into a confident
+// green "Profit" figure (it shows a neutral "Net excl. COGS" instead).
+
+test('cogsIsKnown: no source resolved + real revenue → COGS unknown', () => {
+  // The 2026-05-17 screenshot exactly: RPC down (kpiCogsTotal 0), bulk-orders
+  // feed had no items[] (hasOrderCogs false), no P&L. COGS is unknown.
+  assert.equal(sandbox.cogsIsKnown({
+    windowRevenue: 1678.84, hasPnlCogs: false, hasOrderCogs: false, kpiCogsTotal: 0,
+  }), false);
+});
+
+test('cogsIsKnown: a positive KPI cost total marks COGS known', () => {
+  assert.equal(sandbox.cogsIsKnown({
+    windowRevenue: 1678.84, hasPnlCogs: false, hasOrderCogs: false, kpiCogsTotal: 553.27,
+  }), true);
+});
+
+test('cogsIsKnown: per-order item costs mark COGS known even with RPC down', () => {
+  assert.equal(sandbox.cogsIsKnown({
+    windowRevenue: 1678.84, hasPnlCogs: false, hasOrderCogs: true, kpiCogsTotal: 0,
+  }), true);
+});
+
+test('cogsIsKnown: backend P&L COGS marks COGS known', () => {
+  assert.equal(sandbox.cogsIsKnown({
+    windowRevenue: 1678.84, hasPnlCogs: true, hasOrderCogs: false, kpiCogsTotal: 0,
+  }), true);
+});
+
+test('cogsIsKnown: a window with no revenue has no COGS to know → known', () => {
+  // An empty date range must NOT raise a spurious "cost missing" warning.
+  assert.equal(sandbox.cogsIsKnown({
+    windowRevenue: 0, hasPnlCogs: false, hasOrderCogs: false, kpiCogsTotal: 0,
+  }), true);
+  assert.equal(sandbox.cogsIsKnown({}), true);
+  assert.equal(sandbox.cogsIsKnown(), true);
+});
+
+test('cogsIsKnown: negative / non-numeric revenue is treated as no revenue', () => {
+  assert.equal(sandbox.cogsIsKnown({ windowRevenue: -5, kpiCogsTotal: 0 }), true);
+  assert.equal(sandbox.cogsIsKnown({ windowRevenue: 'nope', kpiCogsTotal: 0 }), true);
+});
+
+// ─── sumTrendTotals — cogsKnown propagation ─────────────────────────────────
+
+test('sumTrendTotals: cogsKnown stays true when every bucket has known COGS', () => {
+  const series = [
+    { revenue: 100, expenses: 60, cogsTotal: 40, cogsKnown: true },
+    { revenue: 200, expenses: 90, cogsTotal: 70, cogsKnown: true },
+  ];
+  assert.equal(sandbox.sumTrendTotals(series).cogsKnown, true);
+});
+
+test('sumTrendTotals: one bucket with cogsKnown:false poisons the whole window', () => {
+  const series = [
+    { revenue: 100, expenses: 60, cogsTotal: 40, cogsKnown: true },
+    { revenue: 200, expenses: 20, cogsTotal: 0,  cogsKnown: false },
+  ];
+  assert.equal(sandbox.sumTrendTotals(series).cogsKnown, false);
+});
+
+test('sumTrendTotals: cogsKnown defaults to true for legacy buckets without the flag', () => {
+  // Buckets predating ERR-028 carry no cogsKnown — absence must not be read
+  // as "unknown", or every cached render would flip to the warning state.
+  const series = [
+    { revenue: 100, expenses: 60, cogsTotal: 40 },
+    { revenue: 200, expenses: 90, cogsTotal: 70 },
+  ];
+  assert.equal(sandbox.sumTrendTotals(series).cogsKnown, true);
+});
+
+test('sumTrendTotals: empty / nullish series reports cogsKnown true', () => {
+  for (const v of [null, undefined, []]) {
+    assert.equal(sandbox.sumTrendTotals(v).cogsKnown, true);
+  }
+});
+
+test('integration: ERR-028 screenshot — COGS unknown, net must NOT read as profit', () => {
+  // The 2026-05-17 window: revenue $1,678.84, RPC down so gross_profit null →
+  // kpiCogsInclGst returns 0, no per-order items[], no P&L. COGS is unknown.
+  // The bucket carries cogsKnown:false; sumTrendTotals propagates it; and the
+  // "net" the totals strip would print (revenue − Stripe − GST) is an
+  // OVERSTATEMENT of true profit because product cost is missing entirely.
+  const totalCogsInclGst = sandbox.kpiCogsInclGst(1678.84, null); // RPC down
+  assert.equal(totalCogsInclGst, 0, 'null gross_profit → 0 COGS, not guessed');
+
+  const cogsKnown = sandbox.cogsIsKnown({
+    windowRevenue: 1678.84, hasPnlCogs: false, hasOrderCogs: false,
+    kpiCogsTotal: totalCogsInclGst,
+  });
+  assert.equal(cogsKnown, false, 'COGS is unknown for this window');
+
+  const b = {
+    revenue: 1678.84, orders: 34,
+    pnlCogs: 0, hasPnlCogs: false, cogsDerived: 0,
+    pnlOpex: 0, hasPnlOpex: false, opexLogged: 0,
+    pnlStripe: 0, hasPnlStripe: false,
+    pnlGst: 0, hasPnlGst: false,
+    cogsKnown,
+    hasNet: false,
+  };
+  sandbox.assembleBucketExpense(b);
+  const totals = sandbox.sumTrendTotals([b]);
+  assert.equal(totals.cogsKnown, false,
+    'cogsKnown:false must survive into the totals the strip renders from');
+  assert.equal(totals.cogs, 0, 'COGS sits at a 0 placeholder — shown as "—", never "$0.00 profit"');
+  // The renderable "net" excludes COGS — it is a ceiling on profit, not profit.
+  const net = totals.revenue - totals.expenses;
+  assert.ok(net > 0, 'net excl. COGS is positive here — which is exactly why it must not be labelled "Profit"');
+});

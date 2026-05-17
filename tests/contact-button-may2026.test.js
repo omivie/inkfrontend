@@ -8,14 +8,19 @@
  *   contact_us, or stock_quantity ≤ 0), every product card and the PDP
  *   buy box render ONE primary "Contact us" CTA pointing at /contact.
  *   No "Notify me" string survives anywhere; no UI surface calls the
- *   waitlist API; the inline duplicate "Contact Us" pill above the
- *   price collapses to "Out of stock".
+ *   waitlist API.
+ *
+ * stock-enquiry-may2026 amendment:
+ *   The inline status pill above the price (getStockStatus().text) no
+ *   longer reads a bare "Out of stock" — it spells out the action,
+ *   "Contact Us For Stock Enquiries". The CTA button keeps the short
+ *   "Contact us" label; pill and button are deliberately distinct.
  *
  * The waitlist endpoints stay mounted on the backend for cached older
  * bundles, but the storefront source code MUST NOT reference them in any
  * UI render path. These tests fail if anyone re-introduces the old
- * Notify-me branch, the waitlist injection on the PDP, or a duplicate
- * "Contact Us" pill text in getStockStatus.
+ * Notify-me branch, the waitlist injection on the PDP, or reverts the
+ * out-of-stock pill copy in getStockStatus.
  *
  * Run with: node --test tests/contact-button-may2026.test.js
  */
@@ -170,17 +175,52 @@ test('§3 PDP "Call to Order" tel: CTA is replaced by Contact us', () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// §4 — getStockStatus pill text drops the duplicate "Contact Us"
+// §4 — getStockStatus OOS pill spells out "Contact Us For Stock Enquiries"
 // ─────────────────────────────────────────────────────────────────────────────
 
-test('§4 getStockStatus returns "Out of stock" — never "Contact Us" — for OOS', () => {
+test('§4 OOS_STOCK_LABEL constant reads exactly "Contact Us For Stock Enquiries"', () => {
+    // stock-enquiry-may2026 — the OOS pill copy is centralised in one
+    // constant so every surface (PDP, products grid, shop, ribbons) that
+    // calls getStockStatus() re-labels in lockstep.
+    const labelM = API_CODE.match(/OOS_STOCK_LABEL\s*=\s*['"]([^'"]+)['"]/);
+    assert.ok(labelM, 'api.js must declare an OOS_STOCK_LABEL constant');
+    assert.equal(labelM[1], 'Contact Us For Stock Enquiries',
+        'OOS pill copy must read exactly "Contact Us For Stock Enquiries"');
+});
+
+test('§4 getStockStatus surfaces OOS_STOCK_LABEL — never the bare "Out of stock"', () => {
     const m = API_CODE.match(/function getStockStatus\([^)]*\)\s*\{([\s\S]*?)\n\}/);
     assert.ok(m, 'expected to find getStockStatus in api.js');
     const body = m[1];
-    assert.doesNotMatch(body, /text:\s*['"]Contact Us['"]/,
-        'getStockStatus must not return text "Contact Us" — that duplicates the new CTA button');
-    assert.match(body, /text:\s*['"]Out of stock['"]/,
-        'getStockStatus must surface OOS pills as "Out of stock"');
+    // All three OOS branches — stock_status==='contact_us', ==='out_of_stock',
+    // and the !inStock fallback — must return the contact-us pill carrying
+    // OOS_STOCK_LABEL.
+    const oosReturns = body.match(/class:\s*['"]contact-us['"],\s*text:\s*OOS_STOCK_LABEL/g) || [];
+    assert.equal(oosReturns.length, 3,
+        'all 3 OOS branches must return { class: "contact-us", text: OOS_STOCK_LABEL }');
+    // The stale bare pill copy must be gone.
+    assert.doesNotMatch(body, /text:\s*['"]Out of stock['"]/i,
+        'getStockStatus must no longer surface the bare "Out of stock" pill');
+});
+
+test('§4 OOS pill copy stays distinct from the short "Contact us" button', () => {
+    // The pill states the action ("Contact Us For Stock Enquiries"); the
+    // button IS the action and keeps the short "Contact us" label. Guard
+    // against a regression that collapses the pill to the button label.
+    const m = API_CODE.match(/function getStockStatus\([^)]*\)\s*\{([\s\S]*?)\n\}/);
+    const body = m[1];
+    assert.doesNotMatch(body, /text:\s*['"]Contact us['"]/,
+        'getStockStatus pill must not collapse to the bare "Contact us" button label');
+    // The button copy itself is unchanged — still present in every card renderer.
+    for (const [label, code] of [
+        ['products.js',            PRODUCTS_CODE],
+        ['shop-page.js',           SHOP_CODE],
+        ['product-detail-page.js', PDP_CODE],
+        ['ribbons-page.js',        RIBBONS_CODE],
+    ]) {
+        assert.match(code, /Contact us/,
+            `${label}: the OOS CTA button must keep its short "Contact us" label`);
+    }
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -256,4 +296,34 @@ test('§7 no card-render path branches on product.waitlist_available', () => {
         assert.doesNotMatch(code, /\.waitlist_available\b/,
             `${label}: must not branch on .waitlist_available — spec says ignore that field`);
     }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// §8 — CSS: the long OOS pill copy can wrap inside the card footer row
+// ─────────────────────────────────────────────────────────────────────────────
+
+test('§8 .product-card__stock--contact-us can shrink + wrap (no row overflow)', () => {
+    // stock-enquiry-may2026 — "Contact Us For Stock Enquiries" is ~3× the
+    // length of the old "Out of stock". The pill MUST stay shrinkable
+    // (min-width:0 + flex shrink) so it wraps to a second line instead of
+    // pushing the footer row past the card's content edge.
+    const css = READ(CSS('components.css'));
+    const idx = css.indexOf('.product-card__stock--contact-us');
+    assert.ok(idx !== -1, 'expected a .product-card__stock--contact-us rule in components.css');
+    const open  = css.indexOf('{', idx);
+    const close = css.indexOf('}', open);
+    const body  = css.slice(open + 1, close);
+    assert.match(body, /min-width\s*:\s*0/,
+        'OOS pill must keep min-width:0 so it can shrink below intrinsic width');
+    assert.match(body, /flex\s*:/,
+        'OOS pill must declare a flex shorthand so it shrinks inside the footer row');
+});
+
+test('§8 the stock-prefixed pill class is also styled (products.js renderer)', () => {
+    // products.js emits `stock-${class}` → `stock-contact-us`, while
+    // shop-page.js / ribbons-page.js emit `product-card__stock--contact-us`.
+    // The wrapping rule must cover both class forms.
+    const css = READ(CSS('components.css'));
+    assert.match(css, /\.product-card__stock\.stock-contact-us/,
+        'components.css must style the products.js `stock-contact-us` class form too');
 });

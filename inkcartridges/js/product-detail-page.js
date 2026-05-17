@@ -360,42 +360,19 @@
             // Canonical URL
             document.getElementById('canonical-url').href = canonicalUrl;
 
-            // Schema.org Product structured data — prefer API-provided JSON-LD.
-            // Spec §5.6: dedicated `/api/products/:sku/jsonld` is canonical; fetch it
-            // through Schema.injectProduct as a belt-and-braces fallback when the
-            // embedded `seo.jsonLd` blob is missing or stale.
-            if (typeof Schema !== 'undefined' && Schema.injectProduct && info.sku) {
-                Schema.injectProduct(info.sku);
-            }
-
-            if (seo.jsonLd && typeof seo.jsonLd === 'object' && seo.jsonLd.product_schema) {
-                // API returns separate schema objects — embed each as its own script tag
-                const schemaEl = document.getElementById('product-schema');
-                if (schemaEl) {
-                    schemaEl.textContent = JSON.stringify(seo.jsonLd.product_schema);
-                }
-                // Embed additional schemas (faq, organization, local_business, website)
-                const extraSchemas = ['faq_schema', 'organization_schema', 'local_business_schema', 'website_schema'];
-                extraSchemas.forEach(key => {
-                    if (seo.jsonLd[key]) {
-                        const script = document.createElement('script');
-                        script.type = 'application/ld+json';
-                        script.textContent = JSON.stringify(seo.jsonLd[key]);
-                        document.head.appendChild(script);
-                    }
-                });
-                // Store FAQ data for visible accordion rendering
-                if (seo.jsonLd.faq_schema) {
-                    this._faqSchema = seo.jsonLd.faq_schema;
-                }
-            } else if (seo.jsonLd) {
-                // Legacy format — single JSON-LD blob
-                const schemaEl = document.getElementById('product-schema');
-                if (schemaEl) {
-                    schemaEl.textContent = typeof seo.jsonLd === 'string' ? seo.jsonLd : JSON.stringify(seo.jsonLd);
-                }
-            } else {
-                this.updateProductSchema(info, price);
+            // Structured data (Product / BreadcrumbList / FAQPage) is deliberately
+            // NOT emitted client-side. See marketing-audit-may-2026.md §4 and the
+            // comment block in html/product/index.html: the backend prerender
+            // layer (/api/prerender/product/:sku) is the single source of product
+            // JSON-LD for every Google crawler. A second client-side copy created
+            // two Product nodes with different @ids on the same URL — a Google
+            // Merchant Center "Unacceptable Business Practices" trigger.
+            //
+            // `seo.jsonLd.faq_schema` is still read — but only to populate the
+            // *visible* FAQ accordion (renderFaqAccordion below). That is on-page
+            // UI, not JSON-LD markup, so it carries no duplication risk.
+            if (seo.jsonLd && typeof seo.jsonLd === 'object' && seo.jsonLd.faq_schema) {
+                this._faqSchema = seo.jsonLd.faq_schema;
             }
 
             // Breadcrumb
@@ -427,26 +404,9 @@
 
             document.getElementById('breadcrumb-product').textContent = info.displayName;
 
-            // BreadcrumbList JSON-LD — prefer seo.breadcrumbJsonLd if provided
-            const breadcrumbSchemaEl = document.getElementById('breadcrumb-schema');
-            if (breadcrumbSchemaEl) {
-                if (seo.breadcrumbJsonLd) {
-                    breadcrumbSchemaEl.textContent = typeof seo.breadcrumbJsonLd === 'string'
-                        ? seo.breadcrumbJsonLd
-                        : JSON.stringify(seo.breadcrumbJsonLd);
-                } else {
-                    const breadcrumbSchema = {
-                        "@context": "https://schema.org",
-                        "@type": "BreadcrumbList",
-                        "itemListElement": [
-                            { "@type": "ListItem", "position": 1, "name": "Home", "item": "https://www.inkcartridges.co.nz" },
-                            { "@type": "ListItem", "position": 2, "name": `${info.brandName} Ink Cartridges`, "item": `https://www.inkcartridges.co.nz/shop?brand=${brandSlug}` },
-                            { "@type": "ListItem", "position": 3, "name": info.displayName }
-                        ]
-                    };
-                    breadcrumbSchemaEl.textContent = JSON.stringify(breadcrumbSchema);
-                }
-            }
+            // BreadcrumbList JSON-LD is intentionally not emitted here — the
+            // backend prerender layer owns it (marketing-audit-may-2026.md §4).
+            // The visible breadcrumb nav above is the only client-side breadcrumb.
 
             // Product badge — hidden; genuine/compatible is already in the title
             const badge = document.getElementById('product-badge');
@@ -485,6 +445,25 @@
                      <span class="product-detail__savings">Save ${formatPrice(savingsAmount)}${_isPack ? '' : ` (${savingsPct}%)`}</span>`);
             }
 
+            // Cost-per-page value anchor — marketing-audit-may-2026.md §1.1.
+            // The strongest persuasion lever for B2B / office buyers: it
+            // reframes a $X cartridge as a fraction of a cent per printed
+            // page. The backend emits `cost_per_page_display` (a pre-formatted
+            // string — "3.0¢ per page" or "$0.123 per page") ONLY when the
+            // maths is meaningful: a single cartridge with a real page yield.
+            // It is deliberately absent on value packs and ml-rated bottles.
+            // When absent we render nothing — never compute it client-side
+            // (page yield / pack semantics live with the backend). Painted in
+            // the price accent colour and placed directly under the price,
+            // never buried in the spec table.
+            if (info.cost_per_page_display) {
+                const pricingEl = document.querySelector('.product-info__pricing');
+                if (pricingEl) {
+                    pricingEl.insertAdjacentHTML('beforeend',
+                        `<span class="product-cost-per-page" data-testid="cost-per-page">${Security.escapeHtml(String(info.cost_per_page_display))}</span>`);
+                }
+            }
+
             // GST trust signal lives in the static "Incl. GST" badge rendered
             // beside the price (html/product/index.html). The dollar breakdown
             // was redundant alongside the badge, so it is intentionally not
@@ -517,6 +496,29 @@
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">${stockIcons[stockStatus.class] || stockIcons['in-stock']}</svg>
                 ${Security.escapeHtml(stockStatus.text)}
             </span>`;
+
+            // Stock-urgency cue — marketing-audit-may-2026.md §1.2. The backend
+            // emits `stock_urgency` ONLY for genuine products: compatibles are
+            // pinned at stock_quantity = 100 by business rule, so an urgency
+            // label there would be a lie. 'low' (1–4 units left) earns the
+            // labelled pill ("Only N left") AND flips the buy box to an
+            // attention-red treatment; 'medium' (5–14) shows the calmer "Low
+            // stock" label with NO box restyle — urgency without alarm.
+            // 'high' / 'out' / an absent field render nothing. We re-gate on
+            // `source === 'genuine'` defensively even though the backend
+            // already does, so a future endpoint that leaks the field onto a
+            // compatible row still can't paint a false scarcity claim.
+            const stockUrgency = info.stock_urgency;
+            if (info.source === 'genuine'
+                && (stockUrgency === 'low' || stockUrgency === 'medium')
+                && info.stock_urgency_label) {
+                stockEl.insertAdjacentHTML('beforeend',
+                    `<span class="stock-urgency stock-urgency--${stockUrgency}" data-testid="stock-urgency">${Security.escapeHtml(String(info.stock_urgency_label))}</span>`);
+                if (stockUrgency === 'low') {
+                    const buyBox = document.querySelector('.product-info__actions');
+                    if (buyBox) buyBox.classList.add('product-info__actions--urgent');
+                }
+            }
 
             // Out-of-stock CTA per contact-button-may2026.md — both
             // 'out-of-stock' and 'contact-us' classes collapse into one
@@ -614,6 +616,27 @@
                 }
             }
 
+            // OEM-verified trust badge — marketing-audit-may-2026.md §1.3.
+            // The backend sets `is_oem_verified` when a genuine product's photo
+            // cleared the 4-layer Claude Vision check (blocklist → filename
+            // match → edge density → vision, verdict VERIFIED_BOX /
+            // VERIFIED_PRODUCT). Surfaced as a small badge under the gallery,
+            // it counters the Trade Me / AliExpress fake-cartridge anxiety
+            // that suppresses genuine-toner conversion. The verifier never
+            // runs on compatibles, so the field is absent there — we render
+            // the badge only on a strict `=== true`, never on a falsy/missing
+            // value, so "unverified" never reads as "fake".
+            if (info.is_oem_verified === true) {
+                const galleryEl = document.querySelector('.product-gallery');
+                if (galleryEl) {
+                    galleryEl.insertAdjacentHTML('beforeend',
+                        `<div class="oem-verified" data-testid="oem-verified" title="This product image was verified as a genuine manufacturer product by automated image analysis.">
+                            <svg class="oem-verified__icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 12l2 2 4-4"/><circle cx="12" cy="12" r="10"/></svg>
+                            <span>Verified genuine product image</span>
+                        </div>`);
+                }
+            }
+
             // Compatible devices: printers/typewriters
             this.renderCompatiblePrinters(info);
 
@@ -669,6 +692,129 @@
             }
         },
 
+        /**
+         * Build a printer-hub deep link — marketing-audit-may-2026.md §2.
+         *
+         * The canonical printer hub is `/shop?brand=<brand_slug>&printer_slug=
+         * <slug>`. Both halves now arrive on the API (`compatible_printers[]`
+         * entries carry `slug` + `brand_slug`; `compatible_printers_grouped`
+         * carries `brand_slug` + per-model `slug`), so the storefront no
+         * longer has to guess them from the display name.
+         *
+         * When a usable slug pair is missing (legacy row), we degrade to a
+         * `/shop?q=<name>` search so the link still resolves to something
+         * sensible rather than 404-ing.
+         */
+        _printerHubHref(entry) {
+            if (!entry) return '/shop';
+            const brandSlug = entry.brand_slug
+                || (entry.brand ? String(entry.brand).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') : '');
+            const name = entry.full_name || entry.name
+                || (entry.brand && entry.model_name ? `${entry.brand} ${entry.model_name}` : entry.model_name)
+                || '';
+            if (brandSlug && entry.slug) {
+                return `/shop?brand=${encodeURIComponent(brandSlug)}&printer_slug=${encodeURIComponent(entry.slug)}`;
+            }
+            return `/shop?q=${encodeURIComponent(name || brandSlug)}`;
+        },
+
+        /**
+         * Fast path — render the backend's `compatible_printers_grouped`
+         * (marketing-audit-may-2026.md §1.4). Collapses a 40-line printer
+         * dump into one "Fits <Brand> — model, model, model + N more" row
+         * per brand, brand-sorted descending by `total`, each of the first
+         * three models deep-linked to its printer hub.
+         *
+         * @returns {boolean} true when it rendered (caller then skips the
+         *   flat-list and Supabase fallbacks).
+         */
+        _renderGroupedPrinterCompat(info) {
+            // Ribbons keep their own `/ribbons?printer_model=` routing — the
+            // grouped contract is an ink/toner printer-hub feature.
+            if (info.category === 'ribbon') return false;
+            const groups = Array.isArray(info.compatible_printers_grouped)
+                ? info.compatible_printers_grouped.filter(g => g && g.brand)
+                : [];
+            if (!groups.length) return false;
+
+            const rows = groups.map(group => {
+                const models = Array.isArray(group.top_models) ? group.top_models.filter(m => m && m.full_name) : [];
+                const linked = models.map(m => {
+                    const href = this._printerHubHref({ slug: m.slug, brand_slug: group.brand_slug, brand: group.brand, full_name: m.full_name });
+                    return `<a href="${Security.escapeAttr(href)}" class="printer-link">${Security.escapeHtml(m.full_name)}</a>`;
+                }).join(', ');
+                const total = Number(group.total) || models.length;
+                const remaining = total - models.length;
+                // "+ N more" is plain text by design (audit §1.4 renders it as
+                // such): the three linked models already give crawlable hub
+                // links; an unanchored count avoids implying a dead link.
+                const more = remaining > 0
+                    ? ` <span class="compat-group__more">+${remaining} more</span>`
+                    : '';
+                return `<li class="compat-group">
+                    <span class="compat-group__brand">Fits ${Security.escapeHtml(group.brand)}</span>
+                    <span class="compat-group__models">${linked || Security.escapeHtml(group.brand + ' printers')}</span>${more}
+                </li>`;
+            }).join('');
+
+            const html = `
+                <div class="product-printers-wrap">
+                    <div class="container">
+                        <div class="product-printers-banner product-printers-banner--grouped" data-testid="compat-grouped">
+                            <strong class="product-printers-banner__label">For use in your printer</strong>
+                            <ul class="compat-groups">${rows}</ul>
+                        </div>
+                    </div>
+                </div>`;
+            const insertTarget = document.querySelector('.related-products');
+            if (insertTarget) {
+                insertTarget.insertAdjacentHTML('beforebegin', html);
+                return true;
+            }
+            return false;
+        },
+
+        /**
+         * Fast path — render the flat `compatible_printers[]` array now that
+         * each entry carries `slug` + `brand_slug` (marketing-audit-may-2026.md
+         * §2). Skips the Supabase round-trip and the name-derived slug guess.
+         *
+         * @returns {boolean} true when it rendered.
+         */
+        _renderFlatPrinterCompat(info) {
+            if (info.category === 'ribbon') return false;
+            const printers = Array.isArray(info.compatible_printers)
+                ? info.compatible_printers.filter(p => p && (p.full_name || p.model_name || p.name))
+                : [];
+            // Only take this path when at least one entry carries the new
+            // slug data — otherwise the Supabase fallback (which also fans
+            // out to sibling SKUs) gives a better result.
+            if (!printers.length || !printers.some(p => p.slug)) return false;
+
+            const links = printers.map(p => {
+                const label = p.full_name || p.name
+                    || (p.brand && p.model_name ? `${p.brand} ${p.model_name}` : p.model_name) || '';
+                const href = this._printerHubHref(p);
+                return `<a href="${Security.escapeAttr(href)}" class="printer-link">${Security.escapeHtml(label)}</a>`;
+            }).join(', ');
+
+            const html = `
+                <div class="product-printers-wrap">
+                    <div class="container">
+                        <div class="product-printers-banner" data-testid="compat-flat">
+                            <strong>For Use In:</strong>
+                            <span>${links}</span>
+                        </div>
+                    </div>
+                </div>`;
+            const insertTarget = document.querySelector('.related-products');
+            if (insertTarget) {
+                insertTarget.insertAdjacentHTML('beforebegin', html);
+                return true;
+            }
+            return false;
+        },
+
         async renderCompatiblePrinters(info) {
             // If product has admin-provided compatible devices HTML, render into left column
             if (info.compatible_devices_html) {
@@ -686,6 +832,13 @@
                 return;
             }
 
+            // Fast path 1 — backend grouped compatibility (audit §1.4).
+            if (this._renderGroupedPrinterCompat(info)) return;
+            // Fast path 2 — flat compatible_printers[] with slug/brand_slug (§2).
+            if (this._renderFlatPrinterCompat(info)) return;
+
+            // Fallback — legacy responses carrying neither field: resolve the
+            // printer list from Supabase, fanning out to sibling SKUs.
             try {
                 // Try current product SKU first
                 let printers = await this._fetchPrinters(info.sku);
@@ -1226,137 +1379,13 @@
             return parts.join(' ');
         },
 
-        // Google product type taxonomy mapping
-        _googleProductType(productType) {
-            const map = {
-                'ink_cartridge': 'Office Supplies > Ink & Toner > Ink Cartridges',
-                'ink_bottle': 'Office Supplies > Ink & Toner > Ink Cartridges',
-                'toner_cartridge': 'Office Supplies > Ink & Toner > Toner Cartridges',
-                'drum_unit': 'Office Supplies > Ink & Toner > Drums & Imaging Units',
-                'printer_ribbon': 'Office Supplies > Ink & Toner > Printer Ribbons',
-                'typewriter_ribbon': 'Office Supplies > Ink & Toner > Printer Ribbons',
-                'correction_tape': 'Office Supplies > Ink & Toner > Printer Ribbons',
-                'label_tape': 'Office Supplies > Labels & Tapes > Label Tapes',
-                'fax_film': 'Office Supplies > Ink & Toner > Fax Supplies',
-                'fax_film_refill': 'Office Supplies > Ink & Toner > Fax Supplies',
-                'photo_paper': 'Office Supplies > Paper > Photo Paper',
-            };
-            return map[productType] || 'Office Supplies > Ink & Toner > Ink Cartridges';
-        },
-
-        // Update Schema.org Product structured data
-        updateProductSchema(info, price) {
-            const slug = info.slug || info.sku.toLowerCase();
-            const canonicalUrl = info.canonical_url || `https://www.inkcartridges.co.nz/products/${slug}/${info.sku}`;
-            // Use the centralized helper so the schema's shippingRate stays
-            // in sync with the on-page pill and the cart's free-shipping
-            // threshold — Google penalises inconsistencies between markup
-            // and visible content.
-            const freeShipping = qualifiesForFreeShipping({ retail_price: price });
-            const schema = {
-                "@context": "https://schema.org",
-                "@type": "Product",
-                "name": info.displayName,
-                "description": this.generateMetaDescription(info),
-                "sku": info.sku,
-                "mpn": info.manufacturer_part_number || info.sku,
-                "brand": {
-                    "@type": "Brand",
-                    "name": info.brandName
-                },
-                "category": this._googleProductType(info.product_type),
-                "offers": {
-                    "@type": "Offer",
-                    "url": canonicalUrl,
-                    "priceCurrency": "NZD",
-                    "price": price.toFixed(2),
-                    "itemCondition": "https://schema.org/NewCondition",
-                    "availability": "https://schema.org/InStock",
-                    "seller": {
-                        "@type": "Organization",
-                        "name": "InkCartridges.co.nz"
-                    },
-                    "shippingDetails": {
-                        "@type": "OfferShippingDetails",
-                        "shippingDestination": {
-                            "@type": "DefinedRegion",
-                            "addressCountry": "NZ"
-                        },
-                        "shippingRate": {
-                            "@type": "MonetaryAmount",
-                            "value": freeShipping ? "0" : "7",
-                            "currency": "NZD"
-                        },
-                        "deliveryTime": {
-                            "@type": "ShippingDeliveryTime",
-                            "transitTime": {
-                                "@type": "QuantitativeValue",
-                                "minValue": 1,
-                                "maxValue": 4,
-                                "unitCode": "DAY"
-                            }
-                        }
-                    },
-                    "hasMerchantReturnPolicy": {
-                        "@type": "MerchantReturnPolicy",
-                        "applicableCountry": "NZ",
-                        "returnPolicyCategory": "https://schema.org/MerchantReturnFiniteReturnWindow",
-                        "merchantReturnDays": 30,
-                        "returnMethod": "https://schema.org/ReturnByMail"
-                    }
-                }
-            };
-
-            // Add GTIN-13 (barcode) if available
-            if (info.barcode) {
-                schema.gtin13 = info.barcode;
-            }
-
-            // Add image if available
-            if (info.image_url) {
-                schema.image = info.image_url;
-            }
-
-            // Add color if available
-            if (info.color) {
-                schema.color = info.color;
-            }
-
-            // Add compatible printers (isCompatibleWith)
-            if (info.compatible_printers && info.compatible_printers.length > 0) {
-                schema.isCompatibleWith = info.compatible_printers.map(p => ({
-                    "@type": "Product",
-                    "name": p.full_name || p.name || p.model_name
-                }));
-            }
-
-            // Add page yield as additional property
-            const yield_ = info.pageYield || info.page_yield;
-            if (yield_) {
-                schema.additionalProperty = [{
-                    "@type": "PropertyValue",
-                    "name": "Page Yield",
-                    "value": String(yield_)
-                }];
-            }
-
-            // Add aggregateRating if product has reviews
-            if (info.review_count > 0) {
-                schema.aggregateRating = {
-                    "@type": "AggregateRating",
-                    "ratingValue": String(info.average_rating),
-                    "reviewCount": String(info.review_count),
-                    "bestRating": "5",
-                    "worstRating": "1"
-                };
-            }
-
-            // Update the script tag
-            const schemaEl = document.getElementById('product-schema');
-            if (schemaEl) {
-                schemaEl.textContent = JSON.stringify(schema, null, 2);
-            }
-        },
+        // NOTE: `_googleProductType` and `updateProductSchema` were removed in
+        // the May 2026 marketing audit (marketing-audit-may-2026.md §4). They
+        // built and injected a client-side Product JSON-LD blob; the backend
+        // prerender layer is now the single source of product structured data,
+        // so a client-side copy only risked duplicate Product nodes. Recover
+        // from git history if ever needed — but do not re-introduce
+        // client-side Product / BreadcrumbList / FAQPage JSON-LD emission.
 
 
         // ── Reviews ──────────────────────────────────────────

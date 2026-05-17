@@ -180,8 +180,9 @@ test('shop.html bumps the search.css cache key so the pager CSS lands', () => {
     const shopHtml = fs.readFileSync(path.join(ROOT, 'inkcartridges', 'html', 'shop.html'), 'utf8');
     // The cache key rides forward with every CSS rollout. It was
     // search-pagination-may2026 when the pager shipped; the 4-line title
-    // clamp release (May 2026) bumped it again. The guarantee here is
+    // clamp release bumped it; the out-of-stock pill copy release
+    // (stock-enquiry-may2026) bumped it again. The guarantee here is
     // simply that shop.html requests the *current* search.css build.
-    assert.match(shopHtml, /search\.css\?v=4line-clamp-may2026/);
+    assert.match(shopHtml, /search\.css\?v=stock-enquiry-may2026/);
     assert.doesNotMatch(shopHtml, /search\.css\?v=search-pagination-may2026/);
 });

@@ -7,7 +7,8 @@ import {
   STRIPE_RATE_DERIVE, STRIPE_FIXED_DERIVE, GST_FRACTION_OF_GROSS,
   bucketOperatingExpenses, distributeCogsByRevenue, assembleBucketExpense,
   sumTrendTotals, bucketCogsFromOrders, kpiCogsInclGst,
-  expandRecurringExpenses, isRevenueOrder,
+  expandRecurringExpenses, isRevenueOrder, deriveKpisFromOrders,
+  cogsIsKnown,
 } from '../utils/trend-math.js';
 import { Charts } from '../components/charts.js';
 
@@ -18,6 +19,7 @@ let _container = null;
 let _trendData = null;       // bucketed historical series keyed to current filter
 let _forecastData = null;    // { historical, projected } for forecast chart
 let _trendMetric = 'revenue';
+let _kpi = { cur: {}, derived: false };  // resolved KPI "current" block (RPC or order-derived fallback)
 
 // ---------- helpers ----------
 
@@ -62,6 +64,21 @@ function firstArray(obj, keys) {
 function safeDiv(a, b) {
   if (!b || b === 0 || a == null) return null;
   return a / b;
+}
+
+// Resolve the KPI "current" block once per render. When the
+// analytics_kpi_summary RPC is healthy we use it verbatim; when it is down
+// (recurring ERR-010 — the RPC's GRANT EXECUTE gets dropped by backend
+// redeploys) we reconstruct Revenue/Orders/Gross Profit from the raw orders
+// REST feed so the dashboard self-heals instead of showing "—" everywhere.
+//
+// Returns { cur, derived }: `cur` is shaped like the RPC's current block;
+// `derived` is true when `cur` came from the order-feed fallback.
+function resolveKpiCurrent(d) {
+  const rpcCur = d.kpis?.current ?? {};
+  if (rpcCur.revenue != null) return { cur: rpcCur, derived: false };
+  const fallback = deriveKpisFromOrders(d.rawOrders);
+  return fallback ? { cur: fallback, derived: true } : { cur: {}, derived: false };
 }
 
 // Keep only orders that produced a cleared charge — see `isRevenueOrder` /
@@ -160,6 +177,10 @@ function render(d) {
     return;
   }
 
+  // Resolve the KPI block before anything reads it — buildTrendSeries,
+  // renderKpiStrip and renderSidePanel all depend on it, and all must agree
+  // on whether we're showing RPC numbers or the order-derived fallback.
+  _kpi          = resolveKpiCurrent(d);
   _trendData    = buildTrendSeries(d);
   _forecastData = buildForecastSeries(d);
 
@@ -197,8 +218,8 @@ function render(d) {
 // ---------- KPI strip ----------
 
 function renderKpiStrip(d) {
-  const cur  = d.kpis?.current  ?? {};
-  const prev = d.kpis?.previous ?? {};
+  const cur  = _kpi.cur;
+  const prev = d.kpis?.previous ?? {};   // RPC-only; absent on the fallback path (no deltas)
   const cc   = d.custStats?.current  ?? {};
   const cp   = d.custStats?.previous ?? {};
 
@@ -281,6 +302,30 @@ function renderKpiStrip(d) {
     html += '</div>';
   }
   html += '</div>';
+
+  // When the KPI strip is running on the order-derived fallback, say so
+  // plainly — the numbers are real but reconstructed. WHICH numbers got
+  // reconstructed depends on the order feed: Revenue/Orders/Avg Order Value
+  // always rebuild, but Gross Profit + Gross Margin only when every counted
+  // order carried supplier cost (deriveKpisFromOrders returns
+  // gross_profit:null otherwise). The banner must promise EXACTLY what
+  // rendered — never claim "Gross Margin" on a strip that shows it as "—".
+  if (_kpi.derived) {
+    const profitReconstructed = cur.gross_profit != null;
+    const reconstructedList = profitReconstructed
+      ? '<strong>Revenue</strong>, <strong>Orders</strong>, <strong>Avg Order Value</strong>, <strong>Gross Profit</strong> and <strong>Gross Margin</strong>'
+      : '<strong>Revenue</strong>, <strong>Orders</strong> and <strong>Avg Order Value</strong>';
+    const unavailableList = profitReconstructed
+      ? '<strong>New Customers</strong>, <strong>Returning %</strong> and <strong>Refund Rate</strong>'
+      : '<strong>Gross Profit</strong>, <strong>Gross Margin</strong>, <strong>New Customers</strong>, <strong>Returning %</strong> and <strong>Refund Rate</strong>';
+    html += `
+      <div class="admin-kpi-fallback" role="status">
+        <span class="admin-kpi-fallback__icon" aria-hidden="true">⚠</span>
+        <span>Live analytics service is unavailable — ${reconstructedList}
+        below are reconstructed from order records. ${unavailableList} need the
+        analytics service and return automatically once it is restored.</span>
+      </div>`;
+  }
   return html;
 }
 
@@ -335,13 +380,16 @@ function renderForecastCard(d) {
   const summary = forecastRevenue != null ? formatPrice(forecastRevenue) : MISSING;
 
   // Projected net profit = forecast revenue × the window's net-profit margin.
+  // netMargin is null when COGS is unknown (see buildForecastSeries) — rather
+  // than print a profit built on an incomplete margin, we say why it's absent.
   const netMargin = _forecastData?.netMargin ?? null;
+  const cogsKnown = _forecastData?.cogsKnown !== false;
   const forecastProfit = (forecastRevenue != null && netMargin != null)
     ? forecastRevenue * netMargin
     : null;
   const profitStr = forecastProfit != null
     ? `${forecastProfit >= 0 ? '+' : '−'}${formatPrice(Math.abs(forecastProfit))} profit`
-    : '';
+    : (cogsKnown ? '' : 'profit pending cost data');
 
   return `
     <div class="admin-dash__cell--6 admin-card">
@@ -377,7 +425,7 @@ function renderSidePanel(d) {
   const cashOnHand   = d.runway?.cash_on_hand ?? d.runway?.cash ?? null;
   const burnRate     = d.runway?.burn_rate ?? d.runway?.monthly_burn ?? null;
 
-  const cur = d.kpis?.current ?? {};
+  const cur = _kpi.cur;   // RPC current block, or order-derived fallback
   const grossMarginPct = cur.revenue && cur.gross_profit != null
     ? (cur.gross_profit / cur.revenue) * 100
     : null;
@@ -603,7 +651,11 @@ function buildTrendSeries(d) {
   // convention (`revenue_ex_gst − cost_incl_gst`). `kpiCogsInclGst` recovers
   // the incl-GST cost as `revenue_gross/1.15 − gross_profit` — no extra
   // gross-up (see the helper's comment for why × 1.15 was a bug).
-  const kpiCur = d.kpis?.current || {};
+  // Use the resolved KPI block (RPC, or the order-derived fallback) so COGS is
+  // reconstructed too whenever the orders carry supplier-cost data. When they
+  // don't, gross_profit is null and kpiCogsInclGst returns 0 — COGS stays
+  // honestly blank rather than guessed.
+  const kpiCur = _kpi.cur;
   const totalCogsInclGst = kpiCogsInclGst(kpiCur.revenue, kpiCur.gross_profit);
   const hasAnyPnlCogs = buckets.some(b => b.hasPnlCogs);
   if (!hasAnyPnlCogs) {
@@ -652,12 +704,30 @@ function buildTrendSeries(d) {
   const expandedRows = expandRecurringExpenses(expenseRows, firstStart, windowEndMs);
   bucketOperatingExpenses(buckets, expandedRows, indexFor);
 
-  // 6. Assemble each bucket's final expense components. Order of preference:
+  // 6. Tag every bucket with whether COGS is genuinely KNOWN for this window.
+  // When it isn't (analytics RPC down AND the bulk-orders feed carried no
+  // per-item supplier cost) `cogsTotal` sits at 0 only as a placeholder —
+  // renderTrendTotals must surface that honestly instead of folding the
+  // missing cost into a confident green "Profit" figure. The flag is
+  // window-wide: every bucket carries the same value so sumTrendTotals can
+  // read it off any of them.
+  const windowRevenue = buckets.reduce((s, b) => s + (b.revenue || 0), 0);
+  const windowCogsKnown = cogsIsKnown({
+    windowRevenue,
+    hasPnlCogs: hasAnyPnlCogs,
+    hasOrderCogs: buckets.some(b => b.hasOrderCogs),
+    kpiCogsTotal: totalCogsInclGst,
+  });
+
+  // 7. Assemble each bucket's final expense components. Order of preference:
   //    cogs   → P&L per-period if populated, else revenue-distributed KPI cogs
   //    opex   → P&L per-period if populated, else logged expenses (date-bucketed)
   //    stripe → P&L per-period if populated, else derive from revenue + orders
   //    gst    → P&L per-period if populated, else derive from gross revenue
-  for (const b of buckets) assembleBucketExpense(b);
+  for (const b of buckets) {
+    b.cogsKnown = windowCogsKnown;
+    assembleBucketExpense(b);
+  }
 
   return buckets;
 }
@@ -668,9 +738,57 @@ function renderTrendTotals(series) {
   if (!series.length) { el.innerHTML = ''; return; }
 
   const totals = sumTrendTotals(series);
+  const cogsKnown = totals.cogsKnown !== false;
   const net = totals.revenue - totals.expenses;
   const isLoss = net < 0;
   const hasNoOpex = totals.opex === 0;
+
+  const revenueChip = `
+    <span class="admin-trend-totals__chip admin-trend-totals__chip--revenue">
+      Revenue <strong>${esc(formatPrice(totals.revenue))}</strong>
+    </span>`;
+
+  // COGS unknown — the analytics RPC is down and the order feed carried no
+  // per-item supplier cost, so `totals.cogs` is a 0 placeholder, not a real
+  // zero. `net` here omits product cost entirely and overstates true profit,
+  // so it is shown as a NEUTRAL "Net excl. COGS" figure — never a green
+  // "Profit" chip — the COGS breakdown reads "—", and a warning explains why.
+  // This mirrors the KPI strip, which refuses a Gross Profit card on the same
+  // data rather than guessing.
+  if (!cogsKnown) {
+    const knownExpensePct = totals.revenue > 0
+      ? Math.min(100, (totals.expenses / totals.revenue) * 100)
+      : 0;
+    const unknownPct = Math.max(0, 100 - knownExpensePct);
+    const netSign = net < 0 ? '−' : '+';
+    const breakdown = `COGS — · Opex ${formatPrice(totals.opex)} · Stripe ${formatPrice(totals.stripe)} · GST ${formatPrice(totals.gst)}`;
+    el.innerHTML = `
+      <div class="admin-trend-totals__row">
+        ${revenueChip}
+        <span class="admin-trend-totals__chip admin-trend-totals__chip--expense" title="${esc(breakdown)}">
+          Known expenses <strong>${esc(formatPrice(totals.expenses))}</strong>
+        </span>
+        <span class="admin-trend-totals__chip admin-trend-totals__chip--unknown" title="Excludes product cost (COGS) — see note below">
+          Net excl. COGS <strong>${netSign}${esc(formatPrice(Math.abs(net)))}</strong>
+        </span>
+      </div>
+      <div class="admin-trend-totals__bar" role="img" aria-label="Revenue split into known expenses and an unknown-COGS remainder for ${esc(rangeLabel())}">
+        <div class="admin-trend-totals__seg admin-trend-totals__seg--expense" style="width:${knownExpensePct.toFixed(2)}%"></div>
+        <div class="admin-trend-totals__seg admin-trend-totals__seg--unknown" style="width:${unknownPct.toFixed(2)}%"></div>
+      </div>
+      <div class="admin-trend-totals__breakdown">${esc(breakdown)}</div>
+      <div class="admin-trend-totals__hint admin-trend-totals__hint--warn">
+        <span aria-hidden="true">⚠</span>
+        Product cost (COGS) can't be reconstructed for this window — the live
+        analytics service is unavailable and the order feed carries no supplier
+        costs. <strong>Net excl. COGS</strong> counts only Stripe, GST and
+        logged operating expenses, so it overstates true profit. The real
+        profit figure returns automatically once the analytics service is
+        restored.
+      </div>
+    `;
+    return;
+  }
 
   // Horizontal bar layout:
   // - profit case: [pink expenses | green profit] = revenue (100%)
@@ -711,9 +829,7 @@ function renderTrendTotals(series) {
 
   el.innerHTML = `
     <div class="admin-trend-totals__row">
-      <span class="admin-trend-totals__chip admin-trend-totals__chip--revenue">
-        Revenue <strong>${esc(formatPrice(totals.revenue))}</strong>
-      </span>
+      ${revenueChip}
       <span class="admin-trend-totals__chip admin-trend-totals__chip--expense" title="${esc(breakdown)}">
         Expenses <strong>${esc(formatPrice(totals.expenses))}</strong>
       </span>
@@ -750,6 +866,11 @@ function drawTrendChart() {
   const expenseArr = series.map(m => m.expenses);
   const profitArr  = series.map(m => m.net);
   const orderArr   = series.map(m => m.orders);
+  // When COGS is unknown the per-bucket `net` excludes product cost — the
+  // "Net Profit" line is really "Net excl. COGS". Relabel so the legend and
+  // tooltip don't claim a profit the data can't support (see ERR-028).
+  const trendCogsKnown = !series.some(m => m && m.cogsKnown === false);
+  const netLineLabel = trendCogsKnown ? 'Net Profit' : 'Net (excl. COGS)';
 
   let chartType = 'bar';
   let datasets;
@@ -778,7 +899,7 @@ function drawTrendChart() {
   } else if (_trendMetric === 'profit') {
     chartType = 'line';
     datasets = [{
-      label: 'Net Profit',
+      label: netLineLabel,
       data: profitArr,
       borderColor: colors.cyan,
       backgroundColor: hexToRgba(colors.cyan, 0.22),
@@ -877,11 +998,18 @@ function buildForecastSeries(d) {
   // this function in render(), so its totals are the corrected COGS/expense
   // figures. Net = revenue − expenses; margin = net / revenue.
   const trendTotals = sumTrendTotals(Array.isArray(_trendData) ? _trendData : []);
-  const netMargin = trendTotals.revenue > 0
+  // A profit projection is only as honest as its net-profit margin. When COGS
+  // is unknown for the window (analytics RPC down + no per-order item costs)
+  // the margin below excludes the largest cost line and runs far too high —
+  // so the forecast must NOT project a profit off it. `cogsKnown` gates the
+  // profit headline and the chart's profit lines; `netMargin` is left null so
+  // every downstream consumer fails closed.
+  const cogsKnown = trendTotals.cogsKnown !== false;
+  const netMargin = (cogsKnown && trendTotals.revenue > 0)
     ? (trendTotals.revenue - trendTotals.expenses) / trendTotals.revenue
-    : 0;
+    : null;
 
-  return { historical, prior, cfg, avg30, avg60, avg90, f30, f60, f90, horizonDays, netMargin };
+  return { historical, prior, cfg, avg30, avg60, avg90, f30, f60, f90, horizonDays, netMargin, cogsKnown };
 }
 
 function drawForecastChart() {
@@ -933,8 +1061,12 @@ function drawForecastChart() {
   // daily revenue — labelled "estimate" in the legend so it's not mistaken
   // for booked profit. The forecast profit shares the revenue forecast's
   // flat daily average.
-  const netMargin = (state.netMargin != null && Number.isFinite(state.netMargin))
-    ? state.netMargin : 0;
+  //
+  // When COGS is unknown for the window `state.netMargin` is null — the two
+  // profit datasets are dropped entirely (see `showProfit` below) rather than
+  // drawn off a margin that excludes product cost and overstates profit.
+  const showProfit = state.netMargin != null && Number.isFinite(state.netMargin);
+  const netMargin = showProfit ? state.netMargin : 0;
   const actualProfit   = points.map(p => p.type === 'actual'   ? p.value * netMargin : null);
   const forecastProfit = points.map(p => p.type === 'forecast' ? p.value * netMargin : null);
 
@@ -986,34 +1118,42 @@ function drawForecastChart() {
       spanGaps: false,
       order: 2,
     },
-    {
-      label: 'Profit (actual est.)',
-      data: actualProfit,
-      borderColor: colors.cyan,
-      backgroundColor: 'transparent',
-      borderWidth: 2,
-      fill: false,
-      tension: 0.35,
-      pointRadius: 0,
-      pointHoverRadius: 3,
-      spanGaps: false,
-      order: 1,
-    },
-    {
-      label: 'Profit (forecast)',
-      data: forecastProfit,
-      borderColor: colors.cyan,
-      backgroundColor: 'transparent',
-      borderWidth: 2,
-      borderDash: [5, 4],
-      fill: false,
-      tension: 0.25,
-      pointRadius: 0,
-      pointHoverRadius: 3,
-      spanGaps: false,
-      order: 1,
-    },
   ];
+
+  // Profit lines are added only when COGS is known — otherwise the margin is
+  // incomplete and the lines would overstate profit. The card headline already
+  // shows "profit pending cost data" in this state.
+  if (showProfit) {
+    datasets.push(
+      {
+        label: 'Profit (actual est.)',
+        data: actualProfit,
+        borderColor: colors.cyan,
+        backgroundColor: 'transparent',
+        borderWidth: 2,
+        fill: false,
+        tension: 0.35,
+        pointRadius: 0,
+        pointHoverRadius: 3,
+        spanGaps: false,
+        order: 1,
+      },
+      {
+        label: 'Profit (forecast)',
+        data: forecastProfit,
+        borderColor: colors.cyan,
+        backgroundColor: 'transparent',
+        borderWidth: 2,
+        borderDash: [5, 4],
+        fill: false,
+        tension: 0.25,
+        pointRadius: 0,
+        pointHoverRadius: 3,
+        spanGaps: false,
+        order: 1,
+      },
+    );
+  }
 
   if (hasPrior) {
     datasets.push({

@@ -1,6 +1,15 @@
 const BACKEND = 'https://ink-backend-zaeq.onrender.com';
 
-const BOT_PATTERN = /googlebot|google-inspectiontool|bingbot|slurp|duckduckbot|baiduspider|yandexbot|facebookexternalhit|facebot|twitterbot|linkedinbot|whatsapp|telegrambot|applebot|pinterest|semrushbot|ahrefsbot|mj12bot|dotbot|rogerbot|embedly|quora link preview|showyoubot|outbrain|chrome-lighthouse|google-structured-data-testing-tool/i;
+// `adsbot-google` and `storebot-google` are intentionally listed even though
+// `googlebot` is already present — the AdsBot ("AdsBot-Google", "AdsBot-Google-
+// Mobile") and StoreBot ("Storebot-Google") user-agents do NOT contain the
+// substring "googlebot", so without explicit tokens they would fall through to
+// the SPA. marketing-audit-may-2026.md §4 states the prerender layer is meant
+// to serve "Googlebot/Storebot/AdsBot"; these tokens make that true. It also
+// keeps client-side JSON-LD removal (§4) safe: every Google crawler that reads
+// structured data now receives the backend-prerendered HTML (one Product
+// schema), never the SPA.
+const BOT_PATTERN = /googlebot|adsbot-google|storebot-google|google-inspectiontool|bingbot|slurp|duckduckbot|baiduspider|yandexbot|facebookexternalhit|facebot|twitterbot|linkedinbot|whatsapp|telegrambot|applebot|pinterest|semrushbot|ahrefsbot|mj12bot|dotbot|rogerbot|embedly|quora link preview|showyoubot|outbrain|chrome-lighthouse|google-structured-data-testing-tool/i;
 
 export default async function middleware(request) {
   const url = new URL(request.url);

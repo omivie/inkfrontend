@@ -2537,17 +2537,24 @@ function calculateGST(inclusiveAmount) {
  * @param {object} product - Product object
  * @returns {object} Status with class and text
  */
+// stock-enquiry-may2026 — single source of truth for the out-of-stock pill
+// copy. Every OOS surface (PDP buy box, products grid, shop, ribbons) renders
+// getStockStatus().text, so updating this one string re-labels the whole site.
+// The pill carries the full call-to-action ("Contact Us For Stock Enquiries");
+// the separate bottom-of-card / PDP button keeps the short "Contact us" label.
+const OOS_STOCK_LABEL = 'Contact Us For Stock Enquiries';
+
 function getStockStatus(product) {
-    // contact-button-may2026.md — the inline pill text used to read
-    // "Contact Us", duplicating the bottom-of-card "Contact us" CTA. The
-    // button is now the single contact affordance, so the pill collapses
-    // to a plain "Out of stock" status. The class name 'contact-us' is
-    // intentionally retained so existing CSS (color/weight) keeps working.
+    // contact-button-may2026.md / stock-enquiry-may2026 — for an out-of-stock
+    // product the inline pill spells out the action, "Contact Us For Stock
+    // Enquiries", instead of a bare "Out of stock" status. The class name
+    // 'contact-us' is intentionally retained so existing CSS keeps working;
+    // components.css lets this longer copy wrap inside the card footer row.
     if (product.stock_status === 'contact_us') {
-        return { class: 'contact-us', text: 'Out of stock', icon: 'phone' };
+        return { class: 'contact-us', text: OOS_STOCK_LABEL, icon: 'phone' };
     }
     if (product.stock_status === 'out_of_stock') {
-        return { class: 'contact-us', text: 'Out of stock', icon: 'phone' };
+        return { class: 'contact-us', text: OOS_STOCK_LABEL, icon: 'phone' };
     }
     if (product.stock_status === 'in_stock') {
         return { class: 'in-stock', text: 'In Stock', icon: 'check-circle' };
@@ -2555,7 +2562,7 @@ function getStockStatus(product) {
     // Fallback for endpoints that don't return stock_status (listing, search)
     const inStock = product.in_stock !== undefined ? product.in_stock : (product.stock_quantity > 0);
     if (!inStock) {
-        return { class: 'contact-us', text: 'Out of stock', icon: 'phone' };
+        return { class: 'contact-us', text: OOS_STOCK_LABEL, icon: 'phone' };
     }
     return { class: 'in-stock', text: 'In Stock', icon: 'check-circle' };
 }

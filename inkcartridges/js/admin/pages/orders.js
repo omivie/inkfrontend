@@ -6,7 +6,7 @@ import { DataTable } from '../components/table.js';
 import { Drawer } from '../components/drawer.js';
 import { Toast } from '../components/toast.js';
 import { Modal } from '../components/modal.js';
-import { computeOrderProfit } from '../utils/profitability.js';
+import { computeLineProfits, computeProfitBreakdown } from '../utils/profitability.js';
 
 const formatPrice = (v) => window.formatPrice ? window.formatPrice(v) : `$${Number(v).toFixed(2)}`;
 const MISSING = '\u2014';
@@ -270,12 +270,14 @@ function buildOrderModalContent(modal, o, events, breakdown) {
   if (o.delivery_zone) metaLeft += omRow('Zone', esc(o.delivery_zone));
   if (o.source) metaLeft += omRow('Source', esc(o.source));
 
-  let metaRight = omRow('Created', formatDate(o.created_at));
-  if (o.paid_at) metaRight += omRow('Paid', formatDate(o.paid_at));
-  if (o.shipped_at) metaRight += omRow('Shipped', formatDate(o.shipped_at));
-  if (o.delivered_at) metaRight += omRow('Delivered', formatDate(o.delivered_at));
-  if (o.completed_at) metaRight += omRow('Completed', formatDate(o.completed_at));
-  if (o.cancelled_at) metaRight += omRow('Cancelled', formatDate(o.cancelled_at));
+  // Order dates. For owners these drop to their own section lower down and the
+  // Profit Breakdown takes this top-right meta slot; non-owners keep dates here.
+  let datesRows = omRow('Created', formatDate(o.created_at));
+  if (o.paid_at) datesRows += omRow('Paid', formatDate(o.paid_at));
+  if (o.shipped_at) datesRows += omRow('Shipped', formatDate(o.shipped_at));
+  if (o.delivered_at) datesRows += omRow('Delivered', formatDate(o.delivered_at));
+  if (o.completed_at) datesRows += omRow('Completed', formatDate(o.completed_at));
+  if (o.cancelled_at) datesRows += omRow('Cancelled', formatDate(o.cancelled_at));
 
   // Shipping address — shown inline as middle meta column
   const addr = o.shipping_address || {};
@@ -297,20 +299,25 @@ function buildOrderModalContent(modal, o, events, breakdown) {
     metaMiddle = `<div class="om-meta-addr-label">Ship to</div><address style="font-style:normal;line-height:1.7;font-size:0.9rem">${parts}</address>`;
   }
 
-  const metaSection = `<div class="om-meta-grid${metaMiddle ? ' om-meta-grid--3col' : ''}"><div>${metaLeft}</div>${metaMiddle ? `<div>${metaMiddle}</div>` : ''}<div>${metaRight}</div></div>`;
+  // metaSection is assembled after the items section (below) — the top-right
+  // column shows the owner-only Profit Breakdown, which needs the order totals.
 
   // Items section
   let itemsHtml = '';
+  let orderProfitBreakdown = null;  // populated below; consumed by the Profit Breakdown section
   if (o.items?.length) {
     itemsHtml += `<table class="admin-order-items"><thead><tr>`;
     itemsHtml += `<th>Product</th><th>SKU</th><th>Qty</th><th>Price <span class="admin-text-muted" style="font-weight:400">(excl. GST)</span></th>`;
     if (showCost) itemsHtml += `<th>Cost <span class="admin-text-muted" style="font-weight:400">(excl. GST)</span></th><th>Profit <span class="admin-text-muted" style="font-weight:400">(net)</span></th>`;
     itemsHtml += `</tr></thead><tbody>`;
     let totalPrice = 0, totalCost = 0;
+    const itemRows = [];
     for (const item of o.items) {
       const itemPrice = item.sell_price ?? item.unit_price ?? item.price;
       const qty = item.qty ?? item.quantity ?? 0;
-      totalPrice += (itemPrice ?? 0) * qty;
+      const lineRevenue = (itemPrice ?? 0) * qty;
+      totalPrice += lineRevenue;
+      const hasCost = showCost && item.supplier_cost_snapshot != null;
       if (showCost) totalCost += (item.supplier_cost_snapshot ?? 0) * qty;
       // Prefer backend-supplied canonical_url; fall back to slug/sku reconstruction.
       let itemHref = '';
@@ -322,24 +329,69 @@ function buildOrderModalContent(modal, o, events, breakdown) {
       } else if (item.sku) {
         itemHref = `/p/${encodeURIComponent(item.sku)}`;
       }
+      itemRows.push({ item, itemPrice, qty, lineRevenue, hasCost, itemHref });
+    }
+    const customerPaidInclGst = breakdown?.total_incl_gst ?? o.total_amount ?? o.total ?? null;
+    // Per-line net profit — order Stripe fee (incl. fixed $0.30) is allocated
+    // across lines by revenue share, so the line column sums to the foot total.
+    const { lineProfits, totalProfit: profit } = computeLineProfits(
+      itemRows.map(({ lineRevenue, hasCost, item, qty }) => ({
+        revenueExGst: lineRevenue,
+        costExGst: hasCost ? item.supplier_cost_snapshot * qty : null,
+      })),
+      { customerPaidInclGst },
+    );
+    // Itemised order-level waterfall (revenue → every deduction → net profit).
+    if (showCost) {
+      orderProfitBreakdown = computeProfitBreakdown(totalPrice, totalCost, { customerPaidInclGst });
+    }
+    itemRows.forEach(({ item, itemPrice, hasCost, itemHref }, idx) => {
+      const profitCell = showCost
+        ? `<td class="mono" style="color:var(--success-text,#15803d)">${lineProfits[idx] != null ? formatPrice(lineProfits[idx]) : MISSING}</td>`
+        : '';
       itemsHtml += `<tr>
         <td class="cell-truncate">${item.sku && itemHref ? `<a href="${esc(itemHref)}" target="_blank" style="color:var(--text);text-decoration:underline;text-decoration-color:var(--border);text-underline-offset:2px">${esc(item.product_name || item.name || item.description || MISSING)}</a>` : esc(item.product_name || item.name || item.description || MISSING)}</td>
         <td class="mono">${esc(item.sku || MISSING)}</td>
         <td>${item.qty ?? item.quantity ?? MISSING}</td>
         <td class="mono">${itemPrice != null ? formatPrice(itemPrice) : MISSING}</td>
-        ${showCost ? `<td class="mono">${item.supplier_cost_snapshot != null ? formatPrice(item.supplier_cost_snapshot) : MISSING}</td><td></td>` : ''}
+        ${showCost ? `<td class="mono">${item.supplier_cost_snapshot != null ? formatPrice(item.supplier_cost_snapshot) : MISSING}</td>${profitCell}` : ''}
       </tr>`;
-    }
-    const customerPaidInclGst = breakdown?.total_incl_gst ?? o.total_amount ?? o.total ?? null;
-    const profit = computeOrderProfit(totalPrice, totalCost, { customerPaidInclGst });
+    });
     itemsHtml += `</tbody><tfoot><tr class="admin-order-items__total">
       <td colspan="3"></td>
       <td class="mono"><strong>${formatPrice(totalPrice)}</strong></td>
-      ${showCost ? `<td class="mono"><strong>${formatPrice(totalCost)}</strong></td><td class="mono" style="color:var(--success-text,#15803d)" title="Net profit: ex-GST revenue minus cost (incl. GST) minus Stripe fee (2.65% + $0.30, incl. 15% GST on fee) on the full charged amount"><strong>${profit != null ? formatPrice(profit) : MISSING}</strong></td>` : ''}
+      ${showCost ? `<td class="mono"><strong>${formatPrice(totalCost)}</strong></td><td class="mono" style="color:var(--success-text,#15803d)" title="Net profit (GST-neutral): ex-GST revenue minus ex-GST supplier cost minus Stripe fee (2.65% + $0.30) on the full charged amount. GST is a pass-through — see the Profit Breakdown section."><strong>${profit != null ? formatPrice(profit) : MISSING}</strong></td>` : ''}
     </tr></tfoot></table>`;
   } else {
     itemsHtml += `<p class="admin-text-muted">${MISSING} No items</p>`;
   }
+
+  // Profit Breakdown rows (owner-only) — cash waterfall: the full incl-GST
+  // amount the customer paid, every real payment out, take-home at the bottom.
+  // Rendered into the top-right meta column (swapped with the order dates).
+  const muted = (t) => `<span class="admin-text-muted" style="font-weight:400">${t}</span>`;
+  let profitBreakdownInner = '';
+  if (orderProfitBreakdown) {
+    const b = orderProfitBreakdown;
+    const neg = (v) => `−${formatPrice(Math.abs(v))}`;
+    const pbRow = (label, value, valStyle = '') =>
+      `<div class="om-meta-row"><span>${label}</span><span class="mono"${valStyle ? ` style="${valStyle}"` : ''}>${value}</span></div>`;
+    profitBreakdownInner += `<div class="om-meta-addr-label">Profit breakdown</div>`;
+    profitBreakdownInner += pbRow(`Customer paid ${muted('(incl. GST)')}`, formatPrice(b.customerPaidInclGst));
+    profitBreakdownInner += pbRow(`Paid to supplier ${muted(`(incl. ${formatPrice(b.supplierCostGst)} GST)`)}`, neg(b.supplierCostInclGst));
+    profitBreakdownInner += pbRow(`Paid to Stripe ${muted(`(2.65% + $0.30, incl. ${formatPrice(b.stripeFeeGst)} GST)`)}`, neg(b.stripeFeeInclGst));
+    profitBreakdownInner += pbRow(
+      `<span title="GST you collected from the customer (${formatPrice(b.gstCollected)}) minus the GST you already paid out to your supplier and Stripe — those are reclaimable, so only the remainder goes to IRD.">GST remitted to IRD ${muted('(after credits) ⓘ')}</span>`,
+      neg(b.gstRemittedToIrd));
+    profitBreakdownInner += `<div style="border-top:1px solid var(--border,#e5e7eb);margin:8px 0 6px"></div>`;
+    profitBreakdownInner += pbRow('<strong>Take-home profit</strong>',
+      `<strong>${formatPrice(b.netProfit)}</strong>`,
+      'color:var(--success-text,#15803d)');
+    profitBreakdownInner += pbRow(`Net margin ${muted('(take-home ÷ ex-GST revenue)')}`, `${b.netMarginPct.toFixed(1)}%`);
+  }
+  // Top-right meta column: Profit Breakdown for owners, order dates otherwise.
+  const metaRight = profitBreakdownInner || datesRows;
+  const metaSection = `<div class="om-meta-grid${metaMiddle ? ' om-meta-grid--3col' : ''}"><div>${metaLeft}</div>${metaMiddle ? `<div>${metaMiddle}</div>` : ''}<div>${metaRight}</div></div>`;
 
   // Financial breakdown section (from order-breakdown endpoint)
   let breakdownHtml = '';
@@ -365,6 +417,15 @@ function buildOrderModalContent(modal, o, events, breakdown) {
     if (breakdown.invoice_number) bRight += omRow('Invoice #', esc(breakdown.invoice_number));
     if (breakdown.receipt_url) bRight += omRow('Receipt', `<a href="${Security.escapeAttr(breakdown.receipt_url)}" target="_blank" rel="noopener" style="color:var(--cyan);text-decoration:underline">View Receipt</a>`);
     breakdownHtml += `<div>${bLeft}</div><div>${bRight}</div></div>`;
+  }
+
+  // Dates section — swapped with the Profit Breakdown. Owner-only here: when the
+  // Profit Breakdown occupies the top-right meta column, the order dates move
+  // down to their own section. Non-owners keep the dates in the meta grid.
+  let datesHtml = '';
+  if (orderProfitBreakdown) {
+    datesHtml += `<div class="om-section-title">Dates</div>`;
+    datesHtml += `<div style="max-width:440px">${datesRows}</div>`;
   }
 
   // Tracking section (conditional — address is now in the meta grid)
@@ -407,7 +468,7 @@ function buildOrderModalContent(modal, o, events, breakdown) {
   modal.querySelector('#om-header-actions').innerHTML =
     `<div class="om-header-btns">${btns.join('')}</div>${statusBadge(o.status)}`;
 
-  modal.querySelector('#om-content').innerHTML = [metaSection, itemsHtml, breakdownHtml, shippingHtml, timelineHtml]
+  modal.querySelector('#om-content').innerHTML = [metaSection, itemsHtml, breakdownHtml, datesHtml, shippingHtml, timelineHtml]
     .filter(Boolean).join('');
 
   bindModalActions(modal, o);

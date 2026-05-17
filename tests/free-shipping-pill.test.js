@@ -179,12 +179,17 @@ test('products.js card pill goes through qualifiesForFreeShipping', () => {
         'products.js must not hardcode the 100 threshold any more');
 });
 
-test('product-detail-page.js shipping note + schema use the helper', () => {
+test('product-detail-page.js shipping note uses the helper', () => {
     const src = fs.readFileSync(PDP_JS_PATH, 'utf8');
-    // Both surfaces switched to the helper — guard against either drifting back.
+    // The PDP free-shipping logic must route through qualifiesForFreeShipping
+    // rather than hardcoding the threshold. There used to be two callsites
+    // (the shipping note + the client-side schema.org Offer shippingRate);
+    // marketing-audit-may-2026.md §4 removed all client-side Product JSON-LD,
+    // so the schema callsite is gone. The shipping note remains and must
+    // still use the helper.
     const callsites = src.match(/qualifiesForFreeShipping\(/g) || [];
-    assert.ok(callsites.length >= 2,
-        `expected >= 2 calls to qualifiesForFreeShipping in PDP; got ${callsites.length}`);
+    assert.ok(callsites.length >= 1,
+        `expected >= 1 call to qualifiesForFreeShipping in PDP; got ${callsites.length}`);
     assert.doesNotMatch(src, /price\s*>=\s*100/,
         'product-detail-page.js must not hardcode price >= 100 any more');
 });

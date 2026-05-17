@@ -154,7 +154,7 @@ test('§3 PDP normaliser is unconditional — fires whenever current path differ
         'PDP must call replaceState with the canonical path');
 });
 
-test('§3 PDP renders <link rel="canonical">, og:url, and JSON-LD url from canonical_url', () => {
+test('§3 PDP renders <link rel="canonical"> and og:url from canonical_url', () => {
     const code = stripComments(PDP_SRC);
     assert.match(code, /info\.canonical_url\s*\|\|/,
         'PDP must prefer info.canonical_url for the rendered <link rel="canonical">');
@@ -162,8 +162,14 @@ test('§3 PDP renders <link rel="canonical">, og:url, and JSON-LD url from canon
         'PDP must assign canonicalUrl to #canonical-url href');
     assert.match(code, /getElementById\(\s*['"]og-url['"]\s*\)\.content\s*=\s*canonicalUrl/,
         'PDP must assign canonicalUrl to og:url meta content');
-    assert.match(code, /["']url["']\s*:\s*canonicalUrl/,
-        'PDP must thread canonicalUrl into the Product JSON-LD "url" field');
+    // The client-side Product JSON-LD `"url": canonicalUrl` assertion was
+    // retired by marketing-audit-may-2026.md §4: the PDP no longer emits ANY
+    // client-side Product JSON-LD (the backend prerender layer is the single
+    // source). The <link rel="canonical"> + og:url tags above remain the
+    // client-side canonical signals. See tests/marketing-audit-may2026.test.js
+    // for the no-client-JSON-LD pin.
+    assert.doesNotMatch(code, /["']url["']\s*:\s*canonicalUrl/,
+        'PDP must NOT emit client-side Product JSON-LD (audit §4) — no "url": canonicalUrl');
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

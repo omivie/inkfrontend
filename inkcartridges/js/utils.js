@@ -171,7 +171,7 @@ const ProductColors = {
 
     /**
      * True when a product's image_url is one of the legacy placeholder
-     * "color-swatch-vN.png" PNGs we hand-uploaded per SKU folder before
+     * "color-swatch-vN" images we hand-uploaded per SKU folder before
      * canonical color was authoritative. These images don't update when
      * an admin changes `products.color`, so a tri-colour cartridge whose
      * folder still hosts a red swatch reads as red on the storefront —
@@ -179,10 +179,19 @@ const ProductColors = {
      * card renderers fall through to a `getProductStyle` swatch rendered
      * from the canonical color, so admin edits flow visually without a
      * fresh image upload.
+     *
+     * The extension is matched loosely (png/jpg/jpeg/webp). The May 2026
+     * storage migration converted 2050 product images from PNG/JPG to
+     * WebP (marketing-audit-may-2026.md §3), so a swatch the DB once
+     * pointed at as `color-swatch-v4.png` may now end `.webp`. The
+     * `color-swatch` filename stem — never the extension — is the real
+     * discriminator: genuine product photos are `<sku>-<timestamp>.webp`
+     * and never contain the `color-swatch` segment, so widening the
+     * extension cannot misfire on a real photo.
      */
     isPlaceholderSwatchImage(url) {
         if (!url || typeof url !== 'string') return false;
-        return /\/color-swatch(?:-v\d+)?\.png(?:\?.*)?$/i.test(url);
+        return /\/color-swatch(?:-v\d+)?\.(?:png|jpe?g|webp)(?:\?.*)?$/i.test(url);
     },
 
     /**

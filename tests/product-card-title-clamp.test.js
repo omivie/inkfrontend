@@ -160,7 +160,12 @@ test('no .product-card / .product-box / .smart-ac selector still clamps below 4 
 
 // ─── Cache-bust: every HTML page must request the bumped CSS build ─────────
 
-test('all HTML pages cache-bust the three card CSS files to v=4line-clamp-may2026', () => {
+// The three card CSS files share one rollout token. It advances whenever any
+// of them changes; stock-enquiry-may2026 superseded 4line-clamp-may2026 when
+// the out-of-stock pill copy update touched components.css.
+const CARD_CSS_TOKEN = 'stock-enquiry-may2026';
+
+test(`all HTML pages cache-bust the three card CSS files to v=${CARD_CSS_TOKEN}`, () => {
     const htmlRoot = path.join(ROOT, 'inkcartridges');
     const htmlFiles = [];
     (function walk(dir) {
@@ -182,7 +187,7 @@ test('all HTML pages cache-bust the three card CSS files to v=4line-clamp-may202
             const re = new RegExp(`${cssName}\\?v=([a-zA-Z0-9-]+)`, 'g');
             let m;
             while ((m = re.exec(html)) !== null) {
-                if (m[1] !== '4line-clamp-may2026') {
+                if (m[1] !== CARD_CSS_TOKEN) {
                     stale.push(`${path.relative(ROOT, file)} → ${cssName}?v=${m[1]}`);
                 }
             }

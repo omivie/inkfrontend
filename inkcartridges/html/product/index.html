@@ -31,69 +31,20 @@
     <link rel="apple-touch-icon" href="/apple-touch-icon.png">
     <title id="page-title">Product | InkCartridges.co.nz</title>
 
-    <script type="application/ld+json" id="breadcrumb-schema">
-    {
-        "@context": "https://schema.org",
-        "@type": "BreadcrumbList",
-        "itemListElement": [
-            { "@type": "ListItem", "position": 1, "name": "Home", "item": "https://www.inkcartridges.co.nz/" },
-            { "@type": "ListItem", "position": 2, "name": "Shop", "item": "https://www.inkcartridges.co.nz/shop" },
-            { "@type": "ListItem", "position": 3, "name": "" }
-        ]
-    }
-    </script>
-
-    <script type="application/ld+json" id="product-schema">
-    {
-        "@context": "https://schema.org",
-        "@type": "Product",
-        "name": "Ink Cartridge",
-        "description": "Compatible and genuine ink cartridges for NZ printers. Fast NZ-wide delivery.",
-        "brand": {
-            "@type": "Brand",
-            "name": "InkCartridges.co.nz"
-        },
-        "offers": {
-            "@type": "Offer",
-            "priceCurrency": "NZD",
-            "price": "11.49",
-            "itemCondition": "https://schema.org/NewCondition",
-            "availability": "https://schema.org/InStock",
-            "seller": {
-                "@type": "Organization",
-                "name": "InkCartridges.co.nz"
-            },
-            "shippingDetails": {
-                "@type": "OfferShippingDetails",
-                "shippingRate": {
-                    "@type": "MonetaryAmount",
-                    "value": "7.00",
-                    "currency": "NZD"
-                },
-                "shippingDestination": {
-                    "@type": "DefinedRegion",
-                    "addressCountry": "NZ"
-                },
-                "deliveryTime": {
-                    "@type": "ShippingDeliveryTime",
-                    "transitTime": {
-                        "@type": "QuantitativeValue",
-                        "minValue": 1,
-                        "maxValue": 4,
-                        "unitCode": "DAY"
-                    }
-                }
-            },
-            "hasMerchantReturnPolicy": {
-                "@type": "MerchantReturnPolicy",
-                "applicableCountry": "NZ",
-                "returnPolicyCategory": "https://schema.org/MerchantReturnFiniteReturnWindow",
-                "merchantReturnDays": 30,
-                "returnMethod": "https://schema.org/ReturnByMail"
-            }
-        }
-    }
-    </script>
+    <!--
+      No Product / BreadcrumbList / FAQPage JSON-LD is emitted on this page.
+      marketing-audit-may-2026.md §4: the backend prerender layer
+      (/api/prerender/product/:sku, served to every Google crawler by
+      middleware.js) is the single source of structured data — it emits
+      exactly one Product, one BreadcrumbList and one FAQPage. Emitting a
+      second copy client-side produced two Product nodes with different
+      @ids on the same URL, a Google Merchant Center "Unacceptable Business
+      Practices" trigger. Human visitors do not need JSON-LD, so the SPA no
+      longer ships any. Site-level Organization / WebSite / LocalBusiness
+      are still injected by schema.js — those carry stable global @ids
+      ({SITE_URL}/#organization etc.) and therefore MERGE with the
+      prerendered copies instead of duplicating.
+    -->
 
     <script async src="https://www.googletagmanager.com/gtag/js?id=G-SDQELG0FGD"></script>
     <script src="/js/gtag.js?v=cee7c501"></script>
@@ -105,10 +56,10 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link rel="stylesheet" href="/css/base.css?v=white-cards-may2026">
     <link rel="stylesheet" href="/css/layout.css?v=chrome-lock-may2026">
-    <link rel="stylesheet" href="/css/components.css?v=4line-clamp-may2026">
+    <link rel="stylesheet" href="/css/components.css?v=stock-enquiry-may2026">
     <link rel="stylesheet" href="/css/modern-effects.css?v=ade3173d">
-    <link rel="stylesheet" href="/css/pages.css?v=4line-clamp-may2026">
-    <link rel="stylesheet" href="/css/search.css?v=4line-clamp-may2026">
+    <link rel="stylesheet" href="/css/pages.css?v=stock-enquiry-may2026">
+    <link rel="stylesheet" href="/css/search.css?v=stock-enquiry-may2026">
 </head>
 <body>
     <a href="#main-content" class="skip-link">Skip to main content</a>

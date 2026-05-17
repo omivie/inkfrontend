@@ -1036,6 +1036,29 @@
 }
 .admin-trend-totals__hint a { color: var(--text); text-decoration: underline; }
 .admin-trend-totals__hint a:hover { color: var(--magenta-text); }
+
+/* COGS-unknown state — analytics RPC is down and the order feed carries no
+   supplier costs, so the dashboard cannot value cost of goods. The "net"
+   figure omits COGS, so it is shown neutrally (never green "Profit"): an amber
+   chip, a hatched "unknown" bar segment, and a warning hint. Mirrors the KPI
+   strip refusing a Gross Profit card on the same data. */
+.admin-trend-totals__chip--unknown {
+  background: var(--yellow-dim, #fef3c7);
+  color: var(--yellow-text, #92400e);
+}
+.admin-trend-totals__chip--unknown strong { color: var(--yellow-text, #92400e); }
+.admin-trend-totals__seg--unknown {
+  background: repeating-linear-gradient(
+    45deg,
+    var(--border, #e5e5ea) 0 6px,
+    var(--bg-soft, #f5f5f7) 6px 12px
+  );
+}
+.admin-trend-totals__hint--warn {
+  background: var(--yellow-dim, #fef3c7);
+  color: var(--yellow-text, #92400e);
+  border: 1px solid color-mix(in srgb, var(--yellow, #f59e0b) 35%, transparent);
+}
 .admin-dash-empty {
   display: flex; flex-direction: column; align-items: center; justify-content: center;
   gap: 10px; height: 100%; color: var(--text-muted);
@@ -2904,6 +2927,25 @@ button.admin-active-dot--clickable:hover::after { opacity: 1; }
 @media (max-width: 1400px) { .admin-kpi-grid--8 { grid-template-columns: repeat(4, 1fr); } }
 @media (max-width: 768px)  { .admin-kpi-grid--8 { grid-template-columns: repeat(2, 1fr); } }
 @media (max-width: 420px)  { .admin-kpi-grid--8 { grid-template-columns: 1fr; } }
+
+/* Shown under the KPI strip when the analytics RPC is down and the headline
+   numbers were reconstructed from the orders feed (see deriveKpisFromOrders). */
+.admin-kpi-fallback {
+  grid-column: span 12;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 2px 0 6px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  font-size: 12px;
+  line-height: 1.5;
+  background: var(--yellow-dim, #fef3c7);
+  color: var(--yellow-text, #92400e);
+  border: 1px solid color-mix(in srgb, var(--yellow, #f59e0b) 35%, transparent);
+}
+.admin-kpi-fallback__icon { flex: 0 0 auto; font-size: 13px; line-height: 1.4; }
+.admin-kpi-fallback strong { font-weight: 600; }
 
 .admin-kpi--compact { padding: 8px 10px 6px; }
 .admin-kpi--compact .admin-kpi__label { font-size: 9px; margin-bottom: 2px; }

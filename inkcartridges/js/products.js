@@ -98,6 +98,12 @@ const Products = {
         // breakdown was redundant on cards and is pinned out by
         // tests/inc-gst-amount-removed.test.js.
 
+        // Cost-per-page value anchor — marketing-audit-may-2026.md §1.1. The
+        // backend ships `cost_per_page_display` (pre-formatted string) on the
+        // product-detail endpoint; list endpoints may or may not include it,
+        // so the card renders it purely defensively — present → show it under
+        // the price; absent → render nothing. Never computed client-side.
+
         // Prefer backend-supplied canonical_url (absolute). Reduce to a path so
         // router-based navigation stays in-app, falling back to slug/sku — and
         // finally /p/<sku>, which the Vercel rewrite proxies to the backend's
@@ -152,6 +158,7 @@ const Products = {
                                     <p class="product-card__price">${product.retail_price == null ? 'Price unavailable' : formatPrice(product.retail_price)}</p>
                                     ${showDiscount ? `<span class="product-card__compare-price" aria-label="Was ${formatPrice(originalPrice)}">${formatPrice(originalPrice)}</span>` : ''}
                                     ${product.retail_price != null ? `<p class="product-card__gst">Incl. GST</p>` : ''}
+                                    ${product.cost_per_page_display ? `<p class="product-card__cost-per-page" data-testid="cost-per-page">${Security.escapeHtml(String(product.cost_per_page_display))}</p>` : ''}
                                 </div>
                                 ${(() => {
                                     // contact-button-may2026.md: any OOS product —
