@@ -37,6 +37,17 @@ class DataTable {
     this._render();
   }
 
+  /**
+   * Swap the visible column set and repaint. Used by the per-admin column
+   * picker so toggling a column never re-fetches data — it just re-renders
+   * the current rows through a different column list. Sort/selection state
+   * is preserved (both live outside config.columns).
+   */
+  setColumns(columns) {
+    this.config.columns = columns || [];
+    this._render();
+  }
+
   setLoading(loading) {
     if (loading) {
       let html = '<div class="admin-card"><div class="admin-table-wrap"><table class="admin-table"><thead><tr>';

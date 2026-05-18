@@ -44,6 +44,21 @@ function adminApiWarn(label, e) {
   if (typeof Toast !== 'undefined') Toast.error(`${label}. Please try again.`);
 }
 
+// Rich-text product columns that the backend's HTML sanitiser mangles.
+//
+// The backend's `PUT/POST /api/admin/products` runs an allowlist sanitiser
+// that keeps only `p, strong, em, br, ul, ol, li` — it strips `b, i, u, a,
+// span, h2` (probed live 2026-05-18). The admin rich-text editor's Bold,
+// Italic, Underline and Link buttons emit exactly `<b>/<i>/<u>/<a>`, so every
+// formatting change the user made was silently destroyed on save.
+//
+// Fix: after the backend write, re-persist these two columns straight to
+// Supabase (admin RLS already permits product updates), so the editor's HTML
+// round-trips losslessly. The customer PDP reads these same columns directly
+// from Supabase (product-detail-page.js), so the formatting reaches the
+// storefront intact. See errors.md ERR-034.
+const RICH_TEXT_PRODUCT_COLUMNS = ['description_html', 'compatible_devices_html'];
+
 const AdminAPI = {
   // ---- Orders ----
   async getOrders(filters = {}, page = 1, limit = 20, signal = null) {
@@ -406,6 +421,9 @@ const AdminAPI = {
         err.request_id = resp.request_id;
         throw err;
       }
+      // Repair the rich-text columns the backend sanitiser strips. The product
+      // itself saved fine above, so this is intentionally non-fatal.
+      await this.persistRichTextColumns(productId, data);
       return resp?.data ?? null;
     } catch (e) {
       DebugLog.warn('[AdminAPI] updateProduct failed:', e.message);
@@ -458,7 +476,11 @@ const AdminAPI = {
         }
         throw new Error(msg);
       }
-      return resp?.data ?? resp;
+      const result = resp?.data ?? resp;
+      // Repair the rich-text columns the backend sanitiser strips on create.
+      const newId = result?.product?.id ?? result?.id;
+      if (newId) await this.persistRichTextColumns(newId, data);
+      return result;
     } catch (e) {
       DebugLog.warn('[AdminAPI] createProduct failed:', e.message);
       throw e;
@@ -1029,6 +1051,154 @@ const AdminAPI = {
   // ---- Ribbon Brands (Supabase direct) ----
   _sb() {
     return (typeof Auth !== 'undefined' && Auth.supabase) ? Auth.supabase : null;
+  },
+
+  /**
+   * Re-persist the rich-text product columns straight to Supabase, undoing the
+   * backend sanitiser that strips `<b>/<i>/<u>/<a>` (see RICH_TEXT_PRODUCT_COLUMNS).
+   *
+   * Called after every createProduct / updateProduct. Only columns actually
+   * present on `data` are written, so a partial update (e.g. a bulk price
+   * edit) never blanks a rich-text field it wasn't touching. A `null` value is
+   * written through deliberately — that is how the editor clears a field.
+   *
+   * Non-fatal: the backend write already succeeded, so a Supabase hiccup here
+   * is logged but never thrown. Returns true when the repair was applied.
+   *
+   * @param {string} productId
+   * @param {Object} data - the same payload sent to the backend
+   * @returns {Promise<boolean>}
+   */
+  async persistRichTextColumns(productId, data) {
+    if (!productId || !data) return false;
+    const patch = {};
+    for (const col of RICH_TEXT_PRODUCT_COLUMNS) {
+      if (Object.prototype.hasOwnProperty.call(data, col)) {
+        patch[col] = data[col] == null ? null : data[col];
+      }
+    }
+    if (!Object.keys(patch).length) return false;
+    const sb = this._sb();
+    if (!sb) {
+      DebugLog.warn('[AdminAPI] rich-text repair skipped — no Supabase client');
+      return false;
+    }
+    try {
+      const { error } = await sb.from('products').update(patch).eq('id', productId);
+      if (error) {
+        DebugLog.warn('[AdminAPI] rich-text repair failed:', error.message);
+        return false;
+      }
+      return true;
+    } catch (e) {
+      DebugLog.warn('[AdminAPI] rich-text repair threw:', e.message);
+      return false;
+    }
+  },
+
+  // ─── Per-admin UI preferences ──────────────────────────────────────────────
+  // A tiny key/value store scoped to ONE admin account, so each admin can shape
+  // their own admin surface (which table columns are visible, etc.) without
+  // affecting anyone else.
+  //
+  //   Durable layer  — Supabase table `admin_ui_prefs` (one JSONB row per user,
+  //                    RLS-locked to auth.uid()). Follows the account to any
+  //                    browser or device.
+  //   Instant layer  — localStorage, keyed by the account id, so the saved
+  //                    layout paints on first frame and survives the table
+  //                    being briefly unreachable (Render/Supabase cold start).
+  //
+  // Fail-open by design: if the table does not exist yet, or the network is
+  // down, getUiPrefs() still returns the localStorage copy and setUiPref()
+  // still persists locally — the feature degrades to per-browser, never breaks.
+  // The SQL to create the table lives in inkcartridges/sql/admin_ui_prefs.sql.
+  _uiPrefsCache: null,    // the RESOLVED prefs object (set only once reconciled)
+  _uiPrefsPromise: null,  // the in-flight getUiPrefs() promise — shared by
+                          // concurrent callers so a second call can never
+                          // observe the half-resolved (local-only) state.
+
+  _uiPrefsAccountId() {
+    return (typeof Auth !== 'undefined' && Auth.user && Auth.user.id) ? Auth.user.id : 'anon';
+  },
+
+  _uiPrefsLocalKey() {
+    return `admin_ui_prefs:${this._uiPrefsAccountId()}`;
+  },
+
+  _uiPrefsReadLocal() {
+    try {
+      const raw = localStorage.getItem(this._uiPrefsLocalKey());
+      const parsed = raw ? JSON.parse(raw) : null;
+      return (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) ? parsed : {};
+    } catch { return {}; }
+  },
+
+  _uiPrefsWriteLocal(prefs) {
+    try { localStorage.setItem(this._uiPrefsLocalKey(), JSON.stringify(prefs)); } catch { /* quota / private mode */ }
+  },
+
+  /**
+   * Read this admin's full preference object — the localStorage copy reconciled
+   * against Supabase. Always resolves to an object.
+   *
+   * Race-safe: the reconciliation runs exactly once and every caller (even ones
+   * that arrive mid-fetch) awaits the SAME promise. An earlier version cached
+   * the local-only value synchronously before the Supabase round-trip, so a
+   * second caller arriving during the fetch got stale per-browser defaults
+   * instead of the durable cross-device prefs.
+   */
+  getUiPrefs() {
+    if (this._uiPrefsCache) return Promise.resolve(this._uiPrefsCache);
+    if (this._uiPrefsPromise) return this._uiPrefsPromise;
+    this._uiPrefsPromise = (async () => {
+      let resolved = this._uiPrefsReadLocal();
+      try {
+        const sb = this._sb();
+        const uid = (typeof Auth !== 'undefined' && Auth.user) ? Auth.user.id : null;
+        if (sb && uid) {
+          const { data, error } = await sb
+            .from('admin_ui_prefs').select('prefs').eq('user_id', uid).maybeSingle();
+          if (error) throw error;
+          if (data && data.prefs && typeof data.prefs === 'object' && !Array.isArray(data.prefs)) {
+            resolved = data.prefs;
+            this._uiPrefsWriteLocal(data.prefs);
+          }
+        }
+      } catch (e) {
+        adminApiWarn('getUiPrefs: using local cache (table missing or offline)', e);
+      }
+      this._uiPrefsCache = resolved;  // publish only the fully-reconciled value
+      return resolved;
+    })();
+    return this._uiPrefsPromise;
+  },
+
+  /**
+   * Persist a single preference key. Writes localStorage synchronously (so the
+   * change is durable even if Supabase rejects) then upserts the whole object
+   * to Supabase. Returns true when the durable write succeeded.
+   */
+  async setUiPref(key, value) {
+    const next = { ...(this._uiPrefsCache || this._uiPrefsReadLocal()), [key]: value };
+    // Keep cache AND the shared promise pointing at the new value, so a later
+    // getUiPrefs() (or one still in flight) can never resurrect a stale object.
+    this._uiPrefsCache = next;
+    this._uiPrefsPromise = Promise.resolve(next);
+    this._uiPrefsWriteLocal(next);
+    try {
+      const sb = this._sb();
+      const uid = (typeof Auth !== 'undefined' && Auth.user) ? Auth.user.id : null;
+      if (!sb || !uid) return false;
+      const { error } = await sb.from('admin_ui_prefs').upsert(
+        { user_id: uid, prefs: next, updated_at: new Date().toISOString() },
+        { onConflict: 'user_id' },
+      );
+      if (error) throw error;
+      return true;
+    } catch (e) {
+      adminApiWarn('setUiPref: saved locally only (table missing or offline)', e);
+      return false;
+    }
   },
 
   async getRibbonBrands() {

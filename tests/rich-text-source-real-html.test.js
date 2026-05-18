@@ -136,6 +136,6 @@ test('products.js still imports rich-text-editor (cache-busted)', () => {
     path.resolve(__dirname, '..', 'inkcartridges', 'js', 'admin', 'pages', 'products.js'),
     'utf8'
   );
-  assert.match(PRODUCTS, /from\s+['"]\.\.\/components\/rich-text-editor\.js\?v=source-real-html-may2026['"]/,
-    'products.js must import rich-text-editor.js with the May 2026 cache-bust query');
+  assert.match(PRODUCTS, /from\s+['"]\.\.\/components\/rich-text-editor\.js\?v=rich-text-persist-may2026['"]/,
+    'products.js must import rich-text-editor.js with the current cache-bust query');
 });

@@ -34,6 +34,22 @@ function sanitizeHTML(html) {
     }
   });
 
+  // Normalise presentational tags to their semantic equivalents.
+  // document.execCommand('bold'/'italic') emits <b>/<i>; the rest of the stack
+  // — the backend sanitiser allowlist, the storefront PDP, schema.org markup —
+  // expects <strong>/<em>. Rewriting here means Bold/Italic survive even a
+  // round-trip through the stricter backend sanitiser. (Underline has no
+  // semantic tag, so <u> is kept as-is.)
+  const retag = (fromTag, toTag) => {
+    tmp.querySelectorAll(fromTag).forEach(el => {
+      const repl = document.createElement(toTag);
+      while (el.firstChild) repl.appendChild(el.firstChild);
+      el.replaceWith(repl);
+    });
+  };
+  retag('b', 'strong');
+  retag('i', 'em');
+
   return tmp.innerHTML;
 }
 

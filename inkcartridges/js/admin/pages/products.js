@@ -2,11 +2,11 @@
  * Products & SKUs Page — Full CRUD with image management
  */
 import { AdminAuth, FilterState, AdminAPI, icon, esc, exportDropdown, bindExportDropdown } from '../app.js';
-import { DataTable } from '../components/table.js';
+import { DataTable } from '../components/table.js?v=col-customize-may2026';
 import { Drawer } from '../components/drawer.js';
 import { Toast } from '../components/toast.js';
 import { Modal } from '../components/modal.js';
-import { RichTextEditor } from '../components/rich-text-editor.js?v=source-real-html-may2026';
+import { RichTextEditor } from '../components/rich-text-editor.js?v=rich-text-persist-may2026';
 import { computeProfitability, marginBadge, markupBadge, formatProfitDollars } from '../utils/profitability.js';
 
 const formatPrice = (v) => window.formatPrice ? window.formatPrice(v) : `$${Number(v).toFixed(2)}`;
@@ -77,6 +77,10 @@ let _stockFilter = '';
 let _brands = [];
 let _diagnostics = null;
 let _bulkBar = null;
+let _allColumns = [];               // full column set from buildColumns()
+let _hiddenColumns = new Set();     // column keys this admin has hidden
+let _lastPersistedColumns = null;   // JSON of the last hidden[] sent to setUiPref
+let _forUseInController = null;     // aborts in-flight For-Use-In fetches
 let _activeProductTab = 'products'; // products | printers
 let _subProductModule = null;
 const DIAG_CACHE_KEY = 'admin_product_diagnostics';
@@ -109,18 +113,15 @@ function buildColumns() {
       render: (r) => `<span class="cell-mono">${esc(r.sku || MISSING)}</span>`,
     },
     {
-      key: 'is_reviewed', label: 'Check', sortable: false, className: 'cell-center col-w-check',
-      render: (r) => {
-        const checked = !!r.is_reviewed;
-        const tip = checked
-          ? `Reviewed${r.reviewed_by_email ? ` by ${r.reviewed_by_email}` : ''}${r.reviewed_at ? ` on ${new Date(r.reviewed_at).toLocaleDateString('en-NZ')}` : ''} — click to unmark`
-          : 'Mark as reviewed';
-        return `<label class="review-check${checked ? ' review-check--on' : ''}" title="${esc(tip)}">
-          <input type="checkbox" class="review-check__input" data-product-id="${esc(r.id)}"${checked ? ' checked' : ''} aria-label="Reviewed">
-          <span class="review-check__box" aria-hidden="true"></span>
-        </label>`;
-      },
-      align: 'center',
+      // "For Use In" — the device brands this product fits, drawn from the
+      // product_ribbon_brands junction. Ribbons carry many (Brother, Olympia,
+      // Olivetti …); ink/toner carry none (their single brand is the Brand
+      // column already). Sits right after SKU. Space-heavy by nature, so it
+      // ships hidden by default and each admin opts in via the Columns picker.
+      // Cells render a placeholder, then loadForUseInBrands() back-fills them
+      // in one batched query — same async-cell pattern as the Compat column.
+      key: 'for_use_in', label: 'For Use In', sortable: false, className: 'col-w-fuin',
+      render: (r) => `<div class="admin-fuin-cell" data-fuin-id="${esc(r.id || '')}"><span class="admin-fuin-cell__state">${MISSING}</span></div>`,
     },
     {
       key: 'brand', label: 'Brand', sortable: true, className: 'col-w-brand',
@@ -212,7 +213,167 @@ function buildColumns() {
     },
   );
 
+  // Tag every column with picker metadata. pickerLabel is what the Columns
+  // popover shows (the Image column has an empty header but still needs a
+  // name); lockedVisible columns can never be hidden.
+  for (const col of cols) {
+    col.pickerLabel = COLUMN_PICKER_LABELS[col.key] || col.label || col.key;
+    col.lockedVisible = LOCKED_VISIBLE_COLUMNS.has(col.key);
+  }
+
   return cols;
+}
+
+// ─── Per-admin column visibility ─────────────────────────────────────────────
+// Human-readable names for the Columns popover, keyed by column.key. Columns
+// not listed fall back to their table header label.
+const COLUMN_PICKER_LABELS = {
+  images: 'Image',
+  name: 'Name',
+  sku: 'SKU',
+  brand: 'Brand',
+  retail_price: 'Price',
+  cost_price: 'Cost',
+  margin_pct: 'Margin %',
+  markup_pct: 'Markup %',
+  profit_ex_gst: 'Profit $',
+  source: 'Type',
+  is_active: 'Active',
+  import_locked: 'Import lock',
+  compat: 'Compatible printers',
+  for_use_in: 'For Use In (device brands)',
+};
+// Name is the row's anchor — hiding it would leave rows unidentifiable.
+const LOCKED_VISIBLE_COLUMNS = new Set(['name']);
+// Columns hidden for an admin who has never touched the picker. "For Use In"
+// is opt-in because it makes rows tall.
+const DEFAULT_HIDDEN_COLUMNS = ['for_use_in'];
+// Preference key under which the hidden-column list is stored per admin.
+const COLUMN_PREF_KEY = 'products.columns';
+
+/**
+ * Pure: given the full column set and the set of hidden keys, return the
+ * columns to actually render. A locked column is always kept even if some
+ * stale preference lists it as hidden. Extracted as a named function so the
+ * test suite can exercise it directly.
+ */
+function computeVisibleColumns(allColumns, hiddenKeys) {
+  const hidden = hiddenKeys instanceof Set ? hiddenKeys : new Set(hiddenKeys || []);
+  return allColumns.filter(col => col.lockedVisible || !hidden.has(col.key));
+}
+
+/** Inline SVG for the Columns toolbar button (no entry in the icon registry). */
+function columnsIcon() {
+  return '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="3" x2="9" y2="21"/><line x1="15" y1="3" x2="15" y2="21"/></svg>';
+}
+
+/** Static toolbar markup: the Columns button + its (initially empty) popover. */
+function columnPickerMarkup() {
+  return `<div class="admin-colpicker" id="col-picker">
+    <button type="button" class="admin-btn admin-btn--ghost admin-btn--sm" id="col-picker-trigger" aria-haspopup="true" aria-expanded="false" title="Show or hide table columns">
+      ${columnsIcon()} Columns
+    </button>
+    <div class="admin-colpicker__panel" id="col-picker-panel" role="menu" aria-label="Show or hide table columns" hidden></div>
+  </div>`;
+}
+
+/** Render the checkbox list inside the popover from current visibility state. */
+function renderColumnPickerPanel(panel) {
+  const rows = _allColumns.map(col => {
+    const locked = !!col.lockedVisible;
+    const checked = locked || !_hiddenColumns.has(col.key);
+    return `<label class="admin-colpicker__row${locked ? ' admin-colpicker__row--locked' : ''}">
+      <input type="checkbox" class="admin-colpicker__cb" data-col-key="${esc(col.key)}"${checked ? ' checked' : ''}${locked ? ' disabled' : ''}>
+      <span class="admin-colpicker__name">${esc(col.pickerLabel)}</span>
+      ${locked ? '<span class="admin-colpicker__tag">always on</span>' : ''}
+    </label>`;
+  }).join('');
+  panel.innerHTML = `
+    <div class="admin-colpicker__head">
+      <span class="admin-colpicker__title">Table columns</span>
+      <button type="button" class="admin-colpicker__reset" data-col-reset>Reset</button>
+    </div>
+    <div class="admin-colpicker__list">${rows}</div>
+    <p class="admin-colpicker__foot">Saved to your admin account &mdash; synced to every device you sign in on.</p>
+  `;
+}
+
+/** Repaint the table with the current visible-column set + refill async cells. */
+function applyColumnVisibility() {
+  if (!_table) return;
+  _table.setColumns(computeVisibleColumns(_allColumns, _hiddenColumns));
+  loadRowExtras();
+}
+
+/** Serialise the current hidden-column set the same way persistColumnPrefs does. */
+function serializeHiddenColumns() {
+  return JSON.stringify(
+    _allColumns.filter(c => !c.lockedVisible && _hiddenColumns.has(c.key)).map(c => c.key).sort(),
+  );
+}
+
+/**
+ * Persist this admin's hidden-column list (Supabase + localStorage).
+ * No-op guarded: if the layout is byte-identical to what was last persisted
+ * (or to the layout loaded at page open), nothing is written — a redundant or
+ * spurious call can never round-trip an unchanged value to Supabase.
+ */
+function persistColumnPrefs() {
+  const serialized = serializeHiddenColumns();
+  if (serialized === _lastPersistedColumns) return;
+  _lastPersistedColumns = serialized;
+  AdminAPI.setUiPref(COLUMN_PREF_KEY, { hidden: JSON.parse(serialized) });
+}
+
+/** Wire the Columns popover: open/close, per-checkbox toggle, Reset. */
+function wireColumnPicker(header) {
+  const wrap = header.querySelector('#col-picker');
+  const trigger = header.querySelector('#col-picker-trigger');
+  const panel = header.querySelector('#col-picker-panel');
+  if (!wrap || !trigger || !panel) return;
+
+  const onOutside = (e) => { if (!wrap.contains(e.target)) close(); };
+  const onKey = (e) => { if (e.key === 'Escape') { close(); trigger.focus(); } };
+  function open() {
+    renderColumnPickerPanel(panel);
+    panel.hidden = false;
+    trigger.setAttribute('aria-expanded', 'true');
+    document.addEventListener('click', onOutside, true);
+    document.addEventListener('keydown', onKey);
+  }
+  function close() {
+    panel.hidden = true;
+    trigger.setAttribute('aria-expanded', 'false');
+    document.removeEventListener('click', onOutside, true);
+    document.removeEventListener('keydown', onKey);
+  }
+
+  trigger.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (panel.hidden) open(); else close();
+  });
+
+  // Checkbox toggle — event-delegated because the panel re-renders on each open.
+  panel.addEventListener('change', (e) => {
+    const cb = e.target.closest('.admin-colpicker__cb');
+    if (!cb) return;
+    const key = cb.dataset.colKey;
+    const col = _allColumns.find(c => c.key === key);
+    if (!col || col.lockedVisible) return;
+    if (cb.checked) _hiddenColumns.delete(key);
+    else _hiddenColumns.add(key);
+    applyColumnVisibility();
+    persistColumnPrefs();
+  });
+
+  // Reset — restore the shipped default layout.
+  panel.addEventListener('click', (e) => {
+    if (!e.target.closest('[data-col-reset]')) return;
+    _hiddenColumns = new Set(DEFAULT_HIDDEN_COLUMNS);
+    renderColumnPickerPanel(panel);
+    applyColumnVisibility();
+    persistColumnPrefs();
+  });
 }
 
 async function loadCompatCounts() {
@@ -247,6 +408,67 @@ async function loadCompatCounts() {
     }));
     if (i + batch < arr.length && !signal.aborted) await new Promise(r => setTimeout(r, 300));
   }
+}
+
+/**
+ * Back-fill the "For Use In" column. One batched Supabase read of the
+ * product_ribbon_brands junction for every visible row, grouped by product and
+ * rendered as brand chips. Mirrors loadCompatCounts(): cells render a
+ * placeholder first, this fills them after. No-op when the column is hidden.
+ */
+async function loadForUseInBrands() {
+  if (_hiddenColumns.has('for_use_in')) return;
+  const cells = Array.from(document.querySelectorAll('.admin-fuin-cell[data-fuin-id]'));
+  if (!cells.length) return;
+
+  if (_forUseInController) _forUseInController.abort();
+  _forUseInController = new AbortController();
+  const signal = _forUseInController.signal;
+
+  const sb = (typeof Auth !== 'undefined' && Auth.supabase) ? Auth.supabase : null;
+  const blank = () => cells.forEach(c => {
+    if (!signal.aborted) c.innerHTML = `<span class="admin-fuin-cell__state">${MISSING}</span>`;
+  });
+  if (!sb) { blank(); return; }
+
+  const ids = [...new Set(cells.map(c => c.dataset.fuinId).filter(Boolean))];
+  if (!ids.length) return;
+
+  try {
+    const { data, error } = await sb.from('product_ribbon_brands')
+      .select('product_id, ribbon_brands!product_ribbon_brands_ribbon_brand_id_fkey(id, name)')
+      .in('product_id', ids);
+    if (signal.aborted) return;
+    if (error) throw error;
+
+    const byProduct = {};
+    for (const row of (data || [])) {
+      const name = row.ribbon_brands && row.ribbon_brands.name;
+      if (!name) continue;
+      (byProduct[row.product_id] = byProduct[row.product_id] || []).push(name);
+    }
+
+    for (const cell of cells) {
+      if (signal.aborted) return;
+      const names = [...new Set(byProduct[cell.dataset.fuinId] || [])]
+        .sort((a, b) => a.localeCompare(b));
+      cell.innerHTML = names.length
+        ? names.map(n => `<span class="admin-fuin-chip">${esc(n)}</span>`).join('')
+        : `<span class="admin-fuin-cell__state">${MISSING}</span>`;
+    }
+  } catch {
+    blank();
+  }
+}
+
+/**
+ * Fired after every table render: fills the async columns (Compatible printers
+ * + For Use In). Each loader is internally a no-op when its column is hidden,
+ * so this is safe to call unconditionally.
+ */
+function loadRowExtras() {
+  loadCompatCounts();
+  loadForUseInBrands();
 }
 
 function productHasImage(p) {
@@ -390,7 +612,7 @@ async function loadProducts() {
     const rows = Array.isArray(data) ? data : (data.products || data.data || []);
     const pagination = data.pagination || { total: data.total || rows.length, page: _page, limit: LIMIT };
     _table.setData(rows, pagination);
-    loadCompatCounts();
+    loadRowExtras();
     return;
   }
 
@@ -483,7 +705,7 @@ async function loadProducts() {
       });
       const pagination = { total: count || mapped.length, page: _page, limit: LIMIT };
       _table.setData(mapped, pagination);
-      loadCompatCounts();
+      loadRowExtras();
       return;
     } catch (e) {
       // Fall through to backend API
@@ -500,7 +722,7 @@ async function loadProducts() {
   const rows = Array.isArray(data) ? data : (data.products || data.data || []);
   const pagination = data.pagination || { total: data.total || rows.length, page: _page, limit: LIMIT };
   _table.setData(rows, pagination);
-  loadCompatCounts();
+  loadRowExtras();
 }
 
 let _activeModal = null;
@@ -511,8 +733,8 @@ function closeProductModal() {
   _activeModal = null;
   modal.classList.remove('open');
   setTimeout(() => modal.remove(), 220);
-  // Resume compat count loading for any cells still showing placeholders
-  loadCompatCounts();
+  // Resume async column loading for any cells still showing placeholders
+  loadRowExtras();
 }
 
 async function openProductDrawer(product) {
@@ -1115,16 +1337,22 @@ function buildProductModalTabs(modal, full, isOwner) {
     forUseInHtml += `
     <hr style="margin:22px 0 18px;border:none;border-top:1px solid var(--border)">
     <div class="admin-form-group" id="ribbon-brands-group">
-      <label>Ribbon Brands</label>
+      <label>Ribbon Brands <span class="admin-ribbon-brands__count" id="ribbon-brands-count" hidden></span></label>
       <p style="font-size:12px;color:var(--text-muted);margin:0 0 10px">Assign this ribbon to the device brands it fits (e.g. Brother, Olympia, Olivetti). These power the brand filter customers use on the Ribbons page — a ribbon with no brand assigned will never appear under a brand.</p>
       <div class="admin-ribbon-brands" id="ribbon-brands-chips"><span class="admin-text-muted" style="font-size:13px">Loading…</span></div>
-      <div class="admin-ribbon-brands__controls">
-        <select class="admin-select" id="ribbon-brand-picker" disabled><option value="">Loading…</option></select>
-      </div>
-      <div class="admin-ribbon-brands__new" id="ribbon-brand-new" hidden>
-        <input class="admin-input" id="ribbon-brand-new-name" placeholder="New ribbon brand name…" autocomplete="off" maxlength="80">
-        <button type="button" class="admin-btn admin-btn--primary admin-btn--sm" id="ribbon-brand-new-save">Create</button>
-        <button type="button" class="admin-btn admin-btn--ghost admin-btn--sm" id="ribbon-brand-new-cancel">Cancel</button>
+      <div class="admin-brandpicker" id="ribbon-brand-picker">
+        <button type="button" class="admin-brandpicker__toggle" id="ribbon-brand-toggle" aria-expanded="false" aria-haspopup="listbox" aria-controls="ribbon-brand-panel" disabled>
+          <svg class="admin-brandpicker__toggle-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          <span class="admin-brandpicker__toggle-label" id="ribbon-brand-toggle-label">Loading brands…</span>
+          <svg class="admin-brandpicker__chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg>
+        </button>
+        <div class="admin-brandpicker__panel" id="ribbon-brand-panel" role="dialog" aria-label="Choose ribbon brands" hidden>
+          <div class="admin-brandpicker__searchwrap">
+            <svg class="admin-brandpicker__search-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+            <input type="text" class="admin-brandpicker__search" id="ribbon-brand-search" placeholder="Search brands, or type a new name…" autocomplete="off" maxlength="80" aria-label="Search or add a ribbon brand">
+          </div>
+          <div class="admin-brandpicker__list" id="ribbon-brand-list" role="listbox" aria-multiselectable="true" aria-label="Ribbon brands"></div>
+        </div>
       </div>
     </div>
     `;
@@ -1176,11 +1404,16 @@ function buildProductModalTabs(modal, full, isOwner) {
  * setProductRibbonBrands / createRibbonBrand) had no UI at all, so newly added
  * ribbons could never be filed under a brand.
  *
- * Behaviour:
- *   • Loads the brand catalogue + this product's current assignments.
- *   • Renders assigned brands as removable chips and a picker of the rest.
- *   • The picker's "+ Create new ribbon brand…" row creates a brand inline
- *     (AdminAPI.createRibbonBrand) and immediately assigns it.
+ * UI — a searchable multi-select combobox (`.admin-brandpicker`):
+ *   • Assigned brands render above as removable chips, with a live count.
+ *   • A toggle button opens an INLINE panel — it sits in the form flow (not an
+ *     absolutely-positioned popup) so it can never be clipped by the modal's
+ *     scroll container, the bug the native <select> dropdown had. On open the
+ *     panel is scrolled fully into view.
+ *   • The panel has a search field and a scrollable list of EVERY brand;
+ *     clicking a row toggles assignment (multi-select — the panel stays open).
+ *   • Typing a name with no exact match surfaces an inline "Create …" row;
+ *     Enter on an exact match assigns it, Enter on a novel name creates it.
  *   • Selection lives on modal._ribbonBrandSelection (Map id → {id,name}).
  *
  * Safety: modal._ribbonBrandsLoaded is set true ONLY after a clean load. The
@@ -1195,18 +1428,20 @@ async function wireRibbonBrandsSection(modal, full) {
   const group = modal.querySelector('#ribbon-brands-group');
   if (!group) return; // not a ribbon-family product — section not rendered
 
-  const chipsEl   = modal.querySelector('#ribbon-brands-chips');
-  const picker    = modal.querySelector('#ribbon-brand-picker');
-  const newWrap   = modal.querySelector('#ribbon-brand-new');
-  const newInput  = modal.querySelector('#ribbon-brand-new-name');
-  const newSave   = modal.querySelector('#ribbon-brand-new-save');
-  const newCancel = modal.querySelector('#ribbon-brand-new-cancel');
+  const chipsEl  = modal.querySelector('#ribbon-brands-chips');
+  const countEl  = modal.querySelector('#ribbon-brands-count');
+  const toggleEl = modal.querySelector('#ribbon-brand-toggle');
+  const labelEl  = modal.querySelector('#ribbon-brand-toggle-label');
+  const panelEl  = modal.querySelector('#ribbon-brand-panel');
+  const searchEl = modal.querySelector('#ribbon-brand-search');
+  const listEl   = modal.querySelector('#ribbon-brand-list');
 
   const selection = new Map(); // id(string) → { id, name }
   modal._ribbonBrandSelection = selection;
   modal._ribbonBrandsLoaded = false;
 
   let allBrands = []; // ribbon_brands catalogue rows
+  let creating = false;
 
   // Load the brand catalogue + this product's current assignments together.
   let loadFailed = false;
@@ -1232,18 +1467,28 @@ async function wireRibbonBrandsSection(modal, full) {
   // If the modal was closed while the fetch was in flight, bail quietly.
   if (!modal.isConnected) return;
 
-  allBrands.sort((a, b) =>
+  const sortBrands = () => allBrands.sort((a, b) =>
     (a.sort_order ?? 0) - (b.sort_order ?? 0) ||
     String(a.name || '').localeCompare(String(b.name || '')));
+  sortBrands();
 
   if (loadFailed) {
     chipsEl.innerHTML = `<span class="admin-ribbon-brands__error">Couldn’t load ribbon brands — reopen the product to retry. Saving now leaves existing brand assignments untouched.</span>`;
-    if (picker) { picker.innerHTML = '<option value="">Unavailable</option>'; picker.disabled = true; }
+    labelEl.textContent = 'Brands unavailable';
+    toggleEl.disabled = true;
     return;
   }
 
+  const slugify = (s) => s.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+
+  // ── Renderers ──────────────────────────────────────────────────────────
   const renderChips = () => {
-    if (selection.size === 0) {
+    const n = selection.size;
+    if (countEl) {
+      countEl.hidden = n === 0;
+      countEl.textContent = n ? `${n} assigned` : '';
+    }
+    if (n === 0) {
       chipsEl.innerHTML = `<span class="admin-ribbon-brands__empty">No brands assigned — this ribbon won’t appear under any brand on the Ribbons page.</span>`;
       return;
     }
@@ -1253,67 +1498,97 @@ async function wireRibbonBrandsSection(modal, full) {
       .join('');
   };
 
-  const renderPicker = () => {
-    const available = allBrands.filter(b => !selection.has(String(b.id)));
-    let html = `<option value="">${available.length ? 'Add a brand…' : 'All brands assigned'}</option>`;
-    for (const b of available) {
-      html += `<option value="${esc(String(b.id))}">${esc(b.name || 'Unnamed brand')}</option>`;
-    }
-    html += `<option value="__new__">+ Create new ribbon brand…</option>`;
-    picker.innerHTML = html;
-    picker.disabled = false;
+  const renderToggleLabel = () => {
+    const n = selection.size;
+    labelEl.textContent = n === 0
+      ? 'Add a brand…'
+      : `Add or remove brands · ${n} selected`;
   };
 
-  renderChips();
-  renderPicker();
+  // The panel list: every brand, filtered by the search box, plus an inline
+  // "Create …" row whenever the typed name doesn't match an existing brand.
+  const renderList = () => {
+    const q  = (searchEl.value || '').trim();
+    const ql = q.toLowerCase();
+    const matches = allBrands.filter(b => !ql || String(b.name || '').toLowerCase().includes(ql));
+    let html = '';
+    if (matches.length) {
+      html += matches.map(b => {
+        const id = String(b.id);
+        const on = selection.has(id);
+        return `<button type="button" class="admin-brandpicker__option${on ? ' is-selected' : ''}" data-brand-id="${esc(id)}" role="option" aria-selected="${on}">`
+          + `<span class="admin-brandpicker__check" aria-hidden="true">`
+          + (on ? `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>` : '')
+          + `</span><span class="admin-brandpicker__optname">${esc(b.name || 'Unnamed brand')}</span></button>`;
+      }).join('');
+    } else if (!q) {
+      html += `<div class="admin-brandpicker__empty">No ribbon brands yet — type a name above to create the first one.</div>`;
+    } else {
+      html += `<div class="admin-brandpicker__empty">No brand matches “${esc(q)}”.</div>`;
+    }
+    const exact = allBrands.some(b => String(b.name || '').toLowerCase() === ql);
+    if (q && !exact) {
+      html += `<button type="button" class="admin-brandpicker__create" data-create-brand>`
+        + `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>`
+        + `<span>Create “${esc(q)}”</span></button>`;
+    }
+    listEl.innerHTML = html;
+  };
 
-  // Remove a chip — delegated.
-  chipsEl.addEventListener('click', (e) => {
-    const btn = e.target.closest('[data-remove-brand]');
-    if (!btn) return;
-    selection.delete(String(btn.dataset.removeBrand));
+  // ── Panel open / close ─────────────────────────────────────────────────
+  const openPanel = () => {
+    panelEl.hidden = false;
+    if (toggleEl.setAttribute) toggleEl.setAttribute('aria-expanded', 'true');
+    renderList();
+    if (searchEl.focus) searchEl.focus();
+    // Inline panel — scroll the modal so the whole list is visible.
+    if (panelEl.scrollIntoView) panelEl.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  };
+  const closePanel = () => {
+    panelEl.hidden = true;
+    if (toggleEl.setAttribute) toggleEl.setAttribute('aria-expanded', 'false');
+  };
+
+  // ── Selection mutations ────────────────────────────────────────────────
+  const toggleBrand = (rawId) => {
+    const id = String(rawId);
+    if (selection.has(id)) {
+      selection.delete(id);
+    } else {
+      const b = allBrands.find(x => String(x.id) === id);
+      if (!b) return;
+      selection.set(id, { id, name: b.name || 'Unnamed brand' });
+    }
     renderChips();
-    renderPicker();
-  });
+    renderToggleLabel();
+    renderList();
+  };
 
-  // Picker: assign an existing brand, or open the inline create row.
-  picker.addEventListener('change', () => {
-    const v = picker.value;
-    picker.value = '';
-    if (!v) return;
-    if (v === '__new__') {
-      newWrap.hidden = false;
-      newInput.value = '';
-      newInput.focus();
-      return;
-    }
-    const brand = allBrands.find(b => String(b.id) === v);
-    if (brand) {
-      selection.set(String(brand.id), { id: String(brand.id), name: brand.name || 'Unnamed brand' });
-      renderChips();
-      renderPicker();
-    }
-  });
+  const assignExisting = (brand) => {
+    selection.set(String(brand.id), { id: String(brand.id), name: brand.name || 'Unnamed brand' });
+    renderChips();
+    renderToggleLabel();
+    renderList();
+  };
 
-  // Inline "create new ribbon brand".
-  const slugify = (s) => s.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
-  const createBrand = async () => {
-    const name = newInput.value.trim();
-    if (!name) { newInput.focus(); return; }
+  // Create a brand from the current search text (or assign a name-dupe).
+  const createFromQuery = async () => {
+    if (creating) return;
+    const name = (searchEl.value || '').trim();
+    if (!name) { if (searchEl.focus) searchEl.focus(); return; }
 
     // If a brand with that name already exists, just assign it — no duplicate.
     const dupe = allBrands.find(b => String(b.name || '').toLowerCase() === name.toLowerCase());
     if (dupe) {
-      selection.set(String(dupe.id), { id: String(dupe.id), name: dupe.name });
-      newWrap.hidden = true;
-      renderChips();
-      renderPicker();
+      assignExisting(dupe);
+      searchEl.value = '';
+      renderList();
       Toast.info(`“${dupe.name}” already exists — assigned it.`);
       return;
     }
 
-    newSave.disabled = true;
-    newSave.textContent = 'Creating…';
+    creating = true;
+    listEl.innerHTML = `<div class="admin-brandpicker__empty">Creating “${esc(name)}”…</div>`;
     try {
       const maxSort = allBrands.reduce((m, b) => Math.max(m, b.sort_order ?? 0), 0);
       const created = await AdminAPI.createRibbonBrand({
@@ -1327,24 +1602,84 @@ async function wireRibbonBrandsSection(modal, full) {
         ? created
         : { id: created, name, slug: slugify(name), sort_order: maxSort + 10 };
       allBrands.push(row);
+      sortBrands();
       selection.set(String(row.id), { id: String(row.id), name: row.name || name });
-      newWrap.hidden = true;
+      searchEl.value = '';
       renderChips();
-      renderPicker();
+      renderToggleLabel();
       Toast.success(`Ribbon brand “${name}” created and assigned`);
     } catch (e) {
       Toast.error(`Couldn’t create brand: ${e.message}`);
     } finally {
-      newSave.disabled = false;
-      newSave.textContent = 'Create';
+      creating = false;
+      renderList();
     }
   };
-  newSave.addEventListener('click', createBrand);
-  newInput.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') { e.preventDefault(); createBrand(); }
-    if (e.key === 'Escape') { e.preventDefault(); newWrap.hidden = true; }
+
+  // ── Initial paint ──────────────────────────────────────────────────────
+  renderChips();
+  renderToggleLabel();
+  toggleEl.disabled = false;
+
+  // ── Events ─────────────────────────────────────────────────────────────
+  // Remove a chip — delegated.
+  chipsEl.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-remove-brand]');
+    if (!btn) return;
+    selection.delete(String(btn.dataset.removeBrand));
+    renderChips();
+    renderToggleLabel();
+    renderList();
   });
-  newCancel.addEventListener('click', () => { newWrap.hidden = true; });
+
+  // Toggle the inline panel.
+  toggleEl.addEventListener('click', () => {
+    if (panelEl.hidden) openPanel(); else closePanel();
+  });
+
+  // Search box filters the list live.
+  searchEl.addEventListener('input', renderList);
+  searchEl.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      closePanel();
+      if (toggleEl.focus) toggleEl.focus();
+      return;
+    }
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      const q = (searchEl.value || '').trim();
+      if (!q) return;
+      const exact = allBrands.find(b => String(b.name || '').toLowerCase() === q.toLowerCase());
+      if (exact) {
+        if (!selection.has(String(exact.id))) assignExisting(exact);
+        searchEl.value = '';
+        renderList();
+      } else {
+        createFromQuery();
+      }
+    }
+  });
+
+  // List: toggle a brand row, or fire the inline create row.
+  listEl.addEventListener('click', (e) => {
+    if (e.target.closest('[data-create-brand]')) { createFromQuery(); return; }
+    const opt = e.target.closest('[data-brand-id]');
+    if (opt) toggleBrand(opt.dataset.brandId);
+  });
+
+  // Click outside the Ribbon Brands section closes the panel — but clicks on
+  // its own chips/picker keep it open (multi-select). Capture-phase so it runs
+  // before the toggle's own handler; self-cleaning once the modal unmounts.
+  if (typeof document !== 'undefined') {
+    const onDocClick = (e) => {
+      if (!modal.isConnected) { document.removeEventListener('click', onDocClick, true); return; }
+      if (panelEl.hidden) return;
+      if (group && group.contains && group.contains(e.target)) return;
+      closePanel();
+    };
+    document.addEventListener('click', onDocClick, true);
+  }
 }
 
 /**
@@ -2953,6 +3288,24 @@ async function renderProductsContent(contentEl) {
   if (_container === null) return;
   _brands = brandsData && Array.isArray(brandsData) ? brandsData : [];
 
+  // Per-admin column layout: the full column set, plus this admin's hidden
+  // list resolved from their saved preferences (Supabase, localStorage cache).
+  // An admin who has never opened the Columns picker gets DEFAULT_HIDDEN_COLUMNS.
+  _allColumns = buildColumns();
+  try {
+    const uiPrefs = await AdminAPI.getUiPrefs();
+    if (_container === null) return;
+    const savedCols = uiPrefs && uiPrefs[COLUMN_PREF_KEY];
+    _hiddenColumns = new Set(
+      savedCols && Array.isArray(savedCols.hidden) ? savedCols.hidden : DEFAULT_HIDDEN_COLUMNS,
+    );
+  } catch {
+    _hiddenColumns = new Set(DEFAULT_HIDDEN_COLUMNS);
+  }
+  // Baseline for the persist no-op guard: the layout as loaded must not write
+  // itself straight back to Supabase.
+  _lastPersistedColumns = serializeHiddenColumns();
+
   // Hide global filter bar — products page uses local toolbar instead
   FilterState.showBar(false);
 
@@ -3017,6 +3370,7 @@ async function renderProductsContent(contentEl) {
           <option value="out_of_stock">Out of Stock</option>
         </select>
         <span style="flex:1 1 auto"></span>
+        ${columnPickerMarkup()}
         ${ownerControls}
         <button class="admin-btn admin-btn--primary admin-btn--sm" id="add-product-btn">${icon('products', 14, 14)} Add Product</button>
         ${exportDropdown('export-products')}
@@ -3099,7 +3453,7 @@ async function renderProductsContent(contentEl) {
     renderDiagnostics(container);
 
     _table = new DataTable(tableContainer, {
-      columns: buildColumns(),
+      columns: computeVisibleColumns(_allColumns, _hiddenColumns),
       rowKey: 'id',
       selectable: true,
       onSelectionChange: (sel) => updateBulkBar(sel),
@@ -3125,43 +3479,6 @@ async function renderProductsContent(contentEl) {
       e.stopPropagation();
       const name = btn.dataset.copy;
       navigator.clipboard.writeText(name).then(() => Toast.success('Copied to clipboard')).catch(() => Toast.error('Copy failed'));
-    });
-
-    // Reviewed checkbox toggle (event delegation) — backend toggles is_reviewed on /reviewed
-    tableContainer.addEventListener('change', async (e) => {
-      const cb = e.target.closest('.review-check__input');
-      if (!cb) return;
-      e.stopPropagation();
-      const id = String(cb.dataset.productId || '');
-      if (!id) return;
-      const label = cb.closest('.review-check');
-      const optimisticChecked = cb.checked;
-      cb.disabled = true;
-      label?.classList.toggle('review-check--on', optimisticChecked);
-      try {
-        const result = await AdminAPI.toggleProductReviewed(id);
-        const reviewed = !!result?.is_reviewed;
-        // Sync UI to authoritative state (covers the rare case where backend disagrees with the optimistic flip)
-        cb.checked = reviewed;
-        label?.classList.toggle('review-check--on', reviewed);
-        const tip = reviewed
-          ? `Reviewed${result.reviewed_by_email ? ` by ${result.reviewed_by_email}` : ''}${result.reviewed_at ? ` on ${new Date(result.reviewed_at).toLocaleDateString('en-NZ')}` : ''} — click to unmark`
-          : 'Mark as reviewed';
-        if (label) label.title = tip;
-        const row = _table?.data?.find(r => String(r.id) === id);
-        if (row) {
-          row.is_reviewed = reviewed;
-          row.reviewed_at = result?.reviewed_at ?? null;
-          row.reviewed_by_email = result?.reviewed_by_email ?? null;
-        }
-      } catch (err) {
-        // Revert UI on failure
-        cb.checked = !optimisticChecked;
-        label?.classList.toggle('review-check--on', !optimisticChecked);
-        Toast.error(`Could not save: ${err.message}`);
-      } finally {
-        cb.disabled = false;
-      }
     });
 
     // Import lock toggle (event delegation)
@@ -3230,6 +3547,9 @@ async function renderProductsContent(contentEl) {
     // Export
     bindExportDropdown(header, 'export-products', handleExport);
     header.querySelector('#add-product-btn')?.addEventListener('click', () => openCreateProductModal());
+
+    // Per-admin column visibility picker
+    wireColumnPicker(header);
 
     // Show cached diagnostics instantly if available
     const DIAG_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
