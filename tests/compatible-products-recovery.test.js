@@ -464,6 +464,9 @@ test('getShopData — primary + sidecar fire in parallel, not sequentially', asy
             }, 60);
         }),
     });
+    // The manual product-codes layer (May 2026) adds its own Supabase lookup;
+    // it is orthogonal to primary/sidecar parallelism, so stub it inert here.
+    API._supabaseSelect = async () => null;
     const t0 = Date.now();
     await API.getShopData({ brand: 'brother', category: 'ink' });
     const elapsed = Date.now() - t0;

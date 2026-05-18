@@ -184,6 +184,9 @@ test('GET /api/shop retries on transient 502 twice then succeeds', async () => {
             return mockResponse({ status: 200, body: { ok: true, data: { series: [{ code: 'PG40', count: 5 }] } } });
         },
     });
+    // The manual product-codes layer (May 2026) adds its own Supabase lookup —
+    // stub it inert so `calls` counts only the backend /api/shop retry chain.
+    API._supabaseSelect = async () => null;
     const resp = await API.getShopData({ brand: 'canon', category: 'ink', source: 'genuine' });
     assert.equal(resp.ok, true);
     assert.deepEqual(resp.data.series, [{ code: 'PG40', count: 5 }]);

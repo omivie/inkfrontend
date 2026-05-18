@@ -997,6 +997,81 @@ const AdminAPI = {
     }
   },
 
+  // ---- Product Codes (Supabase direct — /shop categorisation codes) ----
+  // A product's codes are the drilldown chips it appears under (LC40, 200XL…).
+  // Stored normalised UPPERCASE alphanumeric — see sql/product_codes.sql. The
+  // table is an OVERRIDE layer: a product with rows here has its backend-derived
+  // series_codes fully replaced on the storefront; a product with none is
+  // untouched.
+
+  /** Normalise a raw code: uppercase, strip everything but A-Z/0-9. */
+  normalizeProductCode(raw) {
+    return String(raw == null ? '' : raw).toUpperCase().replace(/[^A-Z0-9]/g, '');
+  },
+
+  /** Codes assigned to one product, ascending. Returns null on error. */
+  async getProductCodes(productId) {
+    try {
+      const sb = this._sb();
+      if (!sb) return null;
+      const { data, error } = await sb.from('product_codes')
+        .select('code').eq('product_id', productId).order('code', { ascending: true });
+      if (error) throw error;
+      return (data || []).map(r => r.code);
+    } catch (e) {
+      adminApiWarn('Failed to load product codes', e);
+      return null;
+    }
+  },
+
+  /**
+   * Replace a product's entire code set (delete-then-insert). Codes are
+   * normalised + de-duped here so a malformed UI value can never reach the
+   * table's CHECK constraint. Passing [] clears the product's codes, reverting
+   * it to backend-derived series_codes on the storefront. Returns the cleaned
+   * list that was actually persisted.
+   */
+  async setProductCodes(productId, codes) {
+    try {
+      const sb = this._sb();
+      if (!sb) throw new Error('Supabase not available');
+      const clean = [...new Set((codes || [])
+        .map(c => this.normalizeProductCode(c))
+        .filter(c => c.length >= 2 && c.length <= 24))];
+      const { error: delErr } = await sb.from('product_codes')
+        .delete().eq('product_id', productId);
+      if (delErr) throw delErr;
+      if (clean.length) {
+        const rows = clean.map(code => ({ product_id: productId, code }));
+        const { error: insErr } = await sb.from('product_codes').insert(rows);
+        if (insErr) throw insErr;
+      }
+      return clean;
+    } catch (e) {
+      DebugLog.warn('[AdminAPI] setProductCodes failed:', e.message);
+      throw e;
+    }
+  },
+
+  /**
+   * The distinct-code catalogue (code + product_count) that powers the picker's
+   * autocomplete list. Reads the product_code_catalogue view. Returns null on
+   * error — the picker stays usable (search + inline create) without it.
+   */
+  async getCodeCatalogue() {
+    try {
+      const sb = this._sb();
+      if (!sb) return null;
+      const { data, error } = await sb.from('product_code_catalogue')
+        .select('code, product_count').order('code', { ascending: true });
+      if (error) throw error;
+      return data || [];
+    } catch (e) {
+      adminApiWarn('Failed to load code catalogue', e);
+      return null;
+    }
+  },
+
   // ---- Printer Models (Supabase direct) ----
 
   async getPrinters({ search = '', brandId = '', sort = 'full_name', order = 'asc', page = 1, limit = 200 } = {}) {

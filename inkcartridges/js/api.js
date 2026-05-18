@@ -708,7 +708,7 @@ const API = {
         if (!eligibleForRecovery
             || !primary || !primary.ok || !primary.data
             || !sidecar || !sidecar.ok || !sidecar.data || !Array.isArray(sidecar.data.products)) {
-            return primary;
+            return this._applyManualCodes(primary, params);
         }
 
         // Enrich + merge in a try/catch — if any merge step throws (malformed
@@ -819,6 +819,221 @@ const API = {
             }
         }
 
+        return this._applyManualCodes(primary, params);
+    },
+
+    // ─── Manual product codes (the product_codes override table) ──────────────
+    // Admins assign categorisation codes in the product drawer; they persist to
+    // the Supabase `product_codes` table (see inkcartridges/sql/product_codes.sql).
+    // This block lets the storefront honour them:
+    //   (1) a product WITH manual codes has its series_codes fully overridden;
+    //   (2) the codes drilldown gains a chip for any purely-manual code;
+    //   (3) clicking such a chip recovers the manually-tagged products the
+    //       backend's series_codes filter never returned.
+    // Fail-open throughout — any error leaves the backend response untouched, so
+    // /shop can never break because the codes table is unreachable.
+
+    _manualCodeCache: new Map(),   // key → { at:ms, value }
+    _MANUAL_CODE_TTL: 60000,        // 60s — codes change rarely; admins see fresh on reload
+
+    // apiCategory (the value shop-page passes as params.category) → product_type[].
+    // Mirrors the category→product_type mapping in shop-page.js.
+    _CATEGORY_PRODUCT_TYPES: {
+        ink:     ['ink_cartridge', 'ink_bottle'],
+        toner:   ['toner_cartridge'],
+        drums:   ['drum_unit', 'waste_toner', 'belt_unit', 'fuser_kit', 'maintenance_kit'],
+        label:   ['label_tape'],
+        paper:   ['photo_paper'],
+        ribbons: ['printer_ribbon', 'typewriter_ribbon', 'correction_tape'],
+    },
+
+    /** GET against the Supabase REST API with the public anon key. JSON or null. */
+    async _supabaseSelect(pathAndQuery) {
+        try {
+            const base = (typeof Config !== 'undefined' && Config.SUPABASE_URL) || '';
+            const key  = (typeof Config !== 'undefined' && Config.SUPABASE_ANON_KEY) || '';
+            if (!base || !key) return null;
+            const res = await fetch(`${base.replace(/\/$/, '')}/rest/v1/${pathAndQuery}`, {
+                headers: { apikey: key, Authorization: `Bearer ${key}`, Accept: 'application/json' },
+            });
+            if (!res.ok) return null;
+            return await res.json();
+        } catch (_) {
+            return null;
+        }
+    },
+
+    _manualCodeCacheGet(key) {
+        const hit = this._manualCodeCache.get(key);
+        if (hit && (Date.now() - hit.at) < this._MANUAL_CODE_TTL) return hit.value;
+        return undefined;
+    },
+    _manualCodeCacheSet(key, value) {
+        if (this._manualCodeCache.size > 240) this._manualCodeCache.clear();
+        this._manualCodeCache.set(key, { at: Date.now(), value });
+        return value;
+    },
+
+    /**
+     * Manual codes for a set of product IDs → Map(productId → string[]).
+     * IDs are chunked so the PostgREST `in.(…)` URL never grows unbounded.
+     */
+    async _fetchManualCodesByProduct(ids) {
+        const map = new Map();
+        const unique = [...new Set((ids || []).filter(Boolean))];
+        if (!unique.length) return map;
+        const CHUNK = 60;
+        for (let i = 0; i < unique.length; i += CHUNK) {
+            const slice = unique.slice(i, i + CHUNK);
+            const cacheKey = 'codes:' + slice.join(',');
+            let rows = this._manualCodeCacheGet(cacheKey);
+            if (rows === undefined) {
+                const list = slice.map(encodeURIComponent).join(',');
+                rows = await this._supabaseSelect(`product_codes?select=product_id,code&product_id=in.(${list})`);
+                this._manualCodeCacheSet(cacheKey, rows);
+            }
+            if (Array.isArray(rows)) {
+                for (const r of rows) {
+                    if (!r || !r.product_id || !r.code) continue;
+                    if (!map.has(r.product_id)) map.set(r.product_id, []);
+                    map.get(r.product_id).push(String(r.code).toUpperCase());
+                }
+            }
+        }
+        return map;
+    },
+
+    /** Manual chip counts for a brand+category → [{ code, count }]. */
+    async _fetchManualChipCounts(brandSlug, productTypes) {
+        if (!brandSlug || !Array.isArray(productTypes) || !productTypes.length) return [];
+        const cacheKey = `chips:${brandSlug}:${productTypes.join(',')}`;
+        let rows = this._manualCodeCacheGet(cacheKey);
+        if (rows === undefined) {
+            const types = productTypes.map(encodeURIComponent).join(',');
+            rows = await this._supabaseSelect(
+                `product_code_chip_counts?select=code,product_count`
+                + `&brand_slug=eq.${encodeURIComponent(brandSlug)}&product_type=in.(${types})`);
+            this._manualCodeCacheSet(cacheKey, rows);
+        }
+        if (!Array.isArray(rows)) return [];
+        // View rows are per product_type — sum across types for one chip total.
+        const byCode = new Map();
+        for (const r of rows) {
+            if (!r || !r.code) continue;
+            const c = String(r.code).toUpperCase();
+            byCode.set(c, (byCode.get(c) || 0) + (Number(r.product_count) || 0));
+        }
+        return [...byCode.entries()].map(([code, count]) => ({ code, count }));
+    },
+
+    /** Product IDs carrying a given manual code. */
+    async _fetchProductIdsForCode(code) {
+        const c = String(code || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+        if (c.length < 2) return [];
+        const cacheKey = 'forcode:' + c;
+        let rows = this._manualCodeCacheGet(cacheKey);
+        if (rows === undefined) {
+            rows = await this._supabaseSelect(`product_codes?select=product_id&code=eq.${encodeURIComponent(c)}`);
+            this._manualCodeCacheSet(cacheKey, rows);
+        }
+        return Array.isArray(rows) ? rows.map(r => r && r.product_id).filter(Boolean) : [];
+    },
+
+    /**
+     * Apply the product_codes override layer to a /api/shop response, in place.
+     * Runs at the tail of getShopData on the SWR-cloned response we own.
+     * Fail-open: never throws — returns `primary` whatever happens.
+     *
+     * @param {Object} primary - the /api/shop response
+     * @param {Object} params  - the original getShopData params
+     */
+    async _applyManualCodes(primary, params) {
+        try {
+            if (!primary || !primary.ok || !primary.data) return primary;
+            const data = primary.data;
+            const products = Array.isArray(data.products) ? data.products : [];
+
+            // (1) Override series_codes on every returned product carrying
+            //     manual codes — "manual fully replaces auto".
+            if (products.length) {
+                const codeMap = await this._fetchManualCodesByProduct(products.map(p => p && p.id));
+                if (codeMap.size) {
+                    for (const p of products) {
+                        if (p && p.id && codeMap.has(p.id)) {
+                            p.series_codes = [...new Set(codeMap.get(p.id))];
+                        }
+                    }
+                }
+            }
+
+            // (2) Codes drilldown — ensure a chip exists for every manual code,
+            //     so a purely-manual code (the LC57 case) still shows a tile.
+            if (!params.code && params.brand && params.category && Array.isArray(data.series)) {
+                const types = this._CATEGORY_PRODUCT_TYPES[String(params.category).toLowerCase()];
+                if (types) {
+                    const manualChips = await this._fetchManualChipCounts(params.brand, types);
+                    if (manualChips.length) {
+                        const have = new Set(data.series
+                            .map(s => s && s.code && String(s.code).toUpperCase())
+                            .filter(Boolean));
+                        let added = false;
+                        for (const { code, count } of manualChips) {
+                            if (!have.has(code)) {
+                                data.series.push({ code, count });
+                                have.add(code);
+                                added = true;
+                            }
+                        }
+                        if (added) {
+                            data.series.sort((a, b) => String(a.code)
+                                .localeCompare(String(b.code), 'en', { numeric: true, sensitivity: 'base' }));
+                        }
+                    }
+                }
+            }
+
+            // (3) Code-filtered grid — recover products manually tagged with
+            //     the code that the backend's series_codes filter dropped.
+            if (params.code && params.brand && params.category) {
+                const manualIds = await this._fetchProductIdsForCode(params.code);
+                if (manualIds.length) {
+                    const present = new Set(products.map(p => p && p.id).filter(Boolean));
+                    const missing = new Set(manualIds.filter(id => !present.has(id)));
+                    if (missing.size) {
+                        const fbQs = new URLSearchParams();
+                        fbQs.append('brand', params.brand);
+                        fbQs.append('category', params.category);
+                        fbQs.append('limit', '200');
+                        const pool = await this.getWithSWR(`/api/products?${fbQs.toString()}`).catch(() => null);
+                        const poolProducts = (pool && pool.ok && pool.data && Array.isArray(pool.data.products))
+                            ? pool.data.products : [];
+                        // One batched read of every recoverable product's codes.
+                        const ownCodes = await this._fetchManualCodesByProduct([...missing]);
+                        const fallbackCode = String(params.code).toUpperCase().replace(/[^A-Z0-9]/g, '');
+                        const recovered = [];
+                        for (const p of poolProducts) {
+                            if (!p || !p.id || !missing.has(p.id)) continue;
+                            // Reflect the product's full manual code set.
+                            p.series_codes = ownCodes.has(p.id)
+                                ? [...new Set(ownCodes.get(p.id))]
+                                : [fallbackCode];
+                            recovered.push(p);
+                            missing.delete(p.id);
+                        }
+                        if (recovered.length) {
+                            data.products = products.concat(recovered);
+                            if (primary.meta && typeof primary.meta.total === 'number') {
+                                primary.meta.total += recovered.length;
+                            }
+                        }
+                    }
+                }
+            }
+        } catch (e) {
+            if (typeof DebugLog !== 'undefined' && DebugLog.warn) {
+                DebugLog.warn('[API._applyManualCodes] skipped — manual codes not applied', e);
+            }
+        }
         return primary;
     },
 

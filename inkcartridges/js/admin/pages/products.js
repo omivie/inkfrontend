@@ -862,6 +862,10 @@ async function openProductDrawer(product) {
   // above and parks the selection on modal._ribbonBrandSelection for save.
   wireRibbonBrandsSection(modal, full);
 
+  // Populate the Product Codes section (every product type). Self-renders into
+  // the static shell and parks the selection on modal._productCodesSelection.
+  wireProductCodesSection(modal, full);
+
   // Wire action buttons
   bindProductModalActions(modal, full);
 }
@@ -1330,6 +1334,33 @@ function buildProductModalTabs(modal, full, isOwner) {
     </div>
   `;
 
+  // Product Codes — the /shop drilldown chips this product appears under
+  // (Brother → Ink → LC40). Applies to EVERY product type, unlike Ribbon
+  // Brands below. The catalogue + this product's codes load asynchronously in
+  // wireProductCodesSection(); this is just the static shell.
+  forUseInHtml += `
+    <hr style="margin:22px 0 18px;border:none;border-top:1px solid var(--border)">
+    <div class="admin-form-group" id="product-codes-group">
+      <label>Product Codes <span class="admin-ribbon-brands__count" id="product-codes-count" hidden></span></label>
+      <p style="font-size:12px;color:var(--text-muted);margin:0 0 10px">The series codes this product is categorised under — the chips customers drill into on /shop (Brother › Ink › <strong>LC40</strong>). Assign more than one and the product shows under each: an LC40 cartridge also tagged LC57 appears under both. Codes set here fully replace the auto-detected ones.</p>
+      <div class="admin-ribbon-brands" id="product-codes-chips"><span class="admin-text-muted" style="font-size:13px">Loading…</span></div>
+      <div class="admin-brandpicker" id="code-picker">
+        <button type="button" class="admin-brandpicker__toggle" id="code-toggle" aria-expanded="false" aria-haspopup="listbox" aria-controls="code-panel" disabled>
+          <svg class="admin-brandpicker__toggle-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          <span class="admin-brandpicker__toggle-label" id="code-toggle-label">Loading codes…</span>
+          <svg class="admin-brandpicker__chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg>
+        </button>
+        <div class="admin-brandpicker__panel" id="code-panel" role="dialog" aria-label="Choose product codes" hidden>
+          <div class="admin-brandpicker__searchwrap">
+            <svg class="admin-brandpicker__search-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+            <input type="text" class="admin-brandpicker__search" id="code-search" placeholder="Search or type a code, e.g. LC40…" autocomplete="off" maxlength="24" aria-label="Search or add a product code">
+          </div>
+          <div class="admin-brandpicker__list" id="code-list" role="listbox" aria-multiselectable="true" aria-label="Product codes"></div>
+        </div>
+      </div>
+    </div>
+  `;
+
   // Ribbon Brands assignment — only for ribbon-family products. The catalogue
   // of brands + this product's current assignments load asynchronously in
   // wireRibbonBrandsSection(); this is just the static shell.
@@ -1671,6 +1702,278 @@ async function wireRibbonBrandsSection(modal, full) {
   // Click outside the Ribbon Brands section closes the panel — but clicks on
   // its own chips/picker keep it open (multi-select). Capture-phase so it runs
   // before the toggle's own handler; self-cleaning once the modal unmounts.
+  if (typeof document !== 'undefined') {
+    const onDocClick = (e) => {
+      if (!modal.isConnected) { document.removeEventListener('click', onDocClick, true); return; }
+      if (panelEl.hidden) return;
+      if (group && group.contains && group.contains(e.target)) return;
+      closePanel();
+    };
+    document.addEventListener('click', onDocClick, true);
+  }
+}
+
+/**
+ * Wires the "Product Codes" section in the For Use In tab — available for
+ * EVERY product type. A product's codes are the /shop drilldown chips it
+ * appears under; assigning several (LC40 + LC57) makes it show under each.
+ *
+ * Storage: the product_codes override table (see sql/product_codes.sql),
+ * written by AdminAPI.setProductCodes on save.
+ *
+ *   • Catalogue (AdminAPI.getCodeCatalogue) + this product's codes
+ *     (AdminAPI.getProductCodes) load together.
+ *   • A product with no codes yet is pre-filled from its CURRENT codes —
+ *     backend series_codes when present, else API._enrichSeriesCodes' derived
+ *     codes — so the admin always edits from a correct "as it is now" start.
+ *   • Selection lives on modal._productCodesSelection (Map code→code).
+ *   • modal._productCodesBaseline records what the picker opened with; the
+ *     save handler writes ONLY when the selection diverges, so a seeded but
+ *     untouched product is never materialised into the override table.
+ *
+ * Safety: modal._productCodesLoaded is set true ONLY after a clean load, so a
+ * failed load can never be mistaken for "no codes" and wipe assignments.
+ */
+async function wireProductCodesSection(modal, full) {
+  const group = modal.querySelector('#product-codes-group');
+  if (!group) return;
+
+  const chipsEl  = modal.querySelector('#product-codes-chips');
+  const countEl  = modal.querySelector('#product-codes-count');
+  const toggleEl = modal.querySelector('#code-toggle');
+  const labelEl  = modal.querySelector('#code-toggle-label');
+  const panelEl  = modal.querySelector('#code-panel');
+  const searchEl = modal.querySelector('#code-search');
+  const listEl   = modal.querySelector('#code-list');
+
+  const selection = new Map(); // code → code
+  modal._productCodesSelection = selection;
+  modal._productCodesLoaded = false;
+
+  // Normalise a raw code the same way the table's CHECK constraint expects:
+  // uppercase, A-Z/0-9 only. Mirrors AdminAPI.normalizeProductCode.
+  const norm = (raw) => String(raw == null ? '' : raw).toUpperCase().replace(/[^A-Z0-9]/g, '');
+
+  // Derive the product's current codes — what /shop renders for it today.
+  // Reuses the storefront's shared extractor so the seed matches the live site.
+  const deriveSeed = () => {
+    const out = new Set();
+    const backend = Array.isArray(full.series_codes) ? full.series_codes : [];
+    for (const c of backend) { const n = norm(c); if (n.length >= 2) out.add(n); }
+    if (!out.size && typeof window !== 'undefined' && window.API
+        && typeof window.API._enrichSeriesCodes === 'function') {
+      try {
+        const probe = { sku: full.sku, name: full.name, series_codes: [] };
+        window.API._enrichSeriesCodes(probe);
+        for (const c of (probe.series_codes || [])) { const n = norm(c); if (n.length >= 2) out.add(n); }
+      } catch (_) { /* derivation is best-effort — the admin confirms it */ }
+    }
+    return [...out];
+  };
+
+  let catalogue = [];   // [{ code, product_count }]
+  let seeded = false;   // true when pre-filled from derivation (no saved codes)
+  let loadFailed = false;
+
+  try {
+    const [cat, assigned] = await Promise.all([
+      AdminAPI.getCodeCatalogue(),
+      full.id ? AdminAPI.getProductCodes(full.id) : Promise.resolve([]),
+    ]);
+    catalogue = Array.isArray(cat) ? cat.slice() : [];
+    const rows = Array.isArray(assigned) ? assigned : [];
+    if (rows.length) {
+      for (const c of rows) { const n = norm(c); if (n) selection.set(n, n); }
+    } else {
+      for (const n of deriveSeed()) selection.set(n, n);
+      seeded = selection.size > 0;
+    }
+    modal._productCodesLoaded = true;
+  } catch (e) {
+    loadFailed = true;
+    if (typeof DebugLog !== 'undefined') DebugLog.warn('[products] product codes load failed:', e.message);
+  }
+
+  if (!modal.isConnected) return;
+
+  // Baseline = what the picker opened with. Save diff-checks against this.
+  const baselineOf = () => [...selection.keys()].sort().join(',');
+  modal._productCodesBaseline = baselineOf();
+
+  if (loadFailed) {
+    chipsEl.innerHTML = `<span class="admin-ribbon-brands__error">Couldn’t load product codes — reopen the product to retry. Saving now leaves existing codes untouched.</span>`;
+    labelEl.textContent = 'Codes unavailable';
+    toggleEl.disabled = true;
+    return;
+  }
+
+  const catByCode = new Map(catalogue.map(c => [norm(c.code), c]));
+  const sortCatalogue = () => catalogue.sort((a, b) =>
+    String(a.code).localeCompare(String(b.code), 'en', { numeric: true, sensitivity: 'base' }));
+  sortCatalogue();
+
+  let creating = false; // guards Enter-key double-fire
+
+  // ── Renderers ──────────────────────────────────────────────────────────
+  const renderChips = () => {
+    const n = selection.size;
+    if (countEl) {
+      countEl.hidden = n === 0;
+      countEl.textContent = n ? `${n} code${n === 1 ? '' : 's'}` : '';
+    }
+    if (n === 0) {
+      chipsEl.innerHTML = `<span class="admin-ribbon-brands__empty">No codes — this product won’t appear under any /shop drilldown chip.</span>`;
+      return;
+    }
+    const chips = [...selection.values()]
+      .sort((a, b) => a.localeCompare(b, 'en', { numeric: true, sensitivity: 'base' }))
+      .map(code => `<span class="admin-code-chip">${esc(code)}<button type="button" class="admin-code-chip__remove" data-remove-code="${esc(code)}" title="Remove ${esc(code)}" aria-label="Remove ${esc(code)}">&times;</button></span>`)
+      .join('');
+    const note = seeded
+      ? `<span class="admin-product-codes__seed-note">Suggested from this product’s current categorisation — adjust if needed, then Save to lock it in.</span>`
+      : '';
+    chipsEl.innerHTML = chips + note;
+  };
+
+  const renderToggleLabel = () => {
+    const n = selection.size;
+    labelEl.textContent = n === 0 ? 'Add a code…' : `Add or remove codes · ${n} selected`;
+  };
+
+  const renderList = () => {
+    const rawq = (searchEl.value || '').trim();
+    const q = norm(rawq);
+    const matches = catalogue.filter(c => !q || norm(c.code).includes(q));
+    let html = '';
+    if (matches.length) {
+      html += matches.map(c => {
+        const code = norm(c.code);
+        const on = selection.has(code);
+        const cnt = Number(c.product_count) || 0;
+        return `<button type="button" class="admin-brandpicker__option${on ? ' is-selected' : ''}" data-code="${esc(code)}" role="option" aria-selected="${on}">`
+          + `<span class="admin-brandpicker__check" aria-hidden="true">`
+          + (on ? `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>` : '')
+          + `</span><span class="admin-brandpicker__optname">${esc(code)}</span>`
+          + `<span class="admin-product-codes__optcount">${cnt} product${cnt === 1 ? '' : 's'}</span></button>`;
+      }).join('');
+    } else if (!q) {
+      html += `<div class="admin-brandpicker__empty">No codes in the catalogue yet — type one above (e.g. LC40) to add the first.</div>`;
+    } else {
+      html += `<div class="admin-brandpicker__empty">No existing code matches “${esc(rawq)}”.</div>`;
+    }
+    const exists = !!q && catByCode.has(q);
+    if (q.length >= 2 && q.length <= 24 && !exists && !selection.has(q)) {
+      html += `<button type="button" class="admin-brandpicker__create" data-add-code>`
+        + `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>`
+        + `<span>Add “${esc(q)}”</span></button>`;
+    } else if (rawq && q.length < 2) {
+      html += `<div class="admin-brandpicker__empty">Codes need at least 2 letters or numbers.</div>`;
+    }
+    listEl.innerHTML = html;
+  };
+
+  // ── Panel open / close ─────────────────────────────────────────────────
+  const openPanel = () => {
+    panelEl.hidden = false;
+    if (toggleEl.setAttribute) toggleEl.setAttribute('aria-expanded', 'true');
+    renderList();
+    if (searchEl.focus) searchEl.focus();
+    if (panelEl.scrollIntoView) panelEl.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  };
+  const closePanel = () => {
+    panelEl.hidden = true;
+    if (toggleEl.setAttribute) toggleEl.setAttribute('aria-expanded', 'false');
+  };
+
+  // ── Selection mutations ────────────────────────────────────────────────
+  // Any deliberate edit clears the "suggested" note — the admin owns it now.
+  const markTouched = () => { seeded = false; };
+
+  const addCode = (raw, { quiet = false } = {}) => {
+    const code = norm(raw);
+    if (code.length < 2) { if (!quiet) Toast.error('Codes need at least 2 letters or numbers'); return false; }
+    if (code.length > 24) { if (!quiet) Toast.error('That code is too long (24 characters max)'); return false; }
+    if (!selection.has(code)) {
+      selection.set(code, code);
+      if (!catByCode.has(code)) {
+        const row = { code, product_count: 0 };
+        catalogue.push(row);
+        catByCode.set(code, row);
+        sortCatalogue();
+      }
+    }
+    markTouched();
+    return true;
+  };
+
+  const toggleCode = (rawCode) => {
+    const code = norm(rawCode);
+    if (!code) return;
+    if (selection.has(code)) selection.delete(code);
+    else selection.set(code, code);
+    markTouched();
+    renderChips();
+    renderToggleLabel();
+    renderList();
+  };
+
+  // Add the typed code (or assign it if it already exists in the catalogue).
+  const addFromQuery = () => {
+    if (creating) return;
+    creating = true;
+    try {
+      const code = norm(searchEl.value || '');
+      if (!addCode(code)) return;
+      searchEl.value = '';
+      renderChips();
+      renderToggleLabel();
+      renderList();
+    } finally {
+      creating = false;
+    }
+  };
+
+  // ── Initial paint ──────────────────────────────────────────────────────
+  renderChips();
+  renderToggleLabel();
+  toggleEl.disabled = false;
+
+  // ── Events ─────────────────────────────────────────────────────────────
+  chipsEl.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-remove-code]');
+    if (!btn) return;
+    selection.delete(norm(btn.dataset.removeCode));
+    markTouched();
+    renderChips();
+    renderToggleLabel();
+    renderList();
+  });
+
+  toggleEl.addEventListener('click', () => {
+    if (panelEl.hidden) openPanel(); else closePanel();
+  });
+
+  searchEl.addEventListener('input', renderList);
+  searchEl.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      closePanel();
+      if (toggleEl.focus) toggleEl.focus();
+      return;
+    }
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      if ((searchEl.value || '').trim()) addFromQuery();
+    }
+  });
+
+  listEl.addEventListener('click', (e) => {
+    if (e.target.closest('[data-add-code]')) { addFromQuery(); return; }
+    const opt = e.target.closest('[data-code]');
+    if (opt) toggleCode(opt.dataset.code);
+  });
+
+  // Click outside the section closes the panel; clicks inside keep it open.
   if (typeof document !== 'undefined') {
     const onDocClick = (e) => {
       if (!modal.isConnected) { document.removeEventListener('click', onDocClick, true); return; }
@@ -2726,6 +3029,22 @@ function bindProductModalActions(modal, product) {
           await AdminAPI.setProductRibbonBrands(product.id, [...modal._ribbonBrandSelection.keys()]);
         } catch (rbErr) {
           Toast.error(`Product saved, but ribbon brands didn’t: ${rbErr.message}`);
+        }
+      }
+
+      // Persist Product Codes (product_codes override table). Gated on
+      // _productCodesLoaded so a failed load can never wipe codes, and written
+      // ONLY when the selection diverged from what the picker opened with — a
+      // seeded-but-untouched product stays on the backend-derived path and is
+      // never materialised into the override table.
+      if (modal._productCodesLoaded && modal._productCodesSelection) {
+        const current = [...modal._productCodesSelection.keys()].sort().join(',');
+        if (current !== modal._productCodesBaseline) {
+          try {
+            await AdminAPI.setProductCodes(product.id, [...modal._productCodesSelection.keys()]);
+          } catch (pcErr) {
+            Toast.error(`Product saved, but codes didn’t: ${pcErr.message}`);
+          }
         }
       }
 

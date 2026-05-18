@@ -1559,6 +1559,41 @@
 .admin-brandpicker__create:hover { background: var(--cyan-dim); }
 .admin-brandpicker__create svg { flex: 0 0 auto; }
 
+/* ---- Product Codes picker ---- */
+/* Reuses .admin-brandpicker for the combobox; only the chips + list extras
+   are bespoke. Codes are rendered monospace so LC40 / 200XL read as codes. */
+.admin-code-chip {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 4px 6px 4px 10px; border-radius: 6px;
+  background: var(--cyan-dim, rgba(34, 211, 238, .12));
+  color: var(--cyan-text, #0891b2);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px; font-weight: 600; line-height: 1.4; letter-spacing: .02em;
+  border: 1px solid var(--cyan, rgba(34, 211, 238, .35));
+}
+.admin-code-chip__remove {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 16px; height: 16px; padding: 0;
+  border: none; border-radius: 4px;
+  background: rgba(0, 0, 0, .08); color: inherit;
+  font-size: 13px; line-height: 1; cursor: pointer;
+  transition: background .12s var(--ease, ease);
+}
+.admin-code-chip__remove:hover { background: var(--danger, #dc2626); color: #fff; }
+.admin-product-codes__seed-note {
+  flex-basis: 100%;
+  font-size: 11px; font-style: italic; color: var(--text-muted);
+  padding: 2px 4px 0;
+}
+.admin-product-codes__optcount {
+  margin-left: auto; padding-left: 12px;
+  font-size: 11px; color: var(--text-muted); white-space: nowrap;
+}
+/* Scoped to the code picker only — must not touch the ribbon brand picker. */
+#code-panel .admin-brandpicker__optname {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
 /* ---- Image Lightbox ---- */
 .admin-image-lightbox {
   position: fixed; inset: 0; z-index: 10000;
