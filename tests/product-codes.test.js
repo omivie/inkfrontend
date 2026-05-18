@@ -153,16 +153,20 @@ test('drawer emits the Product Codes shell — chips, picker, toggle, panel, sea
   }
 });
 
-test('Product Codes section is emitted for EVERY product type (not gated on isManualCompat)', () => {
-  // The codes shell must be appended unconditionally, before the ribbon-brands
-  // block which alone is `if (isManualCompat)`-gated.
-  const codesAt  = PRODUCTS_SRC.indexOf('id="product-codes-group"');
-  const ribbonIf = PRODUCTS_SRC.indexOf('if (isManualCompat) {');
-  assert.ok(codesAt !== -1 && ribbonIf !== -1);
-  assert.ok(codesAt < ribbonIf, 'codes shell is appended before the ribbon-only block');
-  // The forUseInHtml += for codes must not sit inside an isManualCompat guard.
-  const block = PRODUCTS_SRC.slice(PRODUCTS_SRC.indexOf('Product Codes — the /shop'), codesAt);
-  assert.doesNotMatch(block, /isManualCompat/, 'codes section is unconditional');
+test('Product Codes is its own tab, emitted for EVERY product type', () => {
+  // 'Product Codes' sits in the unconditional part of the tabs array — before
+  // the `...(isManualCompat ? …)` spread — so every product type gets the tab.
+  const m = PRODUCTS_SRC.match(/const tabs = \[([^\]]*)\]/);
+  assert.ok(m, 'tabs array literal found');
+  const beforeSpread = m[1].split('...(isManualCompat')[0];
+  assert.match(beforeSpread, /'Product Codes'/, "'Product Codes' is an unconditional tab");
+  // Its panel is its own variable, wired into panelContents — NOT appended to
+  // the For Use In panel.
+  assert.match(PRODUCTS_SRC, /const productCodesHtml = `/, 'codes panel is a standalone variable');
+  assert.match(PRODUCTS_SRC, /const panelContents = \[[^\]]*productCodesHtml/,
+    'productCodesHtml is mounted in panelContents');
+  assert.doesNotMatch(PRODUCTS_SRC, /forUseInHtml \+= `[^`]*id="product-codes-group"/,
+    'codes shell must NOT be appended to the For Use In panel');
 });
 
 test('wireProductCodesSection is invoked from openProductDrawer', () => {
@@ -176,8 +180,13 @@ test('save handler persists codes — gated on the load flag AND a baseline diff
   assert.match(save, /AdminAPI\.setProductCodes\(product\.id/, 'writes via setProductCodes');
 });
 
-test('APP_VERSION was bumped to the product-codes build', () => {
-  assert.match(APP_SRC, /const APP_VERSION = '2026\.05\.18-product-codes'/);
+test('APP_VERSION names the product-codes build and is a valid dated tag', () => {
+  // APP_VERSION is a moving cache key — pin its SHAPE + that it names this
+  // feature, not a frozen literal (see errors.md ERR-032).
+  const m = APP_SRC.match(/APP_VERSION\s*=\s*'([^']+)'/);
+  assert.ok(m, 'APP_VERSION must be declared');
+  assert.match(m[1], /^2026\.\d{2}\.\d{2}-[a-z0-9-]+$/i, 'valid dated build tag');
+  assert.match(m[1], /product-codes/, 'names the product-codes feature');
 });
 
 test('admin.css styles the code chips + picker count', () => {

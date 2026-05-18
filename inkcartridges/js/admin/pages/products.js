@@ -1180,7 +1180,7 @@ function buildProductModalTabs(modal, full, isOwner) {
   const manualCompatTypes = ['printer_ribbon', 'typewriter_ribbon', 'correction_tape'];
   const isManualCompat = manualCompatTypes.includes(full.product_type);
 
-  const tabs = ['Basic Info', 'Description', 'For Use In', 'Pricing', 'Inventory', 'SEO', 'Advanced',
+  const tabs = ['Basic Info', 'Description', 'For Use In', 'Product Codes', 'Pricing', 'Inventory', 'SEO', 'Advanced',
     ...(isManualCompat ? [] : ['Compatibility']), 'FAQ'];
   tabsEl.innerHTML = tabs.map((t, i) =>
     `<button class="admin-product-modal__tab${i === 0 ? ' active' : ''}" data-tab="${i}">${esc(t)}</button>`
@@ -1334,12 +1334,11 @@ function buildProductModalTabs(modal, full, isOwner) {
     </div>
   `;
 
-  // Product Codes — the /shop drilldown chips this product appears under
-  // (Brother → Ink → LC40). Applies to EVERY product type, unlike Ribbon
-  // Brands below. The catalogue + this product's codes load asynchronously in
+  // Product Codes panel — its own tab. The /shop drilldown chips this product
+  // appears under (Brother › Ink › LC40). Applies to EVERY product type. The
+  // catalogue + this product's codes load asynchronously in
   // wireProductCodesSection(); this is just the static shell.
-  forUseInHtml += `
-    <hr style="margin:22px 0 18px;border:none;border-top:1px solid var(--border)">
+  const productCodesHtml = `
     <div class="admin-form-group" id="product-codes-group">
       <label>Product Codes <span class="admin-ribbon-brands__count" id="product-codes-count" hidden></span></label>
       <p style="font-size:12px;color:var(--text-muted);margin:0 0 10px">The series codes this product is categorised under — the chips customers drill into on /shop (Brother › Ink › <strong>LC40</strong>). Assign more than one and the product shows under each: an LC40 cartridge also tagged LC57 appears under both. Codes set here fully replace the auto-detected ones.</p>
@@ -1389,7 +1388,7 @@ function buildProductModalTabs(modal, full, isOwner) {
     `;
   }
 
-  const panelContents = [basicHtml, descHtml, forUseInHtml, pricingHtml, inventoryHtml, seoHtml, advancedHtml,
+  const panelContents = [basicHtml, descHtml, forUseInHtml, productCodesHtml, pricingHtml, inventoryHtml, seoHtml, advancedHtml,
     ...(isManualCompat ? [] : [compatHtml]), faqHtml];
   panelsEl.innerHTML = panelContents.map((content, i) =>
     `<div class="admin-product-modal__tab-panel${i === 0 ? ' active' : ''}" data-panel="${i}">${content}</div>`
