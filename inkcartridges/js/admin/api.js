@@ -1072,6 +1072,75 @@ const AdminAPI = {
     }
   },
 
+  /**
+   * Brand-wide code edit: delete `fromCode`, or rename it to `toCode`, across
+   * EVERY product in brandSlug+category whose effective codes include it.
+   *
+   * Walks the /shop code-filtered drilldown (which already merges manual codes)
+   * to find affected products, then writes a product_codes override on each:
+   * the product's effective codes with `fromCode` removed (delete) or swapped
+   * for `toCode` (rename). Materialising the override is the only storefront
+   * lever — codes the backend auto-derives can't be erased at the source, so a
+   * future import may re-derive `fromCode`; the UI flags that caveat.
+   *
+   * @returns {{ changed:number, failed:number, products:number }}
+   */
+  async applyBrandCodeChange({ brandSlug, category, fromCode, toCode = null }) {
+    const from = this.normalizeProductCode(fromCode);
+    if (from.length < 2) throw new Error('No code to change');
+    const to = toCode == null ? null : this.normalizeProductCode(toCode);
+    if (toCode != null && (to.length < 2 || to.length > 24)) {
+      throw new Error('The new code must be 2–24 letters or numbers');
+    }
+    if (to === from) return { changed: 0, failed: 0, products: 0 };
+    if (!brandSlug || !category || typeof window === 'undefined'
+        || !window.API || typeof window.API.getShopData !== 'function') {
+      throw new Error('Cannot resolve the brand’s products');
+    }
+
+    // Gather every product whose EFFECTIVE codes include `from`. getShopData's
+    // code filter already folds in manually-assigned codes and overrides
+    // series_codes to the effective set, so p.series_codes is authoritative.
+    const affected = new Map(); // productId → effective codes[]
+    for (let page = 1; page <= 30; page++) {
+      let resp;
+      try {
+        resp = await window.API.getShopData({ brand: brandSlug, category, code: from, page, limit: 200 });
+      } catch (e) {
+        throw new Error('Couldn’t load the affected products: ' + e.message);
+      }
+      const products = (resp && resp.ok && resp.data && Array.isArray(resp.data.products))
+        ? resp.data.products : [];
+      for (const p of products) {
+        if (!p || !p.id || affected.has(p.id)) continue;
+        const codes = [...new Set((p.series_codes || [])
+          .map(c => this.normalizeProductCode(c)).filter(c => c.length >= 2))];
+        if (codes.includes(from)) affected.set(p.id, codes);
+      }
+      if (products.length < 200) break;
+    }
+
+    let changed = 0, failed = 0;
+    for (const [id, codes] of affected) {
+      const next = codes.filter(c => c !== from);
+      if (to && !next.includes(to)) next.push(to);
+      try {
+        await this.setProductCodes(id, next);
+        changed++;
+      } catch (e) {
+        failed++;
+        DebugLog.warn('[AdminAPI] applyBrandCodeChange row failed:', id, e.message);
+      }
+    }
+    // The storefront's manual-code cache is now stale for this brand.
+    try {
+      if (window.API && window.API._manualCodeCache && window.API._manualCodeCache.clear) {
+        window.API._manualCodeCache.clear();
+      }
+    } catch (_) { /* non-fatal */ }
+    return { changed, failed, products: affected.size };
+  },
+
   // ---- Printer Models (Supabase direct) ----
 
   async getPrinters({ search = '', brandId = '', sort = 'full_name', order = 'asc', page = 1, limit = 200 } = {}) {

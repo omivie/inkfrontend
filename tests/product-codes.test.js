@@ -116,9 +116,28 @@ test('SQL: product_code_chip_counts view — keyed by brand slug + product_type'
 // ─────────────────────────────────────────────────────────────────────────────
 
 test('AdminAPI exposes every product-code method the picker depends on', () => {
-  for (const m of ['getProductCodes', 'setProductCodes', 'getCodeCatalogue', 'normalizeProductCode']) {
+  for (const m of ['getProductCodes', 'setProductCodes', 'getCodeCatalogue',
+                   'normalizeProductCode', 'applyBrandCodeChange']) {
     assert.match(ADMIN_API, new RegExp(`\\b${m}\\b`), `AdminAPI.${m} must exist`);
   }
+});
+
+test('AdminAPI.applyBrandCodeChange gathers affected products then rewrites each', () => {
+  // extractFunction is fooled by the `({ … toCode = null })` destructured arg,
+  // so slice the method span explicitly (see errors.md ERR-PC3).
+  const start = ADMIN_API.indexOf('async applyBrandCodeChange(');
+  const end = ADMIN_API.indexOf('// ---- Printer Models', start);
+  assert.ok(start !== -1 && end !== -1 && end > start, 'applyBrandCodeChange span found');
+  const fn = ADMIN_API.slice(start, end);
+  // Walks the /shop code drilldown to find every product carrying the code…
+  assert.match(fn, /window\.API\.getShopData\(\{ brand: brandSlug, category, code: from/);
+  // …then writes a fresh override on each via setProductCodes.
+  assert.match(fn, /this\.setProductCodes\(id, next\)/);
+  // delete = drop the code; rename = swap it for `to`.
+  assert.match(fn, /codes\.filter\(c => c !== from\)/);
+  assert.match(fn, /next\.push\(to\)/);
+  // A new code must pass the same 2–24 char rule as the table constraint.
+  assert.match(fn, /to\.length < 2 \|\| to\.length > 24/);
 });
 
 test('AdminAPI.setProductCodes replaces the set (delete-then-insert) on product_codes', () => {
@@ -351,9 +370,9 @@ test('clicking a code tile toggles it on, then off', async () => {
   const win = makeWindow({ series: [{ code: 'TN253', count: 4 }] });
   await loadWire()({ AdminAPI, window: win })(modal, PROD({ id: 'p6', product_type: 'toner_cartridge' }));
   const grid = modal._els['product-codes-grid'];
-  await grid.fire('click', clickEvent({ '[data-code]': { dataset: { code: 'TN253' } } }));
+  await grid.fire('click', clickEvent({ '[data-toggle]': { dataset: { code: 'TN253' } } }));
   assert.ok(modal._productCodesSelection.has('TN253'), 'toggled on');
-  await grid.fire('click', clickEvent({ '[data-code]': { dataset: { code: 'TN253' } } }));
+  await grid.fire('click', clickEvent({ '[data-toggle]': { dataset: { code: 'TN253' } } }));
   assert.ok(!modal._productCodesSelection.has('TN253'), 'toggled back off');
 });
 
@@ -363,7 +382,7 @@ test('clicking an already-assigned tile removes the code', async () => {
   const win = makeWindow({ series: [{ code: 'LC40' }, { code: 'LC57' }] });
   await loadWire()({ AdminAPI, window: win })(modal, PROD({ id: 'p7' }));
   await modal._els['product-codes-grid'].fire('click',
-    clickEvent({ '[data-code]': { dataset: { code: 'LC40' } } }));
+    clickEvent({ '[data-toggle]': { dataset: { code: 'LC40' } } }));
   assert.deepEqual([...modal._productCodesSelection.keys()], ['LC57']);
 });
 
@@ -375,6 +394,55 @@ test('a failed load leaves the gate false so save cannot wipe codes', async () =
   await loadWire()({ AdminAPI, window: makeWindow({ shopThrows: true }) })(modal, PROD({ id: 'p8' }));
   assert.notEqual(modal._productCodesLoaded, true, 'gate stays false on load failure');
   assert.equal(modal._els['pc-filter'].disabled, true, 'the filter input is disabled');
+});
+
+test('the ⋯ menu opens Rename / Delete actions on a tile', async () => {
+  const modal = makeModal(CODE_IDS);
+  const AdminAPI = { getProductCodes: async () => [] };
+  const win = makeWindow({ series: [{ code: 'LC40', count: 3 }] });
+  await loadWire()({ AdminAPI, window: win })(modal, PROD({ id: 'pm' }));
+  const grid = modal._els['product-codes-grid'];
+  await grid.fire('click', clickEvent({ '[data-act]': { dataset: { act: 'menu', code: 'LC40' } } }));
+  assert.match(grid.innerHTML, /data-act="rename"[^>]*data-code="LC40"/, 'Rename action shown');
+  assert.match(grid.innerHTML, /data-act="delete"[^>]*data-code="LC40"/, 'Delete action shown');
+});
+
+test('brand-wide delete removes the code everywhere and from the grid', async () => {
+  const modal = makeModal(CODE_IDS);
+  let called = null;
+  const AdminAPI = {
+    getProductCodes: async () => ['LC40', '57CLR'],
+    applyBrandCodeChange: async (args) => { called = args; return { changed: 4, failed: 0, products: 4 }; },
+  };
+  const win = makeWindow({ series: [{ code: 'LC40' }, { code: '57CLR', count: 4 }] });
+  const Toast = makeToast();
+  await loadWire()({ AdminAPI, Toast, window: win })(modal, PROD({ id: 'pd' }));
+  await modal._els['product-codes-grid'].fire('click',
+    clickEvent({ '[data-act]': { dataset: { act: 'delete-go', code: '57CLR' } } }));
+  assert.deepEqual(called, { brandSlug: 'brother', category: 'ink', fromCode: '57CLR', toCode: null });
+  assert.ok(!modal._productCodesSelection.has('57CLR'), 'code dropped from this product');
+  assert.doesNotMatch(modal._els['product-codes-grid'].innerHTML, /data-code="57CLR"/, 'tile gone from the grid');
+  assert.ok(Toast.calls.some(c => c[0] === 'success'), 'a success toast fired');
+});
+
+test('brand-wide rename rewrites the code across products and in the grid', async () => {
+  const modal = makeModal(CODE_IDS);
+  let called = null;
+  const AdminAPI = {
+    getProductCodes: async () => ['57CLR'],
+    applyBrandCodeChange: async (args) => { called = args; return { changed: 2, failed: 0, products: 2 }; },
+  };
+  const win = makeWindow({ series: [{ code: '57CLR', count: 2 }] });
+  await loadWire()({ AdminAPI, window: win })(modal, PROD({ id: 'pr' }));
+  const grid = modal._els['product-codes-grid'];
+  await grid.fire('click', clickEvent({ '[data-act]': { dataset: { act: 'rename', code: '57CLR' } } }));
+  await grid.fire('input', { target: { matches: () => true, value: '57' } });
+  await grid.fire('click', clickEvent({ '[data-act]': { dataset: { act: 'rename-go', code: '57CLR' } } }));
+  assert.deepEqual(called, { brandSlug: 'brother', category: 'ink', fromCode: '57CLR', toCode: '57' });
+  assert.ok(modal._productCodesSelection.has('57'), 'product now carries the renamed code');
+  assert.ok(!modal._productCodesSelection.has('57CLR'), 'old code dropped');
+  assert.match(grid.innerHTML, /data-code="57"/, 'renamed tile is in the grid');
+  assert.doesNotMatch(grid.innerHTML, /data-code="57CLR"/, 'old tile is gone');
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

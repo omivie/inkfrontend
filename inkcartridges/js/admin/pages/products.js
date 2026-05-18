@@ -1887,6 +1887,55 @@ async function wireProductCodesSection(modal, full) {
     if (seedNoteEl) seedNoteEl.hidden = !seeded;
   };
 
+  // Per-tile action state. Only ONE tile is ever non-default at a time.
+  // menuState: null, or { code, mode } — mode ∈ 'menu' | 'rename' | 'delete'.
+  let menuState = null;
+  let renameDraft = '';     // live value of the inline rename input
+  let busy = false;         // guards against a double-fired brand-wide write
+
+  const TICK = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>`;
+  const KEBAB = `<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg>`;
+
+  // Render one code tile — its normal toggle form, or the menu / rename /
+  // delete-confirm form when it is the active tile.
+  const renderTile = (c) => {
+    const on = selection.has(c.code);
+    const mode = (menuState && menuState.code === c.code) ? menuState.mode : '';
+    if (mode === 'menu') {
+      return `<div class="admin-pc-code admin-pc-code--act${on ? ' is-on' : ''}">`
+        + `<span class="admin-pc-code__label">${esc(c.code)}</span>`
+        + `<button type="button" class="admin-pc-act" data-act="rename" data-code="${esc(c.code)}">Rename</button>`
+        + `<button type="button" class="admin-pc-act admin-pc-act--danger" data-act="delete" data-code="${esc(c.code)}">Delete</button>`
+        + `<button type="button" class="admin-pc-act admin-pc-act--x" data-act="cancel" aria-label="Cancel">✕</button>`
+        + `</div>`;
+    }
+    if (mode === 'rename') {
+      return `<div class="admin-pc-code admin-pc-code--act${on ? ' is-on' : ''}">`
+        + `<span class="admin-pc-code__label admin-pc-code__label--from">${esc(c.code)}</span>`
+        + `<span class="admin-pc-code__arrow" aria-hidden="true">→</span>`
+        + `<input type="text" class="admin-pc-rename" data-rename-input value="${esc(c.code)}" maxlength="24" aria-label="New spelling for ${esc(c.code)}">`
+        + `<button type="button" class="admin-pc-act admin-pc-act--go" data-act="rename-go" data-code="${esc(c.code)}">Save</button>`
+        + `<button type="button" class="admin-pc-act admin-pc-act--x" data-act="cancel" aria-label="Cancel">✕</button>`
+        + `</div>`;
+    }
+    if (mode === 'delete') {
+      const n = Number(c.count) || 0;
+      return `<div class="admin-pc-code admin-pc-code--act admin-pc-code--confirm">`
+        + `<span class="admin-pc-code__label">Delete ${esc(c.code)}${n ? ` · ${n} product${n === 1 ? '' : 's'}` : ''}?</span>`
+        + `<button type="button" class="admin-pc-act admin-pc-act--danger" data-act="delete-go" data-code="${esc(c.code)}">Delete</button>`
+        + `<button type="button" class="admin-pc-act admin-pc-act--x" data-act="cancel" aria-label="Cancel">✕</button>`
+        + `</div>`;
+    }
+    return `<div class="admin-pc-code${on ? ' is-on' : ''}">`
+      + `<button type="button" class="admin-pc-code__toggle" data-toggle data-code="${esc(c.code)}" aria-pressed="${on}" title="${on ? 'Assigned — click to remove' : 'Click to assign'}">`
+      + `<span class="admin-pc-code__tick" aria-hidden="true">${on ? TICK : ''}</span>`
+      + `<span class="admin-pc-code__label">${esc(c.code)}</span>`
+      + (c.count ? `<span class="admin-pc-code__count">${c.count}</span>` : '')
+      + `</button>`
+      + `<button type="button" class="admin-pc-code__menu" data-act="menu" data-code="${esc(c.code)}" aria-label="Rename or delete ${esc(c.code)}">${KEBAB}</button>`
+      + `</div>`;
+  };
+
   const renderGrid = () => {
     const f = norm(filterEl.value || '');
     const matches = universe.filter(c => !f || c.code.includes(f));
@@ -1898,16 +1947,9 @@ async function wireProductCodesSection(modal, full) {
         + `</span>`;
       return;
     }
-    gridEl.innerHTML = matches.map(c => {
-      const on = selection.has(c.code);
-      return `<button type="button" class="admin-pc-code${on ? ' is-on' : ''}" data-code="${esc(c.code)}" aria-pressed="${on}" title="${on ? 'Assigned — click to remove' : 'Click to assign'}">`
-        + `<span class="admin-pc-code__tick" aria-hidden="true">`
-        + (on ? `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>` : '')
-        + `</span>`
-        + `<span class="admin-pc-code__label">${esc(c.code)}</span>`
-        + (c.count ? `<span class="admin-pc-code__count">${c.count}</span>` : '')
-        + `</button>`;
-    }).join('');
+    gridEl.innerHTML = matches.map(renderTile).join('');
+    const input = gridEl.querySelector && gridEl.querySelector('[data-rename-input]');
+    if (input && input.focus) { input.focus(); if (input.select) input.select(); }
   };
 
   const renderAdd = () => {
@@ -1950,6 +1992,62 @@ async function wireProductCodesSection(modal, full) {
     renderGrid();
   };
 
+  // Brand-wide delete (toCode null) or rename of a code. Writes commit
+  // IMMEDIATELY via AdminAPI.applyBrandCodeChange — independent of Save —
+  // because they touch many other products, not just this one.
+  const doBrandChange = async (fromCode, toCode) => {
+    if (busy) return;
+    const from = norm(fromCode);
+    const to = toCode == null ? null : norm(toCode);
+    if (!from) return;
+    if (to !== null) {
+      if (to.length < 2) { Toast.error('The new code needs at least 2 letters or numbers'); return; }
+      if (to === from) { menuState = null; renderGrid(); return; }   // no-op rename
+    }
+    busy = true;
+    menuState = null;
+    gridEl.innerHTML = `<span class="admin-pc-empty">${to ? 'Renaming' : 'Deleting'} ${esc(from)} across all products…</span>`;
+    try {
+      const res = await AdminAPI.applyBrandCodeChange({ brandSlug, category, fromCode: from, toCode: to });
+      const hadFrom = selection.has(from);
+      // Universe: drop `from`; fold in `to`.
+      universe = universe.filter(c => c.code !== from);
+      if (to && !universe.some(c => c.code === to)) {
+        universe.push({ code: to, count: res.products || 0 });
+        universe.sort((a, b) => byCode(a.code, b.code));
+      }
+      // This product's own selection follows the same transform.
+      if (selection.delete(from) && to) selection.set(to, to);
+      if (hadFrom) seeded = false;
+      renderCount();
+      renderSeedNote();
+      renderAdd();
+      renderGrid();
+      if (res.failed) {
+        Toast.error(`${to ? 'Renamed' : 'Deleted'} on ${res.changed} product${res.changed === 1 ? '' : 's'}, but ${res.failed} failed — reopen to retry.`);
+      } else if (to) {
+        Toast.success(`Renamed ${from} → ${to} across ${res.changed} product${res.changed === 1 ? '' : 's'}.`);
+      } else {
+        Toast.success(`Deleted ${from} from ${res.changed} product${res.changed === 1 ? '' : 's'}.`);
+      }
+    } catch (e) {
+      Toast.error(`Couldn’t update codes: ${e.message}`);
+      renderGrid();
+    } finally {
+      busy = false;
+    }
+  };
+
+  const handleAct = (act, code) => {
+    const c = norm(code);
+    if (act === 'menu')      { menuState = { code: c, mode: 'menu' };   renderGrid(); return; }
+    if (act === 'cancel')    { menuState = null;                        renderGrid(); return; }
+    if (act === 'rename')    { menuState = { code: c, mode: 'rename' }; renameDraft = c; renderGrid(); return; }
+    if (act === 'delete')    { menuState = { code: c, mode: 'delete' }; renderGrid(); return; }
+    if (act === 'delete-go') return doBrandChange(c, null);
+    if (act === 'rename-go') return doBrandChange(c, renameDraft);
+  };
+
   // ── Initial paint ──────────────────────────────────────────────────────
   renderCount();
   renderSeedNote();
@@ -1958,8 +2056,27 @@ async function wireProductCodesSection(modal, full) {
 
   // ── Events ─────────────────────────────────────────────────────────────
   gridEl.addEventListener('click', (e) => {
-    const btn = e.target.closest('[data-code]');
-    if (btn) toggle(btn.dataset.code);
+    const act = e.target.closest('[data-act]');
+    if (act) return handleAct(act.dataset.act, act.dataset.code);
+    const tog = e.target.closest('[data-toggle]');
+    if (tog) toggle(tog.dataset.code);
+  });
+  // Track the inline rename input; Enter confirms, Escape cancels.
+  gridEl.addEventListener('input', (e) => {
+    if (e.target && e.target.matches && e.target.matches('[data-rename-input]')) {
+      renameDraft = e.target.value;
+    }
+  });
+  gridEl.addEventListener('keydown', (e) => {
+    if (!(e.target && e.target.matches && e.target.matches('[data-rename-input]'))) return;
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      if (menuState) doBrandChange(menuState.code, renameDraft);
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      menuState = null;
+      renderGrid();
+    }
   });
 
   filterEl.addEventListener('input', () => { renderAdd(); renderGrid(); });

@@ -197,13 +197,12 @@ test('the retag helper moves child nodes, not just text', () => {
 // 5. Cache busting — the new modules must actually ship
 // ─────────────────────────────────────────────────────────────────────────────
 
-test('app.js imports admin/api.js with the current cache-bust key', () => {
+test('app.js imports admin/api.js with a cache-bust query', () => {
   // The admin/api.js import key is module-specific — it moves whenever
   // admin/api.js changes so the browser never serves a stale AdminAPI module.
-  // The Product Codes feature (May 2026) edited admin/api.js, bumping the key
-  // from rich-text-persist-may2026 → product-codes-may2026.
-  assert.match(APP_SRC, /from\s+['"]\.\/api\.js\?v=product-codes-may2026['"]/,
-    'admin/api.js import must carry the product-codes cache-bust query');
+  // Pin the SHAPE (a non-empty ?v= query), not a frozen slug (see ERR-032).
+  assert.match(APP_SRC, /from\s+['"]\.\/api\.js\?v=[a-z0-9.-]+['"]/,
+    'admin/api.js import must carry a ?v= cache-bust query');
 });
 
 test('app.js APP_VERSION is a valid bumped build tag', () => {
