@@ -169,13 +169,16 @@ test('landing.js newsletter handler routes INTERNAL_ERROR through mapError', () 
     );
 });
 
-test('landing.js newsletter logs request_id to console.warn for screenshot capture', () => {
-    assert.match(LANDING_SRC, /console\.warn\(\s*['"]\[newsletter\]\s+subscribe failed/);
+test('landing.js newsletter logs request_id via DebugLog.warn (dev-only, no production leak)', () => {
+    // 2026-05-18 console audit: routed through DebugLog so it stays silent
+    // outside localhost. The toast still carries the customer-facing ref.
+    assert.match(LANDING_SRC, /DebugLog\.warn\(\s*['"]\[newsletter\]\s+subscribe failed/);
     assert.match(LANDING_SRC, /request_id:\s*res\.request_id/);
+    assert.doesNotMatch(LANDING_SRC, /console\.warn\(\s*['"]\[newsletter\]/, 'must not bypass DebugLog');
 });
 
 test('landing.js newsletter catch block also logs request_id when err carries it', () => {
-    assert.match(LANDING_SRC, /err\.request_id[\s\S]{0,200}console\.warn\(\s*['"]\[newsletter\]\s+subscribe threw/);
+    assert.match(LANDING_SRC, /err\.request_id[\s\S]{0,260}DebugLog\.warn\(\s*['"]\[newsletter\]\s+subscribe threw/);
 });
 
 test('contact-page.js shows the short ref on the fetch fallback 500 path', () => {

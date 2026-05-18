@@ -383,6 +383,24 @@
     box-shadow: 0 4px 12px rgba(199, 31, 110, 0.5);
 }
 
+/* Admin shortcut — ships in every page header as `hidden` so the navbar
+   stays byte-identical (project_navbar_parity_may2026). initAdminHeaderLink()
+   in main.js unhides it only for server-verified admin accounts.
+   The explicit [hidden] rule is required: `.header-actions__item` sets
+   `display: flex`, and author CSS always beats the UA `[hidden]` rule, so
+   without this the link would render for everyone. */
+.header-actions__item[hidden] {
+    display: none;
+}
+
+.header-actions__item--admin {
+    color: var(--color-primary);
+}
+
+.header-actions__item--admin:hover {
+    color: var(--color-primary-dark);
+}
+
 
 
 /* ==========================================================================

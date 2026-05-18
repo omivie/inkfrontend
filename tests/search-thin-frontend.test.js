@@ -298,8 +298,10 @@ test('main.js — slimmed (initBasicAutocomplete deletion takes ~210 lines)', ()
     const lines = MAIN_JS.split('\n').length;
     // 520 floor was set after the May 2026 search-thin-frontend audit; the
     // navbar-parity rollout (May 2026) added initActiveNavLink (~33 lines)
-    // so the new ceiling is 555. If main.js grows past this, audit before
-    // bumping — the spirit of this test is "don't re-grow what we deleted".
-    assert.ok(lines <= 555,
-        `main.js is ${lines} lines; expected ≤555. If you've added a load-bearing feature, document it; if you've re-introduced deleted search logic, see readfirst/SEARCH_AUDIT.md.`);
+    // lifting the ceiling to 555; the admin-header-link rollout (May 2026)
+    // added initAdminHeaderLink (~70 lines incl. doc comment) lifting it to
+    // 635. If main.js grows past this, audit before bumping — the spirit of
+    // this test is "don't re-grow the deleted autocomplete logic".
+    assert.ok(lines <= 635,
+        `main.js is ${lines} lines; expected ≤635. If you've added a load-bearing feature, document it; if you've re-introduced deleted search logic, see readfirst/SEARCH_AUDIT.md.`);
 });

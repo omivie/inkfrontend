@@ -1,11 +1,11 @@
 /**
  * Admin SPA — Entry point, router, shell
  */
-const APP_VERSION = '2026.05.18-ribbon-brand-picker';
+const APP_VERSION = '2026.05.18-product-codes';
 
 import { AdminAuth } from './auth.js';
 import { FilterState } from './filters.js';
-import { AdminAPI } from './api.js?v=rich-text-persist-may2026';
+import { AdminAPI } from './api.js?v=product-codes-may2026';
 
 const esc = (s) => Security.escapeHtml(String(s));
 

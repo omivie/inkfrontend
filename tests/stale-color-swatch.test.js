@@ -35,6 +35,19 @@
  *   Real product photos are `<sku>-<timestamp>.webp` and never carry the
  *   `color-swatch` stem, so widening the extension cannot misfire.
  *
+ * May 2026 — `compatible-tile` rename:
+ *
+ *   The backend re-stemmed every active compatible product's per-SKU image
+ *   from `color-swatch-vN.{webp,png}` to `compatible-tile-v1.png`. The new
+ *   tiles bake a "COMPATIBLE" label into the artwork and are MEANT to
+ *   render, so `compatible-tile-*` must NOT match isPlaceholderSwatchImage.
+ *   The tests below pin both halves of that contract:
+ *     - the new `compatible-tile` stem is rejected by the detector and
+ *       renders as a real <img> even when a canonical `color` is set;
+ *     - the `color-swatch` stem must never be reused for a real image —
+ *       doing so (e.g. bumping to `color-swatch-v5`) would silently
+ *       re-hide the baked-in label by re-triggering the stale fallback.
+ *
  * Surfaces audited:
  *
  *   - utils.js                     (ProductColors.isPlaceholderSwatchImage)
@@ -151,6 +164,46 @@ test('isPlaceholderSwatchImage rejects real product photos', () => {
     }
 });
 
+test('isPlaceholderSwatchImage rejects the May-2026 compatible-tile stem (label must render)', () => {
+    // The backend re-stemmed every active compatible product's per-SKU image
+    // to `compatible-tile-v1.png`. These tiles bake the "COMPATIBLE" label
+    // into the artwork and MUST render — so the detector has to treat them as
+    // real images, never as stale placeholders. Probe the version/extension
+    // space the renderer docstring promises is safe.
+    const PC = loadProductColors();
+    const compatibleTiles = [
+        'https://lmdlgldjgcanknsjrcxh.supabase.co/storage/v1/object/public/public-assets/images/products/c-can-cl41-ink-rd/compatible-tile-v1.png',
+        'https://example.com/x/compatible-tile-v1.png',
+        'https://example.com/x/compatible-tile-v2.png?cb=42',
+        // future-proofing: a version bump or the WebP migration must not
+        // accidentally start matching the regex.
+        'https://example.com/x/compatible-tile-v5.png',
+        'https://example.com/x/compatible-tile-v1.webp',
+        'https://example.com/x/compatible-tile-v1.jpg',
+    ];
+    for (const url of compatibleTiles) {
+        assert.strictEqual(
+            PC.isPlaceholderSwatchImage(url), false,
+            `compatible-tile is a real labeled image, must NOT be treated as a stale placeholder: ${url}`
+        );
+    }
+});
+
+test('regression: the color-swatch stem stays detected — never reuse it for a real image', () => {
+    // Side effect #3 of the compatible-tile handoff: bumping the placeholder
+    // version back into a `color-swatch-vN` path would silently re-hide the
+    // baked-in label. This pins that the legacy stem keeps tripping the
+    // detector so such a regression fails loudly here.
+    const PC = loadProductColors();
+    for (const v of ['', '-v1', '-v4', '-v5', '-v12']) {
+        const url = `https://example.com/x/color-swatch${v}.png`;
+        assert.strictEqual(
+            PC.isPlaceholderSwatchImage(url), true,
+            `legacy placeholder stem must remain detected: ${url}`
+        );
+    }
+});
+
 // ─────────────────────────────────────────────────────────────────────────────
 // RUNTIME: products.js Products.renderCard drops the swatch image and emits a
 // color-block when image_url is a placeholder.
@@ -246,4 +299,41 @@ test('runtime: compatible card with a REAL product photo keeps the photo (regres
     };
     const html = Products.renderCard(product, 0);
     assert.match(html, /c-bro-tn257-tnr-bk-1776914391318\.webp/, 'real product photo must still be used');
+});
+
+test('runtime: compatible card with a compatible-tile image renders the labeled <img>, NOT a color block', () => {
+    // The May-2026 backend rename: the per-SKU image is now
+    // `compatible-tile-v1.png` with the "COMPATIBLE" label baked in. Even
+    // though a canonical `color` is set — the exact condition that USED to
+    // force the stale-swatch fallback for the old `color-swatch-vN` stem —
+    // the renderer must keep the <img> so the label stays visible.
+    const Products = loadProducts();
+    const tileUrl = 'https://lmdlgldjgcanknsjrcxh.supabase.co/storage/v1/object/public/public-assets/images/products/c-can-cl41-ink-rd/compatible-tile-v1.png';
+    const product = {
+        id: 'p3',
+        sku: 'C-CAN-CL41-INK-RD',
+        name: 'Compatible Ink Cartridge Replacement for Canon CL41 Tri-Colour',
+        brand: { name: 'Canon' },
+        color: 'Tri-Colour',
+        color_hex: null,
+        image_url: tileUrl,
+        retail_price: 19.99,
+        in_stock: true,
+        source: 'compatible',
+        pack_type: 'single',
+    };
+    const html = Products.renderCard(product, 0);
+    // The labeled tile renders as a real <img> …
+    assert.match(html, /<img[^>]+compatible-tile-v1\.png/, 'compatible-tile image must render as <img>');
+    // … as the primary image, with the color block demoted to the hidden
+    // onerror fallback (data-fallback="color-block" is emitted only on the
+    // image branch of getProductImageHTML).
+    assert.match(html, /data-fallback="color-block"/, 'image branch must be taken — tile is primary');
+    // The color block, if present at all, must be the hidden fallback —
+    // never a standalone visible block that would replace the tile.
+    assert.match(
+        html,
+        /product-card__color-block" style="[^"]*display: none;?"/,
+        'color block must be the hidden onerror fallback, not a visible replacement'
+    );
 });

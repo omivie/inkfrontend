@@ -119,9 +119,11 @@
                             fieldMsg = API.extractErrorMessage(res, 'Could not subscribe. Please try again.');
                         }
                         if (res.request_id) {
-                            // Always log to console so dev tools / customer screenshots include
-                            // the full request_id, even if the toast only shows a short prefix.
-                            console.warn('[newsletter] subscribe failed', { code: res.code, request_id: res.request_id });
+                            // Dev-only: DebugLog gates on localhost, so this surfaces the full
+                            // request_id while debugging without leaking it into production
+                            // DevTools. The customer-facing toast carries the 8-char ref for
+                            // support correlation (see API.mapError).
+                            DebugLog.warn('[newsletter] subscribe failed', { code: res.code, request_id: res.request_id });
                         }
                         if (typeof showToast === 'function') showToast(fieldMsg, 'error');
                         if (siteKey && typeof turnstile !== 'undefined') turnstile.reset('#newsletter-turnstile');
@@ -140,7 +142,7 @@
                 if (siteKey && typeof turnstile !== 'undefined') turnstile.reset('#newsletter-turnstile');
             } catch (err) {
                 if (err && err.request_id) {
-                    console.warn('[newsletter] subscribe threw', { code: err.code, status: err.status, request_id: err.request_id });
+                    DebugLog.warn('[newsletter] subscribe threw', { code: err.code, status: err.status, request_id: err.request_id });
                 }
                 const mapped = (typeof API !== 'undefined' && typeof API.mapError === 'function')
                     ? API.mapError(err) : null;

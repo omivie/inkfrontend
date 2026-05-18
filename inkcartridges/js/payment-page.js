@@ -565,7 +565,7 @@
                         // If confirmPayment succeeds without redirect (card), it returns here.
                         // If it redirects (PayPal), this code won't execute — confirmation page handles it.
                         if (stripeError) {
-                            console.error('[Payment] Stripe confirmPayment error (retry):', stripeError.code, stripeError.decline_code, stripeError.message);
+                            DebugLog.error('[Payment] Stripe confirmPayment error (retry):', stripeError.code, stripeError.decline_code, stripeError.message);
                             sessionStorage.removeItem('lastOrder');
                             try {
                                 await API.cancelOrder(dupOrderNumber);
@@ -749,7 +749,7 @@
                 // If we reach here, confirmPayment returned without redirecting (e.g. error)
                 // Successful payments redirect to return_url — confirmation page handles the rest
                 if (stripeError) {
-                    console.error('[Payment] Stripe confirmPayment error:', stripeError.code, stripeError.decline_code, stripeError.message);
+                    DebugLog.error('[Payment] Stripe confirmPayment error:', stripeError.code, stripeError.decline_code, stripeError.message);
                     sessionStorage.removeItem('lastOrder');
                     // Cancel the pending order to restore stock
                     try {
@@ -1027,7 +1027,7 @@
                 },
 
                 createOrder: async () => {
-                    console.log('[PayPal] createOrder called — building payload...');
+                    DebugLog.log('[PayPal] createOrder called — building payload...');
                     // Build order payload with payment_method: 'paypal'
                     const items = self.cartItems.map(item => ({
                         product_id: item.id,
@@ -1063,14 +1063,14 @@
                         ...(isGuest && self.turnstileToken && { turnstile_token: self.turnstileToken })
                     };
 
-                    console.log('[PayPal] Sending order payload:', JSON.stringify(orderPayload, null, 2));
+                    DebugLog.log('[PayPal] Sending order payload:', JSON.stringify(orderPayload, null, 2));
 
                     const response = await API.createOrder(orderPayload);
-                    console.log('[PayPal] API response:', JSON.stringify(response, null, 2));
+                    DebugLog.log('[PayPal] API response:', JSON.stringify(response, null, 2));
 
                     if (!response.ok) {
                         const errorCode = response.code || '';
-                        console.error('[PayPal] API returned error:', errorCode, response.error);
+                        DebugLog.error('[PayPal] API returned error:', errorCode, response.error);
                         if (errorCode === 'ORDER_TOTAL_TOO_LOW') {
                             throw new Error('Your order total is below the minimum. Please add more items.');
                         } else if (errorCode === 'DISPOSABLE_EMAIL') {
@@ -1096,24 +1096,24 @@
 
                     // Handle duplicate order replay
                     if (data.is_duplicate && data.paypal_order_id) {
-                        console.log('[PayPal] Duplicate order — reusing paypal_order_id:', data.paypal_order_id);
+                        DebugLog.log('[PayPal] Duplicate order — reusing paypal_order_id:', data.paypal_order_id);
                         self._pendingPayPalOrderNumber = data.order_number;
                         return data.paypal_order_id;
                     }
 
                     // Stale duplicate (cancelled or missing paypal_order_id) — cancel and retry
                     if (data.is_duplicate && !data.paypal_order_id) {
-                        console.log('[PayPal] Stale duplicate order (status:', data.status, ') — cancelling and retrying...');
+                        DebugLog.log('[PayPal] Stale duplicate order (status:', data.status, ') — cancelling and retrying...');
                         try {
                             await API.cancelOrder(data.order_number);
-                            console.log('[PayPal] Cancelled stale order:', data.order_number);
+                            DebugLog.log('[PayPal] Cancelled stale order:', data.order_number);
                         } catch (cancelErr) {
-                            console.warn('[PayPal] Could not cancel stale order:', cancelErr.message);
+                            DebugLog.warn('[PayPal] Could not cancel stale order:', cancelErr.message);
                         }
                         // Retry with a fresh idempotency key
                         orderPayload.idempotency_key = await self.getIdempotencyKey('paypal-retry-' + Date.now());
                         const retryResponse = await API.createOrder(orderPayload);
-                        console.log('[PayPal] Retry API response:', JSON.stringify(retryResponse, null, 2));
+                        DebugLog.log('[PayPal] Retry API response:', JSON.stringify(retryResponse, null, 2));
 
                         if (!retryResponse.ok) {
                             throw new Error(retryResponse.error || 'Failed to create PayPal order on retry');
@@ -1123,23 +1123,23 @@
                             throw new Error('Server did not return a PayPal order on retry. Please contact support.');
                         }
                         self._pendingPayPalOrderNumber = retryData.order_number;
-                        console.log('[PayPal] Retry succeeded. order_number:', retryData.order_number, 'paypal_order_id:', retryData.paypal_order_id);
+                        DebugLog.log('[PayPal] Retry succeeded. order_number:', retryData.order_number, 'paypal_order_id:', retryData.paypal_order_id);
                         return retryData.paypal_order_id;
                     }
 
                     if (data.payment_method !== 'paypal' || !data.paypal_order_id) {
-                        console.error('[PayPal] Missing paypal_order_id in response. payment_method:', data.payment_method, 'paypal_order_id:', data.paypal_order_id);
+                        DebugLog.error('[PayPal] Missing paypal_order_id in response. payment_method:', data.payment_method, 'paypal_order_id:', data.paypal_order_id);
                         throw new Error('Server did not return a PayPal order. Please try again.');
                     }
 
                     // Store order number for capture step
                     self._pendingPayPalOrderNumber = data.order_number;
-                    console.log('[PayPal] Order created. order_number:', data.order_number, 'paypal_order_id:', data.paypal_order_id);
+                    DebugLog.log('[PayPal] Order created. order_number:', data.order_number, 'paypal_order_id:', data.paypal_order_id);
                     return data.paypal_order_id;
                 },
 
                 onApprove: async (data) => {
-                    console.log('[PayPal] onApprove — user approved. orderID:', data.orderID);
+                    DebugLog.log('[PayPal] onApprove — user approved. orderID:', data.orderID);
                     // User approved payment in PayPal popup — capture it
                     try {
                         const orderNumber = self._pendingPayPalOrderNumber;
@@ -1147,9 +1147,9 @@
                             throw new Error('Order number not found. Please try again.');
                         }
 
-                        console.log('[PayPal] Capturing payment for order:', orderNumber);
+                        DebugLog.log('[PayPal] Capturing payment for order:', orderNumber);
                         const captureResponse = await API.capturePaypal(orderNumber, data.orderID);
-                        console.log('[PayPal] Capture response:', JSON.stringify(captureResponse, null, 2));
+                        DebugLog.log('[PayPal] Capture response:', JSON.stringify(captureResponse, null, 2));
 
                         if (captureResponse.ok && captureResponse.data?.status === 'paid') {
                             // Payment successful — clear cart and redirect
@@ -1173,13 +1173,13 @@
                 },
 
                 onCancel: () => {
-                    console.log('[PayPal] Payment cancelled by user');
+                    DebugLog.log('[PayPal] Payment cancelled by user');
                     self.showError('PayPal payment was cancelled. You can try again or use a different payment method.');
                 },
 
                 onError: (err) => {
-                    console.error('[PayPal] SDK onError fired:', err);
-                    console.error('[PayPal] Error message:', err?.message || String(err));
+                    DebugLog.error('[PayPal] SDK onError fired:', err);
+                    DebugLog.error('[PayPal] Error message:', err?.message || String(err));
                     // Skip generic error if we already showed a specific UI (e.g. email verification)
                     if (err?.message === 'EMAIL_NOT_VERIFIED') return;
                     self.showError('Something went wrong with PayPal. Please try again or use a different payment method.');

@@ -35,9 +35,9 @@ const AccountPage = {
         // Load user info into sidebar (for all account pages)
         this.loadUserInfo();
 
-        // Check admin access via backend (shows admin nav on all account pages if authorized)
-        this.checkAdminAccess();
-
+        // Admin access is surfaced by the global header shortcut
+        // (main.js#initAdminHeaderLink), reachable from every page — see
+        // project_admin_header_link_may2026.
 
         // Load data based on current page
         const path = window.location.pathname;
@@ -906,26 +906,6 @@ const AccountPage = {
             });
         }
     },
-
-    /**
-     * Check admin access via backend API and show admin nav item if authorized
-     */
-    async checkAdminAccess() {
-        const adminNavItem = document.getElementById('admin-nav-item');
-        if (!adminNavItem) return;
-
-        try {
-            const response = await API.verifyAdmin();
-            if (response.ok && response.data) {
-                adminNavItem.hidden = false;
-
-                // Role is verified server-side — no client-side cache needed
-            }
-        } catch {
-            // Not an admin or backend unavailable — keep hidden
-        }
-    },
-
 
     /**
      * Load recent orders for dashboard (from API + local storage fallback)

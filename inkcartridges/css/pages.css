@@ -5408,16 +5408,6 @@
     background-color: var(--color-primary-dark);
 }
 
-.account-nav__item--admin a {
-    color: var(--color-primary);
-    font-weight: var(--font-weight-medium);
-}
-
-.account-nav__item--admin a:hover {
-    color: white;
-    background-color: var(--color-primary);
-}
-
 .account-nav__item--logout a {
     color: var(--color-text-muted);
 }

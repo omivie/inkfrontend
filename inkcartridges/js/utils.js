@@ -188,6 +188,23 @@ const ProductColors = {
      * discriminator: genuine product photos are `<sku>-<timestamp>.webp`
      * and never contain the `color-swatch` segment, so widening the
      * extension cannot misfire on a real photo.
+     *
+     * May 2026 — `compatible-tile` rename. The backend re-stemmed every
+     * active compatible product's per-SKU image from
+     * `color-swatch-vN.{webp,png}` to `compatible-tile-v1.png`. The new
+     * tiles bake a "COMPATIBLE" label into the artwork and ARE meant to
+     * render, so `compatible-tile-*` deliberately does NOT match this
+     * regex. Two hard rules follow, both pinned by stale-color-swatch.test.js:
+     *   1. Never reintroduce the `color-swatch` stem when bumping the
+     *      placeholder version — a `color-swatch-v5` path would silently
+     *      re-hide the baked-in label by re-triggering the stale fallback.
+     *   2. Never give a real, intended-to-render image a stem this regex
+     *      matches.
+     * The regex now only catches dead legacy URLs still cached in
+     * pre-rendered / Google-indexed HTML; it is retained as a zero-cost
+     * guard (it cannot misfire on a real photo, and still protects any
+     * not-yet-migrated row) until those caches age out. Once nothing
+     * references the legacy paths it may be removed outright.
      */
     isPlaceholderSwatchImage(url) {
         if (!url || typeof url !== 'string') return false;

@@ -48,7 +48,7 @@ async function loadPreferences() {
   if (!sb) return;
   const { data, error } = await sb.from('notification_preferences').select('*');
   if (error) {
-    console.warn('[NotifRecipients] Failed to load preferences:', error.message);
+    DebugLog.warn('[NotifRecipients] Failed to load preferences:', error.message);
     return;
   }
   _preferences = {};
@@ -75,7 +75,7 @@ async function ensurePreferences() {
 
   const { error } = await sb.from('notification_preferences').upsert(rows, { onConflict: 'contact_email_id' });
   if (error) {
-    console.warn('[NotifRecipients] Failed to ensure preferences:', error.message);
+    DebugLog.warn('[NotifRecipients] Failed to ensure preferences:', error.message);
     return;
   }
 

@@ -23,6 +23,7 @@
 document.addEventListener('DOMContentLoaded', function() {
     initNavigation();
     initActiveNavLink();
+    initAdminHeaderLink();
     initSearch();
     initCurrentYear();
     initDropdowns();
@@ -62,6 +63,86 @@ function initActiveNavLink() {
         });
     });
     if (best) best.classList.add('nav-menu__link--active');
+}
+
+/**
+ * Reveal the header "Admin" shortcut for verified admin accounts only.
+ *
+ * The link (`#header-admin-link`) ships in every page's header markup as
+ * `hidden` so the navbar stays byte-identical across all 25 customer-facing
+ * pages (project_navbar_parity_may2026). This function is the only thing
+ * that unhides it.
+ *
+ * Security model: this is UI sugar, not an access gate. The /admin route
+ * re-verifies the role server-side on every visit (see js/admin/auth.js),
+ * so a wrongly-shown link grants nothing. The authoritative check here is
+ * `API.verifyAdmin()` (GET /api/admin/verify), which validates the JWT and
+ * role on the backend.
+ *
+ * UX: a per-session sessionStorage hint (`ink_admin_header_hint`, keyed to
+ * the user id) makes the link appear instantly on subsequent page loads so
+ * an admin doesn't watch it pop in after every navigation. The background
+ * verify call always runs and reconciles the hint — so a revoked role, or a
+ * stale hint, self-corrects within one page load.
+ *
+ * Guests and signed-in non-admins trigger no extra network request beyond
+ * the single verify call (guests skip even that).
+ */
+function initAdminHeaderLink() {
+    var link = document.getElementById('header-admin-link');
+    if (!link || typeof Auth === 'undefined') return;
+
+    var HINT_KEY = 'ink_admin_header_hint';
+
+    function readHint() {
+        try { return sessionStorage.getItem(HINT_KEY); } catch (e) { return null; }
+    }
+    function writeHint(value) {
+        try {
+            if (value) sessionStorage.setItem(HINT_KEY, value);
+            else sessionStorage.removeItem(HINT_KEY);
+        } catch (e) { /* sessionStorage unavailable (private mode) — ignore */ }
+    }
+
+    function evaluate() {
+        // Wait for the Supabase session to be resolved before deciding.
+        var ready = Auth.readyPromise || Promise.resolve();
+        ready.then(function() {
+            // Guests never see the link and never trigger a verify call.
+            if (!Auth.isAuthenticated || !Auth.isAuthenticated()) {
+                link.hidden = true;
+                writeHint(null);
+                return;
+            }
+
+            var user = (Auth.getUser && Auth.getUser()) || {};
+            var userId = user.id || user.email || '';
+
+            // Instant-show from a verification earlier this session.
+            if (userId && readHint() === userId) {
+                link.hidden = false;
+            }
+
+            // Authoritative server-side role check.
+            if (typeof API === 'undefined' || !API.verifyAdmin) return;
+            API.verifyAdmin().then(function(res) {
+                var isAdmin = !!(res && res.ok && res.data);
+                link.hidden = !isAdmin;
+                writeHint(isAdmin && userId ? userId : null);
+            }).catch(function() {
+                // Backend unreachable — keep whatever the hint decided.
+                // A stale hint at worst shows a link the /admin page rejects.
+            });
+        });
+    }
+
+    evaluate();
+
+    // Re-evaluate on sign-in / sign-out so the link appears or disappears
+    // without a page reload.
+    if (typeof Auth.onAuthStateChange === 'function') {
+        Auth.onAuthStateChange(function() { evaluate(); });
+    }
 }
 
 /**

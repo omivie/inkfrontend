@@ -121,6 +121,7 @@ test('canonical site-header keeps every load-bearing element', () => {
         'href="mailto:inkandtoner@windowslive.com"',
         '<div class="logo-block">',
         '<a href="/account"',
+        'id="header-admin-link"',
         '<a href="/account/favourites"',
         '<a href="/cart"',
         'id="cart-count"',

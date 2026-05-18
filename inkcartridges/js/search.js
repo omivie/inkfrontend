@@ -334,7 +334,7 @@
             }
 
             if (typeof Products === 'undefined' || typeof Products.renderCard !== 'function') {
-                console.error('[SmartSearch] Products.renderCard not available — ensure /js/products.js is loaded before /js/search.js');
+                DebugLog.error('[SmartSearch] Products.renderCard not available — ensure /js/products.js is loaded before /js/search.js');
                 state.list.innerHTML = `<div class="smart-ac__error">Search is temporarily unavailable. Please try again.</div>`;
                 setLive('Search error');
                 return;
@@ -477,7 +477,7 @@
             } catch (err) {
                 clearTimeout(state.skeletonTimer);
                 if (err && err.name === 'AbortError') return;
-                console.error('[SmartSearch]', err);
+                DebugLog.error('[SmartSearch]', err);
                 renderError(err);
             }
         }
