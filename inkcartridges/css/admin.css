@@ -1559,40 +1559,71 @@
 .admin-brandpicker__create:hover { background: var(--cyan-dim); }
 .admin-brandpicker__create svg { flex: 0 0 auto; }
 
-/* ---- Product Codes picker ---- */
-/* Reuses .admin-brandpicker for the combobox; only the chips + list extras
-   are bespoke. Codes are rendered monospace so LC40 / 200XL read as codes. */
-.admin-code-chip {
-  display: inline-flex; align-items: center; gap: 4px;
-  padding: 4px 6px 4px 10px; border-radius: 6px;
+/* ---- Product Codes tab ---- */
+/* Brand+type header, a filter/add toolbar, and a grid of clickable code
+   tiles. Codes are monospace so LC40 / 200XL read as codes. */
+.admin-pc-context {
+  display: flex; flex-wrap: wrap; gap: 6px 32px;
+  padding: 10px 14px; margin-bottom: 14px;
+  background: var(--surface-hover); border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.admin-pc-context__item { display: flex; flex-direction: column; gap: 2px; }
+.admin-pc-context__label {
+  font-size: 10px; font-weight: 700; letter-spacing: .06em;
+  text-transform: uppercase; color: var(--text-muted);
+}
+.admin-pc-context__value { font-size: 14px; font-weight: 600; color: var(--text); }
+.admin-pc-toolbar { display: flex; gap: 8px; align-items: center; margin-bottom: 12px; }
+.admin-pc-filterwrap { position: relative; flex: 1; }
+.admin-pc-filter-icon {
+  position: absolute; left: 11px; top: 50%; transform: translateY(-50%);
+  color: var(--text-muted); pointer-events: none;
+}
+.admin-pc-filter {
+  width: 100%; padding: 9px 12px 9px 32px;
+  border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--input-bg); color: var(--text); font-size: 13px;
+}
+.admin-pc-filter:focus { outline: none; border-color: var(--cyan); }
+.admin-pc-filter:disabled { opacity: .55; cursor: not-allowed; }
+.admin-pc-filter::placeholder { color: var(--text-muted); }
+.admin-pc-grid {
+  display: flex; flex-wrap: wrap; gap: 8px; align-content: flex-start;
+  max-height: 340px; overflow-y: auto;
+  padding: 12px; border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--surface-hover);
+}
+.admin-pc-code {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 7px 11px; border-radius: 8px; cursor: pointer;
+  border: 1px solid var(--border); background: var(--input-bg); color: var(--text);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px; font-weight: 600; letter-spacing: .02em;
+  transition: border-color .12s var(--ease, ease), background .12s var(--ease, ease);
+}
+.admin-pc-code:hover { border-color: var(--cyan); }
+.admin-pc-code.is-on {
   background: var(--cyan-dim, rgba(34, 211, 238, .12));
+  border-color: var(--cyan, rgba(34, 211, 238, .5));
   color: var(--cyan-text, #0891b2);
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 12px; font-weight: 600; line-height: 1.4; letter-spacing: .02em;
-  border: 1px solid var(--cyan, rgba(34, 211, 238, .35));
 }
-.admin-code-chip__remove {
+.admin-pc-code__tick {
   display: inline-flex; align-items: center; justify-content: center;
-  width: 16px; height: 16px; padding: 0;
-  border: none; border-radius: 4px;
-  background: rgba(0, 0, 0, .08); color: inherit;
-  font-size: 13px; line-height: 1; cursor: pointer;
-  transition: background .12s var(--ease, ease);
+  width: 13px; height: 13px; color: var(--cyan-text, #0891b2);
 }
-.admin-code-chip__remove:hover { background: var(--danger, #dc2626); color: #fff; }
-.admin-product-codes__seed-note {
-  flex-basis: 100%;
-  font-size: 11px; font-style: italic; color: var(--text-muted);
-  padding: 2px 4px 0;
+.admin-pc-code__count {
+  font-family: var(--font-sans, system-ui, -apple-system, sans-serif);
+  font-size: 10px; font-weight: 600; color: var(--text-muted);
+  padding: 1px 6px; border-radius: 999px; background: rgba(0, 0, 0, .06);
 }
-.admin-product-codes__optcount {
-  margin-left: auto; padding-left: 12px;
-  font-size: 11px; color: var(--text-muted); white-space: nowrap;
+.admin-pc-code.is-on .admin-pc-code__count { background: rgba(255, 255, 255, .55); }
+.admin-pc-empty { font-size: 13px; color: var(--text-muted); padding: 6px 4px; }
+.admin-pc-empty--error { color: var(--danger, #dc2626); }
+.admin-pc-seed-note {
+  font-size: 11px; font-style: italic; color: var(--text-muted); margin: 8px 2px 0;
 }
-/* Scoped to the code picker only — must not touch the ribbon brand picker. */
-#code-panel .admin-brandpicker__optname {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-}
+.admin-pc-seed-note[hidden] { display: none; }
 
 /* ---- Image Lightbox ---- */
 .admin-image-lightbox {

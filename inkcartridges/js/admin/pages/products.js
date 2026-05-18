@@ -23,6 +23,25 @@ const MISSING = '\u2014';
 // product_ribbon_brands junction (see wireRibbonBrandsSection).
 const RIBBON_PRODUCT_TYPES = ['printer_ribbon', 'typewriter_ribbon', 'correction_tape'];
 
+// Product Codes tab — a human label per product_type, and the /shop drilldown
+// category each type belongs to (mirrors shop-page.js's category config).
+// These drive the tab's brand+type header and the code-universe lookup.
+const PRODUCT_TYPE_LABELS = {
+  ink_cartridge: 'Ink Cartridges', ink_bottle: 'Ink Bottles', toner_cartridge: 'Toner Cartridges',
+  drum_unit: 'Drum Units', waste_toner: 'Waste Toner', belt_unit: 'Belt Units',
+  fuser_kit: 'Fuser Kits', maintenance_kit: 'Maintenance Kits', fax_film: 'Fax Film',
+  fax_film_refill: 'Fax Film Refills', printer_ribbon: 'Printer Ribbons',
+  typewriter_ribbon: 'Typewriter Ribbons', correction_tape: 'Correction Tape',
+  label_tape: 'Label Tape', photo_paper: 'Photo Paper', printer: 'Printers',
+};
+const PRODUCT_TYPE_TO_SHOP_CATEGORY = {
+  ink_cartridge: 'ink', ink_bottle: 'ink', toner_cartridge: 'toner',
+  drum_unit: 'drums', waste_toner: 'drums', belt_unit: 'drums',
+  fuser_kit: 'drums', maintenance_kit: 'drums',
+  label_tape: 'label', photo_paper: 'paper',
+  printer_ribbon: 'ribbons', typewriter_ribbon: 'ribbons', correction_tape: 'ribbons',
+};
+
 /** Open a large full-screen preview of a product image. */
 function openImageLightbox(url, alt = '') {
   if (!url) return;
@@ -1334,29 +1353,26 @@ function buildProductModalTabs(modal, full, isOwner) {
     </div>
   `;
 
-  // Product Codes panel — its own tab. The /shop drilldown chips this product
-  // appears under (Brother › Ink › LC40). Applies to EVERY product type. The
-  // catalogue + this product's codes load asynchronously in
-  // wireProductCodesSection(); this is just the static shell.
+  // Product Codes panel — its own tab. Shows the product's brand + type, then
+  // a grid of EVERY code that exists for that brand+type; the admin clicks the
+  // tiles this product belongs to. wireProductCodesSection() fills it in.
   const productCodesHtml = `
     <div class="admin-form-group" id="product-codes-group">
       <label>Product Codes <span class="admin-ribbon-brands__count" id="product-codes-count" hidden></span></label>
-      <p style="font-size:12px;color:var(--text-muted);margin:0 0 10px">The series codes this product is categorised under — the chips customers drill into on /shop (Brother › Ink › <strong>LC40</strong>). Assign more than one and the product shows under each: an LC40 cartridge also tagged LC57 appears under both. Codes set here fully replace the auto-detected ones.</p>
-      <div class="admin-ribbon-brands" id="product-codes-chips"><span class="admin-text-muted" style="font-size:13px">Loading…</span></div>
-      <div class="admin-brandpicker" id="code-picker">
-        <button type="button" class="admin-brandpicker__toggle" id="code-toggle" aria-expanded="false" aria-haspopup="listbox" aria-controls="code-panel" disabled>
-          <svg class="admin-brandpicker__toggle-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-          <span class="admin-brandpicker__toggle-label" id="code-toggle-label">Loading codes…</span>
-          <svg class="admin-brandpicker__chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg>
-        </button>
-        <div class="admin-brandpicker__panel" id="code-panel" role="dialog" aria-label="Choose product codes" hidden>
-          <div class="admin-brandpicker__searchwrap">
-            <svg class="admin-brandpicker__search-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-            <input type="text" class="admin-brandpicker__search" id="code-search" placeholder="Search or type a code, e.g. LC40…" autocomplete="off" maxlength="24" aria-label="Search or add a product code">
-          </div>
-          <div class="admin-brandpicker__list" id="code-list" role="listbox" aria-multiselectable="true" aria-label="Product codes"></div>
-        </div>
+      <p style="font-size:12px;color:var(--text-muted);margin:0 0 12px">The series codes this product is categorised under — the chips customers drill into on /shop. Click a code to toggle it; the product shows under every code you pick. Codes set here fully replace the auto-detected ones.</p>
+      <div class="admin-pc-context">
+        <span class="admin-pc-context__item"><span class="admin-pc-context__label">Brand</span><span class="admin-pc-context__value" id="pc-brand">—</span></span>
+        <span class="admin-pc-context__item"><span class="admin-pc-context__label">Type</span><span class="admin-pc-context__value" id="pc-type">—</span></span>
       </div>
+      <div class="admin-pc-toolbar">
+        <div class="admin-pc-filterwrap">
+          <svg class="admin-pc-filter-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+          <input type="text" class="admin-pc-filter" id="pc-filter" placeholder="Filter codes, or type a new one…" autocomplete="off" maxlength="24" aria-label="Filter or add a product code">
+        </div>
+        <button type="button" class="admin-btn admin-btn--primary admin-btn--sm" id="pc-add-btn" hidden>+ Add &ldquo;<span id="pc-add-label"></span>&rdquo;</button>
+      </div>
+      <div class="admin-pc-grid" id="product-codes-grid"><span class="admin-text-muted" style="font-size:13px">Loading codes…</span></div>
+      <p class="admin-pc-seed-note" id="pc-seed-note" hidden>Pre-selected from this product’s current categorisation — adjust, then Save to lock it in.</p>
     </div>
   `;
 
@@ -1713,21 +1729,26 @@ async function wireRibbonBrandsSection(modal, full) {
 }
 
 /**
- * Wires the "Product Codes" section in the For Use In tab — available for
- * EVERY product type. A product's codes are the /shop drilldown chips it
- * appears under; assigning several (LC40 + LC57) makes it show under each.
+ * Wires the "Product Codes" tab — available for EVERY product type. A
+ * product's codes are the /shop drilldown chips it appears under; assigning
+ * several (LC40 + LC57) makes it show under each.
+ *
+ * The tab shows the product's brand + type, then a grid of EVERY code that
+ * exists for that brand+type (the live /shop drilldown chips, fetched via
+ * window.API.getShopData). The admin clicks a code tile to toggle it; a code
+ * not already in the grid can be typed into the filter box and added.
  *
  * Storage: the product_codes override table (see sql/product_codes.sql),
  * written by AdminAPI.setProductCodes on save.
  *
- *   • Catalogue (AdminAPI.getCodeCatalogue) + this product's codes
- *     (AdminAPI.getProductCodes) load together.
- *   • A product with no codes yet is pre-filled from its CURRENT codes —
+ *   • This product's codes (AdminAPI.getProductCodes) + the brand+type code
+ *     universe (API.getShopData series) load together.
+ *   • A product with no codes yet is pre-selected from its CURRENT codes —
  *     backend series_codes when present, else API._enrichSeriesCodes' derived
  *     codes — so the admin always edits from a correct "as it is now" start.
  *   • Selection lives on modal._productCodesSelection (Map code→code).
- *   • modal._productCodesBaseline records what the picker opened with; the
- *     save handler writes ONLY when the selection diverges, so a seeded but
+ *   • modal._productCodesBaseline records what the tab opened with; the save
+ *     handler writes ONLY when the selection diverges, so a seeded but
  *     untouched product is never materialised into the override table.
  *
  * Safety: modal._productCodesLoaded is set true ONLY after a clean load, so a
@@ -1737,21 +1758,44 @@ async function wireProductCodesSection(modal, full) {
   const group = modal.querySelector('#product-codes-group');
   if (!group) return;
 
-  const chipsEl  = modal.querySelector('#product-codes-chips');
-  const countEl  = modal.querySelector('#product-codes-count');
-  const toggleEl = modal.querySelector('#code-toggle');
-  const labelEl  = modal.querySelector('#code-toggle-label');
-  const panelEl  = modal.querySelector('#code-panel');
-  const searchEl = modal.querySelector('#code-search');
-  const listEl   = modal.querySelector('#code-list');
+  const countEl    = modal.querySelector('#product-codes-count');
+  const brandEl    = modal.querySelector('#pc-brand');
+  const typeEl     = modal.querySelector('#pc-type');
+  const filterEl   = modal.querySelector('#pc-filter');
+  const addBtn     = modal.querySelector('#pc-add-btn');
+  const addLabel   = modal.querySelector('#pc-add-label');
+  const gridEl     = modal.querySelector('#product-codes-grid');
+  const seedNoteEl = modal.querySelector('#pc-seed-note');
 
   const selection = new Map(); // code → code
   modal._productCodesSelection = selection;
   modal._productCodesLoaded = false;
 
-  // Normalise a raw code the same way the table's CHECK constraint expects:
+  // Normalise a raw code the way the table's CHECK constraint expects:
   // uppercase, A-Z/0-9 only. Mirrors AdminAPI.normalizeProductCode.
   const norm = (raw) => String(raw == null ? '' : raw).toUpperCase().replace(/[^A-Z0-9]/g, '');
+  const byCode = (a, b) => String(a).localeCompare(String(b), 'en', { numeric: true, sensitivity: 'base' });
+
+  // ── Resolve the product's brand + type ─────────────────────────────────
+  const brandName = (typeof extractBrandName === 'function' ? extractBrandName(full) : '') || '';
+  let brandSlug = '';
+  if (full.brand && typeof full.brand === 'object' && full.brand.slug) {
+    brandSlug = String(full.brand.slug);
+  }
+  if (!brandSlug) {
+    const bid = full.brand_id || (full.brand && full.brand.id);
+    const hit = (Array.isArray(_brands) ? _brands : []).find(b => b && String(b.id) === String(bid));
+    if (hit && hit.slug) brandSlug = String(hit.slug);
+  }
+  if (!brandSlug && brandName) {
+    brandSlug = brandName.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+  }
+  const productType = full.product_type || '';
+  const typeLabel = PRODUCT_TYPE_LABELS[productType] || productType || '—';
+  const category  = PRODUCT_TYPE_TO_SHOP_CATEGORY[productType] || '';
+
+  brandEl.textContent = brandName || '—';
+  typeEl.textContent  = typeLabel;
 
   // Derive the product's current codes — what /shop renders for it today.
   // Reuses the storefront's shared extractor so the seed matches the live site.
@@ -1770,16 +1814,20 @@ async function wireProductCodesSection(modal, full) {
     return [...out];
   };
 
-  let catalogue = [];   // [{ code, product_count }]
-  let seeded = false;   // true when pre-filled from derivation (no saved codes)
+  let universe = [];    // [{ code, count }] — every code for this brand+type
+  let seeded = false;   // true when pre-selected from derivation (no saved codes)
   let loadFailed = false;
 
+  // ── Load this product's codes + the brand+type code universe ───────────
   try {
-    const [cat, assigned] = await Promise.all([
-      AdminAPI.getCodeCatalogue(),
+    const canFetchUniverse = !!(brandSlug && category && typeof window !== 'undefined'
+      && window.API && typeof window.API.getShopData === 'function');
+    const [assigned, shop] = await Promise.all([
       full.id ? AdminAPI.getProductCodes(full.id) : Promise.resolve([]),
+      canFetchUniverse ? window.API.getShopData({ brand: brandSlug, category }).catch(() => null)
+                       : Promise.resolve(null),
     ]);
-    catalogue = Array.isArray(cat) ? cat.slice() : [];
+
     const rows = Array.isArray(assigned) ? assigned : [];
     if (rows.length) {
       for (const c of rows) { const n = norm(c); if (n) selection.set(n, n); }
@@ -1787,6 +1835,30 @@ async function wireProductCodesSection(modal, full) {
       for (const n of deriveSeed()) selection.set(n, n);
       seeded = selection.size > 0;
     }
+
+    // Code universe = the /shop drilldown chips for this brand+category
+    // (getShopData's series already folds in manually-assigned codes).
+    const seen = new Map();
+    const series = shop && shop.data && Array.isArray(shop.data.series) ? shop.data.series : [];
+    for (const s of series) {
+      const n = norm(s && s.code);
+      if (n.length >= 2 && !seen.has(n)) seen.set(n, Number(s && s.count) || 0);
+    }
+    // Fallback: derive from the product list when the endpoint shipped no series.
+    if (!seen.size && shop && shop.data && Array.isArray(shop.data.products)) {
+      for (const p of shop.data.products) {
+        for (const c of ((p && p.series_codes) || [])) {
+          const n = norm(c);
+          if (n.length >= 2 && !seen.has(n)) seen.set(n, 0);
+        }
+      }
+    }
+    // Every currently-selected code must show as a tile even if the universe
+    // lookup missed it (a manual code, a brand-slug mismatch, …).
+    for (const c of selection.keys()) if (!seen.has(c)) seen.set(c, 0);
+    universe = [...seen.entries()].map(([code, count]) => ({ code, count }));
+    universe.sort((a, b) => byCode(a.code, b.code));
+
     modal._productCodesLoaded = true;
   } catch (e) {
     loadFailed = true;
@@ -1795,193 +1867,118 @@ async function wireProductCodesSection(modal, full) {
 
   if (!modal.isConnected) return;
 
-  // Baseline = what the picker opened with. Save diff-checks against this.
-  const baselineOf = () => [...selection.keys()].sort().join(',');
-  modal._productCodesBaseline = baselineOf();
+  // Baseline = what the tab opened with. The save handler diff-checks this.
+  modal._productCodesBaseline = [...selection.keys()].sort().join(',');
 
   if (loadFailed) {
-    chipsEl.innerHTML = `<span class="admin-ribbon-brands__error">Couldn’t load product codes — reopen the product to retry. Saving now leaves existing codes untouched.</span>`;
-    labelEl.textContent = 'Codes unavailable';
-    toggleEl.disabled = true;
+    gridEl.innerHTML = `<span class="admin-pc-empty admin-pc-empty--error">Couldn’t load product codes — reopen the product to retry. Saving now leaves existing codes untouched.</span>`;
+    filterEl.disabled = true;
     return;
   }
 
-  const catByCode = new Map(catalogue.map(c => [norm(c.code), c]));
-  const sortCatalogue = () => catalogue.sort((a, b) =>
-    String(a.code).localeCompare(String(b.code), 'en', { numeric: true, sensitivity: 'base' }));
-  sortCatalogue();
-
-  let creating = false; // guards Enter-key double-fire
-
   // ── Renderers ──────────────────────────────────────────────────────────
-  const renderChips = () => {
+  const renderCount = () => {
     const n = selection.size;
-    if (countEl) {
-      countEl.hidden = n === 0;
-      countEl.textContent = n ? `${n} code${n === 1 ? '' : 's'}` : '';
-    }
-    if (n === 0) {
-      chipsEl.innerHTML = `<span class="admin-ribbon-brands__empty">No codes — this product won’t appear under any /shop drilldown chip.</span>`;
+    countEl.hidden = n === 0;
+    countEl.textContent = n ? `${n} code${n === 1 ? '' : 's'}` : '';
+  };
+
+  const renderSeedNote = () => {
+    if (seedNoteEl) seedNoteEl.hidden = !seeded;
+  };
+
+  const renderGrid = () => {
+    const f = norm(filterEl.value || '');
+    const matches = universe.filter(c => !f || c.code.includes(f));
+    if (!matches.length) {
+      gridEl.innerHTML = `<span class="admin-pc-empty">`
+        + (universe.length
+            ? 'No code matches that filter — type a full code and press Add to create it.'
+            : `No codes found for ${esc(brandName || 'this brand')} ${esc(typeLabel)} yet — type one above and press Add.`)
+        + `</span>`;
       return;
     }
-    const chips = [...selection.values()]
-      .sort((a, b) => a.localeCompare(b, 'en', { numeric: true, sensitivity: 'base' }))
-      .map(code => `<span class="admin-code-chip">${esc(code)}<button type="button" class="admin-code-chip__remove" data-remove-code="${esc(code)}" title="Remove ${esc(code)}" aria-label="Remove ${esc(code)}">&times;</button></span>`)
-      .join('');
-    const note = seeded
-      ? `<span class="admin-product-codes__seed-note">Suggested from this product’s current categorisation — adjust if needed, then Save to lock it in.</span>`
-      : '';
-    chipsEl.innerHTML = chips + note;
+    gridEl.innerHTML = matches.map(c => {
+      const on = selection.has(c.code);
+      return `<button type="button" class="admin-pc-code${on ? ' is-on' : ''}" data-code="${esc(c.code)}" aria-pressed="${on}" title="${on ? 'Assigned — click to remove' : 'Click to assign'}">`
+        + `<span class="admin-pc-code__tick" aria-hidden="true">`
+        + (on ? `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>` : '')
+        + `</span>`
+        + `<span class="admin-pc-code__label">${esc(c.code)}</span>`
+        + (c.count ? `<span class="admin-pc-code__count">${c.count}</span>` : '')
+        + `</button>`;
+    }).join('');
   };
 
-  const renderToggleLabel = () => {
-    const n = selection.size;
-    labelEl.textContent = n === 0 ? 'Add a code…' : `Add or remove codes · ${n} selected`;
-  };
-
-  const renderList = () => {
-    const rawq = (searchEl.value || '').trim();
-    const q = norm(rawq);
-    const matches = catalogue.filter(c => !q || norm(c.code).includes(q));
-    let html = '';
-    if (matches.length) {
-      html += matches.map(c => {
-        const code = norm(c.code);
-        const on = selection.has(code);
-        const cnt = Number(c.product_count) || 0;
-        return `<button type="button" class="admin-brandpicker__option${on ? ' is-selected' : ''}" data-code="${esc(code)}" role="option" aria-selected="${on}">`
-          + `<span class="admin-brandpicker__check" aria-hidden="true">`
-          + (on ? `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>` : '')
-          + `</span><span class="admin-brandpicker__optname">${esc(code)}</span>`
-          + `<span class="admin-product-codes__optcount">${cnt} product${cnt === 1 ? '' : 's'}</span></button>`;
-      }).join('');
-    } else if (!q) {
-      html += `<div class="admin-brandpicker__empty">No codes in the catalogue yet — type one above (e.g. LC40) to add the first.</div>`;
+  const renderAdd = () => {
+    const n = norm(filterEl.value || '');
+    const exists = universe.some(c => c.code === n);
+    if (n.length >= 2 && n.length <= 24 && !exists) {
+      addLabel.textContent = n;
+      addBtn.hidden = false;
     } else {
-      html += `<div class="admin-brandpicker__empty">No existing code matches “${esc(rawq)}”.</div>`;
+      addBtn.hidden = true;
     }
-    const exists = !!q && catByCode.has(q);
-    if (q.length >= 2 && q.length <= 24 && !exists && !selection.has(q)) {
-      html += `<button type="button" class="admin-brandpicker__create" data-add-code>`
-        + `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>`
-        + `<span>Add “${esc(q)}”</span></button>`;
-    } else if (rawq && q.length < 2) {
-      html += `<div class="admin-brandpicker__empty">Codes need at least 2 letters or numbers.</div>`;
-    }
-    listEl.innerHTML = html;
   };
 
-  // ── Panel open / close ─────────────────────────────────────────────────
-  const openPanel = () => {
-    panelEl.hidden = false;
-    if (toggleEl.setAttribute) toggleEl.setAttribute('aria-expanded', 'true');
-    renderList();
-    if (searchEl.focus) searchEl.focus();
-    if (panelEl.scrollIntoView) panelEl.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
-  };
-  const closePanel = () => {
-    panelEl.hidden = true;
-    if (toggleEl.setAttribute) toggleEl.setAttribute('aria-expanded', 'false');
-  };
-
-  // ── Selection mutations ────────────────────────────────────────────────
-  // Any deliberate edit clears the "suggested" note — the admin owns it now.
-  const markTouched = () => { seeded = false; };
-
-  const addCode = (raw, { quiet = false } = {}) => {
-    const code = norm(raw);
-    if (code.length < 2) { if (!quiet) Toast.error('Codes need at least 2 letters or numbers'); return false; }
-    if (code.length > 24) { if (!quiet) Toast.error('That code is too long (24 characters max)'); return false; }
-    if (!selection.has(code)) {
-      selection.set(code, code);
-      if (!catByCode.has(code)) {
-        const row = { code, product_count: 0 };
-        catalogue.push(row);
-        catByCode.set(code, row);
-        sortCatalogue();
-      }
-    }
-    markTouched();
-    return true;
-  };
-
-  const toggleCode = (rawCode) => {
+  // ── Mutations ──────────────────────────────────────────────────────────
+  const toggle = (rawCode) => {
     const code = norm(rawCode);
     if (!code) return;
     if (selection.has(code)) selection.delete(code);
     else selection.set(code, code);
-    markTouched();
-    renderChips();
-    renderToggleLabel();
-    renderList();
+    seeded = false;          // a deliberate edit — the admin owns it now
+    renderCount();
+    renderSeedNote();
+    renderGrid();
   };
 
-  // Add the typed code (or assign it if it already exists in the catalogue).
-  const addFromQuery = () => {
-    if (creating) return;
-    creating = true;
-    try {
-      const code = norm(searchEl.value || '');
-      if (!addCode(code)) return;
-      searchEl.value = '';
-      renderChips();
-      renderToggleLabel();
-      renderList();
-    } finally {
-      creating = false;
+  const addTyped = () => {
+    const code = norm(filterEl.value || '');
+    if (code.length < 2) { Toast.error('Codes need at least 2 letters or numbers'); return; }
+    if (code.length > 24) { Toast.error('That code is too long (24 characters max)'); return; }
+    if (!universe.some(c => c.code === code)) {
+      universe.push({ code, count: 0 });
+      universe.sort((a, b) => byCode(a.code, b.code));
     }
+    selection.set(code, code);
+    seeded = false;
+    filterEl.value = '';
+    renderCount();
+    renderSeedNote();
+    renderAdd();
+    renderGrid();
   };
 
   // ── Initial paint ──────────────────────────────────────────────────────
-  renderChips();
-  renderToggleLabel();
-  toggleEl.disabled = false;
+  renderCount();
+  renderSeedNote();
+  renderAdd();
+  renderGrid();
 
   // ── Events ─────────────────────────────────────────────────────────────
-  chipsEl.addEventListener('click', (e) => {
-    const btn = e.target.closest('[data-remove-code]');
-    if (!btn) return;
-    selection.delete(norm(btn.dataset.removeCode));
-    markTouched();
-    renderChips();
-    renderToggleLabel();
-    renderList();
+  gridEl.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-code]');
+    if (btn) toggle(btn.dataset.code);
   });
 
-  toggleEl.addEventListener('click', () => {
-    if (panelEl.hidden) openPanel(); else closePanel();
-  });
-
-  searchEl.addEventListener('input', renderList);
-  searchEl.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') {
-      e.preventDefault();
-      closePanel();
-      if (toggleEl.focus) toggleEl.focus();
-      return;
-    }
-    if (e.key === 'Enter') {
-      e.preventDefault();
-      if ((searchEl.value || '').trim()) addFromQuery();
+  filterEl.addEventListener('input', () => { renderAdd(); renderGrid(); });
+  filterEl.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter') return;
+    e.preventDefault();
+    const n = norm(filterEl.value || '');
+    if (!n) return;
+    if (universe.some(c => c.code === n)) {
+      toggle(n);
+      filterEl.value = '';
+      renderAdd();
+      renderGrid();
+    } else {
+      addTyped();
     }
   });
 
-  listEl.addEventListener('click', (e) => {
-    if (e.target.closest('[data-add-code]')) { addFromQuery(); return; }
-    const opt = e.target.closest('[data-code]');
-    if (opt) toggleCode(opt.dataset.code);
-  });
-
-  // Click outside the section closes the panel; clicks inside keep it open.
-  if (typeof document !== 'undefined') {
-    const onDocClick = (e) => {
-      if (!modal.isConnected) { document.removeEventListener('click', onDocClick, true); return; }
-      if (panelEl.hidden) return;
-      if (group && group.contains && group.contains(e.target)) return;
-      closePanel();
-    };
-    document.addEventListener('click', onDocClick, true);
-  }
+  addBtn.addEventListener('click', addTyped);
 }
 
 /**

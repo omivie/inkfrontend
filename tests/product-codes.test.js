@@ -145,10 +145,9 @@ test('AdminAPI.normalizeProductCode uppercases and strips non-alphanumerics', ()
 // 3. Admin drawer shell + wiring — admin/pages/products.js
 // ─────────────────────────────────────────────────────────────────────────────
 
-test('drawer emits the Product Codes shell — chips, picker, toggle, panel, search, list', () => {
-  for (const id of ['product-codes-group', 'product-codes-chips', 'product-codes-count',
-                     'code-picker', 'code-toggle', 'code-toggle-label',
-                     'code-panel', 'code-search', 'code-list']) {
+test('drawer emits the Product Codes shell — brand/type context, filter, add, grid', () => {
+  for (const id of ['product-codes-group', 'product-codes-count', 'pc-brand', 'pc-type',
+                     'pc-filter', 'pc-add-btn', 'pc-add-label', 'product-codes-grid', 'pc-seed-note']) {
     assert.match(PRODUCTS_SRC, new RegExp(`id="${id}"`), `#${id} must be in the shell`);
   }
 });
@@ -189,12 +188,14 @@ test('APP_VERSION names the product-codes build and is a valid dated tag', () =>
   assert.match(m[1], /product-codes/, 'names the product-codes feature');
 });
 
-test('admin.css styles the code chips + picker count', () => {
-  assert.match(CSS_SRC, /\.admin-code-chip\s*\{/);
-  assert.match(CSS_SRC, /\.admin-code-chip__remove/);
-  assert.match(CSS_SRC, /\.admin-product-codes__optcount/);
-  // The monospace rule must be scoped so it cannot bleed into the ribbon picker.
-  assert.match(CSS_SRC, /#code-panel \.admin-brandpicker__optname/);
+test('admin.css styles the Product Codes grid', () => {
+  assert.match(CSS_SRC, /\.admin-pc-context\b/);
+  assert.match(CSS_SRC, /\.admin-pc-grid\b/);
+  assert.match(CSS_SRC, /\.admin-pc-code\b/);
+  assert.match(CSS_SRC, /\.admin-pc-code\.is-on/);
+  assert.match(CSS_SRC, /\.admin-pc-seed-note/);
+  // The retired combobox-picker classes must be gone.
+  assert.doesNotMatch(CSS_SRC, /\.admin-code-chip\b/);
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -214,13 +215,13 @@ function makeEl(id) {
   };
 }
 
-const CODE_IDS = ['product-codes-group', 'product-codes-chips', 'product-codes-count',
-  'code-picker', 'code-toggle', 'code-toggle-label', 'code-panel', 'code-search', 'code-list'];
+const CODE_IDS = ['product-codes-group', 'product-codes-count', 'pc-brand', 'pc-type',
+  'pc-filter', 'pc-add-btn', 'pc-add-label', 'product-codes-grid', 'pc-seed-note'];
 
 function makeModal(ids) {
   const els = {};
   for (const id of ids) els[id] = makeEl(id);
-  if (els['code-panel']) els['code-panel'].hidden = true;
+  if (els['pc-seed-note']) els['pc-seed-note'].hidden = true;
   return {
     isConnected: true, _els: els,
     querySelector(sel) { return els[sel.replace(/^#/, '')] || null; },
@@ -233,6 +234,20 @@ function makeToast() {
     error: (m) => calls.push(['error', m]), info: (m) => calls.push(['info', m]) };
 }
 
+// A fake `window` carrying the API surface wireProductCodesSection touches:
+// getShopData (the code universe) and _enrichSeriesCodes (the seed fallback).
+function makeWindow({ series = [], products = [], enrich = null, shopThrows = false } = {}) {
+  return {
+    API: {
+      getShopData: async () => {
+        if (shopThrows) throw new Error('shop down');
+        return { ok: true, data: { series, products } };
+      },
+      _enrichSeriesCodes: enrich || (() => false),
+    },
+  };
+}
+
 function clickEvent(map) {
   return { target: { closest: (sel) => map[sel] || null }, preventDefault() {} };
 }
@@ -243,99 +258,123 @@ function keyEvent(key, target) {
 // Build a runnable copy of wireProductCodesSection with its free globals injected.
 function loadWire() {
   const src = extractFunction(PRODUCTS_SRC, 'async function wireProductCodesSection(');
-  const factory = new Function('AdminAPI', 'Toast', 'esc', 'DebugLog', 'window',
+  const factory = new Function(
+    'AdminAPI', 'Toast', 'esc', 'DebugLog', 'window',
+    'extractBrandName', '_brands', 'PRODUCT_TYPE_LABELS', 'PRODUCT_TYPE_TO_SHOP_CATEGORY',
     `${src}; return wireProductCodesSection;`);
-  return (deps) => factory(deps.AdminAPI, deps.Toast || makeToast(), esc,
-    deps.DebugLog || { warn() {} }, deps.window || {});
+  return (deps) => factory(
+    deps.AdminAPI, deps.Toast || makeToast(), esc, deps.DebugLog || { warn() {} },
+    deps.window || makeWindow(),
+    deps.extractBrandName || ((p) => (p && p.brand && p.brand.name) || (p && p.brand_name) || ''),
+    deps._brands || [],
+    deps.PRODUCT_TYPE_LABELS || { ink_cartridge: 'Ink Cartridges', toner_cartridge: 'Toner Cartridges' },
+    deps.PRODUCT_TYPE_TO_SHOP_CATEGORY || { ink_cartridge: 'ink', toner_cartridge: 'toner' });
 }
 
-test('seed: a product with no saved codes is pre-filled from backend series_codes', async () => {
+// A representative Brother ink product.
+const PROD = (over = {}) => ({
+  id: 'p1', sku: 's', name: 'n', series_codes: [],
+  product_type: 'ink_cartridge', brand: { name: 'Brother', slug: 'brother' }, ...over,
+});
+
+test('header shows the product brand + type; grid renders the whole code universe', async () => {
   const modal = makeModal(CODE_IDS);
-  const AdminAPI = {
-    getCodeCatalogue: async () => ([{ code: 'LC40', product_count: 3 }]),
-    getProductCodes: async () => [],
-  };
-  await loadWire()({ AdminAPI })(modal, { id: 'p1', sku: 'CLC40BK', name: 'x', series_codes: ['LC40'] });
+  const AdminAPI = { getProductCodes: async () => ['LC40'] };
+  const win = makeWindow({ series: [{ code: 'LC37', count: 5 }, { code: 'LC40', count: 9 }, { code: 'LC59', count: 2 }] });
+  await loadWire()({ AdminAPI, window: win })(modal, PROD());
+  assert.equal(modal._els['pc-brand'].textContent, 'Brother');
+  assert.equal(modal._els['pc-type'].textContent, 'Ink Cartridges');
+  const grid = modal._els['product-codes-grid'].innerHTML;
+  for (const code of ['LC37', 'LC40', 'LC59']) {
+    assert.match(grid, new RegExp(`data-code="${code}"`), `${code} tile rendered`);
+  }
+  assert.match(grid, /data-code="LC40"[^>]*aria-pressed="true"/, 'the assigned code is marked on');
+  assert.match(grid, /data-code="LC37"[^>]*aria-pressed="false"/, 'unassigned codes are off');
+});
+
+test('seed: a product with no saved codes is pre-selected from backend series_codes', async () => {
+  const modal = makeModal(CODE_IDS);
+  const AdminAPI = { getProductCodes: async () => [] };
+  const win = makeWindow({ series: [{ code: 'LC40', count: 3 }, { code: 'LC57', count: 1 }] });
+  await loadWire()({ AdminAPI, window: win })(modal, PROD({ series_codes: ['LC40'] }));
   assert.equal(modal._productCodesLoaded, true);
   assert.deepEqual([...modal._productCodesSelection.keys()], ['LC40']);
-  assert.match(modal._els['product-codes-chips'].innerHTML, /Suggested from/, 'shows the seed note');
+  assert.equal(modal._els['pc-seed-note'].hidden, false, 'seed note is visible');
 });
 
 test('seed: with no series_codes, it derives via window.API._enrichSeriesCodes', async () => {
   const modal = makeModal(CODE_IDS);
-  const win = { API: { _enrichSeriesCodes(p) { p.series_codes = ['LC57']; return true; } } };
-  const AdminAPI = { getCodeCatalogue: async () => [], getProductCodes: async () => [] };
-  await loadWire()({ AdminAPI, window: win })(modal, { id: 'p2', sku: 'CLC57', name: 'n', series_codes: [] });
+  const win = makeWindow({ series: [], enrich: (p) => { p.series_codes = ['LC57']; return true; } });
+  const AdminAPI = { getProductCodes: async () => [] };
+  await loadWire()({ AdminAPI, window: win })(modal, PROD({ id: 'p2', series_codes: [] }));
   assert.deepEqual([...modal._productCodesSelection.keys()], ['LC57']);
 });
 
 test('a product WITH saved codes loads them and shows no seed note', async () => {
   const modal = makeModal(CODE_IDS);
-  const AdminAPI = {
-    getCodeCatalogue: async () => ([{ code: 'LC40', product_count: 9 }]),
-    getProductCodes: async (pid) => { assert.equal(pid, 'p3'); return ['LC40', 'LC57']; },
-  };
-  await loadWire()({ AdminAPI })(modal, { id: 'p3', sku: 's', name: 'n', series_codes: ['LC40'] });
+  const AdminAPI = { getProductCodes: async (pid) => { assert.equal(pid, 'p3'); return ['LC40', 'LC57']; } };
+  const win = makeWindow({ series: [{ code: 'LC40' }, { code: 'LC57' }, { code: 'LC73' }] });
+  await loadWire()({ AdminAPI, window: win })(modal, PROD({ id: 'p3', series_codes: ['LC40'] }));
   assert.deepEqual([...modal._productCodesSelection.keys()].sort(), ['LC40', 'LC57']);
-  assert.doesNotMatch(modal._els['product-codes-chips'].innerHTML, /Suggested from/);
+  assert.equal(modal._els['pc-seed-note'].hidden, true, 'no seed note when codes were saved');
   assert.equal(modal._productCodesBaseline, 'LC40,LC57', 'baseline = the opened-with set');
 });
 
-test('typing a new code and pressing Enter adds it to the selection', async () => {
+test('typing a code not in the grid and pressing Enter adds it', async () => {
   const modal = makeModal(CODE_IDS);
-  const AdminAPI = { getCodeCatalogue: async () => [], getProductCodes: async () => ['LC40'] };
-  await loadWire()({ AdminAPI })(modal, { id: 'p4', sku: 's', name: 'n', series_codes: [] });
-  const search = modal._els['code-search'];
-  search.value = 'lc-57';                       // lower-case + hyphen → normalises to LC57
-  await search.fire('keydown', keyEvent('Enter', search));
+  const AdminAPI = { getProductCodes: async () => ['LC40'] };
+  const win = makeWindow({ series: [{ code: 'LC40' }] });
+  await loadWire()({ AdminAPI, window: win })(modal, PROD({ id: 'p4' }));
+  const filter = modal._els['pc-filter'];
+  filter.value = 'lc-57';                       // lower-case + hyphen → normalises to LC57
+  await filter.fire('keydown', keyEvent('Enter', filter));
   assert.ok(modal._productCodesSelection.has('LC57'), 'normalised code added');
   assert.deepEqual([...modal._productCodesSelection.keys()].sort(), ['LC40', 'LC57']);
+  assert.match(modal._els['product-codes-grid'].innerHTML, /data-code="LC57"/, 'new code joins the grid');
 });
 
 test('a 1-character code is rejected with an error toast', async () => {
   const modal = makeModal(CODE_IDS);
   const Toast = makeToast();
-  const AdminAPI = { getCodeCatalogue: async () => [], getProductCodes: async () => [] };
-  await loadWire()({ AdminAPI, Toast })(modal, { id: 'p5', sku: 's', name: 'n', series_codes: [] });
-  const search = modal._els['code-search'];
-  search.value = 'L';
-  await search.fire('keydown', keyEvent('Enter', search));
+  const AdminAPI = { getProductCodes: async () => [] };
+  await loadWire()({ AdminAPI, Toast, window: makeWindow({ series: [] }) })(modal, PROD({ id: 'p5' }));
+  const filter = modal._els['pc-filter'];
+  filter.value = 'L';
+  await filter.fire('keydown', keyEvent('Enter', filter));
   assert.equal(modal._productCodesSelection.size, 0, 'no code added');
   assert.ok(Toast.calls.some(c => c[0] === 'error'), 'an error toast fired');
 });
 
-test('clicking a catalogue row toggles the code on, then off', async () => {
+test('clicking a code tile toggles it on, then off', async () => {
   const modal = makeModal(CODE_IDS);
-  const AdminAPI = {
-    getCodeCatalogue: async () => ([{ code: 'TN253', product_count: 4 }]),
-    getProductCodes: async () => [],
-  };
-  await loadWire()({ AdminAPI })(modal, { id: 'p6', sku: 's', name: 'n', series_codes: [] });
-  const list = modal._els['code-list'];
-  await list.fire('click', clickEvent({ '[data-code]': { dataset: { code: 'TN253' } } }));
+  const AdminAPI = { getProductCodes: async () => [] };
+  const win = makeWindow({ series: [{ code: 'TN253', count: 4 }] });
+  await loadWire()({ AdminAPI, window: win })(modal, PROD({ id: 'p6', product_type: 'toner_cartridge' }));
+  const grid = modal._els['product-codes-grid'];
+  await grid.fire('click', clickEvent({ '[data-code]': { dataset: { code: 'TN253' } } }));
   assert.ok(modal._productCodesSelection.has('TN253'), 'toggled on');
-  await list.fire('click', clickEvent({ '[data-code]': { dataset: { code: 'TN253' } } }));
+  await grid.fire('click', clickEvent({ '[data-code]': { dataset: { code: 'TN253' } } }));
   assert.ok(!modal._productCodesSelection.has('TN253'), 'toggled back off');
 });
 
-test('removing a chip un-assigns the code', async () => {
+test('clicking an already-assigned tile removes the code', async () => {
   const modal = makeModal(CODE_IDS);
-  const AdminAPI = { getCodeCatalogue: async () => [], getProductCodes: async () => ['LC40', 'LC57'] };
-  await loadWire()({ AdminAPI })(modal, { id: 'p7', sku: 's', name: 'n', series_codes: [] });
-  await modal._els['product-codes-chips'].fire('click',
-    clickEvent({ '[data-remove-code]': { dataset: { removeCode: 'LC40' } } }));
+  const AdminAPI = { getProductCodes: async () => ['LC40', 'LC57'] };
+  const win = makeWindow({ series: [{ code: 'LC40' }, { code: 'LC57' }] });
+  await loadWire()({ AdminAPI, window: win })(modal, PROD({ id: 'p7' }));
+  await modal._els['product-codes-grid'].fire('click',
+    clickEvent({ '[data-code]': { dataset: { code: 'LC40' } } }));
   assert.deepEqual([...modal._productCodesSelection.keys()], ['LC57']);
 });
 
-test('a failed catalogue load leaves the gate false so save cannot wipe codes', async () => {
+test('a failed load leaves the gate false so save cannot wipe codes', async () => {
   const modal = makeModal(CODE_IDS);
-  const AdminAPI = {
-    getCodeCatalogue: async () => { throw new Error('down'); },
-    getProductCodes: async () => { throw new Error('down'); },
-  };
-  await loadWire()({ AdminAPI })(modal, { id: 'p8', sku: 's', name: 'n', series_codes: [] });
+  // getProductCodes rejecting is the unrecoverable signal (the getShopData
+  // call is .catch-guarded inside the function).
+  const AdminAPI = { getProductCodes: async () => { throw new Error('down'); } };
+  await loadWire()({ AdminAPI, window: makeWindow({ shopThrows: true }) })(modal, PROD({ id: 'p8' }));
   assert.notEqual(modal._productCodesLoaded, true, 'gate stays false on load failure');
-  assert.equal(modal._els['code-toggle'].disabled, true, 'picker is disabled');
+  assert.equal(modal._els['pc-filter'].disabled, true, 'the filter input is disabled');
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
