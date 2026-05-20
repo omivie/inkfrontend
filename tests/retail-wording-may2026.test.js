@@ -253,8 +253,11 @@ test('§7 shipping.html lead text describes dispatch without naming a partner', 
     const src = SRC['shipping.html'];
     assert.match(src, /Tracked courier on every order/i,
         'shipping.html lead must still open with the courier promise');
-    assert.match(src, /Same-day dispatch/i,
-        'shipping.html lead must still promise same-day dispatch');
+    // Same-day-dispatch promise was qualified May 2026 for Google Ads
+    // "Misrepresentation" compliance: Auckland-metro only, 2pm cutoff,
+    // business days. See readfirst/google-ads-compliance-may2026.md.
+    assert.match(src, /Auckland metro[\s\S]{0,80}\b2pm\b[\s\S]{0,80}same-day/i,
+        'shipping.html lead must qualify same-day dispatch to Auckland metro before 2pm on a business day');
 });
 
 test('§7 faq.html still answers "Where do orders ship from?"', () => {

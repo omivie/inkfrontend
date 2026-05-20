@@ -34,9 +34,9 @@
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
                         027 474 0115
                     </a>
-                    <a href="mailto:inkandtoner@windowslive.com" class="header-contact__item">
+                    <a href="mailto:support@inkcartridges.co.nz" class="header-contact__item">
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
-                        inkandtoner@windowslive.com
+                        support@inkcartridges.co.nz
                     </a>
                 </div>
 
@@ -175,11 +175,13 @@
                         <section class="policy-section" id="snapshot">
                             <h2>1. The 30-second summary</h2>
                             <ul>
-                                <li><strong>Faulty, damaged, or wrong item:</strong> we cover everything — refund, replacement, or repair, plus return shipping. No time limit beyond what&rsquo;s reasonable for the goods.</li>
-                                <li><strong>Change of mind, sealed:</strong> within <span data-legal-bind="return-window">30</span> days, send it back unopened in original packaging, we refund the item price. You pay return shipping.</li>
+                                <li><strong>Faulty, damaged, or incorrectly supplied:</strong> within <span data-legal-bind="return-window-faulty">30</span> days of delivery — refund, replacement, or repair, plus return shipping. CGA rights still apply beyond that window for as long as is reasonable for the product.</li>
+                                <li><strong>Change of mind, sealed:</strong> within <span data-legal-bind="return-window-change">14</span> days of delivery, send it back unopened in original packaging, we refund the item price. You pay return shipping.</li>
                                 <li><strong>Change of mind, opened:</strong> ink and toner are consumables. Once a vacuum seal or foil is broken we cannot resell, so we cannot refund a change-of-mind return. (Faulty cartridges are different — see &sect;2.)</li>
+                                <li><strong>Compatible cartridge warranty:</strong> <span data-legal-bind="compatible-warranty">12 months</span> from purchase. Genuine cartridges carry the manufacturer&rsquo;s warranty.</li>
                                 <li><strong>No restocking fee.</strong> Ever. If a return qualifies, you get the full item price back.</li>
                             </ul>
+                            <p class="legal-page__disambiguation"><small data-legal-bind="disambiguation">InkCartridges.co.nz is operated by Office Consumables Ltd (NZBN 9429033934204, GST 94-509-459).</small></p>
                             <div class="policy-callout policy-callout--ok">
                                 <p class="policy-callout__title">No hidden fees</p>
                                 <p>The refund equals the price you paid for the returned item. We never deduct a &ldquo;restocking&rdquo; or &ldquo;processing&rdquo; charge.</p>
@@ -206,19 +208,19 @@
                             </ul>
                             <h3>How to start a CGA claim</h3>
                             <ol>
-                                <li>Email <a data-legal-bind="email-href" href="mailto:inkandtoner@windowslive.com"><span data-legal-bind="email">inkandtoner@windowslive.com</span></a> with your order number, the SKU on the box, a one-line description of what&rsquo;s wrong, and a photo if visible.</li>
+                                <li>Email <a data-legal-bind="email-href" href="mailto:support@inkcartridges.co.nz"><span data-legal-bind="email">support@inkcartridges.co.nz</span></a> with your order number, the SKU on the box, a one-line description of what&rsquo;s wrong, and a photo if visible.</li>
                                 <li>We reply within one business day with a return label (we pay shipping for genuine CGA failures) or, for minor issues, a same-day replacement we&rsquo;ll send before yours comes back.</li>
                                 <li>Refunds go back to the original payment method within 5 working days of the return arriving.</li>
                             </ol>
                             <div class="policy-callout">
                                 <p class="policy-callout__title">No artificial time limit on CGA claims</p>
-                                <p>The 30-day window in &sect;3 below is for change-of-mind only. CGA rights for faulty goods last as long as is reasonable for the product — for ink that&rsquo;s typically 12–24 months from manufacture, and we honour the manufacturer&rsquo;s expiry on every cartridge.</p>
+                                <p>The <span data-legal-bind="return-window-change">14</span>-day window in &sect;3 below is for change-of-mind only. CGA rights for faulty goods last as long as is reasonable for the product — for ink that&rsquo;s typically 12–24 months from manufacture, and we honour the manufacturer&rsquo;s expiry on every cartridge. Our compatible-cartridge replacement guarantee runs for <span data-legal-bind="compatible-warranty">12 months</span> from purchase, on top of those CGA rights.</p>
                             </div>
                         </section>
 
                         <section class="policy-section" id="change-of-mind">
                             <h2>3. Change of mind — sealed cartridges only</h2>
-                            <p>If you decide a cartridge isn&rsquo;t for you, you can return it within <span data-legal-bind="return-window">30</span> days of delivery for a refund, provided:</p>
+                            <p>If you decide a cartridge isn&rsquo;t for you, you can return it within <span data-legal-bind="return-window-change">14</span> days of delivery for a refund, provided:</p>
                             <ul>
                                 <li>The factory seal (vacuum bag, foil, or shrink-wrap) is intact.</li>
                                 <li>The product packaging is undamaged and resaleable.</li>
@@ -281,6 +283,7 @@
                             <p>Always email us first so we can issue a return authorisation; otherwise the package may be refused on arrival. Once authorised, address returns to our office:</p>
                             <address style="font-style: normal;">
                                 <strong>Returns &mdash; <span data-legal-bind="trading-name">InkCartridges.co.nz</span></strong><br>
+                                c/- <span data-legal-bind="legal-entity">Office Consumables Ltd</span><br>
                                 <span data-legal-bind="address-block">37A Archibald Road<br>Kelston, Auckland 0602<br>New Zealand</span>
                             </address>
                             <p>Use a tracked courier — we can&rsquo;t process a refund for a parcel that doesn&rsquo;t arrive.</p>
@@ -289,7 +292,7 @@
                         <section class="policy-section" id="contact">
                             <h2>10. Need help?</h2>
                             <p>
-                                Email <a data-legal-bind="email-href" href="mailto:inkandtoner@windowslive.com"><span data-legal-bind="email">inkandtoner@windowslive.com</span></a>,
+                                Email <a data-legal-bind="email-href" href="mailto:support@inkcartridges.co.nz"><span data-legal-bind="email">support@inkcartridges.co.nz</span></a>,
                                 call <a data-legal-bind="phone-href" href="tel:+64274740115"><span data-legal-bind="phone-display">027 474 0115</span></a>,
                                 or use the <a href="/contact">contact form</a>. We reply <span data-legal-bind="response-sla">within one business day</span>.
                             </p>
@@ -300,7 +303,7 @@
         </section>
     </main>
 
-    <footer class="site-footer"><noscript><p>InkCartridges.co.nz &mdash; Phone: <a href="tel:0274740115">027 474 0115</a> &mdash; Email: inkandtoner@windowslive.com &mdash; 37A Archibald Road, Kelston, Auckland 0602, NZ</p></noscript></footer>
+    <footer class="site-footer"><noscript><p>InkCartridges.co.nz is operated by Office Consumables Ltd (NZBN 9429033934204, GST 94-509-459). Phone <a href="tel:0274740115">027 474 0115</a> &mdash; Email <a href="mailto:support@inkcartridges.co.nz">support@inkcartridges.co.nz</a> &mdash; 37A Archibald Road, Kelston, Auckland 0602, New Zealand.</p></noscript></footer>
 
     <script defer src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.98.0" integrity="sha384-Sm2s7OXxsAMTyJ4iIyRBgVpeGUvMPk2lRQnnZhE78Wej7oggIoolKt+SCt0XJbUB" crossorigin="anonymous"></script>
     <script defer src="/js/config.js?v=d58abcf9"></script>

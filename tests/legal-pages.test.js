@@ -190,7 +190,7 @@ test('§5 Contact page exposes physical address, phone, email, contact form, and
     assert.match(src, /37A Archibald Road/,                'Contact must show the physical street address');
     assert.match(src, /Kelston, Auckland 0602/,            'Contact must show the suburb + postcode');
     assert.match(src, /tel:\+?64?2?7?\d{6,8}|tel:0274740115/, 'Contact must offer a tel: link');
-    assert.match(src, /mailto:inkandtoner@windowslive\.com/, 'Contact must offer a mailto: link');
+    assert.match(src, /mailto:support@inkcartridges\.co\.nz/, 'Contact must offer a mailto: link');
     assert.match(src, /id="contact-form"/,                  'Contact must render a contact form');
     assert.match(src, /data-legal-bind="map"/,              'Contact must include a map embed (Google Merchant Center requirement)');
 });
@@ -227,6 +227,10 @@ test('§6 legal-config.js exposes every binding key used by the pages', () => {
         'response-sla', 'free-threshold', 'currency', 'return-window',
         'policy-date', 'policy-version', 'privacy-officer', 'privacy-email',
         'handling-time',
+        // Google Ads "Business Transparency" bindings (May 2026):
+        'nzbn', 'gst-number', 'disambiguation', 'copyright',
+        'return-window-faulty', 'return-window-change',
+        'compatible-warranty', 'dispatch-cutoff',
         'tax-line', 'payment-methods', 'carriers',
         'shipping-zones', 'data-processors', 'cookies', 'map',
     ];

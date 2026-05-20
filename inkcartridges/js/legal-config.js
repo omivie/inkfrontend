@@ -23,10 +23,13 @@
 
     var LegalConfig = {
         // ─── Identity ─────────────────────────────────────────────────────
+        // Mirrors backend src/utils/trustSignals.js — single source of truth
+        // for the Google Ads "Business Transparency" appeal. Updating these
+        // values without also updating the backend is a cloaking risk.
         tradingName: 'InkCartridges.co.nz',
-        legalEntity: 'InkCartridges.co.nz',           // Sole trader / operating name
-        gstNumber:   '',                                // e.g. '123-456-789' — empty hides the line
-        nzbn:        '',                                // e.g. '9429012345678' — empty hides the line
+        legalEntity: 'Office Consumables Ltd',          // NZ-registered limited company
+        gstNumber:   '94-509-459',                      // formatted with dashes — IRD form
+        nzbn:        '9429033934204',                   // New Zealand Business Number
         nzOwned:     true,                              // controls "100% NZ Owned" framing
 
         // ─── Contact ──────────────────────────────────────────────────────
@@ -40,7 +43,7 @@
         },
         phoneDisplay:  '027 474 0115',
         phoneE164:     '+64274740115',
-        email:         'inkandtoner@windowslive.com',
+        email:         'support@inkcartridges.co.nz',
         hoursDisplay:  'Monday – Friday, 9:00am – 5:00pm NZT',
         responseSLA:   'within one business day',
 
@@ -50,8 +53,8 @@
         geo: { lat: -36.9005, lng: 174.6669 },          // 1/37 Archibald Rd, Kelston
 
         // ─── Privacy / data handling ──────────────────────────────────────
-        privacyOfficerName:  'Privacy Officer, InkCartridges.co.nz',
-        privacyOfficerEmail: 'inkandtoner@windowslive.com',
+        privacyOfficerName:  'Privacy Officer, Office Consumables Ltd',
+        privacyOfficerEmail: 'support@inkcartridges.co.nz',
         // Cookie / processor disclosure — every party in our CSP that
         // touches user data, named explicitly so the Privacy Policy is
         // not vague (Privacy Act 2020 §22 IPP3 transparency requirement).
@@ -80,14 +83,23 @@
         currencySymbol:         '$',
         freeShippingThreshold:  FREE_SHIPPING_THRESHOLD,
         carriers:               ['NZ Post', 'Aramex (CourierPost network)'],
-        handlingTime:           'Same-day dispatch on orders placed before 12:00pm NZT, Monday – Friday. Orders placed after 12:00pm, on weekends, or on NZ public holidays dispatch the next working day.',
+        handlingTime:           'Auckland metro orders placed before 2:00pm NZT on a business day are dispatched same-day. Orders placed after 2:00pm, on weekends, or on NZ public holidays dispatch the next working day. Outside Auckland metro, dispatch is the next working day after order placement.',
         shippingZones: [
             { zone: 'Auckland metro',        urban: '$7.00', rural: '$14.00', eta: '1–2 working days' },
             { zone: 'North Island',          urban: '$7.00 – $12.00', rural: '$14.00 – $20.00', eta: '1–3 working days' },
             { zone: 'South Island',          urban: '$7.00 – $22.00', rural: '$14.00 – $30.00', eta: '2–4 working days' },
         ],
         // ─── Returns ──────────────────────────────────────────────────────
-        returnWindowDays:       30,
+        // Two windows mirror the backend trustSignals.js contract:
+        //   - returnWindowDaysFaulty  — faulty/damaged/incorrect (30 days)
+        //   - returnWindowDaysChange  — change-of-mind, unopened (14 days)
+        // `returnWindowDays` is preserved as the faulty-default for any
+        // historical `[data-legal-bind="return-window"]` binding.
+        returnWindowDays:        30,
+        returnWindowDaysFaulty:  30,
+        returnWindowDaysChange:  14,
+        compatibleWarrantyMonths: 12,
+        dispatchCutoffDisplay:   '2pm NZT, Auckland metro, business days',
         returnsAddressSameAsBusiness: true,
         // CGA-aligned return rules. Note: faulty / not-as-described returns
         // are NEVER time-barred by the 30-day window — that's a Consumer
@@ -128,6 +140,22 @@
         // line empty, since "GST: " with no number reads as a defect.
         hasTaxIdentifiers: function () {
             return !!(this.gstNumber || this.nzbn);
+        },
+        // Plain-text disambiguation sentence required by Google Ads
+        // "Business Transparency" — surfaced on every page the trading
+        // name appears prominently (footer, About hero, contact card).
+        // Backend mirror: src/utils/trustSignals.js disambiguationLine().
+        disambiguationLine: function () {
+            return this.tradingName
+                + ' is operated by ' + this.legalEntity
+                + ' (NZBN ' + this.nzbn + ', GST ' + this.gstNumber + ').';
+        },
+        // Returns "© 2026 Office Consumables Ltd. All rights reserved." —
+        // the canonical copyright string for SPA + prerender parity. The
+        // year is computed at render time so it auto-rolls each Jan 1.
+        copyrightLine: function () {
+            return '© ' + new Date().getFullYear()
+                + ' ' + this.legalEntity + '. All rights reserved.';
         },
     };
 

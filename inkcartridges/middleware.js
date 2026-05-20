@@ -9,7 +9,21 @@ const BACKEND = 'https://ink-backend-zaeq.onrender.com';
 // keeps client-side JSON-LD removal (§4) safe: every Google crawler that reads
 // structured data now receives the backend-prerendered HTML (one Product
 // schema), never the SPA.
-const BOT_PATTERN = /googlebot|adsbot-google|storebot-google|google-inspectiontool|bingbot|slurp|duckduckbot|baiduspider|yandexbot|facebookexternalhit|facebot|twitterbot|linkedinbot|whatsapp|telegrambot|applebot|pinterest|semrushbot|ahrefsbot|mj12bot|dotbot|rogerbot|embedly|quora link preview|showyoubot|outbrain|chrome-lighthouse|google-structured-data-testing-tool/i;
+//
+// AI-search bots (May 2026 — see readfirst/ai-search-readiness-may2026.md):
+// ChatGPT/Perplexity/Claude/Google-AI-Overviews/Gemini agents identify with
+// their own UA strings (GPTBot, ChatGPT-User, OAI-SearchBot, PerplexityBot,
+// Perplexity-User, ClaudeBot, anthropic-ai, Claude-Web, Google-Extended,
+// Applebot-Extended, meta-externalagent, Amazonbot). The backend's robots.txt
+// + botPrerender now explicitly *allow* these UAs and route them to the
+// rich prerender HTML (with dateModified + visible FAQ + page-updated). The
+// Vercel middleware is the first hop on the customer domain, so those UAs
+// must be in BOT_PATTERN here too — otherwise the request falls through to
+// the SPA shell (no FAQ, no dateModified, no citation signal) and the
+// backend changes are cosmetic. CCBot + Bytespider are deliberately NOT
+// listed: the backend robots.txt blocks them (low-value scrapers); FE
+// matches by simply not routing them to the prerender either.
+const BOT_PATTERN = /googlebot|adsbot-google|storebot-google|google-inspectiontool|bingbot|slurp|duckduckbot|baiduspider|yandexbot|facebookexternalhit|facebot|twitterbot|linkedinbot|whatsapp|telegrambot|applebot|pinterest|semrushbot|ahrefsbot|mj12bot|dotbot|rogerbot|embedly|quora link preview|showyoubot|outbrain|chrome-lighthouse|google-structured-data-testing-tool|gptbot|chatgpt-user|oai-searchbot|perplexitybot|perplexity-user|claudebot|anthropic-ai|claude-web|google-extended|applebot-extended|meta-externalagent|amazonbot/i;
 
 export default async function middleware(request) {
   const url = new URL(request.url);
@@ -60,14 +74,57 @@ export default async function middleware(request) {
   else if (path === '/ribbons') {
     prerenderPath = '/api/prerender/category/ribbons';
   }
-  // /shop?printer_slug=<slug> → printer prerender (canonical post-May-2026)
-  // Legacy `?printer=<slug>` accepted for back-compat with bookmarks/cached crawls;
-  // new emissions across the storefront use `printer_slug` per
-  // docs: search-dropdown-routing.md (Three-Handler Routing Contract).
+  // /ink-cartridges → category/ink, /toner-cartridges → category/toner.
+  //
+  // Spec (brand-canonical audit, May 2026): the backend's CollectionPage
+  // schema for `/api/schema/collection?category=ink` returns
+  // `collectionPage.url = /ink-cartridges` (not the old /ink 404 path), and
+  // the SPA is now mounted at /ink-cartridges and /toner-cartridges as
+  // rewrites (vercel.json) so the rendered URL matches the schema. Bots get
+  // the dedicated category prerender from the backend here.
+  else if (path === '/ink-cartridges' || path === '/ink-cartridges/') {
+    prerenderPath = '/api/prerender/category/ink';
+  }
+  else if (path === '/toner-cartridges' || path === '/toner-cartridges/') {
+    prerenderPath = '/api/prerender/category/toner';
+  }
+  // /shop?brand=<slug>&printer_slug=<slug> → printer prerender (canonical).
+  //
+  // Spec (brand-canonical audit, May 2026 — backend handoff): the canonical
+  // printer-hub URL ALWAYS carries both `brand` AND `printer_slug`. The
+  // backend's prerender endpoint requires both — `/shop?printer_slug=<slug>`
+  // alone is no longer a canonical shape (sitemap and internal links never
+  // emit it). Gating here on both params keeps the prerender/canonical
+  // contract intact: a bot hitting a legacy bare-printer_slug URL falls
+  // through to the SPA shell while the backend's slug_redirects layer
+  // canonicalises subsequent crawls to the branded form.
+  //
+  // /shop?brand=<slug> → brand prerender (May 2026 AI-search readiness).
+  // /brand/<slug> 301-redirects here (see vercel.json) so this branch is the
+  // canonical entry point for brand-hub bots. The backend's brand prerender
+  // emits CollectionPage with dateModified + a visible <section class="faq">
+  // whose Q/A text is string-identical to the FAQPage JSON-LD acceptedAnswer
+  // (cloaking-safe) + a <p class="page-updated"><time> footer. AI engines
+  // (ChatGPT/Perplexity/Claude/Gemini/Google-AI-Overviews) cite freshness +
+  // FAQ structure heavily; without this branch, AI bots hitting the brand
+  // hub get the SPA shell and the backend signals never reach them.
+  //
+  // Precedence: printer_slug + brand wins. The printer hub is the narrower,
+  // more useful intent — a bot landing on /shop?brand=brother&printer_slug=…
+  // should get the printer-scoped prerender (compatible cartridges for that
+  // model), not the broader brand catalog. `?printer=<slug>` is still
+  // accepted as a back-compat alias for printer_slug, but only when paired
+  // with brand.
+  //
+  // Pinned by tests/printer-url-canonical-may2026.test.js (middleware gates
+  // section): bare printer_slug must NOT trigger printer prerender.
   else if (path === '/shop') {
+    const brandSlug = url.searchParams.get('brand');
     const printerSlug = url.searchParams.get('printer_slug') || url.searchParams.get('printer');
-    if (printerSlug) {
+    if (brandSlug && printerSlug) {
       prerenderPath = `/api/prerender/printer/${encodeURIComponent(printerSlug)}`;
+    } else if (brandSlug) {
+      prerenderPath = `/api/prerender/brand/${encodeURIComponent(brandSlug)}`;
     }
   }
 
@@ -115,6 +172,8 @@ export const config = {
     '/p/:path*',
     '/html/product',
     '/ribbons',
+    '/ink-cartridges',
+    '/toner-cartridges',
     '/shop',
   ],
 };

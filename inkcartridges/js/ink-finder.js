@@ -669,11 +669,11 @@
         // the pieces — emit the canonical (branded) form.
         let url;
         if (selectedModel) {
+            // selectedBrand is already a brand slug (data-brand attribute on
+            // the brand button), so buildPrinterUrl in strict mode always
+            // yields the canonical /shop?brand=&printer_slug= shape.
             url = (typeof buildPrinterUrl === 'function')
-                ? buildPrinterUrl(
-                      { slug: selectedModel, brand_slug: selectedBrand },
-                      { allowUnbranded: true }
-                  )
+                ? buildPrinterUrl({ slug: selectedModel, brand_slug: selectedBrand })
                 : `/shop?brand=${encodeURIComponent(selectedBrand)}&printer_slug=${encodeURIComponent(selectedModel)}`;
         } else {
             url = `/shop?printer_model=${encodeURIComponent(selectedPrinterName)}&printer_brand=${encodeURIComponent(selectedBrand)}`;

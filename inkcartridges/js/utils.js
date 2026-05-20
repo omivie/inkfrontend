@@ -342,36 +342,81 @@ function debounce(func, wait = 300) {
  */
 
 /**
+ * Slugify a brand display name (e.g. "Fuji Xerox" → "fuji-xerox", "HP" → "hp").
+ * Used by buildPrinterUrl to recover brand_slug when the payload only carries
+ * a display-name string (saved-printer rows, trending-printer fallbacks).
+ */
+function slugifyBrand(value) {
+    if (value == null) return '';
+    return String(value)
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '');
+}
+
+if (typeof window !== 'undefined') {
+    window.slugifyBrand = slugifyBrand;
+}
+
+/**
  * Build the canonical printer-page URL.
  *
- * Spec contract (docs: search-dropdown-routing.md, May 2026):
- *   `/shop?brand=<brand_slug>&printer_slug=<slug>`
+ * Spec contract (docs: search-dropdown-routing.md, May 2026 + brand-canonical
+ * audit, May-2026): `/shop?brand=<brand_slug>&printer_slug=<slug>` — ALWAYS
+ * with brand. The bot-prerender middleware only rewrites to the SEO
+ * prerender API when BOTH params are present. Anything else (e.g. legacy
+ * `?printer=<slug>` or bare `?printer_slug=<slug>`) gets the empty SPA shell
+ * from Googlebot, breaks the sitemap canonical, and creates duplicate-content
+ * for the printer page.
  *
- * The bot-prerender middleware only rewrites to the SEO prerender API when
- * BOTH `brand` and `printer_slug` are present. Anything else (e.g. legacy
- * `?printer=<slug>`) gets the empty SPA shell from Googlebot, breaks the
- * sitemap canonical, and creates duplicate-content for the printer page.
+ * Brand-slug resolution ladder (any source is acceptable):
+ *   1. printer.brand_slug              ← canonical /api responses
+ *   2. printer.brand.slug              ← nested search-printers shape
+ *   3. printer.printer_models.brand_slug  ← saved-printer join shape
+ *   4. slugifyBrand(printer.brand_name) ← display-name fallback
+ *   5. slugifyBrand(printer.brand) when typeof brand === 'string'
  *
- * The spec is explicit: prefer hiding the drill-in row over rendering a
- * partial URL. Callers that get `null` back must hide the affordance, not
- * fall back to a non-canonical shape.
+ * Only when ALL five fail does `allowUnbranded` come into play. The unbranded
+ * form is permitted only for user-click affordances behind auth (e.g. saved-
+ * printer CTA on /account/printers, which is not in the search index) or
+ * <button>-driven navigation (trending chips). Public, indexable <a> tags
+ * MUST resolve to the branded form or hide the affordance.
  *
- * The unbranded `/shop?printer_slug=<slug>` form is permitted only as a
- * documented last resort (e.g. an older deploy without `brand_slug`),
- * surfaced via `buildPrinterUrl(p, { allowUnbranded: true })`.
- *
- * @param {Object|null} printer - Printer-shaped object: { slug, brand_slug?, brand?: { slug } }
+ * @param {Object|null} printer
+ *   Printer-shaped object. Accepts any combination of:
+ *     { slug, printer_slug, brand_slug, brand, brand_name, printer_models }
+ *   where `brand` may be `{ slug }`, `{ name }`, or a display-name string.
  * @param {{ allowUnbranded?: boolean }} [opts]
  * @returns {string|null} Canonical URL or null when required fields are missing.
  */
 function buildPrinterUrl(printer, opts) {
     if (!printer || typeof printer !== 'object') return null;
-    const slug = printer.slug || printer.printer_slug || '';
-    if (!slug) return null;
-    // Accept either flat (matched_printer shape) or nested (search-printers shape).
-    const brandSlug = printer.brand_slug
-        || (printer.brand && (typeof printer.brand === 'object' ? printer.brand.slug : null))
+    const slug = printer.slug || printer.printer_slug
+        || (printer.printer_models && printer.printer_models.slug)
         || '';
+    if (!slug) return null;
+
+    const nested = printer.printer_models || printer.printer || null;
+    let brandSlug = printer.brand_slug
+        || (printer.brand && typeof printer.brand === 'object' ? printer.brand.slug : null)
+        || (nested && nested.brand_slug)
+        || (nested && nested.brand && typeof nested.brand === 'object' ? nested.brand.slug : null)
+        || '';
+
+    if (!brandSlug) {
+        // Display-name fallback. Saved-printer rows ship `brand` as a plain
+        // string (e.g. "Brother"); slugify it so we still emit the canonical
+        // branded URL.
+        const brandName = printer.brand_name
+            || (typeof printer.brand === 'string' ? printer.brand : null)
+            || (printer.brand && typeof printer.brand === 'object' ? printer.brand.name : null)
+            || (nested && nested.brand_name)
+            || (nested && typeof nested.brand === 'string' ? nested.brand : null)
+            || '';
+        if (brandName) brandSlug = slugifyBrand(brandName);
+    }
+
     if (brandSlug) {
         return `/shop?brand=${encodeURIComponent(brandSlug)}&printer_slug=${encodeURIComponent(slug)}`;
     }

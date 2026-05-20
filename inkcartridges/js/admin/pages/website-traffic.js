@@ -67,6 +67,31 @@ function renderBreakdown(title, items) {
     </div>`;
 }
 
+// Email Campaigns breakdown — campaign-visitor-tracking-may2026.md §1.
+// Backend guarantees: `campaign_breakdown` is always an array (possibly empty),
+// sorted by unique_visitors desc, capped at 10 rows. `campaign_id === "unattributed"`
+// renders as plain text (the recipient was matched by auth but the campaign was
+// unknown). We render via barRow() so the visual language matches Device/Channel/etc.
+function renderCampaignBreakdown(rows) {
+    const list = Array.isArray(rows) ? rows : [];
+    if (list.length === 0) {
+        return `<div class="admin-card admin-mb-lg">
+            <div class="admin-card__title">Email Campaigns</div>
+            <div class="admin-empty"><div class="admin-empty__text">No campaign traffic yet.</div></div>
+        </div>`;
+    }
+    const total = list.reduce((s, r) => s + (Number(r.unique_visitors) || 0), 0);
+    let bars = '';
+    for (const r of list) {
+        const label = (r && r.campaign_id) ? String(r.campaign_id) : 'unattributed';
+        bars += barRow(label, Number(r.unique_visitors) || 0, total);
+    }
+    return `<div class="admin-card admin-mb-lg">
+        <div class="admin-card__title">Email Campaigns <small style="color:var(--text-muted);font-weight:400">— unique visitors per campaign</small></div>
+        <div class="admin-traffic-bars">${bars}</div>
+    </div>`;
+}
+
 function renderTable(title, headers, rows, renderCell) {
     if (!rows || !rows.length) {
         return `<div class="admin-card admin-mb-lg">
@@ -195,11 +220,18 @@ async function render() {
     const os = (s.os_breakdown || []).map(r => ({ label: r.os || 'Unknown', count: r.count }));
     const channels = (s.channel_breakdown || []).map(r => ({ label: r.channel || 'Unknown', count: r.count }));
 
+    // Campaign attribution — campaign-visitor-tracking-may2026.md §1.
+    // Backend guarantees 0 (never null) when nothing matches; coerce defensively
+    // anyway so a malformed envelope doesn't paint "NaN% of unique visitors".
+    const campaignVisitors = Number.isFinite(s.campaign_visitors) ? s.campaign_visitors : 0;
+    const campaignPercent = Number.isFinite(s.campaign_visitor_percent) ? s.campaign_visitor_percent : 0;
+
     body.innerHTML = `
-        <div class="admin-kpi-grid admin-kpi-grid--5 admin-mb-lg">
+        <div class="admin-kpi-grid admin-kpi-grid--6 admin-mb-lg">
             ${kpi({ label: 'Sessions', value: fmt(s.sessions) })}
             ${kpi({ label: 'Pageviews', value: fmt(s.pageviews) })}
             ${kpi({ label: 'Unique Visitors', value: fmt(s.unique_visitors) })}
+            ${kpi({ label: 'Campaign Visitors', value: fmt(campaignVisitors), sub: `${campaignPercent.toFixed(1)}% of unique visitors` })}
             ${kpi({ label: 'Avg Session', value: duration(s.avg_session_duration) })}
             ${kpi({ label: 'Bounce Rate', value: s.bounce_rate != null ? pct(s.bounce_rate) : MISSING })}
         </div>
@@ -213,6 +245,8 @@ async function render() {
             ${renderBreakdown('Browser', browsers)}
             ${renderBreakdown('Operating System', os)}
         </div>
+
+        ${renderCampaignBreakdown(s.campaign_breakdown)}
 
         ${renderTable('Top Pages', ['Path', 'Pageviews', 'Uniques'], s.top_pages || [], (r) => `
             <td class="admin-mono">${esc(r.path || '')}</td>

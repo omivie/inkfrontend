@@ -141,7 +141,6 @@ const Products = {
                     <div class="product-card__image-wrapper">
                         ${this.getProductImageHTML(product, { priority })}
                         ${chipStackHTML}
-                        ${product.is_lowest_in_market ? `<span class="product-card__badge product-card__badge--lowest-price" title="${product.market_position ? Security.escapeAttr(product.market_position.price_diff_percent + '% less than ' + product.market_position.lowest_competitor_name) : ''}">Lowest Price</span>` : ''}
                     </div>
                     <div class="product-card__content">
                         <p class="product-card__brand">${Security.escapeHtml(product.brand?.name || '')}</p>

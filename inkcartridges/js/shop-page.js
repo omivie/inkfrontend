@@ -513,7 +513,18 @@
         parseURLState() {
             const params = new URLSearchParams(window.location.search);
             this.state.brand = params.get('brand');
-            this.state.category = params.get('category');
+            // Category-landing routes: /ink-cartridges and /toner-cartridges
+            // are mounted directly at this SPA (rewrite, not redirect) so the
+            // page URL matches the backend's CollectionPage.url canonical
+            // (brand-canonical audit, May 2026). An explicit ?category= query
+            // param wins over the path so legacy /shop?category=ink URLs and
+            // brand-narrowing drilldowns keep working.
+            const pathCategory = (window.location.pathname === '/ink-cartridges' || window.location.pathname === '/ink-cartridges/')
+                ? 'ink'
+                : (window.location.pathname === '/toner-cartridges' || window.location.pathname === '/toner-cartridges/')
+                    ? 'toner'
+                    : null;
+            this.state.category = params.get('category') || pathCategory;
             const _rawCode = params.get('code');
             this.state.code = (typeof window !== 'undefined' && window.SeriesCodes && _rawCode)
                 ? window.SeriesCodes.collapseYieldSuffix(_rawCode)
@@ -563,9 +574,41 @@
         },
 
         updateURL() {
+            // Category-landing path: /ink-cartridges and /toner-cartridges
+            // are the canonical URLs for the category-only state (no brand /
+            // code / search / printer filters). Any extra filter switches the
+            // URL back to /shop?... so /ink-cartridges?brand=hp doesn't appear
+            // (the brand drilldown shape has always been /shop?brand=...).
+            const isCategoryOnly = !this.state.brand
+                && !this.state.code
+                && !this.state.search
+                && !this.state.printer
+                && !this.state.printerModel
+                && !this.state.type
+                && this.state.category;
+
+            const categoryLandings = { ink: '/ink-cartridges', toner: '/toner-cartridges' };
+            const onCategoryLanding = window.location.pathname === '/ink-cartridges'
+                || window.location.pathname === '/toner-cartridges';
+
+            let pathname;
+            if (isCategoryOnly && categoryLandings[this.state.category]) {
+                pathname = categoryLandings[this.state.category];
+            } else if (onCategoryLanding) {
+                // Leaving the category-landing for a filtered state — switch
+                // back to /shop so the URL shape matches the canonical
+                // shop-filter route.
+                pathname = '/shop';
+            } else {
+                pathname = window.location.pathname;
+            }
+
             const params = new URLSearchParams();
             if (this.state.brand) params.set('brand', this.state.brand);
-            if (this.state.category) params.set('category', this.state.category);
+            // On a category-landing path the category is implied by pathname;
+            // omitting the param keeps the URL canonical (no /ink-cartridges?category=ink).
+            const categoryImpliedByPath = pathname === '/ink-cartridges' || pathname === '/toner-cartridges';
+            if (this.state.category && !categoryImpliedByPath) params.set('category', this.state.category);
             if (this.state.code) params.set('code', this.state.code);
             if (this.state.type) params.set('type', this.state.type);
             if (this.state.search) params.set('q', this.state.search);
@@ -577,8 +620,8 @@
             }
 
             const newURL = params.toString()
-                ? `${window.location.pathname}?${params.toString()}`
-                : window.location.pathname;
+                ? `${pathname}?${params.toString()}`
+                : pathname;
 
             history.pushState({ ...this.state }, '', newURL);
         },
@@ -2441,13 +2484,21 @@
                     // recovery) instead of an ambiguous mixed result set.
                     if (products.length === 0 && smartData?.matched_printer?.slug) {
                         const p2 = smartData.matched_printer;
-                        // Canonical printer URL per search-dropdown-routing.md.
-                        // brand_slug shipped May 2026 — emit the branded form
-                        // when present, fall back to unbranded printer_slug
-                        // (still better than the legacy `?printer=` shape).
-                        const printerHref = (typeof buildPrinterUrl === 'function')
-                            ? buildPrinterUrl(p2, { allowUnbranded: true })
-                            : `/shop?printer_slug=${encodeURIComponent(p2.slug)}`;
+                        // Canonical printer URL per brand-canonical audit (May 2026):
+                        // /shop?brand=<brand_slug>&printer_slug=<slug>. /smart's
+                        // matched_printer payload carries brand_slug/brand_name;
+                        // buildPrinterUrl slugifies the name as a last-resort
+                        // fallback. If even that yields no brand_slug, we still
+                        // emit the unbranded form (history-only URL — this is a
+                        // user-already-typed-something flow, not an indexed
+                        // anchor); a follow-up crawl 301s it via slug_redirects.
+                        const branded = (typeof buildPrinterUrl === 'function')
+                            ? buildPrinterUrl(p2)
+                            : null;
+                        const printerHref = branded
+                            || (typeof buildPrinterUrl === 'function'
+                                ? buildPrinterUrl(p2, { allowUnbranded: true })
+                                : `/shop?printer_slug=${encodeURIComponent(p2.slug)}`);
                         history.replaceState({}, '', printerHref);
                         this.state.search = null;
                         this.state.printer = p2.slug;
@@ -2896,20 +2947,25 @@
                 if (r.kind === 'compat') {
                     const printers = (r.data && Array.isArray(r.data.compatible_printers)) ? r.data.compatible_printers : [];
                     if (printers.length === 0) continue;
-                    renderedAny = true;
                     const cards = printers.slice(0, 4).map(p => {
                         const name = Security.escapeHtml(p.name || p.full_name || p.model_name || '');
-                        // Canonical printer URL per search-dropdown-routing.md.
-                        // compatible_printers payload includes brand.slug, so
-                        // the branded form is the expected shape; fall back
-                        // to unbranded only if it's missing.
+                        // Canonical printer URL per brand-canonical audit (May
+                        // 2026): /shop?brand=&printer_slug=. compatible_printers
+                        // ships brand.slug + brand_name, so buildPrinterUrl in
+                        // strict mode always yields the branded shape. If a
+                        // future payload is missing brand, hide the card rather
+                        // than emit a non-canonical <a> (these tiles are
+                        // publicly indexed via /shop search-result pages).
                         const href = (typeof buildPrinterUrl === 'function')
-                            ? buildPrinterUrl(p, { allowUnbranded: true })
-                            : `/shop?printer_slug=${encodeURIComponent(p.slug || '')}`;
+                            ? buildPrinterUrl(p)
+                            : null;
+                        if (!href) return '';
                         return `<a class="recovery-printer-card" href="${Security.escapeAttr(href)}">
                                     <span class="recovery-printer-card__name">${name}</span>
                                 </a>`;
-                    }).join('');
+                    }).filter(Boolean).join('');
+                    if (!cards) continue;
+                    renderedAny = true;
                     railsHost.insertAdjacentHTML('beforeend', `
                         <section class="search-recovery__rail">
                             <h3 class="search-recovery__rail-title">This cartridge fits these printers</h3>
@@ -3166,7 +3222,6 @@
                     <div class="product-card__image-wrapper">
                         ${imageContent}
                         ${fitsPrinterBadge ? `<div class="product-card__chip-stack">${fitsPrinterBadge}</div>` : ''}
-                        ${product.is_lowest_in_market ? `<span class="product-card__badge product-card__badge--lowest-price" title="${product.market_position ? Security.escapeAttr(product.market_position.price_diff_percent + '% less than ' + product.market_position.lowest_competitor_name) : ''}">Lowest Price</span>` : ''}
                         ${packTypeRibbon}
                     </div>
                     <div class="product-card__content">
@@ -3397,8 +3452,35 @@
                 "@type": "CollectionPage",
                 "name": pageName,
                 "url": pageUrl,
+                // dateModified — May 2026 AI search readiness.
+                // The backend prerender already emits MAX(items.updated_at)
+                // for crawlers; AI agents that read the rendered DOM (Gemini
+                // live, Bing live) should see a matching freshness signal
+                // here instead of a stale, static stamp. The SPA doesn't
+                // have a single MAX(updated_at), so render time is the
+                // honest proxy — products were fetched moments ago.
+                "dateModified": this._collectionDateModified(),
                 "breadcrumb": { "@type": "BreadcrumbList", "itemListElement": items }
             });
+        },
+
+        // Returns MAX(updated_at) across products in the current view if
+        // any product carries an updated_at field; falls back to render
+        // time. Matches the contract in readfirst/ai-search-readiness-may2026.md.
+        _collectionDateModified() {
+            try {
+                const pools = [this.allProducts, this.products, this.state?.products].filter(Array.isArray);
+                let max = 0;
+                for (const pool of pools) {
+                    for (const p of pool) {
+                        const t = p && p.updated_at ? Date.parse(p.updated_at) : NaN;
+                        if (!isNaN(t) && t > max) max = t;
+                    }
+                }
+                return new Date(max || Date.now()).toISOString();
+            } catch (_) {
+                return new Date().toISOString();
+            }
         },
 
         createBreadcrumbItem(text, isCurrent, onClick = null) {
@@ -3472,15 +3554,26 @@
             // spec requires a single canonical form per page so Google doesn't see
             // /shop?brand=Canon and /shop?brand=canon as separate URLs). Product
             // codes preserve case (PG-540 etc.). Search 'q' preserves user input.
+            //
+            // Category-only states canonical to the dedicated landing URLs
+            // (/ink-cartridges, /toner-cartridges) per brand-canonical audit
+            // (May 2026). The backend's CollectionPage schema nominates these
+            // URLs so the rendered page URL must match.
             const lc = (v) => (v == null ? v : String(v).toLowerCase());
-            const params = new URLSearchParams();
-            if (brand)                params.set('brand',        lc(brand));
-            if (category)             params.set('category',     lc(category));
-            if (code)                 params.set('code',         code);
-            if (this.state.printer)   params.set('printer_slug', lc(this.state.printer));
-            if (this.state.search)    params.set('q',            this.state.search);
-            const qs = params.toString() ? '?' + params.toString() : '';
-            canonical = `${BASE}/shop${qs}`;
+            const isCategoryOnly = !brand && !code && !this.state.printer && !this.state.search;
+            const categoryLandings = { ink: '/ink-cartridges', toner: '/toner-cartridges' };
+            if (isCategoryOnly && category && categoryLandings[lc(category)]) {
+                canonical = `${BASE}${categoryLandings[lc(category)]}`;
+            } else {
+                const params = new URLSearchParams();
+                if (brand)                params.set('brand',        lc(brand));
+                if (category)             params.set('category',     lc(category));
+                if (code)                 params.set('code',         code);
+                if (this.state.printer)   params.set('printer_slug', lc(this.state.printer));
+                if (this.state.search)    params.set('q',            this.state.search);
+                const qs = params.toString() ? '?' + params.toString() : '';
+                canonical = `${BASE}/shop${qs}`;
+            }
 
             switch (this.state.level) {
                 case 'categories':

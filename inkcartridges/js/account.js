@@ -1111,15 +1111,23 @@ const AccountPage = {
         if (!printers.length) return printers;
         return printers.map(p => {
             const nested = p.printer_models || p.printer || null;
-            if (nested && typeof nested === 'object') {
-                return {
+            const lifted = nested && typeof nested === 'object'
+                ? {
                     ...p,
                     full_name: p.full_name || nested.full_name,
                     model_name: p.model_name || nested.model_name,
                     slug: p.slug || nested.slug,
-                };
-            }
-            return p;
+                    // brand_slug + brand_name lifted from nested join so
+                    // buildPrinterUrl can always emit the canonical
+                    // /shop?brand=&printer_slug= form for saved printers.
+                    brand_slug: p.brand_slug || nested.brand_slug
+                        || (nested.brand && typeof nested.brand === 'object' ? nested.brand.slug : null),
+                    brand: p.brand || nested.brand_name
+                        || (typeof nested.brand === 'string' ? nested.brand : null)
+                        || (nested.brand && typeof nested.brand === 'object' ? nested.brand.name : null),
+                }
+                : p;
+            return lifted;
         });
     },
 

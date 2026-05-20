@@ -2049,6 +2049,13 @@ button.admin-active-dot--clickable:hover::after { opacity: 1; }
 @media (max-width: 768px)  { .admin-kpi-grid--5 { grid-template-columns: repeat(2, 1fr); } }
 @media (max-width: 480px)  { .admin-kpi-grid--5 { grid-template-columns: 1fr; } }
 
+/* Website Traffic uses 6 cards — Sessions/Pageviews/Uniques/Campaign Visitors/Avg/Bounce. */
+.admin-kpi-grid--6 { grid-template-columns: repeat(6, 1fr); }
+.admin-kpi-grid--6 .admin-kpi:nth-child(5n+5)::before { background: var(--cyan); }
+@media (max-width: 1400px) { .admin-kpi-grid--6 { grid-template-columns: repeat(3, 1fr); } }
+@media (max-width: 900px)  { .admin-kpi-grid--6 { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 480px)  { .admin-kpi-grid--6 { grid-template-columns: 1fr; } }
+
 .admin-kpi-grid--4 { grid-template-columns: repeat(4, 1fr); }
 @media (max-width: 1024px) { .admin-kpi-grid--4 { grid-template-columns: repeat(2, 1fr); } }
 @media (max-width: 480px)  { .admin-kpi-grid--4 { grid-template-columns: 1fr; } }

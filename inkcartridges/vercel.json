@@ -87,8 +87,6 @@
     { "source": "/([^/]+)-toner-cartridges", "destination": "/shop?search=$1", "permanent": true },
     { "source": "/([^/]+)-toner-cartridge", "destination": "/shop?search=$1", "permanent": true },
 
-    { "source": "/ink-cartridges", "destination": "/shop?category=ink", "permanent": true },
-    { "source": "/toner-cartridges", "destination": "/shop?category=toner", "permanent": true },
     { "source": "/printers/:slug", "destination": "/shop?printer=:slug", "permanent": true },
     { "source": "/genuine-vs-compatible", "destination": "/", "permanent": true }
   ],
@@ -111,6 +109,8 @@
     },
 
     { "source": "/shop", "destination": "/html/shop" },
+    { "source": "/ink-cartridges", "destination": "/html/shop" },
+    { "source": "/toner-cartridges", "destination": "/html/shop" },
     { "source": "/search", "destination": "/html/shop" },
     { "source": "/cart", "destination": "/html/cart" },
     { "source": "/checkout", "destination": "/html/checkout" },
@@ -140,6 +140,7 @@
     { "source": "/feeds/google-shopping.xml", "destination": "https://ink-backend-zaeq.onrender.com/feeds/google-shopping.xml" },
     { "source": "/feeds/facebook-catalog.tsv", "destination": "https://ink-backend-zaeq.onrender.com/feeds/facebook-catalog.tsv" },
     { "source": "/feeds/google-promotions.xml", "destination": "https://ink-backend-zaeq.onrender.com/feeds/google-promotions.xml" },
-    { "source": "/robots.txt", "destination": "https://ink-backend-zaeq.onrender.com/robots.txt" }
+    { "source": "/robots.txt", "destination": "https://ink-backend-zaeq.onrender.com/robots.txt" },
+    { "source": "/llms.txt", "destination": "https://ink-backend-zaeq.onrender.com/llms.txt" }
   ]
 }

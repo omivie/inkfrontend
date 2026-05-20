@@ -636,14 +636,9 @@
     color: var(--color-text-inverse);
 }
 
-.product-card__badge--lowest-price {
-    background-color: var(--yellow-primary);
-    color: var(--steel-900);
-    top: var(--spacing-3);
-    right: var(--spacing-3);
-    left: auto;
-    font-size: 9px;
-}
+/* product-card__badge--lowest-price retired (google-ads-compliance-may2026.md).
+   Comparative-pricing superlatives violate Google Ads "Misrepresentation" —
+   we surface the lower price itself, not a "Lowest" claim. */
 
 /* Top-left chip stack — the FITS YOUR PRINTER chip and the SAVE
    discount chip share the top-left corner. Stacking them via flex

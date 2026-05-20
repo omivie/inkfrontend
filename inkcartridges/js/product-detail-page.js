@@ -1373,8 +1373,9 @@
             const price = parseFloat(info.retail_price || 0);
             parts.push(`- $${price.toFixed(2)} NZD`);
 
-            // Call to action
-            parts.push('- Free NZ shipping over $100. Fast delivery. Quality guaranteed.');
+            // Call to action — factual benefits only (Google Ads compliance,
+            // May 2026): no "guarantee"/"hurry"/"risk-free" superlatives.
+            parts.push('- Free NZ shipping over $100. Tracked NZ-wide delivery. 30-day returns under the Consumer Guarantees Act 1993.');
 
             return parts.join(' ');
         },

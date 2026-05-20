@@ -707,8 +707,8 @@ mark.smart-ac__mark {
     font-weight: 600;
 }
 /* Smart-AC dropdown cards run in a tight grid — the top-left chips
-   (Save / Fits Your Printer / Lowest Price) crowd the thumbnail in
-   that footprint, so we hide them dropdown-side only. */
+   (Save / Fits Your Printer) crowd the thumbnail in that footprint,
+   so we hide them dropdown-side only. */
 .smart-ac__grid .product-card__badge {
     display: none;
 }
