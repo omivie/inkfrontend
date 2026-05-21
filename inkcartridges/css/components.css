@@ -3506,3 +3506,27 @@ a.product-card__contact-btn {
         justify-content: center;
     }
 }
+
+/* ==========================================================================
+   MOBILE PARITY — May 2026 (mobile-parity-audit-may2026.md S1.5)
+   Touch targets on list-view product cards + favourites cards.
+   At <=768px every primary tap target reaches the 44×44 WCAG 2.5.5 /
+   Apple HIG minimum. (OOS "Contact us" cards already had 44px; this
+   brings the in-stock "Add to Cart" path to parity.)
+   ========================================================================== */
+@media (max-width: 768px) {
+    .product-card__add-to-cart,
+    .product-card__add-btn,
+    .product-card__footer .product-card__cart-btn {
+        min-height: 44px;
+    }
+
+    .favourite-item__add-cart {
+        min-height: 44px;
+    }
+
+    .favourite-item__remove {
+        width: 44px;
+        height: 44px;
+    }
+}

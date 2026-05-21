@@ -423,6 +423,20 @@
                 card.id = `smart-ac-option-${id}-${i}`;
             });
 
+            // Image error-fallback parity with the /search results grid.
+            // Every other card surface (shop, filters, favourites, landing,
+            // checkout, cart, PDP rail) binds this; the dropdown was the lone
+            // omission, so a tile whose /api/images/optimize URL transiently
+            // failed showed bare alt text here while /search recovered via the
+            // raw Supabase URL. getProductImageHTML now emits data-raw-src and
+            // this binds the error→raw-retry→placeholder handler so both
+            // surfaces share one fallback strategy. See
+            // search-dropdown-routing.md "Image rendering parity" (2026-05-20)
+            // and tests/search-dropdown-image-parity.test.js.
+            if (typeof Products.bindImageFallbacks === 'function') {
+                Products.bindImageFallbacks(state.list);
+            }
+
             if (typeof Products.bindAddToCartEvents === 'function') {
                 Products.bindAddToCartEvents(state.list);
             } else if (typeof Products.attachCardListeners === 'function') {

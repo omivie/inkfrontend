@@ -1733,8 +1733,9 @@
         position: static;
         flex: 0 0 auto;
         transform: none;
-        width: 40px;
-        height: 40px;
+        /* 44×44 minimum touch target (mobile-parity-may2026 S0.1). */
+        width: 44px;
+        height: 44px;
         color: var(--white-primary);
     }
 
@@ -1857,5 +1858,111 @@
 
     .product-grid--list .product-card {
         grid-template-columns: 1fr;
+    }
+}
+
+/* ==========================================================================
+   MOBILE PARITY — May 2026 (mobile-parity-audit-may2026.md)
+   Accessibility + touch-target fixes for the shared site-header.
+   S0.1: icon-only header links get a 44×44 hit area; the visible 24px icon
+         is unchanged. aria-labels live in the markup (every page header).
+   S0.6: the tap-to-call phone number stays visible on mobile (it was
+         display:none) — a tel: link is more useful on a phone than desktop.
+   ========================================================================== */
+@media (max-width: 768px) {
+    /* S0.1 — grow the tap area to the Apple HIG 44×44 minimum. The icon
+       stays 24px; padding does the work. */
+    .header-actions__item {
+        min-width: 44px;
+        min-height: 44px;
+        padding: var(--spacing-1);
+        justify-content: center;
+    }
+
+    /* S0.1 — the nav search submit was ~30px tall; lift it to 44. */
+    .search-form--nav .search-form__button {
+        min-width: 44px;
+        min-height: 44px;
+    }
+
+    /* S0.6 — re-show the utility bar but as a single tap-to-call chip.
+       The email is dropped on mobile (long string, lower value than a
+       one-tap phone call for our phone-first NZ ink buyer). */
+    .header-contact {
+        display: flex;
+        flex-direction: row;
+        align-items: center;
+        gap: var(--spacing-3);
+        min-width: 0;
+        order: 4;
+        width: 100%;
+        margin-top: var(--spacing-1);
+    }
+
+    .header-contact__item[href^="mailto:"] {
+        display: none;
+    }
+
+    .header-contact__item[href^="tel:"] {
+        display: inline-flex;
+        min-height: 44px;
+        align-items: center;
+        font-weight: var(--font-weight-semibold);
+    }
+}
+
+@media (max-width: 480px) {
+    /* The 480px breakpoint hides the action labels (icon-only). Keep the
+       full 44×44 hit area so the icons remain comfortably tappable, and
+       keep the tap-to-call chip visible (override the legacy display:none
+       that lived in the 480 block). */
+    .header-contact {
+        display: flex;
+    }
+
+    .header-actions__item {
+        min-width: 44px;
+        min-height: 44px;
+    }
+}
+
+/* ==========================================================================
+   MOBILE PARITY — May 2026 (S0.5) — footer link columns as accordions.
+   .footer-column is now <details>, .footer-column__heading is its <summary>.
+   Desktop: summary reads as a plain heading (non-interactive, no marker) and
+   every column is forced open by footer.js. Mobile: summary is a 44px-tall
+   tap target with a +/- affordance; footer.js leaves only Contact open.
+   ========================================================================== */
+.footer-column[data-footer-accordion] {
+    /* <details> defaults to display:block — keep grid cell behaviour. */
+    min-width: 0;
+}
+
+summary.footer-column__heading {
+    list-style: none;
+    cursor: default;
+}
+summary.footer-column__heading::-webkit-details-marker {
+    display: none;
+}
+
+@media (max-width: 768px) {
+    summary.footer-column__heading {
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        min-height: 44px;
+        margin-bottom: var(--spacing-md);
+    }
+    /* +/- affordance — flips when the column is open. */
+    summary.footer-column__heading::after {
+        content: '+';
+        font-size: 1.25rem;
+        line-height: 1;
+        color: rgba(255, 255, 255, 0.6);
+    }
+    .footer-column[open] > summary.footer-column__heading::after {
+        content: '\2212'; /* minus */
     }
 }

@@ -28,6 +28,19 @@ const Products = {
         const srcsetVal = typeof imageSrcset === 'function' && product.image_url ? imageSrcset(product.image_url) : '';
         const srcsetHtml = srcsetVal ? ` srcset="${Security.escapeAttr(srcsetVal)}" sizes="(max-width: 480px) 200px, (max-width: 768px) 300px, 400px"` : '';
         const loadAttrs = priority ? 'fetchpriority="high" decoding="async"' : 'loading="lazy" decoding="async"';
+        // Raw (non-optimized) Supabase URL for the error-fallback retry. `src`
+        // and `srcset` both route through /api/images/optimize; when that
+        // endpoint transiently fails for a single tile (429, cold-cache
+        // timeout, one bad conversion) the optimized URL 4xx/5xx's while the
+        // file itself is fine. bindImageFallbacks() retries this raw URL before
+        // dropping to the placeholder/color-block. This must mirror the
+        // shop-page.js results-grid renderer (shop-page.js:3145) exactly — when
+        // only one of the two surfaces carries data-raw-src, the typeahead
+        // dropdown shows bare alt text for a tile the /search page renders
+        // fine. See search-dropdown-routing.md "Image rendering parity"
+        // (2026-05-20) and tests/search-dropdown-image-parity.test.js.
+        const rawImageUrl = product.image_url && typeof storageUrlRaw === 'function' ? storageUrlRaw(product.image_url) : product.image_url;
+        const rawAttr = rawImageUrl && rawImageUrl !== imageUrl ? ` data-raw-src="${Security.escapeAttr(rawImageUrl)}"` : '';
         // Stale-swatch fallback: when image_url is the per-SKU `color-swatch-vN.png`
         // placeholder we hand-uploaded once per product, prefer rendering a fresh
         // color block from the canonical `color` field. The image was authored
@@ -43,7 +56,7 @@ const Products = {
                              class="product-card__image"
                              width="200" height="200"
                              ${loadAttrs}${srcsetHtml}
-                             data-fallback="color-block">
+                             data-fallback="color-block"${rawAttr}>
                         <div class="product-card__color-block" style="${colorStyle}; display: none;"></div>`;
             } else {
                 return `<img src="${Security.escapeAttr(imageUrl)}"
@@ -51,7 +64,7 @@ const Products = {
                              class="product-card__image"
                              width="200" height="200"
                              ${loadAttrs}${srcsetHtml}
-                             data-fallback="placeholder">`;
+                             data-fallback="placeholder"${rawAttr}>`;
             }
         } else if (colorStyle && product.source === 'compatible') {
             // Compatible with no image but has color - show color block

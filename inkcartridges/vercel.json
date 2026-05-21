@@ -45,6 +45,7 @@
     }
   ],
   "redirects": [
+    { "source": "/account/", "destination": "/account", "permanent": true },
     { "source": "/brand/:slug", "destination": "/shop?brand=:slug", "permanent": true },
     { "source": "/brands/:slug/hub", "destination": "/shop?brand=:slug", "permanent": true },
     { "source": "/brands/:slug", "destination": "/shop?brand=:slug", "permanent": true },

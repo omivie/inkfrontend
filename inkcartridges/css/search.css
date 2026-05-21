@@ -356,6 +356,20 @@
     border-color: var(--cyan-primary, #2563eb);
     outline: none;
 }
+/* mobile-parity-may2026 S1.2 — pin the "Show all cartridges for <printer>"
+   drill-in row to the top of the dropdown so it stays visible while the user
+   scrolls the product results beneath it (it was scrolling out of view). */
+.smart-ac__top-row--printer {
+    position: sticky;
+    top: 0;
+    z-index: 3;
+    background: var(--white-primary, #fff);
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.06);
+}
+.smart-ac__top-row--printer:hover,
+.smart-ac__top-row--printer:focus-visible {
+    background: #e0f2fe;
+}
 .smart-ac__top-row__icon {
     display: inline-flex;
     align-items: center;
@@ -604,6 +618,11 @@ mark.smart-ac__mark {
     .smart-ac-dropdown {
         min-width: 0;
         max-height: 70vh;
+        /* mobile-parity-may2026 S1.2 — dvh tracks the iOS Safari toolbar
+           collapse and the on-screen keyboard, so the dropdown (and its
+           sticky "View all results" footer) stays reachable instead of
+           disappearing under the soft keyboard. vh above is the fallback. */
+        max-height: 70dvh;
     }
 
     .smart-ac__row {
@@ -767,6 +786,42 @@ mark.smart-ac__mark {
         grid-template-columns: repeat(2, minmax(0, 1fr));
         gap: 8px;
         padding: 8px;
+    }
+}
+
+/* mobile-parity-may2026 S1.1 — at phone widths a 2-column card grid still
+   renders cards ~165px wide; product names and prices are unreadable. Drop
+   to a single-column, horizontal-thumb list (the native mobile autocomplete
+   pattern: Amazon / Apple / Google Shopping). Each row is a 64px thumbnail
+   beside the title + price; tapping the row opens the PDP, so the per-card
+   Add-to-Cart button is hidden (the PDP sticky buy bar handles the add). */
+@media (max-width: 480px) {
+    .smart-ac__grid {
+        grid-template-columns: 1fr;
+        gap: 6px;
+    }
+    .smart-ac__grid .product-card__link {
+        display: grid;
+        grid-template-columns: 64px 1fr;
+        align-items: center;
+        gap: 10px;
+    }
+    .smart-ac__grid .product-card__image-wrapper {
+        width: 64px;
+        height: 64px;
+        aspect-ratio: 1 / 1;
+        flex: 0 0 64px;
+    }
+    .smart-ac__grid .product-card__content {
+        padding: 0;
+    }
+    .smart-ac__grid .product-card__title {
+        font-size: 14px;
+        /* Keep the 4-line clamp from the product-card-title-clamp contract;
+           the horizontal row just grows taller for long names. */
+    }
+    .smart-ac__grid .product-card__add-btn {
+        display: none;
     }
 }
 

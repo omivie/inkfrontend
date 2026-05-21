@@ -32,13 +32,13 @@ const AdminAuth = {
         resp = await window.API.verifyAdmin();
       } catch (e2) {
         DebugLog.error('[AdminAuth] Verification failed after retry:', e2);
-        window.location.href = '/account/';
+        window.location.href = '/account';
         throw e2;
       }
     }
 
     if (!resp || !resp.data) {
-      window.location.href = '/account/';
+      window.location.href = '/account';
       throw new Error('Not authorized as admin');
     }
 
@@ -47,7 +47,7 @@ const AdminAuth = {
     const rawRole = (resp.data.role || '').toLowerCase().replace(/[^a-z]/g, '');
     if (!ALLOWED_ROLES[rawRole]) {
       DebugLog.error('[AdminAuth] Unrecognized role:', resp.data.role);
-      window.location.href = '/account/';
+      window.location.href = '/account';
       throw new Error('Unrecognized admin role');
     }
     this.role = ALLOWED_ROLES[rawRole];

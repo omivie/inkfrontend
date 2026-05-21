@@ -214,10 +214,15 @@ test('§5 LegalConfig.address.street is unchanged (37A Archibald Road)', () => {
 //        prior dropship disclosure cannot persist on a returning browser.
 // ─────────────────────────────────────────────────────────────────────────────
 
-test('§6 every footer-linked page loads footer.js with v=retail-may2026', () => {
+test('§6 every footer-linked page loads footer.js with the current cache key', () => {
+    // The cache key rides forward with every footer.js change. retail-may2026
+    // shipped the retail-wording rewrite; mobile-parity-may2026 bumped it when
+    // the footer link columns became <details> accordions (S0.5). The retail
+    // wording itself is still asserted by the §1 content scan above regardless
+    // of the cache key — the key only guarantees deployed clients refetch.
     for (const page of FOOTER_LINKED_PAGES) {
-        assert.match(SRC[page], /\/js\/footer\.js\?v=retail-may2026/,
-            `${page}: must load footer.js with v=retail-may2026 (bumped from dropship-may2026)`);
+        assert.match(SRC[page], /\/js\/footer\.js\?v=mobile-parity-may2026/,
+            `${page}: must load footer.js with v=mobile-parity-may2026 (bumped from retail-may2026)`);
     }
 });
 

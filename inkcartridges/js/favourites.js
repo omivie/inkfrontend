@@ -16,6 +16,21 @@ const Favourites = {
     // Loading state
     isLoading: false,
 
+    // True once a server load has completed successfully (so the page can
+    // tell "not loaded yet" apart from "loaded, genuinely empty").
+    loaded: false,
+
+    // Set to { message, requestId } when the last load failed. A failed load
+    // is NOT an empty list — surfacing this is what stops a backend 500 from
+    // masquerading as "You haven't saved any favourites yet" (the bug that
+    // hid a broken GET /api/user/favourites for a week — see errors.md ERR-032).
+    loadError: null,
+
+    // In-flight load promise — collapses concurrent loadFromServer() calls
+    // (init() + Auth.onAuthStateChange + the page controller all race to load)
+    // into a single GET instead of firing it two or three times.
+    _loadPromise: null,
+
     /**
      * Initialize favourites
      */
@@ -73,47 +88,104 @@ const Favourites = {
     },
 
     /**
-     * Load favourites from server
+     * Load favourites from server.
+     *
+     * De-duplicated: concurrent callers share one in-flight GET. On a
+     * structured failure (e.g. the backend returning 500 — which api.js
+     * resolves as { ok:false, ... } rather than throwing) we record
+     * `loadError` instead of silently leaving `items` empty, so the page can
+     * show a real error+retry state rather than the misleading empty state.
      */
     async loadFromServer() {
+        if (this._loadPromise) return this._loadPromise;
+        this._loadPromise = this._doLoadFromServer();
+        try {
+            await this._loadPromise;
+        } finally {
+            this._loadPromise = null;
+        }
+    },
+
+    async _doLoadFromServer() {
         if (typeof API === 'undefined') {
             DebugLog.warn('API not available');
             return;
         }
 
+        this.isLoading = true;
+        this.loadError = null;
         try {
-            this.isLoading = true;
             const response = await API.getFavourites();
 
-            if (response.ok && response.data) {
-                const favourites = Array.isArray(response.data) ? response.data : (response.data.favourites || []);
-                this.items = favourites.map(fav => ({
-                    id: fav.product_id,
-                    sku: fav.product_sku,
-                    name: fav.product?.name || '',
-                    price: fav.product?.retail_price || 0,
-                    image: typeof storageUrl === 'function' ? storageUrl(fav.product?.image_url) : (fav.product?.image_url || ''),
-                    brand: fav.product?.brand?.name || '',
-                    color: fav.product?.color || '',
-                    color_hex: fav.product?.color_hex || null,
-                    // Brand source feeds the genuine-no-color-tile gate in
-                    // getItemImageHTML and the COMPATIBLE/GENUINE badge —
-                    // without this, server-loaded favourites lose track of
-                    // genuine vs compatible (legacy code only had a name
-                    // regex, which the May 2026 "Compatible <Type> Cartridge
-                    // Replacement for ..." rename now overmatches).
-                    product_source: fav.product?.source || null,
-                    in_stock: true,
-                    is_active: fav.product?.is_active !== false,
-                    addedAt: fav.added_at
-                }));
+            // api.js returns a resolved { ok:false, error, code, status,
+            // request_id } envelope for 4xx/5xx (it does NOT throw on 500).
+            // Treat anything that isn't ok as a load failure — never as an
+            // empty list.
+            if (!response || response.ok !== true) {
+                this.loadError = {
+                    message: (response && response.error) || 'Failed to load favourites',
+                    requestId: (response && response.request_id) || null
+                };
+                return;
             }
+
+            const favourites = Array.isArray(response.data) ? response.data : (response.data?.favourites || []);
+            this.items = favourites.map(fav => ({
+                id: fav.product_id,
+                sku: fav.product_sku,
+                name: fav.product?.name || '',
+                price: fav.product?.retail_price || 0,
+                image: typeof storageUrl === 'function' ? storageUrl(fav.product?.image_url) : (fav.product?.image_url || ''),
+                brand: fav.product?.brand?.name || '',
+                color: fav.product?.color || '',
+                color_hex: fav.product?.color_hex || null,
+                // Brand source feeds the genuine-no-color-tile gate in
+                // getItemImageHTML and the COMPATIBLE/GENUINE badge —
+                // without this, server-loaded favourites lose track of
+                // genuine vs compatible (legacy code only had a name
+                // regex, which the May 2026 "Compatible <Type> Cartridge
+                // Replacement for ..." rename now overmatches).
+                product_source: fav.product?.source || null,
+                in_stock: true,
+                is_active: fav.product?.is_active !== false,
+                addedAt: fav.added_at
+            }));
+            this.loaded = true;
         } catch (error) {
+            // Network/parse failures still throw. Surface them too — do not
+            // wipe a previously-good list into a fake empty state.
             DebugLog.error('Failed to load favourites from server:', error);
-            this.items = [];
+            this.loadError = {
+                message: (error && error.message) || 'Failed to load favourites',
+                requestId: (error && error.request_id) || null
+            };
         } finally {
             this.isLoading = false;
         }
+    },
+
+    /**
+     * Guarantee a server load has happened (or is happening) before the
+     * favourites page renders. Lets the page controller be authoritative
+     * about loading its own data instead of racing the global init().
+     */
+    async ensureLoaded() {
+        if (this._loadPromise) return this._loadPromise;
+        if (this.loaded && !this.loadError) return;
+        if (!this._isAuthenticated()) return;
+        return this.loadFromServer();
+    },
+
+    /**
+     * Re-attempt a failed load (bound to the error-state "Try again" button).
+     */
+    async reload() {
+        if (!this._isAuthenticated()) return;
+        this.loaded = false;
+        this.isLoading = true;
+        this.renderFavouritesPage();
+        await this.loadFromServer();
+        this.renderFavouritesPage();
     },
 
     /**
@@ -348,6 +420,31 @@ const Favourites = {
                 grid.style.display = '';
             }
             if (emptyState) emptyState.hidden = true;
+            return;
+        }
+
+        // Show error state — a failed load is NOT an empty list. Without this
+        // branch a backend 500 silently renders "You haven't saved any
+        // favourites yet", which is what hid the broken GET endpoint.
+        if (this.loadError) {
+            if (emptyState) emptyState.hidden = true;
+            if (grid) {
+                const refLine = this.loadError.requestId
+                    ? `<p style="color: var(--color-text-muted); margin-top: 0.5rem; font-size: 0.75rem;">Reference: ${Security.escapeHtml(String(this.loadError.requestId).slice(0, 8))}</p>`
+                    : '';
+                grid.style.display = '';
+                grid.innerHTML = `
+                    <div class="favourites-error" role="alert" style="text-align:center; padding: 3rem 1rem; max-width: 28rem; margin: 0 auto;">
+                        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true" style="color: var(--color-text-muted);"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                        <p style="margin-top: 1rem;">We couldn't load your favourites just now. Your saved items are safe — this is a temporary problem on our side.</p>
+                        ${refLine}
+                        <button type="button" id="favourites-retry" class="btn btn--primary" style="margin-top: 1.25rem;">Try again</button>
+                    </div>`;
+                const retryBtn = document.getElementById('favourites-retry');
+                if (retryBtn) {
+                    retryBtn.addEventListener('click', () => { this.reload(); });
+                }
+            }
             return;
         }
 

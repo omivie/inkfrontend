@@ -21,6 +21,16 @@
         if (accountEl) accountEl.classList.add('auth-ready');
 
         if (typeof Favourites !== 'undefined') {
+            // Be authoritative about loading our own data rather than racing
+            // the global Favourites.init() (which also loads on its own
+            // DOMContentLoaded). Show the spinner immediately, guarantee a
+            // server load (de-duped — shares the in-flight GET if init already
+            // started one), then render the final state (list / empty / error).
+            if (!Favourites.loaded) {
+                Favourites.isLoading = true;
+                Favourites.renderFavouritesPage();
+            }
+            await Favourites.ensureLoaded();
             Favourites.renderFavouritesPage();
         }
     });

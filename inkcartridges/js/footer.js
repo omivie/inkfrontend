@@ -57,8 +57,8 @@
                         <p class="footer-brand__disambiguation" data-legal-bind="disambiguation">${TRUST.disambig}</p>
                     </div>
 
-                    <div class="footer-column">
-                        <p class="footer-column__heading">Contact</p>
+                    <details class="footer-column" data-footer-accordion open>
+                        <summary class="footer-column__heading">Contact</summary>
                         <ul class="footer-links">
                             <li>
                                 <strong>Office:</strong><br>
@@ -77,27 +77,27 @@
                                 Mon&ndash;Fri, 9am &ndash; 5pm
                             </li>
                         </ul>
-                    </div>
+                    </details>
 
-                    <div class="footer-column">
-                        <p class="footer-column__heading">Information</p>
+                    <details class="footer-column" data-footer-accordion>
+                        <summary class="footer-column__heading">Information</summary>
                         <ul class="footer-links">
                             <li><a href="/about">About Us</a></li>
                             <li><a href="/contact">Contact Us</a></li>
                             <li><a href="/faq">FAQ</a></li>
                             <li><a href="/shop">Shop All</a></li>
                         </ul>
-                    </div>
+                    </details>
 
-                    <div class="footer-column">
-                        <p class="footer-column__heading">Policies</p>
+                    <details class="footer-column" data-footer-accordion>
+                        <summary class="footer-column__heading">Policies</summary>
                         <ul class="footer-links">
                             <li><a href="/shipping">Shipping &amp; Delivery</a></li>
                             <li><a href="/returns">Refunds &amp; Returns</a></li>
                             <li><a href="/terms">Terms of Service</a></li>
                             <li><a href="/privacy">Privacy Policy</a></li>
                         </ul>
-                    </div>
+                    </details>
                 </div>
 
                 <div class="footer-trust">
@@ -250,6 +250,13 @@
             </div>
         </div>`;
 
+    // mobile-parity-may2026 S0.5 — collapse the footer link columns into
+    // accordions on mobile (the 4-column grid stacked to a 2,081px wall).
+    // <details>/<summary> is natively keyboard-operable. On desktop every
+    // column stays expanded (CSS also neuters the summary so it reads as a
+    // plain heading); on mobile only Contact stays open, the rest collapse.
+    syncFooterAccordions();
+
     // Google Customer Reviews - badge + opt-in survey loader
     (function () {
       window.___gcfg = { lang: 'en_NZ' };
@@ -287,6 +294,22 @@
         });
       }
     })();
+  }
+
+  function syncFooterAccordions() {
+    const items = document.querySelectorAll('.site-footer [data-footer-accordion]');
+    if (!items.length || !window.matchMedia) return;
+    const mq = window.matchMedia('(max-width: 768px)');
+    const apply = () => {
+      items.forEach((d, i) => {
+        // Desktop: every column expanded. Mobile: Contact (first) open, rest
+        // collapsed so the footer shrinks well under one viewport.
+        d.open = mq.matches ? i === 0 : true;
+      });
+    };
+    apply();
+    if (mq.addEventListener) mq.addEventListener('change', apply);
+    else if (mq.addListener) mq.addListener(apply); // Safari < 14
   }
 
   if (document.readyState === 'loading') {

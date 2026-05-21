@@ -829,6 +829,17 @@ const RibbonsPage = {
         // Update document title to match
         const docPrefix = activeBrand ? `${activeBrand} ` : '';
         document.title = `${docPrefix}Typewriter & Printer Ribbons | InkCartridges.co.nz`;
+
+        // SERP title + meta-description parity (seo-meta-rewrite-may2026).
+        // /ribbons is served the `category/ribbons` prerender by middleware
+        // regardless of any client-side brand/model filter (the filter never
+        // appears in the crawlable URL). So mirror the backend copy only for
+        // the canonical, unfiltered /ribbons state — when a brand/model filter
+        // is active we keep the brand-specific document.title above for the
+        // human's benefit and skip the (generic) prerender mirror.
+        if (typeof SeoMeta !== 'undefined' && !activeBrand && !model) {
+            SeoMeta.render({ surface: 'category-ribbons' });
+        }
     }
 };
 

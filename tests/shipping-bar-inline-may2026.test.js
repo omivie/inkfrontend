@@ -150,11 +150,12 @@ test('§6 shop.html pages.css link uses the current cache key', () => {
     // The cache key rides forward with every CSS rollout — it was
     // shipping-inline-may2026 when the inline bar shipped; the 4-line
     // title clamp release bumped it; stock-enquiry-may2026 bumped it
-    // again. The guarantee is that shop.html requests the *current*
-    // pages.css build so deployed clients refetch.
+    // again; mobile-parity-may2026 bumped it for the mobile-parity audit.
+    // The guarantee is that shop.html requests the *current* pages.css
+    // build so deployed clients refetch.
     assert.match(
         SHOP_HTML,
-        /pages\.css\?v=stock-enquiry-may2026/,
+        /pages\.css\?v=mobile-parity-may2026/,
         'shop.html must cache-bust pages.css with the current key so deployed clients pull the new rules'
     );
 });

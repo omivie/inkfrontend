@@ -563,8 +563,15 @@
                 this.state.level = 'printer-products';
             } else if (this.state.code) {
                 this.state.level = 'products';
-            } else if (this.state.category) {
+            } else if (this.state.category && this.state.brand) {
                 this.state.level = 'codes';
+            } else if (this.state.category) {
+                // mobile-parity-may2026 S0.3 — category set but no brand. The
+                // chip grid is meaningless without a brand (/api/products/series
+                // 422s without one), which used to dump deep-linked users into
+                // the "server may be warming up" error state forever. Show the
+                // brand picker instead; picking a brand drills into the chips.
+                this.state.level = 'brands';
             } else if (this.state.brand) {
                 this.state.level = 'categories';
             } else {
@@ -646,7 +653,11 @@
                     this.state = { level: 'categories', brand: data.brand, category: null, code: null, type: currentType };
                     break;
                 case 'codes':
-                    this.state = { level: 'codes', brand: this.state.brand, category: data.category, code: null, type: currentType };
+                    // data.brand is supplied by the S0.3 category-picker path
+                    // (brand was null until the user picked one); the normal
+                    // categories→codes drilldown omits it and keeps the
+                    // already-selected brand.
+                    this.state = { level: 'codes', brand: data.brand || this.state.brand, category: data.category, code: null, type: currentType };
                     break;
                 case 'products':
                     this.state = { level: 'products', brand: this.state.brand, category: this.state.category, code: data.code, type: currentType };
@@ -859,6 +870,24 @@
             const grid = this.elements.brandsGrid;
             grid.innerHTML = '';
 
+            // mobile-parity-may2026 S0.3 — when we arrived here via a
+            // category-only URL (/shop?category=ink, /ink-cartridges) the brand
+            // picker is a "choose a brand to see <category>" step. Re-label the
+            // section, hide the unrelated typewriter-ribbon picker, and route
+            // tile clicks straight to the chip grid for brand + category.
+            const categoryPicker = !this.state.brand && !!this.state.category;
+            const ribbonsSection = document.getElementById('ribbons-section');
+            const sectionTitle = this.elements.levelBrands?.querySelector('.shop-section-card__title');
+            if (categoryPicker) {
+                const labels = { ink: 'ink cartridges', toner: 'toner', drum: 'drums', paper: 'paper' };
+                const label = labels[this.state.category] || `${this.state.category} products`;
+                if (sectionTitle) sectionTitle.textContent = `Choose a brand to see ${label}`;
+                if (ribbonsSection) ribbonsSection.hidden = true;
+            } else {
+                if (sectionTitle) sectionTitle.textContent = 'Select your ink cartridge or toner brand';
+                if (ribbonsSection) ribbonsSection.hidden = false;
+            }
+
             // Known brands shown first, in preferred order
             const preferredOrder = ['brother', 'canon', 'epson', 'hp', 'samsung', 'lexmark', 'oki', 'fuji-xerox', 'kyocera', 'dymo'];
 
@@ -889,7 +918,9 @@
                     ? `<img src="${Security.escapeAttr(logoSrc)}" alt="${Security.escapeAttr(displayName)}" class="drilldown-box__logo drilldown-box__logo--${Security.escapeAttr(brandId)}">`
                     : `<span class="drilldown-box__name">${Security.escapeHtml(brand.name || brandId)}</span>`;
                 box.innerHTML = `${inner}<span class="drilldown-box__count" data-count="${Security.escapeAttr(brandId)}" aria-hidden="true"></span>`;
-                box.addEventListener('click', () => this.navigateTo('categories', { brand: brandId }));
+                box.addEventListener('click', () => categoryPicker
+                    ? this.navigateTo('codes', { brand: brandId, category: this.state.category })
+                    : this.navigateTo('categories', { brand: brandId }));
                 const prefetch = () => {
                     if (!this._prefetchedBrands) this._prefetchedBrands = new Set();
                     if (this._prefetchedBrands.has(brandId)) return;
@@ -3650,6 +3681,32 @@
                 robotsMeta.content = 'noindex, follow';
             } else if (robotsMeta) {
                 robotsMeta.content = 'index, follow';
+            }
+
+            // SERP title + meta-description parity (seo-meta-rewrite-may2026).
+            // The strings set above are the immediate, no-network values and
+            // remain authoritative for surfaces that have NO bot prerender
+            // (search results, code-filtered/deep-filter views, category-only
+            // /shop). For the prerendered surfaces (/shop landing, brand hub,
+            // printer hub, /ink-cartridges, /toner-cartridges) SeoMeta mirrors
+            // the backend's exact <title>/<meta name=description> so the SPA
+            // render is byte-identical to what crawlers are served (no cloaking
+            // penalty). SeoMeta derives the surface + prerender endpoint from
+            // window.location and is a no-op when there is no prerender. The
+            // hints feed only the fail-open fallback copy (prerender down).
+            if (typeof SeoMeta !== 'undefined') {
+                const printerFull = [
+                    this.state.printerBrand
+                        ? (this.brandInfo[this.state.printerBrand]?.name || this.state.printerBrand)
+                        : '',
+                    this.state.printerModelDisplay || this.state.printerModel || this.state.printer || '',
+                ].filter(Boolean).join(' ');
+                SeoMeta.render({
+                    hints: {
+                        brand: brandName || null,
+                        printer: printerFull || null,
+                    },
+                });
             }
         },
 

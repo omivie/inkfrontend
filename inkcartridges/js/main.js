@@ -462,6 +462,17 @@ function updateCartCount(count) {
         }
     });
 
+    // Keep the header cart link's accessible name in sync with the count
+    // (mobile-parity-may2026 S0.1). On mobile the visible "Cart" label is
+    // hidden and the badge is aria-hidden, so without this a screen reader
+    // hears only "link". The audit acceptance checks aria-label ~= /cart.*\d/i.
+    const n = Number(count) || 0;
+    $$('a.header-actions__item[href="/cart"]').forEach(function(link) {
+        link.setAttribute('aria-label', n > 0
+            ? `Cart, ${n} item${n === 1 ? '' : 's'}`
+            : 'Cart, empty');
+    });
+
     // Persist count for fast-path on next page load
     try {
         localStorage.setItem('cart_count', count);

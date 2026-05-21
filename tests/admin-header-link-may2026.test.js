@@ -64,7 +64,10 @@ const PAGES_WITH_HEADER = walkHtml(HTML_ROOT)
     .map((file) => ({ file, header: extractSiteHeader(fs.readFileSync(file, 'utf8')) }))
     .filter((p) => p.header !== null);
 
-const LINK_TAG = '<a href="/admin" class="header-actions__item header-actions__item--admin" id="header-admin-link" hidden>';
+// aria-label="Admin" added in mobile-parity-may2026 (S0.1): the admin
+// shortcut is icon-only on mobile (label span hidden < 480px), so it needs an
+// explicit accessible name like every other header action link.
+const LINK_TAG = '<a href="/admin" class="header-actions__item header-actions__item--admin" id="header-admin-link" aria-label="Admin" hidden>';
 
 test('every customer-facing page with a header ships the admin shortcut', () => {
     assert.ok(PAGES_WITH_HEADER.length >= 20,

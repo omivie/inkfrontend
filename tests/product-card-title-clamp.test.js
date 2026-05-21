@@ -162,8 +162,9 @@ test('no .product-card / .product-box / .smart-ac selector still clamps below 4 
 
 // The three card CSS files share one rollout token. It advances whenever any
 // of them changes; stock-enquiry-may2026 superseded 4line-clamp-may2026 when
-// the out-of-stock pill copy update touched components.css.
-const CARD_CSS_TOKEN = 'stock-enquiry-may2026';
+// the out-of-stock pill copy update touched components.css. mobile-parity-may2026
+// superseded it when the mobile-parity audit touched all three card CSS files.
+const CARD_CSS_TOKEN = 'mobile-parity-may2026';
 
 test(`all HTML pages cache-bust the three card CSS files to v=${CARD_CSS_TOKEN}`, () => {
     const htmlRoot = path.join(ROOT, 'inkcartridges');

@@ -118,11 +118,16 @@ export default async function middleware(request) {
   //
   // Pinned by tests/printer-url-canonical-may2026.test.js (middleware gates
   // section): bare printer_slug must NOT trigger printer prerender.
+  //
+  // The printer prerender endpoint is `/api/prerender/printer/:brand/:slug`
+  // (the slug-only form 404s — see seo-meta-rewrite-may2026.md). A 404 here
+  // makes the fetch below bail (`!response.ok`) and the bot falls through to
+  // the SPA shell, so the printer hub's SEO copy never reaches crawlers.
   else if (path === '/shop') {
     const brandSlug = url.searchParams.get('brand');
     const printerSlug = url.searchParams.get('printer_slug') || url.searchParams.get('printer');
     if (brandSlug && printerSlug) {
-      prerenderPath = `/api/prerender/printer/${encodeURIComponent(printerSlug)}`;
+      prerenderPath = `/api/prerender/printer/${encodeURIComponent(brandSlug)}/${encodeURIComponent(printerSlug)}`;
     } else if (brandSlug) {
       prerenderPath = `/api/prerender/brand/${encodeURIComponent(brandSlug)}`;
     }

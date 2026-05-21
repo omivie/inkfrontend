@@ -3310,17 +3310,32 @@
         gap: var(--spacing-xs) var(--spacing-md);
     }
 
+    /* mobile-parity-may2026 S2.1 — the buy box was a nowrap flex row
+       (quantity + Add to Cart + 48px favourite), which pushed the
+       favourite button ~47px past a 375px viewport. A 2-column grid
+       guarantees the favourite stays inside the viewport at any width:
+       the quantity stepper spans its own row, then Add to Cart (1fr)
+       and the fixed 48px favourite sit side by side. */
     .product-info__actions {
-        flex-wrap: nowrap;
+        display: grid;
+        grid-template-columns: 1fr 48px;
+        gap: var(--spacing-sm);
+        align-items: stretch;
+    }
+    .product-info__actions .product-info__quantity,
+    .product-info__actions .quantity-selector {
+        grid-column: 1 / -1;
     }
     .product-info__add-to-cart {
-        flex: 1 1 auto;
         min-width: 0;
         justify-content: center;
     }
     .product-info__actions > a.btn {
-        flex: 1 1 100%;
+        grid-column: 1 / -1;
         justify-content: center;
+    }
+    .product-info__actions .favourite-btn {
+        width: 48px;
     }
 
     .product-trust-strip {
@@ -12457,3 +12472,177 @@ body.page-shop {
     user-select: none;
 }
 
+
+/* ==========================================================================
+   MOBILE PARITY — May 2026 (mobile-parity-audit-may2026.md)
+   Cart sticky checkout bar (S3.1) + coupon entry (S3.2).
+   ========================================================================== */
+
+/* S3.1 — sticky checkout bar. Mirrors .sticky-atc on the PDP: hidden by
+   default, slides up on mobile when the real Order Summary checkout button
+   scrolls out of view (toggled via .is-visible by cart-page.js). Honours the
+   iOS home-indicator gesture bar via env(safe-area-inset-bottom) (S0.8). */
+.cart-sticky-bar {
+    display: none;
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    z-index: var(--z-sticky, 100);
+    background: var(--white-primary, #fff);
+    border-top: 1px solid var(--color-border);
+    box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.1);
+    padding: var(--spacing-sm) var(--spacing-md);
+    padding-bottom: calc(var(--spacing-sm) + env(safe-area-inset-bottom, 0px));
+    transform: translateY(100%);
+    transition: transform 0.3s ease;
+}
+
+.cart-sticky-bar.is-visible {
+    transform: translateY(0);
+}
+
+.cart-sticky-bar__inner {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-md);
+    max-width: var(--container-max-width);
+    margin: 0 auto;
+}
+
+.cart-sticky-bar__total {
+    display: flex;
+    flex-direction: column;
+    line-height: 1.1;
+    white-space: nowrap;
+}
+
+.cart-sticky-bar__label {
+    font-size: var(--font-size-xs);
+    color: var(--color-text-muted);
+}
+
+#cart-sticky-total {
+    font-size: var(--font-size-lg);
+    font-weight: var(--font-weight-bold);
+}
+
+.cart-sticky-bar__btn {
+    flex: 1;
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    text-decoration: none;
+}
+
+@media (max-width: 768px) {
+    .cart-sticky-bar {
+        display: block;
+    }
+}
+
+/* S3.2 — coupon entry disclosure. Compact, full-width on mobile. */
+.cart-coupon {
+    margin: var(--spacing-md) 0;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    padding: var(--spacing-2) var(--spacing-3);
+}
+
+.cart-coupon__summary {
+    cursor: pointer;
+    font-weight: var(--font-weight-semibold);
+    font-size: var(--font-size-sm);
+    list-style: none;
+    min-height: 44px;
+    display: flex;
+    align-items: center;
+}
+
+.cart-coupon__summary::-webkit-details-marker {
+    display: none;
+}
+
+.cart-coupon__summary::after {
+    content: '+';
+    margin-left: auto;
+    font-size: 1.2em;
+    color: var(--color-text-muted);
+}
+
+.cart-coupon[open] .cart-coupon__summary::after {
+    content: '\2212'; /* minus */
+}
+
+.cart-coupon__form {
+    display: flex;
+    gap: var(--spacing-2);
+    margin-top: var(--spacing-2);
+}
+
+.cart-coupon__input {
+    flex: 1 1 auto;
+    min-width: 0;
+    min-height: 44px;
+    padding: var(--spacing-2) var(--spacing-3);
+    border: 2px solid var(--color-border);
+    border-radius: var(--radius-md);
+    font-size: var(--font-size-sm);
+    text-transform: uppercase;
+}
+
+.cart-coupon__input:focus {
+    border-color: var(--cyan-primary);
+    outline: none;
+    box-shadow: 0 0 0 3px var(--cyan-light);
+}
+
+.cart-coupon__apply {
+    flex: 0 0 auto;
+    min-height: 44px;
+}
+
+.cart-coupon__feedback {
+    margin: var(--spacing-2) 0 0;
+    font-size: var(--font-size-sm);
+    min-height: 1.2em;
+}
+
+.cart-coupon__feedback--ok { color: var(--color-success-green, #16a34a); }
+.cart-coupon__feedback--err { color: var(--color-error, #c1124e); }
+
+/* ==========================================================================
+   MOBILE PARITY — May 2026 — P2 polish
+   S2.4 breadcrumb dedupe · S3.6 stepper compact · S0.11 scrollbar gutter
+   ========================================================================== */
+@media (max-width: 480px) {
+    /* S2.4 — the PDP breadcrumb's last item is the full product name, which
+       is then repeated verbatim as the H1 right below it (≈600px of stacked
+       duplication at 375px). Drop the redundant current item on phones; the
+       brand → category → code crumbs above it still give context, and the H1
+       carries the full name. Scoped by the unique #breadcrumb-product id so
+       other pages' breadcrumbs are untouched. */
+    #breadcrumb-product {
+        display: none;
+    }
+
+    /* S3.6 — keep the 4-step checkout stepper on one line at phone widths. */
+    .checkout-progress--compact .checkout-progress__label {
+        font-size: var(--font-size-xs);
+    }
+    .checkout-progress--compact .checkout-progress__steps {
+        flex-wrap: nowrap;
+    }
+}
+
+/* S0.11 — modern-effects.css forces `html { overflow-y: scroll }` to keep a
+   stable scrollbar gutter on desktop (macOS overlay scrollbars). On mobile
+   there is no gutter to reserve, and the reserved 11px steals horizontal
+   real estate (body 364 vs viewport 375). Release it below the tablet break.
+   This rule lives in pages.css because it loads *after* modern-effects.css. */
+@media (max-width: 768px) {
+    html {
+        overflow-y: auto;
+    }
+}
