@@ -1,7 +1,7 @@
 /**
  * Admin SPA — Entry point, router, shell
  */
-const APP_VERSION = '2026.05.22-traffic-over-time';
+const APP_VERSION = '2026.05.23-load-retry';
 
 import { AdminAuth } from './auth.js';
 import { FilterState } from './filters.js';

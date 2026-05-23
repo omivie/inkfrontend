@@ -120,7 +120,22 @@ const Charts = {
 
     const colors = getThemeColors();
     const opts = baseOptions(colors);
+    const callerScales = options.scales;
+    const callerPlugins = options.plugins;
     Object.assign(opts, options);
+    // Deep-merge scales & plugins so caller overrides don't wipe base config
+    // (a flat Object.assign nukes the themed axis ticks + tooltip styling).
+    if (callerScales) {
+      opts.scales = { ...baseOptions(colors).scales };
+      for (const axis of Object.keys(callerScales)) {
+        opts.scales[axis] = Object.assign(opts.scales[axis] || {}, callerScales[axis]);
+      }
+    }
+    if (callerPlugins) {
+      for (const key of Object.keys(callerPlugins)) {
+        opts.plugins[key] = Object.assign(opts.plugins[key] || {}, callerPlugins[key]);
+      }
+    }
 
     const chart = new window.Chart(canvas, {
       type: 'bar',

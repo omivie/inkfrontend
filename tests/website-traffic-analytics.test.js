@@ -421,3 +421,160 @@ test('INSIGHT_THRESHOLDS: documented values are pinned', () => {
   assert.equal(T.bounceGreat, 40);
   assert.equal(T.minSessionsForStats, 30);
 });
+
+// ─── bucketSeries (chart granularity: 1 day / 1 week / 1 month bars) ─────────
+//
+// The chart card lets the user pick 1 day / 1 week / 1 month per bar. The
+// backend timeseries is daily-only, so we re-bucket client-side. These tests
+// pin the bucketing rules — get the boundary wrong (e.g. a Sunday-start week)
+// and every weekly bar misaligns by a day for the rest of time.
+
+test('bucketSeries: exposed GRANULARITIES are exactly day/week/month', () => {
+  assert.deepEqual(plain(sandbox.GRANULARITIES), ['day', 'week', 'month']);
+});
+
+test("bucketSeries('day'): passthrough — one bucket per source row, days=1", () => {
+  const series = sandbox.normalizeSeries(LIVE_TIMESERIES);
+  const out = sandbox.bucketSeries(series, 'day');
+  assert.equal(out.length, series.length);
+  for (let i = 0; i < out.length; i++) {
+    assert.equal(out[i].key, series[i].date);
+    assert.equal(out[i].start, series[i].date);
+    assert.equal(out[i].end, series[i].date);
+    assert.equal(out[i].days, 1);
+    assert.equal(out[i].sessions, series[i].sessions);
+    assert.equal(out[i].pageviews, series[i].pageviews);
+  }
+});
+
+test("bucketSeries('day'): unknown granularity falls back to day", () => {
+  const out = sandbox.bucketSeries(
+    [{ date: '2026-05-01', sessions: 4, pageviews: 9 }],
+    'lol'
+  );
+  assert.equal(out.length, 1);
+  assert.equal(out[0].days, 1);
+});
+
+test("bucketSeries('day'): default granularity is day", () => {
+  const out = sandbox.bucketSeries([{ date: '2026-05-01', sessions: 1, pageviews: 1 }]);
+  assert.equal(out[0].start, '2026-05-01');
+  assert.equal(out[0].days, 1);
+});
+
+test("bucketSeries('week'): groups by Monday-start ISO week", () => {
+  // 2026-05-18 is a Monday. 2026-05-23 is a Saturday — same ISO week.
+  // 2026-05-24 is a Sunday — STILL the same ISO week (Mon→Sun).
+  // 2026-05-25 is the next Monday — a new bucket.
+  const out = sandbox.bucketSeries([
+    { date: '2026-05-18', sessions: 10, pageviews: 30 }, // Mon
+    { date: '2026-05-23', sessions: 5,  pageviews: 12 }, // Sat
+    { date: '2026-05-24', sessions: 2,  pageviews: 4  }, // Sun (still wk1)
+    { date: '2026-05-25', sessions: 7,  pageviews: 18 }, // Mon (wk2)
+  ], 'week');
+  assert.equal(out.length, 2);
+  assert.equal(out[0].key, '2026-05-18');
+  assert.equal(out[0].start, '2026-05-18');
+  assert.equal(out[0].end, '2026-05-24');
+  assert.equal(out[0].sessions, 17);
+  assert.equal(out[0].pageviews, 46);
+  assert.equal(out[0].days, 3);
+  assert.equal(out[1].key, '2026-05-25');
+  assert.equal(out[1].start, '2026-05-25');
+  assert.equal(out[1].end, '2026-05-31');
+  assert.equal(out[1].days, 1);
+});
+
+test("bucketSeries('week'): a Sunday at the start rolls back to the prior Monday", () => {
+  // 2026-05-17 is a Sunday; its ISO week starts Mon 2026-05-11.
+  const out = sandbox.bucketSeries([
+    { date: '2026-05-17', sessions: 3, pageviews: 8 },
+  ], 'week');
+  assert.equal(out[0].start, '2026-05-11');
+  assert.equal(out[0].end, '2026-05-17');
+});
+
+test("bucketSeries('week'): crosses year boundary correctly", () => {
+  // ISO week containing 2026-01-01 (a Thursday) starts Mon 2025-12-29.
+  const out = sandbox.bucketSeries([
+    { date: '2025-12-29', sessions: 1, pageviews: 1 }, // Mon
+    { date: '2026-01-01', sessions: 2, pageviews: 5 }, // Thu — same week
+    { date: '2026-01-04', sessions: 3, pageviews: 7 }, // Sun — still same week
+    { date: '2026-01-05', sessions: 4, pageviews: 9 }, // Mon — new week
+  ], 'week');
+  assert.equal(out.length, 2);
+  assert.equal(out[0].start, '2025-12-29');
+  assert.equal(out[0].end, '2026-01-04');
+  assert.equal(out[0].sessions, 6);
+  assert.equal(out[0].pageviews, 13);
+  assert.equal(out[0].days, 3);
+  assert.equal(out[1].start, '2026-01-05');
+});
+
+test("bucketSeries('month'): groups by calendar month, end = last day", () => {
+  const out = sandbox.bucketSeries([
+    { date: '2026-04-15', sessions: 88, pageviews: 257 },
+    { date: '2026-04-30', sessions: 12, pageviews: 40  },
+    { date: '2026-05-01', sessions: 20, pageviews: 60  },
+    { date: '2026-05-22', sessions: 17, pageviews: 27  },
+  ], 'month');
+  assert.equal(out.length, 2);
+  assert.equal(out[0].key, '2026-04');
+  assert.equal(out[0].start, '2026-04-01');
+  assert.equal(out[0].end, '2026-04-30'); // April has 30 days
+  assert.equal(out[0].sessions, 100);
+  assert.equal(out[0].pageviews, 297);
+  assert.equal(out[0].days, 2);
+  assert.equal(out[1].key, '2026-05');
+  assert.equal(out[1].start, '2026-05-01');
+  assert.equal(out[1].end, '2026-05-31'); // May has 31 days
+  assert.equal(out[1].days, 2);
+});
+
+test("bucketSeries('month'): February in a leap year ends on the 29th", () => {
+  // 2024 is a leap year — February has 29 days.
+  const out = sandbox.bucketSeries([
+    { date: '2024-02-01', sessions: 1, pageviews: 1 },
+    { date: '2024-02-29', sessions: 1, pageviews: 1 },
+  ], 'month');
+  assert.equal(out[0].end, '2024-02-29');
+});
+
+test("bucketSeries('month'): non-leap February ends on the 28th", () => {
+  const out = sandbox.bucketSeries([
+    { date: '2026-02-15', sessions: 1, pageviews: 1 },
+  ], 'month');
+  assert.equal(out[0].end, '2026-02-28');
+});
+
+test('bucketSeries: weekly + monthly preserve grand totals from the daily series', () => {
+  const series = sandbox.normalizeSeries(LIVE_TIMESERIES);
+  const daySum = (out, k) => out.reduce((t, b) => t + (b[k] || 0), 0);
+  const total = (k) => series.reduce((t, b) => t + (b[k] || 0), 0);
+  for (const g of ['day', 'week', 'month']) {
+    const out = sandbox.bucketSeries(series, g);
+    assert.equal(daySum(out, 'sessions'), total('sessions'), `${g} sessions total`);
+    assert.equal(daySum(out, 'pageviews'), total('pageviews'), `${g} pageviews total`);
+  }
+});
+
+test('bucketSeries: empty / junk input is safe', () => {
+  assert.deepEqual(plain(sandbox.bucketSeries([], 'week')), []);
+  assert.deepEqual(plain(sandbox.bucketSeries(null, 'month')), []);
+  assert.deepEqual(plain(sandbox.bucketSeries(undefined, 'day')), []);
+  // Row with no date → skipped, not crashing
+  const out = sandbox.bucketSeries(
+    [{ sessions: 5, pageviews: 5 }, { date: '2026-05-01', sessions: 1, pageviews: 1 }],
+    'week'
+  );
+  assert.equal(out.length, 1);
+});
+
+test('bucketSeries: output is sorted ascending by key', () => {
+  const out = sandbox.bucketSeries([
+    { date: '2026-05-22', sessions: 1, pageviews: 1 },
+    { date: '2026-04-15', sessions: 1, pageviews: 1 },
+  ], 'month');
+  assert.equal(out[0].key, '2026-04');
+  assert.equal(out[1].key, '2026-05');
+});

@@ -173,9 +173,12 @@ test('admin.css cache token is shared and current across admin pages', () => {
     const html = fs.readFileSync(path.join(adminHtmlDir, f), 'utf8');
     if (!/admin\.css\?v=/.test(html)) continue;
     referencing++;
-    // Token last bumped for the Website Traffic over-time chart (May 2026).
-    assert.match(html, /admin\.css\?v=traffic-over-time-may2026/, `${f} must use the bumped admin.css token`);
+    // Token last bumped for the website-traffic load-retry empty-state (May 2026).
+    assert.match(html, /admin\.css\?v=load-retry-may2026/, `${f} must use the bumped admin.css token`);
     assert.doesNotMatch(html, /admin\.css\?v=col-compact-may2026/, `${f} must drop the stale token`);
+    assert.doesNotMatch(html, /admin\.css\?v=traffic-over-time-may2026/, `${f} must drop the prior token`);
+    assert.doesNotMatch(html, /admin\.css\?v=traffic-bars-may2026/, `${f} must drop the prior token`);
+    assert.doesNotMatch(html, /admin\.css\?v=skeleton-load-may2026/, `${f} must drop the prior token`);
   }
   assert.ok(referencing >= 10, `expected the token across the admin pages, saw ${referencing}`);
 });
@@ -184,6 +187,6 @@ test('products page imports the bumped table.js token; APP_VERSION advanced', ()
   assert.match(PRODUCTS_SRC, /components\/table\.js\?v=col-compact-may2026/,
     'products.js must import the bumped table.js version');
   const APP_SRC = READ('inkcartridges/js/admin/app.js');
-  assert.match(APP_SRC, /APP_VERSION\s*=\s*'2026\.05\.22-traffic-over-time'/,
+  assert.match(APP_SRC, /APP_VERSION\s*=\s*'2026\.05\.23-load-retry'/,
     'APP_VERSION must be bumped so the SPA page modules re-fetch');
 });

@@ -20,6 +20,11 @@ let _trendData = null;       // bucketed historical series keyed to current filt
 let _forecastData = null;    // { historical, projected } for forecast chart
 let _trendMetric = 'revenue';
 let _kpi = { cur: {}, derived: false };  // resolved KPI "current" block (RPC or order-derived fallback)
+// Race-guard for loadDashboard — see the same pattern in pages/website-traffic.js.
+// Filter changes call loadDashboard() concurrently; without this, a slow earlier
+// load can paint stale data on top of a newer load that already finished.
+let _loadSeq = 0;
+let _hasRenderedSuccessfully = false; // first-load skeleton vs re-load dim
 
 // ---------- helpers ----------
 
@@ -89,12 +94,53 @@ function revenueGeneratingOrders(rawOrders) {
 
 // ---------- data loading ----------
 
+// Skeleton matching the dashboard layout — 8 KPI tiles, two-up trend+forecast
+// chart cards, then a side panel + lower row of summary cards. Used only on the
+// FIRST load while the parallel fetches are in flight (subsequent filter-change
+// reloads keep the existing content visible with a dim overlay).
+function dashboardSkeleton() {
+  const tile = '<div class="admin-skel admin-skel__tile" aria-hidden="true"></div>';
+  return `
+    <div class="admin-page-header admin-page-header--dash"><h1>Dashboard</h1></div>
+    <div class="admin-skeleton" role="status" aria-label="Loading dashboard">
+      <span class="admin-sr-only">Loading dashboard…</span>
+      <div class="admin-kpi-grid admin-mb-lg" style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;">
+        ${tile}${tile}${tile}${tile}${tile}${tile}${tile}${tile}
+      </div>
+      <div class="admin-dash">
+        <div class="admin-card"><div class="admin-skel admin-skel__line admin-skel__line--title"></div><div class="admin-skel admin-skel__chart"></div></div>
+        <div class="admin-card"><div class="admin-skel admin-skel__line admin-skel__line--title"></div><div class="admin-skel admin-skel__chart"></div></div>
+        <div class="admin-card admin-dash__side"><div class="admin-skel admin-skel__line admin-skel__line--title"></div>
+          <div class="admin-skel admin-skel__row"></div><div class="admin-skel admin-skel__row"></div><div class="admin-skel admin-skel__row"></div><div class="admin-skel admin-skel__row"></div>
+        </div>
+        <div class="admin-card"><div class="admin-skel admin-skel__line admin-skel__line--title"></div><div class="admin-skel admin-skel__row"></div><div class="admin-skel admin-skel__row"></div><div class="admin-skel admin-skel__row"></div></div>
+        <div class="admin-card"><div class="admin-skel admin-skel__line admin-skel__line--title"></div><div class="admin-skel admin-skel__row"></div><div class="admin-skel admin-skel__row"></div><div class="admin-skel admin-skel__row"></div></div>
+        <div class="admin-card"><div class="admin-skel admin-skel__line admin-skel__line--title"></div><div class="admin-skel admin-skel__row"></div><div class="admin-skel admin-skel__row"></div></div>
+      </div>
+    </div>
+  `;
+}
+
 async function loadDashboard() {
+  if (!_container) return;
+  const mySeq = ++_loadSeq;
+
+  // First load → matched-layout skeleton. Re-load (filter change) → keep the
+  // existing page visible and dim it via `--reloading`. Both paths get the same
+  // race guard so a stale fetch can't paint over a newer one.
+  if (!_hasRenderedSuccessfully) {
+    _container.innerHTML = dashboardSkeleton();
+  } else {
+    _container.classList.add('admin-page--reloading');
+  }
+
   const params = FilterState.getParams();
   const signal = FilterState.getAbortSignal();
   const isOwner = AdminAuth.isOwner();
 
   if (!isOwner) {
+    if (mySeq !== _loadSeq || !_container) return;
+    _container.classList.remove('admin-page--reloading');
     render({ isOwner: false });
     return;
   }
@@ -137,6 +183,12 @@ async function loadDashboard() {
   const results = await Promise.allSettled(promises);
   const val = (i) => results[i]?.status === 'fulfilled' ? results[i].value : null;
 
+  // Race guard — bail if a newer loadDashboard() has been kicked off (or if the
+  // page was destroyed). Without this, a slow earlier load races a newer one
+  // and paints stale data on top.
+  if (mySeq !== _loadSeq || !_container) return;
+  _container.classList.remove('admin-page--reloading');
+
   render({
     isOwner: true,
     kpis:         val(0),
@@ -158,6 +210,7 @@ async function loadDashboard() {
     forecastHistory: val(16),
     expenses:     val(17),
   });
+  _hasRenderedSuccessfully = true;
 }
 
 // ---------- render ----------
@@ -1770,6 +1823,8 @@ export default {
     _container = null;
     _trendData = null;
     _forecastData = null;
+    _hasRenderedSuccessfully = false; // next mount shows the skeleton again
+    _loadSeq++;                       // any in-flight load now stale-checks and bails
   },
 
   async onFilterChange() {

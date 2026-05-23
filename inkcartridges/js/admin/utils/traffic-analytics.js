@@ -91,6 +91,91 @@ export function seriesTotals(series) {
   };
 }
 
+// ─── Bucketing (chart granularity) ───────────────────────────────────────────
+//
+// The chart card lets the user choose 1 day / 1 week / 1 month per bar. The
+// backend timeseries is daily-only, so we re-bucket client-side. All math is
+// UTC day-arithmetic so DST never shifts a bucket boundary.
+//
+//   bucketSeries(series, 'day')   → identity passthrough (one bar per day)
+//   bucketSeries(series, 'week')  → ISO Monday-start weeks
+//   bucketSeries(series, 'month') → calendar months keyed YYYY-MM
+//
+// Every bucket carries:
+//   { key, start, end, sessions, pageviews, days }
+//     key   stable sort key + dataset label (YYYY-MM-DD for day/week, YYYY-MM for month)
+//     start ISO date of first calendar day in the bucket (inclusive)
+//     end   ISO date of last  calendar day in the bucket (inclusive)
+//     days  number of days the source series contributed to this bucket
+//
+// `days` is the raw count of source rows that fell into the bucket — it is NOT
+// the calendar span of the bucket. A partial week at either end of the window
+// will have fewer than 7 days. This matters for "avg per bucket" UX copy: the
+// renderer formats based on granularity, not on this number.
+export const GRANULARITIES = Object.freeze(['day', 'week', 'month']);
+
+// ms-per-day constant. Re-used by previousRange + bucketing.
+const _DAY_MS = 86400000;
+
+// UTC Monday-start of the week containing `ms`. Mirrors ISO 8601 (week starts
+// Monday); chosen because NZ business weeks run Mon–Sun and our existing
+// "7-day avg" pill already assumes a Monday-anchored window.
+function _startOfIsoWeekUtc(ms) {
+  const d = new Date(ms);
+  const day = d.getUTCDay();              // 0 = Sun … 6 = Sat
+  const back = day === 0 ? 6 : day - 1;   // days to roll back to Mon
+  return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() - back);
+}
+
+function _iso(ms) { return new Date(ms).toISOString().slice(0, 10); }
+
+export function bucketSeries(series, granularity = 'day') {
+  const rows = Array.isArray(series) ? series : [];
+  const g = GRANULARITIES.includes(granularity) ? granularity : 'day';
+
+  if (g === 'day') {
+    return rows.map((d) => ({
+      key: d.date,
+      start: d.date,
+      end: d.date,
+      sessions: Number(d.sessions) || 0,
+      pageviews: Number(d.pageviews) || 0,
+      days: 1,
+    }));
+  }
+
+  const map = new Map();
+  for (const r of rows) {
+    if (!r || !r.date) continue;
+    const ms = Date.parse(r.date + 'T00:00:00Z');
+    if (!Number.isFinite(ms)) continue;
+
+    let key, startMs, endMs;
+    if (g === 'week') {
+      startMs = _startOfIsoWeekUtc(ms);
+      endMs = startMs + 6 * _DAY_MS;
+      key = _iso(startMs);
+    } else { // month
+      const d = new Date(ms);
+      const y = d.getUTCFullYear();
+      const m = d.getUTCMonth(); // 0-indexed
+      startMs = Date.UTC(y, m, 1);
+      endMs = Date.UTC(y, m + 1, 0); // day 0 of next month = last day of this
+      key = `${y}-${String(m + 1).padStart(2, '0')}`;
+    }
+
+    let b = map.get(key);
+    if (!b) {
+      b = { key, start: _iso(startMs), end: _iso(endMs), sessions: 0, pageviews: 0, days: 0 };
+      map.set(key, b);
+    }
+    b.sessions += Number(r.sessions) || 0;
+    b.pageviews += Number(r.pageviews) || 0;
+    b.days += 1;
+  }
+  return [...map.values()].sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
+}
+
 // Direction of the sessions trend across the window: compares the mean of the
 // first half against the mean of the second half. Returns null when there are
 // too few points to say anything honest (<4 days).
@@ -375,5 +460,5 @@ export function generateInsights({ summary, series, deltas } = {}) {
 export default {
   normalizeSeries, movingAverage, seriesTotals, trendDirection,
   previousRange, pctChange, computeDeltas, channelMix, generateInsights,
-  INSIGHT_THRESHOLDS,
+  bucketSeries, GRANULARITIES, INSIGHT_THRESHOLDS,
 };

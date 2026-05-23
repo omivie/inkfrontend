@@ -2832,6 +2832,111 @@ button.admin-active-dot--clickable:hover::after { opacity: 1; }
   font-variant-numeric: tabular-nums;
 }
 
+/* Traffic Over Time card header — title on the left, Day/Week/Month segmented
+   control on the right. Wraps on narrow widths so the toggle drops below. */
+.admin-traffic-card__title {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 16px; flex-wrap: wrap;
+}
+/* Segmented pill control — Day / Week / Month bar-width toggle. */
+.admin-segmented {
+  display: inline-flex; padding: 3px; gap: 2px; border-radius: 999px;
+  background: var(--surface-alt, rgba(0,0,0,.05));
+  border: 1px solid var(--border, rgba(0,0,0,.07));
+}
+.admin-segmented__btn {
+  appearance: none; -webkit-appearance: none; border: 0; cursor: pointer;
+  padding: 5px 14px; border-radius: 999px;
+  font-size: 12px; font-weight: 600; letter-spacing: .2px;
+  color: var(--text-muted); background: transparent;
+  transition: background .15s ease, color .15s ease;
+  font-family: inherit;
+}
+.admin-segmented__btn:hover { color: var(--text); background: rgba(0,0,0,.04); }
+.admin-segmented__btn--active,
+.admin-segmented__btn--active:hover {
+  background: var(--surface, #fff); color: var(--text);
+  box-shadow: 0 1px 2px rgba(0,0,0,.06);
+}
+.admin-segmented__btn:focus-visible {
+  outline: 2px solid var(--cyan, #267FB5); outline-offset: 2px;
+}
+
+/* Inline partial-failure banner for the Website Traffic page — shown above the
+   KPI strip when some fetches succeeded but others failed. Keeps the page
+   useful while making the gap honest. */
+.admin-traffic-partial-banner {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; flex-wrap: wrap; padding: 10px 14px; margin-bottom: 14px;
+  background: rgba(244,196,48,.10);
+  border: 1px solid rgba(244,196,48,.30);
+  border-left: 3px solid var(--yellow, #F4C430);
+  border-radius: 8px;
+  font-size: 13px; color: var(--text);
+}
+.admin-traffic-partial-banner .admin-btn--small {
+  padding: 4px 12px; font-size: 12px;
+}
+/* CTA spacing inside .admin-empty when shown with a button beneath. */
+.admin-empty__cta { display: inline-flex; gap: 10px; }
+.admin-traffic-error .admin-empty { padding: 32px 24px; }
+.admin-btn--small { padding: 4px 12px; font-size: 12px; line-height: 1.4; }
+
+/* ============================================================================
+   Skeleton loader (admin pages)
+   ----------------------------------------------------------------------------
+   Shown on FIRST load of Dashboard + Website Traffic so the user sees a
+   matched-layout placeholder instead of a flash of "empty" content. Subsequent
+   re-loads (filter changes) use `.admin-page--reloading` to dim the existing
+   page so we don't blow away real data only to redraw it 200ms later.
+   ============================================================================ */
+@keyframes admin-skel-shimmer {
+  0%   { background-position: -150% 0; }
+  100% { background-position:  150% 0; }
+}
+.admin-skel {
+  position: relative; overflow: hidden; border-radius: 8px;
+  background:
+    linear-gradient(
+      90deg,
+      var(--surface-alt, rgba(0,0,0,.05)) 0%,
+      rgba(255,255,255,.55)               50%,
+      var(--surface-alt, rgba(0,0,0,.05)) 100%
+    );
+  background-size: 200% 100%;
+  animation: admin-skel-shimmer 1.6s ease-in-out infinite;
+}
+[data-theme="dark"] .admin-skel {
+  background:
+    linear-gradient(
+      90deg,
+      rgba(255,255,255,.04) 0%,
+      rgba(255,255,255,.10) 50%,
+      rgba(255,255,255,.04) 100%
+    );
+  background-size: 200% 100%;
+}
+.admin-skel__tile   { height: 92px; }
+.admin-skel__chart  { height: 320px; margin-top: 8px; }
+.admin-skel__row    { height: 14px; margin: 10px 0; }
+.admin-skel__row:last-child { width: 60%; }
+.admin-skel__line--title { height: 18px; width: 220px; margin-bottom: 16px; }
+.admin-skel__stat   { height: 38px; width: 96px; }
+
+/* During a re-load, dim the page slightly so users perceive activity without
+   the layout collapsing. Pointer-events stay live — nothing is disabled. */
+.admin-page--reloading { position: relative; }
+.admin-page--reloading > *:not(.admin-page-header) {
+  opacity: .55;
+  transition: opacity .18s ease;
+  filter: saturate(.85);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .admin-skel { animation: none; }
+  .admin-page--reloading > *:not(.admin-page-header) { transition: none; }
+}
+
 /* Marketing insight feed. */
 .admin-insights {
   display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; padding: 4px 0;
