@@ -84,6 +84,7 @@
                         <ul class="footer-links">
                             <li><a href="/about">About Us</a></li>
                             <li><a href="/contact">Contact Us</a></li>
+                            <li><a href="/track-order">Track Order</a></li>
                             <li><a href="/faq">FAQ</a></li>
                             <li><a href="/shop">Shop All</a></li>
                         </ul>
@@ -232,6 +233,8 @@
                         <li><a href="/faq">FAQ</a></li>
                         <li class="footer-legal-nav__sep" aria-hidden="true">&middot;</li>
                         <li><a href="/contact">Contact</a></li>
+                        <li class="footer-legal-nav__sep" aria-hidden="true">&middot;</li>
+                        <li><a href="/track-order">Track Order</a></li>
                     </ul>
                 </nav>
                 <p class="footer-copyright" data-legal-bind="copyright">

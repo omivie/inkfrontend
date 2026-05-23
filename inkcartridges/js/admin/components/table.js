@@ -17,6 +17,9 @@ class DataTable {
    * @param {string} config.rowKey - property name for unique row ID
    * @param {boolean} config.selectable - show checkboxes for row selection
    * @param {Function} config.onSelectionChange - callback(selectedKeys: Set)
+   * @param {string} config.tableClass - extra class on the <table> (e.g.
+   *   'admin-table--colsized' to opt into table-layout:fixed so per-column
+   *   widths are honoured exactly instead of being stretched by width:100%)
    */
   constructor(container, config) {
     this.container = container;
@@ -50,7 +53,7 @@ class DataTable {
 
   setLoading(loading) {
     if (loading) {
-      let html = '<div class="admin-card"><div class="admin-table-wrap"><table class="admin-table"><thead><tr>';
+      let html = `<div class="admin-card"><div class="admin-table-wrap"><table class="admin-table${this.config.tableClass ? ' ' + this.config.tableClass : ''}"><thead><tr>`;
       if (this.config.selectable) html += '<th class="cell-select"></th>';
       for (const col of this.config.columns) {
         html += `<th>${esc(col.label)}</th>`;
@@ -120,7 +123,7 @@ class DataTable {
       return;
     }
 
-    let html = '<div class="admin-card admin-mb-0"><div class="admin-table-wrap"><table class="admin-table"><thead><tr>';
+    let html = `<div class="admin-card admin-mb-0"><div class="admin-table-wrap"><table class="admin-table${this.config.tableClass ? ' ' + this.config.tableClass : ''}"><thead><tr>`;
     if (selectable) {
       html += '<th class="cell-select"><input type="checkbox" class="dt-select-all"></th>';
     }

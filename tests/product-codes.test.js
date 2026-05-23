@@ -198,13 +198,13 @@ test('save handler persists codes — gated on the load flag AND a baseline diff
   assert.match(save, /AdminAPI\.setProductCodes\(product\.id/, 'writes via setProductCodes');
 });
 
-test('APP_VERSION names the product-codes build and is a valid dated tag', () => {
-  // APP_VERSION is a moving cache key — pin its SHAPE + that it names this
-  // feature, not a frozen literal (see errors.md ERR-032).
+test('APP_VERSION is a valid dated build tag', () => {
+  // APP_VERSION is a single moving cache key shared by every admin feature, so
+  // pin only its SHAPE — not the slug of whichever feature bumped it last (it
+  // legitimately advances each release; this test must not break on the bump).
   const m = APP_SRC.match(/APP_VERSION\s*=\s*'([^']+)'/);
   assert.ok(m, 'APP_VERSION must be declared');
-  assert.match(m[1], /^2026\.\d{2}\.\d{2}-[a-z0-9-]+$/i, 'valid dated build tag');
-  assert.match(m[1], /product-codes/, 'names the product-codes feature');
+  assert.match(m[1], /^2026\.\d{2}\.\d{2}-[a-z0-9-]+$/i, 'valid dated build tag (YYYY.MM.DD-slug)');
 });
 
 test('admin.css styles the Product Codes grid', () => {

@@ -1,7 +1,37 @@
+/**
+ * TRACK-ORDER-PAGE.JS — customer tracking REQUEST controller (May 2026).
+ *
+ * Request-based tracking model
+ * ============================
+ * We deliberately no longer reveal tracking automatically. A customer submits
+ * their order number (plus the email used to place the order) and we record a
+ * request + notify the opted-in admins. An admin then enters the carrier,
+ * tracking number, and status in the admin panel — that action is what emails
+ * the customer their tracking details. So this page NEVER renders a tracking
+ * number, carrier, timeline, or live events; it only confirms the request was
+ * received.
+ *
+ * One controller, two mounts
+ * ==========================
+ *   • Public page  /track-order            — standalone, works logged-out.
+ *   • Account page /account/track-order    — same form inside the account
+ *                                            sidebar; auth-gated like its peers.
+ * The account mount is detected by the presence of `.account-sidebar`. Only the
+ * account mount redirects unauthenticated visitors to login — the public mount
+ * is usable by anyone with an order number.
+ *
+ * When the visitor IS signed in we prefill their email and list their recent
+ * orders, each with a one-click "Request tracking" button.
+ *
+ * Shared DOM contract (present on both pages):
+ *   #track-order-form  #track-order-number  #track-email  #track-submit
+ *   #track-result      #recent-orders-list (optional)
+ */
+(function () {
     const TrackOrderPage = {
 
         async init() {
-            // Auth guard
+            // Wait briefly for Auth to settle so prefill / recent-orders work.
             if (typeof Auth !== 'undefined' && !Auth.initialized) {
                 const maxWait = 3000;
                 let waited = 0;
@@ -11,7 +41,12 @@
                 }
             }
 
-            if (typeof Auth === 'undefined' || !Auth.isAuthenticated()) {
+            const isAccountMount = !!document.querySelector('.account-sidebar');
+            const authed = typeof Auth !== 'undefined' && Auth.isAuthenticated();
+
+            // The account-embedded page is gated like its sibling account pages.
+            // The public page is open to anyone holding an order number.
+            if (isAccountMount && !authed) {
                 window.location.href = '/account/login?redirect=' + encodeURIComponent(window.location.pathname);
                 return;
             }
@@ -19,41 +54,57 @@
             const accountEl = document.querySelector('.account-page');
             if (accountEl) accountEl.classList.add('auth-ready');
 
-            // Load recent orders
-            this.loadRecentOrders();
+            // Prefill the email for signed-in customers.
+            if (authed && Auth.user?.email) {
+                const emailInput = document.getElementById('track-email');
+                if (emailInput && !emailInput.value) emailInput.value = Auth.user.email;
+            }
 
-            // Auto-load from URL param
+            // Recent orders (signed-in only — fetch fails open when logged out).
+            if (authed) {
+                this.loadRecentOrders();
+            } else {
+                const recent = document.getElementById('recent-orders-section');
+                if (recent) recent.hidden = true;
+            }
+
+            // Deep link: /track-order?order=ORD-... prefills the field.
             const params = new URLSearchParams(window.location.search);
             const orderParam = params.get('order');
             if (orderParam) {
-                const input = document.getElementById('order-number');
+                const input = document.getElementById('track-order-number');
                 if (input) input.value = orderParam;
-                this.loadTracking(orderParam);
             }
 
-            // Form submit
-            document.getElementById('track-order-form')?.addEventListener('submit', (e) => {
-                e.preventDefault();
-                const orderNumber = document.getElementById('order-number').value.trim();
-                if (orderNumber) this.loadTracking(orderNumber);
-            });
+            const form = document.getElementById('track-order-form');
+            if (form) {
+                form.addEventListener('submit', (e) => {
+                    e.preventDefault();
+                    this.submitRequest(
+                        document.getElementById('track-order-number')?.value.trim(),
+                        document.getElementById('track-email')?.value.trim()
+                    );
+                });
+            }
         },
 
         async loadRecentOrders() {
             const container = document.getElementById('recent-orders-list');
+            const section = document.getElementById('recent-orders-section');
             if (!container) return;
 
             container.innerHTML = '<p class="text-muted" style="padding: 0.5rem 0;">Loading recent orders…</p>';
 
             try {
                 const response = await API.getRecentTracking();
-                if (response.ok && response.data?.orders) {
+                if (response.ok && response.data?.orders?.length) {
+                    if (section) section.hidden = false;
                     this.renderRecentOrders(response.data.orders);
                 } else {
-                    container.innerHTML = '';
+                    if (section) section.hidden = true;
                 }
             } catch (err) {
-                container.innerHTML = '';
+                if (section) section.hidden = true;
             }
         },
 
@@ -61,29 +112,21 @@
             const container = document.getElementById('recent-orders-list');
             if (!container) return;
 
-            if (!orders.length) {
-                container.innerHTML = '<p class="text-muted">No recent orders to display.</p>';
-                return;
-            }
-
             const esc = Security.escapeHtml;
             const rows = orders.map(order => {
                 const date = new Date(order.created_at).toLocaleDateString('en-NZ', {
                     day: 'numeric', month: 'short', year: 'numeric'
                 });
-                const trackBtn = order.has_tracking
-                    ? `<button class="btn btn--sm btn--secondary recent-order-track-btn" data-order="${esc(order.order_number)}">Track</button>`
-                    : '';
                 return `
                     <div class="recent-order-row">
                         <div class="recent-order-row__main">
-                            <button class="recent-order-row__number" data-order="${esc(order.order_number)}">${esc(order.order_number)}</button>
-                            <span class="order-status-badge order-status-badge--${esc(order.status)}">${esc(order.status_label)}</span>
+                            <span class="recent-order-row__number">${esc(order.order_number)}</span>
+                            <span class="order-status-badge order-status-badge--${esc(order.status)}">${esc(order.status_label || order.status)}</span>
                             <span class="recent-order-row__date">${date}</span>
                         </div>
                         <div class="recent-order-row__actions">
-                            <span class="recent-order-row__total">${formatPrice(order.total)}</span>
-                            ${trackBtn}
+                            <span class="recent-order-row__total">${typeof formatPrice === 'function' ? formatPrice(order.total) : ''}</span>
+                            <button type="button" class="btn btn--sm btn--secondary recent-order-track-btn" data-order="${esc(order.order_number)}">Request tracking</button>
                         </div>
                     </div>
                 `;
@@ -91,150 +134,106 @@
 
             container.innerHTML = rows;
 
-            container.querySelectorAll('[data-order]').forEach(btn => {
+            container.querySelectorAll('.recent-order-track-btn').forEach(btn => {
                 btn.addEventListener('click', () => {
                     const num = btn.dataset.order;
-                    const input = document.getElementById('order-number');
+                    const input = document.getElementById('track-order-number');
                     if (input) input.value = num;
-                    this.loadTracking(num);
+                    const email = document.getElementById('track-email')?.value.trim();
+                    this.submitRequest(num, email);
+                    // Bring the result into view on the (often long) account page.
+                    document.getElementById('track-result')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
                 });
             });
         },
 
-        async loadTracking(orderNumber) {
-            const resultEl = document.getElementById('tracking-result');
-            if (!resultEl) return;
+        showResult(html, variant) {
+            const el = document.getElementById('track-result');
+            if (!el) return;
+            el.hidden = false;
+            el.className = 'track-result' + (variant ? ` track-result--${variant}` : '');
+            el.innerHTML = html;
+        },
 
-            resultEl.style.display = 'block';
-            resultEl.innerHTML = '<p class="text-muted" style="padding: 1rem 0;">Loading tracking…</p>';
+        setSubmitting(busy) {
+            const btn = document.getElementById('track-submit');
+            if (!btn) return;
+            btn.disabled = busy;
+            btn.classList.toggle('is-loading', busy);
+            // Preserve innerHTML (the SVG icon), not just textContent, so the
+            // button doesn't lose its icon after the first submit.
+            if (busy) {
+                if (btn._originalHtml == null) btn._originalHtml = btn.innerHTML;
+                btn.textContent = 'Sending request…';
+            } else if (btn._originalHtml != null) {
+                btn.innerHTML = btn._originalHtml;
+                btn._originalHtml = null;
+            }
+        },
+
+        async submitRequest(orderNumber, email) {
+            const esc = Security.escapeHtml;
+
+            if (!orderNumber) {
+                this.showResult('<p>Please enter your order number so we can find your delivery.</p>', 'error');
+                document.getElementById('track-order-number')?.focus();
+                return;
+            }
+
+            // Email is mandatory when we can't infer it from a session — it's how
+            // the team confirms ownership and where the tracking reply is sent.
+            const authed = typeof Auth !== 'undefined' && Auth.isAuthenticated();
+            if (!email && !authed) {
+                this.showResult('<p>Please enter the email address you used to place the order.</p>', 'error');
+                document.getElementById('track-email')?.focus();
+                return;
+            }
+
+            this.setSubmitting(true);
+            this.showResult('<p class="text-muted">Sending your request…</p>', null);
 
             try {
-                const response = await API.getOrderTracking(orderNumber);
-                if (response.ok && response.data) {
-                    this.renderTracking(response.data);
+                const response = await API.requestOrderTracking({ order_number: orderNumber, email });
+
+                if (response.ok) {
+                    const dest = email || (authed && Auth.user?.email) || 'the email on your order';
+                    this.showResult(`
+                        <div class="track-result__icon" aria-hidden="true">
+                            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+                        </div>
+                        <h3 class="track-result__title">Request received</h3>
+                        <p>Thanks — we've passed your request to our dispatch team for order
+                        <strong>${esc(orderNumber)}</strong>. We'll email your tracking number and
+                        delivery status to <strong>${esc(dest)}</strong>, usually within one business day.</p>
+                        <p class="text-muted">Didn't get it? Check your spam folder or
+                        <a href="/contact">contact us</a> and we'll help right away.</p>
+                    `, 'success');
+                    const form = document.getElementById('track-order-form');
+                    if (form) form.reset();
+                    // Re-prefill email after reset for signed-in customers.
+                    if (authed && Auth.user?.email) {
+                        const emailInput = document.getElementById('track-email');
+                        if (emailInput) emailInput.value = Auth.user.email;
+                    }
+                } else if (response.code === 'RATE_LIMITED') {
+                    this.showResult('<p>You\'ve sent a few requests in a short time. Please wait a minute and try again.</p>', 'error');
                 } else {
-                    const msg = response.error?.message || 'Order not found.';
-                    resultEl.innerHTML = `<div class="tracking-detail tracking-detail--error"><p>${Security.escapeHtml(msg)}</p></div>`;
+                    const msg = (typeof API.extractErrorMessage === 'function')
+                        ? API.extractErrorMessage(response)
+                        : (response.error || 'We couldn\'t submit your request.');
+                    this.showResult(`<p>${esc(msg)} Please try again, or <a href="/contact">contact us</a>.</p>`, 'error');
                 }
             } catch (err) {
-                resultEl.innerHTML = `<div class="tracking-detail tracking-detail--error"><p>Could not load tracking information.</p></div>`;
+                this.showResult('<p>We couldn\'t reach the server. Please check your connection and try again, or <a href="/contact">contact us</a>.</p>', 'error');
+            } finally {
+                this.setSubmitting(false);
             }
-        },
-
-        renderTracking(data) {
-            const resultEl = document.getElementById('tracking-result');
-            if (!resultEl) return;
-
-            const esc = Security.escapeHtml;
-            const isCancelled = data.status === 'cancelled';
-
-            // Timeline HTML
-            const timelineHtml = this.buildTimelineHtml(data.timeline, isCancelled);
-
-            // Tracking info
-            let trackingInfoHtml = '';
-            if (data.tracking_number) {
-                trackingInfoHtml += `
-                    <div class="tracking-info-row">
-                        <span class="tracking-info-label">Tracking Number</span>
-                        <span class="tracking-info-value">${esc(data.tracking_number)}</span>
-                    </div>
-                `;
-            }
-            if (data.carrier) {
-                trackingInfoHtml += `
-                    <div class="tracking-info-row">
-                        <span class="tracking-info-label">Carrier</span>
-                        <span class="tracking-info-value">${esc(data.carrier)}</span>
-                    </div>
-                `;
-            }
-            if (data.estimated_delivery) {
-                const estDate = new Date(data.estimated_delivery + 'T00:00:00').toLocaleDateString('en-NZ', {
-                    day: 'numeric', month: 'short', year: 'numeric'
-                });
-                trackingInfoHtml += `
-                    <div class="tracking-info-row">
-                        <span class="tracking-info-label">Est. Delivery</span>
-                        <span class="tracking-info-value">${estDate}</span>
-                    </div>
-                `;
-            }
-
-            // Tracking events or fallback
-            let eventsHtml = '';
-            if (data.tracking_events && data.tracking_events.length) {
-                // Show newest first
-                const events = [...data.tracking_events].reverse();
-                const eventItems = events.map(ev => {
-                    const evDate = ev.date
-                        ? new Date(ev.date).toLocaleDateString('en-NZ', { day: 'numeric', month: 'short', year: 'numeric' })
-                        : '';
-                    const location = ev.location ? ` — ${esc(ev.location)}` : '';
-                    return `
-                        <div class="tracking-event">
-                            <div class="tracking-event__dot"></div>
-                            <div class="tracking-event__body">
-                                <span class="tracking-event__label">${esc(ev.event)}${location}</span>
-                                ${evDate ? `<span class="tracking-event__date">${evDate}</span>` : ''}
-                            </div>
-                        </div>
-                    `;
-                }).join('');
-                eventsHtml = `
-                    <div class="tracking-events">
-                        <h3 class="tracking-events__heading">Live Tracking</h3>
-                        ${eventItems}
-                    </div>
-                `;
-            } else if (data.status === 'shipped' && data.tracking_number && data.tracking_url) {
-                eventsHtml = `
-                    <div class="tracking-fallback">
-                        <p>Live tracking data unavailable. <a href="${Security.escapeAttr(data.tracking_url)}" target="_blank" rel="noopener noreferrer">Track on NZ Post →</a></p>
-                    </div>
-                `;
-            } else if (data.status !== 'shipped' && data.status !== 'completed' && data.status !== 'cancelled') {
-                eventsHtml = `<p class="text-muted" style="margin-top: 1rem;">Your order hasn't shipped yet.</p>`;
-            }
-
-            resultEl.innerHTML = `
-                <div class="tracking-detail">
-                    <div class="tracking-detail__header">
-                        <span class="tracking-detail__order-number">${esc(data.order_number)}</span>
-                        <span class="order-status-badge order-status-badge--${esc(data.status)}">${esc(data.status_label)}</span>
-                    </div>
-                    ${timelineHtml}
-                    ${trackingInfoHtml ? `<div class="tracking-info">${trackingInfoHtml}</div>` : ''}
-                    ${eventsHtml}
-                </div>
-            `;
-        },
-
-        buildTimelineHtml(timeline, isCancelled) {
-            if (!timeline || !timeline.length) return '';
-
-            const steps = timeline.map(step => {
-                const cls = isCancelled && step.step === 'cancelled'
-                    ? 'timeline-step timeline-step--completed timeline-step--cancelled'
-                    : step.completed
-                        ? 'timeline-step timeline-step--completed'
-                        : 'timeline-step';
-                const dateStr = step.date
-                    ? new Date(step.date).toLocaleDateString('en-NZ', { day: 'numeric', month: 'short' })
-                    : '';
-                return `
-                    <div class="${cls}">
-                        <div class="timeline-step__dot"></div>
-                        <div class="timeline-step__label">${Security.escapeHtml(step.label)}</div>
-                        ${dateStr ? `<div class="timeline-step__date">${dateStr}</div>` : ''}
-                    </div>
-                `;
-            }).join('');
-
-            return `<div class="order-timeline">${steps}</div>`;
         }
     };
 
-    document.addEventListener('DOMContentLoaded', () => {
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', () => TrackOrderPage.init());
+    } else {
         TrackOrderPage.init();
-    });
+    }
+})();

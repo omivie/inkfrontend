@@ -217,6 +217,25 @@ function render(d) {
 
 // ---------- KPI strip ----------
 
+// Render one KPI card. `extraClass` lets callers tag a card (e.g. the
+// half-height cards in the Gross/Net stack) without duplicating the markup.
+function renderKpiTile(t, extraClass = '') {
+  const alertCls = t.alert ? ' admin-kpi--alert' : '';
+  let h = `<div class="admin-kpi admin-kpi--compact${alertCls}${extraClass}">`;
+  h += `<div class="admin-kpi__label">${esc(t.label)}</div>`;
+  if (t.value != null) {
+    h += `<div class="admin-kpi__value">${esc(t.value)}</div>`;
+    h += deltaBadge(t.raw, t.prev);
+  } else {
+    h += missingValue(t.tooltip || 'Data unavailable');
+  }
+  if (t.sparkId) {
+    h += `<div class="admin-kpi__spark"><canvas id="${t.sparkId}"></canvas></div>`;
+  }
+  h += '</div>';
+  return h;
+}
+
 function renderKpiStrip(d) {
   const cur  = _kpi.cur;
   const prev = d.kpis?.previous ?? {};   // RPC-only; absent on the fallback path (no deltas)
@@ -236,6 +255,18 @@ function renderKpiStrip(d) {
   const newCustomers     = cc.new_customers ?? cc.new ?? cc.newCustomers ?? null;
   const newCustomersPrev = cp.new_customers ?? cp.new ?? cp.newCustomers ?? null;
 
+  // Net Profit — sourced from the SAME bucketed totals that feed the Trends
+  // "Profit" pill (renderTrendTotals: net = revenue − expenses), so the headline
+  // KPI and the Trends figure can never drift apart. Gross Profit (above) is
+  // pre-fee margin; this is net of Stripe + GST + opex. Only meaningful when
+  // COGS is genuinely known — when it isn't (analytics RPC down, no per-item
+  // cost) the net would silently omit product cost and overstate profit, so we
+  // show "—" exactly as the Gross Profit card does on the same data.
+  const _tt          = sumTrendTotals(Array.isArray(_trendData) ? _trendData : []);
+  const netCogsKnown = _tt.cogsKnown !== false;
+  const hasTrend     = Array.isArray(_trendData) && _trendData.length > 0;
+  const netProfit    = (hasTrend && netCogsKnown) ? (_tt.revenue - _tt.expenses) : null;
+
   const tiles = [
     {
       label: 'Revenue',
@@ -247,7 +278,16 @@ function renderKpiStrip(d) {
       label: 'Gross Profit',
       value: cur.gross_profit != null ? formatPrice(cur.gross_profit) : null,
       raw: cur.gross_profit, prev: prev.gross_profit,
-      tooltip: 'Requires supplier cost data on order items',
+      tooltip: 'Revenue (ex-GST) − COGS. Product margin before payment fees.',
+    },
+    {
+      label: 'Net Profit',
+      value: netProfit != null ? formatPrice(netProfit) : null,
+      raw: null, prev: null,                       // no period-over-period delta computed
+      alert: netProfit != null && netProfit < 0,   // red accent on a loss
+      tooltip: netCogsKnown
+        ? 'Revenue − COGS − Stripe fees − GST − Opex. Matches the Trends “Profit” figure.'
+        : 'Needs product cost (COGS) — unavailable while the analytics service is down',
     },
     {
       label: 'Orders',
@@ -285,21 +325,22 @@ function renderKpiStrip(d) {
     },
   ];
 
+  // Gross Profit + Net Profit share a single grid cell, stacked vertically at
+  // half height each. This keeps the strip at 8 cells (2 rows of 4) instead of
+  // spilling Out of Stock onto a lonely third row.
   let html = '<div class="admin-kpi-grid admin-kpi-grid--8">';
-  for (const t of tiles) {
-    const alertCls = t.alert ? ' admin-kpi--alert' : '';
-    html += `<div class="admin-kpi admin-kpi--compact${alertCls}">`;
-    html += `<div class="admin-kpi__label">${esc(t.label)}</div>`;
-    if (t.value != null) {
-      html += `<div class="admin-kpi__value">${esc(t.value)}</div>`;
-      html += deltaBadge(t.raw, t.prev);
-    } else {
-      html += missingValue(t.tooltip || 'Data unavailable');
+  for (let i = 0; i < tiles.length; i++) {
+    const t = tiles[i];
+    const next = tiles[i + 1];
+    if (t.label === 'Gross Profit' && next && next.label === 'Net Profit') {
+      html += '<div class="admin-kpi-stack">'
+            + renderKpiTile(t, ' admin-kpi--half')
+            + renderKpiTile(next, ' admin-kpi--half')
+            + '</div>';
+      i += 1; // Net Profit already emitted as the second half
+      continue;
     }
-    if (t.sparkId) {
-      html += `<div class="admin-kpi__spark"><canvas id="${t.sparkId}"></canvas></div>`;
-    }
-    html += '</div>';
+    html += renderKpiTile(t);
   }
   html += '</div>';
 
@@ -313,11 +354,11 @@ function renderKpiStrip(d) {
   if (_kpi.derived) {
     const profitReconstructed = cur.gross_profit != null;
     const reconstructedList = profitReconstructed
-      ? '<strong>Revenue</strong>, <strong>Orders</strong>, <strong>Avg Order Value</strong>, <strong>Gross Profit</strong> and <strong>Gross Margin</strong>'
+      ? '<strong>Revenue</strong>, <strong>Orders</strong>, <strong>Avg Order Value</strong>, <strong>Gross Profit</strong>, <strong>Net Profit</strong> and <strong>Gross Margin</strong>'
       : '<strong>Revenue</strong>, <strong>Orders</strong> and <strong>Avg Order Value</strong>';
     const unavailableList = profitReconstructed
       ? '<strong>New Customers</strong>, <strong>Returning %</strong> and <strong>Refund Rate</strong>'
-      : '<strong>Gross Profit</strong>, <strong>Gross Margin</strong>, <strong>New Customers</strong>, <strong>Returning %</strong> and <strong>Refund Rate</strong>';
+      : '<strong>Gross Profit</strong>, <strong>Net Profit</strong>, <strong>Gross Margin</strong>, <strong>New Customers</strong>, <strong>Returning %</strong> and <strong>Refund Rate</strong>';
     html += `
       <div class="admin-kpi-fallback" role="status">
         <span class="admin-kpi-fallback__icon" aria-hidden="true">⚠</span>

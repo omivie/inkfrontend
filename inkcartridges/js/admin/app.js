@@ -1,7 +1,7 @@
 /**
  * Admin SPA — Entry point, router, shell
  */
-const APP_VERSION = '2026.05.19-product-codes-edit';
+const APP_VERSION = '2026.05.22-traffic-over-time';
 
 import { AdminAuth } from './auth.js';
 import { FilterState } from './filters.js';
@@ -50,6 +50,7 @@ const NAV_ITEMS = [
   { key: 'analytics', label: 'Finance', icon: 'finance', ownerOnly: true },
   { key: 'website-traffic', label: 'Website Traffic', icon: 'analytics', ownerOnly: true },
   { key: 'orders', label: 'Orders', icon: 'orders' },
+  { key: 'tracking-requests', label: 'Tracking Requests', icon: 'fulfillment', badge: true },
   { key: 'products', label: 'Products', icon: 'products' },
   { key: 'ribbon-brands', label: 'Ribbon Brands', icon: 'products' },
   { key: 'customers', label: 'Customers', icon: 'customers' },
@@ -132,7 +133,7 @@ function renderSidebar() {
       continue;
     }
     const navHref = item.href || `#${item.key}`;
-    const badgeHtml = item.badge ? ` <span class="admin-nav-badge" id="nav-badge-${esc(item.key)}"></span>` : '';
+    const badgeHtml = item.badge ? ` <span class="admin-nav-badge" id="nav-badge-${esc(item.key)}" style="display:none"></span>` : '';
     html += `
       <div class="admin-nav-section">
         <a href="${esc(navHref)}" class="admin-nav-item" data-nav="${item.key}" data-tooltip="${esc(item.label)}">
@@ -507,6 +508,9 @@ async function boot() {
     setTimeout(() => loading.remove(), 300);
     shell.hidden = false;
 
+    // Populate the pending tracking-requests badge (non-blocking).
+    refreshTrackingRequestsBadge();
+
     // Initial route
     const route = getRouteFromHash();
     await navigate(route);
@@ -585,4 +589,21 @@ function bindExportDropdown(container, id, exportFn) {
 }
 
 // Export for page modules
-export { AdminAuth, FilterState, AdminAPI, icon, esc, exportDropdown, bindExportDropdown };
+// Refresh the "Tracking Requests" sidebar badge with the pending count.
+// Fail-silent: a missing endpoint or network blip just leaves the badge blank.
+async function refreshTrackingRequestsBadge() {
+  try {
+    const el = document.getElementById('nav-badge-tracking-requests');
+    if (!el) return;
+    const count = await AdminAPI.getPendingTrackingRequestCount();
+    if (count && count > 0) {
+      el.textContent = count > 99 ? '99+' : String(count);
+      el.style.display = '';
+    } else {
+      el.textContent = '';
+      el.style.display = 'none';
+    }
+  } catch (_) { /* non-fatal */ }
+}
+
+export { AdminAuth, FilterState, AdminAPI, icon, esc, exportDropdown, bindExportDropdown, refreshTrackingRequestsBadge };

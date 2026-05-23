@@ -9,12 +9,13 @@ let _emails = [];
 let _preferences = {}; // map of contact_email_id -> preference row
 
 const NOTIFICATION_TYPES = [
-  { key: 'notify_orders',    label: 'Customer Orders' },
-  { key: 'notify_contact',   label: 'Contact Form' },
-  { key: 'notify_low_stock', label: 'Low Stock Alerts' },
-  { key: 'notify_refunds',   label: 'Refunds & Chargebacks' },
-  { key: 'notify_signups',   label: 'New Account Signups' },
-  { key: 'notify_reviews',   label: 'Product Reviews' },
+  { key: 'notify_orders',            label: 'Customer Orders' },
+  { key: 'notify_contact',           label: 'Contact Form' },
+  { key: 'notify_tracking_requests', label: 'Tracking Requests' },
+  { key: 'notify_low_stock',         label: 'Low Stock Alerts' },
+  { key: 'notify_refunds',           label: 'Refunds & Chargebacks' },
+  { key: 'notify_signups',           label: 'New Account Signups' },
+  { key: 'notify_reviews',           label: 'Product Reviews' },
 ];
 
 function getSb() {

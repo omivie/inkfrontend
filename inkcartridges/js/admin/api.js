@@ -1477,6 +1477,83 @@ const AdminAPI = {
     }
   },
 
+  // ---- Tracking Requests (customer-initiated, May 2026) ----
+  // Customers submit their order number on /track-order; the backend records a
+  // row here and emails the admins who opted into `notify_tracking_requests`.
+  // The admin then fulfils the request (carrier + tracking number), which
+  // updates the order to `shipped` and emails the customer their tracking.
+
+  /**
+   * List tracking requests. `status` is 'pending' | 'fulfilled' | 'all'.
+   * Returns { requests, pagination } or null on error.
+   */
+  async getTrackingRequests(filters = {}, page = 1, limit = 50) {
+    try {
+      const params = new URLSearchParams();
+      params.set('page', page);
+      params.set('limit', limit);
+      if (filters.status && filters.status !== 'all') params.set('status', filters.status);
+      if (filters.search) params.set('search', filters.search);
+      const resp = await window.API.get(`/api/admin/tracking-requests?${params}`);
+      return resp?.data ?? null;
+    } catch (e) {
+      adminApiWarn('Failed to load tracking requests', e);
+      return null;
+    }
+  },
+
+  /** Count of pending tracking requests (for the nav badge). 0 on error. */
+  async getPendingTrackingRequestCount() {
+    try {
+      const resp = await window.API.get('/api/admin/tracking-requests?status=pending&limit=1');
+      const data = resp?.data ?? null;
+      return data?.pagination?.total ?? (Array.isArray(data?.requests) ? data.requests.length : 0);
+    } catch (e) {
+      return 0;
+    }
+  },
+
+  /**
+   * Fulfil a tracking request: persist the carrier + tracking number on the
+   * order, advance it to `shipped`, mark the request fulfilled, and email the
+   * customer their tracking details. One backend call does all of it so the
+   * admin can never half-complete the flow.
+   *
+   * @param {string} requestId
+   * @param {{ carrier?: string, tracking_number: string, status?: string, note?: string }} body
+   */
+  async fulfillTrackingRequest(requestId, body) {
+    try {
+      const resp = await window.API.post(`/api/admin/tracking-requests/${encodeURIComponent(requestId)}/fulfill`, {
+        carrier: body.carrier || null,
+        tracking_number: body.tracking_number,
+        status: body.status || 'shipped',
+        note: body.note || null,
+      });
+      if (resp && resp.ok === false) {
+        let msg = resp.error || 'Failed to fulfil tracking request';
+        if (resp.request_id) msg += ` (ref ${String(resp.request_id).slice(0, 8)})`;
+        throw new Error(msg);
+      }
+      return resp?.data ?? null;
+    } catch (e) {
+      DebugLog.warn('[AdminAPI] fulfillTrackingRequest failed:', e.message);
+      throw e;
+    }
+  },
+
+  /** Dismiss a request without sending tracking (e.g. duplicate / spam). */
+  async dismissTrackingRequest(requestId) {
+    try {
+      const resp = await window.API.put(`/api/admin/tracking-requests/${encodeURIComponent(requestId)}`, { status: 'dismissed' });
+      if (resp && resp.ok === false) throw new Error(resp.error || 'Failed to dismiss request');
+      return resp?.data ?? null;
+    } catch (e) {
+      DebugLog.warn('[AdminAPI] dismissTrackingRequest failed:', e.message);
+      throw e;
+    }
+  },
+
   // ---- Compatibility ----
   async addCompatiblePrinter(sku, printerId) {
     try {

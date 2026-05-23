@@ -4,6 +4,57 @@ Log every error encountered here. Before editing a file, scan for known issues. 
 
 ---
 
+## ERR-035 — Admin Dashboard live analytics dark again: `42501 permission denied for function` (2026-05-22)
+
+**Symptom:** Admin Dashboard shows the yellow *"Live analytics service is
+unavailable — Revenue, Orders and Avg Order Value below are reconstructed from
+order records. Gross Profit, Gross Margin, New Customers, Returning % and Refund
+Rate need the analytics service…"* banner. KPI strip: Revenue $1,691.83, Orders
+35, AOV $48.34 (reconstructed), but Gross Profit / New Customers / Returning % /
+Refund Rate / Gross Margin all "—". Trends shows "Net excl. COGS" not Profit.
+This is the order-feed self-heal ([[project_dashboard_kpi_self_heal_may2026]])
+doing its job — the dashboard is NOT broken; the analytics RPCs are.
+
+**Root cause (backend DB grant — NOT frontend):** third recurrence of the
+ERR-010 / ERR-029 family. Diagnosed live: minted an `authenticated` JWT
+(`POST /auth/v1/token?grant_type=password` with the anon key) and curled the
+RPCs with their real named params (`date_from`, `date_to`, `brand_filter`, …):
+
+```
+analytics_kpi_summary   → 403 {"code":"42501","message":"permission denied for function analytics_kpi_summary"}
+analytics_revenue_series→ 403 42501
+analytics_customer_stats→ 403 42501
+get_suppliers           → 403 42501   (collateral — confirms it's all of public)
+```
+
+The functions still EXIST (correct params give 42501, not PGRST202 404 — calling
+with empty `{}` *does* give a 404 signature-mismatch, which is a red herring; you
+must send the real named params to see the true 42501). A backend migration had
+again revoked / dropped-and-recreated public functions without re-granting
+EXECUTE to `authenticated`.
+
+**Fix (permanent, this time it can't recur):** `inkcartridges/sql/analytics_function_grants.sql`
+— idempotent migration that (1) `GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA public
+TO authenticated, service_role` to restore data now, (2) `ALTER DEFAULT
+PRIVILEGES` for the standard creating roles, and (3) installs an **event trigger**
+`trg_grant_execute_on_public_functions` that re-grants EXECUTE on any function
+the instant it is CREATEd/ALTERed in `public`. The event trigger is the durable
+part: a future DROP+CREATE migration (which discards the ACL) is now healed in
+the same transaction, before any client can hit a 42501. Ends the recurrence.
+Applied to live project `lmdlgldjgcanknsjrcxh`; re-probed the RPCs → 200.
+
+**Rule:** when the dashboard shows the self-heal banner, do NOT touch the
+frontend — the self-heal is correct and the missing KPIs (New Customers, etc.)
+*cannot be honestly reconstructed* from the order feed, so faking them is wrong.
+Diagnose with the JWT+curl recipe; the answer is always a DB grant. Apply
+`sql/analytics_function_grants.sql` — the event trigger means you only ever apply
+it once. **Probe gotcha:** an empty-`{}` RPC call returns 404 PGRST202 even when
+the real problem is 42501 — always send the function's real named params.
+
+**Pinned by:** `tests/analytics-function-grants.test.js`.
+
+---
+
 ## ERR-034 — `/shop?category=ink` (no brand) stuck on "server may be warming up" forever (2026-05-21)
 
 **Symptom:** Any category-only deep link — `/shop?category=ink`, `/shop?category=toner`,
@@ -215,3 +266,68 @@ bookmarked/external trailing-slash hits.
 never `/account/`. Sub-paths (`/account/login`, `/account/orders`, …) are unaffected.
 
 **Pinned by:** `tests/account-trailing-slash-redirect.test.js` (5 tests).
+
+---
+
+## ERR-035 — New public clean-URL route 404s in local dev despite vercel.json (2026-05-22)
+
+**Symptom:** While building the request-based tracking feature, the new public
+page `/track-order` returned "Page Not Found" under `npx serve` even though the
+file existed at `inkcartridges/html/track-order.html` and the `vercel.json`
+rewrite `{ "source": "/track-order", "destination": "/html/track-order" }` was
+added.
+
+**Root cause (two parts):**
+1. **`serve.json` is a separate rewrite table from `vercel.json`.** Production
+   uses `vercel.json`; local `npx serve` uses `inkcartridges/serve.json`. A new
+   clean URL needs an entry in **both**. The fix added
+   `{ "source": "track-order", "destination": "/html/track-order.html" }` to
+   `serve.json` (note: no leading slash on `source`, `.html` on `destination` —
+   that's the serve.json convention, distinct from vercel.json's).
+2. **`serve` loads its config once at startup.** Editing `serve.json` while the
+   server is running has no effect — you must restart the `serve` process.
+
+**Rule:** When adding a customer-facing clean URL, update `vercel.json`
+(`/foo` → `/html/foo`) AND `serve.json` (`foo` → `/html/foo.html`), then restart
+any running dev server. Pinned indirectly by
+`tests/tracking-request-may2026.test.js` (asserts the vercel.json rewrite).
+
+**Note (not an error):** The tracking-request backend endpoints
+(`POST /api/orders/track-request`, `GET/POST/PUT /api/admin/tracking-requests…`)
+are **not yet implemented** — the frontend ships ahead of them and degrades
+gracefully (admin list shows "all caught up", customer submit shows a retry
+message). Full backend contract is in `tracking-request-backend-spec.md`.
+
+---
+
+## ERR-036 — Admin Products SKU/Brand columns "too much white space" (2026-05-22)
+
+**Symptom:** On `/admin#products` the SKU and Brand columns showed a short value
+(e.g. `G981YC`, an `HP` badge) floating in a wide column with a large empty gap
+to the right. Reported as the columns needing to be "compacted."
+
+**Root cause:** The `col-w-*` widths were only *hints*. The DataTable renders
+`<table class="admin-table">` which is `width:100%` with the default
+`table-layout:auto`. When the visible columns don't fill the container, the
+browser distributes the surplus by **stretching every column proportionally** —
+and `max-width` on a `<td>` is ignored in that mode (verified live: a 120px SKU
+rendered ~140px, a 90px Brand ~105px, ballooning further on wide viewports). The
+"white space" was that stretch, not over-generous widths.
+
+**Fix:** Added `.admin-table--colsized { table-layout: fixed }` (opt-in via a
+new `DataTable` `config.tableClass`, passed by the products page). Under fixed
+layout the `col-w-*` widths are honoured to the pixel; **Name is the sole
+`width:auto` column** so it absorbs all surplus (its title text uses the room).
+SKU 120→96px, Brand 90→88px, and the brand badge is `white-space:normal` so the
+rare long ribbon brand (Fuji Xerox, Triumph-adler) wraps instead of clipping.
+Live-verified: SKU exactly 96px / Brand exactly 88px at 1202px AND 1900px
+viewports, zero clipping across 100 rows + injected worst-case brand names.
+
+**Rule:** A `width:100%` + `table-layout:auto` table stretches all columns and
+ignores per-cell `max-width`. To make `col-w-*` widths real, the table needs
+`table-layout:fixed` **and** exactly one `width:auto` column to absorb surplus —
+every other column must carry an explicit width (incl. `cell-select` 40px,
+`cell-image` 60px). Don't try to fix column slack by shrinking the fixed widths
+alone; under auto-layout they'll just stretch again.
+
+**Pinned by:** `tests/admin-products-column-compact.test.js` (9 tests).

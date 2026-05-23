@@ -2,7 +2,7 @@
  * Products & SKUs Page — Full CRUD with image management
  */
 import { AdminAuth, FilterState, AdminAPI, icon, esc, exportDropdown, bindExportDropdown } from '../app.js';
-import { DataTable } from '../components/table.js?v=col-customize-may2026';
+import { DataTable } from '../components/table.js?v=col-compact-may2026';
 import { Drawer } from '../components/drawer.js';
 import { Toast } from '../components/toast.js';
 import { Modal } from '../components/modal.js';
@@ -3888,6 +3888,11 @@ async function renderProductsContent(contentEl) {
       columns: computeVisibleColumns(_allColumns, _hiddenColumns),
       rowKey: 'id',
       selectable: true,
+      // Fixed table layout: honour the col-w-* widths exactly. Without this the
+      // table's width:100% stretches every column proportionally (a sparse
+      // result set inflated SKU/Brand by ~16% — the "empty space" complaint).
+      // Name is the only width:auto column, so it absorbs all surplus.
+      tableClass: 'admin-table--colsized',
       onSelectionChange: (sel) => updateBulkBar(sel),
       onRowClick: (row) => openProductDrawer(row),
       onSort: (key, dir) => {

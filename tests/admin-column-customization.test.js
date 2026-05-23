@@ -357,6 +357,6 @@ test('module cache keys are bumped so the new code ships', () => {
     'APP_VERSION must change off the pre-column-customize build');
   assert.match(APP_SRC, /from '\.\/api\.js\?v=col-customize-may2026'|from '\.\/api\.js\?v=[a-z0-9-]+'/,
     'api.js import must carry a cache-bust query');
-  assert.match(PRODUCTS_SRC, /from '\.\.\/components\/table\.js\?v=col-customize-may2026'/,
+  assert.match(PRODUCTS_SRC, /from '\.\.\/components\/table\.js\?v=[a-z0-9-]+'/,
     'table.js import must be cache-busted');
 });

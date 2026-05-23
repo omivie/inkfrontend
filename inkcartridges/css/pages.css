@@ -11316,6 +11316,122 @@ body.page-shop {
     font-size: 0.8rem;
 }
 
+/* =========================================================================
+   Track Order — request page (May 2026 request-based model)
+   The public /track-order page and the account-embedded one share these.
+   ========================================================================= */
+.track-page {
+    padding: 2.5rem 0 4rem;
+}
+.track-page__header {
+    text-align: center;
+    margin-bottom: 2rem;
+}
+.track-page__title {
+    font-size: clamp(1.6rem, 4vw, 2.1rem);
+    font-weight: 700;
+    margin: 0 0 0.5rem;
+    color: var(--color-text, #222);
+}
+.track-page__lead {
+    color: var(--color-text-muted, #666);
+    max-width: 38rem;
+    margin: 0 auto;
+    line-height: 1.55;
+}
+.track-card {
+    background: #fff;
+    border: 1px solid var(--color-border, #e8e8e8);
+    border-radius: 12px;
+    padding: 1.75rem;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+}
+.track-form .form-group {
+    margin-bottom: 1.1rem;
+}
+.track-form .btn {
+    width: 100%;
+    justify-content: center;
+}
+.track-form .btn.is-loading {
+    opacity: 0.7;
+    cursor: progress;
+}
+/* The order number on a recent-order row is no longer a button — it's a
+   plain label, so strip the link affordance the shared class implies. */
+.recent-order-row span.recent-order-row__number {
+    color: var(--color-text, #222);
+    text-decoration: none;
+    cursor: default;
+}
+
+/* Result panel — shared confirmation / error surface */
+.track-result {
+    margin-top: 1.5rem;
+    padding: 1.25rem 1.25rem;
+    border-radius: 10px;
+    border: 1px solid var(--color-border-light, #eee);
+    background: #fafafa;
+    text-align: center;
+}
+.track-result p {
+    margin: 0 0 0.5rem;
+    line-height: 1.55;
+}
+.track-result p:last-child {
+    margin-bottom: 0;
+}
+.track-result__icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 52px;
+    height: 52px;
+    border-radius: 50%;
+    margin-bottom: 0.5rem;
+}
+.track-result__title {
+    font-size: 1.15rem;
+    font-weight: 700;
+    margin: 0 0 0.5rem;
+}
+.track-result--success {
+    background: #f0faf3;
+    border-color: #b8e6c6;
+    color: #1c6b38;
+}
+.track-result--success .track-result__icon {
+    background: #d6f3df;
+    color: #1c8a45;
+}
+.track-result--success a {
+    color: #14572c;
+    font-weight: 600;
+}
+.track-result--error {
+    background: #fdf1f1;
+    border-color: #f3c2c2;
+    color: #9c2b2b;
+    text-align: left;
+}
+.track-result--error a {
+    color: #7d2222;
+    font-weight: 600;
+}
+.track-recent {
+    margin-top: 2.5rem;
+}
+.track-recent__title {
+    font-size: 1.15rem;
+    font-weight: 700;
+    margin: 0 0 0.25rem;
+}
+.track-page__help {
+    margin-top: 2rem;
+    text-align: center;
+    font-size: 0.9rem;
+}
+
 /* Timeline used in order-detail-page */
 .order-detail-timeline {
     margin-bottom: 1.5rem;

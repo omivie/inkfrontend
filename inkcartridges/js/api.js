@@ -1890,6 +1890,28 @@ const API = {
     },
 
     /**
+     * Request a tracking update for an order (May 2026 request-based model).
+     *
+     * We no longer surface tracking automatically. The customer submits their
+     * order number (and the email used to place the order) and we notify the
+     * opted-in admins, who reply with the carrier + tracking number + status —
+     * that admin action is what emails the customer their tracking details.
+     *
+     * The endpoint is intentionally NON-ENUMERATING: it returns a generic
+     * success regardless of whether the order exists or the email matches, so
+     * a stranger guessing order numbers learns nothing. The frontend therefore
+     * shows the same confirmation for every 2xx response.
+     *
+     * @param {{ order_number: string, email?: string }} payload
+     */
+    async requestOrderTracking(payload) {
+        return this.post('/api/orders/track-request', {
+            order_number: payload.order_number,
+            email: payload.email || null,
+        });
+    },
+
+    /**
      * Check for a recent pending order (checkout timeout recovery)
      * Call when order creation times out to check if order was actually created
      */

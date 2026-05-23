@@ -11,6 +11,7 @@
     { "source": "payment", "destination": "/html/payment.html" },
     { "source": "order-confirmation", "destination": "/html/order-confirmation.html" },
     { "source": "contact", "destination": "/html/contact.html" },
+    { "source": "track-order", "destination": "/html/track-order.html" },
     { "source": "terms", "destination": "/html/terms.html" },
     { "source": "privacy", "destination": "/html/privacy.html" },
     { "source": "returns", "destination": "/html/returns.html" },
