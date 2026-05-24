@@ -216,7 +216,10 @@
                 paymentMethod: apiOrder.payment_method,
                 createdAt: apiOrder.created_at,
                 customerNotes: apiOrder.customer_notes || null,
-                trackingNumber: apiOrder.tracking_number || null,
+                // Tracking-on-demand (May 2026): trackingNumber intentionally NOT
+                // surfaced here — the confirmation page must not leak the carrier
+                // number ahead of an explicit /track-order request. Pinned by
+                // tests/tracking-on-demand-may2026.test.js.
                 invoiceNumber: apiOrder.invoice?.invoice_number || null,
                 invoiceDate: apiOrder.invoice?.invoice_date || null,
                 googleCustomerReviews: apiOrder.google_customer_reviews || null
@@ -336,23 +339,13 @@
                 shippingMethodEl.textContent = tierLabel + zoneLabel;
             }
 
-            // Estimated delivery — use actual date from API, fall back to tier-based estimate
-            const deliveryEl = document.getElementById('estimated-delivery');
-            if (deliveryEl) {
-                if (order.estimatedDelivery) {
-                    const d = new Date(order.estimatedDelivery);
-                    deliveryEl.textContent = d.toLocaleDateString('en-NZ', { day: 'numeric', month: 'long', year: 'numeric' });
-                } else {
-                    const shipping = order.shipping?.toLowerCase() || '';
-                    if (shipping.includes('overnight')) {
-                        deliveryEl.textContent = 'Next business day';
-                    } else if (shipping.includes('express')) {
-                        deliveryEl.textContent = '1-2 business days';
-                    } else {
-                        deliveryEl.textContent = '3-5 business days';
-                    }
-                }
-            }
+            // Tracking-on-demand (May 2026): the visible "Estimated Delivery"
+            // row on the confirmation page was removed (the #estimated-delivery
+            // <span> no longer ships in the HTML). Customers request tracking
+            // via /track-order once dispatched. The estimated-delivery date is
+            // still computed in getEstimatedDeliveryDate() for the Google
+            // Customer Reviews opt-in (Google data feed only — not customer UI).
+            // Pinned by tests/tracking-on-demand-may2026.test.js.
 
             // Order items
             if (order.items && order.items.length > 0) {

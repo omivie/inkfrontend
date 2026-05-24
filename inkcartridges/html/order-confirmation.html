@@ -98,8 +98,13 @@
                                 <span class="text-muted">Loading shipping details...</span>
                             </address>
                             <p class="confirmation-card__shipping-method">
-                                <strong>Shipping Method:</strong> <span id="shipping-method">Loading...</span><br>
-                                <strong>Estimated Delivery:</strong> <span id="estimated-delivery">--</span>
+                                <!-- Tracking-on-demand (May 2026): the Estimated Delivery
+                                     row is intentionally removed. Customers request tracking
+                                     via /track-order once dispatched. The Shipping Method
+                                     line stays — that's the option they chose at checkout,
+                                     not a delivery prediction. Pinned by
+                                     tests/tracking-on-demand-may2026.test.js. -->
+                                <strong>Shipping Method:</strong> <span id="shipping-method">Loading...</span>
                             </p>
                         </div>
                     </div>
@@ -204,12 +209,16 @@
                     </div>
 
                     <div class="confirmation-actions">
-                        <a href="/account" class="btn btn--primary btn--large" data-track="cta_click" data-track-cta="Track Order" data-track-location="post_purchase">
+                        <!-- Tracking-on-demand (May 2026): this CTA points at the PUBLIC
+                             /track-order request form (not /account) so guests can
+                             reach it too. Tracking is requested, never auto-revealed.
+                             Pinned by tests/tracking-on-demand-may2026.test.js. -->
+                        <a href="/track-order" class="btn btn--primary btn--large" data-track="cta_click" data-track-cta="Track Order" data-track-location="post_purchase" data-track-cta-tracking>
                             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                                <circle cx="12" cy="12" r="10"/>
-                                <polyline points="12 6 12 12 16 14"/>
+                                <circle cx="11" cy="11" r="8"/>
+                                <path d="M21 21l-4.35-4.35"/>
                             </svg>
-                            Track Your Order
+                            Request tracking update
                         </a>
                         <a href="/" class="btn btn--secondary btn--large">
                             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -264,7 +273,7 @@
     <script defer src="/js/modern-effects.js?v=ad8bff1e"></script>
     <script defer src="/js/cart.js?v=err-extract-may2026"></script>
 
-    <script defer src="/js/order-confirmation-page.js?v=e9bb3c71"></script>
+    <script defer src="/js/order-confirmation-page.js?v=tracking-on-demand-may2026"></script>
     <script defer src="/js/analytics.js?v=8c9ee196"></script>
     <script defer src="/js/site-guard.js?v=2e596146"></script>
 </body>

@@ -269,6 +269,14 @@
                                     </dl>
                                 </div>
                                 <div class="order-actions">
+                                    <!-- Tracking-on-demand (May 2026): tracking is never shown
+                                         inline on this page. Customers request a tracking
+                                         update via /account/track-order; admins reply by email.
+                                         Pinned by tests/tracking-on-demand-may2026.test.js. -->
+                                    <a href="/account/track-order" class="btn btn--primary btn--full" data-track-cta>
+                                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
+                                        Request tracking update
+                                    </a>
                                     <a href="/account/orders" class="btn btn--secondary btn--full">Back to Orders</a>
                                 </div>
                             </aside>
@@ -295,7 +303,7 @@
     <script defer src="/js/cart.js?v=err-extract-may2026"></script>
     <script defer src="/js/printer-data.js?v=may2026-finder-wiring"></script>
     <script defer src="/js/account.js?v=may2026-finder-wiring"></script>
-    <script defer src="/js/order-detail-page.js?v=b61486ff"></script>
+    <script defer src="/js/order-detail-page.js?v=tracking-on-demand-may2026"></script>
     <script defer src="/js/analytics.js?v=8c9ee196"></script>
     <script defer src="/js/site-guard.js?v=2e596146"></script>
 </body>

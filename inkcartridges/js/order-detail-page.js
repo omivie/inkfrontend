@@ -84,10 +84,12 @@
                 })}`;
             }
 
-            // Render timeline stepper
-            if (order.timeline && order.timeline.length) {
-                this.renderTimeline(order);
-            }
+            // Tracking-on-demand (May 2026): the order timeline / shipment
+            // progress is NEVER rendered automatically on the order-detail
+            // page. Customers request tracking via /account/track-order — see
+            // tests/tracking-on-demand-may2026.test.js + project_tracking_on_demand_may2026.md.
+            // The status badge above stays (it's order-level metadata, not a
+            // step-by-step shipment progression).
 
             // Render items
             const itemsContainer = document.querySelector('.order-items');
@@ -182,35 +184,10 @@
             if (breadcrumb) breadcrumb.textContent = `Order #${order.order_number}`;
         },
 
-        renderTimeline(order) {
-            const itemsContainer = document.querySelector('.order-items');
-            if (!itemsContainer) return;
-
-            const isCancelled = order.status === 'cancelled';
-            const steps = order.timeline.map(step => {
-                const cls = isCancelled && step.step === 'cancelled'
-                    ? 'timeline-step timeline-step--completed timeline-step--cancelled'
-                    : step.completed
-                        ? 'timeline-step timeline-step--completed'
-                        : 'timeline-step';
-                // esc() provided by utils.js
-                const dateStr = step.date
-                    ? new Date(step.date).toLocaleDateString('en-NZ', { day: 'numeric', month: 'short' })
-                    : '';
-                return `
-                    <div class="${cls}">
-                        <div class="timeline-step__dot"></div>
-                        <div class="timeline-step__label">${esc(step.label)}</div>
-                        ${dateStr ? `<div class="timeline-step__date">${dateStr}</div>` : ''}
-                    </div>
-                `;
-            }).join('');
-
-            const wrapper = document.createElement('div');
-            wrapper.className = 'order-detail-timeline';
-            wrapper.innerHTML = `<div class="order-timeline">${steps}</div>`;
-            itemsContainer.parentNode.insertBefore(wrapper, itemsContainer);
-        },
+        // Tracking-on-demand (May 2026): renderTimeline() was removed. The
+        // order-detail surface no longer paints a shipment-progress timeline;
+        // customers request tracking via the /account/track-order form.
+        // Pinned by tests/tracking-on-demand-may2026.test.js.
 
         getStatusClass(status) {
             const statusMap = {
