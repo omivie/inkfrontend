@@ -3338,9 +3338,6 @@
         width: 48px;
     }
 
-    .product-trust-strip {
-        gap: 4px 10px;
-    }
 }
 
 
@@ -10962,22 +10959,84 @@ body.page-shop {
    SEO / CRO: Product Page Enhancements
    ============================================ */
 
-/* Trust strip */
-.product-trust-strip {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px 16px;
-    font-size: var(--text-xs, 0.75rem);
-    color: var(--color-success, #16a34a);
-    padding: 10px 0;
+/* Trust strip — REMOVED in product-page-buybox-may2026.
+   The four hard-coded badges (Ships from Auckland · GST Invoice Included ·
+   Free Shipping over $100 · 30-Day Returns · 1–4 Day Delivery) were folded
+   into the four-row .buy-box <dl> so the SPA mirrors the prerendered card
+   Googlebot sees (no-cloaking parity). Do not re-introduce — the buy-box
+   rows are the canonical surface; redundant badges create copy drift. */
+
+/* ── Four-row buy-box (product-page-buybox-may2026.md) ────────────────────
+   Locked layout: Price · Availability · Delivery · Returns. Renders inside
+   .product-info__pricing so the cost_per_page_display anchor (PDP §1.1)
+   keeps the same scope. <dl> for semantics (term/description pairs) and
+   so the Offer microdata wraps real label→value rows for crawlers. */
+.buy-box {
+    display: grid;
+    grid-template-columns: max-content 1fr;
+    column-gap: var(--spacing-md, 16px);
+    row-gap: 6px;
+    align-items: baseline;
+    margin: 0;
+    padding: var(--spacing-md, 14px) 0;
     border-top: 1px solid var(--color-border, #e5e7eb);
     border-bottom: 1px solid var(--color-border, #e5e7eb);
-    margin: 12px 0;
 }
-.product-trust-strip span {
+.buy-box__label {
+    font-family: var(--font-family-mono, ui-monospace, SFMono-Regular, monospace);
+    font-size: var(--text-xs, 0.75rem);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--color-text-muted, #6b7280);
+    margin: 0;
+}
+.buy-box__value {
+    margin: 0;
+    font-size: var(--text-sm, 0.9375rem);
+    color: var(--color-text, #111827);
+    line-height: 1.45;
+}
+.buy-box__value--price {
     display: flex;
-    align-items: center;
-    gap: 4px;
+    align-items: baseline;
+    flex-wrap: wrap;
+    gap: var(--spacing-xs, 6px) var(--spacing-sm, 10px);
+}
+.buy-box__value--price .product-info__price {
+    font-size: var(--font-size-2xl, 1.75rem);
+    font-weight: var(--font-weight-bold, 700);
+    line-height: 1.1;
+    color: var(--color-text, #111827);
+}
+.buy-box__value--price .product-info__gst {
+    font-size: var(--text-sm, 0.875rem);
+    color: var(--color-text-light, #6b7280);
+}
+.buy-box__sep {
+    color: var(--color-text-muted, #9ca3af);
+    margin: 0 2px;
+}
+.buy-box__delivery-cutoff {
+    color: var(--color-text-muted, #4b5563);
+}
+.buy-box__returns-link {
+    color: var(--cyan-primary, #267FB5);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+}
+.buy-box__returns-link:hover,
+.buy-box__returns-link:focus-visible {
+    color: var(--cyan-dark, #1c5e88);
+}
+@media (max-width: 480px) {
+    .buy-box {
+        column-gap: var(--spacing-sm, 10px);
+        padding: 12px 0;
+    }
+    .buy-box__label {
+        font-size: 0.6875rem;
+    }
 }
 
 /* Stock urgency */

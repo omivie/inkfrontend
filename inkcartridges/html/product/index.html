@@ -56,10 +56,10 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link rel="stylesheet" href="/css/base.css?v=white-cards-may2026">
     <link rel="stylesheet" href="/css/layout.css?v=mobile-parity-may2026">
-    <link rel="stylesheet" href="/css/components.css?v=mobile-parity-may2026">
+    <link rel="stylesheet" href="/css/components.css?v=buybox-may2026">
     <link rel="stylesheet" href="/css/modern-effects.css?v=ade3173d">
-    <link rel="stylesheet" href="/css/pages.css?v=mobile-parity-may2026">
-    <link rel="stylesheet" href="/css/search.css?v=mobile-parity-may2026">
+    <link rel="stylesheet" href="/css/pages.css?v=buybox-may2026">
+    <link rel="stylesheet" href="/css/search.css?v=buybox-may2026">
 </head>
 <body>
     <a href="#main-content" class="skip-link">Skip to main content</a>
@@ -213,26 +213,49 @@
                             <p class="product-info__sku" id="product-sku"><span class="skeleton" style="display:inline-block;width:100px;height:1em;"></span></p>
                         </div>
 
+                        <!--
+                          Four-row buy-box per product-page-buybox-may2026.md.
+                          Copy is locked to mirror the backend prerender so the
+                          SERP preview and the live SPA page agree (Google's
+                          no-cloaking rule). The pin lives in
+                          tests/product-buybox-may2026.test.js — do not collapse
+                          rows or change row order without updating the spec
+                          and the prerender alongside.
+
+                          Wrapper retains .product-info__pricing because the
+                          cost_per_page_display anchor (renderProduct → §1.1)
+                          and inc-gst-amount-removed.test.js both pin it.
+                        -->
                         <div class="product-info__pricing">
-                            <span class="product-info__price" id="product-price"><span class="skeleton" style="display:inline-block;width:80px;height:1.2em;"></span></span>
-                            <span class="product-info__gst">Incl. GST</span>
-                            <span class="product-info__availability" id="product-stock">
-                                <span class="stock-status stock-status--in-stock">
-                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
-                                    In Stock
-                                </span>
-                            </span>
+                            <dl class="buy-box" id="product-buybox" data-testid="buy-box" itemprop="offers" itemscope itemtype="https://schema.org/Offer">
+                                <dt class="buy-box__label">Price</dt>
+                                <dd class="buy-box__value buy-box__value--price">
+                                    <span class="product-info__price" id="product-price" itemprop="price" content=""><span class="skeleton" style="display:inline-block;width:80px;height:1.2em;"></span></span>
+                                    <meta itemprop="priceCurrency" content="NZD">
+                                    <span class="product-info__gst">Incl. GST</span>
+                                </dd>
+
+                                <dt class="buy-box__label">Availability</dt>
+                                <dd class="buy-box__value buy-box__value--availability" id="product-stock">
+                                    <span class="stock-status stock-status--in-stock">
+                                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
+                                        In Stock
+                                    </span>
+                                </dd>
+
+                                <dt class="buy-box__label">Delivery</dt>
+                                <dd class="buy-box__value buy-box__value--delivery" id="product-delivery" data-testid="buy-box-delivery">
+                                    <span class="skeleton" style="display:inline-block;width:240px;height:1em;"></span>
+                                </dd>
+
+                                <dt class="buy-box__label">Returns</dt>
+                                <dd class="buy-box__value buy-box__value--returns" id="product-returns" data-testid="buy-box-returns">
+                                    <span class="skeleton" style="display:inline-block;width:160px;height:1em;"></span>
+                                </dd>
+                            </dl>
                         </div>
 
-                        <div id="product-shipping-note" class="product-shipping-note"></div>
-
-                        <div class="product-trust-strip">
-                            <span>&#10003; Ships from Auckland</span>
-                            <span>&#10003; GST Invoice Included</span>
-                            <span>&#10003; Free Shipping over $100</span>
-                            <span>&#10003; 30-Day Returns</span>
-                            <span>&#10003; 1–4 Day Delivery</span>
-                        </div>
+                        <div id="product-shipping-note" class="product-shipping-note" hidden></div>
 
                         <div class="product-info__actions">
                             <div class="quantity-selector">
@@ -374,7 +397,7 @@
     <script defer src="/js/mega-nav.js?v=2d5bc155"></script>
     <script defer src="/js/modern-effects.js?v=ad8bff1e"></script>
 
-    <script defer src="/js/product-detail-page.js?v=err-extract-may2026"></script>
+    <script defer src="/js/product-detail-page.js?v=buybox-may2026"></script>
     <script defer src="/js/analytics.js?v=8c9ee196"></script>
     <script defer src="/js/site-guard.js?v=2e596146"></script>
 </body>

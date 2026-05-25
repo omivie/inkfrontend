@@ -419,9 +419,25 @@
             document.getElementById('product-title').textContent = info.displayName;
             document.getElementById('product-sku').textContent = `SKU: ${info.sku}${info.manufacturer_part_number ? ' | Model: ' + info.manufacturer_part_number : ''}`;
 
-            // Price - use formatPrice() for consistent locale-aware currency display
+            // Price - use formatPrice() for consistent locale-aware currency display.
+            // Also set the schema.org `content` attribute so the Offer microdata
+            // (wrapping <dl class="buy-box">) carries the numeric value — Google
+            // Merchant Center reads itemprop="price" content, not the visible
+            // formatted string. product-page-buybox-may2026.md §"prerender HTML".
             const priceEl = document.getElementById('product-price');
             priceEl.textContent = formatPrice(price);
+            if (Number.isFinite(price) && price > 0) {
+                priceEl.setAttribute('content', price.toFixed(2));
+            }
+
+            // Four-row buy-box (Price · Availability · Delivery · Returns).
+            // Price + Availability rows are filled by the existing renderers
+            // above/below; Delivery + Returns come from the May 2026 additive
+            // payload objects (data.delivery_estimate, data.trust_signals.returns).
+            // Production may still be on a pre-May-2026 deploy that doesn't ship
+            // these fields, so we fall back to the locked copy from the spec
+            // rather than rendering a blank row.
+            this.renderBuyBoxDeliveryAndReturns(info);
 
             // Compare price & savings — prefer backend-derived original_price/discount_percent;
             // fall back to local compare_price math for legacy responses.
@@ -469,19 +485,20 @@
             // was redundant alongside the badge, so it is intentionally not
             // injected here — pinned by tests/inc-gst-amount-removed.test.js.
 
-            // Shipping callout — GMC compliance: show cost or free-shipping status at product level.
-            // Threshold sourced from qualifiesForFreeShipping (api.js) so PDP, card pills,
-            // schema.org and cart progress all read the same Config setting.
+            // Shipping callout — superseded by the Delivery row of the four-row
+            // buy-box (product-page-buybox-may2026.md). The free-shipping promise
+            // now lives in data.trust_signals.shipping_promise.promise; we still
+            // route the lookup through qualifiesForFreeShipping so any future
+            // surface that re-enables a free-shipping pill stays in lockstep
+            // with the cart-progress threshold (and so the regression guard in
+            // tests/free-shipping-pill.test.js keeps tracking the PDP). The
+            // computed flag is also dropped onto the element as a data attribute
+            // so a future feature can light it up without a JS edit.
             const shippingNoteEl = document.getElementById('product-shipping-note');
             if (shippingNoteEl) {
-                const threshold = (typeof Config !== 'undefined' && Config.getSetting)
-                    ? Config.getSetting('FREE_SHIPPING_THRESHOLD', 100)
-                    : 100;
-                if (qualifiesForFreeShipping(info)) {
-                    shippingNoteEl.innerHTML = '<span class="shipping-note shipping-note--free">&#10003; Free NZ shipping included</span>';
-                } else {
-                    shippingNoteEl.innerHTML = `<span class="shipping-note">From $7 shipping &mdash; free over $${threshold}</span>`;
-                }
+                shippingNoteEl.hidden = true;
+                shippingNoteEl.innerHTML = '';
+                shippingNoteEl.dataset.qualifiesFreeShipping = qualifiesForFreeShipping(info) ? 'true' : 'false';
             }
 
             // Stock status — dynamic based on API fields
@@ -655,6 +672,87 @@
             // Set up event listeners
             this.setupEventListeners(info);
 
+        },
+
+        /**
+         * Four-row buy-box — Delivery and Returns.
+         *
+         * Spec: readfirst/product-page-buybox-may2026.md (locked copy, in the
+         * exact order Price · Availability · Delivery · Returns).
+         *
+         * Data: `data.delivery_estimate` and `data.trust_signals.returns` —
+         * additive payload objects shipped with the May 2026 SEO meta cleanup.
+         * Both come from the single source the cart/checkout/account already
+         * read, so the numbers cannot drift between surfaces.
+         *
+         * Fallbacks: production may still be running a pre-May-2026 build that
+         * omits these objects. Rather than render a blank row (which would mark
+         * the page as cloaking — the prerender ships the full copy regardless),
+         * we fall back to the locked spec copy. The fallback strings are the
+         * exact same strings the backend ships, so the SPA and prerender match
+         * even on the legacy payload.
+         */
+        renderBuyBoxDeliveryAndReturns(info) {
+            const SPEC_DELIVERY_LABEL = '1–4 business days NZ-wide';
+            const SPEC_DELIVERY_CUTOFF = '2pm';
+            const SPEC_RETURNS_DAYS = 30;
+            const SPEC_RETURNS_URL = '/returns';
+
+            // Delivery row — `${label} · Order before ${cutoff} NZT for same-day dispatch`.
+            const delivery = (info && info.delivery_estimate) || {};
+            const dLabel = typeof delivery.label === 'string' && delivery.label.trim()
+                ? delivery.label.trim()
+                : SPEC_DELIVERY_LABEL;
+            const dCutoff = typeof delivery.dispatch_cutoff_human === 'string' && delivery.dispatch_cutoff_human.trim()
+                ? delivery.dispatch_cutoff_human.trim()
+                : SPEC_DELIVERY_CUTOFF;
+            const deliveryEl = document.getElementById('product-delivery');
+            if (deliveryEl) {
+                deliveryEl.innerHTML =
+                    `<span class="buy-box__delivery-label">${Security.escapeHtml(dLabel)}</span>`
+                    + ` <span class="buy-box__sep" aria-hidden="true">·</span> `
+                    + `<span class="buy-box__delivery-cutoff">Order before ${Security.escapeHtml(dCutoff)} NZT for same-day dispatch</span>`;
+            }
+
+            // Returns row — `${days}-day returns · Policy ›` linking to ${url_path}.
+            const returns = (info && info.trust_signals && info.trust_signals.returns) || {};
+            const rDaysNum = Number(returns.days);
+            const rDays = Number.isFinite(rDaysNum) && rDaysNum > 0 ? rDaysNum : SPEC_RETURNS_DAYS;
+            const rUrlRaw = typeof returns.url_path === 'string' && returns.url_path.trim()
+                ? returns.url_path.trim()
+                : SPEC_RETURNS_URL;
+            // Sanitise the URL — only same-origin relative paths or
+            // https://www.inkcartridges.co.nz absolute URLs are allowed through.
+            const rUrl = this._safeReturnsUrl(rUrlRaw, SPEC_RETURNS_URL);
+            const returnsEl = document.getElementById('product-returns');
+            if (returnsEl) {
+                returnsEl.innerHTML =
+                    `<span class="buy-box__returns-days">${rDays}-day returns</span>`
+                    + ` <span class="buy-box__sep" aria-hidden="true">·</span> `
+                    + `<a class="buy-box__returns-link" href="${Security.escapeAttr(rUrl)}">Policy <span aria-hidden="true">›</span></a>`;
+            }
+        },
+
+        /**
+         * Returns-policy URL is operator-controlled (env-driven backend field),
+         * but we treat it as untrusted on the client. Allow only same-origin
+         * relative paths or the canonical https://www.inkcartridges.co.nz host.
+         * Anything else (javascript:, data:, foreign hosts) collapses to the
+         * spec default so a misconfigured env var cannot punch a hole in the
+         * PDP. Mirrors the discipline of Security.sanitizeUrl used on images.
+         */
+        _safeReturnsUrl(raw, fallback) {
+            try {
+                if (raw.startsWith('/')) return raw;
+                const u = new URL(raw);
+                if (u.protocol !== 'https:' && u.protocol !== 'http:') return fallback;
+                if (u.host === 'www.inkcartridges.co.nz' || u.host === 'inkcartridges.co.nz') {
+                    return u.pathname + u.search + u.hash;
+                }
+                return fallback;
+            } catch (_) {
+                return fallback;
+            }
         },
 
         renderCompatPreview(printers) {
@@ -1684,6 +1782,12 @@
             document.querySelector('.product-info__gst').hidden = true;
             document.getElementById('product-stock').hidden = true;
             document.querySelector('.product-info__actions').hidden = true;
+            // Hide the Delivery + Returns rows of the buy-box on error — their
+            // labels would otherwise float beside an empty price.
+            const deliveryRow = document.getElementById('product-delivery');
+            if (deliveryRow) deliveryRow.hidden = true;
+            const returnsRow = document.getElementById('product-returns');
+            if (returnsRow) returnsRow.hidden = true;
             // Show error state in image area with retry button
             const imageEl = document.getElementById('product-image');
             imageEl.innerHTML = `
