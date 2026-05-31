@@ -76,10 +76,23 @@ const API = {
 
         try {
             const cacheMode = method === 'GET' ? 'default' : 'no-store';
+            // Cross-origin cache safety (api-subdomain cutover, May 2026):
+            // The storefront now calls https://api.inkcartridges.co.nz cross-origin.
+            // Cloudflare's cache rule BYPASSES the edge cache whenever an sb-* /
+            // __ink_auth cookie rides along, so sending cookies on public catalog
+            // reads would defeat the whole cutover (a MISS for every visitor).
+            // Auth is carried by the Authorization: Bearer header and guest carts
+            // by the X-Guest-Session header — never by cookies — so we only attach
+            // credentials when the request is actually authenticated. Anonymous
+            // reads use 'omit' → cookies dropped cross-origin → cache HIT.
+            const reqHeaders = fetchOptions.headers;
+            const hasAuthHeader = reqHeaders instanceof Headers
+                ? reqHeaders.has('Authorization')
+                : !!(reqHeaders && (reqHeaders.Authorization || reqHeaders.authorization));
             const response = await fetch(url, {
                 ...fetchOptions,
                 signal: controller.signal,
-                credentials: 'include',
+                credentials: hasAuthHeader ? 'include' : 'omit',
                 cache: cacheMode
             });
             clearTimeout(timeoutId);
@@ -1269,7 +1282,9 @@ const API = {
 
         let res;
         try {
-            res = await fetch(url, { method: 'GET', headers, credentials: 'include' });
+            // Public read: omit cookies when anonymous so it hits the Cloudflare
+            // edge cache (see api-subdomain cutover note in _fetchWithAuth).
+            res = await fetch(url, { method: 'GET', headers, credentials: token ? 'include' : 'omit' });
         } catch (err) {
             return { kind: 'network-error', error: err && err.message };
         }

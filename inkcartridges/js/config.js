@@ -7,10 +7,18 @@
  */
 
 const Config = {
-    // Backend API URL - Use Vercel proxy in production, direct URL in local dev
-    API_URL: (location.hostname === 'localhost' || location.hostname === '127.0.0.1')
-        ? 'https://ink-backend-zaeq.onrender.com'
-        : '',
+    // Backend API base URL.
+    //  • Production (www + apex) → https://api.inkcartridges.co.nz : a direct,
+    //    Cloudflare-proxied, edge-cached path to Render. This removes the flaky
+    //    Browser→Cloudflare→Vercel→Render hop that caused /shop 504s and the
+    //    long skeleton-loader hangs (api-subdomain cutover, May 2026). The apex
+    //    and www origins are the two the backend CORS allow-list accepts.
+    //  • localhost / Vercel previews / anything else → Render origin direct. The
+    //    backend already accepts these origins, and this path needs no Vercel
+    //    /api rewrite (which has been removed from vercel.json).
+    API_URL: (location.hostname === 'www.inkcartridges.co.nz' || location.hostname === 'inkcartridges.co.nz')
+        ? 'https://api.inkcartridges.co.nz'
+        : 'https://ink-backend-zaeq.onrender.com',
 
     // Supabase configuration
     SUPABASE_URL: 'https://lmdlgldjgcanknsjrcxh.supabase.co',
