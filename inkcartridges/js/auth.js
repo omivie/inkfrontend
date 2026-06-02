@@ -323,6 +323,41 @@ const Auth = {
         return { data, error };
     },
 
+    /**
+     * Sign in with Microsoft (Azure / Entra ID)
+     *
+     * Supabase uses the `azure` provider slug for Microsoft Entra — NOT
+     * `microsoft`. The Azure app registration is multi-tenant + personal
+     * accounts, so both work/school (Microsoft 365 / Entra ID) and
+     * consumer (@outlook.com / @hotmail.com) accounts can sign in.
+     *
+     * `scopes: 'email openid profile'` is the minimum that guarantees the
+     * issued JWT carries an email claim, which the backend's
+     * requireVerifiedEmail middleware depends on. Microsoft OAuth also
+     * auto-populates email_confirmed_at, so verified-email gates pass.
+     *
+     * redirectTo points at /account — the SAME landing route the Google
+     * button uses. The onAuthStateChange listener in init() is fully
+     * provider-agnostic (it never branches on provider), so account sync,
+     * favourites load, and UI refresh happen identically for both.
+     */
+    async signInWithMicrosoft() {
+        if (!this.supabase) return { error: { message: 'Auth not initialized' } };
+
+        const { data, error } = await this.supabase.auth.signInWithOAuth({
+            provider: 'azure',
+            options: {
+                scopes: 'email openid profile',
+                redirectTo: `${window.location.origin}/account`,
+                queryParams: {
+                    prompt: 'select_account'
+                }
+            }
+        });
+
+        return { data, error };
+    },
+
     _setAuthCookie() {
         document.cookie = '__ink_auth=1; path=/; SameSite=Strict; max-age=604800';
     },

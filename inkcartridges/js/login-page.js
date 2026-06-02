@@ -412,10 +412,36 @@
                 });
             }
 
-            // Google sign in
-            document.querySelectorAll('.btn--google').forEach(btn => {
-                btn.addEventListener('click', async () => {
-                    await Auth.signInWithGoogle();
+            // Social sign-in (Google + Microsoft). On success the browser
+            // navigates away to the provider's consent screen, so the button
+            // is only re-enabled when signInWithOAuth returns/throws an error
+            // — in which case we surface a toast so the user isn't left
+            // staring at a dead button.
+            const socialProviders = [
+                { selector: '.btn--google', signIn: () => Auth.signInWithGoogle(), label: 'Google' },
+                { selector: '.btn--microsoft', signIn: () => Auth.signInWithMicrosoft(), label: 'Microsoft' }
+            ];
+            socialProviders.forEach(({ selector, signIn, label }) => {
+                document.querySelectorAll(selector).forEach(btn => {
+                    btn.addEventListener('click', async () => {
+                        btn.disabled = true;
+                        try {
+                            const { error } = await signIn();
+                            if (error) {
+                                DebugLog.error(`[auth] ${label} sign-in`, error);
+                                if (typeof showToast === 'function') {
+                                    showToast(`Couldn't sign in with ${label}. Please try again.`, 'error');
+                                }
+                                btn.disabled = false;
+                            }
+                        } catch (e) {
+                            DebugLog.error(`[auth] ${label} sign-in`, e);
+                            if (typeof showToast === 'function') {
+                                showToast(`Couldn't sign in with ${label}. Please try again.`, 'error');
+                            }
+                            btn.disabled = false;
+                        }
+                    });
                 });
             });
 
