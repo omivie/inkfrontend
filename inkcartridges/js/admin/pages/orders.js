@@ -93,6 +93,29 @@ const COLUMNS = [
   },
 ];
 
+// Read a query param from the SPA hash, e.g. "#orders?focus=2026..." → "2026...".
+function getHashParam(key) {
+  const hash = window.location.hash || '';
+  const qIndex = hash.indexOf('?');
+  if (qIndex === -1) return null;
+  return new URLSearchParams(hash.slice(qIndex + 1)).get(key);
+}
+
+// Open the order drawer for a specific order number once the list has loaded.
+// Falls back gracefully to the filtered list if the order isn't in the results.
+async function focusOnOrder(orderNumber) {
+  if (!orderNumber || !_table) return;
+  const wanted = String(orderNumber).trim().toLowerCase();
+  const rows = _table.data || [];
+  const match = rows.find(r => String(r.order_number || '').toLowerCase() === wanted);
+  if (match) {
+    openOrderModal(match);
+  } else if (rows.length === 1) {
+    openOrderModal(rows[0]);
+  }
+  // else: leave the search applied so the admin can pick from the filtered list.
+}
+
 async function loadOrders() {
   _table.setLoading(true);
   const { from, to } = FilterState.getDateRange();
@@ -968,6 +991,13 @@ export default {
     _page = 1;
     _activeTab = 'orders';
     _subTabModule = null;
+
+    // Deep-link: #orders?focus=<order_number> seeds the search and auto-opens
+    // the order drawer. The Tracking Requests page routes here so an admin can
+    // add a tracking number (which auto-fulfils the request + emails the customer).
+    const focusOrder = getHashParam('focus');
+    if (focusOrder) _search = focusOrder;
+
     FilterState.setVisibleFilters(['statuses']);
 
     // Tab bar
@@ -991,6 +1021,10 @@ export default {
     container.appendChild(content);
 
     await renderOrdersTab(content);
+
+    // After the (search-seeded) list loads, auto-open the focused order so the
+    // admin lands directly on the tracking field.
+    if (focusOrder) await focusOnOrder(focusOrder);
   },
 
   destroy() {

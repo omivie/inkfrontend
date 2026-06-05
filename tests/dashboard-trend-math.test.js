@@ -55,6 +55,23 @@ vm.runInContext(
   { filename: 'trend-math.js' }
 );
 
+// Canonical profit math (profitability.js) loaded into its own sandbox so the
+// GST-neutral cross-validation tests can assert the dashboard's bucket math
+// EQUALS the single source of truth used by every order's detail modal.
+const PROFITABILITY_PATH = path.resolve(
+  __dirname, '..', 'inkcartridges', 'js', 'admin', 'utils', 'profitability.js'
+);
+const profSandbox = {
+  console, Math, Number, Object, Array, String, Boolean, JSON, Error, Date,
+};
+profSandbox.globalThis = profSandbox;
+const profCtx = vm.createContext(profSandbox);
+vm.runInContext(
+  stripEsm(fs.readFileSync(PROFITABILITY_PATH, 'utf8')),
+  profCtx,
+  { filename: 'profitability.js' }
+);
+
 // ─── Constants ──────────────────────────────────────────────────────────────
 
 test('STRIPE_RATE_DERIVE is 2.65% (NZ domestic card, stripe.com/nz/pricing)', () => {
@@ -253,10 +270,13 @@ test('assembleBucketExpense: P&L cogs trumps revenue-distributed cogs', () => {
 
 test('assembleBucketExpense: derived path when P&L is empty', () => {
   // Matches the dashboard fixture: rev $1,277.36 across 31 orders, no P&L data.
-  // Stripe (new convention) = (1277.36 × 0.0265 + 31 × 0.30) × 1.15 ≈ 49.62
-  // GST                     = 1277.36 × 3/23                        ≈ 166.612
-  // COGS  = kpiCogsInclGst(1277.36, 557.48) = 1277.36/1.15 − 557.48  ≈ 553.27
-  // Expenses total          ≈ 769.50; Net ≈ 507.86 (a profit).
+  // GST-NEUTRAL model (2026-06-05): the GST line is NET remitted, not gross output.
+  // Stripe   = (1277.36 × 0.0265 + 31 × 0.30) × 1.15                 ≈ 49.6225
+  // GST_net  = (1277.36 − 553.27 − 49.6225) × 3/23                   ≈ 87.974
+  // COGS     = kpiCogsInclGst(1277.36, 557.48) = 1277.36/1.15 − 557.48 ≈ 553.27
+  // Expenses = 553.27 + 49.6225 + 87.974                             ≈ 690.87
+  // Net      = 1277.36 − 690.87                                      ≈ 586.49
+  // (Net also = (revenue − cogs − stripe) / 1.15 = 674.4675/1.15 — GST-neutral.)
   const b = {
     revenue: 1277.36, orders: 31,
     pnlCogs: 0, hasPnlCogs: false, cogsDerived: 553.27,
@@ -269,18 +289,20 @@ test('assembleBucketExpense: derived path when P&L is empty', () => {
   assert.equal(b.cogsTotal, 553.27);
   assert.equal(b.opexTotal, 0);
   assert.ok(Math.abs(b.stripeTotal - 49.6225) < 0.01);
-  assert.ok(Math.abs(b.gstTotal    - 166.612) < 0.01);
-  assert.ok(Math.abs(b.expenses - 769.50) < 0.05, `expenses=${b.expenses}`);
-  assert.ok(b.net > 503 && b.net < 513, `expected profit ~$507.86, got ${b.net}`);
+  assert.ok(Math.abs(b.gstTotal    - 87.974) < 0.01, `net GST, got ${b.gstTotal}`);
+  assert.ok(Math.abs(b.expenses - 690.87) < 0.05, `expenses=${b.expenses}`);
+  assert.ok(Math.abs(b.net - 586.49) < 0.05, `expected GST-neutral net ~$586.49, got ${b.net}`);
+  // GST-neutral identity: net === (revenue − cogs − stripe) / 1.15 exactly.
+  assert.ok(Math.abs(b.net - (b.revenue - b.cogsTotal - b.stripeTotal) / 1.15) < 1e-9);
   assert.equal(b.hasExpense, true);
 });
 
 test('assembleBucketExpense: opex logged on the same day shows up', () => {
-  // The user's 3 May supplier purchase scenario.
-  // Stripe (new) = (358.24 × 0.0265 + 1 × 0.30) × 1.15 ≈ 11.26
-  // GST          = 358.24 × 3/23                       ≈ 46.73
-  // Expenses     = 220 + 250 + 11.26 + 46.73           ≈ 527.99
-  // Net          = 358.24 − 527.99                     ≈ −170 (loss)
+  // The user's 3 May supplier purchase scenario (net-GST model).
+  // Stripe   = (358.24 × 0.0265 + 1 × 0.30) × 1.15        ≈ 11.26
+  // GST_net  = (358.24 − 220 − 11.26) × 3/23              ≈ 16.56
+  // Expenses = 220 + 250 + 11.26 + 16.56                 ≈ 497.82
+  // Net      = 358.24 − 497.82                            ≈ −139.6 (loss; opex dominates)
   const b = {
     revenue: 358.24, orders: 1,
     pnlCogs: 0, hasPnlCogs: false, cogsDerived: 220,
@@ -343,13 +365,13 @@ test('sumTrendTotals: empty / nullish series returns zeros, no crash', () => {
 
 test('integration: dashboard 3m window matches the user-visible totals', () => {
   // Reproduce the screenshot fixture: revenue $1,277.36, gross_profit $557.48,
-  // 31 orders, no logged opex. With the corrected COGS formula:
+  // 31 orders, no logged opex. GST-NEUTRAL model (GST line = net remitted):
   //   COGS   = kpiCogsInclGst(1277.36, 557.48) = 1277.36/1.15 − 557.48 ≈ 553.27
-  //   Stripe = (1277.36 × 0.0265 + 31 × 0.30) × 1.15   ≈ 49.62
-  //   GST    = 1277.36 × (3/23)                        ≈ 166.61
+  //   Stripe = (1277.36 × 0.0265 + 31 × 0.30) × 1.15        ≈ 49.6225
+  //   GST    = (1277.36 − 553.27 − 49.6225) × 3/23          ≈ 87.974  (NET remitted)
   //   Opex   = 0 (none logged)
-  //   Total  ≈ 769.50
-  //   Net    ≈ 507.86 profit
+  //   Total  ≈ 690.87
+  //   Net    ≈ 586.49 profit  (= (rev − cogs − stripe)/1.15, GST-neutral)
   const buckets = [
     { revenue: 1277.36, orders: 31,
       pnlCogs: 0, hasPnlCogs: false, cogsDerived: 0,
@@ -369,14 +391,15 @@ test('integration: dashboard 3m window matches the user-visible totals', () => {
   assert.ok(Math.abs(totals.cogs   - 553.27)  < 0.05, `cogs=${totals.cogs}`);
   assert.equal(totals.opex, 0);
   assert.ok(Math.abs(totals.stripe - 49.6225) < 0.01, `stripe=${totals.stripe}`);
-  assert.ok(Math.abs(totals.gst    - 166.612) < 0.01, `gst=${totals.gst}`);
-  assert.ok(Math.abs(totals.expenses - 769.50) < 0.05,
-    `expected ~$769.50 expenses, got ${totals.expenses}`);
-  // Regression guard: expenses must still INCLUDE cogs (the broken cogs=0 path
-  // showed only ~$215.66) — but must NOT double-count it via the old ×1.15
-  // over-gross-up (which inflated expenses to ~$936).
-  assert.ok(totals.expenses > 700 && totals.expenses < 800,
-    `regression guard: expenses must include cogs once, got ${totals.expenses}`);
+  assert.ok(Math.abs(totals.gst    - 87.974)  < 0.01, `net gst=${totals.gst}`);
+  assert.ok(Math.abs(totals.expenses - 690.87) < 0.05,
+    `expected ~$690.87 expenses, got ${totals.expenses}`);
+  // Net must be the GST-neutral take-home, NOT the old GST-double-counted figure.
+  const net = totals.revenue - totals.expenses;
+  assert.ok(Math.abs(net - 586.49) < 0.05, `expected GST-neutral net ~$586.49, got ${net}`);
+  // Regression guard: GST line must be NET (~$88), never the gross output GST
+  // (~$166.6) that double-counted the input credits already inside COGS+Stripe.
+  assert.ok(totals.gst < 120, `regression guard: GST must be net remitted, got ${totals.gst}`);
 });
 
 test('integration: a bucket with logged opex flips a profit window into a loss', () => {
@@ -550,14 +573,35 @@ test('bucketCogsFromOrders: 4 May order → 4 May bucket gets $228.45', () => {
       ],
     },
   ];
-  const { resolvedCount, resolvedRevenue } = sandbox.bucketCogsFromOrders(buckets, orders, indexFor);
+  const { resolvedCount, resolvedRevenue, resolvedCost } = sandbox.bucketCogsFromOrders(buckets, orders, indexFor);
   assert.equal(resolvedCount, 1);
   assert.ok(Math.abs(resolvedRevenue - 358.24) < 0.01);
+  // resolvedCost is the incl-GST cash placed into buckets (must match cogsFromOrders).
+  assert.ok(Math.abs(resolvedCost - 228.4475) < 0.01,
+    `resolvedCost should equal the bucketed cost, got ${resolvedCost}`);
   assert.equal(buckets[0].cogsFromOrders, 0);
   assert.equal(buckets[0].hasOrderCogs, false);
   assert.ok(Math.abs(buckets[1].cogsFromOrders - 228.4475) < 0.01,
     `bucket 4 May should have $228.45, got ${buckets[1].cogsFromOrders}`);
   assert.equal(buckets[1].hasOrderCogs, true);
+});
+
+test('bucketCogsFromOrders: resolves order-level cost_total_excl_gst (enrichment path)', () => {
+  // enrichOrdersWithSupplierCost stamps cost_total_excl_gst on the bulk-list
+  // order (the detail endpoint carries supplier_cost_snapshot; the list does
+  // not). orderCostInclGst must honour that order-level field and gross it up.
+  const buckets = [{ startMs: 0, cogsFromOrders: 0, hasOrderCogs: false }];
+  const indexFor = () => 0;
+  const orders = [
+    // no items[] with cost — only the back-filled order-level cost
+    { created_at: '2026-06-01T18:56:28Z', total: 400.49, cost_total_excl_gst: 305.13 },
+  ];
+  const { resolvedCount, resolvedCost } = sandbox.bucketCogsFromOrders(buckets, orders, indexFor);
+  assert.equal(resolvedCount, 1);
+  assert.ok(Math.abs(resolvedCost - 350.8995) < 0.01,
+    `305.13 ex-GST should gross up to $350.90 incl, got ${resolvedCost}`);
+  assert.ok(Math.abs(buckets[0].cogsFromOrders - 350.8995) < 0.01);
+  assert.equal(buckets[0].hasOrderCogs, true);
 });
 
 test('bucketCogsFromOrders: orders without items[] do not block resolution of others', () => {
@@ -568,10 +612,118 @@ test('bucketCogsFromOrders: orders without items[] do not block resolution of ot
     { created_at: '2026-05-02T00:00:00Z', total: 50,
       items: [{ qty: 1, supplier_cost_snapshot: 30 }] },           // exact: 34.50
   ];
-  const { resolvedCount, resolvedRevenue } = sandbox.bucketCogsFromOrders(buckets, orders, indexFor);
+  const { resolvedCount, resolvedRevenue, resolvedCost } = sandbox.bucketCogsFromOrders(buckets, orders, indexFor);
   assert.equal(resolvedCount, 1);
   assert.equal(resolvedRevenue, 50);
+  assert.ok(Math.abs(resolvedCost - 34.5) < 0.01);
   assert.ok(Math.abs(buckets[0].cogsFromOrders - 34.5) < 0.01);
+});
+
+// ─── residualCogsAfterExact ──────────────────────────────────────────────────
+
+test('residualCogsAfterExact: window total stays pinned to the KPI figure', () => {
+  // Σ(exact per-order) + residual must equal totalCogsInclGst, so resolving
+  // some orders exactly only reshapes per-day bars — it never drifts the total.
+  const total = 1032.50;
+  const resolved = 350.8995;           // the one Brother order resolved exactly
+  const residual = sandbox.residualCogsAfterExact(total, resolved);
+  assert.ok(Math.abs((resolved + residual) - total) < 1e-9,
+    `exact + residual must equal total, got ${resolved + residual}`);
+  assert.ok(Math.abs(residual - 681.6005) < 0.01);
+});
+
+test('residualCogsAfterExact: clamps at 0 when exact cost meets/exceeds the KPI total', () => {
+  // If line-item costs already exceed the KPI-derived total (KPI under-reporting),
+  // trust the harder per-order data and add no residual.
+  assert.equal(sandbox.residualCogsAfterExact(500, 500), 0);
+  assert.equal(sandbox.residualCogsAfterExact(500, 620), 0);
+});
+
+test('residualCogsAfterExact: nothing resolved → residual is the whole KPI total', () => {
+  // The status quo when the orders feed carries no supplier cost at all.
+  assert.ok(Math.abs(sandbox.residualCogsAfterExact(1032.50, 0) - 1032.50) < 1e-9);
+});
+
+test('residualCogsAfterExact: no/invalid KPI total → 0 (COGS stays honestly blank)', () => {
+  assert.equal(sandbox.residualCogsAfterExact(0, 0), 0);
+  assert.equal(sandbox.residualCogsAfterExact(null, 100), 0);
+  assert.equal(sandbox.residualCogsAfterExact(-5, 0), 0);
+  // a NaN resolvedCost must not poison the residual
+  assert.ok(Math.abs(sandbox.residualCogsAfterExact(800, NaN) - 800) < 1e-9);
+});
+
+// ─── snapshot-cost reconciliation ────────────────────────────────────────────
+
+test('extrapolateWindowCogsInclGst: full coverage → just the resolved sum', () => {
+  // resolved revenue == total revenue ⇒ no extrapolation.
+  assert.ok(Math.abs(sandbox.extrapolateWindowCogsInclGst(1500, 2200, 2200) - 1500) < 1e-9);
+});
+
+test('extrapolateWindowCogsInclGst: scales the resolved cost ratio across the gap', () => {
+  // resolved 1517 cost on 2209 of 2211 revenue ⇒ ~1518.4 over the full window.
+  const est = sandbox.extrapolateWindowCogsInclGst(1517, 2209, 2211);
+  assert.ok(Math.abs(est - 1517 * (2211 / 2209)) < 1e-6);
+  assert.ok(est > 1517, 'extrapolated window cost must cover the unresolved tail');
+});
+
+test('extrapolateWindowCogsInclGst: never scales below the resolved sum', () => {
+  // a totalRevenue somehow < resolvedRevenue must not shrink the cost.
+  assert.ok(Math.abs(sandbox.extrapolateWindowCogsInclGst(1000, 2000, 1500) - 1000) < 1e-9);
+});
+
+test('extrapolateWindowCogsInclGst: nothing resolved → 0', () => {
+  assert.equal(sandbox.extrapolateWindowCogsInclGst(0, 0, 2200), 0);
+  assert.equal(sandbox.extrapolateWindowCogsInclGst(500, 0, 2200), 0);
+});
+
+test('reconciledGrossProfitInclGst: revenue_ex_gst − cost_EX_gst (GST-neutral, canonical)', () => {
+  // $2,211.17 gross, $1,518 incl-GST snapshot COGS. Gross profit subtracts the
+  // EX-GST cost (1518/1.15 = 1320), NOT the incl cost — both sides ex-GST.
+  const gp = sandbox.reconciledGrossProfitInclGst(2211.17, 1518);
+  const revEx = 2211.17 * (1 - 3 / 23);
+  const costEx = 1518 / 1.15;
+  assert.ok(Math.abs(gp - (revEx - costEx)) < 1e-6, `gp=${gp}`);
+  // ~$602.76: below the optimistic $890 RPC figure, but POSITIVE (subtracting the
+  // incl cost would have wrongly given ~$405 and could go negative on thin items).
+  assert.ok(Math.abs(gp - 602.76) < 0.5, `canonical gross profit ~$602.76, got ${gp}`);
+  // A single thin-margin order must NOT show negative gross profit (the cost-incl
+  // bug did): Brother sells $348.25 ex, costs $305.13 ex → +$43.12 gross.
+  const brother = sandbox.reconciledGrossProfitInclGst(400.49, 305.13 * 1.15);
+  assert.ok(Math.abs(brother - 43.12) < 0.05, `Brother gross profit must be +$43.12, got ${brother}`);
+});
+
+test('reconciledGrossProfitInclGst: unusable revenue → null (keep provisional)', () => {
+  assert.equal(sandbox.reconciledGrossProfitInclGst(0, 100), null);
+  assert.equal(sandbox.reconciledGrossProfitInclGst(null, 100), null);
+  assert.equal(sandbox.reconciledGrossProfitInclGst(-1, 100), null);
+});
+
+test('costCoverage: resolved revenue fraction, clamped to [0,1]', () => {
+  assert.ok(Math.abs(sandbox.costCoverage(2209, 2211) - (2209 / 2211)) < 1e-9);
+  assert.equal(sandbox.costCoverage(0, 2211), 0);
+  assert.equal(sandbox.costCoverage(2211, 0), 0);
+  assert.equal(sandbox.costCoverage(3000, 2211), 1, 'over-100% coverage clamps to 1');
+});
+
+test('reconciliation end-to-end: snapshot COGS drives both the chart and the KPI consistently', () => {
+  // Mirrors the live 2026-06-05 finding. The chart uses the snapshot COGS total
+  // DIRECTLY (payload._reconciledCogsInclGst = windowCogs); the KPI gross_profit
+  // is the canonical ex-GST figure. The two are decoupled but consistent:
+  //   chart COGS (incl) = windowCogs
+  //   KPI gross_profit  = rev_ex − windowCogs/1.15
+  //   ⇒ kpiCogsInclGst(rev, gross_profit) recovers cost_EX = windowCogs/1.15
+  const revenueGross = 2211.17;
+  const windowCogs = sandbox.extrapolateWindowCogsInclGst(1517, 2209, 2211.17);
+  const reconciledGP = sandbox.reconciledGrossProfitInclGst(revenueGross, windowCogs);
+  // gross_profit is on the EX-GST cost basis, so inverting it yields cost_EX,
+  // exactly windowCogs/1.15 — proving the convention flipped cleanly.
+  const recoveredCostEx = sandbox.kpiCogsInclGst(revenueGross, reconciledGP);
+  assert.ok(Math.abs(recoveredCostEx - windowCogs / 1.15) < 1e-6,
+    `gross_profit must be on the ex-GST basis: ${recoveredCostEx} vs ${windowCogs / 1.15}`);
+  // Canonical gross profit ~$602; net (Gross − stripe_ex) is the real take-home,
+  // both well below the optimistic $890 RPC figure but POSITIVE and honest.
+  assert.ok(reconciledGP > 580 && reconciledGP < 620,
+    `reconciled gross profit ~$602, got ${reconciledGP}`);
 });
 
 // ─── assembleBucketExpense: per-order COGS preference ───────────────────────
@@ -813,20 +965,23 @@ test('expandRecurringExpenses: end-to-end with bucketOperatingExpenses — empty
 
 // ─── Integration: the user's 4 May order, expenses must be ≥ $285 ───────────
 
-test('integration: 4 May order single-bucket — expenses match cost+stripe+gst exactly', () => {
+test('integration: 4 May order single-bucket — expenses match cost+stripe+net-gst exactly', () => {
   // Reproduces the user's complaint on 2026-05-08:
   //   "How can the expenses be $209 for the order on the 4th of may if just
   //   the costs for the products are $198.65 before gst."
   //
-  // After the fix, the 4 May bucket must show (2026-05-12 Stripe convention):
-  //   Cost incl-GST: 198.65 × 1.15                    = 228.4475
-  //   Stripe:        (358.24 × 0.0265 + 1 × 0.30) × 1.15 ≈ 11.262
-  //   GST output:    358.24 × 3/23                     ≈ 46.727
-  //   ─────────────────────────────────────────────────────────
-  //   Total:                                           ≈ 286.44
+  // GST-NEUTRAL model (corrected 2026-06-05 — the GST line is NET remitted, not
+  // gross output; the old fix had over-shot to ~$286 by double-counting GST):
+  //   Cost incl-GST: 198.65 × 1.15                          = 228.4475
+  //   Stripe:        (358.24 × 0.0265 + 1 × 0.30) × 1.15     ≈ 11.2624
+  //   GST net:       (358.24 − 228.4475 − 11.2624) × 3/23    ≈ 15.4600
+  //   ─────────────────────────────────────────────────────────────────
+  //   Total expenses:                                        ≈ 255.17
+  //   Net profit:    358.24 − 255.17                         ≈ 103.07 (28.8% margin)
   //
-  // The chart used to show $208.99 on this bucket. Anything below $285 means
-  // the 1.15 gross-up was lost again or per-order COGS regressed.
+  // The expense bar must still EXCEED the incl-GST supplier cost ($228.45) — the
+  // original "$209 < $228 cost" complaint — but must NOT inflate to $286 by
+  // counting the gross output GST on top of the GST already inside COGS+Stripe.
   const items = [
     { qty: 1, supplier_cost_snapshot: 18.85 },
     { qty: 1, supplier_cost_snapshot: 34.95 },
@@ -851,10 +1006,14 @@ test('integration: 4 May order single-bucket — expenses match cost+stripe+gst 
   }], indexFor);
   sandbox.assembleBucketExpense(buckets[0]);
 
-  assert.ok(buckets[0].expenses >= 285, `regression guard: 4 May expenses must be ≥ $285 (cost incl-GST + Stripe + GST), got ${buckets[0].expenses}`);
-  assert.ok(buckets[0].expenses < 290, `4 May expenses must not exceed $290, got ${buckets[0].expenses}`);
   assert.ok(Math.abs(buckets[0].cogsTotal - 228.4475) < 0.01,
     `cogs must equal cost-incl-GST exactly when items[] are present: ${buckets[0].cogsTotal}`);
+  assert.ok(buckets[0].expenses > buckets[0].cogsTotal,
+    `expenses must exceed the supplier cost (original complaint), got ${buckets[0].expenses}`);
+  assert.ok(Math.abs(buckets[0].expenses - 255.17) < 0.05,
+    `4 May expenses must be ~$255.17 (cost incl + Stripe + NET gst), got ${buckets[0].expenses}`);
+  const net = buckets[0].revenue - buckets[0].expenses;
+  assert.ok(Math.abs(net - 103.07) < 0.05, `GST-neutral net ~$103.07, got ${net}`);
 });
 
 test('integration: when items[] are absent, KPI fallback equals the per-order cost', () => {
@@ -1192,4 +1351,158 @@ test('integration: ERR-028 screenshot — COGS unknown, net must NOT read as pro
   // The renderable "net" excludes COGS — it is a ceiling on profit, not profit.
   const net = totals.revenue - totals.expenses;
   assert.ok(net > 0, 'net excl. COGS is positive here — which is exactly why it must not be labelled "Profit"');
+});
+
+// ─── forecastDailyAvgFromHistory ─────────────────────────────────────────────
+// Local fallback that keeps the 30-day forecast line from flat-lining at $0
+// when the backend forecast endpoint ships nothing.
+
+const DAY = 24 * 60 * 60 * 1000;
+// Anchor timestamp (epoch-ms) — passed in, never read from the clock, so the
+// math is deterministic. 2026-06-05.
+const T0 = Date.UTC(2026, 5, 5);
+const day = (offsetDays, rev) => ({ ts: T0 - offsetDays * DAY, rev });
+
+test('forecastDailyAvgFromHistory: averages trailing days including zero days', () => {
+  // 30 days, each $30 → flat $30/day average.
+  const hist = Array.from({ length: 30 }, (_, i) => day(i, 30));
+  assert.ok(Math.abs(sandbox.forecastDailyAvgFromHistory(hist, 30) - 30) < 1e-9);
+});
+
+test('forecastDailyAvgFromHistory: zero-revenue days drag the average down', () => {
+  // 10 days of $60 + 20 days of $0 over a 30-day span → $600 / 30 = $20/day.
+  const hist = [
+    ...Array.from({ length: 10 }, (_, i) => day(i, 60)),
+    ...Array.from({ length: 20 }, (_, i) => day(i + 10, 0)),
+  ];
+  assert.ok(Math.abs(sandbox.forecastDailyAvgFromHistory(hist, 30) - 20) < 1e-9,
+    'missing/zero days must count against the projection, not be dropped');
+});
+
+test('forecastDailyAvgFromHistory: only the trailing window counts', () => {
+  // A big spike 45 days ago is outside the 30-day window and must be ignored.
+  const hist = [
+    day(45, 10000),
+    ...Array.from({ length: 30 }, (_, i) => day(i, 10)),
+  ];
+  assert.ok(Math.abs(sandbox.forecastDailyAvgFromHistory(hist, 30) - 10) < 1e-9);
+});
+
+test('forecastDailyAvgFromHistory: short history divides by its real span, not 30', () => {
+  // Only 5 days of $50 each → $250 / 5 = $50/day, NOT $250 / 30.
+  const hist = Array.from({ length: 5 }, (_, i) => day(i, 50));
+  assert.ok(Math.abs(sandbox.forecastDailyAvgFromHistory(hist, 30) - 50) < 1e-9);
+});
+
+test('forecastDailyAvgFromHistory: empty / non-array history → null', () => {
+  assert.equal(sandbox.forecastDailyAvgFromHistory([], 30), null);
+  assert.equal(sandbox.forecastDailyAvgFromHistory(null, 30), null);
+  assert.equal(sandbox.forecastDailyAvgFromHistory(undefined, 30), null);
+});
+
+test('forecastDailyAvgFromHistory: drops malformed points (NaN ts)', () => {
+  const hist = [
+    { ts: NaN, rev: 9999 },
+    ...Array.from({ length: 30 }, (_, i) => day(i, 40)),
+  ];
+  assert.ok(Math.abs(sandbox.forecastDailyAvgFromHistory(hist, 30) - 40) < 1e-9);
+});
+
+test('forecastDailyAvgFromHistory: a 30-day total grosses back up correctly', () => {
+  // The headline does projected30 = localAvg × 30. $25/day → $750 projected.
+  const hist = Array.from({ length: 30 }, (_, i) => day(i, 25));
+  const avg = sandbox.forecastDailyAvgFromHistory(hist, 30);
+  assert.ok(Math.abs(avg * 30 - 750) < 1e-9);
+});
+
+// ─── Cross-validation against profitability.js (the canonical source) ────────
+//
+// The dashboard's bucket math is only correct if it agrees, dollar-for-dollar,
+// with the GST-neutral helpers that produce each order's detail-modal numbers.
+// These tests build a bucket from real order data and assert the assembled
+// net / GST equal computeOrderProfit / computeProfitBreakdown EXACTLY — so the
+// chart can never silently drift from the modal again (ERR-039 / 2026-06-05).
+
+// Build a single-bucket window from one order and assemble it the way
+// buildTrendSeries does (per-order COGS → assembleBucketExpense).
+function assembleSingleOrderBucket({ revenueIncl, costExGst }) {
+  const buckets = [{
+    startMs: 0, revenue: revenueIncl, orders: 1,
+    pnlCogs: 0, hasPnlCogs: false,
+    cogsDerived: 0, cogsFromOrders: 0, hasOrderCogs: false,
+    pnlOpex: 0, hasPnlOpex: false, opexLogged: 0,
+    pnlStripe: 0, hasPnlStripe: false,
+    pnlGst: 0, hasPnlGst: false,
+    hasNet: false,
+  }];
+  sandbox.bucketCogsFromOrders(
+    buckets,
+    [{ created_at: '2026-06-01T18:56:28Z', total: revenueIncl,
+       items: [{ qty: 1, supplier_cost_snapshot: costExGst }] }],
+    () => 0
+  );
+  sandbox.assembleBucketExpense(buckets[0]);
+  return buckets[0];
+}
+
+test('cross-val: Brother order bucket net === modal take-home ($32.21)', () => {
+  // INV-2026-0017 — the order the user pointed at. Sell $348.25 ex / $400.49 incl,
+  // supplier cost $305.13 ex. The order modal shows take-home $32.21.
+  const b = assembleSingleOrderBucket({ revenueIncl: 400.49, costExGst: 305.13 });
+  const canonical = profSandbox.computeOrderProfit(348.25, 305.13, { customerPaidInclGst: 400.49 });
+  const bucketNet = b.revenue - b.expenses;
+  assert.ok(Math.abs(canonical - 32.21) < 0.05, `canonical take-home ~$32.21, got ${canonical}`);
+  assert.ok(Math.abs(bucketNet - canonical) < 0.02,
+    `bucket net must equal computeOrderProfit: ${bucketNet} vs ${canonical}`);
+  // And the bucket's GST line must equal the modal's NET gstRemittedToIrd (~$4.83),
+  // never the gross output GST (~$52.24).
+  const bd = profSandbox.computeProfitBreakdown(348.25, 305.13, { customerPaidInclGst: 400.49 });
+  assert.ok(Math.abs(bd.gstRemittedToIrd - 4.83) < 0.05, `modal net GST ~$4.83, got ${bd.gstRemittedToIrd}`);
+  assert.ok(Math.abs(b.gstTotal - bd.gstRemittedToIrd) < 0.05,
+    `bucket GST must equal net remitted: ${b.gstTotal} vs ${bd.gstRemittedToIrd}`);
+  // Sanity on the user's complaint: expenses must sit BELOW revenue (a profit).
+  assert.ok(b.expenses < b.revenue, `expenses ${b.expenses} must be below revenue ${b.revenue}`);
+});
+
+test('cross-val: bucket components === the cash waterfall (COGS incl, Stripe incl, NET GST)', () => {
+  const b = assembleSingleOrderBucket({ revenueIncl: 400.49, costExGst: 305.13 });
+  const bd = profSandbox.computeProfitBreakdown(348.25, 305.13, { customerPaidInclGst: 400.49 });
+  assert.ok(Math.abs(b.cogsTotal - bd.supplierCostInclGst) < 0.01,
+    `COGS must be incl-GST cash to supplier: ${b.cogsTotal} vs ${bd.supplierCostInclGst}`);
+  assert.ok(Math.abs(b.stripeTotal - bd.stripeFeeInclGst) < 0.05,
+    `Stripe must be incl-GST: ${b.stripeTotal} vs ${bd.stripeFeeInclGst}`);
+  // Every dollar accounted: COGS + Stripe + net GST === customerPaid − take-home.
+  const cashOut = b.cogsTotal + b.stripeTotal + b.gstTotal;
+  assert.ok(Math.abs(cashOut - (b.revenue - bd.netProfit)) < 0.05,
+    `cash out must foot to revenue − take-home: ${cashOut} vs ${b.revenue - bd.netProfit}`);
+});
+
+test('cross-val: multi-order window net === Σ computeOrderProfit (GST-neutral)', () => {
+  // Mixed window: the thin-margin Brother + a healthier compatible order.
+  const orders = [
+    { revenueIncl: 400.49, sellEx: 348.25, costEx: 305.13 },  // ~8% margin
+    { revenueIncl: 165.90, sellEx: 144.26, costEx: 80.00 },   // healthy
+  ];
+  const buckets = [{
+    startMs: 0, revenue: 0, orders: 0,
+    pnlCogs: 0, hasPnlCogs: false, cogsDerived: 0, cogsFromOrders: 0, hasOrderCogs: false,
+    pnlOpex: 0, hasPnlOpex: false, opexLogged: 0,
+    pnlStripe: 0, hasPnlStripe: false, pnlGst: 0, hasPnlGst: false, hasNet: false,
+  }];
+  const raw = orders.map((o, i) => ({
+    created_at: '2026-06-01T18:56:28Z', total: o.revenueIncl,
+    items: [{ qty: 1, supplier_cost_snapshot: o.costEx }],
+  }));
+  for (const o of orders) { buckets[0].revenue += o.revenueIncl; buckets[0].orders += 1; }
+  sandbox.bucketCogsFromOrders(buckets, raw, () => 0);
+  sandbox.assembleBucketExpense(buckets[0]);
+
+  const bucketNet = buckets[0].revenue - buckets[0].expenses;
+  const canonicalSum = orders.reduce((s, o) =>
+    s + profSandbox.computeOrderProfit(o.sellEx, o.costEx, { customerPaidInclGst: o.revenueIncl }), 0);
+  // Per-order Stripe ($0.30 fixed × N) vs bucket Stripe (orders × $0.30) agree
+  // for same N, so the window net matches the sum of order take-homes closely.
+  assert.ok(Math.abs(bucketNet - canonicalSum) < 0.05,
+    `window net must equal Σ computeOrderProfit: ${bucketNet} vs ${canonicalSum}`);
+  assert.ok(bucketNet > 0 && buckets[0].expenses < buckets[0].revenue);
 });

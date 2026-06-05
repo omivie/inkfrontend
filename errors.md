@@ -386,3 +386,133 @@ every other column must carry an explicit width (incl. `cell-select` 40px,
 alone; under auto-layout they'll just stretch again.
 
 **Pinned by:** `tests/admin-products-column-compact.test.js` (9 tests).
+
+## ERR-038 — Tracking-request frontend built ahead of backend; backend shipped a different (simpler) contract (2026-06-05)
+
+**Symptom:** The customer + admin tracking-request UI was built in May 2026
+against a *speculative* spec (`tracking-request-backend-spec.md`) before the
+backend existed. When the backend dev delivered (`tracking-request-api.md`), the
+real endpoints diverged from what the frontend assumed — so the admin "Tracking
+Requests" page would have called endpoints that 404.
+
+**Divergences (assumed → actual):**
+- Admin list pagination: `data.pagination.total` → **flat `data.total`** (no
+  pagination object; `?status=` only, no page/limit/search). The nav badge read
+  `data.pagination.total` and would always have shown 0.
+- Fulfilment: `POST …/:id/fulfill` (inline carrier+tracking modal) → **no such
+  endpoint**. Fulfilment is now **automatic** — setting a tracking number on the
+  order via `PUT /api/admin/orders/:id` flips any pending request to `fulfilled`
+  and emails the customer. The admin page must *route to the order*, not fulfil
+  inline.
+- Dismiss: `PUT …/:id {status:'dismissed'}` → **no endpoint, no `dismissed`
+  status**. Statuses are only `pending | fulfilled`.
+- Request row: flat `carrier`/`tracking_number`/`note` → **nested
+  `order:{status,tracking_number,carrier}`**; no `note`.
+- Table: `tracking_requests` → **`order_tracking_requests`** (migration 083),
+  one-pending-per-order partial unique index.
+- Validation code: doc said `VALIDATION_ERROR`; **live backend returns
+  `VALIDATION_FAILED`** with a `details[]` array (verified by curl). `api.js`
+  already has a `VALIDATION_FAILED` branch that returns a structured envelope
+  (doesn't throw), so the customer page reads `response.code` not a thrown error.
+
+**Fix:** Reconciled the frontend to the *verified live* backend:
+- `admin/api.js` — `getTrackingRequests({status})` (status-only), count reads
+  flat `data.total`; **deleted** `fulfillTrackingRequest`/`dismissTrackingRequest`.
+- `admin/pages/tracking-requests.js` — rewritten as a read-and-route surface:
+  reads nested `order`, pending rows get "Open order to add tracking" →
+  `#orders?focus=<order_number>`; no fulfil modal, no dismiss.
+- `admin/pages/orders.js` — new `#orders?focus=<order_number>` deep-link
+  (`getHashParam` + `focusOnOrder`) seeds the search and auto-opens the order
+  drawer. **Live-verified**: deep-link filtered to the exact order and opened
+  its drawer.
+- `track-order-page.js` — signed-in users always send a valid email
+  (`effectiveEmail` falls back to `Auth.user.email`); friendly `VALIDATION_FAILED`
+  copy.
+- `sql/tracking_requests.sql` → renamed `sql/order_tracking_requests.sql`,
+  schema rewritten to match migration 083. Obsolete `tracking-request-backend-spec.md`
+  deleted.
+
+**Rule:** When a backend handoff doc arrives, **verify it against the live API
+before trusting it** — both the FE's old spec AND the new doc can be wrong (the
+new doc said `VALIDATION_ERROR`; the server says `VALIDATION_FAILED`). curl the
+public endpoints; auth + curl the admin ones. Frontend built ahead of a backend
+is a *hypothesis*, not a contract — reconcile on delivery.
+
+**Pinned by:** `tests/tracking-request-may2026.test.js` (20 tests, rewritten).
+
+---
+
+## ERR-039 — Dashboard profit miscalculated: (a) GST double-counted in expenses, (b) gross_profit used cost-INCL, (c) COGS smeared by revenue, (d) KPI cost basis ≠ snapshots (2026-06-05)
+
+**Symptom:** User spotted the Revenue & Expenses chart showing **2 Jun expenses
+$269.69** when one order that day (Brother TN645CMY, INV-2026-0017) had a
+**supplier cost of $350.90 incl-GST** on its own — i.e. the day's *total* expense
+bar was *below* a single order's cost, which is impossible.
+
+**Root cause (two layered bugs, both verified live via Playwright + the admin API):**
+1. **Per-day shape.** The bulk `GET /api/admin/orders` list **omits
+   `supplier_cost_snapshot`** (its line items carry only price/qty; the snapshot
+   lives only on the *detail* endpoint `/api/admin/orders/:id`). So
+   `bucketCogsFromOrders` resolved $0 cost per order and `buildTrendSeries` fell
+   all the way back to smearing the window-total COGS *proportional to revenue*.
+   For a low-margin genuine SKU (87.6% cost-to-revenue vs the 46.7% window
+   average) that under-booked 2 Jun's COGS to ~$200 → expenses $269.69 to the
+   cent.
+2. **Headline total.** Reconstructing real cost from the snapshots (40/40 orders)
+   gave **~$1,517 incl-GST COGS**, but `analytics_kpi_summary`'s `gross_profit`
+   implied **$1,032.50 COGS** — the RPC's cost basis runs **~$480 lower** than
+   what was actually paid to suppliers, so profit was overstated.
+3. **GST double-count (the bug the user caught on the follow-up).** `trend-math`'s
+   expense GST line was `deriveGst(revenue) = revenue × 3/23` = **gross OUTPUT
+   GST**, added on top of an **incl-GST** COGS + Stripe. That double-counts the
+   input-tax credits already inside the incl-GST cost lines, inflating expenses by
+   `(cogs+stripe) × 3/23` and crushing profit toward zero. It violated the project's
+   own GST-NEUTRAL rule (profitability.js, 2026-05-17). It also defined gross_profit
+   as `rev_ex − cost_INCL` (e.g. Brother 348.25 − 350.90 = **−$2.65**, a negative
+   gross profit on a profitable order) instead of the canonical `rev_ex − cost_EX`
+   (= +$43.12). This is why 2 Jun's reconciled bar ($426.85) still nearly touched
+   its revenue ($428.44).
+
+**Fix (frontend — `pages/dashboard.js` + `utils/trend-math.js`):**
+- `enrichOrdersWithSupplierCost` back-fills each in-window order's real cost from
+  the detail endpoint and stamps `cost_total_excl_gst` (which `orderCostInclGst`
+  reads). Rate-limit-hardened: **concurrency 2** trickle, 3 retries w/ backoff on
+  429, capped 200, **sessionStorage** cache (snapshots immutable → fetch once per
+  session; warm reloads reconcile instantly, no flash).
+- **GST-NEUTRAL expense model** (now matches profitability.js / each order's detail
+  modal exactly): `deriveNetGstRemitted(rev, cogs, stripe) = (rev − cogs − stripe) ×
+  3/23` is the **NET** GST remitted to IRD (= `computeProfitBreakdown.gstRemittedToIrd`),
+  replacing the gross-output GST in `assembleBucketExpense`. `reconciledGrossProfitInclGst`
+  now subtracts cost_**EX** (`cogsIncl/1.15`). Net = `revenue − (cogs_incl + opex +
+  stripe_incl + gst_net)` collapses to `rev_ex − cost_ex − stripe_ex` = Σ
+  `computeOrderProfit`. GST nets to zero.
+- `reconcileProfitFromSnapshots` pins both `_reconciledCogsInclGst` (chart COGS, used
+  directly) and the canonical `_reconciledGrossProfit`; `resolveKpiCurrent` applies
+  the override so Gross Profit, Net Profit, Gross Margin, Trends + the forecast's
+  `netMargin` all read the same true figure. `costCoverage` gate ≥ 0.6; honest
+  "✓ reconciled" / "provisional" label on the strip.
+- **Live result (GST-neutral):** 2 Jun $269.69 → **$378.47** expenses / **+$49.97
+  profit** (below revenue $428.44 — the user's complaint resolved); window GST line
+  $288.41 gross → **$85.88 net**; Net Profit **$572.55** = `(rev−cogs−stripe)/1.15`;
+  Gross Profit **$644.29** = `rev_ex − cost_ex`; Gross Margin **28.7%**. The Brother
+  order's detail modal is unchanged at take-home **$32.21**, and the chart now agrees
+  with it. Cache token `2026.06.05-gst-neutral-reconcile-4`.
+
+**Rule:** The dashboard P&L is **GST-NEUTRAL** — profitability.js is the single
+source of truth (`net = rev_ex − cost_ex − stripe_ex`; the GST you pay supplier +
+Stripe is reclaimed). The chart's expense GST line is the **NET remitted**, never
+the gross output GST, and COGS being incl-GST means you must NOT also expense the
+full output GST. Cross-validate any new P&L surface against `computeProfitBreakdown`.
+Separately: the bulk `/orders` list is **not** a cost source (detail endpoint only),
+and `analytics_kpi_summary.gross_profit` disagrees with the locked snapshots.
+
+**Durable fix is backend (frontend is a rate-limited best-effort workaround):**
+ship `supplier_cost_snapshot` (or `cost_total_excl_gst`) on the `/orders` **list**
+response, AND correct `analytics_kpi_summary` to value `gross_profit` from the
+snapshots (GST-neutral). Either removes the per-session detail fan-out entirely.
+
+**Pinned by:** `tests/dashboard-trend-math.test.js` (110 tests — `deriveNetGstRemitted`,
+canonical `reconciledGrossProfitInclGst`, `extrapolateWindowCogsInclGst`, `costCoverage`,
+`residualCogsAfterExact`, and **3 cross-validation tests** that assert the bucket math
+equals `profitability.js` `computeOrderProfit`/`computeProfitBreakdown` and the modal's
+$32.21 / $4.83 net GST).

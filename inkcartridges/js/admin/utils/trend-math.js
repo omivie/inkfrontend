@@ -3,32 +3,38 @@
  *
  * The Trends bucket builder in pages/dashboard.js orchestrates the data sources
  * (KPI summary, P&L, raw orders, logged expenses) but the actual math lives
- * here so it can be unit-tested in isolation. The chart MUST reflect every
- * dollar that left the company in a window — COGS, operating expenses, Stripe
- * fees, and GST remitted — so each helper is named after the loss line it
- * builds.
+ * here so it can be unit-tested in isolation. The chart shows the CASH waterfall
+ * for a window — the same money trail as each order's detail modal — so a
+ * bucket's `net` equals the sum of its orders' take-home profit.
  *
- * Conventions (revised by user 2026-05-12, see project_profit_calc.md):
- *   - Order totals on this dashboard are gross (incl-GST). Output GST embedded
+ * GST-NEUTRAL MODEL (the single source of truth is utils/profitability.js;
+ * corrected 2026-06-05 — the chart previously double-counted GST):
+ *   - Order totals on this dashboard are gross (incl-GST). Output GST collected
  *     in a gross sale = gross × 3/23.
- *   - Cost is grossed up by 1.15 since we pay the supplier incl-GST.
- *   - Stripe NZ domestic card = gross × 2.65% + $0.30 per transaction, ALL
- *     multiplied by 1.15 (Stripe charges 15% GST on its fee; treat as cash
- *     outflow). Fee base on this dashboard is bucket gross revenue (already
- *     incl-GST + shipping per `o.total`).
+ *   - COGS is incl-GST cash to the supplier (cost_ex × 1.15).
+ *   - Stripe NZ domestic card = gross × 2.65% + $0.30 per transaction, ALL × 1.15
+ *     (Stripe charges 15% GST on its fee). Fee base = bucket gross revenue
+ *     (incl-GST + shipping per `o.total`).
+ *   - GST expense = NET remitted to IRD = output GST − input credits on COGS &
+ *     Stripe = (revenue_incl − cogs_incl − stripe_incl) × 3/23. This is
+ *     `computeProfitBreakdown.gstRemittedToIrd`. Using the gross OUTPUT GST as
+ *     the expense (the old bug) double-counts the input credits already inside
+ *     the incl-GST COGS + Stripe.
+ *   - Result: net = revenue_incl − (cogs_incl + opex + stripe_incl + gst_net)
+ *     collapses to the canonical `revenue_ex − cost_ex − stripe_ex` per order
+ *     (= profitability.js computeOrderProfit). GST nets to zero.
+ *   - Gross Profit (the KPI card) = revenue_ex − cost_EX (pre-Stripe); Net Profit
+ *     = Gross − stripe_ex. See reconciledGrossProfitInclGst.
  *
- * COGS source-of-truth (set by user 2026-05-08, formula corrected 2026-05-16):
- *   - Backend /api/admin/analytics/pnl rarely populates per-period cogs.
- *   - The KPI summary RPC (analytics_kpi_summary) reliably returns `revenue`
- *     (GROSS, incl-GST) and `gross_profit` for the visible window.
- *   - `gross_profit` follows the canonical profitability.js convention:
- *         gross_profit = revenue_ex_gst − cost_incl_gst
- *     so the incl-GST cost is recovered WITHOUT any further gross-up:
- *         cost_incl_gst = revenue_ex_gst − gross_profit
- *                       = (revenue_gross / 1.15) − gross_profit
- *   - That total COGS is distributed across buckets in proportion to each
- *     bucket's revenue. Totals match exactly; per-bucket shape mirrors the
- *     revenue shape (best approximation absent a daily-cost-series RPC).
+ * COGS source-of-truth (set by user 2026-05-08):
+ *   - Preferred: real per-order supplier_cost_snapshot (incl-GST) summed into the
+ *     bucket each order falls in (dashboard.js back-fills it from the order detail
+ *     endpoint, since the bulk /orders list omits it — see ERR-039). The window
+ *     total is then `payload._reconciledCogsInclGst`.
+ *   - Fallback (provisional, no snapshots resolvable): recover an approximate
+ *     incl-GST cost from the KPI summary's gross_profit via `kpiCogsInclGst`
+ *     (which assumes the BACKEND's gross_profit = revenue_ex − cost_incl) and
+ *     distribute it across buckets by revenue. Labelled "provisional" in the UI.
  *
  * Operating expenses source-of-truth:
  *   - /api/admin/analytics/expenses returns manually-logged spend with a date
@@ -319,6 +325,7 @@ export function bucketCogsFromOrders(buckets, rawOrders, indexFor) {
   const orders = Array.isArray(rawOrders) ? rawOrders : [];
   let resolvedCount = 0;
   let resolvedRevenue = 0;
+  let resolvedCost = 0;
   for (const o of orders) {
     const cost = orderCostInclGst(o);
     if (cost <= 0) continue;
@@ -330,8 +337,81 @@ export function bucketCogsFromOrders(buckets, rawOrders, indexFor) {
     buckets[i].hasOrderCogs = true;
     resolvedCount += 1;
     resolvedRevenue += Number(o?.total || 0);
+    resolvedCost += cost;
   }
-  return { resolvedCount, resolvedRevenue };
+  return { resolvedCount, resolvedRevenue, resolvedCost };
+}
+
+// Residual COGS to spread across orders that did NOT resolve an exact per-order
+// cost. The KPI summary's gross_profit gives the authoritative window-total COGS
+// (`kpiCogsInclGst`); per-order line items account for part of it exactly
+// (`resolvedCost` from `bucketCogsFromOrders`). The remainder is what the
+// un-resolved orders must have cost, so distributing exactly THIS keeps the
+// window total pinned: Σ(exact per-order) + residual = totalCogsInclGst. The
+// previous approach spread `totalCogs × unresolvedRevenueShare`, which silently
+// drifted the window total away from the KPI as soon as any order resolved a
+// cost that wasn't revenue-proportional (e.g. a low-margin genuine toner).
+//
+// Clamp at 0: if exact line-item costs already meet or exceed the KPI total
+// (KPI under-reporting cost), we trust the harder per-order data and add nothing.
+export function residualCogsAfterExact(totalCogsInclGst, resolvedCost) {
+  const t = Number(totalCogsInclGst);
+  if (!Number.isFinite(t) || t <= 0) return 0;
+  const r = Number(resolvedCost);
+  return Math.max(0, t - (Number.isFinite(r) ? r : 0));
+}
+
+// ── Snapshot-cost reconciliation ─────────────────────────────────────────────
+//
+// The dashboard's analytics_kpi_summary RPC reports a gross_profit whose cost
+// basis runs materially lower than the actual `supplier_cost_snapshot` locked on
+// each order (verified live 2026-06-05: the RPC implied ~53% margin where the
+// real snapshots showed ~31%, overstating profit by ~$480 in one window). When
+// we have resolved enough orders' real cost, we recompute gross_profit from the
+// snapshots so every profit surface — Gross Profit, Net Profit, Gross Margin and
+// the Trends chart — tells the truth instead of the optimistic RPC figure.
+
+// Estimate the FULL window's incl-GST COGS from the orders whose snapshot cost we
+// resolved, extrapolating the resolved cost-to-revenue ratio across any orders
+// we couldn't value (network/rate-limit gaps). With full coverage this is just
+// the resolved sum. Returns 0 when nothing usable resolved.
+export function extrapolateWindowCogsInclGst(resolvedCostInclGst, resolvedRevenue, totalRevenue) {
+  const c  = Number(resolvedCostInclGst);
+  const rr = Number(resolvedRevenue);
+  if (!Number.isFinite(c) || c <= 0 || !Number.isFinite(rr) || rr <= 0) return 0;
+  const tr = Number(totalRevenue);
+  const total = (Number.isFinite(tr) && tr > rr) ? tr : rr;   // never scale below resolved
+  return c * (total / rr);
+}
+
+// gross_profit, recomputed from snapshot COGS, in the canonical profitability.js
+// convention: revenue_ex_gst − cost_EX_gst (GST-neutral — both sides ex-GST).
+// `revenueGross` is incl-GST (the KPI/orders revenue basis); `windowCogsInclGst`
+// is the incl-GST cash to suppliers, so we strip its GST back out before
+// subtracting. For the Brother order this gives 348.25 − 305.13 = +$43.12, NOT
+// the 348.25 − 350.90 = −$2.65 that subtracting the INCL cost would (wrongly)
+// produce. Gross is pre-Stripe; Net Profit = Gross − stripe_ex (see the Trends
+// strip). Returns null when revenue is unusable so callers keep the provisional
+// RPC number rather than inventing one.
+export function reconciledGrossProfitInclGst(revenueGross, windowCogsInclGst) {
+  const r = Number(revenueGross);
+  if (!Number.isFinite(r) || r <= 0) return null;
+  const cogsIncl = Number(windowCogsInclGst);
+  const revenueExGst = r * (1 - GST_FRACTION_OF_GROSS);
+  const costExGst = (Number.isFinite(cogsIncl) ? cogsIncl : 0) / COST_GST_GROSS_UP;
+  return revenueExGst - costExGst;
+}
+
+// Fraction of window revenue whose snapshot cost we actually resolved — the
+// caller's confidence gate. Reconcile the headline only above a threshold so a
+// couple of resolved orders can't drive a wild extrapolation across a window we
+// mostly couldn't value.
+export function costCoverage(resolvedRevenue, totalRevenue) {
+  const rr = Number(resolvedRevenue);
+  const tr = Number(totalRevenue);
+  if (!Number.isFinite(tr) || tr <= 0) return 0;
+  if (!Number.isFinite(rr) || rr <= 0) return 0;
+  return Math.min(1, rr / tr);
 }
 
 function safeNum(v) {
@@ -348,12 +428,50 @@ export function deriveStripe(revenue, orders) {
   return base * (1 + STRIPE_FEE_GST_DERIVE);
 }
 
-// Per-bucket output GST embedded in gross-incl-GST revenue.
+// Per-bucket OUTPUT GST collected — the GST embedded in gross-incl-GST revenue.
+// This is the tax we COLLECT from customers, NOT the cash that leaves the
+// company: most of it is offset by input-tax credits on the GST we already paid
+// suppliers + Stripe. It is NOT the expense line (see deriveNetGstRemitted).
+// Kept exported because "GST collected" is a meaningful figure in its own right.
 export function deriveGst(revenue) {
   return safeNum(revenue) * GST_FRACTION_OF_GROSS;
 }
 
-// Final assembly: pick the most authoritative source for each component.
+// Per-bucket NET GST remitted to IRD — the actual GST cash that leaves the
+// company. This is the canonical figure from profitability.js's cash waterfall
+// (`computeProfitBreakdown.gstRemittedToIrd`):
+//
+//     gstRemitted = output GST collected − input credit on COGS − input credit on Stripe
+//
+// In incl-GST terms every component carries its GST as `gross × 3/23`, so:
+//
+//     gstRemitted = (revenue_incl − cogs_incl − stripe_incl) × 3/23
+//
+// Using this (not the gross output GST) is what makes the dashboard GST-NEUTRAL:
+// the GST we pay suppliers + Stripe is reclaimed, so bucket profit collapses to
+// the canonical `revenue_ex − cost_ex − stripe_ex` (= Σ computeOrderProfit) and
+// matches each order's "take-home profit" on its detail modal. Distributing the
+// gross output GST instead double-counted the input credits already baked into
+// the incl-GST COGS + Stripe, inflating expenses by ~(cogs+stripe)×3/23 and
+// understating profit (ERR-039 follow-up, 2026-06-05).
+//
+// May be negative in a loss bucket (input credits exceed output GST → a GST
+// refund, a genuine cash inflow); we keep it exact rather than clamping.
+export function deriveNetGstRemitted(revenueInclGst, cogsInclGst, stripeInclGst) {
+  const base = safeNum(revenueInclGst) - safeNum(cogsInclGst) - safeNum(stripeInclGst);
+  return base * GST_FRACTION_OF_GROSS;
+}
+
+// Final assembly: pick the most authoritative source for each component, then
+// foot every dollar of cash out. The expense breakdown is the CASH waterfall
+// (matches profitability.js / each order's detail modal):
+//   COGS   incl-GST cash to suppliers
+//   Opex   logged operating spend (treated as final cash; no GST credit, since
+//          logged subs are predominantly foreign/GST-free)
+//   Stripe incl-GST cash to Stripe
+//   GST    NET remitted to IRD (output − input credits) — NOT gross output GST
+// so `net = revenue_incl − expenses` equals the GST-neutral take-home profit.
+//
 // Order of preference for COGS:
 //   1. P&L per-period (forward-compat — backend rarely ships this today)
 //   2. Sum of orderCostInclGst per order in the bucket (exact, from items[])
@@ -365,7 +483,10 @@ export function assembleBucketExpense(b) {
   else                     b.cogsTotal = b.cogsDerived || 0;
   b.opexTotal   = b.hasPnlOpex ? b.pnlOpex : (b.opexLogged || 0);
   b.stripeTotal = b.hasPnlStripe ? b.pnlStripe : deriveStripe(b.revenue, b.orders);
-  b.gstTotal    = b.hasPnlGst ? b.pnlGst : deriveGst(b.revenue);
+  // GST expense = NET remitted (output − input credits on COGS + Stripe). Must be
+  // computed AFTER cogsTotal + stripeTotal so the credits are available.
+  b.gstTotal    = b.hasPnlGst ? b.pnlGst : deriveNetGstRemitted(b.revenue, b.cogsTotal, b.stripeTotal);
+  b.gstCollected = deriveGst(b.revenue);   // informational: output GST collected
   b.expenses    = b.cogsTotal + b.opexTotal + b.stripeTotal + b.gstTotal;
   b.hasExpense  = b.expenses > 0;
   if (!b.hasNet) b.net = b.revenue - b.expenses;
@@ -476,4 +597,41 @@ export function cogsIsKnown({
 } = {}) {
   if (!(Number(windowRevenue) > 0)) return true;
   return Boolean(hasPnlCogs) || Boolean(hasOrderCogs) || Number(kpiCogsTotal) > 0;
+}
+
+// Estimate expected daily revenue from recent history — a local fallback for
+// the 30-day forecast when the backend forecast endpoint returns nothing.
+//
+// Why this exists: the forecast chart projects forward at `f30 / 30`, where
+// `f30` is the backend's 30-day revenue forecast. When that endpoint is down or
+// empty (`f30 == null`) the projection collapses to a flat $0 line — the
+// "forecast isn't working" symptom. Falling back to the trailing daily average
+// keeps the forward line meaningful (and honest: it's labelled a trend estimate).
+//
+// `historical` is the array buildForecastSeries assembles: `[{ ts, rev }, …]`,
+// where `ts` is epoch-ms and `rev` is that day's revenue. We average the last
+// `trailingDays` calendar days INCLUDING zero-revenue days (dividing by the span
+// covered, capped at `trailingDays`), so a quiet stretch correctly drags the
+// projection down rather than being silently dropped. Returns null when there's
+// no usable history to average.
+export function forecastDailyAvgFromHistory(historical, trailingDays = 30) {
+  if (!Array.isArray(historical) || trailingDays <= 0) return null;
+  const pts = historical
+    .filter(h => h && Number.isFinite(h.ts))
+    .sort((a, b) => a.ts - b.ts);
+  if (!pts.length) return null;
+
+  const maxTs = pts[pts.length - 1].ts;
+  const cutoff = maxTs - (trailingDays - 1) * ONE_DAY_MS;
+  const recent = pts.filter(h => h.ts >= cutoff);
+  if (!recent.length) return null;
+
+  const total = recent.reduce((s, h) => s + Number(h.rev || 0), 0);
+  // Span = inclusive day count from the earliest recent point to the latest,
+  // capped at trailingDays so a short history doesn't inflate the average.
+  const spanDays = Math.min(
+    trailingDays,
+    Math.round((maxTs - recent[0].ts) / ONE_DAY_MS) + 1
+  );
+  return spanDays > 0 ? total / spanDays : null;
 }

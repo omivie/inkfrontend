@@ -180,10 +180,13 @@
                 return;
             }
 
-            // Email is mandatory when we can't infer it from a session — it's how
-            // the team confirms ownership and where the tracking reply is sent.
+            // Email is mandatory — it's how the team confirms ownership and where
+            // the tracking reply is sent. For signed-in customers we fall back to
+            // the session email so the backend (which requires a valid email)
+            // always receives one even if the visible field was cleared.
             const authed = typeof Auth !== 'undefined' && Auth.isAuthenticated();
-            if (!email && !authed) {
+            const effectiveEmail = email || (authed && Auth.user?.email) || '';
+            if (!effectiveEmail) {
                 this.showResult('<p>Please enter the email address you used to place the order.</p>', 'error');
                 document.getElementById('track-email')?.focus();
                 return;
@@ -193,10 +196,10 @@
             this.showResult('<p class="text-muted">Sending your request…</p>', null);
 
             try {
-                const response = await API.requestOrderTracking({ order_number: orderNumber, email });
+                const response = await API.requestOrderTracking({ order_number: orderNumber, email: effectiveEmail });
 
                 if (response.ok) {
-                    const dest = email || (authed && Auth.user?.email) || 'the email on your order';
+                    const dest = effectiveEmail || 'the email on your order';
                     this.showResult(`
                         <div class="track-result__icon" aria-hidden="true">
                             <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
@@ -217,6 +220,10 @@
                     }
                 } else if (response.code === 'RATE_LIMITED') {
                     this.showResult('<p>You\'ve sent a few requests in a short time. Please wait a minute and try again.</p>', 'error');
+                } else if (response.code === 'VALIDATION_FAILED') {
+                    // Malformed order number or email — guide the customer rather
+                    // than surfacing the backend's terse "Validation failed".
+                    this.showResult('<p>Please double-check your order number and email address, then try again. Your order number is in your confirmation email.</p>', 'error');
                 } else {
                     const msg = (typeof API.extractErrorMessage === 'function')
                         ? API.extractErrorMessage(response)

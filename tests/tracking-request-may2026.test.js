@@ -1,6 +1,6 @@
 /**
- * Tracking Requests — request-based tracking model (May 2026)
- * ===========================================================
+ * Tracking Requests — request-based tracking model
+ * ================================================
  *
  * We stopped revealing order tracking automatically. The contract:
  *
@@ -9,12 +9,22 @@
  *      renders a tracking number, carrier, timeline, or live events.
  *   2. The request notifies admins who opted into `notify_tracking_requests`
  *      on the admin Settings page.
- *   3. An admin fulfils the request (carrier + tracking number) from the admin
- *      "Tracking Requests" page, which emails the customer their tracking.
+ *   3. An admin opens the admin "Tracking Requests" page and clicks through to
+ *      the ORDER to add a tracking number. Fulfilment is AUTOMATIC — adding
+ *      tracking on the order (PUT /api/admin/orders/:id) flips the request to
+ *      `fulfilled` and emails the customer. There is no fulfil/dismiss endpoint.
  *
- * These tests pin the FRONTEND half of that contract (the backend half lives in
- * tracking-request-backend-spec.md). Run with:
+ * These tests pin the FRONTEND half of that contract against the verified live
+ * backend (June 2026). Run with:
  *   node --test tests/tracking-request-may2026.test.js
+ *
+ * Backend contract (verified live, June 2026):
+ *   POST /api/orders/track-request → 200 {ok:true,data:{message}} ALWAYS
+ *     (anti-enumeration); 400 {ok:false,error:{code:'VALIDATION_FAILED',...}}
+ *     for malformed input; 429 {ok:false,error:{code:'RATE_LIMITED'}}.
+ *   GET /api/admin/tracking-requests?status=pending|fulfilled|all →
+ *     {ok:true,data:{requests:[{id,order_number,email,status,fulfilled_at,
+ *       created_at,order:{status,tracking_number,carrier}}],total}}  (flat total).
  */
 
 'use strict';
@@ -67,6 +77,18 @@ test('track-order controller renders a confirmation, prefills email when signed 
   assert.match(ctrl, /RATE_LIMITED/, 'handles the rate-limit response code');
 });
 
+test('track-order controller handles the live backend error codes', () => {
+  const ctrl = read('js/track-order-page.js');
+  // The live backend returns VALIDATION_FAILED (not VALIDATION_ERROR) for
+  // malformed order numbers / emails. api.js surfaces it as response.code.
+  assert.match(ctrl, /VALIDATION_FAILED/, 'must handle the VALIDATION_FAILED code specifically');
+  // Signed-in customers must always send a valid email (backend requires one):
+  // the controller falls back to the session email when the field is empty.
+  assert.match(ctrl, /effectiveEmail/, 'must compute an effective email with a session fallback');
+  assert.match(ctrl, /effectiveEmail\s*=\s*email\s*\|\|\s*\(authed\s*&&\s*Auth\.user\?\.email\)/,
+    'effective email must fall back to Auth.user.email when authed');
+});
+
 // ─── Public page ─────────────────────────────────────────────────────────────
 test('public /track-order page exists with the request form contract', () => {
   const html = read('html/track-order.html');
@@ -115,29 +137,61 @@ test('footer.js links to /track-order in both the column and the bottom nav', ()
 });
 
 // ─── Admin API ───────────────────────────────────────────────────────────────
-test('admin/api.js exposes the tracking-request methods + endpoints', () => {
+test('admin/api.js exposes the read-only tracking-request methods', () => {
   const api = read('js/admin/api.js');
   assert.match(api, /async getTrackingRequests\(/, 'getTrackingRequests missing');
   assert.match(api, /async getPendingTrackingRequestCount\(/, 'getPendingTrackingRequestCount missing');
-  assert.match(api, /async fulfillTrackingRequest\(/, 'fulfillTrackingRequest missing');
-  assert.match(api, /async dismissTrackingRequest\(/, 'dismissTrackingRequest missing');
   assert.match(api, /\/api\/admin\/tracking-requests/, 'list endpoint missing');
-  assert.match(api, /\/tracking-requests\/\$\{encodeURIComponent\(requestId\)\}\/fulfill/, 'fulfill endpoint missing');
-  // fulfil must carry a tracking number and POST it.
-  const fn = api.slice(api.indexOf('async fulfillTrackingRequest('));
-  assert.match(fn.slice(0, 600), /tracking_number/, 'fulfil payload must carry tracking_number');
+});
+
+test('admin/api.js drops the non-existent fulfil/dismiss endpoints', () => {
+  const api = read('js/admin/api.js');
+  // The backend has NO fulfil/dismiss endpoint — fulfilment is automatic when
+  // a tracking number is set on the order. Calling them would 404.
+  assert.ok(!/fulfillTrackingRequest/.test(api), 'fulfillTrackingRequest must be removed (no /fulfill endpoint)');
+  assert.ok(!/dismissTrackingRequest/.test(api), 'dismissTrackingRequest must be removed (no dismiss endpoint)');
+  assert.ok(!/tracking-requests\/[^'"`]*\/fulfill/.test(api), 'must not reference a /fulfill route');
+});
+
+test('admin/api.js reads the flat data.total (no pagination object)', () => {
+  const api = read('js/admin/api.js');
+  const fn = api.slice(api.indexOf('async getPendingTrackingRequestCount('));
+  const body = fn.slice(0, 500);
+  assert.match(body, /data\.total/, 'badge count must read flat data.total');
+  assert.ok(!/pagination/.test(body), 'must NOT read data.pagination.total (the backend returns no pagination)');
 });
 
 // ─── Admin page + nav ────────────────────────────────────────────────────────
-test('admin Tracking Requests page module is well-formed', () => {
+test('admin Tracking Requests page is a read-and-route surface', () => {
   const page = read('js/admin/pages/tracking-requests.js');
   assert.match(page, /export default/, 'must have a default export');
   assert.match(page, /async init\(/, 'page module needs init()');
   assert.match(page, /destroy\(\)/, 'page module needs destroy()');
   assert.match(page, /title:\s*'Tracking Requests'/, 'page title');
-  assert.match(page, /import \{ Modal \}/, 'must import Modal for the fulfil dialog');
-  assert.match(page, /fulfillTrackingRequest/, 'must call fulfillTrackingRequest');
-  assert.match(page, /refreshTrackingRequestsBadge/, 'must refresh the nav badge after actions');
+  assert.match(page, /getTrackingRequests/, 'must list requests');
+  assert.match(page, /refreshTrackingRequestsBadge/, 'must refresh the nav badge after loads');
+  // Routes to the order; fulfilment happens there (auto), not via a modal here.
+  assert.match(page, /orders\?focus=/, 'pending requests must deep-link to the order via #orders?focus=');
+  assert.match(page, /data-open-order/, 'must render an "open order" action');
+  assert.match(page, /r\.order\b|\.order\s*\|\|/, 'must read the nested order object from each request');
+});
+
+test('admin Tracking Requests page has no fulfil/dismiss UI', () => {
+  const page = read('js/admin/pages/tracking-requests.js');
+  assert.ok(!/fulfillTrackingRequest/.test(page), 'must not call the removed fulfil endpoint');
+  assert.ok(!/dismissTrackingRequest/.test(page), 'must not call the removed dismiss endpoint');
+  assert.ok(!/showFulfillModal|import \{ Modal \}/.test(page), 'inline fulfil modal must be gone');
+  assert.ok(!/data-dismiss=/.test(page), 'dismiss button must be gone');
+  // 'dismissed' is not a backend status anymore.
+  assert.ok(!/dismissed/.test(page), 'must not reference a dismissed status');
+});
+
+test('admin orders page supports the #orders?focus= deep-link', () => {
+  const orders = read('js/admin/pages/orders.js');
+  assert.match(orders, /function getHashParam\(/, 'getHashParam helper must exist');
+  assert.match(orders, /async function focusOnOrder\(/, 'focusOnOrder helper must exist');
+  assert.match(orders, /getHashParam\(['"]focus['"]\)/, 'init must read the focus param');
+  assert.match(orders, /openOrderModal/, 'focus must open the order drawer');
 });
 
 test('admin app.js registers the tracking-requests nav item + badge wiring', () => {
@@ -158,15 +212,21 @@ test('admin Settings exposes the notify_tracking_requests opt-in', () => {
 });
 
 // ─── Schema ──────────────────────────────────────────────────────────────────
-test('SQL migration defines the queue table + admin opt-in column', () => {
-  const sql = read('sql/tracking_requests.sql');
-  assert.match(sql, /create table if not exists public\.tracking_requests/, 'table create missing');
-  assert.match(sql, /status[\s\S]*check \(status in \('pending', 'fulfilled', 'dismissed'\)\)/, 'status check constraint missing');
+test('SQL doc mirrors the deployed order_tracking_requests schema', () => {
+  const sql = read('sql/order_tracking_requests.sql');
+  assert.match(sql, /create table if not exists public\.order_tracking_requests/, 'table create missing');
+  // Status is pending|fulfilled only — no dismissed.
+  assert.match(sql, /status[\s\S]*check \(status in \('pending', 'fulfilled'\)\)/, 'status check constraint missing/wrong');
+  assert.ok(!/dismissed/.test(sql), 'dismissed status must be gone from the schema doc');
+  // One pending request per order (partial unique index).
+  assert.match(sql, /unique index[\s\S]*where status = 'pending'/, 'one-pending-per-order partial unique index missing');
+  // order_id cascades on delete.
+  assert.match(sql, /order_id[\s\S]*references public\.orders[\s\S]*on delete cascade/, 'order_id FK cascade missing');
   assert.match(sql, /enable row level security/, 'RLS must be enabled');
   assert.match(sql, /add column if not exists notify_tracking_requests boolean/, 'opt-in column add missing');
 });
 
-test('backend spec doc exists for the backend Claude', () => {
-  assert.ok(fs.existsSync(path.join(ROOT, 'tracking-request-backend-spec.md')),
-    'tracking-request-backend-spec.md must exist at repo root');
+test('the obsolete backend handoff spec is gone (backend is built)', () => {
+  assert.ok(!fs.existsSync(path.join(ROOT, 'tracking-request-backend-spec.md')),
+    'tracking-request-backend-spec.md must be removed — the backend is built and the spec is obsolete');
 });

@@ -187,6 +187,9 @@ test('products page imports the bumped table.js token; APP_VERSION advanced', ()
   assert.match(PRODUCTS_SRC, /components\/table\.js\?v=col-compact-may2026/,
     'products.js must import the bumped table.js version');
   const APP_SRC = READ('inkcartridges/js/admin/app.js');
-  assert.match(APP_SRC, /APP_VERSION\s*=\s*'2026\.06\.04-analytics-http'/,
-    'APP_VERSION must be bumped so the SPA page modules re-fetch');
+  // APP_VERSION advances every time the SPA ships (so page modules re-fetch).
+  // Assert it's a date-stamped token at or after the col-compact bump rather than
+  // pinning a single literal that any later feature would (correctly) break.
+  assert.match(APP_SRC, /APP_VERSION\s*=\s*'2026\.0[6-9]\.[0-9]{2}-[a-z0-9-]+'/,
+    'APP_VERSION must be a current date-stamped token so SPA page modules re-fetch');
 });

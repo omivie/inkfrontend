@@ -6,9 +6,11 @@ import { AdminAuth, FilterState, AdminAPI, esc } from '../app.js';
 import {
   STRIPE_RATE_DERIVE, STRIPE_FIXED_DERIVE, GST_FRACTION_OF_GROSS,
   bucketOperatingExpenses, distributeCogsByRevenue, assembleBucketExpense,
-  sumTrendTotals, bucketCogsFromOrders, kpiCogsInclGst,
+  sumTrendTotals, bucketCogsFromOrders, kpiCogsInclGst, residualCogsAfterExact,
   expandRecurringExpenses, isRevenueOrder, deriveKpisFromOrders,
-  cogsIsKnown, refundAmount,
+  cogsIsKnown, refundAmount, forecastDailyAvgFromHistory,
+  orderCostInclGst, extrapolateWindowCogsInclGst, reconciledGrossProfitInclGst,
+  costCoverage,
 } from '../utils/trend-math.js';
 import { Charts } from '../components/charts.js';
 
@@ -81,15 +83,199 @@ function safeDiv(a, b) {
 // `derived` is true when `cur` came from the order-feed fallback.
 function resolveKpiCurrent(d) {
   const rpcCur = d.kpis?.current ?? {};
-  if (rpcCur.revenue != null) return { cur: rpcCur, derived: false };
-  const fallback = deriveKpisFromOrders(d.rawOrders);
-  return fallback ? { cur: fallback, derived: true } : { cur: {}, derived: false };
+  let base;
+  if (rpcCur.revenue != null) base = { cur: rpcCur, derived: false };
+  else {
+    const fallback = deriveKpisFromOrders(d.rawOrders);
+    base = fallback ? { cur: fallback, derived: true } : { cur: {}, derived: false };
+  }
+  // Snapshot-cost reconciliation (set by reconcileProfitFromSnapshots once enough
+  // orders resolve their real supplier cost): override gross_profit so the whole
+  // dashboard derives the true margin from snapshots, not the optimistic RPC.
+  if (d._reconciledGrossProfit != null && Number.isFinite(d._reconciledGrossProfit)) {
+    base = {
+      ...base,
+      cur: { ...base.cur, gross_profit: d._reconciledGrossProfit },
+      reconciled: true,
+      coverage: d._costCoverage ?? null,
+    };
+  }
+  return base;
 }
 
 // Keep only orders that produced a cleared charge — see `isRevenueOrder` /
 // NON_REVENUE_ORDER_STATUSES in trend-math.js for the rationale.
 function revenueGeneratingOrders(rawOrders) {
   return firstArray(rawOrders, ['orders', 'data']).filter(isRevenueOrder);
+}
+
+// ---------- per-order supplier-cost enrichment ----------
+//
+// The bulk /api/admin/orders list omits `supplier_cost_snapshot` (investigated
+// 2026-06-05: list line items carry only price/qty; the cost snapshot lives on
+// the detail endpoint /api/admin/orders/:id). Without it, the Revenue &
+// Expenses chart can't value COGS per order and falls back to smearing the KPI
+// window-total COGS by revenue — which under-books cost on days dominated by a
+// low-margin genuine SKU (a single $350.90 supplier cost showing as ~$200, so
+// the day's expense bar came out *below* that order's own cost).
+//
+// We back-fill the real cost by fetching each order's detail (the same call the
+// Orders page makes) and stamping `cost_total_excl_gst` on the raw order, which
+// `orderCostInclGst` then reads. Cost is paid carefully:
+//   - sub-month granularity only (hour/day/week): at month resolution many
+//     orders blend into a bucket and revenue-share is already a fair shape, and
+//     wide windows carry far too many orders to fan out responsibly.
+//   - capped fan-out + bounded concurrency so we never hammer the backend.
+//   - cached by order id (cost snapshots are immutable once placed), and `null`
+//     is cached too so cost-less orders aren't re-fetched every reload.
+// Non-blocking: the dashboard paints immediately with the revenue-share
+// approximation, then this self-corrects the per-day shape a few seconds later.
+const ENRICH_MAX_FETCH   = 200;      // never fan out more live detail calls than this
+const ENRICH_CONCURRENCY = 2;        // simultaneous detail requests — a gentle trickle that
+                                     // coexists with the backend rate limiter (api.js also
+                                     // honours Retry-After on 429 underneath)
+const ENRICH_RETRIES     = 3;        // per-order retries on transient failure / 429
+const COVERAGE_MIN       = 0.6;      // reconcile the headline only above this resolved-revenue share
+const _COST_CACHE_KEY    = 'admin.dash.orderCost.v1';
+
+// Persisted id → ex-GST supplier cost (number) | null. Snapshots are immutable
+// once an order is placed, so caching across reloads (sessionStorage) is safe and
+// means the expensive detail fan-out runs at most once per order per session.
+const _orderCostCache = (() => {
+  const m = new Map();
+  try {
+    const raw = sessionStorage.getItem(_COST_CACHE_KEY);
+    if (raw) for (const [k, v] of Object.entries(JSON.parse(raw))) m.set(k, v);
+  } catch (_) { /* private mode / quota — fall back to in-memory only */ }
+  return m;
+})();
+function persistCostCache() {
+  try {
+    sessionStorage.setItem(_COST_CACHE_KEY, JSON.stringify(Object.fromEntries(_orderCostCache)));
+  } catch (_) { /* best effort */ }
+}
+
+const _sleep = (ms) => new Promise(r => setTimeout(r, ms));
+
+// Sum ex-GST supplier cost from a detail-endpoint order's line items.
+// Returns null when no item carries a cost snapshot (so we can cache "unknown").
+function detailOrderCostExGst(order) {
+  const items = (order && (order.items || order.order_items)) || [];
+  let exGst = 0, saw = false;
+  for (const it of items) {
+    if (it == null || it.supplier_cost_snapshot == null) continue;
+    const c = Number(it.supplier_cost_snapshot);
+    const q = Number(it.quantity ?? it.qty ?? 0);
+    if (Number.isFinite(c) && Number.isFinite(q)) { exGst += c * q; saw = true; }
+  }
+  return saw ? exGst : null;
+}
+
+// Fetch one order's detail, retrying on rate-limit/transient failure with
+// backoff. Returns the ex-GST cost (number), null when the order genuinely
+// carries no snapshot, or `undefined` when every attempt failed (so the caller
+// leaves it uncached and retries on a later load rather than poisoning the cache
+// with a transient miss). `idx` staggers first attempts to spread the load.
+async function fetchOrderCostExGst(id, idx = 0) {
+  await _sleep((idx % ENRICH_CONCURRENCY) * 60);   // deterministic stagger, no Math.random
+  for (let attempt = 0; attempt < ENRICH_RETRIES; attempt++) {
+    try {
+      const resp = await window.API.get(`/api/admin/orders/${id}`);
+      const order = resp?.data?.order ?? resp?.data ?? null;
+      return detailOrderCostExGst(order);          // number | null — a real answer
+    } catch (_) {
+      if (attempt < ENRICH_RETRIES - 1) await _sleep(400 * Math.pow(3, attempt)); // 400 → 1200 → 3600
+    }
+  }
+  return undefined;                                 // exhausted — transient, don't cache
+}
+
+// Run `worker` over `items` with at most `concurrency` in flight at once.
+async function runPool(items, concurrency, worker) {
+  const queue = items.map((item, i) => ({ item, i }));
+  const runners = Array.from(
+    { length: Math.min(concurrency, queue.length) },
+    async () => {
+      while (queue.length) {
+        const { item, i } = queue.shift();
+        try { await worker(item, i); } catch (_) { /* leave this order on the fallback */ }
+      }
+    }
+  );
+  await Promise.all(runners);
+}
+
+// Stamp `cost_total_excl_gst` on each in-window revenue order from the detail
+// endpoint (the bulk /orders list omits supplier_cost_snapshot). Mutates the
+// order objects in place so a later buildTrendSeries / reconcile sees them, and
+// returns the count of orders whose cost was newly applied this call — 0 means
+// nothing changed, so the caller can skip the re-render.
+async function enrichOrdersWithSupplierCost(rawOrders, unit) {
+  if (unit === 'month') return 0;      // wide windows carry too many orders to fan out
+  const orders = revenueGeneratingOrders(rawOrders);
+  if (!orders.length) return 0;
+
+  // Apply cached costs first (free); collect the genuinely-unknown into `need`.
+  let applied = 0;
+  const need = [];
+  for (const o of orders) {
+    if (!o || o.id == null || o.cost_total_excl_gst != null) continue; // already costed
+    if (_orderCostCache.has(o.id)) {
+      const c = _orderCostCache.get(o.id);
+      if (c != null) { o.cost_total_excl_gst = c; applied++; }
+    } else {
+      need.push(o);
+    }
+  }
+
+  // Guard the live fan-out: a huge window stays on the provisional RPC numbers
+  // rather than firing hundreds of detail calls at the backend.
+  if (need.length > ENRICH_MAX_FETCH) return applied;
+
+  let touchedCache = false;
+  await runPool(need, ENRICH_CONCURRENCY, async (o, i) => {
+    const cost = await fetchOrderCostExGst(o.id, i);
+    if (cost === undefined) return;              // transient failure — don't cache, retry next load
+    _orderCostCache.set(o.id, cost);             // number or null (genuinely cost-less)
+    touchedCache = true;
+    if (cost != null) { o.cost_total_excl_gst = cost; applied++; }
+  });
+  if (touchedCache) persistCostCache();
+  return applied;
+}
+
+// Recompute the window's gross_profit from the real supplier-cost snapshots now
+// stamped on the orders, and pin it onto `payload` so resolveKpiCurrent (hence
+// Gross Profit, Net Profit, Gross Margin AND the Trends chart) shows the true
+// margin instead of the optimistic analytics_kpi_summary figure. Reconciles only
+// above COVERAGE_MIN resolved-revenue so a thin sample can't drive a wild
+// extrapolation; below it we leave the provisional RPC numbers in place. Sets
+// payload._reconciledGrossProfit / _costCoverage (cleared when not confident).
+function reconcileProfitFromSnapshots(payload) {
+  const orders = revenueGeneratingOrders(payload.rawOrders);
+  let resolvedCost = 0, resolvedRev = 0, totalRev = 0;
+  for (const o of orders) {
+    const total = Number(o?.total || 0);
+    totalRev += total;
+    const cost = orderCostInclGst(o);            // reads cost_total_excl_gst, grosses up
+    if (cost > 0) { resolvedCost += cost; resolvedRev += total; }
+  }
+  const coverage = costCoverage(resolvedRev, totalRev);
+  if (coverage < COVERAGE_MIN || resolvedRev <= 0) {
+    payload._reconciledGrossProfit = null;
+    payload._reconciledCogsInclGst = null;
+    payload._costCoverage = coverage;
+    return false;
+  }
+  const revenueGross = payload.kpis?.current?.revenue ?? totalRev;
+  const windowCogs = extrapolateWindowCogsInclGst(resolvedCost, resolvedRev, totalRev);
+  // Pin the snapshot COGS directly so buildTrendSeries uses real cash-to-supplier
+  // (not a value back-derived from gross_profit), and pin the canonical
+  // (ex-GST−based) gross_profit so the KPI card + Gross Margin read true.
+  payload._reconciledCogsInclGst = windowCogs;
+  payload._reconciledGrossProfit = reconciledGrossProfitInclGst(revenueGross, windowCogs);
+  payload._costCoverage = coverage;
+  return payload._reconciledGrossProfit != null;
 }
 
 // ---------- data loading ----------
@@ -189,7 +375,7 @@ async function loadDashboard() {
   if (mySeq !== _loadSeq || !_container) return;
   _container.classList.remove('admin-page--reloading');
 
-  render({
+  const payload = {
     isOwner: true,
     kpis:         val(0),
     revSeries:    val(1),
@@ -209,8 +395,25 @@ async function loadDashboard() {
     auditLogs:    val(14),
     forecastHistory: val(16),
     expenses:     val(17),
-  });
+  };
+  // Apply any session-cached supplier costs synchronously and reconcile the
+  // headline profit BEFORE the first paint — on a warm cache the dashboard shows
+  // the true (snapshot-based) margin immediately, no flash.
+  const enrichUnit = getBucketConfig().unit;
+  reconcileProfitFromSnapshots(payload);
+  render(payload);
   _hasRenderedSuccessfully = true;
+
+  // Background: back-fill real per-order supplier cost from the detail endpoint
+  // (the bulk /orders list omits it), then re-reconcile and re-render so every
+  // profit surface — Gross/Net Profit, Gross Margin, Trends — reflects the true
+  // margin instead of the optimistic analytics_kpi_summary figure. Non-blocking,
+  // rate-limit-hardened, session-cached. Guarded by the load-sequence token.
+  enrichOrdersWithSupplierCost(payload.rawOrders, enrichUnit).then((applied) => {
+    if (applied <= 0 || mySeq !== _loadSeq || !_container) return;
+    reconcileProfitFromSnapshots(payload);
+    render(payload);
+  }).catch(() => { /* enrichment is best-effort; keep the painted dashboard */ });
 }
 
 // ---------- render ----------
@@ -464,13 +667,19 @@ function renderTrendCard() {
 }
 
 function renderForecastCard(d) {
-  const forecastRevenue = pickForecast(d.forecasts, 30);
+  // Prefer the resolved projection from buildForecastSeries (which falls back to
+  // a local trailing average when the backend forecast is empty) so the headline
+  // matches the chart instead of showing "—" while the chart projects forward.
+  const forecastRevenue = _forecastData?.projected30 ?? pickForecast(d.forecasts, 30);
+  const usingLocal      = _forecastData?.usingLocal === true;
   const forecastConf    = d.forecasts?.confidence ?? null;
-  const confStr = typeof forecastConf === 'number'
-    ? `${forecastConf}% confidence`
-    : (typeof forecastConf === 'string' && forecastConf
-        ? `${forecastConf.charAt(0).toUpperCase()}${forecastConf.slice(1)} confidence`
-        : 'Projected');
+  const confStr = usingLocal
+    ? 'Trend estimate'
+    : (typeof forecastConf === 'number'
+      ? `${forecastConf}% confidence`
+      : (typeof forecastConf === 'string' && forecastConf
+          ? `${forecastConf.charAt(0).toUpperCase()}${forecastConf.slice(1)} confidence`
+          : 'Projected'));
   const summary = forecastRevenue != null ? formatPrice(forecastRevenue) : MISSING;
 
   // Projected net profit = forecast revenue × the window's net-profit margin.
@@ -561,7 +770,10 @@ function getBucketConfig() {
     const stepMs = 2 * 3600 * 1000;
     return { unit: 'hour', n, endMs, stepMs, labelFor: (d) => d.toLocaleTimeString('en-NZ', { hour: 'numeric' }) };
   }
-  if (days <= 60) {
+  if (days <= 100) {
+    // Daily buckets up to ~3 months so each calendar day is its own bar. The 3m
+    // window (90 days) lands here — previously it fell to weekly buckets, which
+    // lumped e.g. all of the week of 31 May into a single "31 May" column.
     const stepMs = 24 * 3600 * 1000;
     return { unit: 'day', n: days, endMs, stepMs, labelFor: (d) => d.toLocaleDateString('en-NZ', { day: 'numeric', month: 'short' }) };
   }
@@ -643,20 +855,41 @@ function buildTrendSeries(d) {
     return -1;
   };
 
-  // 1. Daily revenue series (most accurate for rev within filter range)
-  const revSeries = firstArray(d.revSeries?.series, []);
-  for (const r of revSeries) {
-    const ts = Date.parse(r.date);
-    if (isNaN(ts)) continue;
-    const i = indexFor(ts);
-    if (i < 0) continue;
-    buckets[i].revenue += Number(r.revenue || 0);
-    buckets[i].hasRevenue = true;
+  // Revenue source depends on granularity.
+  //
+  // At DAY/HOUR resolution we derive revenue straight from each order's
+  // created_at + total — the SAME basis the Orders list uses — so a bar lands on
+  // the exact calendar day the order shows in the list. The backend's
+  // pre-aggregated `revSeries` keys revenue by a date-only string bucketed in a
+  // different timezone (UTC), which at daily resolution shifts an order's revenue
+  // onto the adjacent local day (orders dated 2 Jun showing up under 1 Jun). The
+  // per-order created_at carries a full timestamp, so `bucketStart` snaps it to
+  // the same local day the Orders list renders — keeping the chart, the order
+  // count, and the list all in agreement.
+  //
+  // At WEEK/MONTH resolution we keep `revSeries`: a one-day boundary shift is
+  // invisible once orders are grouped by week/month, and wide windows can exceed
+  // the raw-orders page cap (500) that would otherwise undercount revenue.
+  const useOrderRevenue = cfg.unit === 'day' || cfg.unit === 'hour';
+
+  // 1. Daily revenue series — week/month granularity only (see note above).
+  if (!useOrderRevenue) {
+    const revSeries = firstArray(d.revSeries?.series, []);
+    for (const r of revSeries) {
+      const ts = Date.parse(r.date);
+      if (isNaN(ts)) continue;
+      const i = indexFor(ts);
+      if (i < 0) continue;
+      buckets[i].revenue += Number(r.revenue || 0);
+      buckets[i].hasRevenue = true;
+    }
   }
 
-  // 2. Raw orders — count per bucket + fallback revenue. Only revenue-
-  // generating statuses count, so the order tally + Stripe fixed-fee match
-  // the KPI summary (which counts sales, not pending/cancelled rows).
+  // 2. Raw orders — count per bucket, and source bucket revenue from each
+  // order's total when running order-derived (day/hour) or as a fallback for any
+  // bucket revSeries left empty. Only revenue-generating statuses count, so the
+  // order tally + Stripe fixed-fee match the KPI summary (which counts sales,
+  // not pending/cancelled rows).
   const rawOrders = revenueGeneratingOrders(d.rawOrders);
   for (const o of rawOrders) {
     const ts = Date.parse(o.created_at || o.createdAt || '');
@@ -664,8 +897,9 @@ function buildTrendSeries(d) {
     const i = indexFor(ts);
     if (i < 0) continue;
     buckets[i].orders += 1;
-    if (!buckets[i].hasRevenue) {
+    if (useOrderRevenue || !buckets[i].hasRevenue) {
       buckets[i].revenue += Number(o.total || 0);
+      buckets[i].hasRevenue = true;
     }
   }
 
@@ -743,30 +977,32 @@ function buildTrendSeries(d) {
   //   (c) If neither is available, fall back to pure revenue-share
   //       distribution of the full grossed-up KPI cost.
   //
-  // COGS basis: the KPI's gross_profit follows the canonical profitability
-  // convention (`revenue_ex_gst − cost_incl_gst`). `kpiCogsInclGst` recovers
-  // the incl-GST cost as `revenue_gross/1.15 − gross_profit` — no extra
-  // gross-up (see the helper's comment for why × 1.15 was a bug).
-  // Use the resolved KPI block (RPC, or the order-derived fallback) so COGS is
-  // reconstructed too whenever the orders carry supplier-cost data. When they
-  // don't, gross_profit is null and kpiCogsInclGst returns 0 — COGS stays
-  // honestly blank rather than guessed.
+  // COGS window total, incl-GST cash to suppliers:
+  //   1. Reconciled snapshot total (`d._reconciledCogsInclGst`) — the real
+  //      supplier_cost_snapshot sum, set by reconcileProfitFromSnapshots once
+  //      enough orders resolve. This is authoritative; the KPI gross_profit (now
+  //      overridden to the canonical ex-GST basis) can no longer be inverted to
+  //      recover an incl-GST cost, so we must NOT fall back to kpiCogsInclGst here.
+  //   2. Provisional fallback (no snapshots): recover an approximate incl-GST cost
+  //      from the BACKEND gross_profit via kpiCogsInclGst, distributed by revenue.
   const kpiCur = _kpi.cur;
-  const totalCogsInclGst = kpiCogsInclGst(kpiCur.revenue, kpiCur.gross_profit);
+  const totalCogsInclGst = (d._reconciledCogsInclGst != null && Number.isFinite(d._reconciledCogsInclGst))
+    ? d._reconciledCogsInclGst
+    : kpiCogsInclGst(kpiCur.revenue, kpiCur.gross_profit);
   const hasAnyPnlCogs = buckets.some(b => b.hasPnlCogs);
   if (!hasAnyPnlCogs) {
-    // (a) try per-order — only counts toward the bucket if items[] exists.
-    const { resolvedRevenue } = bucketCogsFromOrders(buckets, rawOrders, indexFor);
+    // (a) try per-order — only counts toward the bucket if a supplier cost is
+    // present (line-item `supplier_cost_snapshot` or an order-level
+    // `cost_total_excl_gst`, which enrichOrdersWithSupplierCost back-fills from
+    // the detail endpoint since the bulk /orders list omits it).
+    const { resolvedCost } = bucketCogsFromOrders(buckets, rawOrders, indexFor);
     if (totalCogsInclGst > 0) {
-      const totalRev = buckets.reduce((s, b) => s + (b.revenue || 0), 0);
-      // (b) compute a residual to spread across the un-resolved revenue.
-      // We approximate per-order resolution by revenue: orders whose items[]
-      // were present contributed `resolvedRevenue` worth of revenue, so the
-      // residual COGS for the rest = totalCogs × (1 − resolvedRevenue / totalRev).
-      const unresolvedShare = totalRev > 0
-        ? Math.max(0, 1 - (resolvedRevenue / totalRev))
-        : 1;
-      const residualCogs = totalCogsInclGst * unresolvedShare;
+      // (b) residual = KPI window-total COGS minus what per-order line items
+      // already accounted for exactly. Distributing THIS (not a revenue-
+      // proportional slice) keeps the window total pinned to the KPI figure, so
+      // resolving a low-margin order's exact cost reshapes the per-day bars
+      // without drifting the totals strip or the Net-Profit KPI.
+      const residualCogs = residualCogsAfterExact(totalCogsInclGst, resolvedCost);
       if (residualCogs > 0) {
         // Distribute the residual only across buckets whose orders weren't
         // resolved exactly — using each bucket's UN-resolved revenue.
@@ -923,6 +1159,18 @@ function renderTrendTotals(series) {
        </div>`
     : '';
 
+  // COGS-source note: confirm the profit figure is reconciled from real per-order
+  // supplier costs (snapshots), or flag that it's still the provisional analytics
+  // estimate until those resolve. Keeps the headline honest about its basis.
+  const covPct = _kpi.coverage != null ? Math.round(_kpi.coverage * 100) : null;
+  const cogsSrcNote = _kpi.reconciled
+    ? `<div class="admin-trend-totals__hint admin-trend-totals__hint--src">
+        <span aria-hidden="true">✓</span> COGS reconciled from per-order supplier costs${covPct != null && covPct < 100 ? ` (${covPct}% of revenue valued)` : ''} — not the analytics estimate.
+       </div>`
+    : `<div class="admin-trend-totals__hint admin-trend-totals__hint--src">
+        COGS is the provisional analytics estimate — per-order supplier costs not resolved for this window.
+       </div>`;
+
   el.innerHTML = `
     <div class="admin-trend-totals__row">
       ${revenueChip}
@@ -937,6 +1185,7 @@ function renderTrendTotals(series) {
       ${segs}
     </div>
     <div class="admin-trend-totals__breakdown">${esc(breakdown)}</div>
+    ${cogsSrcNote}
     ${hint}
   `;
 }
@@ -1070,10 +1319,21 @@ function buildForecastSeries(d) {
   const f60 = pickForecast(d.forecasts, 60);
   const f90 = pickForecast(d.forecasts, 90);
 
-  // Daily avg projections for days 1-30, 31-60, 61-90.
-  const avg30 = f30 != null ? f30 / 30 : null;
+  // Local fallback: when the backend forecast endpoint ships nothing, project
+  // forward at the trailing 30-day daily revenue average instead of letting the
+  // chart flat-line at $0. `usingLocal` flags the headline as a trend estimate.
+  const localAvg = forecastDailyAvgFromHistory(historical, 30);
+  const usingLocal = f30 == null;
+
+  // Daily avg projections for days 1-30, 31-60, 61-90. Fall back to the local
+  // trailing average whenever the corresponding backend horizon is missing.
+  const avg30 = f30 != null ? f30 / 30 : localAvg;
   const avg60 = f60 != null && f30 != null ? (f60 - f30) / 30 : avg30;
   const avg90 = f90 != null && f60 != null ? (f90 - f60) / 30 : avg60;
+
+  // 30-day projected revenue total for the card headline — backend value, or
+  // the local average grossed back up to a 30-day total.
+  const projected30 = f30 != null ? f30 : (localAvg != null ? localAvg * 30 : null);
 
   // Prior forecasts: each snapshot's projected_revenue is a 30-day total.
   // Convert to implied daily avg so it overlays the daily-scale actual/forecast lines.
@@ -1105,7 +1365,7 @@ function buildForecastSeries(d) {
     ? (trendTotals.revenue - trendTotals.expenses) / trendTotals.revenue
     : null;
 
-  return { historical, prior, cfg, avg30, avg60, avg90, f30, f60, f90, horizonDays, netMargin, cogsKnown };
+  return { historical, prior, cfg, avg30, avg60, avg90, f30, f60, f90, projected30, usingLocal, horizonDays, netMargin, cogsKnown };
 }
 
 function drawForecastChart() {

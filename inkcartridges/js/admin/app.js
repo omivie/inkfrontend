@@ -1,7 +1,7 @@
 /**
  * Admin SPA — Entry point, router, shell
  */
-const APP_VERSION = '2026.06.04-analytics-http';
+const APP_VERSION = '2026.06.05-gst-neutral-reconcile-4';
 
 import { AdminAuth } from './auth.js';
 import { FilterState } from './filters.js';
