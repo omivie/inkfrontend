@@ -1,11 +1,11 @@
 /**
  * Admin SPA — Entry point, router, shell
  */
-const APP_VERSION = '2026.05.23-load-retry';
+const APP_VERSION = '2026.06.04-analytics-http';
 
 import { AdminAuth } from './auth.js';
 import { FilterState } from './filters.js';
-import { AdminAPI } from './api.js?v=product-codes-edit-may2026';
+import { AdminAPI } from './api.js?v=analytics-http-jun2026';
 
 const esc = (s) => Security.escapeHtml(String(s));
 

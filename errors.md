@@ -4,6 +4,61 @@ Log every error encountered here. Before editing a file, scan for known issues. 
 
 ---
 
+## ERR-037 — Admin Dashboard analytics: route through backend HTTP wrappers, not direct Supabase RPC (permanent ERR-010 fix, 2026-06-04)
+
+**Symptom:** Recurring — the dashboard's New Customers / Returning % (and at
+other times Revenue / Gross Profit / Orders) intermittently show "—" or trip the
+yellow *"Live analytics service is unavailable"* banner. Live-diagnosed
+2026-06-04: minted an admin JWT and probed the direct Supabase RPCs —
+`analytics_customer_stats` → **403 `42501 permission denied for function`**,
+while `analytics_kpi_summary` / `_revenue_series` / `_refunds_series` /
+`_top_products` were 200 *that minute*. This is the ERR-010 / ERR-029 / ERR-035
+family: the RPCs' `GRANT EXECUTE TO authenticated` is dropped by backend
+redeploys, one function at a time, unpredictably.
+
+**Root cause:** the frontend called the Postgres RPCs **directly** from the
+browser (`AdminAPI.getDashboardKPIs` etc. → `rpc('analytics_*')` →
+`SUPABASE_URL/rest/v1/rpc/...`). Any dropped grant 403s and the tile goes dark.
+The grant churn is a backend/DB problem the frontend cannot stop — but it does
+NOT have to depend on those grants.
+
+**Fix (frontend, permanent):** the backend now exposes a service-role HTTP
+wrapper for every analytics read under `/api/admin/analytics/*` (spec:
+`Downloads/analytics-api-spec.md`). Those wrappers hold their own grants
+(immune to the `authenticated`-role GRANT being dropped) and fall back to a
+JS-computed equivalent server-side (`data.fallback = true`). Rewired the five
+RPC-backed getters to hit **HTTP first, direct RPC only as a secondary
+fallback** (covers the inverse outage — backend down, grant healthy):
+- `getDashboardKPIs`   → `GET /kpi-summary`   (live shape `{current,previous}` == old RPC; `normalizeKpiSummary` also tolerates the spec-doc metric-keyed shape)
+- `getRevenueSeries`   → `GET /revenue-series`
+- `getRefundAnalytics` → `GET /refunds-series`
+- `getTopProducts`     → `GET /top-products-rpc` (unwraps `{products}` → array)
+- `getCustomerStats`   → RPC first (only source of *returning %*); when its grant
+  is dropped, reconstruct **New Customers** from the always-on
+  `GET /summary/customers` (`new_customers_30d`). Returning % has no fallback
+  source so it honestly stays "—" instead of lying.
+
+Also fixed a latent refund bug surfaced en route: `analytics_refunds_series`
+keys the daily refund total as **`total_amount`**, but the dashboard read
+`r.amount || r.total || r.value` (none match) → every refund summed to $0 and
+Refund-Rate read 0%. Added `trend-math.refundAmount(row)` (reads `total_amount`
+first) and routed all four refund-sum sites through it. And `window.API.get`
+now forwards a 2nd `options` arg so `{ signal }` aborts actually work.
+
+**Verified live 2026-06-04** by running the rewired `AdminAPI` against prod:
+KPIs $933.81/9 orders/$332.78 GP via HTTP; CustomerStats `new_customers: 2`
+via the summary fallback (RPC was 403); refunds-series exposes `total_amount`;
+top-products returns a 10-item array.
+
+**Rule:** never call `analytics_*` Supabase RPCs directly from the browser —
+go through `/api/admin/analytics/*`. The direct RPC is a *fallback*, never the
+primary. `data.fallback === true` from the HTTP wrapper means the numbers are
+valid (server reconstructed them) — do NOT raise the "unavailable" banner for it.
+
+**Pinned by:** `tests/admin-analytics-wiring.test.js` (23 tests).
+
+---
+
 ## ERR-035 — Admin Dashboard live analytics dark again: `42501 permission denied for function` (2026-05-22)
 
 **Symptom:** Admin Dashboard shows the yellow *"Live analytics service is

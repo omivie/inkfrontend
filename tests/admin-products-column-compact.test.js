@@ -187,6 +187,6 @@ test('products page imports the bumped table.js token; APP_VERSION advanced', ()
   assert.match(PRODUCTS_SRC, /components\/table\.js\?v=col-compact-may2026/,
     'products.js must import the bumped table.js version');
   const APP_SRC = READ('inkcartridges/js/admin/app.js');
-  assert.match(APP_SRC, /APP_VERSION\s*=\s*'2026\.05\.23-load-retry'/,
+  assert.match(APP_SRC, /APP_VERSION\s*=\s*'2026\.06\.04-analytics-http'/,
     'APP_VERSION must be bumped so the SPA page modules re-fetch');
 });

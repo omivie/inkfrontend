@@ -66,6 +66,19 @@ export function pickExpenseAmount(row) {
   return Number.isFinite(n) ? n : 0;
 }
 
+// Dollar value of a refund-series row. The analytics_refunds_series source
+// (the direct RPC and the /api/admin/analytics/refunds-series HTTP wrapper)
+// keys the daily refund total as `total_amount` — older/ad-hoc refund shapes
+// use amount/total/value. Reading only the latter silently summed every refund
+// to $0 (refunds-series carries no `amount` field), so the Refund-Rate KPI and
+// both refund cards always read 0%. `total_amount`/`refund_amount` come first
+// so the canonical series field wins; the legacy keys remain as fallbacks.
+export function refundAmount(row) {
+  const v = row?.total_amount ?? row?.refund_amount ?? row?.amount ?? row?.total ?? row?.value;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : 0;
+}
+
 // Recurring-expense expansion.
 //
 // A row may carry a `recurrence` string ('weekly' | 'monthly' | 'yearly' |

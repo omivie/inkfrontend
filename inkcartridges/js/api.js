@@ -515,8 +515,11 @@ const API = {
     /**
      * GET request helper
      */
-    async get(endpoint) {
-        return this.request(endpoint, { method: 'GET' });
+    async get(endpoint, options = {}) {
+        // Forward caller options (e.g. { signal } for AbortController) into
+        // request → fetch. Previously the 2nd arg was silently dropped, so
+        // admin callers passing { signal } couldn't abort in-flight reads.
+        return this.request(endpoint, { ...options, method: 'GET' });
     },
 
     /**

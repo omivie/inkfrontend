@@ -8,7 +8,7 @@ import {
   bucketOperatingExpenses, distributeCogsByRevenue, assembleBucketExpense,
   sumTrendTotals, bucketCogsFromOrders, kpiCogsInclGst,
   expandRecurringExpenses, isRevenueOrder, deriveKpisFromOrders,
-  cogsIsKnown,
+  cogsIsKnown, refundAmount,
 } from '../utils/trend-math.js';
 import { Charts } from '../components/charts.js';
 
@@ -426,7 +426,7 @@ function renderKpiStrip(d) {
 function sumRefundAmounts(refunds) {
   const series = firstArray(refunds, ['series', 'refunds', 'data']);
   if (!series.length) return null;
-  return series.reduce((sum, r) => sum + (r.amount || r.total || r.value || 0), 0);
+  return series.reduce((sum, r) => sum + refundAmount(r), 0);
 }
 
 function outOfStockCount(data) {
@@ -516,7 +516,9 @@ function pickForecast(forecasts, days) {
 
 function renderSidePanel(d) {
   const runwayMonths = d.runway?.runway_months ?? d.runway?.months ?? d.runway?.runway ?? null;
-  const cashOnHand   = d.runway?.cash_on_hand ?? d.runway?.cash ?? null;
+  // /burn-runway ships `cash_balance` (verified live 2026-06-04); keep the
+  // legacy aliases so an older shape still resolves.
+  const cashOnHand   = d.runway?.cash_balance ?? d.runway?.cash_on_hand ?? d.runway?.cash ?? null;
   const burnRate     = d.runway?.burn_rate ?? d.runway?.monthly_burn ?? null;
 
   const cur = _kpi.cur;   // RPC current block, or order-derived fallback
@@ -1482,8 +1484,8 @@ function renderRefundsCard(refunds, kpis) {
   let thisTotal = 0, thisCount = 0, lastTotal = 0, lastCount = 0;
   for (const r of series) {
     const date = String(r.date || r.month || '');
-    const amt = Number(r.amount || r.total || r.value || 0);
-    const cnt = Number(r.count || 1);
+    const amt = refundAmount(r);
+    const cnt = Number(r.count ?? r.refund_count ?? 1);
     if (date.startsWith(thisMonth)) { thisTotal += amt; thisCount += cnt; }
     else if (date.startsWith(lastMonth)) { lastTotal += amt; lastCount += cnt; }
   }
@@ -1517,7 +1519,7 @@ function drawRefundReasons(refunds) {
   const reasons = {};
   for (const r of series) {
     const reason = r.reason || r.type || 'Other';
-    reasons[reason] = (reasons[reason] || 0) + Number(r.amount || r.total || r.value || 0);
+    reasons[reason] = (reasons[reason] || 0) + refundAmount(r);
   }
   const labels = Object.keys(reasons);
   const data   = Object.values(reasons);
@@ -1787,7 +1789,7 @@ function drawSparklines(d) {
     for (const r of revSeries) revByDate[r.date] = r.revenue || 0;
     const rateSeries = refSeries.map(r => {
       const rev = revByDate[r.date] || 0;
-      const refundAmt = Number(r.amount || r.total || 0);
+      const refundAmt = refundAmount(r);
       return rev > 0 ? (refundAmt / rev) * 100 : 0;
     });
     const colors = Charts.getThemeColors();

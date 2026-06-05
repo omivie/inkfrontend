@@ -59,6 +59,136 @@ function adminApiWarn(label, e) {
 // storefront intact. See errors.md ERR-034.
 const RICH_TEXT_PRODUCT_COLUMNS = ['description_html', 'compatible_devices_html'];
 
+// ===========================================================================
+// Admin analytics — resilient HTTP wiring (ERR-010 permanent fix, Jun 2026)
+// ===========================================================================
+//
+// The dashboard's headline analytics (KPIs, revenue series, refunds, top
+// products, customer stats) used to call the Supabase Postgres RPCs DIRECTLY
+// from the browser (analytics_kpi_summary, …). Those RPCs depend on a
+// `GRANT EXECUTE TO authenticated` that backend redeploys keep dropping — so
+// the calls intermittently 403 ("permission denied for function") and the
+// dashboard silently degrades to "—" or the order-reconstructed fallback.
+// (Probed live 2026-06-04: analytics_customer_stats was 403 right then.)
+//
+// The backend now exposes a service-role HTTP wrapper for every one of these
+// under /api/admin/analytics/* (see Downloads/analytics-api-spec.md). The
+// wrapper holds its own grants — immune to the authenticated-role GRANT being
+// dropped — and falls back to a JS-computed equivalent server-side, flagging
+// `data.fallback = true`. So we route through HTTP FIRST and keep the direct
+// RPC only as a secondary fallback (covers the inverse outage: backend down
+// but Postgres grant healthy). Either side of the outage, the strip self-heals.
+//
+// The live HTTP payloads were verified to be byte-shape-identical to the RPCs
+// the dashboard already consumed, so this is a near drop-in. `normalizeKpiSummary`
+// additionally tolerates the metric-keyed shape the spec DOC describes, so the
+// dashboard survives a future backend reshape without code changes.
+
+// Convert a FilterState URLSearchParams (from/to/brands/suppliers/statuses)
+// into the query string the analytics HTTP endpoints expect. Accepts a
+// URLSearchParams, a plain object, or a query string.
+function analyticsQuery(filterParams, extra = {}) {
+  const p = filterParams instanceof URLSearchParams
+    ? filterParams
+    : new URLSearchParams(filterParams || '');
+  const q = new URLSearchParams();
+  const from = p.get('from');
+  const to = p.get('to');
+  if (from) q.set('date_from', from);
+  if (to) q.set('date_to', to);
+  if (p.get('brands'))    q.set('brand_filter', p.get('brands'));
+  if (p.get('suppliers')) q.set('supplier_filter', p.get('suppliers'));
+  if (p.get('statuses'))  q.set('status_filter', p.get('statuses'));
+  for (const [k, v] of Object.entries(extra)) {
+    if (v != null && v !== '') q.set(k, String(v));
+  }
+  return q.toString();
+}
+
+// Normalize a kpi-summary payload (from HTTP or the direct RPC) to the
+// { current, previous } shape the dashboard's resolveKpiCurrent consumes.
+//   - Live shape ({ current, previous }) passes straight through (and keeps
+//     any `fallback` flag the HTTP wrapper set).
+//   - Spec-doc metric-keyed shape ({ revenue: {current, previous}, … } plus
+//     flat scalars like new_customers) is folded into current/previous.
+//   - Anything unrecognised → null, so callers can try the next source.
+function normalizeKpiSummary(data) {
+  if (!data || typeof data !== 'object' || Array.isArray(data)) return null;
+  if (data.current && typeof data.current === 'object') return data;
+
+  const METRIC_KEYS = [
+    'revenue', 'gross_profit', 'net_profit', 'gross_margin',
+    'net_margin', 'stripe_fees', 'orders', 'aov',
+  ];
+  const current = {};
+  const previous = {};
+  let sawMetric = false;
+  for (const k of METRIC_KEYS) {
+    const m = data[k];
+    if (m && typeof m === 'object' && ('current' in m || 'previous' in m)) {
+      sawMetric = true;
+      if (m.current != null)  current[k]  = m.current;
+      if (m.previous != null) previous[k] = m.previous;
+    }
+  }
+  if (!sawMetric) return null;
+  // Flat scalars ride along on `current` so the side panel / KPI tiles can read
+  // them the same way they read RPC fields.
+  const FLAT_KEYS = [
+    'new_customers', 'returning_rate', 'returning_pct', 'runway_months',
+    'total_customers', 'avg_ltv', 'churn_rate', 'nps_score', 'cash_balance',
+  ];
+  for (const k of FLAT_KEYS) {
+    if (data[k] != null) current[k] = data[k];
+  }
+  const out = { current, previous };
+  if (data.fallback) out.fallback = true;
+  return out;
+}
+
+// Adapt the always-on /summary/customers payload into the { current, previous }
+// shape the dashboard's customer KPIs consume. This is the fallback source for
+// "New Customers" when the analytics_customer_stats RPC's grant is dropped —
+// it has no returning-% figure, so that tile honestly stays "—". The
+// new_customers_30d value is a rolling-30d count regardless of the active
+// filter window; we surface it rather than show nothing.
+function adaptCustomerSummary(summary) {
+  if (!summary || typeof summary !== 'object') return null;
+  const hasAny = summary.new_customers_30d != null
+    || summary.total_customers != null
+    || summary.avg_ltv != null;
+  if (!hasAny) return null;
+  return {
+    current: {
+      new_customers:   summary.new_customers_30d ?? null,
+      total_customers: summary.total_customers ?? null,
+      avg_ltv:         summary.avg_ltv ?? null,
+      churn_rate:      summary.churn_rate ?? null,
+      nps_score:       summary.nps_score ?? null,
+      // returning_pct intentionally absent — no source in /summary/customers.
+    },
+    previous: {},
+    _summaryFallback: true,
+  };
+}
+
+// GET an analytics HTTP endpoint, unwrap the { ok, data } envelope, and return
+// `data` (or null on any failure / non-200 / abort). Mirrors the swallow-and-
+// return-null convention of the other read methods so one dead tile never
+// blanks the whole dashboard.
+async function analyticsHttpGet(path, signal) {
+  try {
+    if (signal?.aborted) return null;
+    const resp = await window.API.get(path, { signal });
+    if (resp && resp.ok === false) return null;
+    return resp?.data ?? null;
+  } catch (e) {
+    if (e?.name === 'AbortError') return null;
+    DebugLog.warn(`[AdminAPI] analytics GET ${path} failed:`, e.message);
+    return null;
+  }
+}
+
 const AdminAPI = {
   // ---- Orders ----
   async getOrders(filters = {}, page = 1, limit = 20, signal = null) {
@@ -243,18 +373,33 @@ const AdminAPI = {
     }
   },
 
-  // ---- Dashboard Analytics (RPC — owner-only by RLS) ----
+  // ---- Dashboard Analytics ----
+  // Each method hits the resilient backend HTTP wrapper first (service-role
+  // grants survive redeploys + server-side fallback) and only drops to the
+  // direct Supabase RPC if the HTTP layer is unreachable. See the block comment
+  // above `analyticsQuery` for the ERR-010 rationale.
+
   async getDashboardKPIs(filterParams, signal) {
+    const qs = analyticsQuery(filterParams);
+    const http = normalizeKpiSummary(
+      await analyticsHttpGet(`/api/admin/analytics/kpi-summary?${qs}`, signal)
+    );
+    if (http?.current?.revenue != null) return http;
+    // HTTP missing/empty → direct RPC (covers backend-down, grant-healthy).
     const { from, to } = Object.fromEntries(filterParams);
-    return rpc('analytics_kpi_summary', {
+    const rpcData = normalizeKpiSummary(await rpc('analytics_kpi_summary', {
       date_from: from, date_to: to,
       brand_filter: filterParams.get('brands') || null,
       supplier_filter: filterParams.get('suppliers') || null,
       status_filter: filterParams.get('statuses') || null,
-    }, signal);
+    }, signal));
+    return rpcData ?? http;
   },
 
   async getRevenueSeries(filterParams, signal) {
+    const qs = analyticsQuery(filterParams);
+    const http = await analyticsHttpGet(`/api/admin/analytics/revenue-series?${qs}`, signal);
+    if (Array.isArray(http?.series) || Array.isArray(http)) return http;
     const { from, to } = Object.fromEntries(filterParams);
     return rpc('analytics_revenue_series', {
       date_from: from, date_to: to,
@@ -273,6 +418,9 @@ const AdminAPI = {
   },
 
   async getRefundAnalytics(filterParams, signal) {
+    const qs = analyticsQuery(filterParams);
+    const http = await analyticsHttpGet(`/api/admin/analytics/refunds-series?${qs}`, signal);
+    if (Array.isArray(http?.series) || Array.isArray(http)) return http;
     const { from, to } = Object.fromEntries(filterParams);
     return rpc('analytics_refunds_series', {
       date_from: from, date_to: to,
@@ -282,13 +430,28 @@ const AdminAPI = {
 
   async getCustomerStats(filterParams, signal) {
     const { from, to } = Object.fromEntries(filterParams);
-    return rpc('analytics_customer_stats', {
+    // The direct RPC returns the richest shape ({ current, previous } with
+    // returning_pct) when its grant is intact — and it's the ONLY source of
+    // returning %. Try it first.
+    const rpcData = await rpc('analytics_customer_stats', {
       date_from: from, date_to: to,
       brand_filter: filterParams.get('brands') || null,
     }, signal);
+    if (rpcData?.current?.new_customers != null || rpcData?.current?.returning_pct != null) {
+      return rpcData;
+    }
+    // RPC grant dropped (recurring ERR-010) → reconstruct "New Customers" from
+    // the always-on /summary/customers HTTP endpoint. Returning % has no
+    // fallback source, so that tile stays "—" rather than lie.
+    const summary = await analyticsHttpGet('/api/admin/analytics/summary/customers', signal);
+    return adaptCustomerSummary(summary) ?? rpcData;
   },
 
   async getTopProducts(filterParams, signal) {
+    const qs = analyticsQuery(filterParams, { result_limit: 10 });
+    const http = await analyticsHttpGet(`/api/admin/analytics/top-products-rpc?${qs}`, signal);
+    if (Array.isArray(http)) return http;
+    if (Array.isArray(http?.products)) return http.products;  // tolerate { products: [...] }
     const { from, to } = Object.fromEntries(filterParams);
     return rpc('analytics_top_products', {
       date_from: from, date_to: to,
@@ -2542,4 +2705,9 @@ const PlannerNotesAPI = {
   },
 };
 
-export { AdminAPI, PlannerAPI, PlannerNotesAPI };
+export {
+  AdminAPI, PlannerAPI, PlannerNotesAPI,
+  // Pure analytics-shape helpers — exported for unit tests (see
+  // tests/admin-analytics-wiring.test.js).
+  analyticsQuery, normalizeKpiSummary, adaptCustomerSummary,
+};
