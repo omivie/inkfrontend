@@ -153,10 +153,7 @@ async function renderOwnerIntel(container) {
   section.innerHTML = `
     <div class="admin-section__header"><h2 class="admin-section__title">Customer Intelligence</h2></div>
     <div class="admin-kpi-grid" id="intel-kpis">
-      <div class="admin-kpi"><div class="admin-skeleton admin-skeleton--kpi"></div></div>
-      <div class="admin-kpi"><div class="admin-skeleton admin-skeleton--kpi"></div></div>
-      <div class="admin-kpi"><div class="admin-skeleton admin-skeleton--kpi"></div></div>
-      <div class="admin-kpi"><div class="admin-skeleton admin-skeleton--kpi"></div></div>
+      <div class="admin-loader"><div class="admin-loading__spinner"></div></div>
     </div>
     <div class="admin-grid-2 admin-mb">
       <div class="admin-card admin-card--cyan">

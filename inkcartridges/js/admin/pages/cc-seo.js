@@ -126,10 +126,7 @@ export default {
         <div class="cc-section__title">Indexing Status</div>
         <div id="cc-indexing-status">
           <div class="admin-kpi-grid admin-kpi-grid--4">
-            <div class="admin-kpi"><div class="admin-skeleton admin-skeleton--kpi"></div></div>
-            <div class="admin-kpi"><div class="admin-skeleton admin-skeleton--kpi"></div></div>
-            <div class="admin-kpi"><div class="admin-skeleton admin-skeleton--kpi"></div></div>
-            <div class="admin-kpi"><div class="admin-skeleton admin-skeleton--kpi"></div></div>
+            <div class="admin-loader"><div class="admin-loading__spinner"></div></div>
           </div>
         </div>
       </div>

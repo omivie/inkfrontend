@@ -65,7 +65,7 @@ function renderHeatmap(data) {
 
 async function loadHeatmap() {
   const grid = _el.querySelector('#cc-heatmap-grid');
-  grid.innerHTML = '<div class="admin-skeleton admin-skeleton--kpi" style="height:120px"></div>';
+  grid.innerHTML = '<div class="admin-loader"><div class="admin-loading__spinner"></div></div>';
   const data = await AdminAPI.getPricingHeatmap(_heatmapSource);
   renderHeatmap(data);
 }
@@ -143,7 +143,7 @@ let _tierData = null;
 
 async function loadTierMultipliers() {
   const wrap = _el.querySelector('#cc-tier-wrap');
-  wrap.innerHTML = '<div class="admin-skeleton admin-skeleton--kpi" style="height:80px"></div>';
+  wrap.innerHTML = '<div class="admin-loader"><div class="admin-loading__spinner"></div></div>';
   const data = await AdminAPI.getTierMultipliers();
   _tierData = data;
   renderTierMultipliers(data);
@@ -330,13 +330,13 @@ export default {
       <div class="cc-section">
         <div class="cc-section__title">Global Price Offset</div>
         <div class="admin-card cc-offset-card" id="cc-offset-wrap">
-          <div class="admin-skeleton admin-skeleton--kpi"></div>
+          <div class="admin-loader"><div class="admin-loading__spinner"></div></div>
         </div>
       </div>
       <div class="cc-section" id="cc-tier-section">
         <div class="cc-section__title">Tier Price Multipliers</div>
         <div class="admin-card" id="cc-tier-wrap">
-          <div class="admin-skeleton admin-skeleton--kpi" style="height:80px"></div>
+          <div class="admin-loader"><div class="admin-loading__spinner"></div></div>
         </div>
       </div>
     `;

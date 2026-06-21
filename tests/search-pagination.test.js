@@ -183,8 +183,9 @@ test('shop.html bumps the search.css cache key so the pager CSS lands', () => {
     // clamp release bumped it; the out-of-stock pill copy release
     // (stock-enquiry-may2026) bumped it; the mobile-parity audit bumped it
     // again (mobile-parity-may2026); the four-row buy-box release
-    // (buybox-may2026) bumped it. The guarantee here is simply that
-    // shop.html requests the *current* search.css build.
-    assert.match(shopHtml, /search\.css\?v=buybox-may2026/);
+    // (buybox-may2026) bumped it; the loading-state rework (loading-spinner-jun2026)
+    // bumped it again. The guarantee here is simply that shop.html requests the
+    // *current* search.css build.
+    assert.match(shopHtml, /search\.css\?v=loading-spinner-jun2026/);
     assert.doesNotMatch(shopHtml, /search\.css\?v=search-pagination-may2026/);
 });

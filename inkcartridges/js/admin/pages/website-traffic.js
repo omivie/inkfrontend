@@ -582,40 +582,14 @@ function categoriseFailure({ summary, recent, timeseries }) {
     return 'transient';
 }
 
-// Skeleton matching the eventual layout — 6 KPI tiles, chart card with summary
-// strip + tall chart area, marketing-insights row, two-up breakdown row, a wide
-// table card. Renders to the same grid classes the live layout uses so the page
-// does not "jump" when real content arrives.
+// First-load loading state: a single centered spinner (replaces the old
+// matched-layout skeleton). The race-guard logic below still gates this so a
+// stale render can never paint the load-failed hero over a fresh page.
 function skeleton() {
-    const tile = '<div class="admin-skel admin-skel__tile" aria-hidden="true"></div>';
-    const stat = '<div class="admin-skel admin-skel__stat" aria-hidden="true"></div>';
     return `
-        <div class="admin-skeleton" role="status" aria-label="Loading website traffic">
+        <div class="admin-loader" role="status" aria-label="Loading website traffic">
             <span class="admin-sr-only">Loading website traffic…</span>
-            <div class="admin-kpi-grid admin-kpi-grid--6 admin-mb-lg">
-                ${tile}${tile}${tile}${tile}${tile}${tile}
-            </div>
-            <div class="admin-card admin-mb-lg">
-                <div class="admin-skel admin-skel__line admin-skel__line--title"></div>
-                <div class="admin-traffic-summary">
-                    ${stat}${stat}${stat}${stat}${stat}
-                </div>
-                <div class="admin-chart-box admin-chart-box--tall">
-                    <div class="admin-skel admin-skel__chart"></div>
-                </div>
-            </div>
-            <div class="admin-grid-2 admin-mb-lg">
-                <div class="admin-card"><div class="admin-skel admin-skel__line admin-skel__line--title"></div>
-                    <div class="admin-skel admin-skel__row"></div>
-                    <div class="admin-skel admin-skel__row"></div>
-                    <div class="admin-skel admin-skel__row"></div>
-                </div>
-                <div class="admin-card"><div class="admin-skel admin-skel__line admin-skel__line--title"></div>
-                    <div class="admin-skel admin-skel__row"></div>
-                    <div class="admin-skel admin-skel__row"></div>
-                    <div class="admin-skel admin-skel__row"></div>
-                </div>
-            </div>
+            <div class="admin-loading__spinner" aria-hidden="true"></div>
         </div>
     `;
 }

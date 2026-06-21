@@ -104,7 +104,7 @@ export default {
     _host = host;
     _onTileClick = opts.onTileClick || null;
     _host.innerHTML = `<div class="cc2-topbar__row">
-      ${TILES.map(() => '<div class="cc2-tile cc2-tile--loading"><div class="admin-skeleton admin-skeleton--text" style="width:60%"></div></div>').join('')}
+      <div class="admin-loader"><div class="admin-loading__spinner"></div></div>
     </div>`;
     const data = await getHealthSummary();
     renderTiles(data);

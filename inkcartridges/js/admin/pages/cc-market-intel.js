@@ -19,7 +19,7 @@ let _minVariance = 15;
 // ---- Competitive Summary (KPI cards) ----
 async function loadReport() {
   const grid = _el.querySelector('#mi-report-grid');
-  grid.innerHTML = '<div class="admin-skeleton admin-skeleton--kpi" style="height:80px"></div>'.repeat(4);
+  grid.innerHTML = '<div class="admin-loader"><div class="admin-loading__spinner"></div></div>';
   const data = await AdminAPI.getMarketIntelReport();
   if (!data) {
     grid.innerHTML = '<div class="admin-empty"><div class="admin-empty__text">Could not load market report</div></div>';

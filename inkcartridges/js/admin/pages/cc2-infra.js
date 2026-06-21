@@ -88,14 +88,7 @@ export default {
         <span class="cc2-meta">Prerender cache + image pipeline counters</span>
       </div>
       <div class="cc2-infra-grid" id="cc2-infra-grid">
-        <div class="admin-card cc2-infra-card">
-          <div class="admin-skeleton admin-skeleton--text" style="width:50%"></div>
-          <div class="admin-skeleton admin-skeleton--row" style="margin-top:14px"></div>
-        </div>
-        <div class="admin-card cc2-infra-card">
-          <div class="admin-skeleton admin-skeleton--text" style="width:50%"></div>
-          <div class="admin-skeleton admin-skeleton--row" style="margin-top:14px"></div>
-        </div>
+        <div class="admin-loader"><div class="admin-loading__spinner"></div></div>
       </div>
     `;
     const [prerender, image] = await Promise.all([

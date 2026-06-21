@@ -20,7 +20,7 @@ function statusDot(ok) {
 // ---- System Health ----
 async function loadHealth() {
   const grid = _el.querySelector('#mon-health-grid');
-  grid.innerHTML = '<div class="admin-skeleton admin-skeleton--kpi" style="height:70px"></div>'.repeat(4);
+  grid.innerHTML = '<div class="admin-loader"><div class="admin-loading__spinner"></div></div>';
   const data = await AdminAPI.getHealthCheck();
   if (!data) {
     grid.innerHTML = '<div class="admin-empty"><div class="admin-empty__text">Could not reach health endpoint</div></div>';
@@ -55,7 +55,7 @@ async function loadHealth() {
 // ---- Cron Summary ----
 async function loadCronSummary() {
   const grid = _el.querySelector('#mon-cron-summary');
-  grid.innerHTML = '<div class="admin-skeleton admin-skeleton--kpi" style="height:60px"></div>'.repeat(3);
+  grid.innerHTML = '<div class="admin-loader"><div class="admin-loading__spinner"></div></div>';
   const data = await AdminAPI.getCronSummary();
   if (!data) {
     grid.innerHTML = '<div class="admin-empty"><div class="admin-empty__text">No cron summary available</div></div>';
@@ -137,7 +137,7 @@ async function loadCronHistory() {
 async function loadRlsStatus() {
   const wrap = _el.querySelector('#mon-rls-wrap');
   if (!wrap) return;
-  wrap.innerHTML = '<div class="admin-skeleton admin-skeleton--kpi" style="height:80px"></div>';
+  wrap.innerHTML = '<div class="admin-loader"><div class="admin-loading__spinner"></div></div>';
   const data = await AdminAPI.getRlsStatus();
   if (!data) {
     wrap.innerHTML = '<div class="admin-empty"><div class="admin-empty__text">Could not load RLS status</div></div>';
@@ -208,7 +208,7 @@ export default {
       <div class="cc-section">
         <div class="cc-section__title">RLS Policy Status</div>
         <div class="admin-card" id="mon-rls-wrap">
-          <div class="admin-skeleton admin-skeleton--kpi" style="height:80px"></div>
+          <div class="admin-loader"><div class="admin-loading__spinner"></div></div>
         </div>
       </div>` : ''}
     `;

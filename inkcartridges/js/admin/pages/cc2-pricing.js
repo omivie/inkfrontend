@@ -250,11 +250,7 @@ function renderResults() {
   const data = _state.result;
   if (_state.loading) {
     wrap.innerHTML = `<div class="admin-card cc2-pricing__skeleton">
-      <div class="admin-skeleton admin-skeleton--text" style="width:30%"></div>
-      <div class="admin-skeleton admin-skeleton--text" style="width:60%;margin-top:8px"></div>
-      <div class="admin-skeleton admin-skeleton--row" style="margin-top:18px"></div>
-      <div class="admin-skeleton admin-skeleton--row"></div>
-      <div class="admin-skeleton admin-skeleton--row"></div>
+      <div class="admin-loader"><div class="admin-loading__spinner"></div></div>
     </div>`;
     return;
   }

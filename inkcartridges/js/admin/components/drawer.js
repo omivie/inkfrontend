@@ -76,13 +76,7 @@ const Drawer = {
       close,
       setLoading(loading) {
         if (loading) {
-          bodyEl.innerHTML = `
-            <div class="admin-skeleton admin-skeleton--text"></div>
-            <div class="admin-skeleton admin-skeleton--text" style="width:60%"></div>
-            <div class="admin-skeleton admin-skeleton--row"></div>
-            <div class="admin-skeleton admin-skeleton--row"></div>
-            <div class="admin-skeleton admin-skeleton--row"></div>
-          `;
+          bodyEl.innerHTML = '<div class="admin-loader"><div class="admin-loading__spinner"></div></div>';
         }
       },
       setBody(content) {

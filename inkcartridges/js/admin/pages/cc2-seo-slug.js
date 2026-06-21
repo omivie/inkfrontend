@@ -235,11 +235,7 @@ export default {
         <span class="cc2-meta" id="cc2-slug-total">Loading…</span>
       </div>
       <div class="cc2-slug-grid" id="cc2-slug-grid">
-        ${SECTIONS.map(() => `<div class="admin-card cc2-slug-card">
-          <div class="admin-skeleton admin-skeleton--text" style="width:60%"></div>
-          <div class="admin-skeleton admin-skeleton--text" style="width:80%;margin-top:8px"></div>
-          <div class="admin-skeleton admin-skeleton--row" style="margin-top:14px"></div>
-        </div>`).join('')}
+        <div class="admin-loader"><div class="admin-loading__spinner"></div></div>
       </div>
     `;
     load();

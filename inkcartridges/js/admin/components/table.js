@@ -53,22 +53,7 @@ class DataTable {
 
   setLoading(loading) {
     if (loading) {
-      let html = `<div class="admin-card"><div class="admin-table-wrap"><table class="admin-table${this.config.tableClass ? ' ' + this.config.tableClass : ''}"><thead><tr>`;
-      if (this.config.selectable) html += '<th class="cell-select"></th>';
-      for (const col of this.config.columns) {
-        html += `<th>${esc(col.label)}</th>`;
-      }
-      html += '</tr></thead><tbody>';
-      for (let i = 0; i < 8; i++) {
-        html += '<tr>';
-        if (this.config.selectable) html += '<td class="cell-select"></td>';
-        for (const col of this.config.columns) {
-          html += `<td><div class="admin-skeleton admin-skeleton--text" style="width:${60 + Math.random() * 30}%"></div></td>`;
-        }
-        html += '</tr>';
-      }
-      html += '</tbody></table></div></div>';
-      this.container.innerHTML = html;
+      this.container.innerHTML = '<div class="admin-loader"><div class="admin-loading__spinner"></div></div>';
     }
   }
 

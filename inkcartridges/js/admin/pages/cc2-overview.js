@@ -128,12 +128,7 @@ export default {
   async init(host, ctx = {}) {
     _host = host;
     _host.innerHTML = `<div class="cc2-overview-grid">
-      ${SECTIONS.map(() => `<div class="cc2-overview-card admin-card">
-        <div class="admin-skeleton admin-skeleton--text" style="width:50%"></div>
-        <div class="admin-skeleton admin-skeleton--text" style="width:80%;margin-top:12px"></div>
-        <div class="admin-skeleton admin-skeleton--text" style="width:70%;margin-top:8px"></div>
-        <div class="admin-skeleton admin-skeleton--text" style="width:65%;margin-top:8px"></div>
-      </div>`).join('')}
+      <div class="admin-loader"><div class="admin-loading__spinner"></div></div>
     </div>`;
     const data = await getHealthSummary();
     if (_host) render(_host, data, ctx.switchTab);

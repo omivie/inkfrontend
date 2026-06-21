@@ -285,24 +285,14 @@ function reconcileProfitFromSnapshots(payload) {
 // FIRST load while the parallel fetches are in flight (subsequent filter-change
 // reloads keep the existing content visible with a dim overlay).
 function dashboardSkeleton() {
-  const tile = '<div class="admin-skel admin-skel__tile" aria-hidden="true"></div>';
+  // First-load loading state: a single centered spinner (replaces the old
+  // matched-layout skeleton). The race-guard in loadDashboard() still gates
+  // this so a stale fetch can't paint over a newer render.
   return `
     <div class="admin-page-header admin-page-header--dash"><h1>Dashboard</h1></div>
-    <div class="admin-skeleton" role="status" aria-label="Loading dashboard">
+    <div class="admin-loader" role="status" aria-label="Loading dashboard">
       <span class="admin-sr-only">Loading dashboard…</span>
-      <div class="admin-kpi-grid admin-mb-lg" style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;">
-        ${tile}${tile}${tile}${tile}${tile}${tile}${tile}${tile}
-      </div>
-      <div class="admin-dash">
-        <div class="admin-card"><div class="admin-skel admin-skel__line admin-skel__line--title"></div><div class="admin-skel admin-skel__chart"></div></div>
-        <div class="admin-card"><div class="admin-skel admin-skel__line admin-skel__line--title"></div><div class="admin-skel admin-skel__chart"></div></div>
-        <div class="admin-card admin-dash__side"><div class="admin-skel admin-skel__line admin-skel__line--title"></div>
-          <div class="admin-skel admin-skel__row"></div><div class="admin-skel admin-skel__row"></div><div class="admin-skel admin-skel__row"></div><div class="admin-skel admin-skel__row"></div>
-        </div>
-        <div class="admin-card"><div class="admin-skel admin-skel__line admin-skel__line--title"></div><div class="admin-skel admin-skel__row"></div><div class="admin-skel admin-skel__row"></div><div class="admin-skel admin-skel__row"></div></div>
-        <div class="admin-card"><div class="admin-skel admin-skel__line admin-skel__line--title"></div><div class="admin-skel admin-skel__row"></div><div class="admin-skel admin-skel__row"></div><div class="admin-skel admin-skel__row"></div></div>
-        <div class="admin-card"><div class="admin-skel admin-skel__line admin-skel__line--title"></div><div class="admin-skel admin-skel__row"></div><div class="admin-skel admin-skel__row"></div></div>
-      </div>
+      <div class="admin-loading__spinner" aria-hidden="true"></div>
     </div>
   `;
 }

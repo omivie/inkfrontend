@@ -123,10 +123,7 @@ export default {
         </button>
       </div>
       <div class="cc2-orphan-grid" id="cc2-orphan-grid">
-        ${TESTS.map(t => `<div class="admin-card cc2-orphan-card">
-          <div class="admin-skeleton admin-skeleton--text" style="width:60%"></div>
-          <div class="admin-skeleton admin-skeleton--text" style="width:80%;margin-top:10px"></div>
-        </div>`).join('')}
+        <div class="admin-loader"><div class="admin-loading__spinner"></div></div>
       </div>
     `;
     _host.querySelector('[data-action="copy-hint"]').addEventListener('click', copyHint);

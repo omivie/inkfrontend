@@ -131,8 +131,7 @@ export default {
       <div class="cc-section">
         <div class="cc-section__title">Import Status</div>
         <div class="cc-import-cards" id="cc-import-cards">
-          <div class="admin-card cc-import-card"><div class="admin-skeleton admin-skeleton--kpi" style="height:100px"></div></div>
-          <div class="admin-card cc-import-card"><div class="admin-skeleton admin-skeleton--kpi" style="height:100px"></div></div>
+          <div class="admin-loader"><div class="admin-loading__spinner"></div></div>
         </div>
       </div>
       <div class="cc-section">

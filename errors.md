@@ -4,6 +4,41 @@ Log every error encountered here. Before editing a file, scan for known issues. 
 
 ---
 
+## ERR-041 — Card-CSS cache-bust token was inconsistent across the 3 shared files; bumping it breaks token tests in 3 files (2026-06-21)
+
+**Symptom:** During the loading-state rework I edited `css/pages.css`. The
+"3 card CSS files share ONE rollout token" convention was already violated at
+HEAD: `pages.css?v=faq-toggle-jun2026` while `components.css` / `search.css`
+were still `buybox-may2026`. That left `tests/product-card-title-clamp.test.js`
+("all HTML pages cache-bust … to v=buybox-may2026"), `tests/shipping-bar-inline-may2026.test.js`
+(§6) and others RED before I touched anything.
+
+**Root cause:** Multiple test files independently hardcode the expected `?v=`
+token for `components.css`/`pages.css`/`search.css`. When ANY of the three CSS
+files changes you must (a) set ALL THREE to the same new token across every HTML
+file, and (b) update EVERY test that pins the old token — they don't read from a
+single constant.
+
+**Fix:** New shared token `loading-spinner-jun2026` stamped on all three files in
+every `*.html` (perl one-liner over `find … -name '*.html'`), and the constant
+bumped in **three** test files:
+- `tests/product-card-title-clamp.test.js` (`CARD_CSS_TOKEN`)
+- `tests/search-pagination.test.js` (search.css assertion)
+- `tests/shipping-bar-inline-may2026.test.js` (§6 pages.css assertion)
+
+**How to apply next time:** grep `tests/` for `buybox-may2026` (or the current
+token) AND for `(pages|search|components)\.css` assertions before committing any
+card-CSS change. Deployed HTML is content-hash stamped by `scripts/stamp-versions.js`
+at build; the committed manual `?v=` token only needs to be internally consistent
++ match the tests.
+
+**Pre-existing, NOT fixed here (out of scope, unrelated to loading states):**
+5 red tests in `legal-pages.test.js` (§2 footer Policies column, §2 copyright
+surcharge wording, §9 pages.css legal hooks) and `tracking-request-may2026.test.js`
+(/track-order footer link, footer disambiguation line). These were red at HEAD.
+
+---
+
 ## ERR-040 — Landing page edits must target `inkcartridges/index.html` (ROOT), not `inkcartridges/html/index.html` (2026-06-21)
 
 **Symptom:** Redesigned the "Find ink for your printer" Ink Finder and applied

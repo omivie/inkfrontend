@@ -145,12 +145,18 @@ test('every non-Name column carries an explicit width', () => {
 // 4. DataTable wiring — tableClass plumbed through both render paths
 // ─────────────────────────────────────────────────────────────────────────────
 
-test('DataTable appends config.tableClass in the loading + main render paths', () => {
+test('DataTable appends config.tableClass in the main render path', () => {
+  // The loading path no longer renders a ghost <table> — it shows a single
+  // centered spinner (.admin-loader) — so tableClass is now only interpolated
+  // onto the live <table> in _render().
   const occurrences = TABLE_SRC.match(
     /class="admin-table\$\{this\.config\.tableClass \? ' ' \+ this\.config\.tableClass : ''\}"/g
   );
   assert.ok(occurrences, 'tableClass must be interpolated onto the <table>');
-  assert.equal(occurrences.length, 2, 'both setLoading() and _render() must honour tableClass');
+  assert.equal(occurrences.length, 1, '_render() must honour tableClass');
+  // The loading state is the single spinner, not a skeleton table.
+  assert.match(TABLE_SRC, /setLoading\([\s\S]*?admin-loader[\s\S]*?admin-loading__spinner/,
+    'setLoading() must render the single centered spinner');
 });
 
 test('products page opts into the fixed-layout class', () => {

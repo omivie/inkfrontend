@@ -165,7 +165,9 @@ test('no .product-card / .product-box / .smart-ac selector still clamps below 4 
 // the out-of-stock pill copy update touched components.css. mobile-parity-may2026
 // superseded it when the mobile-parity audit touched all three card CSS files.
 // buybox-may2026 superseded it when the four-row PDP buy-box landed in pages.css.
-const CARD_CSS_TOKEN = 'buybox-may2026';
+// loading-spinner-jun2026 superseded it when the loading-state rework reshaped the
+// product-card skeletons (pages.css) and normalised all three card CSS files.
+const CARD_CSS_TOKEN = 'loading-spinner-jun2026';
 
 test(`all HTML pages cache-bust the three card CSS files to v=${CARD_CSS_TOKEN}`, () => {
     const htmlRoot = path.join(ROOT, 'inkcartridges');

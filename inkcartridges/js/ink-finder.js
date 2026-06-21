@@ -762,14 +762,10 @@
         goToStage('brand');
 
         if (brand) {
-            // Warm the cache for a snappy first interaction.
+            // Warm the cache for a snappy first interaction. Never pre-highlight a
+            // brand — a selected-looking tile the user hasn't clicked reads as a
+            // phantom selection. The grid stays neutral until an explicit click.
             loadPrintersForBrand(brand).catch(() => {});
-            // Pre-highlight only an explicit prior choice, never the default.
-            if (fromStorage) {
-                brandButtons.forEach(btn => {
-                    btn.classList.toggle('ink-finder__brand-btn--selected', btn.dataset.brand === brand);
-                });
-            }
         }
     }
 

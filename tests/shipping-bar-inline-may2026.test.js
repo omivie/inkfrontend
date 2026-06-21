@@ -151,12 +151,13 @@ test('§6 shop.html pages.css link uses the current cache key', () => {
     // shipping-inline-may2026 when the inline bar shipped; the 4-line
     // title clamp release bumped it; stock-enquiry-may2026 bumped it
     // again; mobile-parity-may2026 bumped it for the mobile-parity audit;
-    // buybox-may2026 bumped it when the four-row PDP buy-box landed.
+    // buybox-may2026 bumped it when the four-row PDP buy-box landed;
+    // loading-spinner-jun2026 bumped it for the loading-state rework.
     // The guarantee is that shop.html requests the *current* pages.css
     // build so deployed clients refetch.
     assert.match(
         SHOP_HTML,
-        /pages\.css\?v=buybox-may2026/,
+        /pages\.css\?v=loading-spinner-jun2026/,
         'shop.html must cache-bust pages.css with the current key so deployed clients pull the new rules'
     );
 });

@@ -4156,41 +4156,67 @@
     display: none;
 }
 
-/* Brand Box Skeleton */
+/* Drill-down level skeletons — heights are matched 1:1 to the real
+   .drilldown-box tiles so the loading boxes line up with the eventual
+   layout (brand 56, category 180, code 100 min-heights). */
+
+/* Brand Box Skeleton — matches .drilldown-box--brand (min-height:56px) */
 .skeleton--brand-box {
-    height: 120px;
+    height: 56px;
     border-radius: var(--radius-lg, 12px);
     background: linear-gradient(90deg, #f0f0f0 25%, #e8e8e8 50%, #f0f0f0 75%);
     background-size: 200% 100%;
     animation: skeleton-loading 1.5s infinite;
 }
 
-/* Category Box Skeleton */
+/* Category Box Skeleton — matches .drilldown-box--category (min-height:180px) */
 .skeleton--category-box {
-    height: 160px;
+    height: 180px;
     border-radius: var(--radius-lg, 12px);
     background: linear-gradient(90deg, #f0f0f0 25%, #e8e8e8 50%, #f0f0f0 75%);
     background-size: 200% 100%;
     animation: skeleton-loading 1.5s infinite;
 }
 
-/* Product Code Box Skeleton */
+/* Product Code Box Skeleton — matches .drilldown-box--code (min-height:100px) */
 .skeleton--code-box {
-    height: 80px;
-    border-radius: var(--radius-md, 8px);
-    background: linear-gradient(90deg, #f0f0f0 25%, #e8e8e8 50%, #f0f0f0 75%);
-    background-size: 200% 100%;
-    animation: skeleton-loading 1.5s infinite;
-}
-
-/* Product Card Skeleton */
-.skeleton--product-card {
-    height: 320px;
+    height: 100px;
     border-radius: var(--radius-lg, 12px);
     background: linear-gradient(90deg, #f0f0f0 25%, #e8e8e8 50%, #f0f0f0 75%);
     background-size: 200% 100%;
     animation: skeleton-loading 1.5s infinite;
 }
+
+/* Structured product-card skeleton — reuses the real .product-card box model
+   so the loading grid mirrors the eventual product grid exactly (same 7-up
+   flex sizing, 4:3 image, content lines). Replaces the old solid 320px block
+   that rendered as oversized squares in a mismatched 4-up grid. */
+.product-card--skeleton {
+    pointer-events: none;
+}
+.product-card--skeleton .product-card__image-wrapper > .skeleton {
+    width: 100%;
+    height: 100%;
+    border-radius: 0;
+    background: linear-gradient(90deg, #f0f0f0 25%, #e8e8e8 50%, #f0f0f0 75%);
+    background-size: 200% 100%;
+    animation: skeleton-loading 1.5s infinite;
+}
+.product-card--skeleton .product-card__content {
+    gap: 7px;
+}
+.product-card--skeleton .skel-line {
+    display: block;
+    height: 11px;
+    border-radius: 4px;
+    background: linear-gradient(90deg, #f0f0f0 25%, #e8e8e8 50%, #f0f0f0 75%);
+    background-size: 200% 100%;
+    animation: skeleton-loading 1.5s infinite;
+}
+.product-card--skeleton .skel-line--brand  { width: 45%; }
+.product-card--skeleton .skel-line--title  { height: 13px; width: 95%; }
+.product-card--skeleton .skel-line--title2 { height: 13px; width: 70%; }
+.product-card--skeleton .skel-line--price  { height: 16px; width: 50%; margin-top: 10px; }
 
 /* Section Title Skeleton */
 .skeleton--section-title {
@@ -4208,39 +4234,17 @@
     margin-bottom: var(--spacing-xl);
 }
 
-.drilldown-skeleton--products .products-row {
-    display: grid !important;
-    grid-template-columns: repeat(4, 1fr) !important;
-    gap: var(--spacing-md) !important;
-    flex-wrap: unset !important;
-}
-
-.drilldown-skeleton--products .skeleton--product-card {
-    width: 100%;
-    max-width: none;
-}
+/* The skeleton products row reuses the real .products-row flex layout and
+   .product-card sizing, so it inherits the live grid + responsive breakpoints
+   automatically — no grid override needed. */
 
 @media (max-width: 768px) {
     .skeleton--brand-box {
-        height: 100px;
+        height: 56px;
     }
 
     .skeleton--category-box {
-        height: 140px;
-    }
-
-    .skeleton--product-card {
-        height: 280px;
-    }
-
-    .drilldown-skeleton--products .products-row {
-        grid-template-columns: repeat(2, 1fr) !important;
-    }
-}
-
-@media (min-width: 769px) and (max-width: 1024px) {
-    .drilldown-skeleton--products .products-row {
-        grid-template-columns: repeat(3, 1fr) !important;
+        height: 160px;
     }
 }
 
@@ -4609,18 +4613,21 @@
 
 .cart-summary__payment-icons {
     display: flex;
+    flex-wrap: wrap;
     justify-content: center;
+    align-items: center;
     gap: var(--spacing-sm);
     margin-top: var(--spacing-md);
     font-size: var(--font-size-sm);
     color: var(--color-text-muted);
 }
 
-.cart-summary__payment-icons span {
-    padding: var(--spacing-1) var(--spacing-2);
-    background-color: var(--color-background);
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius-sm);
+.cart-summary__payment-icons .pay-card {
+    height: 24px;
+    width: auto;
+    display: block;
+    border-radius: 4px;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12);
 }
 
 @media (max-width: 1024px) {

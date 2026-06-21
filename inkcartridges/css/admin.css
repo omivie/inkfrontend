@@ -1110,6 +1110,21 @@
 .admin-skeleton--chart { height: 280px; border-radius: var(--radius); }
 .admin-skeleton--row { height: 44px; margin: 4px 0; }
 
+/* ---- Inline loader (single spinner) ----
+   Canonical in-panel loading state for admin pages: one centered spinner
+   instead of filler skeleton boxes. Reuses .admin-loading__spinner. */
+.admin-loader {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  min-height: 200px;
+  padding: 48px 0;
+  /* Span every column when dropped into a grid container (e.g. KPI grids);
+     ignored in flow/flex contexts. Keeps the single spinner centered. */
+  grid-column: 1 / -1;
+}
+
 /* ---- Tooltip ---- */
 [data-tooltip] { position: relative; }
 [data-tooltip]::after {

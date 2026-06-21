@@ -588,10 +588,26 @@
                     window.location.href = href;
                     return;
                 }
-                const q = chip.getAttribute('data-chip') || '';
-                state.input.value = q;
-                state.input.focus();
-                runSearch(q);
+                // Recent-search chip: "re-run this search." Per the three-handler
+                // routing contract (search-dropdown-routing.md), a recent-search
+                // chip routes to /search?q= exactly like Enter / "View all
+                // results" — it never branches on matched_printer and it never
+                // leaves the box merely *filled*.
+                //
+                // Navigating directly is also the permanent fix for
+                // search-recent-chip-no-submit-jun2026.md: writing the chip text
+                // via `input.value = …` does NOT fire an 'input' event, so
+                // main.js's syncSubmitState() never re-enables the submit button.
+                // A stale-disabled submit button is a no-op for BOTH Enter and a
+                // direct magnifier click — so the previous "fill the box +
+                // runSearch" path left the user staring at a dead search box.
+                // Routing straight to the results page sidesteps that entirely
+                // and matches what a "recent searches" list is for (one click
+                // re-runs it).
+                const q = (chip.getAttribute('data-chip') || '').trim();
+                if (!q) return;
+                saveRecent(q); // bump this query back to the top of recents
+                window.location.href = `/search?q=${encodeURIComponent(q)}`;
                 return;
             }
             const card = e.target.closest('.product-card');

@@ -33,7 +33,7 @@ async function loadPaymentBreakdown() {
   const chartWrap = _el.querySelector('#cc-payment-chart-wrap');
   const summaryWrap = _el.querySelector('#cc-payment-summary');
 
-  chartWrap.innerHTML = '<div class="admin-skeleton admin-skeleton--kpi" style="height:200px"></div>';
+  chartWrap.innerHTML = '<div class="admin-loader"><div class="admin-loading__spinner"></div></div>';
   summaryWrap.innerHTML = '';
 
   const data = await AdminAPI.getPaymentBreakdown(startInput.value, endInput.value);

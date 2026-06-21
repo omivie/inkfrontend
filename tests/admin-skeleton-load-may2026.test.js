@@ -87,23 +87,14 @@ test('website-traffic.js: first load renders skeleton(), re-loads use --reloadin
   );
 });
 
-test('website-traffic.js: skeleton() emits the matched-layout 6 KPI tiles + chart shell', () => {
+test('website-traffic.js: skeleton() renders a single centered spinner', () => {
+  // Loading state is now one centered spinner (.admin-loader + .admin-loading__spinner)
+  // instead of the old matched-layout skeleton boxes.
   const skelStart = WT_SRC.indexOf('function skeleton()');
-  assert.ok(skelStart > -1);
-  const skelChunk = WT_SRC.slice(skelStart, skelStart + 2000);
-  // Tiles are emitted via a `const tile = '<div ...>'` placeholder repeated with
-  // ${tile}; count the substitutions (+ any inline literals just in case).
-  const tileCount = (skelChunk.match(/\$\{tile\}/g) || []).length
-                  + (skelChunk.match(/<div[^>]*admin-skel__tile/g) || []).length;
-  assert.ok(tileCount >= 6, `skeleton must include ≥6 KPI tile placeholders, saw ${tileCount}`);
-  assert.match(skelChunk, /admin-kpi-grid--6/, 'KPI skeleton row must use the --6 grid');
-  assert.match(skelChunk, /admin-chart-box--tall/, 'chart skeleton must use the tall chart box');
-  assert.match(skelChunk, /admin-skel__chart/, 'chart skeleton placeholder must exist');
-  assert.match(skelChunk, /admin-skel__stat/, 'summary-strip skeleton placeholders must exist');
-  // Five summary stat placeholders to match the real layout.
-  const statCount = (skelChunk.match(/\$\{stat\}/g) || []).length
-                  + (skelChunk.match(/<div[^>]*admin-skel__stat/g) || []).length;
-  assert.ok(statCount >= 5, `skeleton must include ≥5 summary-stat placeholders, saw ${statCount}`);
+  assert.ok(skelStart > -1, 'skeleton() must exist');
+  const skelChunk = WT_SRC.slice(skelStart, skelStart + 600);
+  assert.match(skelChunk, /admin-loader/, 'skeleton must use the centered .admin-loader wrapper');
+  assert.match(skelChunk, /admin-loading__spinner/, 'skeleton must render the single spinner');
 });
 
 test('website-traffic.js: destroy() bumps the seq + resets the first-load flag', () => {
@@ -148,14 +139,11 @@ test('dashboard.js: first load shows dashboardSkeleton(), re-loads dim via --rel
   );
 });
 
-test('dashboard.js: dashboardSkeleton() includes 8 KPI tile placeholders + chart cards', () => {
+test('dashboard.js: dashboardSkeleton() renders a single centered spinner', () => {
   const start = DASH_SRC.indexOf('function dashboardSkeleton()');
-  const chunk = DASH_SRC.slice(start, start + 2500);
-  const tileCount = (chunk.match(/\$\{tile\}/g) || []).length
-                  + (chunk.match(/<div[^>]*admin-skel__tile/g) || []).length;
-  assert.ok(tileCount >= 8, `expected ≥8 KPI tile placeholders, saw ${tileCount}`);
-  const chartCount = (chunk.match(/admin-skel__chart/g) || []).length;
-  assert.ok(chartCount >= 2, `expected ≥2 chart skeletons (trend + forecast), saw ${chartCount}`);
+  const chunk = DASH_SRC.slice(start, start + 600);
+  assert.match(chunk, /admin-loader/, 'must use the centered .admin-loader wrapper');
+  assert.match(chunk, /admin-loading__spinner/, 'must render the single spinner');
 });
 
 test('dashboard.js: destroy() bumps _loadSeq + resets first-load flag', () => {
@@ -176,6 +164,7 @@ test('admin.css: defines the admin-skel shimmer + .admin-page--reloading dim', (
   assert.match(CSS_SRC, /\.admin-skel__row/,                'row variant must exist');
   assert.match(CSS_SRC, /\.admin-skel__line--title/,        'title-line variant must exist');
   assert.match(CSS_SRC, /\.admin-page--reloading/,          'reloading dim class must exist');
+  assert.match(CSS_SRC, /\.admin-loader\s*\{/,              'centered single-spinner loader class must exist');
 });
 
 test('admin.css: shimmer + reload dim respect prefers-reduced-motion', () => {
