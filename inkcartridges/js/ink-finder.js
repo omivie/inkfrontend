@@ -12,31 +12,72 @@
     // DOM ELEMENTS
     // ============================================
     const brandButtons = document.querySelectorAll('.ink-finder__brand-btn');
-    const seriesTrigger = document.getElementById('ink-finder-series-trigger');
-    const seriesDropdown = document.getElementById('ink-finder-series-dropdown');
-    const seriesInput = document.getElementById('ink-finder-series');
-    const modelTrigger = document.getElementById('ink-finder-model-trigger');
-    const modelDropdown = document.getElementById('ink-finder-model-dropdown');
-    const modelInput = document.getElementById('ink-finder-model');
-    const submitBtn = document.getElementById('ink-finder-submit');
-    const submitLabel = submitBtn ? submitBtn.querySelector('.ink-finder__btn-label') : null;
-    const steps = document.querySelectorAll('.ink-finder__step');
-    const stickyCta = document.getElementById('ink-finder-sticky-cta');
-    const stickyBtn = document.getElementById('ink-finder-sticky-btn');
-    const stickyLabel = document.getElementById('ink-finder-sticky-label');
+
+    // Stages (replace-in-place: brand → series → model → confirm)
+    const stages = {
+        brand: document.getElementById('finder-stage-brand'),
+        series: document.getElementById('finder-stage-series'),
+        model: document.getElementById('finder-stage-model'),
+        confirm: document.getElementById('finder-stage-confirm')
+    };
+
+    // Breadcrumb crumbs + separators
+    const breadcrumb = document.getElementById('finder-breadcrumb');
+    const crumbs = {
+        brand: breadcrumb && breadcrumb.querySelector('.finder-breadcrumb__crumb[data-stage="brand"]'),
+        series: breadcrumb && breadcrumb.querySelector('.finder-breadcrumb__crumb[data-stage="series"]'),
+        model: breadcrumb && breadcrumb.querySelector('.finder-breadcrumb__crumb[data-stage="model"]')
+    };
+    const crumbText = {
+        brand: document.getElementById('crumb-brand-text'),
+        series: document.getElementById('crumb-series-text'),
+        model: document.getElementById('crumb-model-text')
+    };
+    const seps = {
+        series: document.getElementById('finder-sep-series'),
+        model: document.getElementById('finder-sep-model')
+    };
+
+    // Series stage
+    const seriesTiles = document.getElementById('finder-series-tiles');
+    const seriesEmpty = document.getElementById('finder-series-empty');
+    const seriesFilter = document.getElementById('finder-series-filter');
+    const seriesHint = document.getElementById('finder-series-hint');
+
+    // Model stage
+    const modelTiles = document.getElementById('finder-model-tiles');
+    const modelEmpty = document.getElementById('finder-model-empty');
+    const modelFilter = document.getElementById('finder-model-filter');
+    const modelHint = document.getElementById('finder-model-hint');
+
+    // Confirm stage
+    const confirmCard = document.getElementById('finder-confirm-card');
 
     // Exit if elements don't exist (not on this page)
-    if (!brandButtons.length || !seriesTrigger || !modelTrigger || !submitBtn) {
+    if (!brandButtons.length || !stages.series || !stages.model || !seriesTiles || !modelTiles) {
         return;
     }
 
-    // localStorage key — see readfirst/ink-finder-may2026.md "Acceptance":
-    // homepage finder shows series for the user's last-selected brand
-    // (or default Brother).
+    // localStorage key — homepage finder remembers the user's last-selected
+    // brand (or default Brother) and pre-highlights it on the brand grid.
     const LS_BRAND_KEY = 'ink-finder-last-brand';
     const DEFAULT_BRAND = 'brother';
-    const DEFAULT_CTA_TEXT = (submitLabel && submitLabel.dataset.defaultLabel)
-        || 'Find Cartridges';
+
+    // Map brand slug → display name straight from the brand buttons' aria-label
+    // so breadcrumb/hint copy ("Brother PIXMA") needs no second source of truth.
+    const BRAND_NAMES = {};
+    brandButtons.forEach(b => {
+        if (b.dataset.brand) BRAND_NAMES[b.dataset.brand] = b.getAttribute('aria-label') || b.dataset.brand;
+    });
+
+    function escapeHtml(str) {
+        if (window.Security && typeof Security.escapeHtml === 'function') {
+            return Security.escapeHtml(str);
+        }
+        return String(str == null ? '' : str)
+            .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+    }
 
     // ============================================
     // TAB SWITCHING
@@ -85,9 +126,12 @@
     // STATE
     // ============================================
     let selectedBrand = null;
+    let selectedBrandName = null;
     let selectedSeries = null;
+    let selectedSeriesName = null;
     let selectedModel = null;
     let selectedPrinterName = null;
+    let currentStage = 'brand';
     let printerCache = {}; // Cache extracted printers by brand
     let currentSeriesData = [];
     let currentModelsData = [];
@@ -380,202 +424,160 @@
     }
 
     // ============================================
-    // CUSTOM SELECT FUNCTIONS
+    // STAGE NAVIGATION + BREADCRUMB
     // ============================================
 
-    function openDropdown(trigger, dropdown) {
-        trigger.setAttribute('aria-expanded', 'true');
-        dropdown.hidden = false;
-        trigger.parentElement.classList.add('custom-select--open');
+    function goToStage(stage) {
+        currentStage = stage;
+        Object.keys(stages).forEach(key => {
+            if (stages[key]) stages[key].hidden = (key !== stage);
+        });
+        updateBreadcrumb();
     }
 
-    function closeDropdown(trigger, dropdown) {
-        trigger.setAttribute('aria-expanded', 'false');
-        dropdown.hidden = true;
-        trigger.parentElement.classList.remove('custom-select--open');
-    }
+    function updateBreadcrumb() {
+        // Brand crumb — always present.
+        if (crumbText.brand) crumbText.brand.textContent = selectedBrandName || 'Select brand';
 
-    function toggleDropdown(trigger, dropdown) {
-        const isOpen = trigger.getAttribute('aria-expanded') === 'true';
-        if (isOpen) {
-            closeDropdown(trigger, dropdown);
-        } else {
-            closeAllDropdowns();
-            openDropdown(trigger, dropdown);
-        }
-    }
+        // Series crumb — appears once a brand is chosen.
+        const showSeries = !!selectedBrand;
+        if (crumbs.series) crumbs.series.hidden = !showSeries;
+        if (seps.series) seps.series.hidden = !showSeries;
+        if (crumbText.series) crumbText.series.textContent = selectedSeriesName || 'Series';
 
-    function closeAllDropdowns() {
-        closeDropdown(seriesTrigger, seriesDropdown);
-        closeDropdown(modelTrigger, modelDropdown);
-    }
-
-    function populateDropdown(dropdown, options, valueKey = 'id', labelKey = 'name') {
-        dropdown.innerHTML = '';
-
-        if (options.length === 0) {
-            const empty = document.createElement('li');
-            empty.className = 'custom-select__empty';
-            empty.textContent = 'No options available';
-            dropdown.appendChild(empty);
-            return;
+        // Model crumb — appears once a series is chosen.
+        const showModel = !!selectedSeries;
+        if (crumbs.model) crumbs.model.hidden = !showModel;
+        if (seps.model) seps.model.hidden = !showModel;
+        if (crumbText.model) {
+            crumbText.model.textContent = selectedPrinterName
+                ? stripBrand(selectedPrinterName) : 'Model';
         }
 
-        const cols = 3;
-        const rowsPerPage = 6;
-        const itemsPerPage = cols * rowsPerPage;  // 18 items per "page"
-
-        // Use CSS order property for column-first ordering within row-first grid
-        // Items should fill: 6 down col 1, then 6 down col 2, then 6 down col 3, then repeat
-        options.forEach((option, i) => {
-            const li = document.createElement('li');
-            li.className = 'custom-select__option';
-            li.setAttribute('data-value', option[valueKey]);
-            li.setAttribute('data-full-name', option.fullName || option.name || '');
-
-            // "Other Models" should always appear at the end
-            const isOtherModels = option[valueKey] === 'other' || (option.name && option.name.toLowerCase().includes('other'));
-
-            if (isOtherModels) {
-                // Give it a very high order value to push to the end
-                li.style.order = 99999;
-            } else {
-                // Calculate CSS order for column-first fill in a row-first grid
-                // Visual position i maps to grid order that places it in the correct cell
-                const page = Math.floor(i / itemsPerPage);       // which page of 18 items
-                const indexInPage = i % itemsPerPage;            // position within page (0-17)
-                const visualCol = Math.floor(indexInPage / rowsPerPage);  // column 0, 1, or 2
-                const visualRow = indexInPage % rowsPerPage;     // row 0-5 within column
-                // Grid flows row-first, so order = row * cols + col
-                const order = (page * rowsPerPage + visualRow) * cols + visualCol;
-                li.style.order = order;
-            }
-
-            // Add model count for series
-            if (option.models) {
-                const count = option.models.length;
-                li.textContent = `${option[labelKey]} (${count} ${count === 1 ? 'model' : 'models'})`;
-            } else {
-                // Stash the raw label so the model-selected handler can rebuild
-                // "✓ <label>" without regex-stripping every time.
-                li.dataset.modelLabel = option[labelKey];
-                li.textContent = option[labelKey];
-            }
-
-            dropdown.appendChild(li);
+        // Active + done styling. The confirm stage keeps the model crumb active.
+        const activeStage = currentStage === 'confirm' ? 'model' : currentStage;
+        [['brand', selectedBrand], ['series', selectedSeries], ['model', selectedModel]].forEach(([key, done]) => {
+            const c = crumbs[key];
+            if (!c) return;
+            const isActive = key === activeStage;
+            c.classList.toggle('finder-breadcrumb__crumb--active', isActive);
+            c.classList.toggle('finder-breadcrumb__crumb--done', !!done && !isActive);
         });
     }
 
-    function setSelectValue(trigger, input, value, label) {
-        const valueSpan = trigger.querySelector('.custom-select__value');
-        valueSpan.textContent = label;
-        input.value = value;
+    // Model full names arrive brand-prefixed ("Brother PIXMA TS3360"); the
+    // model crumb is tighter without the redundant brand, so trim it when present.
+    function stripBrand(fullName) {
+        if (!fullName || !selectedBrandName) return fullName || '';
+        const prefix = selectedBrandName + ' ';
+        return fullName.startsWith(prefix) ? fullName.slice(prefix.length) : fullName;
     }
 
     // ============================================
-    // STEP MANAGEMENT
+    // TILE RENDERING
     // ============================================
 
-    function updateStepStates() {
-        steps.forEach((step, index) => {
-            const stepNum = index + 1;
-            step.classList.remove('ink-finder__step--active', 'ink-finder__step--completed', 'ink-finder__step--disabled');
+    function renderSeriesTiles(filterText) {
+        const q = (filterText || '').trim().toLowerCase();
+        const matches = currentSeriesData.filter(s => !q || (s.name || '').toLowerCase().includes(q));
 
-            if (stepNum === 1) {
-                step.classList.add('ink-finder__step--active');
-                if (selectedBrand) {
-                    step.classList.add('ink-finder__step--completed');
-                }
-            } else if (stepNum === 2) {
-                if (selectedBrand) {
-                    step.classList.add('ink-finder__step--active');
-                    if (selectedSeries) {
-                        step.classList.add('ink-finder__step--completed');
-                    }
-                } else {
-                    step.classList.add('ink-finder__step--disabled');
-                }
-            } else if (stepNum === 3) {
-                if (selectedSeries) {
-                    step.classList.add('ink-finder__step--active');
-                    if (selectedModel) {
-                        step.classList.add('ink-finder__step--completed');
-                    }
-                } else {
-                    step.classList.add('ink-finder__step--disabled');
-                }
-            }
+        seriesTiles.innerHTML = '';
+        matches.forEach(s => {
+            const count = (s.models || []).length;
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'finder-tile';
+            btn.setAttribute('role', 'listitem');
+            btn.dataset.seriesId = s.id;
+            btn.innerHTML =
+                `<span class="finder-tile__name">${escapeHtml(s.name)}</span>` +
+                `<span class="finder-tile__meta">${count} ${count === 1 ? 'model' : 'models'}</span>`;
+            seriesTiles.appendChild(btn);
         });
+        if (seriesEmpty) seriesEmpty.hidden = matches.length > 0;
     }
+
+    function renderModelTiles(filterText) {
+        const q = (filterText || '').trim().toLowerCase();
+        const matches = currentModelsData.filter(m =>
+            !q || (m.name || '').toLowerCase().includes(q) || (m.fullName || '').toLowerCase().includes(q));
+
+        modelTiles.innerHTML = '';
+        matches.forEach(m => {
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'finder-tile';
+            btn.setAttribute('role', 'listitem');
+            btn.dataset.modelId = m.id;
+            btn.dataset.fullName = m.fullName || m.name || '';
+            btn.innerHTML = `<span class="finder-tile__name">${escapeHtml(m.name)}</span>`;
+            modelTiles.appendChild(btn);
+        });
+        if (modelEmpty) modelEmpty.hidden = matches.length > 0;
+    }
+
+    // ============================================
+    // SELECTION HANDLERS
+    // ============================================
 
     /**
-     * Handle brand selection
+     * Handle brand selection. With opts.bootstrap the cache is warmed and the
+     * brand pre-highlighted, but we stay on the brand stage (page-load entry).
      */
     async function selectBrand(brand, opts) {
         const silent = !!(opts && opts.silent);
 
-        // Update button states
         brandButtons.forEach(btn => {
-            btn.classList.remove('ink-finder__brand-btn--selected');
-            if (btn.dataset.brand === brand) {
-                btn.classList.add('ink-finder__brand-btn--selected');
-            }
+            btn.classList.toggle('ink-finder__brand-btn--selected', btn.dataset.brand === brand);
         });
 
         selectedBrand = brand;
+        selectedBrandName = BRAND_NAMES[brand] || brand;
         selectedSeries = null;
+        selectedSeriesName = null;
         selectedModel = null;
         selectedPrinterName = null;
 
-        // Persist for next visit (acceptance: homepage finder shows series for
-        // the user's last-selected brand). Skip when called via the silent
-        // bootstrap path so a returning user with no preference doesn't get
-        // their (empty) preference rewritten by the default.
+        // Persist the user's explicit pick for next visit.
         if (!silent) {
             try { localStorage.setItem(LS_BRAND_KEY, brand); } catch { /* ignore */ }
         }
 
-        // Show loading state
-        setSelectValue(seriesTrigger, seriesInput, '', 'Loading series…');
-        seriesTrigger.disabled = true;
-        setSelectValue(modelTrigger, modelInput, '', 'Which model?');
-        modelTrigger.disabled = true;
-        submitBtn.disabled = true;
-        resetCtaLabel();
-        hideStickyCta();
+        // Reset downstream filters so a new brand starts clean.
+        if (seriesFilter) seriesFilter.value = '';
+        if (modelFilter) modelFilter.value = '';
+        if (seriesHint) seriesHint.innerHTML = `Which series? <span>${escapeHtml(selectedBrandName)}</span>`;
 
-        updateStepStates();
+        // Loading shim, then advance to the series stage.
+        seriesTiles.innerHTML = '<p class="finder-empty">Loading series…</p>';
+        if (seriesEmpty) seriesEmpty.hidden = true;
+        goToStage('series');
 
-        // Load printers for this brand
         const series = await loadPrintersForBrand(brand);
-        currentSeriesData = series;
+        // Guard against rapid brand switching — ignore a stale resolve.
+        if (selectedBrand !== brand) return;
+        currentSeriesData = series || [];
 
-        if (series.length === 0) {
-            setSelectValue(seriesTrigger, seriesInput, '', 'No printers found');
+        if (!currentSeriesData.length) {
+            seriesTiles.innerHTML = '<p class="finder-empty">No printer series found for this brand.</p>';
             return;
         }
-
-        // Populate series dropdown
-        populateDropdown(seriesDropdown, series);
-        setSelectValue(seriesTrigger, seriesInput, '', 'Which series?');
-        seriesTrigger.disabled = false;
-
-        updateStepStates();
+        renderSeriesTiles('');
     }
 
     /**
      * Handle series selection
      */
     function selectSeries(seriesId) {
-        selectedSeries = seriesId;
-        selectedModel = null;
-        selectedPrinterName = null;
-
-        // Find the selected series
         const series = currentSeriesData.find(s => s.id === seriesId);
         if (!series) return;
 
-        // Deduplicate models by base name (before any "/" variant suffix)
+        selectedSeries = seriesId;
+        selectedSeriesName = series.name;
+        selectedModel = null;
+        selectedPrinterName = null;
+
+        // Deduplicate models by base name (before any "/" variant suffix).
         const modelMap = new Map();
         (series.models || []).forEach(m => {
             const baseName = (m.name || '').split('/')[0].trim();
@@ -586,98 +588,113 @@
         });
         currentModelsData = Array.from(modelMap.values());
 
-        // Populate models dropdown
-        populateDropdown(modelDropdown, currentModelsData);
-        setSelectValue(modelTrigger, modelInput, '', 'Which model?');
-        modelTrigger.disabled = false;
-        submitBtn.disabled = true;
-        resetCtaLabel();
-        hideStickyCta();
-
-        updateStepStates();
+        if (modelFilter) modelFilter.value = '';
+        if (modelHint) {
+            modelHint.innerHTML =
+                `Which model? <span>${escapeHtml(selectedBrandName + ' · ' + selectedSeriesName)}</span>`;
+        }
+        renderModelTiles('');
+        goToStage('model');
     }
 
     /**
-     * Handle model selection
+     * Handle model selection — fetch the live cartridge count, then confirm.
      */
-    function selectModel(modelId, printerFullName) {
+    function selectModel(modelId, fullName) {
         selectedModel = modelId;
-        selectedPrinterName = printerFullName;
-        submitBtn.disabled = false;
-        updateCtaLabel(printerFullName);
-        showStickyCta(printerFullName);
-        updateStepStates();
-    }
-
-    // ============================================
-    // CTA TEXT + STICKY BAR
-    // (spec: "Show cartridges for <full_name>")
-    // ============================================
-
-    function updateCtaLabel(fullName) {
-        const text = fullName ? `Show cartridges for ${fullName}` : DEFAULT_CTA_TEXT;
-        if (submitLabel) submitLabel.textContent = text;
-    }
-
-    function resetCtaLabel() {
-        if (submitLabel) submitLabel.textContent = DEFAULT_CTA_TEXT;
-    }
-
-    function showStickyCta(fullName) {
-        if (!stickyCta || !stickyBtn) return;
-        const span = stickyBtn.querySelector('span');
-        if (span) span.textContent = `Show cartridges for ${fullName}`;
-        if (stickyLabel) stickyLabel.textContent = fullName || 'Show cartridges';
-        // Only reveal once the inline button leaves the viewport — the
-        // IntersectionObserver further down handles that. Mark "ready" and
-        // let the observer decide visibility.
-        stickyCta.dataset.ready = '1';
-        applyStickyVisibility();
-    }
-
-    function hideStickyCta() {
-        if (!stickyCta) return;
-        delete stickyCta.dataset.ready;
-        stickyCta.hidden = true;
-        stickyCta.setAttribute('aria-hidden', 'true');
-        stickyCta.classList.remove('ink-finder__sticky-cta--visible');
-    }
-
-    function applyStickyVisibility() {
-        if (!stickyCta) return;
-        const ready = stickyCta.dataset.ready === '1';
-        const inlineOffscreen = stickyCta.dataset.inlineOffscreen === '1';
-        const visible = ready && inlineOffscreen;
-        stickyCta.hidden = !visible;
-        stickyCta.setAttribute('aria-hidden', visible ? 'false' : 'true');
-        stickyCta.classList.toggle('ink-finder__sticky-cta--visible', visible);
+        selectedPrinterName = fullName;
+        goToStage('confirm');
+        showConfirm(modelId, fullName);
     }
 
     /**
-     * Navigate to shop page with printer filter
+     * Confirm stage: show a loading shim, fetch the real compatible-cartridge
+     * count for this printer, then render the confirm card.
+     */
+    async function showConfirm(modelId, fullName) {
+        confirmCard.innerHTML =
+            '<div class="finder-confirm__spinner" aria-hidden="true"></div>' +
+            '<p class="finder-confirm__count">Finding cartridges…</p>' +
+            `<p class="finder-confirm__printer">${escapeHtml(fullName)}</p>`;
+
+        let count = null;
+        let failed = false;
+        try {
+            const resp = await API.getProductsByPrinter(modelId, { limit: 200 });
+            if (resp && resp.ok && resp.data) {
+                const list = resp.data.compatible_products || resp.data.products || [];
+                count = (typeof resp.data.total === 'number')
+                    ? resp.data.total
+                    : (Array.isArray(list) ? list.length : 0);
+            } else {
+                failed = true;
+            }
+        } catch {
+            failed = true;
+        }
+
+        // Stale guard: the user may have gone back and picked a different model.
+        if (selectedModel !== modelId || currentStage !== 'confirm') return;
+
+        renderConfirm(fullName, count, failed);
+    }
+
+    function renderConfirm(fullName, count, failed) {
+        const safeName = escapeHtml(fullName);
+        let body;
+
+        if (!failed && count === 0) {
+            // Honest empty state — route to contact rather than an empty results page.
+            body =
+                '<p class="finder-confirm__count">No cartridges listed yet</p>' +
+                `<p class="finder-confirm__printer">We don’t have ink for <strong>${safeName}</strong> on the site right now — get in touch and we’ll help.</p>` +
+                '<div class="finder-confirm__actions">' +
+                    '<a class="btn btn--primary btn--large finder-confirm__view" href="/contact">Contact us for this printer</a>' +
+                    '<button type="button" class="finder-confirm__back">← Choose another model</button>' +
+                '</div>';
+        } else if (failed) {
+            // Couldn't read a count — still let them through to results.
+            body =
+                `<p class="finder-confirm__count">${safeName}</p>` +
+                '<p class="finder-confirm__printer">View the cartridges compatible with your printer.</p>' +
+                '<div class="finder-confirm__actions">' +
+                    '<button type="button" class="btn btn--primary btn--large finder-confirm__view">View compatible cartridges</button>' +
+                    '<button type="button" class="finder-confirm__back">← Choose another model</button>' +
+                '</div>';
+        } else {
+            const noun = count === 1 ? 'cartridge' : 'cartridges';
+            body =
+                `<p class="finder-confirm__count"><em>${count}</em> compatible ${noun} found</p>` +
+                `<p class="finder-confirm__printer">for ${safeName}</p>` +
+                '<div class="finder-confirm__actions">' +
+                    `<button type="button" class="btn btn--primary btn--large finder-confirm__view">View ${noun} →</button>` +
+                    '<button type="button" class="finder-confirm__back">← Choose another model</button>' +
+                '</div>';
+        }
+
+        confirmCard.innerHTML = body;
+
+        // The contact link is an <a> and navigates itself; only the button
+        // variants drive the printer-results navigation.
+        const viewBtn = confirmCard.querySelector('.finder-confirm__view');
+        if (viewBtn && viewBtn.tagName === 'BUTTON') {
+            viewBtn.addEventListener('click', findProducts);
+        }
+        const backBtn = confirmCard.querySelector('.finder-confirm__back');
+        if (backBtn) backBtn.addEventListener('click', () => goToStage('model'));
+    }
+
+    /**
+     * Navigate to the shop page filtered to the selected printer.
      */
     function findProducts() {
-        if (!selectedPrinterName || !selectedBrand) return;
-
-        // Prefer the strict printer-products route which filters via
-        // product_compatibility — no fuzzy name matching, no noise.
-        // Fall back to ?printer_model= only when we don't have a slug.
-        //
-        // Canonical printer URL per docs/storefront/search-dropdown-routing.md:
-        // /shop?brand=<brand_slug>&printer_slug=<slug>. selectedBrand is a
-        // brand slug here (data-brand on the brand button), so we have all
-        // the pieces — emit the canonical (branded) form.
-        let url;
-        if (selectedModel) {
-            // selectedBrand is already a brand slug (data-brand attribute on
-            // the brand button), so buildPrinterUrl in strict mode always
-            // yields the canonical /shop?brand=&printer_slug= shape.
-            url = (typeof buildPrinterUrl === 'function')
-                ? buildPrinterUrl({ slug: selectedModel, brand_slug: selectedBrand })
-                : `/shop?brand=${encodeURIComponent(selectedBrand)}&printer_slug=${encodeURIComponent(selectedModel)}`;
-        } else {
-            url = `/shop?printer_model=${encodeURIComponent(selectedPrinterName)}&printer_brand=${encodeURIComponent(selectedBrand)}`;
-        }
+        if (!selectedModel || !selectedBrand) return;
+        // Canonical printer URL: /shop?brand=<brand_slug>&printer_slug=<slug>.
+        // selectedBrand is already a brand slug (data-brand on the brand button).
+        const fallback = `/shop?brand=${encodeURIComponent(selectedBrand)}&printer_slug=${encodeURIComponent(selectedModel)}`;
+        const url = (typeof buildPrinterUrl === 'function')
+            ? (buildPrinterUrl({ slug: selectedModel, brand_slug: selectedBrand }) || fallback)
+            : fallback;
         window.location.href = url;
     }
 
@@ -685,140 +702,74 @@
     // EVENT LISTENERS
     // ============================================
 
-    // Brand button clicks
+    // Brand tile clicks → advance to series.
     brandButtons.forEach(btn => {
-        btn.addEventListener('click', function() {
-            selectBrand(this.dataset.brand);
-        });
+        btn.addEventListener('click', () => selectBrand(btn.dataset.brand));
     });
 
-    // Series dropdown trigger
-    seriesTrigger.addEventListener('click', function(e) {
-        e.stopPropagation();
-        if (!this.disabled) {
-            toggleDropdown(seriesTrigger, seriesDropdown);
-        }
+    // Series tile clicks (delegated) → advance to model.
+    seriesTiles.addEventListener('click', (e) => {
+        const tile = e.target.closest('.finder-tile');
+        if (tile && tile.dataset.seriesId) selectSeries(tile.dataset.seriesId);
     });
 
-    // Series dropdown option selection
-    seriesDropdown.addEventListener('click', function(e) {
-        const option = e.target.closest('.custom-select__option');
-        if (option) {
-            const value = option.dataset.value;
-            const label = option.textContent;
-
-            seriesDropdown.querySelectorAll('.custom-select__option').forEach(opt => {
-                opt.classList.remove('custom-select__option--selected');
-            });
-            option.classList.add('custom-select__option--selected');
-
-            setSelectValue(seriesTrigger, seriesInput, value, label);
-            closeDropdown(seriesTrigger, seriesDropdown);
-
-            selectSeries(value);
-        }
+    // Model tile clicks (delegated) → fetch count + confirm.
+    modelTiles.addEventListener('click', (e) => {
+        const tile = e.target.closest('.finder-tile');
+        if (tile && tile.dataset.modelId) selectModel(tile.dataset.modelId, tile.dataset.fullName);
     });
 
-    // Model dropdown trigger
-    modelTrigger.addEventListener('click', function(e) {
-        e.stopPropagation();
-        if (!this.disabled) {
-            toggleDropdown(modelTrigger, modelDropdown);
-        }
-    });
+    // In-step filters.
+    if (seriesFilter) seriesFilter.addEventListener('input', () => renderSeriesTiles(seriesFilter.value));
+    if (modelFilter) modelFilter.addEventListener('input', () => renderModelTiles(modelFilter.value));
 
-    // Model dropdown option selection
-    modelDropdown.addEventListener('click', function(e) {
-        const option = e.target.closest('.custom-select__option');
-        if (option) {
-            const value = option.dataset.value;
-            const label = option.dataset.modelLabel || option.textContent.replace(/^✓\s+/, '');
-            const fullName = option.dataset.fullName || label;
-
-            modelDropdown.querySelectorAll('.custom-select__option').forEach(opt => {
-                opt.classList.remove('custom-select__option--selected');
-                // Strip any leftover "✓ " prefix from a previous selection
-                const prev = opt.dataset.modelLabel || opt.textContent.replace(/^✓\s+/, '');
-                opt.textContent = prev;
-            });
-            option.classList.add('custom-select__option--selected');
-            // Affordance (spec): selected model gets a "✓" prefix in the dropdown
-            // and bold weight (the latter via .custom-select__option--selected).
-            option.textContent = `✓ ${label}`;
-
-            setSelectValue(modelTrigger, modelInput, value, label);
-            closeDropdown(modelTrigger, modelDropdown);
-
-            selectModel(value, fullName);
-        }
-    });
-
-    // Close dropdowns when clicking outside
-    document.addEventListener('click', function(e) {
-        if (!e.target.closest('.custom-select')) {
-            closeAllDropdowns();
-        }
-    });
-
-    // Keyboard support
-    document.addEventListener('keydown', function(e) {
-        if (e.key === 'Escape') {
-            closeAllDropdowns();
-        }
-    });
-
-    // Submit button click
-    submitBtn.addEventListener('click', findProducts);
-
-    // Sticky CTA click — same handler as the inline button.
-    if (stickyBtn) {
-        stickyBtn.addEventListener('click', findProducts);
-    }
-
-    // ============================================
-    // STICKY CTA — IntersectionObserver
-    // ============================================
-    // Show the sticky bar only when the inline button is off-screen, so the
-    // customer never sees two buttons doing the same thing at the same time.
-    if (stickyCta && 'IntersectionObserver' in window) {
-        const inlineObserver = new IntersectionObserver((entries) => {
-            for (const entry of entries) {
-                stickyCta.dataset.inlineOffscreen = entry.isIntersecting ? '0' : '1';
+    // Breadcrumb — jump back to any completed step.
+    if (breadcrumb) {
+        breadcrumb.addEventListener('click', (e) => {
+            const crumb = e.target.closest('.finder-breadcrumb__crumb');
+            if (!crumb) return;
+            const target = crumb.dataset.stage;
+            if (target === 'brand') {
+                goToStage('brand');
+            } else if (target === 'series' && selectedBrand) {
+                if (!seriesTiles.querySelector('.finder-tile')) {
+                    renderSeriesTiles(seriesFilter ? seriesFilter.value : '');
+                }
+                goToStage('series');
+            } else if (target === 'model' && selectedSeries) {
+                goToStage('model');
             }
-            applyStickyVisibility();
-        }, { root: null, threshold: 0 });
-        inlineObserver.observe(submitBtn);
-    } else if (stickyCta) {
-        // No IntersectionObserver — show the sticky bar whenever it's ready.
-        stickyCta.dataset.inlineOffscreen = '1';
+        });
     }
 
     // ============================================
-    // BOOTSTRAP — auto-load the user's last brand
-    // (spec: "homepage finder shows series cards for the user's last-selected
-    // brand (or default Brother)")
+    // BOOTSTRAP
     // ============================================
+    // Land on the brand grid. If the user has an explicit prior brand, warm its
+    // series cache (so the first click renders instantly) and pre-highlight it.
     function bootstrap() {
         let brand = null;
         try { brand = localStorage.getItem(LS_BRAND_KEY); } catch { /* ignore */ }
 
-        // Validate against the brand buttons actually rendered on the page —
-        // a stale localStorage value (renamed brand, retired button) would
-        // otherwise silently no-op.
         const knownBrands = new Set(
             Array.from(brandButtons).map(b => b.dataset.brand).filter(Boolean)
         );
-        if (!brand || !knownBrands.has(brand)) {
+        const fromStorage = !!brand && knownBrands.has(brand);
+        if (!fromStorage) {
             brand = knownBrands.has(DEFAULT_BRAND) ? DEFAULT_BRAND : null;
         }
 
-        // Initialize step states first so the UI doesn't flash "all disabled".
-        updateStepStates();
+        goToStage('brand');
 
         if (brand) {
-            // silent: don't overwrite localStorage on the bootstrap path —
-            // we want to remember the user's *explicit* picks, not the default.
-            selectBrand(brand, { silent: true });
+            // Warm the cache for a snappy first interaction.
+            loadPrintersForBrand(brand).catch(() => {});
+            // Pre-highlight only an explicit prior choice, never the default.
+            if (fromStorage) {
+                brandButtons.forEach(btn => {
+                    btn.classList.toggle('ink-finder__brand-btn--selected', btn.dataset.brand === brand);
+                });
+            }
         }
     }
 

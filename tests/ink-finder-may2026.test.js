@@ -1,28 +1,27 @@
 /**
- * Ink Finder wiring contract — May 2026
- * ======================================
+ * Ink Finder wiring contract — guided cascade redesign (Jun 2026)
+ * ===============================================================
  *
- * Pins the spec at readfirst/ink-finder-may2026.md:
+ * Supersedes the May 2026 dropdown+sticky-CTA contract. The "Find ink for your
+ * printer" section was redesigned into a breadcrumb-driven, replace-in-place
+ * cascade:
  *
- *   1. Endpoint: GET /api/printers/by-brand/<slug>?grouped=true&exclude_non_ink=true
- *      — already covered by tests/ink-finder-grouped.test.js. This file pins
- *      the *wiring* layer on top of that contract.
+ *   brand grid → (click) → series tiles → (click) → model tiles → (click) →
+ *   confirm card that fetches the real compatible-cartridge COUNT, then
+ *   navigates to /shop?brand=<slug>&printer_slug=<slug>.
  *
- *   2. Two-step cascade — series → model — leading to
- *      /shop?brand=<brandSlug>&printer_slug=<modelSlug>.
- *
- *   3. Empty-state fallback — when series_groups is empty, re-fetch with
- *      ?grouped=false and present the flat list. api.js getPrintersByBrand
- *      must accept { grouped: false }.
- *
- *   4. Storefront copy — "Find ink for your printer", "Which series?",
- *      "Which model?", and a CTA that becomes "Show cartridges for <full_name>".
- *
- *   5. Affordances — "✓" prefix on the selected model, sticky CTA at the
- *      bottom of the viewport once both steps complete.
- *
- *   6. Acceptance — homepage finder auto-loads the user's last-selected brand
- *      (localStorage key "ink-finder-last-brand") falling back to brother.
+ * Pinned behaviour:
+ *   1. One stage visible at a time, with a breadcrumb whose crumbs jump back.
+ *   2. Series + model are clickable TILES (not <select> dropdowns), each stage
+ *      carrying an always-on type-to-filter box.
+ *   3. Clicking a model fetches the live count via API.getProductsByPrinter and
+ *      shows a confirm card before navigating (count → confirm).
+ *   4. Endpoint contract unchanged: grouped=true default, grouped=false fallback
+ *      (also covered by tests/ink-finder-grouped.test.js).
+ *   5. Acceptance: finder remembers the user's last brand (localStorage
+ *      "ink-finder-last-brand"), default brother.
+ *   6. The retired surface — dropdown triggers, the inline "Find Cartridges"
+ *      submit button, the sticky CTA, and the Popular chips — is gone.
  *
  * Run with: node --test tests/ink-finder-may2026.test.js
  */
@@ -52,7 +51,7 @@ const FINDER_CODE = stripComments(FINDER_SRC);
 const API_CODE    = stripComments(API_SRC);
 
 // ─────────────────────────────────────────────────────────────────────────────
-// §1 — Storefront copy (spec "Storefront copy")
+// §1 — Storefront copy + structure
 // ─────────────────────────────────────────────────────────────────────────────
 
 test('index.html — heading is "Find ink for your printer"', () => {
@@ -61,75 +60,83 @@ test('index.html — heading is "Find ink for your printer"', () => {
         /id="ink-finder-heading"[^>]*>\s*Find ink for your printer\s*</,
         'spec: section heading must read "Find ink for your printer"'
     );
-    // The pre-spec wording must not survive — would otherwise cause a flicker
-    // if a stale CDN copy lands on a fresh page.
-    assert.doesNotMatch(
-        INDEX_HTML,
-        /id="ink-finder-heading"[^>]*>\s*Find Your Ink Fast\s*</,
-        'pre-spec heading "Find Your Ink Fast" must be retired'
-    );
 });
 
-test('index.html — step 2 prompt is "Which series?"', () => {
-    assert.match(
-        INDEX_HTML,
-        /data-step="2"[\s\S]*?ink-finder__step-label[^>]*>\s*Which series\?\s*</,
-        'spec: step 2 label must read "Which series?"'
-    );
+test('index.html — breadcrumb with brand/series/model crumbs is present', () => {
+    assert.match(INDEX_HTML, /id="finder-breadcrumb"/,
+        'cascade must render a breadcrumb (#finder-breadcrumb)');
+    for (const stage of ['brand', 'series', 'model']) {
+        const re = new RegExp(`finder-breadcrumb__crumb[^>]*data-stage="${stage}"`);
+        assert.match(INDEX_HTML, re, `breadcrumb must carry a "${stage}" crumb`);
+    }
 });
 
-test('index.html — step 3 prompt is "Which model?"', () => {
-    assert.match(
-        INDEX_HTML,
-        /data-step="3"[\s\S]*?ink-finder__step-label[^>]*>\s*Which model\?\s*</,
-        'spec: step 3 label must read "Which model?"'
-    );
+test('index.html — four stages exist, only brand is visible initially', () => {
+    // Brand stage is the entry point (not hidden); the rest start hidden.
+    assert.match(INDEX_HTML, /id="finder-stage-brand"[^>]*data-stage="brand"/,
+        'brand stage must exist');
+    for (const stage of ['series', 'model', 'confirm']) {
+        const re = new RegExp(`id="finder-stage-${stage}"[^>]*data-stage="${stage}"[^>]*hidden`);
+        assert.match(INDEX_HTML, re, `${stage} stage must start hidden`);
+    }
+    // The brand stage div itself must not be hidden at load.
+    assert.doesNotMatch(INDEX_HTML, /id="finder-stage-brand"[^>]*hidden/,
+        'brand stage must be visible on load');
 });
 
-test('index.html — submit button has a label span the JS can rewrite', () => {
-    // The CTA text becomes "Show cartridges for <full_name>" once both steps
-    // complete. The JS swaps textContent on this span — without it, swapping
-    // the whole button blows away the icon.
-    assert.match(
-        INDEX_HTML,
-        /id="ink-finder-submit"[\s\S]*?class="ink-finder__btn-label"[^>]*data-default-label="Find Cartridges"/,
-        'submit button must wrap its label in <span class="ink-finder__btn-label">'
-    );
+test('index.html — series & model are tile grids with a filter box each', () => {
+    assert.match(INDEX_HTML, /id="finder-series-tiles"/, 'series tiles container required');
+    assert.match(INDEX_HTML, /id="finder-model-tiles"/, 'model tiles container required');
+    // Always-on filter (chosen design): a filter input in each step.
+    assert.match(INDEX_HTML, /id="finder-series-filter"/, 'series filter input required');
+    assert.match(INDEX_HTML, /id="finder-model-filter"/, 'model filter input required');
 });
 
-// ─────────────────────────────────────────────────────────────────────────────
-// §2 — Sticky CTA element (spec "Affordance")
-// ─────────────────────────────────────────────────────────────────────────────
-
-test('index.html — sticky CTA element is present', () => {
-    assert.match(
-        INDEX_HTML,
-        /id="ink-finder-sticky-cta"/,
-        'spec: a sticky bottom-of-viewport CTA must exist'
-    );
-    assert.match(
-        INDEX_HTML,
-        /id="ink-finder-sticky-btn"/,
-        'sticky CTA must carry a click target with id="ink-finder-sticky-btn"'
-    );
+test('index.html — confirm card target exists for the count-then-confirm step', () => {
+    assert.match(INDEX_HTML, /id="finder-confirm-card"/,
+        'confirm stage must carry #finder-confirm-card the JS fills with the count');
 });
 
-test('pages.css — sticky CTA is fixed-bottom with safe-area inset', () => {
-    assert.match(PAGES_CSS, /\.ink-finder__sticky-cta\s*\{[^}]*position:\s*fixed/,
-        'sticky CTA must be position:fixed');
-    assert.match(PAGES_CSS, /\.ink-finder__sticky-cta\s*\{[^}]*bottom:\s*0/,
-        'sticky CTA must dock to bottom:0');
-    assert.match(PAGES_CSS, /env\(safe-area-inset-bottom/,
-        'sticky CTA must respect iOS safe-area-inset-bottom');
-});
-
-test('pages.css — sticky CTA has a --visible reveal state', () => {
-    assert.match(PAGES_CSS, /\.ink-finder__sticky-cta--visible/,
-        'sticky CTA must have a --visible modifier the JS can toggle');
+test('index.html — "By Cartridge Code" tab and "Contact us" help line are kept', () => {
+    assert.match(INDEX_HTML, /id="finder-tab-cartridge"/,
+        'the cartridge-code tab must remain (kept per design decision)');
+    assert.match(INDEX_HTML, /ink-finder__help[\s\S]*?Contact us/,
+        'the "Not sure of your model? Contact us" help line must remain');
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// §3 — api.js getPrintersByBrand accepts { grouped: false }
+// §2 — Retired surface must be gone
+// ─────────────────────────────────────────────────────────────────────────────
+
+test('index.html — dropdown / submit / sticky / popular surface is retired', () => {
+    const banned = [
+        [/class="ink-finder__steps"/,            'old 3-step dropdown row'],
+        [/id="ink-finder-series-trigger"/,       'old series <select> trigger'],
+        [/id="ink-finder-model-trigger"/,        'old model <select> trigger'],
+        [/id="ink-finder-submit"/,               'old inline "Find Cartridges" button'],
+        [/id="ink-finder-sticky-cta"/,           'old sticky CTA bar'],
+        [/class="ink-finder__popular"/,          'old Popular shortcut chips'],
+    ];
+    for (const [re, label] of banned) {
+        assert.doesNotMatch(INDEX_HTML, re, `${label} must be removed from the redesigned finder`);
+    }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// §3 — CSS for the new surface
+// ─────────────────────────────────────────────────────────────────────────────
+
+test('pages.css — ships breadcrumb, tile, filter and confirm styles', () => {
+    assert.match(PAGES_CSS, /\.finder-breadcrumb\b/,        'breadcrumb styles required');
+    assert.match(PAGES_CSS, /\.finder-breadcrumb__crumb--active\b/, 'active-crumb state required');
+    assert.match(PAGES_CSS, /\.finder-tile\b/,              'tile styles required');
+    assert.match(PAGES_CSS, /\.finder-filter__input\b/,     'filter input styles required');
+    assert.match(PAGES_CSS, /\.finder-confirm__card\b/,     'confirm card styles required');
+    assert.match(PAGES_CSS, /\.finder-confirm__spinner\b/,  'loading spinner styles required');
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// §4 — api.js endpoint contract (unchanged: grouped default + grouped=false fallback)
 // ─────────────────────────────────────────────────────────────────────────────
 
 function getPrintersByBrandBody() {
@@ -138,21 +145,19 @@ function getPrintersByBrandBody() {
     return m[0];
 }
 
-test('api.js getPrintersByBrand — accepts { grouped: false } for the empty fallback', () => {
+test('api.js getPrintersByBrand — grouped=true default, grouped=false fallback', () => {
     const body = getPrintersByBrandBody();
-    assert.match(body, /opts/,
-        'getPrintersByBrand must accept an options arg');
+    assert.match(body, /opts/, 'getPrintersByBrand must accept an options arg');
     assert.match(body, /grouped\s*:\s*false|grouped\s*===\s*false/,
         'getPrintersByBrand must branch on opts.grouped === false');
     assert.match(body, /grouped=false&exclude_non_ink=true/,
         'fallback path must request ?grouped=false&exclude_non_ink=true');
-    // The default must still be the grouped shape — that's the primary contract.
     assert.match(body, /grouped=true&exclude_non_ink=true/,
         'default path must still request ?grouped=true&exclude_non_ink=true');
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// §4 — ink-finder.js wiring
+// §5 — ink-finder.js wiring
 // ─────────────────────────────────────────────────────────────────────────────
 
 test('ink-finder.js — bootstraps from localStorage with brother fallback', () => {
@@ -166,51 +171,57 @@ test('ink-finder.js — bootstraps from localStorage with brother fallback', () 
         'bootstrap() must be invoked on module init');
 });
 
+test('ink-finder.js — drives a brand→series→model→confirm stage machine', () => {
+    assert.match(FINDER_CODE, /function\s+goToStage\s*\(/,
+        'finder must define goToStage() to swap stages in place');
+    assert.match(FINDER_CODE, /function\s+updateBreadcrumb\s*\(/,
+        'finder must define updateBreadcrumb()');
+    assert.match(FINDER_CODE, /function\s+renderSeriesTiles\s*\(/,
+        'finder must render series tiles');
+    assert.match(FINDER_CODE, /function\s+renderModelTiles\s*\(/,
+        'finder must render model tiles');
+    assert.match(FINDER_CODE, /['"]confirm['"]/,
+        'finder must reference a "confirm" stage');
+});
+
+test('ink-finder.js — clicking a model fetches the live count then confirms', () => {
+    assert.match(FINDER_CODE, /API\.getProductsByPrinter\s*\(/,
+        'confirm step must fetch the real cartridge count via API.getProductsByPrinter');
+    assert.match(FINDER_CODE, /compatible/,
+        'confirm card must report compatible-cartridge count copy');
+    assert.match(FINDER_CODE, /Choose another model/,
+        'confirm card must offer a "Choose another model" path back');
+});
+
 test('ink-finder.js — empty fallback re-requests with { grouped: false }', () => {
     assert.match(FINDER_CODE, /API\.getPrintersByBrand\s*\(\s*brand\s*,\s*\{\s*grouped\s*:\s*false\s*\}\s*\)/,
         'finder must re-fetch with { grouped: false } when series_groups is empty');
 });
 
-test('ink-finder.js — CTA text becomes "Show cartridges for <full_name>"', () => {
-    assert.match(FINDER_CODE, /Show cartridges for/,
-        'finder must rewrite the CTA to "Show cartridges for <full_name>"');
-    assert.match(FINDER_CODE, /function\s+updateCtaLabel/,
-        'finder must define updateCtaLabel');
-    assert.match(FINDER_CODE, /function\s+resetCtaLabel/,
-        'finder must define resetCtaLabel for reverting on brand/series changes');
-});
-
-test('ink-finder.js — selected model gets a "✓" prefix in the dropdown', () => {
-    // The handler builds `✓ <label>` after a click. We just pin the literal so
-    // a refactor that drops the affordance trips this test.
-    assert.match(FINDER_CODE, /['"`]✓\s/,
-        'finder must prepend "✓ " to the selected model option label');
-});
-
-test('ink-finder.js — sticky CTA toggle uses IntersectionObserver', () => {
-    assert.match(FINDER_CODE, /IntersectionObserver/,
-        'finder must observe the inline button so the sticky bar only shows when it is off-screen');
-    assert.match(FINDER_CODE, /ink-finder-sticky-cta/,
-        'finder must reference the sticky CTA element id');
-});
-
 test('ink-finder.js — emits canonical /shop?brand=<slug>&printer_slug=<slug>', () => {
-    // Either via buildPrinterUrl (preferred) or by emitting the literal — both
-    // resolve to the same canonical URL. Pin both shapes.
     const usesBuilder = /buildPrinterUrl\s*\(/.test(FINDER_CODE);
     const usesLiteral = /\/shop\?brand=\$\{[^}]+\}&printer_slug=\$\{/.test(FINDER_CODE);
     assert.ok(usesBuilder || usesLiteral,
         'finder must navigate to /shop?brand=<slug>&printer_slug=<slug>');
 });
 
+test('ink-finder.js — retired dropdown/sticky/CTA code is gone', () => {
+    const banned = [
+        [/ink-finder-sticky-cta/,      'sticky CTA reference'],
+        [/IntersectionObserver/,       'sticky CTA observer'],
+        [/custom-select__option/,      'old dropdown option handling'],
+        [/updateCtaLabel/,             'old inline CTA label rewrite'],
+    ];
+    for (const [re, label] of banned) {
+        assert.doesNotMatch(FINDER_CODE, re, `${label} must be removed from the rewritten finder`);
+    }
+});
+
 // ─────────────────────────────────────────────────────────────────────────────
-// §5 — Regression guard: spec-mandated brand button set is intact
+// §6 — Regression guard: brand button set intact
 // ─────────────────────────────────────────────────────────────────────────────
 
 test('index.html — every expected brand button is wired with data-brand', () => {
-    // 9 brands the storefront exposes today. The bootstrap path validates the
-    // localStorage value against this DOM list — losing one silently makes the
-    // default-to-Brother fallback no-op for that brand.
     const brands = ['brother', 'canon', 'epson', 'hp', 'samsung',
                     'lexmark', 'oki', 'fuji-xerox', 'kyocera'];
     for (const slug of brands) {

@@ -4,6 +4,38 @@ Log every error encountered here. Before editing a file, scan for known issues. 
 
 ---
 
+## ERR-040 — Landing page edits must target `inkcartridges/index.html` (ROOT), not `inkcartridges/html/index.html` (2026-06-21)
+
+**Symptom:** Redesigned the "Find ink for your printer" Ink Finder and applied
+the whole HTML rewrite to `inkcartridges/html/index.html` — but nothing changed
+on the live landing page, and the pinning test (`tests/ink-finder-may2026.test.js`,
+which reads `inkcartridges/index.html`) didn't see my markup.
+
+**Cause:** There are **two** index.html files and they are NOT the same page:
+- `inkcartridges/index.html` — the **ROOT / canonical landing page**. `npx serve
+  inkcartridges` serves it at `/`, the screenshot URL `localhost:3000` is it, and
+  every test reads it. Heading: *"Find ink for your printer"*.
+- `inkcartridges/html/index.html` — an **unreferenced legacy duplicate** (older
+  heading *"Find Your Ink Fast"*, old finder markup). Nothing routes to it (no
+  vercel rewrite, zero inbound links — `grep -rIn "html/index.html"` is empty).
+
+**Fix / rule:** For the landing page, edit `inkcartridges/index.html` (root). All
+other pages live under `inkcartridges/html/` (shop.html, account/, etc.) — only
+the landing is special-cased at the package root. When `serve inkcartridges`
+serves `/`, it resolves to the root index, so that is the source of truth.
+
+**Also (cache tokens):** the working tree was mid a `faq-toggle-jun2026` pages.css
+rollout (the "three card CSS" shared token, pinned by
+`tests/product-card-title-clamp.test.js` to `buybox-may2026` — that test + footer
+`.footer-legal-nav` + shop.html token tests were already RED from that WIP, not
+from finder work). When you touch pages.css on the landing, match the in-flight
+rollout token rather than minting a new one, so you don't fragment the shared key.
+
+**Pinned by:** `tests/ink-finder-may2026.test.js` (rewritten to the cascade
+contract, 26 tests) + `tests/ink-finder-grouped.test.js` (unchanged, still green).
+
+---
+
 ## ERR-037 — Admin Dashboard analytics: route through backend HTTP wrappers, not direct Supabase RPC (permanent ERR-010 fix, 2026-06-04)
 
 **Symptom:** Recurring — the dashboard's New Customers / Returning % (and at

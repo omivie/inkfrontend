@@ -36,7 +36,7 @@
     <link rel="stylesheet" href="/css/layout.css?v=mobile-parity-may2026">
     <link rel="stylesheet" href="/css/components.css?v=buybox-may2026">
     <link rel="stylesheet" href="/css/modern-effects.css?v=ade3173d">
-    <link rel="stylesheet" href="/css/pages.css?v=buybox-may2026">
+    <link rel="stylesheet" href="/css/pages.css?v=faq-toggle-jun2026">
     <link rel="stylesheet" href="/css/search.css?v=buybox-may2026">
 
     <script type="application/ld+json">
@@ -363,96 +363,87 @@
                     </div>
 
                     <div class="ink-finder__tab-panel" id="finder-panel-printer" role="tabpanel" aria-labelledby="finder-tab-printer">
-                        <p class="ink-finder__panel-hint">Select your printer brand, then choose the series and model to find compatible cartridges</p>
-                        <div class="ink-finder__steps">
-                            <div class="ink-finder__step ink-finder__step--active" data-step="1">
-                                <div class="ink-finder__step-header">
-                                    <span class="ink-finder__step-number">1</span>
-                                    <span class="ink-finder__step-label">Select Brand</span>
-                                </div>
-                                <div class="ink-finder__brands">
-                                    <button class="ink-finder__brand-btn" data-brand="brother" aria-label="Brother" type="button">
-                                        <img src="/assets/brands/brother.png" alt="Brother" class="ink-finder__brand-img ink-finder__brand-img--brother">
-                                    </button>
-                                    <button class="ink-finder__brand-btn" data-brand="canon" aria-label="Canon" type="button">
-                                        <img src="/assets/brands/canon.png" alt="Canon" class="ink-finder__brand-img ink-finder__brand-img--canon">
-                                    </button>
-                                    <button class="ink-finder__brand-btn" data-brand="epson" aria-label="Epson" type="button">
-                                        <img src="/assets/brands/epson.png" alt="Epson" class="ink-finder__brand-img ink-finder__brand-img--epson">
-                                    </button>
-                                    <button class="ink-finder__brand-btn" data-brand="hp" aria-label="HP" type="button">
-                                        <img src="/assets/brands/hp.png" alt="HP" class="ink-finder__brand-img ink-finder__brand-img--hp">
-                                    </button>
-                                    <button class="ink-finder__brand-btn" data-brand="samsung" aria-label="Samsung" type="button">
-                                        <img src="/assets/brands/samsung.svg" alt="Samsung" class="ink-finder__brand-img ink-finder__brand-img--samsung">
-                                    </button>
-                                    <button class="ink-finder__brand-btn" data-brand="lexmark" aria-label="Lexmark" type="button">
-                                        <img src="/assets/brands/lexmark.png" alt="Lexmark" class="ink-finder__brand-img ink-finder__brand-img--lexmark">
-                                    </button>
-                                    <button class="ink-finder__brand-btn" data-brand="oki" aria-label="OKI" type="button">
-                                        <img src="/assets/brands/oki.svg" alt="OKI" class="ink-finder__brand-img ink-finder__brand-img--oki">
-                                    </button>
-                                    <button class="ink-finder__brand-btn" data-brand="fuji-xerox" aria-label="Fuji Xerox" type="button">
-                                        <img src="/assets/brands/fuji-xerox.png" alt="Fuji Xerox" class="ink-finder__brand-img ink-finder__brand-img--fuji-xerox">
-                                    </button>
-                                    <button class="ink-finder__brand-btn" data-brand="kyocera" aria-label="Kyocera" type="button">
-                                        <img src="/assets/brands/kyocera.svg" alt="Kyocera" class="ink-finder__brand-img ink-finder__brand-img--kyocera">
-                                    </button>
-                                </div>
-                            </div>
+                        <!-- Progress breadcrumb: each crumb jumps back to that step -->
+                        <nav class="finder-breadcrumb" id="finder-breadcrumb" aria-label="Printer selection progress">
+                            <button class="finder-breadcrumb__crumb finder-breadcrumb__crumb--active" data-stage="brand" type="button">
+                                <span class="finder-breadcrumb__step">1</span>
+                                <span class="finder-breadcrumb__text" id="crumb-brand-text">Select brand</span>
+                            </button>
+                            <svg class="finder-breadcrumb__sep" id="finder-sep-series" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" hidden><polyline points="9 18 15 12 9 6"/></svg>
+                            <button class="finder-breadcrumb__crumb" data-stage="series" type="button" hidden>
+                                <span class="finder-breadcrumb__step">2</span>
+                                <span class="finder-breadcrumb__text" id="crumb-series-text">Series</span>
+                            </button>
+                            <svg class="finder-breadcrumb__sep" id="finder-sep-model" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" hidden><polyline points="9 18 15 12 9 6"/></svg>
+                            <button class="finder-breadcrumb__crumb" data-stage="model" type="button" hidden>
+                                <span class="finder-breadcrumb__step">3</span>
+                                <span class="finder-breadcrumb__text" id="crumb-model-text">Model</span>
+                            </button>
+                        </nav>
 
-                            <div class="ink-finder__step ink-finder__step--disabled" data-step="2">
-                                <div class="ink-finder__step-header">
-                                    <span class="ink-finder__step-number">2</span>
-                                    <span class="ink-finder__step-label">Which series?</span>
-                                </div>
-                                <div class="custom-select">
-                                    <button class="custom-select__trigger" id="ink-finder-series-trigger" disabled type="button">
-                                        <span class="custom-select__value">Which series?</span>
-                                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
-                                    </button>
-                                    <div class="custom-select__dropdown" id="ink-finder-series-dropdown"></div>
-                                    <input type="hidden" id="ink-finder-series" name="series">
-                                </div>
-                            </div>
-
-                            <div class="ink-finder__step ink-finder__step--disabled" data-step="3">
-                                <div class="ink-finder__step-header">
-                                    <span class="ink-finder__step-number">3</span>
-                                    <span class="ink-finder__step-label">Which model?</span>
-                                </div>
-                                <div class="custom-select">
-                                    <button class="custom-select__trigger" id="ink-finder-model-trigger" disabled type="button">
-                                        <span class="custom-select__value">Which model?</span>
-                                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
-                                    </button>
-                                    <div class="custom-select__dropdown" id="ink-finder-model-dropdown"></div>
-                                    <input type="hidden" id="ink-finder-model" name="model">
-                                </div>
+                        <!-- Stage 1: Brand -->
+                        <div class="finder-stage" id="finder-stage-brand" data-stage="brand">
+                            <p class="finder-stage__hint">Select your printer brand to get started</p>
+                            <div class="ink-finder__brands">
+                                <button class="ink-finder__brand-btn" data-brand="brother" aria-label="Brother" type="button">
+                                    <img src="/assets/brands/brother.png" alt="Brother" class="ink-finder__brand-img ink-finder__brand-img--brother">
+                                </button>
+                                <button class="ink-finder__brand-btn" data-brand="canon" aria-label="Canon" type="button">
+                                    <img src="/assets/brands/canon.png" alt="Canon" class="ink-finder__brand-img ink-finder__brand-img--canon">
+                                </button>
+                                <button class="ink-finder__brand-btn" data-brand="epson" aria-label="Epson" type="button">
+                                    <img src="/assets/brands/epson.png" alt="Epson" class="ink-finder__brand-img ink-finder__brand-img--epson">
+                                </button>
+                                <button class="ink-finder__brand-btn" data-brand="hp" aria-label="HP" type="button">
+                                    <img src="/assets/brands/hp.png" alt="HP" class="ink-finder__brand-img ink-finder__brand-img--hp">
+                                </button>
+                                <button class="ink-finder__brand-btn" data-brand="samsung" aria-label="Samsung" type="button">
+                                    <img src="/assets/brands/samsung.svg" alt="Samsung" class="ink-finder__brand-img ink-finder__brand-img--samsung">
+                                </button>
+                                <button class="ink-finder__brand-btn" data-brand="lexmark" aria-label="Lexmark" type="button">
+                                    <img src="/assets/brands/lexmark.png" alt="Lexmark" class="ink-finder__brand-img ink-finder__brand-img--lexmark">
+                                </button>
+                                <button class="ink-finder__brand-btn" data-brand="oki" aria-label="OKI" type="button">
+                                    <img src="/assets/brands/oki.svg" alt="OKI" class="ink-finder__brand-img ink-finder__brand-img--oki">
+                                </button>
+                                <button class="ink-finder__brand-btn" data-brand="fuji-xerox" aria-label="Fuji Xerox" type="button">
+                                    <img src="/assets/brands/fuji-xerox.png" alt="Fuji Xerox" class="ink-finder__brand-img ink-finder__brand-img--fuji-xerox">
+                                </button>
+                                <button class="ink-finder__brand-btn" data-brand="kyocera" aria-label="Kyocera" type="button">
+                                    <img src="/assets/brands/kyocera.svg" alt="Kyocera" class="ink-finder__brand-img ink-finder__brand-img--kyocera">
+                                </button>
                             </div>
                         </div>
 
-                        <div class="ink-finder__action">
-                            <button class="ink-finder__btn btn btn--primary btn--large" id="ink-finder-submit" disabled type="button">
-                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-                                <span class="ink-finder__btn-label" data-default-label="Find Cartridges">Find Cartridges</span>
-                            </button>
+                        <!-- Stage 2: Series -->
+                        <div class="finder-stage" id="finder-stage-series" data-stage="series" hidden>
+                            <div class="finder-stage__head">
+                                <p class="finder-stage__hint" id="finder-series-hint">Which series?</p>
+                                <div class="finder-filter">
+                                    <svg class="finder-filter__icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                                    <input type="text" class="finder-filter__input" id="finder-series-filter" placeholder="Filter series…" autocomplete="off" aria-label="Filter series">
+                                </div>
+                            </div>
+                            <div class="finder-tiles" id="finder-series-tiles" role="list"></div>
+                            <p class="finder-empty" id="finder-series-empty" hidden>No matching series.</p>
                         </div>
-                    </div>
 
-                    <!--
-                        Sticky CTA — appears at the bottom of the viewport once both
-                        series and model are picked, so customers don't have to scroll
-                        back to the inline button. Auto-hides when the inline button
-                        is on screen (IntersectionObserver in ink-finder.js).
-                    -->
-                    <div class="ink-finder__sticky-cta" id="ink-finder-sticky-cta" hidden aria-hidden="true">
-                        <div class="container ink-finder__sticky-inner">
-                            <span class="ink-finder__sticky-label" id="ink-finder-sticky-label">Show cartridges</span>
-                            <button class="btn btn--primary ink-finder__sticky-btn" id="ink-finder-sticky-btn" type="button">
-                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-                                <span>Show cartridges</span>
-                            </button>
+                        <!-- Stage 3: Model -->
+                        <div class="finder-stage" id="finder-stage-model" data-stage="model" hidden>
+                            <div class="finder-stage__head">
+                                <p class="finder-stage__hint" id="finder-model-hint">Which model?</p>
+                                <div class="finder-filter">
+                                    <svg class="finder-filter__icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                                    <input type="text" class="finder-filter__input" id="finder-model-filter" placeholder="Filter models…" autocomplete="off" aria-label="Filter models">
+                                </div>
+                            </div>
+                            <div class="finder-tiles" id="finder-model-tiles" role="list"></div>
+                            <p class="finder-empty" id="finder-model-empty" hidden>No matching models.</p>
+                        </div>
+
+                        <!-- Stage 4: Confirm (count fetched, then navigate) -->
+                        <div class="finder-stage" id="finder-stage-confirm" data-stage="confirm" hidden>
+                            <div class="finder-confirm__card" id="finder-confirm-card" aria-live="polite"></div>
                         </div>
                     </div>
 
@@ -476,14 +467,6 @@
                                 </button>
                             </form>
                         </div>
-                    </div>
-
-                    <div class="ink-finder__popular">
-                        <span class="ink-finder__popular-label">Popular:</span>
-                        <a href="/shop?printer_model=Brother+MFC-J6945DW&printer_brand=brother" class="ink-finder__popular-chip">Brother MFC-J6945DW</a>
-                        <a href="/shop?printer_model=HP+ENVY+6020&printer_brand=hp" class="ink-finder__popular-chip">HP ENVY 6020</a>
-                        <a href="/shop?printer_model=Epson+XP-4100&printer_brand=epson" class="ink-finder__popular-chip">Epson XP-4100</a>
-                        <a href="/shop?printer_model=Canon+PIXMA+TS3360&printer_brand=canon" class="ink-finder__popular-chip">Canon PIXMA TS3360</a>
                     </div>
 
                     <p class="ink-finder__help">
@@ -593,10 +576,10 @@
     <script defer src="/js/main.js?v=mobile-parity-may2026"></script>
     <script defer src="/js/footer.js?v=mobile-parity-may2026"></script>
     <script defer src="/js/mega-nav.js?v=2d5bc155"></script>
-    <script defer src="/js/landing.js?v=err-extract-may2026"></script>
+    <script defer src="/js/landing.js?v=faq-smooth-jun2026"></script>
     <script defer src="/js/modern-effects.js?v=ad8bff1e"></script>
     <script defer src="/js/cart.js?v=err-extract-may2026"></script>
-    <script defer src="/js/ink-finder.js?v=may2026-finder-wiring"></script>
+    <script defer src="/js/ink-finder.js?v=ink-finder-cascade-jun2026"></script>
     <script defer src="/js/printer-data.js?v=may2026-finder-wiring"></script>
     <script defer src="/js/analytics.js?v=8c9ee196"></script>
     <script defer src="/js/site-guard.js?v=2e596146"></script>

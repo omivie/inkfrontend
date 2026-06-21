@@ -1021,6 +1021,316 @@
 
 
 /* ==========================================================================
+   FIND INK FOR YOUR PRINTER — guided cascade redesign (Jun 2026)
+   Breadcrumb-driven, replace-in-place flow: brand → series → model → confirm.
+   Tiles instead of dropdowns, in-step filter, instant count-then-confirm.
+   ========================================================================== */
+
+/* Breadcrumb — each crumb jumps back to that step */
+.finder-breadcrumb {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: var(--spacing-xs);
+    margin-bottom: var(--spacing-lg);
+}
+
+.finder-breadcrumb__crumb {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 5px 14px 5px 5px;
+    border: 1.5px solid var(--color-border);
+    background: var(--white-primary);
+    border-radius: var(--radius-full);
+    font-family: inherit;
+    font-size: 14px;
+    font-weight: var(--font-weight-medium);
+    color: var(--color-text-muted);
+    cursor: pointer;
+    transition: all var(--transition-fast);
+}
+
+.finder-breadcrumb__crumb:hover:not(.finder-breadcrumb__crumb--active) {
+    border-color: var(--cyan-light);
+    color: var(--cyan-dark);
+}
+
+.finder-breadcrumb__crumb--active {
+    border-color: var(--cyan-primary);
+    background: var(--cyan-light);
+    color: var(--cyan-dark);
+    cursor: default;
+}
+
+.finder-breadcrumb__step {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    background: var(--cyan-primary);
+    color: var(--white-primary);
+    font-size: 12px;
+    font-weight: var(--font-weight-bold);
+    flex-shrink: 0;
+    transition: background var(--transition-fast);
+}
+
+.finder-breadcrumb__crumb--done .finder-breadcrumb__step {
+    background: var(--color-success-green);
+}
+
+.finder-breadcrumb__text {
+    max-width: 240px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.finder-breadcrumb__sep {
+    flex-shrink: 0;
+    color: var(--color-text-muted);
+    opacity: 0.5;
+}
+
+/* Stage container — gentle fade as steps swap in place */
+.finder-stage {
+    animation: finderFade 0.18s ease;
+}
+
+@keyframes finderFade {
+    from { opacity: 0; transform: translateY(4px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+
+.finder-stage__head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--spacing-md);
+    flex-wrap: wrap;
+    margin-bottom: var(--spacing-md);
+}
+
+.finder-stage__hint {
+    font-size: var(--font-size-md);
+    font-weight: var(--font-weight-semibold);
+    color: var(--color-text-heading);
+    margin: 0;
+}
+
+.finder-stage__hint span {
+    color: var(--color-text-muted);
+    font-weight: var(--font-weight-normal);
+}
+
+/* Brand stage reuses the existing brand-button grid, just wider & centred */
+#finder-stage-brand .finder-stage__hint {
+    text-align: center;
+    margin-bottom: var(--spacing-md);
+}
+
+#finder-stage-brand .ink-finder__brands {
+    grid-template-columns: repeat(3, 1fr);
+    max-width: 440px;
+    margin: 0 auto;
+}
+
+#finder-stage-brand .ink-finder__brand-btn {
+    width: 100%;
+}
+
+/* In-step filter box */
+.finder-filter {
+    position: relative;
+    display: flex;
+    align-items: center;
+    min-width: 220px;
+}
+
+.finder-filter__icon {
+    position: absolute;
+    left: 12px;
+    color: var(--color-text-muted);
+    pointer-events: none;
+}
+
+.finder-filter__input {
+    width: 100%;
+    height: 42px;
+    padding: 0 14px 0 38px;
+    font-family: inherit;
+    font-size: 14px;
+    border: 1.5px solid var(--color-border);
+    border-radius: var(--radius-md);
+    background: var(--white-primary);
+    color: var(--color-text);
+    transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.finder-filter__input:focus {
+    outline: none;
+    border-color: var(--cyan-primary);
+    box-shadow: 0 0 0 3px rgba(38, 127, 181, 0.15);
+}
+
+/* Tiles grid */
+.finder-tiles {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+    gap: var(--spacing-sm);
+    max-height: 360px;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding: 2px;
+}
+
+.finder-tile {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    justify-content: center;
+    gap: 2px;
+    min-height: 64px;
+    padding: 12px 14px;
+    text-align: left;
+    background: var(--color-background-alt);
+    border: 1.5px solid transparent;
+    border-radius: var(--radius-md);
+    font-family: inherit;
+    cursor: pointer;
+    transition: all var(--transition-fast);
+}
+
+.finder-tile:hover {
+    border-color: var(--cyan-primary);
+    background: var(--white-primary);
+    box-shadow: var(--shadow-sm);
+    transform: translateY(-1px);
+}
+
+.finder-tile:focus-visible {
+    outline: none;
+    border-color: var(--cyan-primary);
+    box-shadow: 0 0 0 3px rgba(38, 127, 181, 0.15);
+}
+
+.finder-tile__name {
+    font-size: 15px;
+    font-weight: var(--font-weight-semibold);
+    color: var(--color-text-heading);
+    line-height: 1.25;
+}
+
+.finder-tile__meta {
+    font-size: 12px;
+    color: var(--color-text-muted);
+}
+
+.finder-empty {
+    padding: var(--spacing-lg);
+    text-align: center;
+    color: var(--color-text-muted);
+    font-style: italic;
+}
+
+/* Confirm card — count fetched, then navigate */
+.finder-confirm__card {
+    max-width: 520px;
+    margin: var(--spacing-md) auto;
+    padding: var(--spacing-xl);
+    text-align: center;
+    background: var(--color-background-alt);
+    border: 1.5px solid var(--color-border-light);
+    border-radius: var(--radius-lg);
+}
+
+.finder-confirm__spinner {
+    width: 36px;
+    height: 36px;
+    margin: 0 auto var(--spacing-md);
+    border: 3px solid var(--cyan-light);
+    border-top-color: var(--cyan-primary);
+    border-radius: 50%;
+    animation: finderSpin 0.7s linear infinite;
+}
+
+@keyframes finderSpin {
+    to { transform: rotate(360deg); }
+}
+
+.finder-confirm__count {
+    font-size: var(--font-size-xl);
+    font-weight: var(--font-weight-bold);
+    color: var(--color-text-heading);
+    margin: 0 0 4px;
+}
+
+.finder-confirm__count em {
+    color: var(--cyan-primary);
+    font-style: normal;
+}
+
+.finder-confirm__printer {
+    font-size: var(--font-size-md);
+    color: var(--color-text-muted);
+    margin: 0 0 var(--spacing-lg);
+}
+
+.finder-confirm__actions {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--spacing-sm);
+}
+
+.finder-confirm__view {
+    min-width: 240px;
+}
+
+.finder-confirm__back {
+    background: none;
+    border: none;
+    font-family: inherit;
+    font-size: 14px;
+    color: var(--cyan-primary);
+    cursor: pointer;
+    padding: 6px;
+}
+
+.finder-confirm__back:hover {
+    text-decoration: underline;
+}
+
+@media (max-width: 600px) {
+    .finder-stage__head {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .finder-filter {
+        min-width: 0;
+    }
+
+    .finder-tiles {
+        grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+        max-height: 320px;
+    }
+
+    .finder-breadcrumb__text {
+        max-width: 120px;
+    }
+
+    .finder-confirm__view {
+        width: 100%;
+        min-width: 0;
+    }
+}
+
+
+/* ==========================================================================
    CATEGORIES SECTION (Landing)
    ========================================================================== */
 
@@ -1122,22 +1432,11 @@
     content: '';
 }
 
-.faq-question::after {
-    content: '';
-    display: inline-block;
-    width: 10px;
-    height: 10px;
-    border-right: 2px solid var(--color-text-muted);
-    border-bottom: 2px solid var(--color-text-muted);
-    transform: rotate(45deg);
-    flex-shrink: 0;
-    margin-left: var(--spacing-md);
-    transition: transform var(--transition-fast);
-}
-
-.faq-item[open] .faq-question::after {
-    transform: rotate(-135deg);
-}
+/* Toggle indicator is owned by the canonical `.faq-item > summary::after`
+   rule (cyan +/−). The old border-arrow declarations were removed here:
+   because the cascade resolves per-property, their border/width/height and
+   transform: rotate(45deg) leaked onto the winning `content: '+'`, drawing
+   a rotated box behind the plus glyph. */
 
 .faq-question:hover {
     color: var(--cyan-primary);
@@ -1149,7 +1448,9 @@
     line-height: 1.7;
     color: var(--color-text);
     overflow: hidden;
-    transition: max-height var(--transition-normal), opacity var(--transition-normal);
+    transition: max-height 0.3s cubic-bezier(0.33, 1, 0.68, 1),
+                opacity 0.22s ease;
+    will-change: max-height;
 }
 
 .faq-answer p {
@@ -12569,8 +12870,7 @@ body.page-shop {
    "Business Transparency" parity. Renders as muted small print
    under hero / footer copyright. */
 .legal-page__disambiguation,
-.footer-brand__disambiguation,
-.footer-disambiguation {
+.footer-brand__disambiguation {
     color: var(--color-text-muted, #6b7280);
     margin: 4px 0 0;
     line-height: 1.5;
@@ -12578,9 +12878,6 @@ body.page-shop {
 .footer-brand__disambiguation {
     font-size: 0.82rem;
     margin-top: 8px;
-}
-.footer-disambiguation {
-    text-align: center;
 }
 
 /* Map embed (contact + about location) */
@@ -12611,42 +12908,6 @@ body.page-shop {
 }
 
 .legal-map__link:hover { text-decoration: underline; }
-
-/* Footer policy nav block — added by footer.js */
-.footer-legal-nav {
-    border-top: 1px solid rgba(255, 255, 255, 0.08);
-    padding: 14px 0;
-    margin-top: 8px;
-}
-
-.footer-legal-nav ul {
-    list-style: none;
-    padding: 0;
-    margin: 0;
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px 18px;
-    justify-content: center;
-    font-size: 0.85rem;
-}
-
-.footer-legal-nav a {
-    color: rgba(255, 255, 255, 0.78);
-    text-decoration: none;
-    transition: color 0.15s ease;
-}
-
-.footer-legal-nav a:hover,
-.footer-legal-nav a:focus-visible {
-    color: #fff;
-    text-decoration: underline;
-}
-
-.footer-legal-nav__sep {
-    color: rgba(255, 255, 255, 0.3);
-    user-select: none;
-}
-
 
 /* ==========================================================================
    MOBILE PARITY — May 2026 (mobile-parity-audit-may2026.md)

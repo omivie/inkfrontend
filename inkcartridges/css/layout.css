@@ -1458,20 +1458,23 @@
     font-size: var(--font-size-xs);
 }
 
-.footer-payment__icons {
+.footer-payment__cards {
     display: flex;
-    gap: var(--spacing-sm);
+    align-items: center;
+    gap: 8px;
 }
 
-.footer-payment__icon {
-    height: 24px;
+.pay-card {
+    height: 26px;
     width: auto;
-    opacity: 0.8;
+    display: block;
+    border-radius: 4px;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
 }
 
 @media (max-width: 480px) {
-    .footer-payment__icon {
-        height: 28px;
+    .pay-card {
+        height: 30px;
     }
 }
 

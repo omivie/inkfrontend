@@ -39,29 +39,43 @@
         const content = details.querySelector('.faq-answer');
         if (!summary || !content) return;
 
+        let animating = false;
+
         summary.addEventListener('click', (e) => {
             e.preventDefault();
+            // Ignore clicks mid-animation so rapid toggling can't desync state.
+            if (animating) return;
+            animating = true;
 
             if (details.open) {
-                // Closing
+                // Closing: pin the current height, then collapse to 0.
                 content.style.maxHeight = content.scrollHeight + 'px';
-                requestAnimationFrame(() => {
-                    content.style.maxHeight = '0';
-                    content.style.opacity = '0';
-                });
-                content.addEventListener('transitionend', function handler() {
-                    details.open = false;
-                    content.removeEventListener('transitionend', handler);
-                }, { once: true });
-            } else {
-                // Opening
-                details.open = true;
-                const height = content.scrollHeight;
-                content.style.maxHeight = '0';
+                content.style.opacity = '1';
+                void content.offsetHeight; // force reflow so the start value commits
+                content.style.maxHeight = '0px';
                 content.style.opacity = '0';
-                requestAnimationFrame(() => {
-                    content.style.maxHeight = height + 'px';
-                    content.style.opacity = '1';
+                content.addEventListener('transitionend', function handler(ev) {
+                    if (ev.propertyName !== 'max-height') return;
+                    details.open = false;
+                    content.style.maxHeight = '';
+                    content.style.opacity = '';
+                    content.removeEventListener('transitionend', handler);
+                    animating = false;
+                });
+            } else {
+                // Opening: render collapsed, then expand to the measured height.
+                details.open = true;
+                content.style.maxHeight = '0px';
+                content.style.opacity = '0';
+                void content.offsetHeight; // force reflow so 0px is the start frame
+                content.style.maxHeight = content.scrollHeight + 'px';
+                content.style.opacity = '1';
+                content.addEventListener('transitionend', function handler(ev) {
+                    if (ev.propertyName !== 'max-height') return;
+                    // Release the fixed height so the panel stays responsive.
+                    content.style.maxHeight = 'none';
+                    content.removeEventListener('transitionend', handler);
+                    animating = false;
                 });
             }
         });
