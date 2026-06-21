@@ -4,6 +4,77 @@ Log every error encountered here. Before editing a file, scan for known issues. 
 
 ---
 
+## ERR-043 — `git stash pop` silently popped an UNRELATED old stash and shredded 51 files with conflict markers (2026-06-21)
+
+**Symptom:** Ran `git stash; <test>; git stash pop` to A/B a change against a
+clean tree. `git stash` printed **"No local changes to save"** (the tree was
+already clean — an external commit `80f71c4` had just captured the WIP), so the
+following `git stash pop` popped a **pre-existing** `stash@{0}` ("navbar-parity:
+pre-commit stash of unrelated WIP"). It 3-way-merged that stale WIP onto HEAD,
+producing `CONFLICT` markers in **51 files** (47 HTML + css + main.js + shop-page.js
++ 2 tests) and depositing 2 banned untracked `readfirst/*.md` specs.
+
+**Root cause:** `git stash pop` with **no argument** operates on `stash@{0}`,
+whatever it is. It is NOT paired to the `git stash` you just ran — if your stash
+saved nothing, pop still fires on an older entry. The repo keeps a long-lived
+`stash@{0}` of unrelated WIP, so a no-op `git stash` followed by `git stash pop`
+is a loaded gun.
+
+**Fix / recovery:** In a stash-pop conflict, `--ours` = your pre-pop tree (here
+HEAD, which already held my edits), `--theirs` = the stash. Resolve to ours and
+clear the merge, keeping the stash entry intact (no data loss):
+```
+git diff --name-only --diff-filter=U | while read f; do git checkout --ours -- "$f"; git add -- "$f"; done
+```
+Then delete any banned untracked files the pop deposited (see no-ghost-files.test.js)
+and re-verify with `git status` + the full test suite.
+
+**Rule:** NEVER use bare `git stash` / `git stash pop` to snapshot around a test
+run in this repo — there is a permanent unrelated `stash@{0}`. To A/B against a
+clean tree use `git stash push -m "tmp" -- <specific files>` then
+`git stash pop stash@{0}` **by explicit ref** only after confirming the message,
+or far simpler: `git show HEAD:<file>` / `git diff` to compare without touching the
+tree. Always read `git stash`'s output — "No local changes to save" means the
+following pop will hit something you did not put there.
+
+---
+
+## ERR-042 — Recent-search chip filled the box but Enter + magnifier did nothing (2026-06-21)
+
+**Symptom:** Clicking a **RECENT SEARCHES** chip in the header dropdown populated
+`#search-input`, but then pressing **Enter** OR clicking the magnifier did
+nothing — no navigation. Distinct from ERR (May search-enter-key) where only
+Enter broke; here **both** died, and **only** on the chip path.
+
+**Root cause:** `js/search.js` recent-chip handler set `state.input.value = q`
+**without dispatching an `input` event**. `js/main.js` `syncSubmitState()` (which
+re-enables the submit button once the box has ≥2 chars) is driven by the `input`
+event, so it never ran and the submit button kept its empty-box `disabled` state.
+A disabled `<button type="submit">` is a no-op for BOTH Enter (HTML implicit
+submission clicks the form's default submit button) AND a direct magnifier click.
+
+**Fix (two layers):**
+1. **search.js (primary):** recent-search chip now navigates straight to
+   `/search?q=${encodeURIComponent(q)}` — the routing-contract destination
+   (`tests/search-dropdown-routing.test.js`), same as Enter / "View all results",
+   and consistent with how trending-printer chips already navigate. No box to be
+   dead.
+2. **main.js (defense-in-depth):** `syncSubmitState` is now also wired to `focus`
+   and `change`, not just `input`, so any programmatic `value =` (autofill,
+   bfcache, future fills) can never strand a stale-disabled submit button.
+
+**Rule:** A programmatic `input.value = …` does NOT fire `input`. If any state
+(a disabled submit, a validity flag, a counter) is driven off the `input` event,
+either dispatch `new Event('input', {bubbles:true})` after the assignment OR
+re-sync that state on `focus`/`change` too. Prefer navigating re-run affordances
+(recent searches) straight to the results route over leaving a filled box that
+depends on the submit button being enabled.
+
+**Pinned by:** `tests/search-recent-chip-no-submit-jun2026.test.js` (19 tests —
+real `onListClick` + real `initSearch`/`syncSubmitState` driven through a fake DOM).
+
+---
+
 ## ERR-041 — Card-CSS cache-bust token was inconsistent across the 3 shared files; bumping it breaks token tests in 3 files (2026-06-21)
 
 **Symptom:** During the loading-state rework I edited `css/pages.css`. The

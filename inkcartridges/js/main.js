@@ -377,14 +377,8 @@ function initSearch() {
         };
         searchInput.addEventListener('input', syncSubmitState);
         // Defense-in-depth (search-recent-chip-no-submit-jun2026.md): a
-        // programmatic `searchInput.value = …` (a dropdown chip, a "did you
-        // mean" fill, browser autofill, bfcache restore) does NOT fire an
-        // 'input' event, so syncSubmitState would never run and the submit
-        // button could stay stale-disabled — a no-op that kills BOTH Enter and
-        // the magnifier on a box that visibly holds text. Re-syncing on focus
-        // and change as well means the disabled state can never lag the actual
-        // value, whatever set it. (The primary chip fix navigates directly, so
-        // it no longer relies on the box at all — this guards every other path.)
+        // programmatic `value =` fires no 'input' event, so re-sync on
+        // focus/change too — else a stale-disabled submit kills Enter+magnifier.
         searchInput.addEventListener('focus', syncSubmitState);
         searchInput.addEventListener('change', syncSubmitState);
         syncSubmitState();
