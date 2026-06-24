@@ -278,6 +278,85 @@ test('byCodeThenColor handles edge cases: empty, single-item, null, non-array', 
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
+// 2b. yieldTier — prefer the backend yield_tier signal (one-model-code-per-row,
+//     Jun 2026). The name matcher silently failed on digit-glued HY ("200HY")
+//     and HP short-series X/Y ("975X"), merging two model codes onto one row.
+//     Spec: one-model-code-per-row-yield-tier-jun2026.md
+// ─────────────────────────────────────────────────────────────────────────────
+
+test('yieldTier maps backend yield_tier STD/XL/XXL → 0/1/2', () => {
+    assert.equal(ProductSort.yieldTier({ yield_tier: 'STD' }), 0);
+    assert.equal(ProductSort.yieldTier({ yield_tier: 'XL' }),  1);
+    assert.equal(ProductSort.yieldTier({ yield_tier: 'XXL' }), 2);
+    // Case-insensitive — backend is canonical upper, but guard against lower.
+    assert.equal(ProductSort.yieldTier({ yield_tier: 'xl' }),  1);
+});
+
+test('yieldTier: backend signal wins over a name the matcher misreads (Epson 200HY)', () => {
+    // "200HY Black" has no word boundary between 0 and HY, so /\bhy\b/ never
+    // fires — the legacy name parse would tier this Standard and merge it into
+    // the 200 row. The backend yield_tier:'XL' fixes it.
+    const std = { name: 'Epson Genuine 200BK Ink Cartridge 200 Black',   color: 'Black', yield_tier: 'STD' };
+    const xl  = { name: 'Epson Genuine 200HYBK Ink Cartridge 200HY Black', color: 'Black', yield_tier: 'XL' };
+    assert.equal(ProductSort.yieldTier(std), 0);
+    assert.equal(ProductSort.yieldTier(xl),  1, 'digit-glued HY must tier XL via backend signal');
+    // Sanity: without the backend field the name parse would WRONGLY tie them.
+    assert.equal(ProductSort.yieldTier({ name: xl.name, color: 'Black' }), 0,
+        'legacy name parse misreads 200HY as Standard — proves the backend signal is necessary');
+});
+
+test('yieldTier: HP short-series 975X tiers XL via backend signal, 975A stays STD', () => {
+    assert.equal(ProductSort.yieldTier({ name: 'HP Genuine 975A Ink Cartridge Black', color: 'Black', yield_tier: 'STD' }), 0);
+    assert.equal(ProductSort.yieldTier({ name: 'HP Genuine 975X Ink Cartridge Black', color: 'Black', yield_tier: 'XL' }),  1);
+});
+
+test('yieldTier: yellow is not misread as extra-high-yield (backend keeps 200Y as STD)', () => {
+    // Trailing Y in "200Y" is the Yellow colour, not a yield marker. Backend
+    // uses product.color to keep it STD — the FE must trust that, not re-parse.
+    assert.equal(ProductSort.yieldTier({ name: 'Epson Genuine 200Y Ink Cartridge 200 Yellow', color: 'Yellow', yield_tier: 'STD' }), 0);
+});
+
+test('yieldTier: legacy name/SKU fallback still works when yield_tier is absent', () => {
+    // Pre-deploy cached payloads have no yield_tier — the name/SKU parse remains.
+    assert.equal(ProductSort.yieldTier({ name: 'Brother Genuine TN645XLBK Toner Black',  color: 'Black' }), 1);
+    assert.equal(ProductSort.yieldTier({ name: 'Brother Genuine TN645XXLBK Toner Black', color: 'Black' }), 2);
+    assert.equal(ProductSort.yieldTier({ name: 'HP 950 High Yield Ink Black',            color: 'Black' }), 1);
+    assert.equal(ProductSort.yieldTier({ sku: 'CART069H', name: 'Canon CART069H Toner',  color: 'Black' }), 1);
+    assert.equal(ProductSort.yieldTier({ name: 'Brother Genuine TN645BK Toner Black',    color: 'Black' }), 0);
+});
+
+test('yieldTier: empty / non-string yield_tier falls through to the name parse', () => {
+    // Defensive — a blank or unexpected value must not short-circuit to 0; it
+    // should drop to the legacy parse so XL names still tier correctly.
+    assert.equal(ProductSort.yieldTier({ yield_tier: '',   name: 'Brother TN645XLBK Toner', color: 'Black' }), 1);
+    assert.equal(ProductSort.yieldTier({ yield_tier: null, name: 'Brother TN645XLBK Toner', color: 'Black' }), 1);
+});
+
+test('byCodeThenColor + rowBreakIndices split Epson 200 vs 200HY into separate rows via yield_tier', () => {
+    // The live bug: ?code=200 rendered 200BK, 200HYBK, 200C, 200HYC … on the
+    // same rows. With yield_tier the standard 200 row and the 200HY row split.
+    const input = [
+        { sku: 'G200BK',   name: 'Epson Genuine 200BK Ink 200 Black',     color: 'Black',   brand: { name: 'Epson' }, yield_tier: 'STD' },
+        { sku: 'G200HYBK', name: 'Epson Genuine 200HYBK Ink 200HY Black', color: 'Black',   brand: { name: 'Epson' }, yield_tier: 'XL'  },
+        { sku: 'G200C',    name: 'Epson Genuine 200C Ink 200 Cyan',       color: 'Cyan',    brand: { name: 'Epson' }, yield_tier: 'STD' },
+        { sku: 'G200HYC',  name: 'Epson Genuine 200HYC Ink 200HY Cyan',   color: 'Cyan',    brand: { name: 'Epson' }, yield_tier: 'XL'  },
+        { sku: 'G200M',    name: 'Epson Genuine 200M Ink 200 Magenta',    color: 'Magenta', brand: { name: 'Epson' }, yield_tier: 'STD' },
+        { sku: 'G200HYM',  name: 'Epson Genuine 200HYM Ink 200HY Magenta',color: 'Magenta', brand: { name: 'Epson' }, yield_tier: 'XL'  },
+        { sku: 'G200Y',    name: 'Epson Genuine 200Y Ink 200 Yellow',     color: 'Yellow',  brand: { name: 'Epson' }, yield_tier: 'STD' },
+        { sku: 'G200HYY',  name: 'Epson Genuine 200HYY Ink 200HY Yellow', color: 'Yellow',  brand: { name: 'Epson' }, yield_tier: 'XL'  }
+    ];
+    const sorted = ProductSort.byCodeThenColor(input);
+    // All 200 standards first (K→C→M→Y), then all 200HY (K→C→M→Y).
+    assert.deepEqual(sorted.map(p => p.sku), [
+        'G200BK', 'G200C', 'G200M', 'G200Y',
+        'G200HYBK', 'G200HYC', 'G200HYM', 'G200HYY'
+    ]);
+    // Two groups of 4 → one row break before the 200HY block.
+    assert.deepEqual(ProductSort.rowBreakIndices(sorted), [4],
+        '200 and 200HY must occupy separate rows');
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
 // 3. rowBreakIndices — boundary detection
 // ─────────────────────────────────────────────────────────────────────────────
 

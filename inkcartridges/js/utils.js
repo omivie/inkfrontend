@@ -737,6 +737,16 @@ const ProductSort = (function() {
     // ─── yield + accessory + source ──────────────────────────────────────
 
     function yieldTier(product) {
+        // Prefer the backend signal: the API now emits yield_tier: 'STD'|'XL'|'XXL',
+        // computed by detectYieldTier() which recognises digit-glued HY ("200HY"),
+        // HP short-series X/Y ("975X"), and W-codes that the name matcher below
+        // misses (those merged two model codes onto one row — Epson 200, HP 975).
+        const yt = (product && product.yield_tier || '').toString().toUpperCase();
+        if (yt === 'XXL') return 2;
+        if (yt === 'XL')  return 1;
+        if (yt === 'STD') return 0;
+
+        // ---- legacy fallback: payloads predating yield_tier ----
         const n = (product && product.name || '').toLowerCase();
         if (n.includes('xxl') || n.includes('super high') || /\bxll\b/.test(n) || /\bshy\b/.test(n)) return 2;
         if (n.includes('xl') || n.includes('high yield') || /\bhy\b/.test(n)) return 1;
