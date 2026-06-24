@@ -324,6 +324,8 @@
             } else {
                 this.totals.discount = 0;
             }
+            // Loyalty points discount (mutually exclusive with coupons) — server-validated.
+            this.totals.loyaltyDiscount = (typeof Cart !== 'undefined' && Cart.loyalty && Cart.loyalty.applied_value_dollars) || 0;
         },
 
         // Update shipping cost and UI info (ETA, spend-more, split shipment)
@@ -333,7 +335,7 @@
             // Fetch shipping from backend API with full item weights
             await this.fetchShippingFromAPI();
 
-            this.totals.total = this.totals.subtotal - this.totals.discount + this.totals.shipping;
+            this.totals.total = this.totals.subtotal - this.totals.discount - (this.totals.loyaltyDiscount || 0) + this.totals.shipping;
             this.updateTotalsDisplay();
             this.updateShippingInfo();
         },
@@ -522,6 +524,19 @@
                     discountEl.textContent = `-$${this.totals.discount.toFixed(2)}`;
                 } else {
                     discountRow.hidden = true;
+                }
+            }
+
+            // Show loyalty points discount if applied
+            const loyaltyRow = document.getElementById('checkout-loyalty-row');
+            const loyaltyEl = document.getElementById('checkout-loyalty-discount');
+            if (loyaltyRow && loyaltyEl) {
+                const ld = this.totals.loyaltyDiscount || 0;
+                if (ld > 0) {
+                    loyaltyRow.hidden = false;
+                    loyaltyEl.textContent = `-$${ld.toFixed(2)}`;
+                } else {
+                    loyaltyRow.hidden = true;
                 }
             }
 
@@ -765,6 +780,8 @@
 
             // Coupon code handler
             this.setupCouponHandler();
+            // Loyalty points handler (mutually exclusive with coupons)
+            this.setupLoyaltyHandler();
         },
 
         /**
@@ -1308,6 +1325,160 @@
                     couponBtn.click();
                 }
             });
+        },
+
+        // loyalty-points-jun2026 — apply loyalty points at checkout (mutually
+        // exclusive with coupons). Mirrors the cart-page control; after any
+        // apply/remove we refetch GET /cart so totals come from the server summary.
+        setupLoyaltyHandler() {
+            const root = document.getElementById('cart-loyalty');
+            if (!root) return;
+
+            const form = document.getElementById('cart-loyalty-form');
+            const input = document.getElementById('cart-loyalty-input');
+            const maxBtn = document.getElementById('cart-loyalty-max');
+            const applyBtn = document.getElementById('cart-loyalty-apply');
+            const removeBtn = document.getElementById('cart-loyalty-remove');
+            const balanceEl = document.getElementById('cart-loyalty-balance');
+            const guestEl = document.getElementById('cart-loyalty-guest');
+            const feedback = document.getElementById('cart-loyalty-feedback');
+            const self = this;
+            let lastLoyalty = null;
+
+            const setFb = (msg, kind) => {
+                if (!feedback) return;
+                feedback.textContent = msg || '';
+                feedback.classList.remove('cart-loyalty__feedback--ok', 'cart-loyalty__feedback--err');
+                if (kind === 'ok') feedback.classList.add('cart-loyalty__feedback--ok');
+                else if (kind === 'err') feedback.classList.add('cart-loyalty__feedback--err');
+            };
+
+            const errText = (code, fb, minPts) => {
+                switch (code) {
+                    case 'EMAIL_NOT_VERIFIED': return 'Verify your email to use points.';
+                    case 'NOT_MULTIPLE_OF_100': return 'Enter points in multiples of 100.';
+                    case 'BELOW_MIN_POINTS': return minPts ? `Minimum redemption is ${minPts} points.` : 'That’s below the minimum redemption.';
+                    case 'CONFLICTS_WITH_COUPON': return 'Remove your coupon to use points.';
+                    case 'EXCEEDS_AVAILABLE_BALANCE': return 'You don’t have that many points.';
+                    case 'EXCEEDS_CART_SUBTOTAL': return 'That’s more than your cart total.';
+                    case 'LOYALTY_DISABLED': return 'Loyalty points are unavailable right now.';
+                    case 'RATE_LIMITED': return 'Too many tries — wait a minute and retry.';
+                    default: return API.extractErrorMessage(fb, 'Couldn’t apply your points right now.');
+                }
+            };
+
+            const render = (lo) => {
+                lastLoyalty = lo || null;
+                const isAuthed = (typeof Auth !== 'undefined') && Auth.isAuthenticated && Auth.isAuthenticated();
+                if (!isAuthed) {
+                    root.hidden = false;
+                    if (guestEl) guestEl.hidden = false;
+                    if (form) form.hidden = true;
+                    if (removeBtn) removeBtn.hidden = true;
+                    if (balanceEl) balanceEl.textContent = '';
+                    setFb('', null);
+                    return;
+                }
+                if (guestEl) guestEl.hidden = true;
+                if (form) form.hidden = false;
+                if (!lo) { root.hidden = true; return; }
+                root.hidden = false;
+
+                const rate = lo.redemption_rate || 100;
+                const balance = lo.points_balance || 0;
+                const applied = lo.points_applied || 0;
+                const maxPts = lo.max_redeemable_points || 0;
+                const minPts = lo.min_redemption_points || 0;
+
+                if (balanceEl) {
+                    const money = (typeof formatPrice === 'function') ? ` (${formatPrice(balance / rate)})` : '';
+                    balanceEl.textContent = `${balance.toLocaleString('en-NZ')} pts${money}`;
+                }
+                if (input) { input.min = String(minPts || 0); input.max = String(maxPts || 0); input.step = '100'; }
+
+                const couponApplied = !!self.appliedCoupon;
+                const canRedeem = maxPts > 0 && !couponApplied;
+                if (applyBtn) applyBtn.disabled = !canRedeem;
+                if (maxBtn) maxBtn.disabled = !canRedeem;
+                if (input) input.disabled = !canRedeem;
+
+                if (applied > 0) {
+                    if (input && document.activeElement !== input) input.value = String(applied);
+                    if (removeBtn) removeBtn.hidden = false;
+                } else if (removeBtn) {
+                    removeBtn.hidden = true;
+                }
+
+                if (lo.stale_notice) setFb(lo.stale_notice, 'err');
+                else if (couponApplied) setFb('Remove your coupon to use points.', null);
+                else if (applied > 0) setFb(lo.message || 'Points applied to this order.', 'ok');
+                else if (maxPts === 0 && balance > 0 && minPts && balance < minPts) setFb(`Earn ${minPts - balance} more points to redeem.`, null);
+                else if (maxPts === 0 && minPts && balance >= minPts) setFb('Add more to your cart to use points.', null);
+                else setFb('', null);
+            };
+
+            const refreshFromCart = async () => {
+                try {
+                    const res = await API.getCart();
+                    const data = res?.data || {};
+                    const summary = data.summary;
+                    self.appliedCoupon = data.coupon?.code || null;
+                    if (summary) {
+                        if (summary.subtotal != null) self.totals.subtotal = summary.subtotal;
+                        self.totals.discount = self.appliedCoupon ? (summary.coupon_discount != null ? summary.coupon_discount : (summary.discount || 0)) : 0;
+                        self.totals.loyaltyDiscount = summary.loyalty_discount_amount || 0;
+                        if (summary.shipping != null) self.totals.shipping = summary.shipping;
+                        self.totals.total = self.totals.subtotal - self.totals.discount - self.totals.loyaltyDiscount + self.totals.shipping;
+                    }
+                    self.updateTotalsDisplay();
+                    render(data.loyalty || null);
+                } catch (e) {
+                    if (typeof DebugLog !== 'undefined') DebugLog.warn('Cart refresh after loyalty change failed:', e && e.message);
+                }
+            };
+
+            const apply = async (points) => {
+                setFb('Applying…', null);
+                try {
+                    const res = await API.applyLoyaltyPoints(points);
+                    if (res && res.ok) await refreshFromCart();
+                    else setFb(errText(res && res.code, res && res.error, lastLoyalty && lastLoyalty.min_redemption_points), 'err');
+                } catch (err) {
+                    setFb(errText(err && err.code, err, lastLoyalty && lastLoyalty.min_redemption_points), 'err');
+                }
+            };
+
+            const remove = async () => {
+                setFb('Removing…', null);
+                try {
+                    const res = await API.removeLoyaltyPoints();
+                    if (res && res.ok) { await refreshFromCart(); setFb('Points removed.', null); }
+                    else setFb(errText(res && res.code, res && res.error), 'err');
+                } catch (err) {
+                    setFb(errText(err && err.code, err), 'err');
+                }
+            };
+
+            if (form) {
+                form.addEventListener('submit', (e) => {
+                    e.preventDefault();
+                    const pts = parseInt(input && input.value, 10);
+                    if (!pts || pts <= 0) { setFb('Enter how many points to use.', 'err'); return; }
+                    apply(pts);
+                });
+            }
+            if (maxBtn) {
+                maxBtn.addEventListener('click', () => {
+                    const max = (lastLoyalty && lastLoyalty.max_redeemable_points) || 0;
+                    if (max <= 0) return;
+                    if (input) input.value = String(max);
+                    apply(max);
+                });
+            }
+            if (removeBtn) removeBtn.addEventListener('click', remove);
+
+            // Initial state from the authoritative server cart (includes already-applied points)
+            refreshFromCart();
         },
 
         // Re-sync the coupon UI and totals from the authoritative server cart.

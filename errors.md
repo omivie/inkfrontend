@@ -4,6 +4,34 @@ Log every error encountered here. Before editing a file, scan for known issues. 
 
 ---
 
+## ERR-044 — Per-page `pages.css` cache token broke the shared three-card-CSS rollout-token invariant (2026-06-24)
+
+**Symptom:** Added loyalty styles to `css/pages.css` and bumped only the 5 touched
+pages' `pages.css?v=` to a new token. The full test suite then failed
+`tests/product-card-title-clamp.test.js` → "all HTML pages cache-bust the three
+card CSS files to v=…", plus (after a naive site-wide bump) two shop.html token
+tests in `search-pagination.test.js` and `shipping-bar-inline-may2026.test.js`.
+
+**Root cause:** `components.css`, `pages.css`, and `search.css` share **ONE**
+rollout token that must be **identical on every `.html` page** under `inkcartridges/`.
+It is pinned three ways: `CARD_CSS_TOKEN` in product-card-title-clamp.test.js (walks
+ALL html), and per-file shop.html assertions in search-pagination + shipping-bar tests.
+A per-page or single-file token bump violates the invariant.
+
+**Fix:** When ANY of those three CSS files changes, advance the shared token across
+**all** html for **all three** files at once, and update the **three** test constants:
+```
+find inkcartridges -name '*.html' -not -path '*/node_modules/*' -print0 | while IFS= read -r -d '' f; do
+  sed -i '' -E 's#/css/(components|pages|search)\.css\?v=[a-zA-Z0-9-]+#/css/\1.css?v=NEWTOKEN#g' "$f"; done
+```
+then update `CARD_CSS_TOKEN` (product-card-title-clamp), the shop.html `pages.css`
+regex (shipping-bar-inline-may2026 §6), and the shop.html `search.css` regex
+(search-pagination). Production HTML is content-hash re-stamped by
+`scripts/stamp-versions.js` at build, so the literal token value is only a
+test/dev contract — keep it consistent, don't fragment it per page.
+
+---
+
 ## ERR-043 — `git stash pop` silently popped an UNRELATED old stash and shredded 51 files with conflict markers (2026-06-21)
 
 **Symptom:** Ran `git stash; <test>; git stash pop` to A/B a change against a

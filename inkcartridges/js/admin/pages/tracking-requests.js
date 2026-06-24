@@ -27,6 +27,10 @@ import { AdminAPI, FilterState, icon, esc, refreshTrackingRequestsBadge } from '
 
 let _container = null;
 let _status = 'pending';
+// Bumped on each load() and on destroy(); a load whose fetch resolves after the
+// page was torn down (fast nav away) sees a stale seq and bails instead of
+// writing into a now-null _container.
+let _loadSeq = 0;
 
 function fmtDate(iso) {
   if (!iso) return '—';
@@ -52,9 +56,12 @@ function orderStatusBadge(status) {
 }
 
 async function load() {
+  const seq = ++_loadSeq;
   renderShell('<div style="display:flex;align-items:center;justify-content:center;min-height:30vh"><div class="admin-loading__spinner"></div></div>');
 
   const data = await AdminAPI.getTrackingRequests({ status: _status });
+  // Bail if the page was destroyed or a newer load started while we awaited.
+  if (seq !== _loadSeq || !_container) return;
   if (data === null) {
     renderShell(`
       <div class="admin-card" style="padding:var(--spacing-md,16px)">
@@ -170,6 +177,7 @@ export default {
   },
 
   destroy() {
+    _loadSeq++; // invalidate any in-flight load()
     _container = null;
   },
 };

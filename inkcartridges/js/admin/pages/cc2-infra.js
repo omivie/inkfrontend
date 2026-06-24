@@ -57,7 +57,7 @@ function renderImagePipeline(p) {
     <article class="admin-card cc2-infra-card cc2-infra-card--${tone}" aria-labelledby="cc2-infra-image">
       <header class="cc2-section-header">
         <h3 id="cc2-infra-image">Image pipeline</h3>
-        <a class="admin-btn admin-btn--ghost admin-btn--sm" href="#image-audit">${icon('image', 14, 14)} Open image audit</a>
+        <a class="admin-btn admin-btn--ghost admin-btn--sm" href="#genuine-image-audit">${icon('image', 14, 14)} Open image audit</a>
       </header>
       <div class="admin-kpi-grid admin-kpi-grid--4">
         <div class="admin-kpi"><div class="admin-kpi__label">WebP conversions</div><div class="admin-kpi__value">${fmtNum(w.webp_conversions)}</div></div>

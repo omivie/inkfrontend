@@ -1,7 +1,7 @@
 /**
  * Admin SPA — Entry point, router, shell
  */
-const APP_VERSION = '2026.06.24-margin-inline';
+const APP_VERSION = '2026.06.25-admin-ia-overhaul3';
 
 import { AdminAuth } from './auth.js';
 import { FilterState } from './filters.js';
@@ -45,35 +45,43 @@ function icon(name, w = 18, h = 18) {
 }
 
 // ---- Navigation config ----
+// Sidebar is grouped into labeled sections (June 2026 IA overhaul). An empty
+// section header is automatically suppressed for a role that can see none of
+// its items (see renderSidebar's pending-section logic), so all-owner groups
+// don't leave orphaned labels for staff.
 const NAV_ITEMS = [
+  { section: 'Overview' },
   { key: 'dashboard', label: 'Dashboard', icon: 'dashboard' },
-  { key: 'analytics', label: 'Finance', icon: 'finance', ownerOnly: true },
-  { key: 'website-traffic', label: 'Website Traffic', icon: 'analytics', ownerOnly: true },
+
+  { section: 'Sell' },
   { key: 'orders', label: 'Orders', icon: 'orders' },
   { key: 'tracking-requests', label: 'Tracking Requests', icon: 'fulfillment', badge: true },
   { key: 'products', label: 'Products', icon: 'products' },
-  { key: 'ribbon-brands', label: 'Ribbon Brands', icon: 'products' },
   { key: 'customers', label: 'Customers', icon: 'customers' },
-  { divider: true },
-  { key: 'planner', label: 'Planner', icon: 'calendar' },
   { key: 'promotions', label: 'Promotions', icon: 'finance', ownerOnly: true },
-  { key: 'shipping-rates', label: 'Shipping Rates', icon: 'fulfillment', ownerOnly: true },
-  { key: 'abuse', label: 'Abuse', icon: 'lock', ownerOnly: true },
-  { key: 'segments', label: 'Segments', icon: 'mail', ownerOnly: true },
-  { divider: true },
-  { key: 'image-audit', label: 'Image Audit', icon: 'image', ownerOnly: true },
-  { key: 'genuine-image-audit', label: 'Genuine Audit', icon: 'image', ownerOnly: true },
-  { key: 'control-center', label: 'Operations', icon: 'lab', ownerOnly: true },
-  { key: 'sync-report', label: 'Feed Sync', icon: 'products', href: '/admin/sync-report', ownerOnly: true },
+
+  { section: 'Analytics' },
+  { key: 'analytics', label: 'Finance', icon: 'finance', ownerOnly: true },
+
+  { section: 'Catalog & Data Ops' },
+  { key: 'control-center', label: 'Control Center', icon: 'lab', ownerOnly: true },
+  { key: 'sync-report', label: 'Feed Sync', icon: 'products', ownerOnly: true },
   { key: 'pending-changes', label: 'Pending Changes', icon: 'orders', ownerOnly: true },
   { key: 'price-monitor', label: 'Price Monitor', icon: 'finance', ownerOnly: true },
+  { key: 'genuine-image-audit', label: 'Image Audit', icon: 'image', ownerOnly: true },
+  { key: 'ribbon-brands', label: 'Ribbon Brands', icon: 'products' },
+  { key: 'segments', label: 'Segments', icon: 'mail', ownerOnly: true },
+
+  { section: 'System' },
+  { key: 'abuse', label: 'Abuse', icon: 'lock', ownerOnly: true },
   { key: 'recovery', label: 'Recovery', icon: 'refunds', ownerOnly: true },
-  { key: 'site-lock', label: 'Site Lock', icon: 'lock', ownerOnly: true },
-  { key: 'legal-content', label: 'Legal Content', icon: 'invoice', ownerOnly: true },
-  { key: 'contact-emails', label: 'Settings', icon: 'settings', ownerOnly: true },
+  { key: 'planner', label: 'Planner', icon: 'calendar' },
+
+  { section: 'Settings' },
+  { key: 'settings', label: 'Settings', icon: 'settings', ownerOnly: true },
 ];
 
-// Legacy route redirects — old pages now merged into parent pages
+// Legacy route redirects — old pages now merged into parent pages / hubs.
 const ROUTE_REDIRECTS = {
   'refunds': 'orders',
   'ribbons': 'products', // retired May 2026 — preserved so old bookmarks land on Products
@@ -81,6 +89,14 @@ const ROUTE_REDIRECTS = {
   'margin': 'analytics',
   'financial-health': 'analytics',
   'coupons': 'promotions',
+  // June 2026 IA overhaul — folded surfaces keep working from old bookmarks,
+  // landing on the exact tab (hubs read ?tab= from the hash).
+  'website-traffic': 'analytics?tab=traffic',   // now the Finance "Traffic" tab
+  'image-audit': 'genuine-image-audit',         // legacy image audit retired
+  'contact-emails': 'settings?tab=notifications', // now a Settings hub tab
+  'shipping-rates': 'settings?tab=shipping',
+  'legal-content': 'settings?tab=legal',
+  'site-lock': 'settings?tab=site-lock',
 };
 
 // ---- Page module cache ----
@@ -100,6 +116,12 @@ async function loadPage(name) {
 // ---- App State ----
 let _currentPage = null;
 let _currentPageName = null;
+// Monotonic navigation token. Bumped on every navigate() so a page whose
+// async init() resolves/rejects LATE (e.g. its fetch finishes after the user
+// already moved on) can detect it's been superseded and avoid clobbering the
+// page that now owns the shared #main-content. Fixes the "go to Tracking then
+// back to Orders → Error Loading Page" race.
+let _navToken = 0;
 
 // ---- Shell Rendering ----
 function renderSidebar() {
@@ -122,15 +144,23 @@ function renderSidebar() {
     <nav class="admin-sidebar__nav">
   `;
 
+  // A section label is held "pending" until its first visible child is about
+  // to render — so an all-owner group renders no orphaned header for staff.
+  let pendingSection = null;
   for (const item of NAV_ITEMS) {
-    if (item.ownerOnly && !isOwner) continue;
     if (item.divider) {
+      pendingSection = null;
       html += '<div class="admin-nav-divider"></div>';
       continue;
     }
     if (item.section) {
-      html += `<div class="admin-nav-section"><div class="admin-nav-section__label">${esc(item.section)}</div></div>`;
+      pendingSection = item.section;
       continue;
+    }
+    if (item.ownerOnly && !isOwner) continue;
+    if (pendingSection) {
+      html += `<div class="admin-nav-section"><div class="admin-nav-section__label">${esc(pendingSection)}</div></div>`;
+      pendingSection = null;
     }
     const navHref = item.href || `#${item.key}`;
     const badgeHtml = item.badge ? ` <span class="admin-nav-badge" id="nav-badge-${esc(item.key)}" style="display:none"></span>` : '';
@@ -211,6 +241,10 @@ async function navigate(pageName) {
     return;
   }
 
+  // Claim this navigation. Any await below that resolves after a newer
+  // navigate() must bail rather than touch the shared content area.
+  const myToken = ++_navToken;
+
   // Destroy current page
   if (_currentPage && _currentPage.destroy) {
     _currentPage.destroy();
@@ -234,7 +268,7 @@ async function navigate(pageName) {
   `;
 
   // Owner-only page check
-  const ownerPages = ['contact-emails', 'control-center', 'site-lock', 'legal-content'];
+  const ownerPages = ['settings', 'control-center', 'sync-report'];
   if (ownerPages.includes(pageName) && !AdminAuth.isOwner()) {
     content.innerHTML = `
       <div class="admin-stub">
@@ -249,6 +283,7 @@ async function navigate(pageName) {
 
   // Load page module
   const page = await loadPage(pageName);
+  if (myToken !== _navToken) return; // superseded during dynamic import
   if (!page) {
     content.innerHTML = `
       <div class="admin-stub">
@@ -275,6 +310,12 @@ async function navigate(pageName) {
   try {
     await page.init(content);
   } catch (e) {
+    // If a newer navigation already took over, this is a stale failure from a
+    // page we've moved on from — log it but don't overwrite the current page.
+    if (myToken !== _navToken) {
+      DebugLog.error(`[Router] Stale page init error (${pageName}, superseded):`, e);
+      return;
+    }
     DebugLog.error(`[Router] Page init error (${pageName}):`, e);
     content.innerHTML = `
       <div class="admin-stub">
@@ -400,7 +441,7 @@ function showShortcutsHelp() {
         <dt>g d</dt><dd>Go to Dashboard</dd>
         <dt>g p</dt><dd>Go to Products</dd>
         <dt>g o</dt><dd>Go to Orders</dd>
-        <dt>g a</dt><dd>Go to Profit Center</dd>
+        <dt>g a</dt><dd>Go to Finance</dd>
         <dt>g c</dt><dd>Go to Customers</dd>
         <dt>j / k</dt><dd>Navigate table rows</dd>
         <dt>Enter</dt><dd>Open focused row</dd>
@@ -453,7 +494,7 @@ function initKeyboardShortcuts() {
     if (gPending) {
       gPending = false;
       clearTimeout(gTimer);
-      const goMap = { d: 'dashboard', p: 'products', o: 'orders', a: 'analytics', c: 'customers', s: 'contact-emails' };
+      const goMap = { d: 'dashboard', p: 'products', o: 'orders', a: 'analytics', c: 'customers', s: 'settings' };
       const target = goMap[e.key];
       if (target) { e.preventDefault(); window.location.hash = target; }
       return;

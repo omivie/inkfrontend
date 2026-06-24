@@ -41,7 +41,29 @@ const TABS = [
   { id: 'margins',     label: 'Margins', lazy: true },
   { id: 'pricing',     label: 'Pricing', lazy: true },
   { id: 'market-intel', label: 'Market Intel', lazy: true },
+  { id: 'traffic',     label: 'Traffic', lazy: true },
 ];
+
+const TAB_IDS = TABS.map(t => t.id);
+
+// Read/persist the active tab in the hash query so #analytics?tab=traffic
+// deep-links (the website-traffic route redirects here, June 2026 IA overhaul).
+function readTabFromHash() {
+  const hash = (window.location.hash || '').replace(/^#/, '');
+  const qIdx = hash.indexOf('?');
+  if (qIdx < 0) return null;
+  const t = new URLSearchParams(hash.slice(qIdx + 1)).get('tab');
+  return TAB_IDS.includes(t) ? t : null;
+}
+
+function writeTabToHash(tabId) {
+  const hash = (window.location.hash || '').replace(/^#/, '');
+  const [base, query] = hash.split('?');
+  const params = new URLSearchParams(query || '');
+  params.set('tab', tabId);
+  const next = `#${base || 'analytics'}?${params.toString()}`;
+  if (window.location.hash !== next) history.replaceState(null, '', next);
+}
 
 let _container = null;
 let _activeTab = 'revenue';
@@ -94,6 +116,7 @@ function render() {
     _lazyTabModule = null;
 
     _activeTab = tabId;
+    writeTabToHash(tabId);
     _container.querySelectorAll('.admin-analytics-tab').forEach(b => {
       b.classList.toggle('is-active', b.dataset.tab === tabId);
     });
@@ -105,6 +128,11 @@ function render() {
 
 async function renderTabContent() {
   Charts.destroyAll();
+  // Reset filter-bar visibility to the default for every tab. Lazy panels that
+  // want to restrict it (Health → period only, Traffic → none) re-apply that in
+  // their own init(); without this baseline, leaving Traffic (which hides all
+  // filters) would leave the bar misconfigured for Revenue.
+  FilterState.setVisibleFilters(null);
   const el = _container?.querySelector('#analytics-tab-content');
   if (!el) return;
 
@@ -117,6 +145,7 @@ async function renderTabContent() {
       'margins': './margin.js',
       'pricing': './cc-profit.js',
       'market-intel': './cc-market-intel.js',
+      'traffic': './website-traffic.js',
     };
     try {
       const mod = await import(moduleMap[_activeTab]);
@@ -296,7 +325,7 @@ export default {
 
   async init(container) {
     _container = container;
-    _activeTab = 'revenue';
+    _activeTab = readTabFromHash() || 'revenue';
     _lazyTabModule = null;
     await loadAnalytics();
   },

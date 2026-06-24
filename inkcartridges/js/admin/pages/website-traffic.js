@@ -559,7 +559,7 @@ function loadFailedHero(reason = 'transient') {
               + "Try again in a moment — the data is still there.";
 
     const cta = isAuth
-        ? `<a class="admin-btn admin-btn--primary" href="/login.html?return=${encodeURIComponent('/admin#website-traffic')}">Sign in</a>`
+        ? `<a class="admin-btn admin-btn--primary" href="/login.html?return=${encodeURIComponent('/admin#analytics?tab=traffic')}">Sign in</a>`
         : `<button type="button" class="admin-btn admin-btn--primary" data-action="retry-traffic">Retry</button>`;
 
     return `<div class="admin-card admin-mb-lg admin-traffic-error" data-reason="${esc(reason)}">

@@ -4434,24 +4434,78 @@
     color: var(--color-info);
 }
 
-/* Loyalty stamp card chip */
-.cart-summary__stamp-card {
+/* Loyalty message chip (earn nudge / applied summary) */
+.cart-summary__loyalty-chip {
     display: inline-flex;
     align-items: center;
     gap: 6px;
     padding: 8px 12px;
     margin: 0 0 var(--spacing-md);
-    background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
-    color: #92400e;
+    background: linear-gradient(135deg, #ecfdf5 0%, #d1fae5 100%);
+    color: #065f46;
     border-radius: 999px;
     font-size: 0.875rem;
     font-weight: 600;
     line-height: 1.2;
 }
-.cart-summary__stamp-card::before {
-    content: "🏆";
+.cart-summary__loyalty-chip::before {
+    content: "★";
     font-size: 1rem;
 }
+
+/* Loyalty points redemption control (cart + checkout) */
+.cart-loyalty {
+    margin: 0 0 var(--spacing-md);
+    padding: 12px 14px;
+    border: 1px solid var(--color-border, #e2e8f0);
+    border-radius: var(--radius-sm, 8px);
+    background: #fff;
+}
+.cart-loyalty__head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 8px;
+}
+.cart-loyalty__title { font-weight: 600; font-size: 0.9375rem; }
+.cart-loyalty__balance { font-size: 0.8125rem; color: var(--color-text-muted, #64748b); }
+.cart-loyalty__guest { font-size: 0.875rem; color: var(--color-text-muted, #64748b); }
+.cart-loyalty__form {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+.cart-loyalty__input {
+    flex: 1 1 auto;
+    min-width: 0;
+    padding: 8px 10px;
+    border: 1px solid var(--color-border, #cbd5e1);
+    border-radius: var(--radius-sm, 8px);
+    font-size: 0.9375rem;
+}
+.cart-loyalty__max { flex: 0 0 auto; }
+.cart-loyalty__apply { flex: 0 0 auto; }
+.cart-loyalty__remove {
+    margin-top: 8px;
+    background: none;
+    border: none;
+    padding: 0;
+    color: var(--color-link, #267FB5);
+    font-size: 0.8125rem;
+    cursor: pointer;
+    text-decoration: underline;
+}
+.cart-loyalty__feedback {
+    margin: 8px 0 0;
+    font-size: 0.8125rem;
+    min-height: 1em;
+    color: var(--color-text-muted, #64748b);
+}
+.cart-loyalty__feedback--ok { color: #065f46; }
+.cart-loyalty__feedback--err { color: var(--color-error, #b91c1c); }
+.cart-summary__row--loyalty span:last-child,
+.checkout-summary__row--loyalty span:last-child { color: #065f46; }
 
 /* Free Shipping Progress Bar */
 .cart-summary__shipping-bar {
@@ -11732,7 +11786,7 @@ body.page-shop {
 }
 
 /* =========================================================================
-   Loyalty / Stamp Card
+   Loyalty Points (balance + savings graph + history + reward coupons)
    ========================================================================= */
 .loyalty-loading {
     padding: var(--spacing-6) 0;
@@ -11757,141 +11811,105 @@ body.page-shop {
     color: var(--color-primary, #2563eb);
 }
 
-.loyalty-card {
-    background: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%);
-    border: 1px solid var(--steel-200, #e2e8f0);
-    border-radius: var(--radius-lg, 12px);
-    padding: clamp(1.25rem, 3vw, 2rem);
-    box-shadow: var(--shadow-sm, 0 1px 2px rgba(0,0,0,0.05));
-    margin-bottom: var(--spacing-6, 1.5rem);
-}
-.loyalty-card__head {
-    display: flex;
-    justify-content: space-between;
-    align-items: flex-start;
-    gap: 1rem;
-    margin-bottom: 1.5rem;
-    flex-wrap: wrap;
-}
-.loyalty-card__title {
-    font-size: clamp(1.125rem, 2vw, 1.375rem);
-    margin: 0 0 0.25rem;
+.loyalty-section__heading {
+    font-size: 1.125rem;
+    margin: 0 0 1rem;
     color: var(--steel-900, #0f172a);
 }
-.loyalty-card__meta {
-    margin: 0;
-    font-size: 0.875rem;
-    color: var(--steel-500, #64748b);
+
+/* Balance hero */
+.loyalty-balance-section { margin-bottom: var(--spacing-6, 1.5rem); }
+.loyalty-balance {
+    background: linear-gradient(135deg, #0d1b2a 0%, #1b2d45 100%);
+    color: #fff;
+    border-radius: var(--radius-lg, 12px);
+    padding: 1.75rem;
 }
-.loyalty-card__progress {
+.loyalty-balance__main {
     display: flex;
     align-items: baseline;
-    gap: 0.35rem;
-    color: var(--color-primary, #2563eb);
-}
-.loyalty-progress__num {
-    font-size: 2rem;
-    font-weight: 700;
-    line-height: 1;
-}
-.loyalty-progress__den {
-    font-size: 0.875rem;
-    color: var(--steel-500, #64748b);
-    font-weight: 500;
-}
-
-.loyalty-stamps {
-    list-style: none;
-    padding: 0;
-    margin: 0;
-    display: grid;
-    grid-template-columns: repeat(6, 1fr);
     gap: 0.5rem;
 }
-.loyalty-stamp {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 0.4rem;
-    position: relative;
+.loyalty-balance__points {
+    font-size: 2.75rem;
+    font-weight: 800;
+    line-height: 1;
 }
-.loyalty-stamp__circle {
-    width: clamp(44px, 11vw, 72px);
-    height: clamp(44px, 11vw, 72px);
-    border-radius: 50%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    border: 2px dashed var(--steel-300, #cbd5e1);
-    background: #fff;
-    color: var(--steel-400, #94a3b8);
-    transition: all 0.25s ease;
-}
-.loyalty-stamp__circle svg {
-    width: 52%;
-    height: 52%;
-}
-.loyalty-stamp__num {
+.loyalty-balance__unit {
+    font-size: 1rem;
     font-weight: 600;
-    font-size: 0.9rem;
-}
-.loyalty-stamp--filled .loyalty-stamp__circle {
-    background: var(--color-primary, #2563eb);
-    border: 2px solid var(--color-primary, #2563eb);
-    color: #fff;
-    box-shadow: 0 4px 12px rgba(37, 99, 235, 0.25);
-}
-.loyalty-stamp--reward .loyalty-stamp__circle {
-    border-style: solid;
-    border-width: 3px;
-}
-.loyalty-stamp--silver .loyalty-stamp__circle {
-    border-color: #94a3b8;
-}
-.loyalty-stamp--gold .loyalty-stamp__circle {
-    border-color: #d4a017;
-}
-.loyalty-stamp--reward-unlocked.loyalty-stamp--silver .loyalty-stamp__circle {
-    background: linear-gradient(135deg, #cbd5e1, #94a3b8);
-    color: #fff;
-    box-shadow: 0 6px 16px rgba(148, 163, 184, 0.45);
-    animation: loyalty-pulse 2.4s ease-in-out infinite;
-}
-.loyalty-stamp--reward-unlocked.loyalty-stamp--gold .loyalty-stamp__circle {
-    background: linear-gradient(135deg, #fde68a, #d4a017);
-    color: #fff;
-    box-shadow: 0 6px 20px rgba(212, 160, 23, 0.5);
-    animation: loyalty-pulse 2.4s ease-in-out infinite;
-}
-.loyalty-stamp--reward-used .loyalty-stamp__circle,
-.loyalty-stamp--reward-expired .loyalty-stamp__circle {
-    background: var(--steel-100, #f1f5f9);
-    color: var(--steel-400, #94a3b8);
-    opacity: 0.7;
-}
-@keyframes loyalty-pulse {
-    0%, 100% { transform: scale(1); }
-    50% { transform: scale(1.04); }
-}
-
-.loyalty-stamp__tier {
-    font-size: 0.65rem;
-    font-weight: 700;
-    letter-spacing: 0.06em;
+    color: #93c5fd;
     text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+.loyalty-balance__meta {
+    margin-top: 0.5rem;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.25rem 1rem;
+}
+.loyalty-balance__value { font-size: 1.05rem; font-weight: 600; }
+.loyalty-balance__lifetime { font-size: 0.875rem; color: #cbd5e1; }
+.loyalty-balance__hint { margin: 0.9rem 0 0; font-size: 0.85rem; color: #cbd5e1; }
+
+/* Savings-over-time chart */
+.loyalty-graph-section { margin-bottom: var(--spacing-6, 1.5rem); }
+.loyalty-graph {
+    width: 100%;
+    background: #fff;
+    border: 1px solid var(--steel-200, #e2e8f0);
+    border-radius: var(--radius-lg, 12px);
+    padding: 0.75rem;
+}
+.loyalty-chart { width: 100%; height: auto; display: block; }
+.loyalty-chart__axis { stroke: var(--steel-200, #e2e8f0); stroke-width: 1; }
+.loyalty-chart__tick { fill: var(--steel-500, #64748b); font-size: 11px; }
+.loyalty-chart__line { stroke-width: 2.5; vector-effect: non-scaling-stroke; }
+.loyalty-chart__line--accrued { stroke: #267FB5; }
+.loyalty-chart__line--savings { stroke: #C71F6E; }
+.loyalty-graph__legend {
+    display: flex;
+    gap: 1.25rem;
+    margin-top: 0.6rem;
+    font-size: 0.8125rem;
     color: var(--steel-600, #475569);
 }
-.loyalty-stamp--gold .loyalty-stamp__tier { color: #b8860b; }
-.loyalty-stamp--silver .loyalty-stamp__tier { color: #64748b; }
-.loyalty-stamp__tier--locked { opacity: 0.5; }
+.loyalty-legend__item { display: inline-flex; align-items: center; gap: 0.4rem; }
+.loyalty-legend__swatch { width: 14px; height: 3px; border-radius: 2px; display: inline-block; }
+.loyalty-legend__swatch--accrued { background: #267FB5; }
+.loyalty-legend__swatch--savings { background: #C71F6E; }
 
-.loyalty-card__next {
-    margin: 1.5rem 0 0;
-    text-align: center;
-    font-size: 0.9rem;
-    color: var(--steel-600, #475569);
+/* Points history (ledger) */
+.loyalty-history-section { margin-bottom: var(--spacing-6, 1.5rem); }
+.loyalty-history-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    gap: 0.5rem;
 }
+.loyalty-ledger {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: 0.75rem 1rem;
+    background: #fff;
+    border: 1px solid var(--steel-200, #e2e8f0);
+    border-radius: var(--radius-md, 8px);
+}
+.loyalty-ledger__main { display: grid; gap: 0.15rem; }
+.loyalty-ledger__label { font-weight: 600; color: var(--steel-900, #0f172a); }
+.loyalty-ledger__date { font-size: 0.8125rem; color: var(--steel-500, #64748b); }
+.loyalty-ledger__amounts { text-align: right; display: grid; gap: 0.15rem; }
+.loyalty-ledger__points { font-weight: 700; font-variant-numeric: tabular-nums; }
+.loyalty-ledger__points--pos { color: #166534; }
+.loyalty-ledger__points--neg { color: #b91c1c; }
+.loyalty-ledger__points--zero { color: var(--steel-500, #64748b); }
+.loyalty-ledger__balance { font-size: 0.75rem; color: var(--steel-500, #64748b); }
+.loyalty-history__more { margin-top: 1rem; }
 
+/* Reward coupons */
 .loyalty-rewards {
     margin-top: var(--spacing-6, 1.5rem);
 }
@@ -11919,15 +11937,11 @@ body.page-shop {
     top: 0;
     bottom: 0;
     width: 4px;
+    background: linear-gradient(180deg, #60a5fa, #2563eb);
 }
-.loyalty-reward--silver::before { background: linear-gradient(180deg, #cbd5e1, #94a3b8); }
-.loyalty-reward--gold::before { background: linear-gradient(180deg, #fde68a, #d4a017); }
-.loyalty-reward--personal::before { background: linear-gradient(180deg, #60a5fa, #2563eb); }
-.loyalty-reward--personal .loyalty-reward__tier { color: #1d4ed8; }
 .loyalty-reward--used,
 .loyalty-reward--expired,
 .loyalty-reward--deactivated { opacity: 0.7; }
-
 .loyalty-reward__head {
     display: flex;
     justify-content: space-between;
@@ -11939,13 +11953,7 @@ body.page-shop {
 .loyalty-reward__tier {
     font-weight: 700;
     font-size: 0.95rem;
-    margin-right: 0.6rem;
-}
-.loyalty-reward--gold .loyalty-reward__tier { color: #b8860b; }
-.loyalty-reward--silver .loyalty-reward__tier { color: #475569; }
-.loyalty-reward__cycle {
-    font-size: 0.75rem;
-    color: var(--steel-500, #64748b);
+    color: #1d4ed8;
 }
 .loyalty-reward__status {
     padding: 0.25rem 0.65rem;
@@ -11959,8 +11967,6 @@ body.page-shop {
 .loyalty-reward__status--used { background: var(--steel-100, #f1f5f9); color: var(--steel-500, #64748b); }
 .loyalty-reward__status--expired { background: #fee2e2; color: #991b1b; }
 .loyalty-reward__status--deactivated { background: var(--steel-100, #f1f5f9); color: var(--steel-500, #64748b); }
-.loyalty-reward__status--personal { background: #dbeafe; color: #1d4ed8; }
-
 .loyalty-reward__code-row {
     display: flex;
     align-items: center;
@@ -12013,9 +12019,8 @@ body.page-shop {
 }
 
 @media (max-width: 520px) {
-    .loyalty-stamps { gap: 0.35rem; }
-    .loyalty-stamp__tier { font-size: 0.6rem; }
-    .loyalty-card__progress { width: 100%; justify-content: flex-start; }
+    .loyalty-balance__points { font-size: 2.25rem; }
+    .loyalty-ledger { flex-wrap: wrap; }
 }
 
 /* ── GMC Compliance: Shipping callouts ── */

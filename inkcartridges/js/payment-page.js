@@ -234,6 +234,7 @@
                     subtotal: summary.subtotal || 0,
                     shipping: shipping,
                     discount: summary.discount || 0,
+                    loyaltyDiscount: summary.loyalty_discount_amount || 0,
                     total: (summary.subtotal || 0) + shipping - (summary.discount || 0)
                 };
 
@@ -252,12 +253,34 @@
                 document.getElementById('checkout-subtotal').textContent = `$${this.totals.subtotal.toFixed(2)}`;
                 document.getElementById('checkout-shipping').textContent = this.totals.shipping === 0 ? 'FREE' : `$${this.totals.shipping.toFixed(2)}`;
 
+                // Loyalty points discount shows on its own row; net it out of the
+                // generic discount line so it isn't double-counted (summary.discount
+                // already includes the loyalty amount).
+                const loyaltyDiscount = this.totals.loyaltyDiscount || 0;
+                const otherDiscount = Math.max(0, this.totals.discount - loyaltyDiscount);
+
                 // Show discount if present
                 const discountRow = document.getElementById('checkout-discount-row');
                 const discountEl = document.getElementById('checkout-discount');
-                if (discountRow && discountEl && this.totals.discount > 0) {
-                    discountRow.hidden = false;
-                    discountEl.textContent = `-$${this.totals.discount.toFixed(2)}`;
+                if (discountRow && discountEl) {
+                    if (otherDiscount > 0) {
+                        discountRow.hidden = false;
+                        discountEl.textContent = `-$${otherDiscount.toFixed(2)}`;
+                    } else {
+                        discountRow.hidden = true;
+                    }
+                }
+
+                // Show loyalty points discount if present
+                const loyaltyRow = document.getElementById('checkout-loyalty-row');
+                const loyaltyEl = document.getElementById('checkout-loyalty-discount');
+                if (loyaltyRow && loyaltyEl) {
+                    if (loyaltyDiscount > 0) {
+                        loyaltyRow.hidden = false;
+                        loyaltyEl.textContent = `-$${loyaltyDiscount.toFixed(2)}`;
+                    } else {
+                        loyaltyRow.hidden = true;
+                    }
                 }
 
                 document.getElementById('checkout-total').textContent = `$${this.totals.total.toFixed(2)} NZD`;
@@ -618,6 +641,12 @@
                 if (!orderResponse.ok) {
                     const errorCode = orderResponse.code || '';
                     const errorMsg = orderResponse.error || 'Failed to create order';
+
+                    // Loyalty points balance changed between cart and pay — the points
+                    // discount can no longer be honoured. Send them back to re-apply.
+                    if (errorCode === 'INSUFFICIENT_POINTS') {
+                        throw new Error('Your loyalty points balance changed, so the points discount is no longer valid. Please return to your cart to re-apply your points, then try again.');
+                    }
 
                     if (errorCode === 'DUPLICATE_ORDER') {
                         const details = orderResponse.data?.error?.details || orderResponse.data?.details || {};

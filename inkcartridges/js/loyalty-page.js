@@ -21,13 +21,22 @@
         return 'Discount';
     };
 
-    const rewardTier = (slot) => slot === 6 ? 'gold' : 'silver';
+    // Ledger row labels (spec §3)
+    const TYPE_LABEL = {
+        earn: 'Earned',
+        bonus: 'Bonus',
+        redeem: 'Redeemed',
+        clawback: 'Reversed',
+        adjust: 'Adjustment'
+    };
 
     const LoyaltyPage = {
-        card: null,
-        stamps: [],
-        rewards: [],
-        tooltip: '',
+        loyalty: null,
+        ledger: [],
+        orders: [],
+        coupons: [],
+        page: 1,
+        totalPages: 1,
 
         async init() {
             await this.waitForAuth();
@@ -39,37 +48,52 @@
             this.bindInfoModal();
 
             try {
-                const [cardSettled, loyaltySettled, personalSettled] = await Promise.allSettled([
-                    API.getStampCard(),
+                const [loyaltySettled, couponsSettled, ordersSettled] = await Promise.allSettled([
+                    API.getLoyalty({ page: 1, limit: 20 }),
                     API.getLoyaltyCoupons(),
-                    API.getPersonalCoupons()
+                    API.getOrders({ limit: 200 })
                 ]);
 
-                if (cardSettled.status !== 'fulfilled') throw cardSettled.reason;
-                const cardRes = cardSettled.value;
+                if (loyaltySettled.status !== 'fulfilled') throw loyaltySettled.reason;
+                const res = loyaltySettled.value;
+                if (!res || res.ok === false) throw new Error(API.extractErrorMessage(res, 'Loyalty load failed'));
 
-                const data = cardRes?.data || {};
-                this.card = data.card || { total_slots: 6, stamps_collected: 0, cycle_number: 1, is_virtual: true };
-                this.stamps = Array.isArray(data.stamps) ? data.stamps : [];
-                this.rewards = Array.isArray(data.rewards) ? data.rewards : [];
-                this.tooltip = data.tooltip || '';
-                this.nextRewardAt = data.next_reward_at;
-                this.completedCycles = data.completed_cycles || 0;
+                const data = res.data || {};
+                this.loyalty = data;
+                this.ledger = Array.isArray(data.ledger) ? data.ledger : [];
+                this.page = (res.meta && res.meta.page) || 1;
+                this.totalPages = (res.meta && res.meta.total_pages) || 1;
 
-                const loyaltyRows = (loyaltySettled.status === 'fulfilled' && Array.isArray(loyaltySettled.value?.data))
-                    ? loyaltySettled.value.data.map((r) => ({ ...r, source: 'loyalty' }))
-                    : [];
-                const personalRows = (personalSettled.status === 'fulfilled' && Array.isArray(personalSettled.value?.data))
-                    ? personalSettled.value.data.map((c) => ({ coupon: c, source: 'personal', status: 'active' }))
-                    : [];
+                this.coupons = (couponsSettled.status === 'fulfilled' && Array.isArray(couponsSettled.value?.data))
+                    ? couponsSettled.value.data : [];
+
+                const od = (ordersSettled.status === 'fulfilled') ? ordersSettled.value?.data : null;
+                this.orders = Array.isArray(od) ? od : (Array.isArray(od?.orders) ? od.orders : []);
 
                 document.getElementById('loyalty-loading').hidden = true;
-                this.renderCard();
-                this.renderRewards([...loyaltyRows, ...personalRows]);
 
-                if (this.tooltip) {
-                    document.getElementById('loyalty-info-text').textContent = this.tooltip;
+                // Program switched off entirely — show a neutral notice and stop.
+                if (data.program_active === false) {
+                    const off = document.getElementById('loyalty-disabled');
+                    if (off) off.hidden = false;
+                    return;
                 }
+
+                this.setInfoCopy();
+
+                const balance = data.points_balance || 0;
+                if (balance === 0 && !this.ledger.length && !this.coupons.length) {
+                    const empty = document.getElementById('loyalty-empty');
+                    if (empty) empty.hidden = false;
+                    // Still show the (zeroed) balance hero for context.
+                    this.renderBalance();
+                    return;
+                }
+
+                this.renderBalance();
+                this.renderGraph();
+                this.renderHistory();
+                this.renderCoupons();
             } catch (err) {
                 if (typeof DebugLog !== 'undefined') DebugLog.error('Loyalty load failed:', err);
                 document.getElementById('loyalty-loading').hidden = true;
@@ -90,128 +114,224 @@
             }
         },
 
-        renderCard() {
-            const section = document.getElementById('loyalty-card-section');
-            const stampsEl = document.getElementById('loyalty-stamps');
-            const metaEl = document.getElementById('loyalty-card-meta');
-            const progressEl = document.getElementById('loyalty-card-progress');
-            const nextEl = document.getElementById('loyalty-next');
+        setInfoCopy() {
+            const el = document.getElementById('loyalty-info-text');
+            if (!el) return;
+            const rate = this.loyalty.redemption_rate || 100;
+            const min = this.loyalty.min_redemption_points || 500;
+            el.textContent = `Earn 1 point for every $1 you spend (excluding shipping), credited once your order is paid. `
+                + `${rate} points = $1. Redeem from ${min} points directly at checkout — just hit “Use loyalty points”.`;
+        },
 
-            const total = this.card.total_slots || 6;
-            const collected = this.card.stamps_collected || 0;
-            const filledSlots = new Set(this.stamps.map((s) => s.slot_number));
-            const rewardsBySlot = new Map(this.rewards.map((r) => [r.slot_number, r]));
+        renderBalance() {
+            const section = document.getElementById('loyalty-balance-section');
+            if (!section) return;
+            const rate = this.loyalty.redemption_rate || 100;
+            const balance = this.loyalty.points_balance || 0;
+            const valueDollars = (this.loyalty.points_value_dollars != null)
+                ? this.loyalty.points_value_dollars
+                : balance / rate;
+            const lifetime = this.loyalty.lifetime_earned || 0;
 
-            const parts = [];
-            for (let n = 1; n <= total; n++) {
-                const isReward = n === 3 || n === 6;
-                const filled = filledSlots.has(n);
-                const reward = rewardsBySlot.get(n);
-                const tier = rewardTier(n);
-
-                let state = filled ? 'filled' : 'empty';
-                let badge = '';
-
-                if (isReward && reward) {
-                    const c = reward.coupon || {};
-                    if (c.is_used) state = 'reward-used';
-                    else if (c.is_expired) state = 'reward-expired';
-                    else if (c.is_active) state = 'reward-unlocked';
-                    badge = `<span class="loyalty-stamp__tier">${tier === 'gold' ? 'Gold' : 'Silver'}</span>`;
-                } else if (isReward) {
-                    badge = `<span class="loyalty-stamp__tier loyalty-stamp__tier--locked">${tier === 'gold' ? 'Gold' : 'Silver'}</span>`;
-                }
-
-                const icon = isReward
-                    ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"/><path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"/><path d="M4 22h16"/><path d="M10 14.66V17a2 2 0 0 0-2 2 1 1 0 0 0 1 1h6a1 1 0 0 0 1-1 2 2 0 0 0-2-2v-2.34"/><path d="M18 2H6v7a6 6 0 0 0 12 0V2z"/></svg>'
-                    : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>';
-
-                parts.push(`
-                    <li class="loyalty-stamp loyalty-stamp--${state} ${isReward ? `loyalty-stamp--reward loyalty-stamp--${tier}` : ''}" data-slot="${n}">
-                        <span class="loyalty-stamp__circle" aria-hidden="true">${filled || (isReward && reward) ? icon : `<span class="loyalty-stamp__num">${n}</span>`}</span>
-                        ${badge}
-                        <span class="visually-hidden">Slot ${n} ${filled ? 'collected' : 'empty'}${isReward ? ' (reward)' : ''}</span>
-                    </li>
-                `);
-            }
-            stampsEl.innerHTML = parts.join('');
-
-            const metaBits = [`Cycle ${esc(this.card.cycle_number || 1)}`];
-            if (this.completedCycles > 0) metaBits.push(`${this.completedCycles} completed`);
-            if (this.card.is_virtual) metaBits.push('Place your first order to start earning');
-            metaEl.innerHTML = metaBits.map(esc).join(' · ');
-
-            progressEl.innerHTML = `<span class="loyalty-progress__num">${collected}</span><span class="loyalty-progress__den">/ ${total} stamps</span>`;
-
-            if (this.nextRewardAt && this.nextRewardAt > collected) {
-                const remaining = this.nextRewardAt - collected;
-                nextEl.textContent = `${remaining} more ${remaining === 1 ? 'stamp' : 'stamps'} until your next reward.`;
-            } else if (!this.nextRewardAt) {
-                nextEl.textContent = 'Card complete — enjoy your rewards!';
-            } else {
-                nextEl.textContent = '';
-            }
+            const ptsEl = document.getElementById('loyalty-balance-points');
+            const valEl = document.getElementById('loyalty-balance-value');
+            const lifeEl = document.getElementById('loyalty-balance-lifetime');
+            if (ptsEl) ptsEl.textContent = `${balance.toLocaleString('en-NZ')}`;
+            if (valEl) valEl.textContent = `${fmtMoney(valueDollars)} to spend`;
+            if (lifeEl) lifeEl.textContent = lifetime ? `${lifetime.toLocaleString('en-NZ')} points earned all-time` : '';
 
             section.hidden = false;
         },
 
-        renderRewards(coupons) {
+        /**
+         * Inline SVG dual-line chart (no external library).
+         * Series A — cumulative dollar value of points accrued (ledger earn + bonus).
+         * Series B — cumulative order savings (order subtotal − total).
+         * Both are derived client-side; the order-savings line is total discount per
+         * order (it can't be split by type without a backend field).
+         */
+        renderGraph() {
+            const host = document.getElementById('loyalty-graph');
+            const legend = document.getElementById('loyalty-graph-legend');
+            const emptyEl = document.getElementById('loyalty-graph-empty');
+            const section = document.getElementById('loyalty-graph-section');
+            if (!host || !section) return;
+            section.hidden = false;
+
+            const rate = this.loyalty.redemption_rate || 100;
+
+            const accrual = this.ledger
+                .filter((r) => (r.type === 'earn' || r.type === 'bonus') && r.points > 0 && r.created_at)
+                .map((r) => ({ t: new Date(r.created_at).getTime(), v: r.points / rate }))
+                .filter((p) => !isNaN(p.t))
+                .sort((a, b) => a.t - b.t);
+
+            const savings = this.orders
+                .map((o) => ({ t: new Date(o.created_at).getTime(), v: Math.max(0, (Number(o.subtotal) || 0) - (Number(o.total) || 0)) }))
+                .filter((p) => !isNaN(p.t) && p.v > 0)
+                .sort((a, b) => a.t - b.t);
+
+            const cum = (arr) => { let s = 0; return arr.map((p) => ({ t: p.t, v: (s += p.v) })); };
+            const seriesA = cum(accrual);
+            const seriesB = cum(savings);
+
+            if (!seriesA.length && !seriesB.length) {
+                host.innerHTML = '';
+                if (legend) legend.hidden = true;
+                if (emptyEl) emptyEl.hidden = false;
+                return;
+            }
+            if (emptyEl) emptyEl.hidden = true;
+            if (legend) legend.hidden = false;
+
+            const allT = [...seriesA, ...seriesB].map((p) => p.t);
+            const allV = [...seriesA, ...seriesB].map((p) => p.v);
+            const minT = Math.min(...allT);
+            const maxT = Math.max(...allT);
+            const maxV = Math.max(1, ...allV);
+            const spanT = (maxT - minT) || 1;
+
+            const W = 600, H = 240, padL = 48, padR = 14, padT = 14, padB = 30;
+            const x = (t) => padL + ((t - minT) / spanT) * (W - padL - padR);
+            const y = (v) => (H - padB) - (v / maxV) * (H - padT - padB);
+
+            const toPoly = (s) => {
+                if (!s.length) return '';
+                const pts = [];
+                if (s[0].t > minT) pts.push(`${x(minT).toFixed(1)},${y(0).toFixed(1)}`);
+                s.forEach((p) => pts.push(`${x(p.t).toFixed(1)},${y(p.v).toFixed(1)}`));
+                const last = s[s.length - 1];
+                if (last.t < maxT) pts.push(`${x(maxT).toFixed(1)},${y(last.v).toFixed(1)}`);
+                return pts.join(' ');
+            };
+
+            const polyA = toPoly(seriesA);
+            const polyB = toPoly(seriesB);
+            const baselineY = y(0).toFixed(1);
+
+            const startLabel = esc(fmtDate(new Date(minT).toISOString()));
+            const endLabel = esc(fmtDate(new Date(maxT).toISOString()));
+            const maxLabel = esc(fmtMoney(maxV));
+
+            host.innerHTML = `
+                <svg class="loyalty-chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="Loyalty value and order savings over time">
+                    <line class="loyalty-chart__axis" x1="${padL}" y1="${padT}" x2="${padL}" y2="${baselineY}"></line>
+                    <line class="loyalty-chart__axis" x1="${padL}" y1="${baselineY}" x2="${W - padR}" y2="${baselineY}"></line>
+                    <text class="loyalty-chart__tick" x="${padL - 6}" y="${(padT + 8).toFixed(1)}" text-anchor="end">${maxLabel}</text>
+                    <text class="loyalty-chart__tick" x="${padL - 6}" y="${baselineY}" text-anchor="end">$0</text>
+                    <text class="loyalty-chart__tick" x="${padL}" y="${H - 8}" text-anchor="start">${startLabel}</text>
+                    <text class="loyalty-chart__tick" x="${W - padR}" y="${H - 8}" text-anchor="end">${endLabel}</text>
+                    ${polyB ? `<polyline class="loyalty-chart__line loyalty-chart__line--savings" points="${polyB}" fill="none"></polyline>` : ''}
+                    ${polyA ? `<polyline class="loyalty-chart__line loyalty-chart__line--accrued" points="${polyA}" fill="none"></polyline>` : ''}
+                </svg>
+            `;
+
+            if (legend) {
+                legend.innerHTML = `
+                    <span class="loyalty-legend__item"><span class="loyalty-legend__swatch loyalty-legend__swatch--accrued"></span>Points value earned</span>
+                    <span class="loyalty-legend__item"><span class="loyalty-legend__swatch loyalty-legend__swatch--savings"></span>Order savings</span>
+                `;
+            }
+        },
+
+        renderHistory() {
+            const section = document.getElementById('loyalty-history-section');
+            const list = document.getElementById('loyalty-history-list');
+            const empty = document.getElementById('loyalty-history-empty');
+            const moreBtn = document.getElementById('loyalty-history-more');
+            if (!section || !list) return;
+            section.hidden = false;
+
+            if (!this.ledger.length) {
+                list.innerHTML = '';
+                if (empty) empty.hidden = false;
+                if (moreBtn) moreBtn.hidden = true;
+                return;
+            }
+            if (empty) empty.hidden = true;
+
+            list.innerHTML = this.ledger.map((row) => {
+                const label = TYPE_LABEL[row.type] || row.type || 'Activity';
+                const pts = Number(row.points) || 0;
+                const sign = pts > 0 ? '+' : '';
+                const dir = pts > 0 ? 'pos' : (pts < 0 ? 'neg' : 'zero');
+                const after = (row.balance_after != null) ? `Balance ${Number(row.balance_after).toLocaleString('en-NZ')}` : '';
+                return `
+                    <li class="loyalty-ledger">
+                        <div class="loyalty-ledger__main">
+                            <span class="loyalty-ledger__label">${esc(label)}</span>
+                            <span class="loyalty-ledger__date">${esc(fmtDate(row.created_at))}</span>
+                        </div>
+                        <div class="loyalty-ledger__amounts">
+                            <span class="loyalty-ledger__points loyalty-ledger__points--${dir}">${sign}${pts.toLocaleString('en-NZ')} pts</span>
+                            <span class="loyalty-ledger__balance">${esc(after)}</span>
+                        </div>
+                    </li>
+                `;
+            }).join('');
+
+            if (moreBtn) {
+                if (this.page < this.totalPages) {
+                    moreBtn.hidden = false;
+                    moreBtn.disabled = false;
+                } else {
+                    moreBtn.hidden = true;
+                }
+            }
+        },
+
+        async loadMoreHistory(btn) {
+            if (this.page >= this.totalPages) return;
+            const next = this.page + 1;
+            if (btn) { btn.disabled = true; btn.textContent = 'Loading…'; }
+            try {
+                const res = await API.getLoyalty({ page: next, limit: 20 });
+                const rows = (res && res.data && Array.isArray(res.data.ledger)) ? res.data.ledger : [];
+                this.ledger = this.ledger.concat(rows);
+                this.page = (res.meta && res.meta.page) || next;
+                this.totalPages = (res.meta && res.meta.total_pages) || this.totalPages;
+                this.renderHistory();
+            } catch (err) {
+                if (typeof DebugLog !== 'undefined') DebugLog.warn('Load more ledger failed:', err && err.message);
+                if (btn) { btn.disabled = false; btn.textContent = 'Load more'; }
+            }
+        },
+
+        renderCoupons() {
             const section = document.getElementById('loyalty-rewards-section');
             const list = document.getElementById('loyalty-rewards-list');
             const empty = document.getElementById('loyalty-rewards-empty');
+            if (!section || !list) return;
             section.hidden = false;
 
-            if (!coupons.length) {
+            const rows = this.coupons || [];
+            if (!rows.length) {
                 list.innerHTML = '';
-                empty.hidden = false;
+                if (empty) empty.hidden = false;
                 return;
             }
-            empty.hidden = true;
+            if (empty) empty.hidden = true;
 
-            const statusLabel = {
-                active: 'Active',
-                used: 'Redeemed',
-                expired: 'Expired',
-                deactivated: 'Inactive'
-            };
+            const statusLabel = { active: 'Active', used: 'Redeemed', expired: 'Expired', deactivated: 'Inactive' };
 
-            list.innerHTML = coupons.map((row) => {
-                const c = row.coupon || {};
-                const isPersonal = row.source === 'personal';
-                const status = row.status || 'active';
+            list.innerHTML = rows.map((row) => {
+                const c = (row && row.coupon) ? row.coupon : (row || {});
+                let status = row && row.status;
+                if (!status) {
+                    status = c.is_used ? 'used' : (c.is_expired ? 'expired' : (c.is_active === false ? 'deactivated' : 'active'));
+                }
                 const canCopy = status === 'active';
                 const conditions = [];
                 if (c.minimum_order_amount) conditions.push(`Valid on orders over ${fmtMoney(c.minimum_order_amount)}`);
                 if (c.exclude_genuine) conditions.push('Compatible products only');
                 if (c.expires_at) conditions.push(`Expires ${fmtDate(c.expires_at)}`);
-
-                let modifier;
-                let headerLeft;
-                let headerBadgeLabel;
-                if (isPersonal) {
-                    modifier = 'personal';
-                    headerLeft = `<span class="loyalty-reward__tier">Personal Coupon</span>`;
-                    headerBadgeLabel = 'Personal';
-                    const limit = Number(c.per_user_limit) || 1;
-                    conditions.push(limit === 1 ? '1 use per customer' : `${limit} uses per customer`);
-                } else {
-                    const tier = rewardTier(row.slot_number);
-                    modifier = tier;
-                    headerLeft = `
-                        <span class="loyalty-reward__tier">${tier === 'gold' ? 'Gold' : 'Silver'} Reward</span>
-                        <span class="loyalty-reward__cycle">Cycle ${esc(row.cycle_number)}</span>
-                    `;
-                    headerBadgeLabel = statusLabel[status] || status;
-                    conditions.push('Single use');
-                }
-
-                const badgeClass = isPersonal ? 'personal' : status;
+                conditions.push('Single use');
 
                 return `
-                    <article class="loyalty-reward loyalty-reward--${esc(modifier)} loyalty-reward--${esc(status)}">
+                    <article class="loyalty-reward loyalty-reward--${esc(status)}">
                         <header class="loyalty-reward__head">
-                            <div>${headerLeft}</div>
-                            <span class="loyalty-reward__status loyalty-reward__status--${esc(badgeClass)}">${esc(headerBadgeLabel)}</span>
+                            <span class="loyalty-reward__tier">Reward coupon</span>
+                            <span class="loyalty-reward__status loyalty-reward__status--${esc(status)}">${esc(statusLabel[status] || status)}</span>
                         </header>
                         <div class="loyalty-reward__code-row">
                             <code class="loyalty-reward__code">${esc(c.code || '')}</code>
@@ -267,6 +387,9 @@
             closeBtn?.addEventListener('click', close);
             backdrop?.addEventListener('click', close);
             document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !modal.hidden) close(); });
+
+            const moreBtn = document.getElementById('loyalty-history-more');
+            if (moreBtn) moreBtn.addEventListener('click', () => this.loadMoreHistory(moreBtn));
         }
     };
 
