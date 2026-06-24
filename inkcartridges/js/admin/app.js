@@ -1,11 +1,11 @@
 /**
  * Admin SPA — Entry point, router, shell
  */
-const APP_VERSION = '2026.06.05-gst-neutral-reconcile-4';
+const APP_VERSION = '2026.06.24-margin-inline';
 
 import { AdminAuth } from './auth.js';
 import { FilterState } from './filters.js';
-import { AdminAPI } from './api.js?v=analytics-http-jun2026';
+import { AdminAPI } from './api.js?v=margin-inline-jun2026';
 
 const esc = (s) => Security.escapeHtml(String(s));
 

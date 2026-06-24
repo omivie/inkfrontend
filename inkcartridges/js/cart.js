@@ -32,8 +32,11 @@ const Cart = {
     // Discount amount from server
     discountAmount: 0,
 
-    // Stamp card progress (null for guests or when loyalty service is down)
-    stampCard: null,
+    // Loyalty points state for this cart (null for guests / when loyalty service is down).
+    // Full shape from the backend: { points_balance, points_applied, applied_value_dollars,
+    // max_redeemable_points, min_redemption_points, redemption_rate, redeemable_now,
+    // message, stale_notice }.
+    loyalty: null,
 
     // Loading state - starts true, set to false after server data is loaded
     loading: true,
@@ -288,10 +291,10 @@ const Cart = {
             showToast(`${count} item${count > 1 ? 's were' : ' was'} removed from your cart (no longer available)`, 'info');
         }
 
-        // Stamp card progress (null for guests or if loyalty service is down)
-        const stampCard = responseData.stamp_card || null;
+        // Loyalty points block (null for guests or if loyalty service is down)
+        const loyalty = responseData.loyalty || null;
 
-        return { items, summary, couponCode, discountAmount, stampCard };
+        return { items, summary, couponCode, discountAmount, loyalty };
     },
 
     /**
@@ -433,7 +436,7 @@ const Cart = {
                 this.serverSummary = parsed.summary;
                 this.appliedCoupon = parsed.couponCode;
                 this.discountAmount = parsed.discountAmount;
-                this.stampCard = parsed.stampCard;
+                this.loyalty = parsed.loyalty;
 
                 this.saveToLocalStorage();
 
@@ -480,7 +483,7 @@ const Cart = {
                 this.serverSummary = parsed.summary;
                 this.appliedCoupon = parsed.couponCode;
                 this.discountAmount = parsed.discountAmount;
-                this.stampCard = parsed.stampCard;
+                this.loyalty = parsed.loyalty;
             }
         } catch (error) {
             DebugLog.error('Failed to load cart from server:', error);
@@ -1054,6 +1057,13 @@ const Cart = {
         const totalEl = document.getElementById('cart-total');
         const savingsRow = document.getElementById('cart-savings-row');
         const savingsEl = document.getElementById('cart-savings');
+        const loyaltyRow = document.getElementById('cart-loyalty-row');
+        const loyaltyEl = document.getElementById('cart-loyalty-discount');
+
+        // Loyalty discount is part of serverSummary.discount; show it on its own row
+        // and net it out of the "You Save" line so it isn't double-counted.
+        const loyaltyDiscount = (this.serverSummary && this.serverSummary.loyalty_discount_amount) || 0;
+        const otherSavings = Math.max(0, discount - loyaltyDiscount);
 
         if (itemCountEl) itemCountEl.textContent = itemCount;
         if (subtotalEl) subtotalEl.textContent = formatPrice(subtotal);
@@ -1061,11 +1071,20 @@ const Cart = {
         if (totalEl) totalEl.textContent = formatPrice(cartTotal) + ' NZD';
 
         if (savingsRow && savingsEl) {
-            if (discount > 0) {
+            if (otherSavings > 0) {
                 savingsRow.hidden = false;
-                savingsEl.textContent = '-' + formatPrice(discount);
+                savingsEl.textContent = '-' + formatPrice(otherSavings);
             } else {
                 savingsRow.hidden = true;
+            }
+        }
+
+        if (loyaltyRow && loyaltyEl) {
+            if (loyaltyDiscount > 0) {
+                loyaltyRow.hidden = false;
+                loyaltyEl.textContent = '-' + formatPrice(loyaltyDiscount);
+            } else {
+                loyaltyRow.hidden = true;
             }
         }
 
@@ -1607,20 +1626,21 @@ const Cart = {
     },
 
     /**
-     * Render the loyalty stamp-card chip on the cart page.
+     * Render the loyalty message chip on the cart page (earn nudge or applied summary).
      * Hidden for guests and when the loyalty service couldn't be queried.
-     * Uses stamp_card.message verbatim — do not interpolate from numeric fields.
+     * Uses loyalty.message verbatim — do not interpolate from numeric fields.
+     * The interactive redeem control (amount/Max/Apply/Remove) lives in cart-page.js.
      */
-    _renderStampCardChip: function() {
-        const chipEl = document.getElementById('cart-stamp-card-chip');
+    _renderLoyaltyChip: function() {
+        const chipEl = document.getElementById('cart-loyalty-chip');
         if (!chipEl) return;
-        const sc = this.stampCard;
-        if (!sc || !sc.message) {
+        const lo = this.loyalty;
+        if (!lo || !lo.message) {
             chipEl.hidden = true;
             chipEl.textContent = '';
             return;
         }
-        chipEl.textContent = sc.message;
+        chipEl.textContent = lo.message;
         chipEl.hidden = false;
     },
 
@@ -1856,8 +1876,12 @@ const Cart = {
                 }
             }
 
-            // Loyalty stamp card chip (auth users only, null for guests / loyalty downtime)
-            this._renderStampCardChip();
+            // Loyalty message chip (auth users only, null for guests / loyalty downtime)
+            this._renderLoyaltyChip();
+            // Refresh the interactive redeem control state from the latest cart
+            if (typeof renderCartLoyaltyControl === 'function') {
+                renderCartLoyaltyControl();
+            }
 
             // Disable checkout if cart has out-of-stock items
             const checkoutBtn = document.getElementById('checkout-btn');

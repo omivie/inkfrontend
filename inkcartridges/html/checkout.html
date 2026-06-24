@@ -360,6 +360,27 @@
                                 </div>
                             </div>
 
+                            <!-- loyalty-points-jun2026 — apply points at checkout (mutually
+                                 exclusive with coupons). Max sends max_redeemable_points. -->
+                            <div class="cart-loyalty checkout-summary__loyalty" id="cart-loyalty" hidden>
+                                <div class="cart-loyalty__head">
+                                    <span class="cart-loyalty__title">Use loyalty points</span>
+                                    <span class="cart-loyalty__balance" id="cart-loyalty-balance"></span>
+                                </div>
+                                <div class="cart-loyalty__guest" id="cart-loyalty-guest" hidden>
+                                    <a href="/account/login?redirect=/checkout">Sign in</a> to spend your points.
+                                </div>
+                                <form class="cart-loyalty__form" id="cart-loyalty-form" novalidate>
+                                    <input type="number" id="cart-loyalty-input" class="cart-loyalty__input"
+                                           name="points" inputmode="numeric" autocomplete="off"
+                                           min="0" step="100" placeholder="Points" aria-label="Points to redeem">
+                                    <button type="button" id="cart-loyalty-max" class="btn btn--ghost cart-loyalty__max">Max</button>
+                                    <button type="submit" id="cart-loyalty-apply" class="btn btn--secondary cart-loyalty__apply">Apply</button>
+                                </form>
+                                <button type="button" id="cart-loyalty-remove" class="cart-loyalty__remove" hidden>Remove points</button>
+                                <p class="cart-loyalty__feedback" id="cart-loyalty-feedback" role="status" aria-live="polite"></p>
+                            </div>
+
                             <div class="checkout-summary__totals">
                                 <div class="checkout-summary__row">
                                     <span>Subtotal</span>
@@ -372,6 +393,10 @@
                                 <div class="checkout-summary__row checkout-summary__row--discount" id="checkout-discount-row" hidden>
                                     <span>Discount</span>
                                     <span id="checkout-discount" class="text-success">-$0.00</span>
+                                </div>
+                                <div class="checkout-summary__row checkout-summary__row--loyalty" id="checkout-loyalty-row" hidden>
+                                    <span>Loyalty points applied</span>
+                                    <span id="checkout-loyalty-discount" class="text-success">-$0.00</span>
                                 </div>
                                 <div class="checkout-summary__row">
                                     <span>GST (15%)</span>
@@ -429,7 +454,7 @@
     <script defer src="/js/shipping.js?v=f1875738"></script>
     <script defer src="/js/api.js?v=product-codes-may2026"></script>
     <script defer src="/js/schema.js?v=1"></script>
-    <script defer src="/js/utils.js?v=one-model-row-jun2026"></script>
+    <script defer src="/js/utils.js?v=toner-drum-split-jun2026"></script>
     <script defer src="/js/auth.js?v=42a58e72"></script>
     <script defer src="/js/cart.js?v=err-extract-may2026"></script>
     <script defer src="/js/cart-analytics.js?v=b2724a74"></script>

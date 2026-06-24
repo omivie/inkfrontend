@@ -167,17 +167,18 @@ function buildColumns() {
     });
     cols.push({
       key: 'margin_pct', label: 'Margin %', sortable: true, className: 'col-w-pct',
-      render: (r) => {
-        const { marginPct } = computeProfitability(r);
-        return marginPct == null ? MISSING : marginBadge(marginPct);
-      },
+      render: (r) => marginCell(r),
       align: 'right',
     });
     cols.push({
       key: 'profit_ex_gst', label: 'Profit $', sortable: true, className: 'col-w-pct',
       render: (r) => {
-        const { profitDollars } = computeProfitability(r);
-        return `<span class="cell-mono cell-right">${formatProfitDollars(profitDollars)}</span>`;
+        // Prefer the backend's $0.30-inclusive profit; fall back to local compute
+        // on the Supabase fast-path (which doesn't carry the server fields).
+        const profit = r.profit_incl_fixed_ex_gst != null
+          ? Number(r.profit_incl_fixed_ex_gst)
+          : computeProfitability(r).profitDollars;
+        return `<span class="cell-mono cell-right">${formatProfitDollars(profit)}</span>`;
       },
       align: 'right',
     });
@@ -233,6 +234,89 @@ function buildColumns() {
   }
 
   return cols;
+}
+
+// ─── Per-product margin offset (click-to-edit Margin % cell) ──────────────────
+// The Margin % column shows the backend's $0.30-inclusive net margin
+// (net_margin_incl_fixed_pct) when present — owner rows fetched via the
+// /api/admin/products path carry it — and falls back to local compute on the
+// Supabase fast-path. The cell is a button: clicking it opens an editor for the
+// product's gross-markup OFFSET (a relative adjustment layered on the tiered
+// general margin, persisting across general-margin changes). A chip shows any
+// applied offset. Ineligible rows (no cost, ribbons) render a plain badge.
+function marginOffsetEligible(r) {
+  return Number(r.cost_price) > 0 && !RIBBON_PRODUCT_TYPES.includes(r.product_type);
+}
+
+function marginCell(r) {
+  const pct = r.net_margin_incl_fixed_pct != null
+    ? Number(r.net_margin_incl_fixed_pct)
+    : computeProfitability(r).marginPct;
+  const badge = pct == null ? MISSING : marginBadge(pct);
+  const off = Number(r.applied_offset);
+  const hasOff = Number.isFinite(off) && Math.abs(off) > 1e-9;
+  const chip = hasOff
+    ? `<span class="margin-offset-chip" title="Per-product margin adjustment (gross markup)">${off > 0 ? '+' : ''}${(off * 100).toFixed(1)}%</span>`
+    : '';
+  if (!marginOffsetEligible(r)) return `<span class="cell-right">${badge}</span>`;
+  const marginAttr = pct == null ? '' : Number(pct).toFixed(1);
+  return `<button type="button" class="margin-edit-btn" data-margin-edit data-id="${esc(String(r.id))}" data-margin="${marginAttr}" title="Click to set this product's target margin">${badge}${chip}</button>`;
+}
+
+// Turn the clicked Margin % cell into an inline input. The operator types a
+// target net margin %; Enter saves (backend derives + stores the offset and
+// re-prices), Escape / clicking away cancels. No popup, no GET round-trip.
+function startInlineMarginEdit(btn) {
+  const id = btn.dataset.id;
+  const cell = btn.closest('td');
+  if (!cell || cell.querySelector('input')) return; // already editing this cell
+  const cur = btn.dataset.margin;
+  const startVal = (cur != null && cur !== '' && cur !== 'null') ? Number(cur).toFixed(1) : '';
+  cell.innerHTML = `<span class="margin-inline-edit"><input type="number" class="margin-inline-input" step="0.1" value="${startVal}" aria-label="Target net margin %"><span>%</span></span>`;
+  const input = cell.querySelector('input');
+  input.focus();
+  input.select();
+
+  let done = false;
+  const revert = () => { if (done) return; done = true; _table.setData(_table.data, _table.pagination); loadRowExtras(); };
+  const commit = async () => {
+    if (done) return;
+    const v = parseFloat(input.value);
+    if (!Number.isFinite(v)) { revert(); return; }
+    done = true;
+    input.disabled = true;
+    try {
+      const res = await AdminAPI.setProductTargetMargin(id, v, null);
+      patchRowFromOffset(id, null, res);
+      Toast.success('Margin updated — price re-calculated');
+    } catch (e) {
+      Toast.error(e.message || 'Failed to update margin');
+      _table.setData(_table.data, _table.pagination);
+      loadRowExtras();
+    }
+  };
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); commit(); }
+    else if (e.key === 'Escape') { e.preventDefault(); revert(); }
+  });
+  input.addEventListener('blur', revert);
+}
+
+// Patch the edited row in place from the PUT response so the new price + margin
+// show without a full refetch (the Supabase fast-path wouldn't carry the server
+// fields anyway). Profit $ isn't returned by the PUT, so drop any stale server
+// value and let it recompute locally from the new retail price.
+function patchRowFromOffset(productId, offsetFrac, res) {
+  if (!_table || !Array.isArray(_table.data)) return;
+  const row = _table.data.find(r => String(r.id) === String(productId));
+  if (!row) return;
+  if (res && res.retail_price != null) row.retail_price = res.retail_price;
+  if (res && res.net_margin_incl_fixed_pct != null) row.net_margin_incl_fixed_pct = res.net_margin_incl_fixed_pct;
+  if (res && res.gross_markup_pct != null) row.gross_markup_pct = res.gross_markup_pct;
+  row.applied_offset = (res && res.offset != null) ? res.offset : offsetFrac;
+  delete row.profit_incl_fixed_ex_gst;
+  _table.setData(_table.data, _table.pagination);
+  loadRowExtras(); // re-render blanks the async Compat / For-Use-In cells — refill them
 }
 
 // ─── Per-admin column visibility ─────────────────────────────────────────────
@@ -3906,6 +3990,15 @@ async function renderProductsContent(contentEl) {
       e.stopPropagation();
       const name = btn.dataset.copy;
       navigator.clipboard.writeText(name).then(() => Toast.success('Copied to clipboard')).catch(() => Toast.error('Copy failed'));
+    });
+
+    // Margin cell → inline-edit the target margin (event delegation)
+    tableContainer.addEventListener('click', (e) => {
+      const btn = e.target.closest('[data-margin-edit]');
+      if (!btn) return;
+      e.preventDefault();
+      e.stopPropagation();
+      startInlineMarginEdit(btn);
     });
 
     // Import lock toggle (event delegation)

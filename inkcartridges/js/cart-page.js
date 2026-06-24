@@ -15,6 +15,7 @@ document.addEventListener('DOMContentLoaded', () => {
     autoApplyCouponFromUrl();
     initStickyCheckoutBar();
     initCouponForm();
+    initLoyaltyControl();
 });
 
 /**
@@ -159,6 +160,191 @@ function initCouponForm() {
             setFeedback('Couldn’t apply that coupon right now. Please try again.', 'err');
         }
     });
+}
+
+/**
+ * loyalty-points-jun2026 — apply loyalty points directly to the cart.
+ *
+ * Points & promo coupons are mutually exclusive (one discount per order). The
+ * Max button sends `loyalty.max_redeemable_points` verbatim; the amount field
+ * accepts multiples of 100 from the server-driven min up to the cart/balance
+ * ceiling. Backend re-validates + clamps and returns the full cart, which we
+ * re-render from. All economic values are read from the response — never hardcoded.
+ */
+function setLoyaltyFeedback(msg, kind) {
+    const feedback = document.getElementById('cart-loyalty-feedback');
+    if (!feedback) return;
+    feedback.textContent = msg || '';
+    feedback.classList.remove('cart-loyalty__feedback--ok', 'cart-loyalty__feedback--err');
+    if (kind === 'ok') feedback.classList.add('cart-loyalty__feedback--ok');
+    else if (kind === 'err') feedback.classList.add('cart-loyalty__feedback--err');
+}
+
+function loyaltyErrorMessage(code, fallbackMsg, minPts) {
+    switch (code) {
+        case 'EMAIL_NOT_VERIFIED': return 'Verify your email to use points.';
+        case 'NOT_MULTIPLE_OF_100': return 'Enter points in multiples of 100.';
+        case 'BELOW_MIN_POINTS': return minPts ? `Minimum redemption is ${minPts} points.` : 'That’s below the minimum redemption.';
+        case 'CONFLICTS_WITH_COUPON': return 'Remove your coupon to use points.';
+        case 'EXCEEDS_AVAILABLE_BALANCE': return 'You don’t have that many points.';
+        case 'EXCEEDS_CART_SUBTOTAL': return 'That’s more than your cart total.';
+        case 'LOYALTY_DISABLED': return 'Loyalty points are unavailable right now.';
+        case 'RATE_LIMITED': return 'Too many tries — wait a minute and retry.';
+        default:
+            return (typeof API !== 'undefined' && API.extractErrorMessage)
+                ? API.extractErrorMessage(fallbackMsg, 'Couldn’t apply your points right now.')
+                : (fallbackMsg || 'Couldn’t apply your points right now.');
+    }
+}
+
+async function applyLoyaltyPointsToCart(points) {
+    if (typeof API === 'undefined' || !API.applyLoyaltyPoints) return;
+    const minPts = (typeof Cart !== 'undefined' && Cart.loyalty && Cart.loyalty.min_redemption_points) || 0;
+    setLoyaltyFeedback('Applying…', null);
+    try {
+        const res = await API.applyLoyaltyPoints(points);
+        if (res && res.ok) {
+            if (typeof Cart !== 'undefined') {
+                if (typeof Cart.loadFromServer === 'function') await Cart.loadFromServer();
+                if (typeof Cart.updateUI === 'function') Cart.updateUI(); // re-renders the applied state + message
+            }
+        } else {
+            setLoyaltyFeedback(loyaltyErrorMessage(res && res.code, res && res.error, minPts), 'err');
+        }
+    } catch (err) {
+        setLoyaltyFeedback(loyaltyErrorMessage(err && err.code, err, minPts), 'err');
+    }
+}
+
+async function removeLoyaltyPointsFromCart() {
+    if (typeof API === 'undefined' || !API.removeLoyaltyPoints) return;
+    setLoyaltyFeedback('Removing…', null);
+    try {
+        const res = await API.removeLoyaltyPoints();
+        if (res && res.ok) {
+            if (typeof Cart !== 'undefined') {
+                if (typeof Cart.loadFromServer === 'function') await Cart.loadFromServer();
+                if (typeof Cart.updateUI === 'function') Cart.updateUI();
+            }
+            setLoyaltyFeedback('Points removed.', null);
+        } else {
+            setLoyaltyFeedback(loyaltyErrorMessage(res && res.code, res && res.error), 'err');
+        }
+    } catch (err) {
+        setLoyaltyFeedback(loyaltyErrorMessage(err && err.code, err), 'err');
+    }
+}
+
+/**
+ * Re-render the cart loyalty control from Cart.loyalty. Called on every cart
+ * render (via cart.js renderCartPage) and once at init. Idempotent.
+ */
+function renderCartLoyaltyControl() {
+    const root = document.getElementById('cart-loyalty');
+    if (!root) return;
+
+    const lo = (typeof Cart !== 'undefined') ? Cart.loyalty : null;
+    const isAuthed = (typeof Auth !== 'undefined') && Auth.isAuthenticated && Auth.isAuthenticated();
+
+    const form = document.getElementById('cart-loyalty-form');
+    const input = document.getElementById('cart-loyalty-input');
+    const maxBtn = document.getElementById('cart-loyalty-max');
+    const applyBtn = document.getElementById('cart-loyalty-apply');
+    const removeBtn = document.getElementById('cart-loyalty-remove');
+    const balanceEl = document.getElementById('cart-loyalty-balance');
+    const guestEl = document.getElementById('cart-loyalty-guest');
+
+    // Guests: show the sign-in affordance, hide the interactive form.
+    if (!isAuthed) {
+        root.hidden = false;
+        if (guestEl) guestEl.hidden = false;
+        if (form) form.hidden = true;
+        if (removeBtn) removeBtn.hidden = true;
+        if (balanceEl) balanceEl.textContent = '';
+        setLoyaltyFeedback('', null);
+        return;
+    }
+    if (guestEl) guestEl.hidden = true;
+    if (form) form.hidden = false;
+
+    // No loyalty block (service down / program off / not eligible) → hide entirely.
+    if (!lo) { root.hidden = true; return; }
+    root.hidden = false;
+
+    const rate = lo.redemption_rate || 100;
+    const balance = lo.points_balance || 0;
+    const applied = lo.points_applied || 0;
+    const maxPts = lo.max_redeemable_points || 0;
+    const minPts = lo.min_redemption_points || 0;
+
+    if (balanceEl) {
+        const dollars = balance / rate;
+        const money = (typeof formatPrice === 'function') ? ` (${formatPrice(dollars)})` : '';
+        balanceEl.textContent = `${balance.toLocaleString('en-NZ')} pts${money}`;
+    }
+
+    if (input) {
+        input.min = String(minPts || 0);
+        input.max = String(maxPts || 0);
+        input.step = '100';
+    }
+
+    const couponApplied = (typeof Cart !== 'undefined') && !!Cart.appliedCoupon;
+    const canRedeem = maxPts > 0 && !couponApplied;
+
+    if (applyBtn) applyBtn.disabled = !canRedeem;
+    if (maxBtn) maxBtn.disabled = !canRedeem;
+    if (input) input.disabled = !canRedeem;
+
+    if (applied > 0) {
+        if (input && document.activeElement !== input) input.value = String(applied);
+        if (removeBtn) removeBtn.hidden = false;
+    } else {
+        if (removeBtn) removeBtn.hidden = true;
+    }
+
+    // Feedback precedence: stale clamp > coupon conflict > applied msg > redeem hints.
+    if (lo.stale_notice) {
+        setLoyaltyFeedback(lo.stale_notice, 'err');
+    } else if (couponApplied) {
+        setLoyaltyFeedback('Remove your coupon to use points.', null);
+    } else if (applied > 0) {
+        setLoyaltyFeedback(lo.message || 'Points applied to this order.', 'ok');
+    } else if (maxPts === 0 && balance > 0 && minPts && balance < minPts) {
+        setLoyaltyFeedback(`Earn ${minPts - balance} more points to redeem.`, null);
+    } else if (maxPts === 0 && minPts && balance >= minPts) {
+        setLoyaltyFeedback('Add more to your cart to use points.', null);
+    } else {
+        setLoyaltyFeedback('', null);
+    }
+}
+
+function initLoyaltyControl() {
+    const form = document.getElementById('cart-loyalty-form');
+    const maxBtn = document.getElementById('cart-loyalty-max');
+    const removeBtn = document.getElementById('cart-loyalty-remove');
+    const input = document.getElementById('cart-loyalty-input');
+    if (!form) { renderCartLoyaltyControl(); return; }
+
+    form.addEventListener('submit', (e) => {
+        e.preventDefault();
+        const pts = parseInt(input && input.value, 10);
+        if (!pts || pts <= 0) { setLoyaltyFeedback('Enter how many points to use.', 'err'); return; }
+        applyLoyaltyPointsToCart(pts);
+    });
+
+    if (maxBtn) {
+        maxBtn.addEventListener('click', () => {
+            const max = (typeof Cart !== 'undefined' && Cart.loyalty && Cart.loyalty.max_redeemable_points) || 0;
+            if (max <= 0) return;
+            if (input) input.value = String(max);
+            applyLoyaltyPointsToCart(max);
+        });
+    }
+
+    if (removeBtn) removeBtn.addEventListener('click', removeLoyaltyPointsFromCart);
+
+    renderCartLoyaltyControl();
 }
 
 async function autoApplyCouponFromUrl() {

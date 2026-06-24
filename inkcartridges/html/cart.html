@@ -231,6 +231,10 @@
                                 <span>You Save</span>
                                 <span id="cart-savings">$0.00</span>
                             </div>
+                            <div class="cart-summary__row cart-summary__row--loyalty" id="cart-loyalty-row" hidden>
+                                <span>Loyalty points applied</span>
+                                <span id="cart-loyalty-discount">$0.00</span>
+                            </div>
                             <div class="cart-summary__row">
                                 <span>Shipping <span id="cart-shipping-tier" style="font-size:0.75rem;color:#6b7280;font-weight:400;" hidden></span></span>
                                 <span id="cart-shipping">Calculated at checkout</span>
@@ -254,7 +258,30 @@
                                 <div class="shipping-bar__fill" id="shipping-bar-fill" style="width: 0%"></div>
                             </div>
                         </div>
-                        <div class="cart-summary__stamp-card" id="cart-stamp-card-chip" hidden></div>
+                        <div class="cart-summary__loyalty-chip" id="cart-loyalty-chip" hidden></div>
+
+                        <!-- loyalty-points-jun2026 — apply loyalty points directly to
+                             the cart (arbitrary amount in 100-pt steps, min from server,
+                             plus a Max button). Mutually exclusive with coupons. Logged-in
+                             + verified-email only; guests see a sign-in affordance. -->
+                        <div class="cart-loyalty" id="cart-loyalty" hidden>
+                            <div class="cart-loyalty__head">
+                                <span class="cart-loyalty__title">Use loyalty points</span>
+                                <span class="cart-loyalty__balance" id="cart-loyalty-balance"></span>
+                            </div>
+                            <div class="cart-loyalty__guest" id="cart-loyalty-guest" hidden>
+                                <a href="/account/login?redirect=/cart">Sign in</a> to spend your points.
+                            </div>
+                            <form class="cart-loyalty__form" id="cart-loyalty-form" novalidate>
+                                <input type="number" id="cart-loyalty-input" class="cart-loyalty__input"
+                                       name="points" inputmode="numeric" autocomplete="off"
+                                       min="0" step="100" placeholder="Points" aria-label="Points to redeem">
+                                <button type="button" id="cart-loyalty-max" class="btn btn--ghost cart-loyalty__max">Max</button>
+                                <button type="submit" id="cart-loyalty-apply" class="btn btn--secondary cart-loyalty__apply">Apply</button>
+                            </form>
+                            <button type="button" id="cart-loyalty-remove" class="cart-loyalty__remove" hidden>Remove points</button>
+                            <p class="cart-loyalty__feedback" id="cart-loyalty-feedback" role="status" aria-live="polite"></p>
+                        </div>
 
                         <!-- mobile-parity-may2026 S3.2 — coupon entry. The
                              apply/preview/remove endpoints + ?coupon= auto-apply
@@ -367,7 +394,7 @@
     <script defer src="/js/config.js?v=d58abcf9"></script>
     <script defer src="/js/security.js?v=08acac61"></script>
     <script defer src="/js/shipping.js?v=f1875738"></script>
-    <script defer src="/js/utils.js?v=one-model-row-jun2026"></script>
+    <script defer src="/js/utils.js?v=toner-drum-split-jun2026"></script>
     <script defer src="/js/api.js?v=product-codes-may2026"></script>
     <script defer src="/js/schema.js?v=1"></script>
     <script defer src="/js/auth.js?v=42a58e72"></script>

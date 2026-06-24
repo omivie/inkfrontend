@@ -21,6 +21,45 @@ let _tableSortOrder = 'asc';
 let _tableMinGap = 0;
 let _savedOffset = null;
 let _sliderTimer = null;
+let _repricePollTimer = null;
+
+/**
+ * Surface the background reprice kicked off by a tier-multiplier / global-offset
+ * save. Both PUTs now return 202 with a `reprice` block:
+ *   { status: 'queued'|'enqueue_failed', job_id, message }
+ * Show the backend's own wording, then (when queued) poll the job to completion
+ * for a "repricing complete — N updated" follow-up. Only one poll runs at a time.
+ */
+function handleRepriceResponse(data) {
+  const reprice = data && data.reprice;
+  if (!reprice) { Toast.success('Saved'); return; }
+  if (reprice.status === 'queued') {
+    Toast.success(reprice.message || 'Settings saved. Repricing in the background.');
+    if (reprice.job_id) pollRepriceJob(reprice.job_id);
+  } else {
+    // enqueue_failed (or anything non-queued): config saved, reprice did not start.
+    Toast.warning(reprice.message || 'Saved, but background repricing did not start.');
+  }
+}
+
+function pollRepriceJob(jobId) {
+  clearInterval(_repricePollTimer);
+  const startedAt = Date.now();
+  const MAX_MS = 3 * 60_000; // give up after ~3 min; the queued toast already informed the operator
+  _repricePollTimer = setInterval(async () => {
+    if (Date.now() - startedAt > MAX_MS) { clearInterval(_repricePollTimer); return; }
+    const job = await AdminAPI.getRepriceJob(jobId);
+    if (!job) return; // transient read miss — try again next tick
+    if (job.status === 'completed') {
+      clearInterval(_repricePollTimer);
+      const n = job.counts && job.counts.updated;
+      Toast.success(typeof n === 'number' ? `Repricing complete — ${n} price${n !== 1 ? 's' : ''} updated` : 'Repricing complete');
+    } else if (job.status === 'failed') {
+      clearInterval(_repricePollTimer);
+      Toast.error(job.error || 'Background repricing failed — prices may be unchanged.');
+    }
+  }, 4000);
+}
 
 function heatColor(margin) {
   if (margin < 5) return 'rgba(220,53,69,0.85)';
@@ -206,7 +245,7 @@ function saveTierMultipliers() {
     title: 'Update Tier Multipliers',
     body: `<p>Set the following tier multipliers?</p>
       <p style="font-size:13px;color:var(--text-muted);margin:8px 0">${esc(summary)}</p>
-      <p style="font-size:13px;color:var(--text-muted)">Changes take effect on the next price recalculation.</p>`,
+      <p style="font-size:13px;color:var(--text-muted)">Saved prices update automatically in the background (about a minute).</p>`,
     footer: `
       <button class="admin-btn admin-btn--ghost" id="cc-tier-cancel">Cancel</button>
       <button class="admin-btn admin-btn--primary" id="cc-tier-confirm">Save</button>
@@ -218,8 +257,8 @@ function saveTierMultipliers() {
     btn.disabled = true;
     btn.textContent = 'Saving...';
     try {
-      await AdminAPI.updateTierMultipliers(multipliers);
-      Toast.success('Tier multipliers updated');
+      const data = await AdminAPI.updateTierMultipliers(multipliers);
+      handleRepriceResponse(data);
       m.close();
       await loadTierMultipliers();
     } catch (e) {
@@ -235,7 +274,7 @@ function showOffsetConfirm(offset) {
   const pct = (offset * 100).toFixed(1);
   const bodyHtml = `
     <p>Set global price offset to <strong>${pct > 0 ? '+' : ''}${pct}%</strong>?</p>
-    <p style="font-size:13px;color:var(--text-muted);margin:8px 0">This affects all product prices on the next import run.</p>
+    <p style="font-size:13px;color:var(--text-muted);margin:8px 0">All product prices update automatically in the background (about a minute).</p>
     <div class="admin-form-group">
       <label>Notes (optional)</label>
       <input type="text" class="admin-input" id="cc-offset-notes" placeholder="e.g. Q2 margin boost" style="width:100%">
@@ -259,8 +298,8 @@ function showOffsetConfirm(offset) {
     saveBtn.disabled = true;
     saveBtn.textContent = 'Saving...';
     try {
-      await AdminAPI.updateGlobalOffset(offset, notes);
-      Toast.success('Global offset updated');
+      const data = await AdminAPI.updateGlobalOffset(offset, notes);
+      handleRepriceResponse(data);
       m.close();
       await loadOffset();
     } catch (e) {
@@ -396,6 +435,7 @@ export default {
 
   destroy() {
     clearTimeout(_sliderTimer);
+    clearInterval(_repricePollTimer);
     if (_table) { _table.destroy(); _table = null; }
     _tierData = null;
     _el = null;

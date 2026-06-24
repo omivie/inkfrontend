@@ -755,21 +755,28 @@ const ProductSort = (function() {
         return 0;
     }
 
-    // accessoryTier: cartridges first (0), drums (1), paper/maintenance (2),
-    // printers/everything else (3). Mirrors backend `accessoryTier`. The
-    // frontend rarely mixes these in a single list — but when /search returns
-    // a long-tail row that includes both ink and accessory results, this
-    // ensures cartridges still come first.
+    // accessoryTier: cartridges first (0), drums (1), other consumable units —
+    // belt / fuser / transfer / waste / maintenance / paper (2), printers /
+    // everything else (3). Mirrors backend `accessoryTier`. Used both as the
+    // lead sort key (sortByCatalogOrder) and — since Jun 2026 — as a within-
+    // family sub-order so a model's toners and drums never interleave (OKI
+    // MC853 listed Black-drum, Black-toner, Cyan-drum, … on the same row).
+    //
+    // The unit type is read from the NAME first, before the category check:
+    // OKI / Brother routinely file a "Drum Unit" / "Fuser Unit" under
+    // category 'toner', so a category-led test would wrongly tier them as
+    // cartridges (0) and re-interleave them with the real toners.
     function accessoryTier(product) {
         if (!product) return 3;
         const cat = (product.category || '').toString().toLowerCase();
         const name = (product.name || '').toString().toLowerCase();
+        if (/\bdrum\b/.test(name) || /\bdrum\b/.test(cat)) return 1;
+        if (/\b(belt|fuser|transfer|waste|maintenance)\b/.test(name)
+            || cat === 'paper' || /\bpaper\b/.test(name) || /\bmaintenance\b/.test(cat)) return 2;
         const isInkOrToner = cat === 'ink' || cat === 'toner'
             || /\b(ink|toner)\s+(cartridge|cartridges)\b/.test(name)
-            || /\bcartridge\b/.test(name) && !/\bdrum|paper|printer\b/.test(name);
+            || (/\bcartridge\b/.test(name) && !/\bprinter\b/.test(name));
         if (isInkOrToner) return 0;
-        if (/\bdrum\b/.test(cat) || /\bdrum\b/.test(name)) return 1;
-        if (cat === 'paper' || /\bpaper\b/.test(name) || /\bmaintenance\b/.test(name)) return 2;
         return 3;
     }
 
@@ -1073,6 +1080,12 @@ const ProductSort = (function() {
         return products.slice().sort((a, b) => {
             const fa = fRank(a), fb = fRank(b);
             if (fa !== fb) return fa - fb;
+            // Within a family, the unit TYPE sub-orders before yield/colour:
+            // all toners (0), then all drums (1), then belt/fuser/etc (2) — so
+            // a model's drums and toners form distinct blocks instead of
+            // interleaving by colour (OKI MC853 black-drum, black-toner, …).
+            const aa = accessoryTier(a), ab = accessoryTier(b);
+            if (aa !== ab) return aa - ab;
             const ya = yieldTier(a), yb = yieldTier(b);
             if (ya !== yb) return ya - yb;
             const ca = colorOrder(a), cb = colorOrder(b);
@@ -1178,11 +1191,15 @@ const ProductSort = (function() {
             ? opts.minGroupSize : 2;
 
         // Pass 1 — segment the sorted list into [{startIndex, key, size}, …].
-        // Each segment is one (familyKey, yieldTier) tuple.
+        // Each segment is one (familyKey, accessoryTier, yieldTier) tuple, so a
+        // family's toner block and drum block break onto separate rows (they
+        // share familyKey + yieldTier but differ in accessoryTier).
         const segments = [];
         let prevKey = null;
         for (let i = 0; i < sortedProducts.length; i++) {
-            const key = familyKey(sortedProducts[i]) + '|' + yieldTier(sortedProducts[i]);
+            const key = familyKey(sortedProducts[i])
+                + '|' + accessoryTier(sortedProducts[i])
+                + '|' + yieldTier(sortedProducts[i]);
             if (key !== prevKey) {
                 segments.push({ startIndex: i, key, size: 1 });
                 prevKey = key;

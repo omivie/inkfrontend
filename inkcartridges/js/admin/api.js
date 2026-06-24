@@ -562,6 +562,18 @@ const AdminAPI = {
     }
   },
 
+  // ---- Per-product margin (inline edit on the Products table) ----
+  // The operator types a target net margin %; the backend derives the relative
+  // gross-markup offset that achieves it, stores it (so it persists across
+  // general-margin changes), re-prices the row (clearing any retail freeze) and
+  // returns the new retail_price / net_margin_incl_fixed_pct / offset.
+  async setProductTargetMargin(productId, targetMarginPct, notes) {
+    const body = { target_margin_pct: targetMarginPct };
+    if (notes) body.notes = notes;
+    const resp = await window.API.put(`/api/admin/products/${encodeURIComponent(productId)}/margin-offset`, body);
+    return resp?.data ?? null;
+  },
+
   async updateProduct(productId, data) {
     try {
       const resp = await window.API.put(`/api/admin/products/${productId}`, data);
@@ -1882,6 +1894,16 @@ const AdminAPI = {
       DebugLog.warn('[AdminAPI] updateGlobalOffset failed:', e.message);
       throw e;
     }
+  },
+
+  // Poll the background reprice job kicked off by a tier-multiplier / global-offset
+  // change (both PUTs return 202 + a reprice.job_id). Returns the job row
+  // { id, status, trigger, counts, error, ... } or null on failure.
+  async getRepriceJob(jobId) {
+    try {
+      const resp = await window.API.get(`/api/admin/pricing/reprice-jobs/${encodeURIComponent(jobId)}`);
+      return resp?.data ?? null;
+    } catch (e) { adminApiWarn('Reprice job status', e); return null; }
   },
 
   // ---- Control Center: SEO & Trust ----

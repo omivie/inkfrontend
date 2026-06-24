@@ -1791,10 +1791,31 @@ const API = {
     },
 
     /**
-     * Get the user's loyalty stamp card (current cycle)
+     * Apply (or update) a loyalty-points redemption directly to the live cart.
+     * Backend re-validates and clamps; returns the FULL cart (same shape as getCart).
+     * @param {number} points - positive integer, multiple of 100 (>= min_redemption_points)
      */
-    async getStampCard() {
-        return this.get('/api/user/stamp-card');
+    async applyLoyaltyPoints(points) {
+        return this.post('/api/cart/loyalty', { points });
+    },
+
+    /**
+     * Remove the loyalty-points redemption from the cart. Idempotent.
+     * Returns the refreshed full cart with loyalty.points_applied = 0.
+     */
+    async removeLoyaltyPoints() {
+        return this.delete('/api/cart/loyalty');
+    },
+
+    /**
+     * Get the user's loyalty points balance, ledger history and redemption options.
+     * @param {{page?: number, limit?: number}} [opts]
+     */
+    async getLoyalty({ page = 1, limit = 20 } = {}) {
+        const params = new URLSearchParams();
+        params.append('page', page);
+        params.append('limit', limit);
+        return this.get(`/api/user/loyalty?${params.toString()}`);
     },
 
     /**

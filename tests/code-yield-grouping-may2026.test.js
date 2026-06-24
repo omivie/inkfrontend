@@ -357,6 +357,69 @@ test('byCodeThenColor + rowBreakIndices split Epson 200 vs 200HY into separate r
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
+// 2c. accessoryTier sub-order — a model's toners and drums must NOT interleave
+//     (Jun 2026). Live bug /search?q=MC853: the OKI MC853 family rendered
+//     Black-drum, Black-toner, Cyan-drum, Cyan-toner … on the same rows because
+//     byCodeThenColor ordered family→yield→colour and omitted accessoryTier.
+//     OKI files the "Drum Unit" rows under category 'toner', so accessoryTier
+//     must read the unit type from the NAME first.
+// ─────────────────────────────────────────────────────────────────────────────
+
+test('accessoryTier reads unit type from the name even when category is toner', () => {
+    // OKI/Brother file drum & fuser units under a toner category.
+    assert.equal(ProductSort.accessoryTier({ name: 'OKI Genuine MC853BK Drum Unit MC853 Black', category: 'toner' }), 1,
+        'a Drum Unit categorised as toner must still tier as a drum (1), not a cartridge (0)');
+    assert.equal(ProductSort.accessoryTier({ name: 'OKI Genuine MC853BK Toner Cartridge MC853 Black', category: 'toner' }), 0);
+    assert.equal(ProductSort.accessoryTier({ name: 'OKI Genuine 44848805 Fuser Unit', category: 'toner' }), 2);
+    assert.equal(ProductSort.accessoryTier({ name: 'OKI Genuine C831N Belt Unit', category: 'toner' }), 2);
+    // Cartridge < drum < other-unit ordering holds.
+    assert.ok(ProductSort.accessoryTier({ name: 'X Toner Cartridge' })
+        < ProductSort.accessoryTier({ name: 'X Drum Unit' }));
+    assert.ok(ProductSort.accessoryTier({ name: 'X Drum Unit' })
+        < ProductSort.accessoryTier({ name: 'X Fuser Unit' }));
+});
+
+test('byCodeThenColor blocks MC853 toners before drums (no colour interleave)', () => {
+    // Incoming scramble exactly mirrors the live /search?q=MC853 payload:
+    // drum and toner of each colour alternate.
+    const oki = (name, color, drum, pack) => ({
+        sku: name.replace(/\s+/g, '-'), name, color,
+        series_codes: ['MC853'], brand: { name: 'OKI' },
+        category: 'toner',                                   // OKI files drums under toner
+        ...(pack ? { pack_type: 'value_pack' } : {})
+    });
+    const input = [
+        oki('OKI Genuine MC853BK Drum Unit MC853 Black',   'Black'),
+        oki('OKI Genuine MC853BK Toner Cartridge MC853 Black',   'Black'),
+        oki('OKI Genuine MC853C Drum Unit MC853 Cyan',     'Cyan'),
+        oki('OKI Genuine MC853C Toner Cartridge MC853 Cyan',     'Cyan'),
+        oki('OKI Genuine MC853M Drum Unit MC853 Magenta',  'Magenta'),
+        oki('OKI Genuine MC853M Toner Cartridge MC853 Magenta',  'Magenta'),
+        oki('OKI Genuine MC853Y Drum Unit MC853 Yellow',   'Yellow'),
+        oki('OKI Genuine MC853Y Toner Cartridge MC853 Yellow',   'Yellow'),
+        oki('OKI Genuine MC853CMY Toner Cartridge MC853 CMY 3-Pack',  'CMY',  false, true),
+        oki('OKI Genuine MC853KCMY Toner Cartridge MC853 KCMY 4-Pack','KCMY', false, true)
+    ];
+    const sorted = ProductSort.byCodeThenColor(input);
+    const isDrum = (p) => /Drum Unit/.test(p.name);
+    // All 6 toners (incl. packs) come before all 4 drums — no interleave.
+    const firstDrum = sorted.findIndex(isDrum);
+    const lastToner = sorted.map(isDrum).lastIndexOf(false);
+    assert.ok(firstDrum > lastToner,
+        'every toner must precede every drum within the MC853 family');
+    assert.equal(firstDrum, 6, 'the 6 toners (K,C,M,Y,CMY,KCMY) lead, then the 4 drums');
+    // Toner block colour order: K → C → M → Y → CMY pack → KCMY pack.
+    assert.deepEqual(sorted.slice(0, 6).map(p => p.color),
+        ['Black', 'Cyan', 'Magenta', 'Yellow', 'CMY', 'KCMY']);
+    // Drum block colour order: K → C → M → Y.
+    assert.deepEqual(sorted.slice(6).map(p => p.color),
+        ['Black', 'Cyan', 'Magenta', 'Yellow']);
+    // One row break before the drum block (toner seg=6, drum seg=4, both ≥2).
+    assert.deepEqual(ProductSort.rowBreakIndices(sorted), [6],
+        'the drum block must start on its own row');
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
 // 3. rowBreakIndices — boundary detection
 // ─────────────────────────────────────────────────────────────────────────────
 
