@@ -7,7 +7,7 @@ import { Drawer } from '../components/drawer.js';
 import { Toast } from '../components/toast.js';
 import { Modal } from '../components/modal.js';
 import { RichTextEditor } from '../components/rich-text-editor.js?v=rich-text-persist-may2026';
-import { computeProfitability, marginBadge, markupBadge, formatProfitDollars } from '../utils/profitability.js';
+import { computeProfitability, marginBadge, formatProfitDollars } from '../utils/profitability.js';
 
 const formatPrice = (v) => window.formatPrice ? window.formatPrice(v) : `$${Number(v).toFixed(2)}`;
 const MISSING = '\u2014';
@@ -174,14 +174,6 @@ function buildColumns() {
       align: 'right',
     });
     cols.push({
-      key: 'markup_pct', label: 'Markup %', sortable: true, className: 'col-w-pct',
-      render: (r) => {
-        const { markupPct } = computeProfitability(r);
-        return markupPct == null ? MISSING : markupBadge(markupPct);
-      },
-      align: 'right',
-    });
-    cols.push({
       key: 'profit_ex_gst', label: 'Profit $', sortable: true, className: 'col-w-pct',
       render: (r) => {
         const { profitDollars } = computeProfitability(r);
@@ -254,7 +246,6 @@ const COLUMN_PICKER_LABELS = {
   retail_price: 'Price',
   cost_price: 'Cost',
   margin_pct: 'Margin %',
-  markup_pct: 'Markup %',
   profit_ex_gst: 'Profit $',
   source: 'Type',
   is_active: 'Active',
@@ -613,7 +604,7 @@ async function loadProducts() {
   // not honor (it only matches the 34 legacy rows where source='ribbon', missing the
   // ~82 newer ribbons that carry source='compatible'/'genuine'). We compensate by
   // applying image/stock filters and margin sort on the Supabase result below.
-  const isMarginSort = _sort === 'margin_pct' || _sort === 'markup_pct' || _sort === 'profit_ex_gst';
+  const isMarginSort = _sort === 'margin_pct' || _sort === 'profit_ex_gst';
   const ribbonUmbrella = _sourceFilter === 'ribbon';
   const needsBackend = !ribbonUmbrella && (isMarginSort || !!_imageFilter || !!_stockFilter);
   if (needsBackend) {
@@ -697,7 +688,7 @@ async function loadProducts() {
         sortedRows = [...sortedRows].sort((a, b) => {
           const ap = computeProfitability(a);
           const bp = computeProfitability(b);
-          const key = _sort === 'profit_ex_gst' ? 'profit_dollars' : (_sort === 'markup_pct' ? 'markup_pct' : 'margin_pct');
+          const key = _sort === 'profit_ex_gst' ? 'profit_dollars' : 'margin_pct';
           const av = ap?.[key] ?? -Infinity;
           const bv = bp?.[key] ?? -Infinity;
           return (av - bv) * dir;
@@ -3376,7 +3367,7 @@ async function exportProductsPDF() {
     // Table columns
     const head = [
       'Name', 'SKU', 'Brand', 'Price',
-      ...(isOwner ? ['Cost', 'Margin %', 'Markup %', 'Profit $'] : []),
+      ...(isOwner ? ['Cost', 'Margin %', 'Profit $'] : []),
       'Active',
     ];
     const body = all.map(p => {
@@ -3393,7 +3384,6 @@ async function exportProductsPDF() {
         ...(isOwner ? [
           p.cost_price != null ? formatPrice(p.cost_price) : MISSING,
           pctCell(prof.marginPct),
-          pctCell(prof.markupPct),
           dollarCell(prof.profitDollars),
         ] : []),
         p.is_active !== false ? 'Yes' : 'No',
