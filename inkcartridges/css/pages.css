@@ -1236,74 +1236,6 @@
     font-style: italic;
 }
 
-/* Confirm card — count fetched, then navigate */
-.finder-confirm__card {
-    max-width: 520px;
-    margin: var(--spacing-md) auto;
-    padding: var(--spacing-xl);
-    text-align: center;
-    background: var(--color-background-alt);
-    border: 1.5px solid var(--color-border-light);
-    border-radius: var(--radius-lg);
-}
-
-.finder-confirm__spinner {
-    width: 36px;
-    height: 36px;
-    margin: 0 auto var(--spacing-md);
-    border: 3px solid var(--cyan-light);
-    border-top-color: var(--cyan-primary);
-    border-radius: 50%;
-    animation: finderSpin 0.7s linear infinite;
-}
-
-@keyframes finderSpin {
-    to { transform: rotate(360deg); }
-}
-
-.finder-confirm__count {
-    font-size: var(--font-size-xl);
-    font-weight: var(--font-weight-bold);
-    color: var(--color-text-heading);
-    margin: 0 0 4px;
-}
-
-.finder-confirm__count em {
-    color: var(--cyan-primary);
-    font-style: normal;
-}
-
-.finder-confirm__printer {
-    font-size: var(--font-size-md);
-    color: var(--color-text-muted);
-    margin: 0 0 var(--spacing-lg);
-}
-
-.finder-confirm__actions {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: var(--spacing-sm);
-}
-
-.finder-confirm__view {
-    min-width: 240px;
-}
-
-.finder-confirm__back {
-    background: none;
-    border: none;
-    font-family: inherit;
-    font-size: 14px;
-    color: var(--cyan-primary);
-    cursor: pointer;
-    padding: 6px;
-}
-
-.finder-confirm__back:hover {
-    text-decoration: underline;
-}
-
 @media (max-width: 600px) {
     .finder-stage__head {
         flex-direction: column;
@@ -1321,11 +1253,6 @@
 
     .finder-breadcrumb__text {
         max-width: 120px;
-    }
-
-    .finder-confirm__view {
-        width: 100%;
-        min-width: 0;
     }
 }
 

@@ -13,12 +13,12 @@
     // ============================================
     const brandButtons = document.querySelectorAll('.ink-finder__brand-btn');
 
-    // Stages (replace-in-place: brand → series → model → confirm)
+    // Stages (replace-in-place: brand → series → model). Picking a model
+    // navigates straight to its cartridges — there is no confirm step.
     const stages = {
         brand: document.getElementById('finder-stage-brand'),
         series: document.getElementById('finder-stage-series'),
-        model: document.getElementById('finder-stage-model'),
-        confirm: document.getElementById('finder-stage-confirm')
+        model: document.getElementById('finder-stage-model')
     };
 
     // Breadcrumb crumbs + separators
@@ -49,9 +49,6 @@
     const modelEmpty = document.getElementById('finder-model-empty');
     const modelFilter = document.getElementById('finder-model-filter');
     const modelHint = document.getElementById('finder-model-hint');
-
-    // Confirm stage
-    const confirmCard = document.getElementById('finder-confirm-card');
 
     // Exit if elements don't exist (not on this page)
     if (!brandButtons.length || !stages.series || !stages.model || !seriesTiles || !modelTiles) {
@@ -454,8 +451,8 @@
                 ? stripBrand(selectedPrinterName) : 'Model';
         }
 
-        // Active + done styling. The confirm stage keeps the model crumb active.
-        const activeStage = currentStage === 'confirm' ? 'model' : currentStage;
+        // Active + done styling.
+        const activeStage = currentStage;
         [['brand', selectedBrand], ['series', selectedSeries], ['model', selectedModel]].forEach(([key, done]) => {
             const c = crumbs[key];
             if (!c) return;
@@ -598,90 +595,13 @@
     }
 
     /**
-     * Handle model selection — fetch the live cartridge count, then confirm.
+     * Handle model selection — the click IS the confirmation, so navigate
+     * straight to the printer's cartridges. No interstitial confirm card.
      */
     function selectModel(modelId, fullName) {
         selectedModel = modelId;
         selectedPrinterName = fullName;
-        goToStage('confirm');
-        showConfirm(modelId, fullName);
-    }
-
-    /**
-     * Confirm stage: show a loading shim, fetch the real compatible-cartridge
-     * count for this printer, then render the confirm card.
-     */
-    async function showConfirm(modelId, fullName) {
-        confirmCard.innerHTML =
-            '<div class="finder-confirm__spinner" aria-hidden="true"></div>' +
-            '<p class="finder-confirm__count">Finding cartridges…</p>' +
-            `<p class="finder-confirm__printer">${escapeHtml(fullName)}</p>`;
-
-        let count = null;
-        let failed = false;
-        try {
-            const resp = await API.getProductsByPrinter(modelId, { limit: 200 });
-            if (resp && resp.ok && resp.data) {
-                const list = resp.data.compatible_products || resp.data.products || [];
-                count = (typeof resp.data.total === 'number')
-                    ? resp.data.total
-                    : (Array.isArray(list) ? list.length : 0);
-            } else {
-                failed = true;
-            }
-        } catch {
-            failed = true;
-        }
-
-        // Stale guard: the user may have gone back and picked a different model.
-        if (selectedModel !== modelId || currentStage !== 'confirm') return;
-
-        renderConfirm(fullName, count, failed);
-    }
-
-    function renderConfirm(fullName, count, failed) {
-        const safeName = escapeHtml(fullName);
-        let body;
-
-        if (!failed && count === 0) {
-            // Honest empty state — route to contact rather than an empty results page.
-            body =
-                '<p class="finder-confirm__count">No cartridges listed yet</p>' +
-                `<p class="finder-confirm__printer">We don’t have ink for <strong>${safeName}</strong> on the site right now — get in touch and we’ll help.</p>` +
-                '<div class="finder-confirm__actions">' +
-                    '<a class="btn btn--primary btn--large finder-confirm__view" href="/contact">Contact us for this printer</a>' +
-                    '<button type="button" class="finder-confirm__back">← Choose another model</button>' +
-                '</div>';
-        } else if (failed) {
-            // Couldn't read a count — still let them through to results.
-            body =
-                `<p class="finder-confirm__count">${safeName}</p>` +
-                '<p class="finder-confirm__printer">View the cartridges compatible with your printer.</p>' +
-                '<div class="finder-confirm__actions">' +
-                    '<button type="button" class="btn btn--primary btn--large finder-confirm__view">View compatible cartridges</button>' +
-                    '<button type="button" class="finder-confirm__back">← Choose another model</button>' +
-                '</div>';
-        } else {
-            const noun = count === 1 ? 'cartridge' : 'cartridges';
-            body =
-                `<p class="finder-confirm__count"><em>${count}</em> compatible ${noun} found</p>` +
-                `<p class="finder-confirm__printer">for ${safeName}</p>` +
-                '<div class="finder-confirm__actions">' +
-                    `<button type="button" class="btn btn--primary btn--large finder-confirm__view">View ${noun} →</button>` +
-                    '<button type="button" class="finder-confirm__back">← Choose another model</button>' +
-                '</div>';
-        }
-
-        confirmCard.innerHTML = body;
-
-        // The contact link is an <a> and navigates itself; only the button
-        // variants drive the printer-results navigation.
-        const viewBtn = confirmCard.querySelector('.finder-confirm__view');
-        if (viewBtn && viewBtn.tagName === 'BUTTON') {
-            viewBtn.addEventListener('click', findProducts);
-        }
-        const backBtn = confirmCard.querySelector('.finder-confirm__back');
-        if (backBtn) backBtn.addEventListener('click', () => goToStage('model'));
+        findProducts();
     }
 
     /**
@@ -713,7 +633,7 @@
         if (tile && tile.dataset.seriesId) selectSeries(tile.dataset.seriesId);
     });
 
-    // Model tile clicks (delegated) → fetch count + confirm.
+    // Model tile clicks (delegated) → navigate straight to its cartridges.
     modelTiles.addEventListener('click', (e) => {
         const tile = e.target.closest('.finder-tile');
         if (tile && tile.dataset.modelId) selectModel(tile.dataset.modelId, tile.dataset.fullName);

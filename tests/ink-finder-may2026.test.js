@@ -7,15 +7,18 @@
  * cascade:
  *
  *   brand grid → (click) → series tiles → (click) → model tiles → (click) →
- *   confirm card that fetches the real compatible-cartridge COUNT, then
- *   navigates to /shop?brand=<slug>&printer_slug=<slug>.
+ *   navigate straight to /shop?brand=<slug>&printer_slug=<slug>.
+ *
+ * Jun 2026 revision: the interstitial confirm card (count-then-confirm) was
+ * removed. Clicking a model IS the confirmation, so the finder navigates
+ * directly to that printer's cartridges — no "View cartridges" button.
  *
  * Pinned behaviour:
  *   1. One stage visible at a time, with a breadcrumb whose crumbs jump back.
  *   2. Series + model are clickable TILES (not <select> dropdowns), each stage
  *      carrying an always-on type-to-filter box.
- *   3. Clicking a model fetches the live count via API.getProductsByPrinter and
- *      shows a confirm card before navigating (count → confirm).
+ *   3. Clicking a model navigates straight to the printer's cartridges — no
+ *      confirm card, no count fetch interstitial.
  *   4. Endpoint contract unchanged: grouped=true default, grouped=false fallback
  *      (also covered by tests/ink-finder-grouped.test.js).
  *   5. Acceptance: finder remembers the user's last brand (localStorage
@@ -71,11 +74,11 @@ test('index.html — breadcrumb with brand/series/model crumbs is present', () =
     }
 });
 
-test('index.html — four stages exist, only brand is visible initially', () => {
+test('index.html — three stages exist, only brand is visible initially', () => {
     // Brand stage is the entry point (not hidden); the rest start hidden.
     assert.match(INDEX_HTML, /id="finder-stage-brand"[^>]*data-stage="brand"/,
         'brand stage must exist');
-    for (const stage of ['series', 'model', 'confirm']) {
+    for (const stage of ['series', 'model']) {
         const re = new RegExp(`id="finder-stage-${stage}"[^>]*data-stage="${stage}"[^>]*hidden`);
         assert.match(INDEX_HTML, re, `${stage} stage must start hidden`);
     }
@@ -92,9 +95,11 @@ test('index.html — series & model are tile grids with a filter box each', () =
     assert.match(INDEX_HTML, /id="finder-model-filter"/, 'model filter input required');
 });
 
-test('index.html — confirm card target exists for the count-then-confirm step', () => {
-    assert.match(INDEX_HTML, /id="finder-confirm-card"/,
-        'confirm stage must carry #finder-confirm-card the JS fills with the count');
+test('index.html — interstitial confirm stage is removed (direct navigation)', () => {
+    assert.doesNotMatch(INDEX_HTML, /id="finder-stage-confirm"/,
+        'the confirm stage must be gone — model clicks navigate straight to results');
+    assert.doesNotMatch(INDEX_HTML, /id="finder-confirm-card"/,
+        'the confirm card target must be gone — no count-then-confirm step');
 });
 
 test('index.html — "By Cartridge Code" tab and "Contact us" help line are kept', () => {
@@ -126,13 +131,12 @@ test('index.html — dropdown / submit / sticky / popular surface is retired', (
 // §3 — CSS for the new surface
 // ─────────────────────────────────────────────────────────────────────────────
 
-test('pages.css — ships breadcrumb, tile, filter and confirm styles', () => {
+test('pages.css — ships breadcrumb, tile and filter styles (confirm styles gone)', () => {
     assert.match(PAGES_CSS, /\.finder-breadcrumb\b/,        'breadcrumb styles required');
     assert.match(PAGES_CSS, /\.finder-breadcrumb__crumb--active\b/, 'active-crumb state required');
     assert.match(PAGES_CSS, /\.finder-tile\b/,              'tile styles required');
     assert.match(PAGES_CSS, /\.finder-filter__input\b/,     'filter input styles required');
-    assert.match(PAGES_CSS, /\.finder-confirm__card\b/,     'confirm card styles required');
-    assert.match(PAGES_CSS, /\.finder-confirm__spinner\b/,  'loading spinner styles required');
+    assert.doesNotMatch(PAGES_CSS, /\.finder-confirm__/,    'dead confirm-card styles must be removed');
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -171,7 +175,7 @@ test('ink-finder.js — bootstraps from localStorage with brother fallback', () 
         'bootstrap() must be invoked on module init');
 });
 
-test('ink-finder.js — drives a brand→series→model→confirm stage machine', () => {
+test('ink-finder.js — drives a brand→series→model stage machine', () => {
     assert.match(FINDER_CODE, /function\s+goToStage\s*\(/,
         'finder must define goToStage() to swap stages in place');
     assert.match(FINDER_CODE, /function\s+updateBreadcrumb\s*\(/,
@@ -180,17 +184,28 @@ test('ink-finder.js — drives a brand→series→model→confirm stage machine'
         'finder must render series tiles');
     assert.match(FINDER_CODE, /function\s+renderModelTiles\s*\(/,
         'finder must render model tiles');
-    assert.match(FINDER_CODE, /['"]confirm['"]/,
-        'finder must reference a "confirm" stage');
 });
 
-test('ink-finder.js — clicking a model fetches the live count then confirms', () => {
-    assert.match(FINDER_CODE, /API\.getProductsByPrinter\s*\(/,
-        'confirm step must fetch the real cartridge count via API.getProductsByPrinter');
-    assert.match(FINDER_CODE, /compatible/,
-        'confirm card must report compatible-cartridge count copy');
-    assert.match(FINDER_CODE, /Choose another model/,
-        'confirm card must offer a "Choose another model" path back');
+test('ink-finder.js — clicking a model navigates straight to its cartridges', () => {
+    // selectModel is the terminal step: it must call findProducts() directly,
+    // with no interstitial confirm card or count fetch.
+    const m = FINDER_CODE.match(/function\s+selectModel\s*\([^)]*\)\s*\{[\s\S]+?\n\s{4}\}/);
+    assert.ok(m, 'expected a selectModel() function in ink-finder.js');
+    assert.match(m[0], /findProducts\s*\(\s*\)/,
+        'selectModel must navigate straight to results via findProducts()');
+});
+
+test('ink-finder.js — confirm card / count-fetch interstitial is gone', () => {
+    const banned = [
+        [/function\s+showConfirm\b/,        'showConfirm() interstitial'],
+        [/function\s+renderConfirm\b/,      'renderConfirm() interstitial'],
+        [/API\.getProductsByPrinter\s*\(/,  'pre-navigation count fetch'],
+        [/Choose another model/,            'confirm-card back link'],
+        [/finder-confirm/,                  'confirm-card DOM hook'],
+    ];
+    for (const [re, label] of banned) {
+        assert.doesNotMatch(FINDER_CODE, re, `${label} must be removed — model click navigates directly`);
+    }
 });
 
 test('ink-finder.js — empty fallback re-requests with { grouped: false }', () => {
