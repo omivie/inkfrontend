@@ -498,7 +498,9 @@ function ensureStyles() {
     .pc-status--rejected { background: var(--danger-dim); color: #f87171; }
     .pc-status--superseded { background: var(--surface-hover); color: var(--text-muted); }
 
-    .pc-pagination { display: flex; align-items: center; gap: 8px; padding: 12px; justify-content: center; }
+    .pc-pagination { display: flex; align-items: center; gap: 8px; padding: 12px; justify-content: center; flex-wrap: wrap; }
+    .pc-pagination__jump { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--text-secondary); }
+    .pc-pagination__jump input { width: 64px; padding: 4px 8px; font-size: 13px; border: 1px solid var(--border-color); border-radius: 6px; background: var(--surface); color: var(--text-primary); }
     .pc-empty-state { text-align: center; padding: 60px 20px; color: var(--text-muted); }
     .pc-empty-state__title { font-size: 16px; font-weight: 600; color: var(--text); margin-bottom: 6px; }
 
@@ -918,15 +920,33 @@ function renderPagination() {
     <button class="admin-btn admin-btn--ghost admin-btn--sm" data-action="prev" ${page <= 1 ? 'disabled' : ''}>← Prev</button>
     <span style="font-size:13px;color:var(--text-secondary)">Page ${page} of ${totalPages} · ${total.toLocaleString('en-NZ')} total</span>
     <button class="admin-btn admin-btn--ghost admin-btn--sm" data-action="next" ${page >= totalPages ? 'disabled' : ''}>Next →</button>
+    <span class="pc-pagination__jump">
+      Go to page
+      <input type="number" id="pc-page-jump" min="1" max="${totalPages}" value="${page}" aria-label="Go to page" inputmode="numeric">
+      <button class="admin-btn admin-btn--ghost admin-btn--sm" data-action="jump">Go</button>
+    </span>
   `;
+  const goToPage = (target) => {
+    const next = Math.min(totalPages, Math.max(1, Math.floor(target) || 1));
+    if (next === _page) return;
+    _page = next;
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+    applyClientFilters();
+  };
   wrap.querySelectorAll('[data-action]').forEach(btn => {
     btn.addEventListener('click', () => {
       if (btn.disabled) return;
-      if (btn.dataset.action === 'prev') _page = Math.max(1, _page - 1);
-      if (btn.dataset.action === 'next') _page = Math.min(totalPages, _page + 1);
-      window.scrollTo({ top: 0, behavior: 'smooth' });
-      applyClientFilters();
+      if (btn.dataset.action === 'prev') return goToPage(_page - 1);
+      if (btn.dataset.action === 'next') return goToPage(_page + 1);
+      if (btn.dataset.action === 'jump') {
+        const input = wrap.querySelector('#pc-page-jump');
+        return goToPage(parseInt(input?.value, 10));
+      }
     });
+  });
+  const jumpInput = wrap.querySelector('#pc-page-jump');
+  jumpInput?.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); goToPage(parseInt(jumpInput.value, 10)); }
   });
 }
 
