@@ -341,6 +341,41 @@ test('API.searchSuggest — never throws; yields [] when the endpoint fails', as
 });
 
 // ═════════════════════════════════════════════════════════════════════════════
+// queryCodeMatch — off-topic flood filter for digit queries (Jun 2026)
+// q=220 substring-matches the API: "220V" fusers, "(220 pages)" copy, and
+// embedded codes (72200, IDK22205, 106R01220, B220Z00, CT351220). The filter
+// keeps real "220"-code rows (incl. 220XL) and drops the rest.
+// ═════════════════════════════════════════════════════════════════════════════
+test('queryCodeMatch — keeps a real 220 model and its 220XL variant', () => {
+    const { queryCodeMatch } = loadShopHelpers();
+    assert.equal(queryCodeMatch({ name: 'Epson Genuine 220BK Ink Cartridge 220 Black (175 pages)', series_codes: ['220'] }, '220'), true);
+    assert.equal(queryCodeMatch({ name: '220XLBK Compatible Ink Cartridge for Epson 220XL Black', series_codes: ['220'] }, '220'), true);
+    // series_codes alone is enough (name need not contain a bare token)
+    assert.equal(queryCodeMatch({ name: 'Epson 220 CMY 3-Pack', series_codes: ['220'] }, '220'), true);
+    // digit-glued HY genuine still reads as a 220 code (via the "220HY Black" token)
+    assert.equal(queryCodeMatch({ name: 'Epson Genuine 220HYBK Ink Cartridge 220HY Black (500 pages)', series_codes: ['220'] }, '220'), true);
+});
+
+test('queryCodeMatch — rejects the off-topic 220 flood', () => {
+    const { queryCodeMatch } = loadShopHelpers();
+    const reject = (name, series_codes) => assert.equal(
+        queryCodeMatch({ name, sku: '', series_codes: series_codes || [] }, '220'), false, name);
+    reject('HP Genuine 220V LaserJet Fuser Kit 220V', ['220V']);          // voltage
+    reject('Canon Genuine PG510BK Ink Cartridge PG510 Black (220 pages)', ['PG510']); // page count
+    reject('Group 1 Compatible DIN2103 Typewriter Ribbon BLACK 72200.01', ['72200']); // embedded
+    reject('Brother Compatible IDK22205 62mm Label Tape', ['IDK22205']);  // embedded
+    reject('Fuji Xerox Genuine 106R01220Y Toner Yellow', ['106R01220']);  // embedded
+    reject('Lexmark Genuine B220Z00BK Drum Unit B220Z00 Black', ['B220Z00']); // embedded
+    reject('Fuji Xerox Genuine CT351220BK Drum Unit CT351220 Black', ['CT351220']); // embedded
+});
+
+test('queryCodeMatch — series_codes wins even when the name lacks a bare token', () => {
+    const { queryCodeMatch } = loadShopHelpers();
+    // a compatible whose name says "220XL" but series_codes is the base 220
+    assert.equal(queryCodeMatch({ name: '220XLCMY Compatible for Epson 220XL CMY 3-Pack', series_codes: ['220'] }, '220'), true);
+});
+
+// ═════════════════════════════════════════════════════════════════════════════
 // loadSearchResults — source-pattern guards (the wiring can't silently revert)
 // ═════════════════════════════════════════════════════════════════════════════
 test('shop-page.js — loadSearchResults computes a hijack flag', () => {
@@ -369,6 +404,15 @@ test('shop-page.js — fallback unions /api/products with API.searchSuggest', ()
     assert.match(SHOP_CODE, /API\.searchSuggest\(\s*searchQuery\s*,\s*20\s*\)/);
     assert.match(SHOP_CODE, /API\.getProducts\(\{\s*search:\s*searchQuery/);
     assert.match(SHOP_CODE, /mergeLiteralResults\(\s*suggestList\s*,\s*fallbackProducts\s*\)/);
+});
+
+test('shop-page.js — digit queries filter the merged set through queryCodeMatch', () => {
+    // The off-topic flood strip: for digit queries, merged → mergedUsed via
+    // queryCodeMatch, with an empty-set safety (onTopic.length > 0).
+    assert.match(SHOP_CODE, /queryHasDigits/);
+    assert.match(SHOP_CODE, /merged\.filter\(\s*p\s*=>\s*queryCodeMatch\(p,\s*searchQuery\)\s*\)/);
+    assert.match(SHOP_CODE, /onTopic\.length\s*>\s*0\s*&&\s*onTopic\.length\s*<\s*merged\.length/);
+    assert.match(SHOP_CODE, /products\s*=\s*mergedUsed/);
 });
 
 test('shop-page.js — suggest is fetched only on page 1', () => {

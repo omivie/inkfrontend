@@ -103,11 +103,52 @@
         return out;
     }
 
+    // True when `query` names a REAL product code on `product` — not an
+    // incidental substring. Used to strip the off-topic flood from the literal-
+    // search fallback union for digit queries: q=220 must keep "220" and
+    // "220XL" but drop "220V" (voltage), "(220 pages)" (page count), and digits
+    // embedded in a longer code ("72200.01", "IDK22205", "106R01220", "B220Z00",
+    // "CT351220"). Two signals, series_codes preferred:
+    //   1. product.series_codes contains the query (optionally + a yield suffix).
+    //   2. the query appears in name/sku as a boundary-delimited code token
+    //      (optionally + a yield suffix), and is NOT followed by "page(s)".
+    // Boundaries use the RAW text (not normalizeForMatch, which would collapse
+    // "220 pages" → "220pages" and re-admit it).
+    function queryCodeMatch(product, query) {
+        if (!product) return false;
+        const q = normalizeForMatch(query);
+        if (!q) return false;
+        const esc = q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const YIELD = '(?:xl|xxl|xxhy|ehy|hy|h)?';
+        // 1. series_codes (backend-canonical).
+        const codes = Array.isArray(product.series_codes) ? product.series_codes : [];
+        const codeRe = new RegExp('^' + esc + YIELD + '$', 'i');
+        for (const c of codes) {
+            const nc = normalizeForMatch(c);
+            if (nc && (nc === q || codeRe.test(nc))) return true;
+        }
+        // 2. bounded code token in name/sku, rejecting "<q> page(s)".
+        const tokenRe = new RegExp('(^|[^0-9a-z])(' + esc + YIELD + ')([^0-9a-z]|$)', 'gi');
+        for (const field of [product.name, product.sku]) {
+            const text = String(field == null ? '' : field).toLowerCase();
+            if (!text) continue;
+            tokenRe.lastIndex = 0;
+            let m;
+            while ((m = tokenRe.exec(text)) !== null) {
+                const afterIdx = m.index + (m[1] ? m[1].length : 0) + m[2].length;
+                if (/^\s*pages?\b/.test(text.slice(afterIdx))) continue;
+                return true;
+            }
+        }
+        return false;
+    }
+
     // Test hook — exercised by tests/search-results-parity-may2026.test.js.
     // Not a public surface; product code calls the locals directly.
     if (typeof window !== 'undefined') {
         window._searchParityHelpers = {
             normalizeForMatch, productMatchesQuery, adaptSuggestProduct, mergeLiteralResults,
+            queryCodeMatch,
         };
     }
 
@@ -2602,17 +2643,36 @@
                         // order first, deduped — guarantees the results page is
                         // a superset of (never a subset of) the dropdown.
                         const merged = mergeLiteralResults(suggestList, fallbackProducts);
+                        // /api/products?search=<digits> matches the digits as a
+                        // bare substring, so e.g. q=220 drags in "220V" fuser
+                        // kits, "(220 pages)" copy, and embedded codes
+                        // (72200.01, IDK22205, 106R01220). For digit queries,
+                        // strip those to genuine "220"-code products (keeps
+                        // 220 + 220XL). Safety: never let the filter empty the
+                        // set or trim it to nothing — fall back to `merged`.
+                        let mergedUsed = merged;
+                        let mergedFiltered = false;
+                        if (queryHasDigits) {
+                            const onTopic = merged.filter(p => queryCodeMatch(p, searchQuery));
+                            if (onTopic.length > 0 && onTopic.length < merged.length) {
+                                mergedUsed = onTopic;
+                                mergedFiltered = true;
+                            }
+                        }
                         // hijack / hardMiss: any literal hit beats /smart's set
                         // (it is empty or provably wrong). softMiss: only swap
                         // when the literal set strictly out-counts /smart, so
                         // we never trade away a good ranking for a flat one.
                         const shouldUseFallback = (hijack || hardMiss)
-                            ? merged.length > 0
-                            : merged.length > smartCount;
+                            ? mergedUsed.length > 0
+                            : mergedUsed.length > smartCount;
                         if (shouldUseFallback) {
-                            products = merged;
+                            products = mergedUsed;
                             smartData = null;
-                            if (fallback.meta && fallback.meta.total_pages != null) {
+                            // A filtered set is a curated single page — the
+                            // backend's total_pages counts the unfiltered union,
+                            // so suppress the pager to avoid phantom pages.
+                            if (!mergedFiltered && fallback.meta && fallback.meta.total_pages != null) {
                                 pagination = {
                                     total: fallback.meta.total,
                                     page: fallback.meta.page,

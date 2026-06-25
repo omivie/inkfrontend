@@ -737,21 +737,38 @@ const ProductSort = (function() {
     // ─── yield + accessory + source ──────────────────────────────────────
 
     function yieldTier(product) {
-        // Prefer the backend signal: the API now emits yield_tier: 'STD'|'XL'|'XXL',
-        // computed by detectYieldTier() which recognises digit-glued HY ("200HY"),
-        // HP short-series X/Y ("975X"), and W-codes that the name matcher below
-        // misses (those merged two model codes onto one row — Epson 200, HP 975).
+        // PRIMARY: the backend signal yield_tier: 'STD'|'XL'|'XXL' (from
+        // detectYieldTier()). When present it always wins — but as of Jun 2026
+        // the live API does NOT emit it on any list endpoint (confirmed null on
+        // /api/search/smart, /api/products, /api/shop), so the detector below is
+        // doing the real work today. Keep this branch first so the field takes
+        // over automatically once the backend ships it.
         const yt = (product && product.yield_tier || '').toString().toUpperCase();
         if (yt === 'XXL') return 2;
         if (yt === 'XL')  return 1;
         if (yt === 'STD') return 0;
 
-        // ---- legacy fallback: payloads predating yield_tier ----
+        // ---- FE detection (mirror of backend detectYieldTier) ----
+        // The old fallback only read XL/XXL/HY as whole words, so it silently
+        // missed digit-glued high-yield ("200HY", "220HYBK": no \b between 0 and
+        // HY) and HP short-series letters ("975X"), merging two model codes onto
+        // one row. We now read the name + sku, using `color` as a guard so a
+        // trailing colour Y ("220Y" Yellow) is never mistaken for a yield marker.
         const n = (product && product.name || '').toLowerCase();
-        if (n.includes('xxl') || n.includes('super high') || /\bxll\b/.test(n) || /\bshy\b/.test(n)) return 2;
-        if (n.includes('xl') || n.includes('high yield') || /\bhy\b/.test(n)) return 1;
         const sku = (product && product.sku || '').toUpperCase();
-        if (/CART\d{3,}H(?=[A-Z]|-|$)/.test(sku)) return 1;
+        // XXL / super-high-yield.
+        if (n.includes('xxl') || n.includes('super high')
+            || /\bxll\b/.test(n) || /\bshy\b/.test(n) || /\d{2,}xxhy/i.test(n)) return 2;
+        // XL / high-yield, incl. digit-glued HY/EHY ("200HY", "220HYBK"),
+        // digit-glued single H ("220H", "CART069H"), and HP short-series X
+        // ("975X"). None of these match a bare trailing colour Y.
+        if (n.includes('xl') || n.includes('high yield') || /\bhy\b/.test(n)
+            || /\d{2,}e?hy/i.test(n) || /\d{2,}h\b/i.test(n) || /\b\d{3,}x\b/i.test(n)) return 1;
+        if (/CART\d{3,}H(?=[A-Z]|-|$)/.test(sku) || /\d{2,}E?HY/.test(sku)) return 1;
+        // NOTE (stopgap limit): HP short-series Y → XXL and Lexmark bare-letter
+        // yields (503H/808S/503U) are intentionally NOT detected here — the
+        // trailing-Y/letter cases collide with colour/model data the FE can't
+        // disambiguate. Those stay STD until the backend yield_tier ships.
         return 0;
     }
 
@@ -768,7 +785,13 @@ const ProductSort = (function() {
     // cartridges (0) and re-interleave them with the real toners.
     function accessoryTier(product) {
         if (!product) return 3;
-        const cat = (product.category || '').toString().toLowerCase();
+        // `category` arrives as an object {name,slug} on the live API, not a
+        // string — `String({...})` is "[object Object]", which silently broke
+        // every cat=== check below (the name regex carried it). Normalise.
+        const rawCat = product.category;
+        const cat = (rawCat && typeof rawCat === 'object'
+            ? (rawCat.slug || rawCat.name || '')
+            : (rawCat || '')).toString().toLowerCase();
         const name = (product.name || '').toString().toLowerCase();
         if (/\bdrum\b/.test(name) || /\bdrum\b/.test(cat)) return 1;
         if (/\b(belt|fuser|transfer|waste|maintenance)\b/.test(name)
@@ -1050,11 +1073,16 @@ const ProductSort = (function() {
     //   645XL K, C, M, Y, [specialty…], CMY, KCMY    ← yield 1 (XL/HY)  row 2
     //   645XXL K, C, M, Y, [specialty…], CMY, KCMY   ← yield 2 (XXL)    row 3
     //
-    // Family order is preserved from the incoming array (first occurrence
-    // wins) so the backend's brand / accessory-tier ordering still drives
-    // which family appears first. Within a family, yield tier is forced to
-    // ascending (std → HY → XXL), then colorOrder to the 22-position table,
-    // then packRank to break a colorOrder tie.
+    // Family order: cartridge families first, then drum-only families, then
+    // belt/fuser/waste families — ranked by each family's MINIMUM accessoryTier
+    // (so OKI MC853, which holds both toners and drums, ranks by its toners = 0
+    // and is NOT sunk). Within an accessory tier, the incoming order is
+    // preserved (first occurrence wins) so the backend's brand/relevance order
+    // still drives which family appears first. This sinks scattered accessory
+    // families (e.g. an HP "Fuser Kit 220V" or a Lexmark drum interleaved into a
+    // /search merge) below the cartridges; it is a no-op on /shop, where the
+    // backend already returns catalog order. Within a family, yield tier is
+    // forced ascending (std → HY → XXL), then colorOrder, then packRank.
     //
     // Renderers pair this with `rowBreakIndices` to insert a flex-basis:100%
     // breaker so each (family, yield) group physically starts on a new row.
@@ -1065,19 +1093,27 @@ const ProductSort = (function() {
         if (!Array.isArray(products) || products.length < 2) {
             return Array.isArray(products) ? products.slice() : [];
         }
-        // Capture each family's first-appearance index so the family sort key
-        // mirrors the incoming order — backend-decided brand/accessory grouping
-        // stays intact, we only impose yield+color within a family.
+        // Capture each family's first-appearance index AND its minimum
+        // accessoryTier across members. The family sort key is then
+        // (familyMinAccessory, firstAppearance): accessory-only families sink
+        // below cartridge families, but original order is otherwise preserved.
         const familyOrder = new Map();
+        const familyMinAccessory = new Map();
         let nextRank = 0;
         for (const p of products) {
             const fk = familyKey(p);
             if (!familyOrder.has(fk)) {
                 familyOrder.set(fk, nextRank++);
             }
+            const at = accessoryTier(p);
+            const prev = familyMinAccessory.get(fk);
+            if (prev === undefined || at < prev) familyMinAccessory.set(fk, at);
         }
         const fRank = (p) => familyOrder.get(familyKey(p));
+        const fAccessory = (p) => familyMinAccessory.get(familyKey(p));
         return products.slice().sort((a, b) => {
+            const faa = fAccessory(a), fab = fAccessory(b);
+            if (faa !== fab) return faa - fab;
             const fa = fRank(a), fb = fRank(b);
             if (fa !== fb) return fa - fb;
             // Within a family, the unit TYPE sub-orders before yield/colour:

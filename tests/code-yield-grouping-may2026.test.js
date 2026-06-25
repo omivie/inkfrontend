@@ -292,22 +292,72 @@ test('yieldTier maps backend yield_tier STD/XL/XXL → 0/1/2', () => {
     assert.equal(ProductSort.yieldTier({ yield_tier: 'xl' }),  1);
 });
 
-test('yieldTier: backend signal wins over a name the matcher misreads (Epson 200HY)', () => {
-    // "200HY Black" has no word boundary between 0 and HY, so /\bhy\b/ never
-    // fires — the legacy name parse would tier this Standard and merge it into
-    // the 200 row. The backend yield_tier:'XL' fixes it.
+test('yieldTier: backend signal AND FE detection both tier Epson 200HY as XL', () => {
+    // The backend yield_tier:'XL' wins when present. Jun 2026: the FE detector
+    // now ALSO catches digit-glued HY ("200HY", no \b between 0 and HY) on its
+    // own, so the split holds even though the live API ships no yield_tier.
     const std = { name: 'Epson Genuine 200BK Ink Cartridge 200 Black',   color: 'Black', yield_tier: 'STD' };
     const xl  = { name: 'Epson Genuine 200HYBK Ink Cartridge 200HY Black', color: 'Black', yield_tier: 'XL' };
     assert.equal(ProductSort.yieldTier(std), 0);
     assert.equal(ProductSort.yieldTier(xl),  1, 'digit-glued HY must tier XL via backend signal');
-    // Sanity: without the backend field the name parse would WRONGLY tie them.
-    assert.equal(ProductSort.yieldTier({ name: xl.name, color: 'Black' }), 0,
-        'legacy name parse misreads 200HY as Standard — proves the backend signal is necessary');
+    // With NO backend field the FE detector still tiers 200HY → XL (1) and
+    // plain 200 → STD (0), so the rows split without backend help.
+    assert.equal(ProductSort.yieldTier({ name: xl.name,  color: 'Black' }), 1,
+        'FE detection tiers digit-glued 200HY as XL even without yield_tier');
+    assert.equal(ProductSort.yieldTier({ name: std.name, color: 'Black' }), 0);
 });
 
 test('yieldTier: HP short-series 975X tiers XL via backend signal, 975A stays STD', () => {
     assert.equal(ProductSort.yieldTier({ name: 'HP Genuine 975A Ink Cartridge Black', color: 'Black', yield_tier: 'STD' }), 0);
     assert.equal(ProductSort.yieldTier({ name: 'HP Genuine 975X Ink Cartridge Black', color: 'Black', yield_tier: 'XL' }),  1);
+});
+
+// ── FE detection stopgap (Jun 2026): the live API ships NO yield_tier, so
+//    yieldTier() must classify from name+sku+colour on its own. ───────────────
+test('yieldTier FE detection (no yield_tier field) classifies the digit-glued + short-series cases', () => {
+    const yt = (name, color, sku) => ProductSort.yieldTier({ name, color, sku });
+    // digit-glued HY / EHY → XL
+    assert.equal(yt('Epson Genuine 220HYBK Ink Cartridge 220HY Black', 'Black'), 1, '220HY → XL');
+    assert.equal(yt('Epson Genuine 200HYC Ink Cartridge 200HY Cyan', 'Cyan'),    1, '200HY → XL');
+    assert.equal(yt('Epson Genuine 220HYC Ink Cartridge 220HY Cyan', 'Cyan'),    1, '220HYC → XL');
+    // digit-glued single H → XL (incl. the malformed "220H Yellow" row)
+    assert.equal(yt('Epson Genuine 220HY Ink Cartridge 220H Yellow', 'Yellow'),  1, '220H Yellow → XL');
+    assert.equal(yt('Canon Genuine CART069H Toner Cartridge Black', 'Black', 'CART069H'), 1, 'CART069H → XL');
+    // HP short-series X → XL
+    assert.equal(yt('HP Genuine 975X Ink Cartridge Cyan', 'Cyan'),               1, '975X → XL');
+    // whole-word XL/XXL/HY still work
+    assert.equal(yt('Brother Genuine TN645XLBK Toner Black', 'Black'),           1, 'XL token → XL');
+    assert.equal(yt('Brother Genuine TN645XXLBK Toner Black', 'Black'),          2, 'XXL token → XXL');
+    // STD must NOT be misread — bare colour Y, plain codes, page counts
+    assert.equal(yt('Epson Genuine 220Y Ink Cartridge 220 Yellow (165 pages)', 'Yellow'), 0, '220Y yellow stays STD');
+    assert.equal(yt('Epson Genuine 220BK Ink Cartridge 220 Black (175 pages)', 'Black'),  0, '220 stays STD');
+    assert.equal(yt('HP Genuine 975A Ink Cartridge Black', 'Black'),            0, '975A stays STD');
+    assert.equal(yt('Fuji Xerox Genuine 106R01220Y Toner Yellow', 'Yellow'),    0, 'embedded 1220Y stays STD');
+});
+
+test('accessoryTier: object category {name,slug} no longer stringifies to [object Object]', () => {
+    // Live API sends category as an object. Tier must still resolve correctly.
+    assert.equal(ProductSort.accessoryTier({ name: 'Epson Genuine 220BK Ink Cartridge 220 Black', category: { name: 'Ink', slug: 'ink' } }), 0);
+    assert.equal(ProductSort.accessoryTier({ name: 'Lexmark Genuine B220Z00BK Drum Unit Black',    category: { name: 'Toner', slug: 'toner' } }), 1);
+    assert.equal(ProductSort.accessoryTier({ name: 'HP Genuine 220V LaserJet Fuser Kit 220V',      category: { name: 'Toner', slug: 'toner' } }), 2);
+    // object category with a drum slug also resolves via the slug now
+    assert.equal(ProductSort.accessoryTier({ name: 'Some Unit', category: { name: 'Drum', slug: 'drum' } }), 1);
+});
+
+test('byCodeThenColor sinks accessory-only families below cartridge families (q=220 search merge)', () => {
+    // Mirrors /search?q=220: Epson 220 inks interleaved (by relevance order)
+    // with an HP fuser family and a Lexmark drum family. Cartridge family must
+    // come first, then the drum family, then the fuser family — regardless of
+    // the incoming order.
+    const input = [
+        { sku: 'HP-FUSER', name: 'HP Genuine 220V LaserJet Fuser Kit 220V', color: 'Colour', series_codes: ['220V'], brand: { name: 'HP' }, category: { slug: 'toner' } },
+        { sku: 'EP-220BK', name: 'Epson Genuine 220BK Ink Cartridge 220 Black', color: 'Black', series_codes: ['220'], brand: { name: 'Epson' }, category: { slug: 'ink' } },
+        { sku: 'LX-DRUM',  name: 'Lexmark Genuine B220Z00BK Drum Unit B220Z00 Black', color: 'Black', series_codes: ['B220Z00'], brand: { name: 'Lexmark' }, category: { slug: 'toner' } },
+        { sku: 'EP-220C',  name: 'Epson Genuine 220C Ink Cartridge 220 Cyan', color: 'Cyan', series_codes: ['220'], brand: { name: 'Epson' }, category: { slug: 'ink' } },
+    ];
+    const sorted = ProductSort.byCodeThenColor(input);
+    assert.deepEqual(sorted.map(p => p.sku), ['EP-220BK', 'EP-220C', 'LX-DRUM', 'HP-FUSER'],
+        'cartridge family first (K→C), then drum family, then fuser family');
 });
 
 test('yieldTier: yellow is not misread as extra-high-yield (backend keeps 200Y as STD)', () => {

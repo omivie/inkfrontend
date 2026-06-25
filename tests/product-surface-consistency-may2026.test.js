@@ -155,8 +155,10 @@ test('soft-miss only swaps when the literal set strictly beats smart count', () 
     // search-results-parity-may2026 folded the soft-miss swap into a shared
     // reconcile that also covers hijack, and renamed `fallbackProducts` →
     // `merged` (dropdown shortlist unioned with the full literal set).
+    // Jun 2026: digit queries filter `merged` → `mergedUsed` (off-topic flood
+    // strip) before this comparison; the strict-beat rule is unchanged.
     assert.match(SHOP_CODE,
-        /shouldUseFallback\s*=\s*\(hijack\s*\|\|\s*hardMiss\)[\s\S]{0,150}merged\.length\s*>\s*smartCount/);
+        /shouldUseFallback\s*=\s*\(hijack\s*\|\|\s*hardMiss\)[\s\S]{0,150}mergedUsed\.length\s*>\s*smartCount/);
 });
 
 test('fallback path still uses SEARCH_PAGE_SIZE + page so pagination keeps working', () => {
