@@ -431,10 +431,19 @@ const AdminAPI = {
   },
 
   async getCustomerStats(filterParams, signal) {
+    // Prefer the HTTP wrapper (migration 092, Jun 2026). The direct
+    // analytics_customer_stats RPC is deliberately locked to the service role,
+    // so a browser .rpc() call 403s BY DESIGN — calling it first just burns a
+    // request and a console error. The wrapper returns the same rich shape
+    // ({ current, previous } with returning_pct) the KPI strip consumes.
+    const http = await analyticsHttpGet(`/api/admin/analytics/customer-stats?${analyticsQuery(filterParams)}`, signal);
+    if (http?.current && (http.current.new_customers != null || http.current.returning_pct != null)) {
+      return http;
+    }
+    // Fallbacks for an old cached payload / wrapper outage: the direct RPC (if
+    // its grant is somehow intact), then /summary/customers (New Customers only,
+    // no returning_pct — that tile honestly stays "—").
     const { from, to } = Object.fromEntries(filterParams);
-    // The direct RPC returns the richest shape ({ current, previous } with
-    // returning_pct) when its grant is intact — and it's the ONLY source of
-    // returning %. Try it first.
     const rpcData = await rpc('analytics_customer_stats', {
       date_from: from, date_to: to,
       brand_filter: filterParams.get('brands') || null,
@@ -442,11 +451,8 @@ const AdminAPI = {
     if (rpcData?.current?.new_customers != null || rpcData?.current?.returning_pct != null) {
       return rpcData;
     }
-    // RPC grant dropped (recurring ERR-010) → reconstruct "New Customers" from
-    // the always-on /summary/customers HTTP endpoint. Returning % has no
-    // fallback source, so that tile stays "—" rather than lie.
     const summary = await analyticsHttpGet('/api/admin/analytics/summary/customers', signal);
-    return adaptCustomerSummary(summary) ?? rpcData;
+    return adaptCustomerSummary(summary) ?? http ?? rpcData;
   },
 
   async getTopProducts(filterParams, signal) {

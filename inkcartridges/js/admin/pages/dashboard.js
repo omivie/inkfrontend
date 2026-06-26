@@ -92,13 +92,31 @@ function hexToRgba(hex, alpha) {
   return hex;
 }
 
-// Resolve the active bar-width. An explicit granularity wins; 'auto' derives a
-// sensible bucket from the range (same thresholds the old getBucketConfig used).
-// This value is forwarded to every series endpoint so the backend buckets.
+// Resolve the active bar-width sent to the backend. An explicit granularity wins
+// — but is CLAMPED coarser if it would exceed the backend's ~750-bucket cap for
+// the real window span (else the request 400s and blanks every chart). 'auto'
+// derives a sensible bucket from the span. FilterState gates the UI to match;
+// this is the safety net for a stale URL like ?period=all&granularity=hour.
+const GRAN_ORDER = ['hour', 'day', 'week', 'month', 'quarter'];
+const GRAN_DAYS = { hour: 1 / 24, day: 1, week: 7, month: 30.4, quarter: 91 };
+const GRAN_BUCKET_CAP = 750;
+
+function realRangeDays() {
+  const { from, to } = FilterState.getDateRange();
+  return Math.max(1, Math.round((new Date(to) - new Date(from)) / 86400000));
+}
+
 function resolveGranularity() {
-  const g = FilterState.get('granularity');
-  if (g && g !== 'auto') return g;
-  const days = FilterState.periodToDays();
+  const days = realRangeDays();
+  const fits = (g) => days / GRAN_DAYS[g] <= GRAN_BUCKET_CAP;
+  const explicit = FilterState.get('granularity');
+  if (explicit && explicit !== 'auto') {
+    if (fits(explicit)) return explicit;
+    for (let i = GRAN_ORDER.indexOf(explicit); i < GRAN_ORDER.length; i++) {
+      if (fits(GRAN_ORDER[i])) return GRAN_ORDER[i];
+    }
+    return 'quarter';
+  }
   if (days <= 2) return 'hour';
   if (days <= 100) return 'day';
   if (days <= 200) return 'week';
@@ -407,34 +425,6 @@ function bundleToGraphs(b) {
 
 // Fallback when the bundle endpoint itself fails: fetch each chart's standalone
 // endpoint in parallel (the router now allows 60 req/min, so the fan-out is safe).
-async function loadGraphsIndividually(params, g, signal) {
-  const calls = {
-    sRevenue:         AdminAPI.getSeriesRevenue(params, g, signal),
-    sGrossProfit:     AdminAPI.getSeriesGrossProfit(params, g, signal),
-    sOrders:          AdminAPI.getSeriesOrders(params, g, signal),
-    sAov:             AdminAPI.getSeriesAOV(params, g, signal),
-    sRefundRate:      AdminAPI.getSeriesRefundRate(params, g, signal),
-    custType:         AdminAPI.getRevenueByCustomerType(params, g, signal),
-    trafficSource:    AdminAPI.getTrafficBySource(params, signal),
-    forecast:         AdminAPI.getRevenueForecast(params, g, signal),
-    topSkusRev:       AdminAPI.getTopSkusByRevenue(params, 10, signal),
-    topSkusProfit:    AdminAPI.getTopSkusByProfit(params, 10, signal),
-    marginBrand:      AdminAPI.getMarginByBrand(params, signal),
-    marginCategory:   AdminAPI.getMarginByCategory(params, signal),
-    conversionSource: AdminAPI.getConversionBySource(params, signal),
-    reorder:          AdminAPI.getReorderInterval(params, signal),
-    supplierRev:      AdminAPI.getSupplierRevenue(params, signal),
-    supplierProblem:  AdminAPI.getSupplierProblemRate(params, signal),
-    searchTop:        AdminAPI.getTopConvertingSearches(params, 10, signal),
-    searchZero:       AdminAPI.getZeroResultSearches(params, 10, signal),
-  };
-  const keys = Object.keys(calls);
-  const settled = await Promise.allSettled(keys.map(k => calls[k]));
-  const out = {};
-  keys.forEach((k, i) => { out[k] = settled[i].status === 'fulfilled' ? settled[i].value : null; });
-  return out;
-}
-
 async function loadDashboard() {
   if (!_container) return;
   const mySeq = ++_loadSeq;
@@ -486,13 +476,13 @@ async function loadDashboard() {
   // Race guard — bail if a newer loadDashboard() started or the page was destroyed.
   if (mySeq !== _loadSeq || !_container) return;
 
-  let graphs = bundleToGraphs(val(0));
-  // Resilience: if the single bundle call failed (network/500), fall back to the
-  // per-chart endpoints so one bad bundle response doesn't blank every graph.
-  if (val(0) == null) {
-    graphs = await loadGraphsIndividually(params, g, signal);
-    if (mySeq !== _loadSeq || !_container) return;
-  }
+  // Graphs come solely from the resilient bundle (per-chart isolation server-side;
+  // a failed sub-chart → null key → that one tile's empty state). We deliberately
+  // do NOT fan out to the per-chart endpoints on a bundle miss: that fan-out is
+  // exactly what trips the 60/min limiter, and api.js already retries the bundle
+  // on transient failures. A total bundle failure → all charts show their empty
+  // state, which self-heals on the next load.
+  const graphs = bundleToGraphs(val(0));
   _container.classList.remove('admin-page--reloading');
 
   const payload = {

@@ -30,6 +30,14 @@ const GRANULARITY_PRESETS = [
   { key: 'quarter', label: 'Quarter' },
 ];
 
+// Approx days per bucket, used to keep the bucket count under the backend cap.
+// The analytics router rejects any series with > BUCKET_CAP buckets ("Too many
+// buckets … Narrow the window or use a coarser granularity"), so we disable any
+// granularity that would exceed it for the selected range — otherwise picking
+// e.g. Hour over All-time 400s and blanks every chart.
+const GRANULARITY_DAYS = { hour: 1 / 24, day: 1, week: 7, month: 30.4, quarter: 91 };
+const BUCKET_CAP = 750;
+
 const FilterState = {
   _state: {
     period: '3m',
@@ -133,7 +141,37 @@ const FilterState = {
   // appears on pages that explicitly want it (e.g. the dashboard).
   setGranularityVisible(show = true) {
     this._showGranularity = !!show;
+    // Drop a stale URL granularity that's invalid for the current range so the
+    // first load doesn't fire an over-the-cap request (e.g. ?granularity=hour&period=all).
+    if (show) this._clampGranularity();
     this._render();
+  },
+
+  // Real span of the selected window in days (uses the actual from/to, not the
+  // 365-capped periodToDays) — needed to gate granularity against the bucket cap.
+  rangeDays() {
+    const { from, to } = this.getDateRange();
+    const d = (new Date(to) - new Date(from)) / 86400000;
+    return Math.max(1, Math.round(d));
+  },
+
+  // Would this granularity stay under the backend's bucket cap for the range?
+  granularityAllowed(key) {
+    if (!key || key === 'auto') return true;
+    const gd = GRANULARITY_DAYS[key];
+    if (!gd) return true;
+    return (this.rangeDays() / gd) <= BUCKET_CAP;
+  },
+
+  // If the current granularity is now too fine for the range, fall back to 'auto'.
+  // Returns true if it changed. (Caller decides whether to persist/notify.)
+  _clampGranularity() {
+    if (this._state.granularity !== 'auto' && !this.granularityAllowed(this._state.granularity)) {
+      this._state.granularity = 'auto';
+      this._writeToURL();
+      return true;
+    }
+    return false;
   },
 
   // Apply page-local defaults (e.g. dashboard wants range=all) only when the
@@ -289,7 +327,9 @@ const FilterState = {
     if (this._showGranularity) {
       centerHtml += '<div class="admin-filter-group admin-filter-group--granularity" title="Bar width">';
       for (const g of GRANULARITY_PRESETS) {
-        centerHtml += `<button class="admin-filter-btn${s.granularity === g.key ? ' active' : ''}" data-granularity="${g.key}">${g.label}</button>`;
+        const allowed = this.granularityAllowed(g.key);
+        const dis = allowed ? '' : ' disabled title="Too many bars for this date range — pick a wider bar width or a shorter range"';
+        centerHtml += `<button class="admin-filter-btn${s.granularity === g.key ? ' active' : ''}" data-granularity="${g.key}"${dis}>${g.label}</button>`;
       }
       centerHtml += '</div>';
     }
@@ -349,6 +389,7 @@ const FilterState = {
           this._state.dateFrom = '';
           this._state.dateTo = '';
         }
+        this._clampGranularity();   // new range may make the bar-width too fine
         this._writeToURL();
         this._updateUI();
         this._render();
@@ -359,6 +400,7 @@ const FilterState = {
     // Granularity (bar-width) buttons
     this._el.querySelectorAll('[data-granularity]').forEach(btn => {
       btn.addEventListener('click', () => {
+        if (btn.disabled) return;   // invalid for this range (over the bucket cap)
         this._state.granularity = btn.dataset.granularity;
         this._writeToURL();
         this._updateUI();
@@ -371,12 +413,16 @@ const FilterState = {
     const dateTo = this._el.querySelector('.admin-date-to');
     if (dateFrom) dateFrom.addEventListener('change', () => {
       this._state.dateFrom = dateFrom.value;
+      this._clampGranularity();   // custom span may make the bar-width too fine
       this._writeToURL();
+      this._render();             // refresh which granularity options are disabled
       this._notifyDebounced();
     });
     if (dateTo) dateTo.addEventListener('change', () => {
       this._state.dateTo = dateTo.value;
+      this._clampGranularity();
       this._writeToURL();
+      this._render();
       this._notifyDebounced();
     });
 
