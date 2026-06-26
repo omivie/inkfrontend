@@ -107,6 +107,21 @@
         // for consumer transactions ("In Trade").
         restockingFeePercent:   0,                      // No restocking fee on unopened, change-of-mind returns
 
+        // ─── Invoicing ────────────────────────────────────────────────────
+        // Seeds the admin Invoices page seller block + bank-payment footer.
+        // Seller identity/address/GST are read from the fields above
+        // (legalEntity, gstNumber, formatAddressMultiLine); these are the
+        // invoice-specific extras the storefront config doesn't already hold.
+        // Values mirror the operator's existing invoice template; the seller
+        // block + footer remain editable per-invoice on the page.
+        invoice: {
+            contactName:    'Trevor Walker',
+            phone:          '09 813 3882',          // invoice contact line (differs from storefront phoneDisplay)
+            bankAcctName:   'Office Consumables Ltd',
+            bankAcctNumber: '01 0186 0335027 00',
+            thankYou:       'Thank you very much for your business and for checking out InkCartridges.co.nz.',
+        },
+
         // ─── Operations ───────────────────────────────────────────────────
         paymentMethods: ['Visa', 'Mastercard', 'American Express', 'PayPal', 'Apple Pay', 'Google Pay'],
         // Effective / last-updated date for all policy pages. Bumped on

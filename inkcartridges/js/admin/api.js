@@ -178,6 +178,16 @@ function adaptCustomerSummary(summary) {
 // `data` (or null on any failure / non-200 / abort). Mirrors the swallow-and-
 // return-null convention of the other read methods so one dead tile never
 // blanks the whole dashboard.
+// The backend rejects a too-fine granularity for a wide range with a 400 whose
+// message is "Too many buckets (N) for granularity 'X'…". (Its week-bucket cap is
+// currently miscounted — week@1y and week@all both report the same 751 as day@all —
+// so `week`/`day` get rejected well before the real 750-bucket limit. Backend bug,
+// tracked in errors.md.) We detect that specific error so the dashboard can step to
+// a coarser grain instead of blanking every chart.
+function isTooManyBucketsError(msg) {
+  return typeof msg === 'string' && /too many buckets/i.test(msg);
+}
+
 async function analyticsHttpGet(path, signal) {
   try {
     if (signal?.aborted) return null;
@@ -480,7 +490,36 @@ const AdminAPI = {
   // Avoids the per-chart parallel fan-out that tripped the rate limiter. Returns
   // the `data` map ({ revenue_series, top_skus_revenue, ... }) or null on failure.
   async getDashboardBundle(filterParams, granularity, signal) {
-    return analyticsHttpGet(`/api/admin/analytics/dashboard-bundle?${analyticsQuery(filterParams, { granularity })}`, signal);
+    // Auto-escalate on the backend's bucket-cap rejection: try the requested grain,
+    // then step coarser (…→week→month→quarter) until one is accepted. Stamp the grain
+    // that actually served on the payload (`_granularity`) so the x-axis labels match
+    // the bars. A non-cap failure (or running out of grains) returns null → the chart's
+    // normal "awaiting data" empty state. See isTooManyBucketsError above.
+    const order = ['hour', 'day', 'week', 'month', 'quarter'];
+    const start = order.indexOf(granularity);
+    const ladder = start === -1 ? [granularity || 'auto'] : order.slice(start);
+    for (const g of ladder) {
+      if (signal?.aborted) return null;
+      try {
+        const resp = await window.API.get(
+          `/api/admin/analytics/dashboard-bundle?${analyticsQuery(filterParams, { granularity: g })}`,
+          { signal }
+        );
+        if (resp && resp.ok === false) {
+          if (isTooManyBucketsError(resp.error || resp.message)) continue;
+          return null;
+        }
+        const data = resp?.data ?? null;
+        if (data && typeof data === 'object') data._granularity = g;
+        return data;
+      } catch (e) {
+        if (e?.name === 'AbortError') return null;
+        if (isTooManyBucketsError(e?.message)) continue;
+        DebugLog.warn(`[AdminAPI] dashboard-bundle (${g}) failed:`, e.message);
+        return null;
+      }
+    }
+    return null;
   },
 
   async getSeriesRevenue(filterParams, granularity, signal) {
@@ -2260,6 +2299,81 @@ const AdminAPI = {
     const resp = await window.API.post(`/api/admin/orders/${orderId}/resend-invoice`, {});
     if (resp && resp.ok === false) throw new Error(resp.error || 'Resend failed');
     return resp?.data ?? null;
+  },
+
+  // =========================================================================
+  // Admin — Standalone Invoices (manual / order-sourced invoicing page)
+  // ---------------------------------------------------------------------
+  // Backend endpoints are NOT live yet — these follow the agreed contract so
+  // the frontend is wired ahead of the backend handoff. Reads fail soft
+  // (null + toast); writes throw so the page can surface a clean error.
+  // The backend is the authority on invoice_number and the saved totals.
+  // =========================================================================
+  async listInvoices(filters = {}, page = 1, limit = 20) {
+    try {
+      const params = new URLSearchParams();
+      params.set('page', page);
+      params.set('limit', limit);
+      if (filters.search) params.set('search', filters.search);
+      if (filters.status) params.set('status', filters.status);
+      if (filters.sort) params.set('sort', filters.sort);
+      if (filters.order) params.set('order', filters.order);
+      const resp = await window.API.get(`/api/admin/invoices?${params}`);
+      return resp?.data ?? null;
+    } catch (e) {
+      adminApiWarn('Failed to load invoices', e);
+      return null;
+    }
+  },
+
+  async getInvoice(invoiceId) {
+    try {
+      const resp = await window.API.get(`/api/admin/invoices/${encodeURIComponent(invoiceId)}`);
+      return resp?.data?.invoice ?? resp?.data ?? null;
+    } catch (e) {
+      adminApiWarn('Failed to load invoice', e);
+      return null;
+    }
+  },
+
+  // Backend assigns the next invoice_number in series and returns the
+  // authoritative subtotal/gst/total on the saved record.
+  async createInvoice(payload) {
+    const resp = await window.API.post('/api/admin/invoices', payload);
+    if (resp && resp.ok === false) throw new Error(resp.error || 'Create invoice failed');
+    return resp?.data?.invoice ?? resp?.data ?? null;
+  },
+
+  async updateInvoice(invoiceId, payload) {
+    const resp = await window.API.put(`/api/admin/invoices/${encodeURIComponent(invoiceId)}`, payload);
+    if (resp && resp.ok === false) throw new Error(resp.error || 'Update invoice failed');
+    return resp?.data?.invoice ?? resp?.data ?? null;
+  },
+
+  async voidInvoice(invoiceId) {
+    const resp = await window.API.post(`/api/admin/invoices/${encodeURIComponent(invoiceId)}/void`, {});
+    if (resp && resp.ok === false) throw new Error(resp.error || 'Void invoice failed');
+    return resp?.data ?? null;
+  },
+
+  async emailInvoice(invoiceId) {
+    const resp = await window.API.post(`/api/admin/invoices/${encodeURIComponent(invoiceId)}/email`, {});
+    if (resp && resp.ok === false) throw new Error(resp.error || 'Email invoice failed');
+    return resp?.data ?? null;
+  },
+
+  // Backend-rendered PDF — returns a Blob object URL (mirrors
+  // getInvoicePreviewUrl). The page falls back to client-side jsPDF when this
+  // endpoint isn't available yet, so a 404/network error is expected pre-backend.
+  async downloadInvoicePdf(invoiceId) {
+    const token = window.Auth?.session?.access_token;
+    if (!token) throw new Error('Not authenticated');
+    const resp = await fetch(`${Config.API_URL}/api/admin/invoices/${encodeURIComponent(invoiceId)}/pdf`, {
+      headers: { 'Authorization': `Bearer ${token}` },
+    });
+    if (!resp.ok) throw new Error(`Invoice PDF fetch failed: ${resp.status}`);
+    const blob = await resp.blob();
+    return URL.createObjectURL(blob);
   },
 
   // =========================================================================

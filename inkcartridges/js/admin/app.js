@@ -5,7 +5,7 @@ const APP_VERSION = '2026.06.25-admin-ia-overhaul3';
 
 import { AdminAuth } from './auth.js';
 import { FilterState } from './filters.js';
-import { AdminAPI } from './api.js?v=margin-inline-jun2026';
+import { AdminAPI } from './api.js?v=invoices-jun2026';
 
 const esc = (s) => Security.escapeHtml(String(s));
 
@@ -58,6 +58,7 @@ const NAV_ITEMS = [
   { key: 'tracking-requests', label: 'Tracking Requests', icon: 'fulfillment', badge: true },
   { key: 'products', label: 'Products', icon: 'products' },
   { key: 'customers', label: 'Customers', icon: 'customers' },
+  { key: 'invoices', label: 'Invoices', icon: 'invoice', ownerOnly: true },
   { key: 'promotions', label: 'Promotions', icon: 'finance', ownerOnly: true },
 
   { section: 'Analytics' },
@@ -268,7 +269,7 @@ async function navigate(pageName) {
   `;
 
   // Owner-only page check
-  const ownerPages = ['settings', 'control-center', 'sync-report'];
+  const ownerPages = ['settings', 'control-center', 'sync-report', 'invoices'];
   if (ownerPages.includes(pageName) && !AdminAuth.isOwner()) {
     content.innerHTML = `
       <div class="admin-stub">
@@ -570,8 +571,16 @@ async function boot() {
   }
 }
 
-// Start when module loads (deferred by type="module")
-boot();
+// Start when module loads (deferred by type="module").
+// Guard against double-boot: app.js can be evaluated under two distinct ES-module URLs
+// (the versioned entry <script> vs the bare `../app.js` imports in page modules). Each
+// URL is its own module instance and would run boot() again — registering a second
+// FilterState subscriber, so every dashboard load fires all analytics endpoints twice
+// and trips the backend rate limiter (429s). The shared-global flag collapses it to one.
+if (!window.__ADMIN_BOOTED__) {
+  window.__ADMIN_BOOTED__ = true;
+  boot();
+}
 
 // ---- Export dropdown helper ----
 function exportDropdown(id, label = 'Export') {

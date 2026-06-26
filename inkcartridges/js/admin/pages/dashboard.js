@@ -28,6 +28,10 @@ let _container = null;
 // load can paint stale data on top of a newer load that already finished.
 let _loadSeq = 0;
 let _hasRenderedSuccessfully = false; // first-load spinner vs re-load dim
+// The grain the bundle ACTUALLY served at — may be coarser than the user's pick if
+// the backend rejected the finer one (getDashboardBundle escalates). Drives fmtBucket
+// so the x-axis labels match the bars, even when escalation happened.
+let _effectiveGranularity = null;
 
 // Last successful render payload, keyed by the active filter signature. Survives SPA
 // navigation (NOT cleared in destroy) so returning to the dashboard paints instantly,
@@ -131,7 +135,7 @@ function resolveGranularity() {
 function fmtBucket(v) {
   if (v == null) return '';
   const s = String(v);
-  const g = resolveGranularity();
+  const g = _effectiveGranularity || resolveGranularity();
   const m = s.match(/^(\d{4})-(\d{2})-(\d{2})(?:T(\d{2}):(\d{2}))?$/);
   const d = m
     ? new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]), m[4] ? Number(m[4]) : 0)
@@ -482,11 +486,16 @@ async function loadDashboard() {
   // exactly what trips the 60/min limiter, and api.js already retries the bundle
   // on transient failures. A total bundle failure → all charts show their empty
   // state, which self-heals on the next load.
-  const graphs = bundleToGraphs(val(0));
+  const bundle = val(0);
+  const graphs = bundleToGraphs(bundle);
   _container.classList.remove('admin-page--reloading');
 
   const payload = {
     isOwner: true,
+    // The grain the bundle ACTUALLY served at (getDashboardBundle may have escalated past
+    // a backend bucket-cap rejection). Carried in the payload — not just a module var — so
+    // a stale-while-revalidate cache repaint labels its x-axis to match its own bars.
+    _effectiveGranularity: (bundle && bundle._granularity) || g,
     kpis: val(1), custStats: val(2), refunds: val(3), outOfStock: val(4),
     recentOrders: val(5), topProducts: val(6),
     ...graphs,
@@ -504,6 +513,9 @@ async function loadDashboard() {
 
 function render(d) {
   if (!_container) return;
+  // Latch the grain this payload was served at so fmtBucket labels the axis to match its
+  // bars — works for both fresh loads and cache repaints (the value rides on the payload).
+  _effectiveGranularity = d._effectiveGranularity || resolveGranularity();
   Charts.destroyAll();
 
   if (!d.isOwner) {

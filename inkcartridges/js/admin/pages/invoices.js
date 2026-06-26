@@ -1,0 +1,829 @@
+/**
+ * Invoices Page — create / save / download standalone invoices.
+ *
+ * Two surfaces:
+ *   A. List  — searchable, paginated table of saved invoices (DataTable).
+ *   B. Editor — slide-in Drawer with a form on the left and a live invoice
+ *      preview on the right (mirrors the operator's exemplar). Invoices can be
+ *      built from scratch or auto-filled from an existing order / customer /
+ *      catalogue product.
+ *
+ * Money model (matches the exemplar): line "Unit Cost" and "Sub Total" are
+ * GST-EXCLUSIVE; GST (15%) is added on top of (subtotal + freight); Total is
+ * the GST-inclusive sum. Freight of 0 renders as "Free".
+ *
+ * SOURCE OF TRUTH: the frontend computes a LIVE PREVIEW only. On Save the
+ * backend assigns the invoice number (continuing the series) and returns the
+ * authoritative subtotal/GST/total. PDF is backend-generated when available;
+ * until then we fall back to client-side jsPDF (already loaded in the shell).
+ */
+import { AdminAPI, icon, esc } from '../app.js';
+import { DataTable } from '../components/table.js';
+import { Drawer } from '../components/drawer.js';
+import { Modal } from '../components/modal.js';
+import { Toast } from '../components/toast.js';
+
+const GST_RATE = 0.15;
+
+// ---- small helpers ------------------------------------------------------
+const escA = (s) => (window.Security?.escapeAttr ? Security.escapeAttr(String(s ?? '')) : String(s ?? '').replace(/"/g, '&quot;'));
+const money = (n) => (typeof window.formatPrice === 'function' ? window.formatPrice(Number(n) || 0) : '$' + (Number(n) || 0).toFixed(2));
+const num = (n) => { const v = Number(n); return Number.isFinite(v) ? v : 0; };
+const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
+const warn = (m, e) => window.DebugLog?.warn?.(`[Invoices] ${m}`, e?.message || e);
+
+function todayInputValue() {
+  const d = new Date();
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${d.getFullYear()}-${mm}-${dd}`;
+}
+
+const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+function ordinal(d) {
+  const v = d % 100;
+  if (v >= 11 && v <= 13) return d + 'th';
+  switch (d % 10) { case 1: return d + 'st'; case 2: return d + 'nd'; case 3: return d + 'rd'; default: return d + 'th'; }
+}
+// "2026-06-25" -> "25th June 2026" (matches the exemplar). Falls back to the
+// raw string if it isn't a parseable Y-M-D.
+function formatInvoiceDate(iso) {
+  const parts = String(iso || '').split('-');
+  if (parts.length !== 3) return iso || '';
+  const y = +parts[0], m = +parts[1] - 1, d = +parts[2];
+  if (isNaN(d) || isNaN(m) || m < 0 || m > 11) return iso;
+  return `${ordinal(d)} ${MONTHS[m]} ${y}`;
+}
+const lines = (s) => String(s || '').split('\n').map((x) => x.trim()).filter(Boolean);
+
+const STATUS_META = {
+  draft:  { label: 'Draft',  cls: 'admin-badge--pending' },
+  unpaid: { label: 'Unpaid', cls: 'admin-badge--processing' },
+  paid:   { label: 'Paid',   cls: 'admin-badge--delivered' },
+  void:   { label: 'Void',   cls: 'admin-badge--cancelled' },
+};
+
+// ---- module state -------------------------------------------------------
+let _container = null;
+let _table = null;
+let _filters = { search: '', status: '' };
+let _page = 1;
+let _limit = 20;
+let _searchDebounce = null;
+
+let _draft = null;        // the invoice currently in the editor
+let _editorRefs = null;   // { drawer }
+let _editorToken = 0;     // bumped each editor open/close — async destroy guard
+const editorAlive = (token) => token === _editorToken && _editorRefs != null;
+
+// =========================================================================
+//  Draft model
+// =========================================================================
+const blankLine = () => ({ code: '', description: '', qty: 1, unitCost: 0 });
+
+function freshDraft() {
+  const L = window.LegalConfig || {};
+  const inv = L.invoice || {};
+  const addr = (typeof L.formatAddressMultiLine === 'function') ? L.formatAddressMultiLine() : [];
+  return {
+    id: null,
+    invoice_number: '',
+    status: 'unpaid',
+    date: todayInputValue(),
+    source_order_id: null,
+    seller: {
+      name: L.legalEntity || 'Office Consumables Ltd',
+      gst: L.gstNumber || '',
+      address: Array.isArray(addr) ? addr.join('\n') : '',
+      phone: inv.phone || L.phoneDisplay || '',
+      contact: inv.contactName || '',
+    },
+    customer: { attn: '', name: '', company: '', address: '', phone: '', email: '' },
+    lines: [blankLine()],
+    freight: 0,
+    footer: {
+      bankName: inv.bankAcctName || L.legalEntity || '',
+      bankAcct: inv.bankAcctNumber || '',
+      thankYou: inv.thankYou || '',
+    },
+    notes: '',
+  };
+}
+
+// Map a saved-invoice record (backend contract) back into the editor draft.
+function draftFromInvoice(rec) {
+  const d = freshDraft();
+  d.id = rec.id ?? null;
+  d.invoice_number = rec.invoice_number ?? '';
+  d.status = rec.status ?? 'unpaid';
+  d.date = (rec.issue_date || rec.date || '').slice(0, 10) || d.date;
+  d.source_order_id = rec.source_order_id ?? null;
+  if (rec.seller) d.seller = { ...d.seller, ...rec.seller, address: Array.isArray(rec.seller.address) ? rec.seller.address.join('\n') : (rec.seller.address ?? d.seller.address) };
+  if (rec.customer) d.customer = { ...d.customer, ...rec.customer, address: Array.isArray(rec.customer.address) ? rec.customer.address.join('\n') : (rec.customer.address ?? '') };
+  const items = rec.line_items || rec.lines || [];
+  d.lines = items.length ? items.map((l) => ({
+    code: l.product_code ?? l.code ?? '',
+    description: l.description ?? '',
+    qty: num(l.quantity ?? l.qty ?? 1),
+    unitCost: num(l.unit_cost_excl_gst ?? l.unitCost ?? 0),
+  })) : [blankLine()];
+  d.freight = num(rec.freight_excl_gst ?? rec.freight ?? 0);
+  if (rec.footer) d.footer = { ...d.footer, ...rec.footer };
+  d.notes = rec.notes ?? '';
+  return d;
+}
+
+function computeTotals(d) {
+  const subtotal = round2((d.lines || []).reduce((s, l) => s + num(l.qty) * num(l.unitCost), 0));
+  const freight = round2(num(d.freight));
+  const gst = round2((subtotal + freight) * GST_RATE);
+  const total = round2(subtotal + freight + gst);
+  return { subtotal, freight, gst, total };
+}
+
+function buildPayload(d) {
+  return {
+    invoice_number: d.invoice_number || null,   // null => backend assigns next in series
+    status: d.status,
+    issue_date: d.date,
+    source_order_id: d.source_order_id || null,
+    seller: { ...d.seller, address: lines(d.seller.address) },
+    customer: { ...d.customer, address: lines(d.customer.address) },
+    line_items: (d.lines || [])
+      .filter((l) => l.code || l.description || num(l.qty) || num(l.unitCost))
+      .map((l) => ({ product_code: l.code, description: l.description, quantity: num(l.qty), unit_cost_excl_gst: round2(num(l.unitCost)) })),
+    freight_excl_gst: round2(num(d.freight)),
+    footer: d.footer,
+    notes: d.notes,
+    // Client preview only — backend recomputes authoritatively and ignores these.
+    preview_totals: computeTotals(d),
+  };
+}
+
+// =========================================================================
+//  Page lifecycle
+// =========================================================================
+export default {
+  title: 'Invoices',
+
+  async init(container) {
+    _container = container;
+    _page = 1;
+    container.innerHTML = `
+      <div class="admin-page-content">
+        <div class="admin-page-header">
+          <div>
+            <h1>Invoices</h1>
+            <p style="margin:4px 0 0;color:var(--text-muted);font-size:13px">Create, save and download invoices. Build from scratch or auto-fill from an existing order.</p>
+          </div>
+          <div class="admin-page-header__actions">
+            <button class="admin-btn admin-btn--primary" id="inv-new">${icon('plus', 14, 14)} New Invoice</button>
+          </div>
+        </div>
+        <div class="admin-filters" style="display:flex;gap:var(--spacing-2);margin-bottom:var(--spacing-3);flex-wrap:wrap">
+          <input class="admin-input" id="inv-search" type="search" placeholder="Search invoice #, customer, email…" autocomplete="off" style="flex:1;min-width:240px">
+          <select class="admin-select" id="inv-status" style="min-width:150px">
+            <option value="">All statuses</option>
+            <option value="unpaid">Unpaid</option>
+            <option value="paid">Paid</option>
+            <option value="draft">Draft</option>
+            <option value="void">Void</option>
+          </select>
+        </div>
+        <div id="inv-table"></div>
+      </div>
+    `;
+
+    _table = new DataTable(container.querySelector('#inv-table'), {
+      columns: COLUMNS,
+      rowKey: 'id',
+      emptyMessage: 'No invoices yet',
+      emptyIcon: icon('invoice', 28, 28),
+      onRowClick: (row) => openExisting(row),
+      onSort: (key, dir) => { _filters.sort = key; _filters.order = dir; loadData(); },
+      onPageChange: (p) => { _page = p; loadData(); },
+      onLimitChange: (l) => { _limit = l; _page = 1; loadData(); },
+    });
+
+    container.querySelector('#inv-new').addEventListener('click', () => openEditor(freshDraft()));
+    container.querySelector('#inv-search').addEventListener('input', (e) => {
+      clearTimeout(_searchDebounce);
+      const v = e.target.value;
+      _searchDebounce = setTimeout(() => { _filters.search = v.trim(); _page = 1; loadData(); }, 300);
+    });
+    container.querySelector('#inv-status').addEventListener('change', (e) => {
+      _filters.status = e.target.value; _page = 1; loadData();
+    });
+    // Row action buttons are delegated (they live inside DataTable cells).
+    container.querySelector('#inv-table').addEventListener('click', onRowAction);
+
+    await loadData();
+  },
+
+  destroy() {
+    clearTimeout(_searchDebounce);
+    _editorToken++;            // invalidate any in-flight editor async work
+    if (Drawer.isOpen()) Drawer.close();
+    _table?.destroy?.();
+    _table = null;
+    _container = null;
+    _draft = null;
+    _editorRefs = null;
+  },
+};
+
+const COLUMNS = [
+  { key: 'invoice_number', label: 'Invoice #', sortable: true, render: (r) => `<span class="cell-mono"><strong>${esc(r.invoice_number || '—')}</strong></span>` },
+  { key: 'issue_date', label: 'Date', sortable: true, render: (r) => esc(formatInvoiceDate((r.issue_date || r.date || '').slice(0, 10))) },
+  { key: 'customer', label: 'Customer', render: (r) => esc(r.customer_name || r.customer?.name || '—') },
+  { key: 'total', label: 'Total (incl GST)', align: 'right', sortable: true, render: (r) => money(r.total_incl_gst ?? r.total ?? 0) },
+  {
+    key: 'status', label: 'Status', align: 'center',
+    render: (r) => { const m = STATUS_META[r.status] || STATUS_META.unpaid; return `<span class="admin-badge ${m.cls}">${m.label}</span>`; },
+  },
+  {
+    key: 'actions', label: '', align: 'right',
+    render: (r) => `
+      <button class="admin-btn admin-btn--ghost admin-btn--sm" data-row-action="download" data-id="${escA(r.id)}" title="Download PDF">${icon('download', 13, 13)}</button>
+      <button class="admin-btn admin-btn--ghost admin-btn--sm" data-row-action="email" data-id="${escA(r.id)}" title="Email to customer">${icon('mail', 13, 13)}</button>
+      <button class="admin-btn admin-btn--ghost admin-btn--sm" data-row-action="void" data-id="${escA(r.id)}" title="Void">${icon('trash', 13, 13)}</button>`,
+  },
+];
+
+async function loadData() {
+  if (!_table) return;
+  _table.setLoading(true);
+  const data = await AdminAPI.listInvoices(_filters, _page, _limit);
+  if (!_table) return; // destroyed mid-fetch
+  const rows = data?.invoices || data?.items || (Array.isArray(data) ? data : []);
+  const pagination = data?.pagination || (data?.total != null ? { total: data.total, page: _page, limit: _limit } : null);
+  _table.setData(rows, pagination);
+}
+
+async function onRowAction(e) {
+  const btn = e.target.closest('[data-row-action]');
+  if (!btn) return;
+  e.stopPropagation();
+  const id = btn.dataset.id;
+  const action = btn.dataset.rowAction;
+  if (action === 'download') {
+    const rec = await AdminAPI.getInvoice(id);
+    if (rec) downloadPdf(draftFromInvoice(rec));
+    else Toast.error('Could not load invoice to download.');
+  } else if (action === 'email') {
+    try { await AdminAPI.emailInvoice(id); Toast.success('Invoice emailed to customer.'); }
+    catch (err) { Toast.error(err.message || 'Email failed (backend pending).'); }
+  } else if (action === 'void') {
+    Modal.confirm({
+      title: 'Void this invoice?',
+      message: 'The invoice is kept for records but marked void.',
+      confirmLabel: 'Void',
+      confirmClass: 'admin-btn--danger',
+      onConfirm: async () => {
+        try { await AdminAPI.voidInvoice(id); Toast.success('Invoice voided.'); loadData(); }
+        catch (err) { Toast.error(err.message || 'Void failed (backend pending).'); }
+      },
+    });
+  }
+}
+
+async function openExisting(row) {
+  const rec = await AdminAPI.getInvoice(row.id) || row;
+  openEditor(draftFromInvoice(rec));
+}
+
+// =========================================================================
+//  Editor (Drawer)
+// =========================================================================
+function openEditor(draft) {
+  _draft = draft;
+  const token = ++_editorToken;
+  const footer = `
+    <button class="admin-btn admin-btn--ghost" data-ed-action="cancel">Cancel</button>
+    <button class="admin-btn admin-btn--ghost" data-ed-action="download">${icon('download', 14, 14)} Download PDF</button>
+    <button class="admin-btn admin-btn--ghost" data-ed-action="email">${icon('mail', 14, 14)} Email</button>
+    <button class="admin-btn admin-btn--primary" data-ed-action="save">Save invoice</button>`;
+
+  const drawer = Drawer.open({
+    title: draft.id ? `Invoice ${draft.invoice_number || ''}`.trim() : 'New Invoice',
+    width: 'min(1180px, 96vw)',
+    body: editorBodyHtml(draft),
+    footer,
+    onClose: () => { if (token === _editorToken) { _editorToken++; _draft = null; _editorRefs = null; } },
+  });
+  if (!drawer) return;
+  _editorRefs = { drawer };
+
+  drawer.footer.addEventListener('click', onEditorFooterClick);
+  bindEditorBody(drawer);
+}
+
+function bindEditorBody(drawer) {
+  const form = drawer.body.querySelector('.invoice-editor__form');
+  form.addEventListener('input', onFormInput);
+  form.addEventListener('change', onFormInput);
+  form.addEventListener('click', onFormClick);
+  renderLines();
+  attachTopAutocompletes();
+  refreshPreview();
+}
+
+// Replace the body in-place (used after an auto-fill that touches many fields).
+function rebuildEditor() {
+  if (!_editorRefs) return;
+  _editorRefs.drawer.setBody(editorBodyHtml(_draft));
+  bindEditorBody(_editorRefs.drawer);
+}
+
+function setPath(obj, path, val) {
+  const parts = path.split('.');
+  let o = obj;
+  for (let i = 0; i < parts.length - 1; i++) o = (o[parts[i]] = o[parts[i]] || {});
+  o[parts[parts.length - 1]] = val;
+}
+
+function onFormInput(e) {
+  const t = e.target;
+  if (t.dataset.field) {
+    setPath(_draft, t.dataset.field, t.value);
+  } else if (t.dataset.line != null && t.dataset.lfield) {
+    const i = +t.dataset.line;
+    if (_draft.lines[i]) _draft.lines[i][t.dataset.lfield] = t.value;
+  } else { return; }
+  refreshPreview();
+}
+
+function onFormClick(e) {
+  const act = e.target.closest('[data-form-action]')?.dataset.formAction;
+  if (!act) return;
+  if (act === 'add-line') { _draft.lines.push(blankLine()); renderLines(); refreshPreview(); }
+  else if (act === 'remove-line') {
+    const i = +e.target.closest('[data-line]').dataset.line;
+    _draft.lines.splice(i, 1);
+    if (!_draft.lines.length) _draft.lines.push(blankLine());
+    renderLines(); refreshPreview();
+  }
+}
+
+async function onEditorFooterClick(e) {
+  const act = e.target.closest('[data-ed-action]')?.dataset.edAction;
+  if (!act) return;
+  if (act === 'cancel') { Drawer.close(); return; }
+  if (act === 'download') { downloadPdf(_draft); return; }
+  if (act === 'save') { await saveInvoice(); return; }
+  if (act === 'email') {
+    if (!_draft.id) { Toast.warning('Save the invoice before emailing it.'); return; }
+    try { await AdminAPI.emailInvoice(_draft.id); Toast.success('Invoice emailed to customer.'); }
+    catch (err) { Toast.error(err.message || 'Email failed (backend pending).'); }
+  }
+}
+
+async function saveInvoice() {
+  const btn = _editorRefs?.drawer.footer.querySelector('[data-ed-action="save"]');
+  if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
+  try {
+    const payload = buildPayload(_draft);
+    const saved = _draft.id
+      ? await AdminAPI.updateInvoice(_draft.id, payload)
+      : await AdminAPI.createInvoice(payload);
+    if (saved) {
+      _draft.id = saved.id ?? _draft.id;
+      if (saved.invoice_number) _draft.invoice_number = saved.invoice_number;
+      Toast.success(`Invoice ${_draft.invoice_number || ''} saved.`.replace('  ', ' '));
+      Drawer.close();
+      loadData();
+    } else {
+      Toast.error('Save returned no data.');
+    }
+  } catch (err) {
+    warn('save failed', err);
+    Toast.error(err.message || 'Could not save invoice — the invoicing backend may not be live yet.');
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = 'Save invoice'; }
+  }
+}
+
+// =========================================================================
+//  Editor markup
+// =========================================================================
+function field(label, path, value, opts = {}) {
+  const type = opts.type || 'text';
+  const ph = opts.placeholder ? ` placeholder="${escA(opts.placeholder)}"` : '';
+  const cls = opts.acClass ? ` class="inv-ac"` : '';
+  const inner = `<input class="admin-input" type="${type}" data-field="${path}" value="${escA(value)}"${ph}${opts.attrs || ''}>`;
+  return `<label class="inv-field"><span class="inv-field__label">${esc(label)}</span>${opts.acClass ? `<div class="inv-ac">${inner}</div>` : inner}</label>`;
+}
+function areaField(label, path, value) {
+  return `<label class="inv-field"><span class="inv-field__label">${esc(label)}</span><textarea class="admin-input inv-textarea" data-field="${path}" rows="3">${esc(value)}</textarea></label>`;
+}
+
+function editorBodyHtml(d) {
+  const numberLine = d.id || d.invoice_number
+    ? `<div class="inv-field"><span class="inv-field__label">Invoice No</span><div class="inv-readonly">${esc(d.invoice_number || '—')}</div></div>`
+    : `<div class="inv-field"><span class="inv-field__label">Invoice No</span><div class="inv-readonly inv-readonly--muted">Auto — assigned on save</div></div>`;
+
+  return `
+  <div class="invoice-editor">
+    <div class="invoice-editor__form">
+
+      <section class="inv-section inv-section--source">
+        <div class="inv-section__title">Start from</div>
+        <div class="inv-grid-2">
+          <label class="inv-field"><span class="inv-field__label">Existing order</span>
+            <div class="inv-ac"><input class="admin-input" id="inv-order-search" type="search" placeholder="Search order # / email to auto-fill…" autocomplete="off"></div>
+          </label>
+          <label class="inv-field"><span class="inv-field__label">Find customer</span>
+            <div class="inv-ac"><input class="admin-input" id="inv-customer-search" type="search" placeholder="Search a customer to fill their details…" autocomplete="off"></div>
+          </label>
+        </div>
+      </section>
+
+      <section class="inv-section">
+        <div class="inv-section__title">Invoice details</div>
+        <div class="inv-grid-3">
+          ${numberLine}
+          ${field('Date', 'date', d.date, { type: 'date' })}
+          <label class="inv-field"><span class="inv-field__label">Status</span>
+            <select class="admin-select" data-field="status">
+              ${['unpaid', 'paid', 'draft', 'void'].map((s) => `<option value="${s}"${d.status === s ? ' selected' : ''}>${STATUS_META[s].label}</option>`).join('')}
+            </select>
+          </label>
+        </div>
+      </section>
+
+      <section class="inv-section">
+        <div class="inv-section__title">Invoice from (seller)</div>
+        <div class="inv-grid-2">
+          ${field('Business name', 'seller.name', d.seller.name)}
+          ${field('GST number', 'seller.gst', d.seller.gst)}
+          ${field('Phone', 'seller.phone', d.seller.phone)}
+          ${field('Contact', 'seller.contact', d.seller.contact)}
+        </div>
+        ${areaField('Address (one line per row)', 'seller.address', d.seller.address)}
+      </section>
+
+      <section class="inv-section">
+        <div class="inv-section__title">Invoice to (customer)</div>
+        <div class="inv-grid-2">
+          ${field('Attn', 'customer.attn', d.customer.attn)}
+          ${field('Invoice to (name)', 'customer.name', d.customer.name)}
+          ${field('Company / line', 'customer.company', d.customer.company)}
+          ${field('Phone', 'customer.phone', d.customer.phone)}
+          ${field('Email', 'customer.email', d.customer.email, { type: 'email' })}
+        </div>
+        ${areaField('Address (one line per row)', 'customer.address', d.customer.address)}
+      </section>
+
+      <section class="inv-section">
+        <div class="inv-section__title">Line items</div>
+        <div class="inv-lines-head">
+          <span>Product Code</span><span>Description</span><span>Number</span><span>Unit Cost (excl. GST)</span><span></span>
+        </div>
+        <div id="inv-lines"></div>
+        <button class="admin-btn admin-btn--ghost admin-btn--sm" data-form-action="add-line">${icon('plus', 13, 13)} Add line</button>
+        <label class="inv-field inv-field--freight"><span class="inv-field__label">Freight (excl. GST — 0 shows as “Free”)</span>
+          <input class="admin-input" type="number" step="0.01" min="0" data-field="freight" value="${escA(d.freight)}">
+        </label>
+      </section>
+
+      <section class="inv-section">
+        <div class="inv-section__title">Payment footer</div>
+        <div class="inv-grid-2">
+          ${field('a/c Name', 'footer.bankName', d.footer.bankName)}
+          ${field('a/c Number', 'footer.bankAcct', d.footer.bankAcct)}
+        </div>
+        ${areaField('Thank-you note', 'footer.thankYou', d.footer.thankYou)}
+      </section>
+    </div>
+
+    <div class="invoice-editor__preview">
+      <div class="inv-preview-note">Live preview — subtotal, GST &amp; total are confirmed by the server on save.</div>
+      <div id="inv-preview"></div>
+    </div>
+  </div>`;
+}
+
+function renderLines() {
+  const host = _editorRefs?.drawer.body.querySelector('#inv-lines');
+  if (!host) return;
+  host.innerHTML = (_draft.lines || []).map((l, i) => `
+    <div class="inv-line" data-line="${i}">
+      <div class="inv-ac"><input class="admin-input" data-line="${i}" data-lfield="code" value="${escA(l.code)}" placeholder="SKU / code" autocomplete="off"></div>
+      <div class="inv-ac"><input class="admin-input" data-line="${i}" data-lfield="description" value="${escA(l.description)}" placeholder="Product description" autocomplete="off"></div>
+      <input class="admin-input" type="number" step="1" min="0" data-line="${i}" data-lfield="qty" value="${escA(l.qty)}">
+      <input class="admin-input" type="number" step="0.01" min="0" data-line="${i}" data-lfield="unitCost" value="${escA(l.unitCost)}">
+      <button class="admin-btn admin-btn--ghost admin-btn--sm inv-line__rm" data-form-action="remove-line" title="Remove line">${icon('trash', 12, 12)}</button>
+    </div>`).join('');
+  // Product autocomplete on both code + description inputs of every line.
+  host.querySelectorAll('.inv-line').forEach((row) => {
+    const i = +row.dataset.line;
+    row.querySelectorAll('.inv-ac > input').forEach((input) => attachAutocomplete(input, {
+      fetch: async (q) => {
+        const data = await AdminAPI.getProducts({ search: q }, 1, 8);
+        return data?.products || data?.items || [];
+      },
+      render: (p) => `<span class="inv-ac__code">${esc(p.sku || '')}</span> ${esc(p.name || p.product_name || '')}`,
+      onPick: (p) => {
+        const ex = p.retail_price != null ? round2(num(p.retail_price) / (1 + GST_RATE)) : num(p.sell_price ?? p.price ?? 0);
+        _draft.lines[i] = { code: p.sku || '', description: p.name || p.product_name || '', qty: _draft.lines[i]?.qty || 1, unitCost: ex };
+        renderLines(); refreshPreview();
+      },
+    }));
+  });
+}
+
+function attachTopAutocompletes() {
+  const body = _editorRefs?.drawer.body;
+  if (!body) return;
+  const orderInput = body.querySelector('#inv-order-search');
+  if (orderInput) attachAutocomplete(orderInput, {
+    fetch: async (q) => {
+      const data = await AdminAPI.getOrders({ search: q }, 1, 8);
+      return data?.orders || data?.items || [];
+    },
+    render: (o) => `<span class="inv-ac__code">${esc(o.order_number || o.id || '')}</span> ${esc(o.customer_name || o.customer_email || '')} · ${money(o.total_amount ?? o.total ?? 0)}`,
+    onPick: (o) => loadFromOrder(o.id || o.order_id),
+  });
+  const custInput = body.querySelector('#inv-customer-search');
+  if (custInput) attachAutocomplete(custInput, {
+    fetch: async (q) => {
+      const data = await AdminAPI.getCustomers({ search: q }, 1, 8);
+      return data?.customers || data?.items || [];
+    },
+    render: (c) => `${esc(c.full_name || `${c.first_name || ''} ${c.last_name || ''}`.trim() || '—')} · ${esc(c.email || '')}`,
+    onPick: (c) => loadFromCustomer(c),
+  });
+}
+
+// ---- auto-fill sources --------------------------------------------------
+async function loadFromOrder(orderId) {
+  if (!orderId) return;
+  const token = _editorToken;
+  const [order, breakdown] = await Promise.all([AdminAPI.getOrder(orderId), AdminAPI.getOrderBreakdown(orderId)]);
+  if (!editorAlive(token)) return;
+  if (!order) { Toast.error('Could not load that order.'); return; }
+
+  const addr = order.shipping_address || {};
+  _draft.source_order_id = order.id || orderId;
+  _draft.customer = {
+    attn: order.customer_name || addr.recipient_name || '',
+    name: order.customer_name || addr.recipient_name || '',
+    company: '',
+    address: [addr.address_line1 || order.shipping_address_line1, addr.address_line2 || order.shipping_address_line2,
+      [(addr.city || order.shipping_city || ''), (addr.region || order.shipping_region || ''), (addr.postal_code || order.shipping_postal_code || '')].filter(Boolean).join(', '),
+      addr.country || order.shipping_country || ''].filter(Boolean).join('\n'),
+    phone: addr.phone || order.shipping_phone || '',
+    email: order.customer_email || order.guest_email || '',
+  };
+  _draft.lines = (order.items || []).map((it) => ({
+    code: it.sku || '',
+    description: it.product_name || it.name || it.description || '',
+    qty: num(it.qty ?? it.quantity ?? 1),
+    unitCost: round2(num(it.sell_price ?? it.unit_price ?? it.price ?? 0)),
+  }));
+  if (!_draft.lines.length) _draft.lines = [blankLine()];
+  // Order shipping_fee is GST-INCLUSIVE — convert to ex-GST for the freight field.
+  const shipIncl = num(breakdown?.shipping_fee ?? order.shipping_fee ?? 0);
+  _draft.freight = shipIncl > 0 ? round2(shipIncl / (1 + GST_RATE)) : 0;
+
+  rebuildEditor();
+  Toast.success(`Filled from order ${order.order_number || ''}`.trim());
+}
+
+async function loadFromCustomer(c) {
+  if (!c) return;
+  const token = _editorToken;
+  const name = c.full_name || `${c.first_name || ''} ${c.last_name || ''}`.trim();
+  _draft.customer.name = name;
+  _draft.customer.attn = _draft.customer.attn || name;
+  _draft.customer.email = c.email || _draft.customer.email;
+  _draft.customer.phone = c.phone || _draft.customer.phone;
+  // Pull the customer's most recent order for a shipping address, if any.
+  const od = await AdminAPI.getOrders({ user_id: c.id }, 1, 1);
+  if (!editorAlive(token)) return;
+  const order = od?.orders?.[0];
+  const addr = order?.shipping_address;
+  if (addr) {
+    _draft.customer.address = [addr.address_line1, addr.address_line2,
+      [addr.city, addr.region, addr.postal_code].filter(Boolean).join(', '), addr.country].filter(Boolean).join('\n');
+    if (!_draft.customer.phone) _draft.customer.phone = addr.phone || '';
+  }
+  rebuildEditor();
+  Toast.success(`Filled customer ${name}`.trim());
+}
+
+// =========================================================================
+//  Autocomplete primitive
+// =========================================================================
+function attachAutocomplete(input, opts) {
+  const wrap = input.closest('.inv-ac');
+  if (!wrap) return;
+  const token = _editorToken;
+  let menu = wrap.querySelector('.inv-ac__menu');
+  if (!menu) { menu = document.createElement('div'); menu.className = 'inv-ac__menu'; wrap.appendChild(menu); }
+  let items = [];
+  let timer = null;
+  const hide = () => { menu.style.display = 'none'; menu.innerHTML = ''; };
+
+  input.addEventListener('input', () => {
+    const q = input.value.trim();
+    clearTimeout(timer);
+    if (q.length < 2) { hide(); return; }
+    timer = setTimeout(async () => {
+      const res = await opts.fetch(q);
+      if (!editorAlive(token)) return;
+      items = res || [];
+      if (!items.length) { hide(); return; }
+      menu.innerHTML = items.map((it, i) => `<button type="button" class="inv-ac__item" data-i="${i}">${opts.render(it)}</button>`).join('');
+      menu.style.display = 'block';
+    }, 250);
+  });
+  // mousedown fires before the input's blur so the pick isn't lost.
+  menu.addEventListener('mousedown', (e) => {
+    const btn = e.target.closest('.inv-ac__item');
+    if (!btn) return;
+    e.preventDefault();
+    const it = items[+btn.dataset.i];
+    hide();
+    if (it) opts.onPick(it);
+  });
+  input.addEventListener('blur', () => setTimeout(hide, 150));
+}
+
+// =========================================================================
+//  Live preview
+// =========================================================================
+function refreshPreview() {
+  const host = _editorRefs?.drawer.body.querySelector('#inv-preview');
+  if (!host) return;
+  host.innerHTML = renderPreview(_draft);
+}
+
+function renderPreview(d) {
+  const t = computeTotals(d);
+  const sellerAddr = lines(d.seller.address).map((l) => esc(l)).join('<br>');
+  const custAddr = lines(d.customer.address).map((l) => esc(l)).join('<br>');
+  const rows = (d.lines || [])
+    .filter((l) => l.code || l.description || num(l.qty) || num(l.unitCost))
+    .map((l) => `<tr>
+      <td class="inv-doc__code">${esc(l.code)}</td>
+      <td>${esc(l.description)}</td>
+      <td class="inv-doc__num">${esc(num(l.qty))}</td>
+      <td class="inv-doc__cost">${money(num(l.qty) * num(l.unitCost))}</td>
+    </tr>`).join('') || `<tr><td colspan="4" class="inv-doc__empty">Add a line item…</td></tr>`;
+
+  const freightCell = t.freight > 0 ? money(t.freight) : 'Free';
+
+  return `
+  <div class="inv-doc">
+    <div class="inv-doc__top">
+      <div class="inv-doc__from">
+        <div class="inv-doc__label">Invoice from:</div>
+        <div class="inv-doc__seller">${esc(d.seller.name)}</div>
+        <table class="inv-doc__meta">
+          <tr><td>Invoice No:</td><td><strong>${esc(d.invoice_number || '—')}</strong></td></tr>
+          <tr><td>Date:</td><td>${esc(formatInvoiceDate(d.date))}</td></tr>
+          ${d.seller.gst ? `<tr><td>Gst:</td><td>${esc(d.seller.gst)}</td></tr>` : ''}
+        </table>
+        <div class="inv-doc__selleraddr">${sellerAddr}${d.seller.phone ? `<br>ph: ${esc(d.seller.phone)}` : ''}${d.seller.contact ? `<br>Contact : ${esc(d.seller.contact)}` : ''}</div>
+      </div>
+      <div class="inv-doc__to">
+        ${(d.customer.attn || d.customer.name) ? `<div class="inv-doc__attn">Attn: <strong>${esc(d.customer.attn || d.customer.name)}</strong></div>` : ''}
+        <div class="inv-doc__label">Invoice To:</div>
+        <div class="inv-doc__buyer">${esc(d.customer.name)}</div>
+        <div class="inv-doc__buyeraddr">${d.customer.company ? `${esc(d.customer.company)}<br>` : ''}${custAddr}${d.customer.phone ? `<br>${esc(d.customer.phone)}` : ''}${d.customer.email ? `<br>${esc(d.customer.email)}` : ''}</div>
+      </div>
+    </div>
+
+    <table class="inv-doc__items">
+      <thead><tr><th>Product Code</th><th>Description</th><th class="inv-doc__num">Number</th><th class="inv-doc__cost">Cost</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+
+    <table class="inv-doc__totals">
+      <tr><td>Sub Total</td><td>${money(t.subtotal)}</td></tr>
+      <tr><td>Freight</td><td>${freightCell}</td></tr>
+      <tr><td>GST</td><td>${money(t.gst)}</td></tr>
+      <tr class="inv-doc__grand"><td>Total</td><td>${money(t.total)}</td></tr>
+    </table>
+
+    <div class="inv-doc__pay">
+      <div class="inv-doc__pay-title">Please make payment to:</div>
+      <table>
+        <tr><td>a/c Name:</td><td><strong>${esc(d.footer.bankName)}</strong></td></tr>
+        <tr><td>a/c Number:</td><td><strong>${esc(d.footer.bankAcct)}</strong></td></tr>
+      </table>
+    </div>
+    ${d.footer.thankYou ? `<div class="inv-doc__thanks">${esc(d.footer.thankYou)}</div>` : ''}
+  </div>`;
+}
+
+// =========================================================================
+//  PDF — backend first, client-side jsPDF fallback
+// =========================================================================
+async function downloadPdf(d) {
+  // A saved invoice can use the backend-rendered PDF (authoritative).
+  if (d.id) {
+    try {
+      const url = await AdminAPI.downloadInvoicePdf(d.id);
+      triggerDownload(url, `Invoice-${d.invoice_number || d.id}.pdf`);
+      setTimeout(() => URL.revokeObjectURL(url), 4000);
+      return;
+    } catch (err) {
+      warn('backend PDF unavailable, using client fallback', err);
+    }
+  }
+  generateClientPdf(d);
+}
+
+function triggerDownload(url, filename) {
+  const a = document.createElement('a');
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click(); a.remove();
+}
+
+function generateClientPdf(d) {
+  const JsPDF = window.jspdf?.jsPDF;
+  if (!JsPDF) { Toast.error('PDF library not loaded.'); return; }
+  const t = computeTotals(d);
+  const doc = new JsPDF({ unit: 'pt', format: 'a4' });
+  const pageW = doc.internal.pageSize.getWidth();
+  const M = 48;
+  const rightX = pageW / 2 + 12;
+
+  const text = (s, x, y) => doc.text(String(s ?? ''), x, y);
+  const block = (arr, x, y, lh = 13) => { arr.forEach((l, i) => text(l, x, y + i * lh)); return y + arr.length * lh; };
+
+  // --- Attn (top right) + Invoice To ---
+  doc.setFont('helvetica', 'normal'); doc.setFontSize(10);
+  text('Attn:', rightX, 60);
+  doc.setFont('helvetica', 'bold'); text(d.customer.attn || d.customer.name || '', rightX + 30, 60);
+
+  // --- Invoice from (left) ---
+  doc.setFont('helvetica', 'normal'); doc.setFontSize(10);
+  text('Invoice from:', M, 96);
+  doc.setFont('helvetica', 'bold'); doc.setFontSize(17);
+  text(d.seller.name, M, 116);
+  doc.setFont('helvetica', 'normal'); doc.setFontSize(10);
+  let ly = 140;
+  text('Invoice No:', M, ly); doc.setFont('helvetica', 'bold'); text(d.invoice_number || '—', M + 70, ly); doc.setFont('helvetica', 'normal');
+  ly += 14; text('Date:', M, ly); text(formatInvoiceDate(d.date), M + 70, ly);
+  if (d.seller.gst) { ly += 14; text('Gst:', M, ly); text(d.seller.gst, M + 70, ly); }
+  ly += 22;
+  ly = block(lines(d.seller.address), M, ly);
+  if (d.seller.phone) ly = block([`ph: ${d.seller.phone}`], M, ly);
+  if (d.seller.contact) ly = block([`Contact : ${d.seller.contact}`], M, ly);
+
+  // --- Invoice To (right) ---
+  doc.setFontSize(10); text('Invoice To:', rightX, 96);
+  doc.setFont('helvetica', 'bold'); doc.setFontSize(15); text(d.customer.name || '', rightX, 116);
+  doc.setFont('helvetica', 'normal'); doc.setFontSize(10);
+  const toLines = [];
+  if (d.customer.company) toLines.push(d.customer.company);
+  toLines.push(...lines(d.customer.address));
+  if (d.customer.phone) toLines.push(d.customer.phone);
+  if (d.customer.email) toLines.push(d.customer.email);
+  block(toLines, rightX, 134);
+
+  // --- Items table ---
+  const startY = Math.max(ly + 16, 250);
+  const rows = (d.lines || [])
+    .filter((l) => l.code || l.description || num(l.qty) || num(l.unitCost))
+    .map((l) => [l.code || '', l.description || '', String(num(l.qty)), money(num(l.qty) * num(l.unitCost))]);
+  doc.autoTable({
+    startY,
+    head: [['Product Code', 'Description', 'Number', 'Cost']],
+    body: rows.length ? rows : [['', '', '', '']],
+    theme: 'plain',
+    styles: { fontSize: 10, cellPadding: 4 },
+    headStyles: { fontStyle: 'bold', halign: 'left' },
+    columnStyles: { 2: { halign: 'center' }, 3: { halign: 'right' } },
+    margin: { left: M, right: M },
+  });
+
+  // --- Totals (right aligned) ---
+  let ty = (doc.lastAutoTable?.finalY || startY) + 30;
+  const labelX = pageW - M - 150;
+  const valX = pageW - M;
+  const totRow = (label, val, bold) => {
+    doc.setFont('helvetica', bold ? 'bold' : 'normal');
+    text(label, labelX, ty);
+    doc.text(String(val), valX, ty, { align: 'right' });
+    ty += 16;
+  };
+  totRow('Sub Total', money(t.subtotal));
+  totRow('Freight', t.freight > 0 ? money(t.freight) : 'free');
+  totRow('GST', money(t.gst));
+  ty += 4; totRow('Total', money(t.total), true);
+
+  // --- Payment block ---
+  let py = ty + 24;
+  doc.setFont('helvetica', 'bold'); doc.setFontSize(10);
+  text('Please make payment to:', M, py); py += 18;
+  doc.setFont('helvetica', 'normal');
+  text(`a/c Name:`, M, py); doc.setFont('helvetica', 'bold'); text(d.footer.bankName || '', M + 70, py); py += 14;
+  doc.setFont('helvetica', 'normal'); text('a/c Number:', M, py); doc.setFont('helvetica', 'bold'); text(d.footer.bankAcct || '', M + 70, py);
+  if (d.footer.thankYou) { py += 30; doc.setFont('helvetica', 'bold'); doc.setFontSize(9); doc.text(doc.splitTextToSize(d.footer.thankYou, pageW - 2 * M), M, py); }
+
+  doc.save(`Invoice-${d.invoice_number || 'draft'}.pdf`);
+}
