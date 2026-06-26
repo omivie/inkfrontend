@@ -49,7 +49,9 @@ const _PAYLOAD_CACHE_MAX = 12;
 const COMBINED_METRICS = [
   { id: 'revenue',           label: 'Revenue',            payloadKey: 'sRevenue',     seriesKey: 'revenue',           color: 'success', unit: 'money',   additive: true  },
   { id: 'gross_profit',      label: 'Gross profit',       payloadKey: 'sGrossProfit', seriesKey: 'gross_profit',      color: 'cyan',    unit: 'money',   additive: true  },
-  { id: 'orders',            label: 'Orders',             payloadKey: 'sOrders',      seriesKey: 'orders',            color: 'yellow',  unit: 'count',   additive: true  },
+  // additive:false → in 'all' mode this plots each bucket's own order count (orders per day),
+  // not a cumulative running total, so the line reads as daily volume.
+  { id: 'orders',            label: 'Orders',             payloadKey: 'sOrders',      seriesKey: 'orders',            color: 'yellow',  unit: 'count',   additive: false },
   { id: 'aov',               label: 'AOV',                payloadKey: 'sAov',         seriesKey: 'aov',               color: 'magenta', unit: 'money',   additive: false },
   { id: 'refund_rate',       label: 'Refund rate',        payloadKey: 'sRefundRate',  seriesKey: 'refund_rate_pct',   color: 'danger',  unit: 'percent', additive: false },
   { id: 'new_revenue',       label: 'New cust. revenue',  payloadKey: 'custType',     seriesKey: 'new_revenue',       color: '#60a5fa', unit: 'money',   additive: true  },
