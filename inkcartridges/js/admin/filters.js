@@ -55,6 +55,11 @@ const FilterState = {
   _dropdowns: new Map(),
   _visibleFilters: null, // null = show all; array = only show these keys
   _showGranularity: false, // pages opt in via setGranularityVisible(true)
+  // Earliest date the store actually has data for (the first order's date). Used as the
+  // 'all' period's start so graphs begin at real data — not a far-past placeholder that
+  // floods the range with empty buckets and blows the backend's per-grain bucket cap.
+  // Set once at boot via setDataStartDate(); falls back to a fixed floor until then.
+  _dataStartDate: null,
 
   // Available options (populated from data)
   _options: {
@@ -92,7 +97,10 @@ const FilterState = {
     const now = new Date();
     const to = now.toISOString().slice(0, 10);
     if (this._state.period === 'all') {
-      return { from: '2020-01-01', to };
+      // Start at the store's first-data date when known (set at boot) so the chart begins
+      // at real activity and the range stays small enough for fine granularities. The
+      // 2020-01-01 floor is only a fallback for before the earliest date has loaded.
+      return { from: this._dataStartDate || '2020-01-01', to };
     }
     const preset = PERIOD_PRESETS.find(p => p.key === this._state.period);
     const days = preset ? preset.days : 30;
@@ -135,6 +143,14 @@ const FilterState = {
   setVisibleFilters(keys) {
     this._visibleFilters = keys; // null resets to "show all"
     this._render();
+  },
+
+  // Set the store's earliest-data date (YYYY-MM-DD) — the 'all' period starts here.
+  // Render-only refresh so a currently-active 'all' view picks up the tighter range.
+  setDataStartDate(dateStr) {
+    if (!dateStr || this._dataStartDate === dateStr) return;
+    this._dataStartDate = dateStr;
+    if (this._state.period === 'all') this._updateUI();
   },
 
   // Show/hide the bar-width (granularity) control. Off by default so it only

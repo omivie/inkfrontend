@@ -249,6 +249,23 @@ const AdminAPI = {
     }
   },
 
+  // Earliest date the store has data for, as YYYY-MM-DD — the oldest order's created_at.
+  // Used to anchor the dashboard's 'all' period at real data instead of a far-past floor.
+  // Returns null on any failure so callers keep their fallback. The backend has no
+  // dedicated min-date field (pagination.range only echoes the requested window), so we
+  // read the single oldest order via the existing sort=oldest path.
+  async getEarliestOrderDate() {
+    try {
+      const data = await this.getOrders({ sort: 'created_at', order: 'asc' }, 1, 1);
+      const arr = Array.isArray(data) ? data : (data?.orders || data?.items || data?.data || []);
+      const created = arr?.[0]?.created_at;
+      return typeof created === 'string' && created.length >= 10 ? created.slice(0, 10) : null;
+    } catch (e) {
+      adminApiWarn('Failed to load earliest order date', e);
+      return null;
+    }
+  },
+
   async getOrder(orderId) {
     try {
       const resp = await window.API.get(`/api/admin/orders/${orderId}`);

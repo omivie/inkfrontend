@@ -528,15 +528,21 @@ async function boot() {
     const filterBar = document.getElementById('filter-bar');
     FilterState.init(filterBar);
 
-    // Load brand/supplier options for filters
-    const brands = await AdminAPI.getBrands();
+    // Load filter options + the store's earliest-data date, in parallel (one round-trip
+    // of latency). The earliest date anchors the 'all' period at real data, so it must be
+    // set before the initial navigate() → dashboard's first load (which defaults to 'all').
+    const [brands, suppliers, dataStart] = await Promise.all([
+      AdminAPI.getBrands(),
+      AdminAPI.getSuppliers(),
+      AdminAPI.getEarliestOrderDate(),
+    ]);
     if (brands && Array.isArray(brands)) {
       FilterState.setOptions('brands', brands.map(b => typeof b === 'string' ? b : b.name || b.brand || String(b)));
     }
-    const suppliers = await AdminAPI.getSuppliers();
     if (suppliers && Array.isArray(suppliers)) {
       FilterState.setOptions('suppliers', suppliers.map(s => typeof s === 'string' ? s : s.name || String(s)));
     }
+    if (dataStart) FilterState.setDataStartDate(dataStart);
 
     // Wire filter changes to current page
     FilterState.subscribe(() => {

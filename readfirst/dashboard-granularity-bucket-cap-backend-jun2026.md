@@ -8,6 +8,38 @@ The real fix is backend. Once fixed, the frontend automatically uses the finer g
 
 ---
 
+## ⚠️ UPDATE 2026-06-26 (re-verified after backend reported "fixed")
+
+The backend was reported fixed, but re-probing shows **Week is still broken** and the
+response shape changed. Two action items remain for the backend:
+
+**A. `week` is STILL miscounted — the cap check ignores the requested range.**
+Re-probed live: `granularity=week` with `date_from=2026-03-01` (a **118-day** window = ~17
+weeks) **still returns `400 "Too many buckets (751)"`**. 751 is the count for the *whole
+dataset in days*, not the requested window in weeks. Compare same window:
+- `granularity=day` · `date_from=2026-03-01` → **200**, returns **118** day buckets ✅ (day
+  correctly honours the range)
+- `granularity=week` · `date_from=2026-03-01` → **400 "751"** ❌ (week ignores the range AND
+  doesn't divide by 7)
+So the `week` branch must (1) scope to the requested `[date_from, date_to]` and (2) bucket by
+`date_trunc('week', …)` / `generate_series(..., '1 week')`. See §3–§4 below — still open.
+
+**B. Time-series response shape changed to a wrapper (heads-up — FE already adapted).**
+Each series is now an object, not a bare array:
+`revenue_series` → `{ "series": [ { "bucket_start", "revenue" }, … ] }`;
+`traffic_by_source`/`conversion_by_source` → `{ "sources": [...] }`;
+`reorder_interval` → `{ "median_days", "buckets": [...] }`.
+The frontend already unwraps these, so no breakage — but please **keep these keys stable**.
+
+**C. Request: expose the data's earliest date.** Add `data_min_date` (the date of the first
+order / first non-empty bucket, `YYYY-MM-DD`) to `pagination.range`. The frontend currently
+derives the dashboard's "all time" start by fetching the oldest order separately
+(`GET /api/admin/orders?sort=oldest&limit=1`); a `data_min_date` on the bundle would let us
+drop that extra round-trip. (`pagination.range` today only echoes the *requested* dateFrom/
+dateTo, which isn't useful for this.)
+
+---
+
 ## 1. Symptom
 
 On the admin dashboard (`/admin#dashboard`), selecting the **Week** bar-width (and **Day**
