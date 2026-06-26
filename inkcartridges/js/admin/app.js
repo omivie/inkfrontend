@@ -1,7 +1,7 @@
 /**
  * Admin SPA — Entry point, router, shell
  */
-const APP_VERSION = '2026.06.26-invoices-validation';
+const APP_VERSION = '2026.06.27-dash-money-merge';
 
 import { AdminAuth } from './auth.js';
 import { FilterState } from './filters.js';

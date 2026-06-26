@@ -349,6 +349,69 @@ function drawShare(canvasId, payload, opts) {
   }), canvasId);
 }
 
+// Revenue + gross profit on one chart. They share the time axis but live on very
+// different scales (revenue ≫ gross profit), so gross profit rides a secondary
+// right-hand y-axis to stay readable. Merges the two payloads by bucket and honors
+// cumulative 'all' mode exactly like the sibling money charts used to.
+function drawRevenueProfit(d) {
+  const canvasId = 'dash-c-revenue-profit';
+  const revList = resolveList(d.sRevenue, ['series', 'data']) || [];
+  const gpList  = resolveList(d.sGrossProfit, ['series', 'data']) || [];
+
+  const byBucket = new Map(); // bucket_start -> { revenue, gross_profit }
+  const order = [];
+  const merge = (list, srcKey, dstKey) => {
+    for (const r of list) {
+      const b = r.bucket_start ?? r.date;
+      if (!byBucket.has(b)) { byBucket.set(b, {}); order.push(b); }
+      byBucket.get(b)[dstKey] = Number(r[srcKey] || 0);
+    }
+  };
+  merge(revList, 'revenue', 'revenue');
+  merge(gpList, 'gross_profit', 'gross_profit');
+  if (!order.length) { chartEmpty(canvasId, EMPTY_MSG); return; }
+  order.sort(); // "YYYY-MM-DD" sorts chronologically
+
+  const c = Charts.getThemeColors();
+  const labels = order.map(fmtBucket);
+  const plot = isCumulativeMode();
+  const accum = (arr) => { if (!plot) return arr; let acc = 0; return arr.map(v => (acc += v)); };
+  const revenue = accum(order.map(b => Number(byBucket.get(b)?.revenue || 0)));
+  const profit  = accum(order.map(b => Number(byBucket.get(b)?.gross_profit || 0)));
+
+  const drawType = plot ? 'line' : 'bar';
+  const mk = (label, data, color, axis) => drawType === 'line'
+    ? { label, data, yAxisID: axis, borderColor: color, backgroundColor: hexToRgba(color, 0.16),
+        borderWidth: 2, fill: true, tension: 0.35, pointRadius: 0, pointHoverRadius: 4 }
+    : { label, data, yAxisID: axis, backgroundColor: color + 'cc', borderRadius: 4,
+        barPercentage: 0.7, categoryPercentage: 0.8 };
+
+  const datasets = [
+    mk('Revenue', revenue, c.success, 'y'),
+    mk('Gross profit', profit, c.cyan, 'y1'),
+  ];
+
+  const fn = drawType === 'line' ? Charts.line : Charts.bar;
+  guardDraw(fn.call(Charts, canvasId, {
+    labels, datasets,
+    options: {
+      plugins: {
+        legend: { display: true, position: 'top', labels: { color: c.textMuted, font: { size: 11 }, boxWidth: 10, boxHeight: 10 } },
+        tooltip: { callbacks: { label: (ctx) => `${ctx.dataset.label}: ${formatPrice(ctx.raw || 0)}` } },
+      },
+      scales: {
+        x: { ticks: { maxTicksLimit: 10 } },
+        // Pin both axes to a 0 floor so the two series share one baseline (revenue and
+        // cumulative gross profit are both ≥0; without min:0 Chart.js pads the right axis
+        // down to ~-$100 and the zero lines drift apart).
+        y:  { beginAtZero: true, min: 0, position: 'left',  ticks: { callback: (v) => formatPrice(v) } },
+        y1: { beginAtZero: true, min: 0, position: 'right', grid: { drawOnChartArea: false },
+              ticks: { color: c.textMuted, font: { size: 11 }, callback: (v) => formatPrice(v) } },
+      },
+    },
+  }), canvasId);
+}
+
 // Revenue forecast: backend ships a contiguous series flagged is_forecast.
 function drawForecast(canvasId, payload) {
   const list = resolveList(payload, ['series', 'data']);
@@ -449,9 +512,9 @@ function drawAllCharts(d) {
   try {
     // Combined overview (above Money)
     drawCombined(d);
-    // Row 1 — Money
-    drawSeries('dash-c-revenue', d.sRevenue, { type: 'bar', additive: true, metrics: [{ label: 'Revenue', key: 'revenue', color: 'success' }], isMoney: true });
-    drawSeries('dash-c-gross-profit', d.sGrossProfit, { type: 'bar', additive: true, metrics: [{ label: 'Gross profit', key: 'gross_profit', color: 'cyan' }], isMoney: true });
+    // Row 1 — Money: revenue + gross profit merged (left), forecast (right)
+    drawRevenueProfit(d);
+    drawForecast('dash-c-forecast', d.forecast);
     // Row 2 — Products
     drawRanked('dash-c-sku-revenue', d.topSkusRev, { listKeys: ['products', 'skus'], labelKey: 'sku', valueKey: 'revenue', color: 'success', isMoney: true });
     drawRanked('dash-c-sku-profit', d.topSkusProfit, { listKeys: ['products', 'skus'], labelKey: 'sku', valueKey: 'gross_profit', color: 'cyan', isMoney: true });
@@ -475,8 +538,6 @@ function drawAllCharts(d) {
     // Row 9 — Risk
     drawSeries('dash-c-refund-rate', d.sRefundRate, { type: 'line', metrics: [{ label: 'Refund rate', key: 'refund_rate_pct', color: 'danger' }], isMoney: false, isPercent: true });
     drawShare('dash-c-refund-reasons', d.refunds, { listKeys: ['reasons'], labelKey: 'reason_code', valueKey: 'count' });
-    // Row 10 — Forecast
-    drawForecast('dash-c-forecast', d.forecast);
   } catch (e) {
     if (window.DebugLog) DebugLog.warn('[Dashboard] chart draw error:', e?.message);
   }
@@ -624,17 +685,20 @@ function render(d) {
   _container.innerHTML = `
     <div class="admin-page-header admin-page-header--dash"><h1>Dashboard</h1></div>
     ${renderKpiStrip(d)}
-    ${renderCombinedSection()}
-    ${row('Money', 'success', chartCard('Revenue', 'over time', 'dash-c-revenue'), chartCard('Gross profit', 'over time', 'dash-c-gross-profit'))}
     <section class="admin-dash-row">
-      <div class="admin-dash-row__label admin-dash-row__label--success">Forecast</div>
+      <div class="admin-dash-row__label admin-dash-row__label--success">Money <small>${esc(rangeLabel())}</small></div>
       <div class="admin-dash">
-        <div class="admin-dash__cell--12 admin-card">
+        <div class="admin-dash__cell--6 admin-card">
+          <div class="admin-card__title"><span>Revenue &amp; gross profit <small>over time</small></span></div>
+          <div class="admin-chart-box"><canvas id="dash-c-revenue-profit"></canvas></div>
+        </div>
+        <div class="admin-dash__cell--6 admin-card">
           <div class="admin-card__title"><span>30-day revenue forecast <small>actual + projection · trend estimate</small></span></div>
-          <div class="admin-chart-box admin-chart-box--tall"><canvas id="dash-c-forecast"></canvas></div>
+          <div class="admin-chart-box"><canvas id="dash-c-forecast"></canvas></div>
         </div>
       </div>
     </section>
+    ${renderCombinedSection()}
     ${row('Products', 'cyan', chartCard('Top SKUs by revenue', 'top 10', 'dash-c-sku-revenue'), chartCard('Top SKUs by gross profit', 'top 10', 'dash-c-sku-profit'))}
     ${row('Sales', 'yellow', chartCard('Orders', 'over time', 'dash-c-orders'), chartCard('Average order value', 'over time', 'dash-c-aov'))}
     ${row('Margin', 'magenta', chartCard('Gross margin by brand', '%', 'dash-c-margin-brand'), chartCard('Gross margin by category', '%', 'dash-c-margin-category'))}
