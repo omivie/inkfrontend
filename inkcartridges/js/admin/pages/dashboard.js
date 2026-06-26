@@ -266,7 +266,7 @@ function drawSeries(canvasId, payload, opts) {
   }), canvasId);
 }
 
-// Ranked bars (top SKUs, suppliers, searches, margin, conversion, histograms).
+// Ranked bars (top SKUs, searches, margin, conversion, histograms).
 function drawRanked(canvasId, payload, opts) {
   const {
     listKeys = [], labelKey, valueKey, color = 'cyan',
@@ -384,9 +384,6 @@ function drawAllCharts(d) {
     // Row 6 — Customers
     drawSeries('dash-c-cust-type', d.custType, { type: 'bar', stacked: true, additive: true, isMoney: true, metrics: [{ label: 'New', key: 'new_revenue', color: 'cyan' }, { label: 'Returning', key: 'returning_revenue', color: 'success' }] });
     drawRanked('dash-c-reorder', d.reorder, { listKeys: ['buckets'], labelKey: 'days_label', valueKey: 'customer_count', color: 'cyan', isMoney: false, horizontal: false, sort: false, limit: 24 });
-    // Row 7 — Suppliers
-    drawRanked('dash-c-supplier-rev', d.supplierRev, { listKeys: ['suppliers'], labelKey: 'supplier', valueKey: 'revenue', color: 'success', isMoney: true });
-    drawRanked('dash-c-supplier-problem', d.supplierProblem, { listKeys: ['suppliers'], labelKey: 'supplier', valueKey: 'problem_rate_pct', color: 'danger', isMoney: false, isPercent: true });
     // Row 8 — Search
     // search→purchase attribution isn't tracked yet (backend data_gap: orders/
     // conversion_pct are null), so rank by search volume until it lands.
@@ -434,8 +431,6 @@ function bundleToGraphs(b) {
     marginCategory:   b.margin_by_category ?? null,
     conversionSource: b.conversion_by_source ?? null,
     reorder:          b.reorder_interval ?? null,
-    supplierRev:      b.suppliers_revenue ?? null,
-    supplierProblem:  b.suppliers_problem_rate ?? null,
     searchTop:        b.search_top_converting ?? null,
     searchZero:       b.search_zero_result ?? null,
   };
@@ -552,7 +547,6 @@ function render(d) {
     ${row('Margin', 'magenta', chartCard('Gross margin by brand', '%', 'dash-c-margin-brand'), chartCard('Gross margin by category', '%', 'dash-c-margin-category'))}
     ${row('Marketing', 'success', chartCard('Traffic by source', 'sessions · approx', 'dash-c-traffic-source'), chartCard('Conversion by source', '% · approx', 'dash-c-conversion-source'))}
     ${row('Customers', 'cyan', chartCard('New vs returning revenue', 'over time', 'dash-c-cust-type'), chartCard('Reorder interval', 'days between orders', 'dash-c-reorder'))}
-    ${row('Suppliers', 'yellow', chartCard('Supplier revenue', '', 'dash-c-supplier-rev'), chartCard('Supplier problem rate', 'refunds · late · cancels · approx', 'dash-c-supplier-problem'))}
     ${row('Search', 'magenta', chartCard('Top searches', 'by volume — conversion pending', 'dash-c-search-top'), chartCard('Zero-result searches', '', 'dash-c-search-zero'))}
     ${row('Risk', 'danger', chartCard('Refund rate', 'over time', 'dash-c-refund-rate'), chartCard('Refund reasons', 'share', 'dash-c-refund-reasons'))}
     <section class="admin-dash-row">
