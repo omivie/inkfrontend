@@ -59,7 +59,7 @@ const COMBINED_METRICS = [
 ];
 
 // Toggle state survives re-renders (filter changes) and SPA nav, like _payloadCache.
-const _combinedEnabled = new Set(['revenue', 'gross_profit']);
+const _combinedEnabled = new Set(['revenue', 'gross_profit', 'orders']);
 let _lastPayload = null; // set in render(d); read by the toggle handler to redraw without refetch
 
 // ---------- small helpers ----------

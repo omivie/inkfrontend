@@ -1,7 +1,7 @@
 /**
  * Admin SPA — Entry point, router, shell
  */
-const APP_VERSION = '2026.06.27-combined-orders-daily';
+const APP_VERSION = '2026.06.27-combined-orders-default';
 
 import { AdminAuth } from './auth.js';
 import { FilterState } from './filters.js';
