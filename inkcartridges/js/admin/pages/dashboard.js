@@ -542,13 +542,6 @@ function render(d) {
     <div class="admin-page-header admin-page-header--dash"><h1>Dashboard</h1></div>
     ${renderKpiStrip(d)}
     ${row('Money', 'success', chartCard('Revenue', 'over time', 'dash-c-revenue'), chartCard('Gross profit', 'over time', 'dash-c-gross-profit'))}
-    ${row('Products', 'cyan', chartCard('Top SKUs by revenue', 'top 10', 'dash-c-sku-revenue'), chartCard('Top SKUs by gross profit', 'top 10', 'dash-c-sku-profit'))}
-    ${row('Sales', 'yellow', chartCard('Orders', 'over time', 'dash-c-orders'), chartCard('Average order value', 'over time', 'dash-c-aov'))}
-    ${row('Margin', 'magenta', chartCard('Gross margin by brand', '%', 'dash-c-margin-brand'), chartCard('Gross margin by category', '%', 'dash-c-margin-category'))}
-    ${row('Marketing', 'success', chartCard('Traffic by source', 'sessions · approx', 'dash-c-traffic-source'), chartCard('Conversion by source', '% · approx', 'dash-c-conversion-source'))}
-    ${row('Customers', 'cyan', chartCard('New vs returning revenue', 'over time', 'dash-c-cust-type'), chartCard('Reorder interval', 'days between orders', 'dash-c-reorder'))}
-    ${row('Search', 'magenta', chartCard('Top searches', 'by volume — conversion pending', 'dash-c-search-top'), chartCard('Zero-result searches', '', 'dash-c-search-zero'))}
-    ${row('Risk', 'danger', chartCard('Refund rate', 'over time', 'dash-c-refund-rate'), chartCard('Refund reasons', 'share', 'dash-c-refund-reasons'))}
     <section class="admin-dash-row">
       <div class="admin-dash-row__label admin-dash-row__label--success">Forecast</div>
       <div class="admin-dash">
@@ -558,6 +551,13 @@ function render(d) {
         </div>
       </div>
     </section>
+    ${row('Products', 'cyan', chartCard('Top SKUs by revenue', 'top 10', 'dash-c-sku-revenue'), chartCard('Top SKUs by gross profit', 'top 10', 'dash-c-sku-profit'))}
+    ${row('Sales', 'yellow', chartCard('Orders', 'over time', 'dash-c-orders'), chartCard('Average order value', 'over time', 'dash-c-aov'))}
+    ${row('Margin', 'magenta', chartCard('Gross margin by brand', '%', 'dash-c-margin-brand'), chartCard('Gross margin by category', '%', 'dash-c-margin-category'))}
+    ${row('Marketing', 'success', chartCard('Traffic by source', 'sessions · approx', 'dash-c-traffic-source'), chartCard('Conversion by source', '% · approx', 'dash-c-conversion-source'))}
+    ${row('Customers', 'cyan', chartCard('New vs returning revenue', 'over time', 'dash-c-cust-type'), chartCard('Reorder interval', 'days between orders', 'dash-c-reorder'))}
+    ${row('Search', 'magenta', chartCard('Top searches', 'by volume — conversion pending', 'dash-c-search-top'), chartCard('Zero-result searches', '', 'dash-c-search-zero'))}
+    ${row('Risk', 'danger', chartCard('Refund rate', 'over time', 'dash-c-refund-rate'), chartCard('Refund reasons', 'share', 'dash-c-refund-reasons'))}
     <section class="admin-dash-row">
       <div class="admin-dash-row__label">Latest</div>
       <div class="admin-dash">
