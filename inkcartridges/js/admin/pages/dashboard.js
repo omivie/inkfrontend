@@ -39,6 +39,27 @@ let _effectiveGranularity = null;
 const _payloadCache = new Map();
 const _PAYLOAD_CACHE_MAX = 12;
 
+// ---------- combined "all metrics over time" graph ----------
+
+// One toggleable line per time-series metric, each pointing at a payload key already
+// produced by bundleToGraphs() and the field inside that payload's `series` rows. The
+// series have different units ($/count/%), so the combined chart normalizes each line to
+// 0–100% of its own peak (real values live in the tooltip). Colors use theme keys plus the
+// two extras drawShare already uses ('#60a5fa', '#a78bfa').
+const COMBINED_METRICS = [
+  { id: 'revenue',           label: 'Revenue',            payloadKey: 'sRevenue',     seriesKey: 'revenue',           color: 'success', unit: 'money',   additive: true  },
+  { id: 'gross_profit',      label: 'Gross profit',       payloadKey: 'sGrossProfit', seriesKey: 'gross_profit',      color: 'cyan',    unit: 'money',   additive: true  },
+  { id: 'orders',            label: 'Orders',             payloadKey: 'sOrders',      seriesKey: 'orders',            color: 'yellow',  unit: 'count',   additive: true  },
+  { id: 'aov',               label: 'AOV',                payloadKey: 'sAov',         seriesKey: 'aov',               color: 'magenta', unit: 'money',   additive: false },
+  { id: 'refund_rate',       label: 'Refund rate',        payloadKey: 'sRefundRate',  seriesKey: 'refund_rate_pct',   color: 'danger',  unit: 'percent', additive: false },
+  { id: 'new_revenue',       label: 'New cust. revenue',  payloadKey: 'custType',     seriesKey: 'new_revenue',       color: '#60a5fa', unit: 'money',   additive: true  },
+  { id: 'returning_revenue', label: 'Returning revenue',  payloadKey: 'custType',     seriesKey: 'returning_revenue', color: '#a78bfa', unit: 'money',   additive: true  },
+];
+
+// Toggle state survives re-renders (filter changes) and SPA nav, like _payloadCache.
+const _combinedEnabled = new Set(['revenue', 'gross_profit']);
+let _lastPayload = null; // set in render(d); read by the toggle handler to redraw without refetch
+
 // ---------- small helpers ----------
 
 function deltaBadge(current, previous, { invert = false } = {}) {
@@ -364,8 +385,70 @@ function drawForecast(canvasId, payload) {
   }), canvasId);
 }
 
+// Combined multi-metric line chart. Merges the enabled series by bucket_start, applies the
+// same cumulative-mode accumulation the sibling charts use, normalizes each series to its
+// own peak (so mismatched units share one 0–100% axis), and draws one chart. Reuses the
+// existing helpers rather than re-bucketing anything.
+function drawCombined(d) {
+  const canvasId = 'dash-c-combined';
+  const enabled = COMBINED_METRICS.filter(m => _combinedEnabled.has(m.id));
+  if (!enabled.length) { chartEmpty(canvasId, 'Select at least one metric'); return; }
+
+  // Build the union x-axis from all enabled series' bucket_start (they share grain/range,
+  // so this is normally identical across series). Map keeps first-seen order.
+  const byBucket = new Map(); // bucket_start -> { [metricId]: rawValue }
+  const order = [];
+  for (const m of enabled) {
+    const list = resolveList(d[m.payloadKey], ['series', 'data']) || [];
+    for (const r of list) {
+      const b = r.bucket_start ?? r.date;
+      if (!byBucket.has(b)) { byBucket.set(b, {}); order.push(b); }
+      byBucket.get(b)[m.id] = Number(r[m.seriesKey] || 0);
+    }
+  }
+  if (!order.length) { chartEmpty(canvasId, EMPTY_MSG); return; }
+  order.sort(); // "YYYY-MM-DD" labels sort chronologically
+
+  const labels = order.map(fmtBucket);
+  const plot = isCumulativeMode();
+  const c = Charts.getThemeColors();
+  const fmtVal = (u, v) => u === 'money' ? formatPrice(v) : u === 'percent' ? `${Number(v).toFixed(1)}%` : String(Math.round(v));
+
+  const datasets = enabled.map(m => {
+    let raw = order.map(b => Number(byBucket.get(b)?.[m.id] || 0));
+    if (plot && m.additive) { let acc = 0; raw = raw.map(v => (acc += v)); } // cumulative in 'all' mode
+    const max = Math.max(...raw.map(Math.abs), 0);
+    const norm = raw.map(v => max ? (v / max) * 100 : 0); // normalize to 0–100% of own peak
+    const col = c[m.color] || m.color;
+    return {
+      label: m.label, data: norm,
+      borderColor: col, backgroundColor: hexToRgba(col, 0.06),
+      borderWidth: 2, fill: false, tension: 0.35, pointRadius: 0, pointHoverRadius: 4,
+      _raw: raw, _unit: m.unit, // stashed so the tooltip shows real values, not the 0–100 scale
+    };
+  });
+
+  guardDraw(Charts.line(canvasId, {
+    labels, datasets,
+    options: {
+      plugins: {
+        legend: { display: false }, // our checkbox toolbar is the legend
+        tooltip: { callbacks: {
+          label: (ctx) => {
+            const ds = ctx.dataset;
+            return `${ds.label}: ${fmtVal(ds._unit, ds._raw?.[ctx.dataIndex] ?? 0)} (${Math.round(ctx.raw)}%)`;
+          },
+        } },
+      },
+      scales: { x: { ticks: { maxTicksLimit: 10 } }, y: { beginAtZero: true, max: 100, ticks: { callback: (v) => `${v}%` } } },
+    },
+  }), canvasId);
+}
+
 function drawAllCharts(d) {
   try {
+    // Combined overview (above Money)
+    drawCombined(d);
     // Row 1 — Money
     drawSeries('dash-c-revenue', d.sRevenue, { type: 'bar', additive: true, metrics: [{ label: 'Revenue', key: 'revenue', color: 'success' }], isMoney: true });
     drawSeries('dash-c-gross-profit', d.sGrossProfit, { type: 'bar', additive: true, metrics: [{ label: 'Gross profit', key: 'gross_profit', color: 'cyan' }], isMoney: true });
@@ -541,6 +624,7 @@ function render(d) {
   _container.innerHTML = `
     <div class="admin-page-header admin-page-header--dash"><h1>Dashboard</h1></div>
     ${renderKpiStrip(d)}
+    ${renderCombinedSection()}
     ${row('Money', 'success', chartCard('Revenue', 'over time', 'dash-c-revenue'), chartCard('Gross profit', 'over time', 'dash-c-gross-profit'))}
     <section class="admin-dash-row">
       <div class="admin-dash-row__label admin-dash-row__label--success">Forecast</div>
@@ -567,8 +651,10 @@ function render(d) {
     </section>
   `;
 
+  _lastPayload = d;   // toggle handler redraws the combined chart from this without refetch
   drawAllCharts(d);
   wireOrderRowClicks();
+  wireCombinedToggles();
 }
 
 // ---------- layout helpers ----------
@@ -589,6 +675,41 @@ function row(label, accent, leftCard, rightCard) {
       <div class="admin-dash">${leftCard}${rightCard}</div>
     </section>
   `;
+}
+
+// Full-width combined-metrics section (above Money). A checkbox toolbar drives which series
+// overlay on one normalized chart; the checkboxes ARE the legend (chart legend is hidden).
+function renderCombinedSection() {
+  const toggles = COMBINED_METRICS.map(m => {
+    const c = Charts.getThemeColors();
+    const col = c[m.color] || m.color;
+    const checked = _combinedEnabled.has(m.id) ? ' checked' : '';
+    return `<label><input type="checkbox" data-metric="${esc(m.id)}"${checked}>`
+      + `<span class="admin-combined-swatch" style="background:${esc(col)}"></span>${esc(m.label)}</label>`;
+  }).join('');
+
+  return `
+    <section class="admin-dash-row">
+      <div class="admin-dash-row__label admin-dash-row__label--cyan">All metrics <small>${esc(rangeLabel())}</small></div>
+      <div class="admin-dash">
+        <div class="admin-dash__cell--12 admin-card">
+          <div class="admin-card__title"><span>All metrics <small>over time · normalized to each series' peak</small></span></div>
+          <div class="admin-combined-toggles">${toggles}</div>
+          <div class="admin-chart-box admin-chart-box--tall"><canvas id="dash-c-combined"></canvas></div>
+        </div>
+      </div>
+    </section>
+  `;
+}
+
+function wireCombinedToggles() {
+  _container?.querySelectorAll('.admin-combined-toggles input[type="checkbox"]').forEach(cb => {
+    cb.addEventListener('change', () => {
+      const id = cb.getAttribute('data-metric');
+      if (cb.checked) _combinedEnabled.add(id); else _combinedEnabled.delete(id);
+      if (_lastPayload) drawCombined(_lastPayload); // redraw only this chart, no refetch
+    });
+  });
 }
 
 // ---------- KPI band ----------
