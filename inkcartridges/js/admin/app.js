@@ -5,7 +5,7 @@ const APP_VERSION = '2026.06.25-admin-ia-overhaul3';
 
 import { AdminAuth } from './auth.js';
 import { FilterState } from './filters.js';
-import { AdminAPI } from './api.js?v=invoices-jun2026';
+import { AdminAPI } from './api.js?v=invoices-errshape-jun2026';
 
 const esc = (s) => Security.escapeHtml(String(s));
 

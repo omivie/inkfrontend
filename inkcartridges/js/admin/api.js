@@ -44,6 +44,17 @@ function adminApiWarn(label, e) {
   if (typeof Toast !== 'undefined') Toast.error(`${label}. Please try again.`);
 }
 
+// Build an Error from a non-OK API envelope. The invoices backend uses the
+// house object error shape `{ ok:false, error:{ code, message, details } }`,
+// so pull `.error.message` (never let an object coerce to "[object Object]");
+// stay tolerant of a legacy string `error`. Mirrors the createCoupon pattern.
+function invoiceError(resp, fallback) {
+  const e = resp?.error;
+  const err = new Error((e && typeof e === 'object' ? e.message : e) || fallback);
+  if (e && typeof e === 'object') { err.code = e.code; err.details = e.details; }
+  return err;
+}
+
 // Rich-text product columns that the backend's HTML sanitiser mangles.
 //
 // The backend's `PUT/POST /api/admin/products` runs an allowlist sanitiser
@@ -2340,25 +2351,25 @@ const AdminAPI = {
   // authoritative subtotal/gst/total on the saved record.
   async createInvoice(payload) {
     const resp = await window.API.post('/api/admin/invoices', payload);
-    if (resp && resp.ok === false) throw new Error(resp.error || 'Create invoice failed');
+    if (resp && resp.ok === false) throw invoiceError(resp, 'Create invoice failed');
     return resp?.data?.invoice ?? resp?.data ?? null;
   },
 
   async updateInvoice(invoiceId, payload) {
     const resp = await window.API.put(`/api/admin/invoices/${encodeURIComponent(invoiceId)}`, payload);
-    if (resp && resp.ok === false) throw new Error(resp.error || 'Update invoice failed');
+    if (resp && resp.ok === false) throw invoiceError(resp, 'Update invoice failed');
     return resp?.data?.invoice ?? resp?.data ?? null;
   },
 
   async voidInvoice(invoiceId) {
     const resp = await window.API.post(`/api/admin/invoices/${encodeURIComponent(invoiceId)}/void`, {});
-    if (resp && resp.ok === false) throw new Error(resp.error || 'Void invoice failed');
+    if (resp && resp.ok === false) throw invoiceError(resp, 'Void invoice failed');
     return resp?.data ?? null;
   },
 
   async emailInvoice(invoiceId) {
     const resp = await window.API.post(`/api/admin/invoices/${encodeURIComponent(invoiceId)}/email`, {});
-    if (resp && resp.ok === false) throw new Error(resp.error || 'Email invoice failed');
+    if (resp && resp.ok === false) throw invoiceError(resp, 'Email invoice failed');
     return resp?.data ?? null;
   },
 
