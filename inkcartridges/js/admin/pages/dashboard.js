@@ -112,12 +112,20 @@ function realRangeDays() {
 function resolveGranularity() {
   const days = realRangeDays();
   const fits = (g) => days / GRAN_DAYS[g] <= GRAN_BUCKET_CAP;
-  const explicit = FilterState.get('granularity') || 'day';
+  // 'all' is a FE-only cumulative-plot mode — fetch off the finest real grain that fits.
+  let explicit = FilterState.get('granularity') || 'day';
+  if (explicit === 'all') explicit = 'day';
   if (fits(explicit)) return explicit;
   for (let i = Math.max(0, GRAN_ORDER.indexOf(explicit)); i < GRAN_ORDER.length; i++) {
     if (fits(GRAN_ORDER[i])) return GRAN_ORDER[i];
   }
   return 'quarter';
+}
+
+// 'all' bar-width → render the additive time-series as a cumulative line ("total over
+// time") instead of per-bucket bars. FE-only; the request uses the resolved real grain.
+function isCumulativeMode() {
+  return FilterState.get('granularity') === 'all';
 }
 
 // Format a backend bucket_start for the x-axis at the active granularity.
@@ -198,7 +206,7 @@ function guardDraw(promise, canvasId) {
 // Time-series (bar or line), one or more metrics, optional stacking. Reads
 // payload.series (one row per backend bucket); never re-buckets.
 function drawSeries(canvasId, payload, opts) {
-  const { type = 'bar', metrics, labelKey = 'bucket_start', isMoney = true, isPercent = false, stacked = false } = opts;
+  const { type = 'bar', metrics, labelKey = 'bucket_start', isMoney = true, isPercent = false, stacked = false, additive = false } = opts;
   const list = resolveList(payload, ['series', 'data']);
   if (!hasData(canvasId, payload, list)) return;
 
@@ -206,17 +214,31 @@ function drawSeries(canvasId, payload, opts) {
   const labels = list.map(r => fmtBucket(r[labelKey]));
   const valFmt = (v) => isMoney ? formatPrice(v) : isPercent ? `${Number(v).toFixed(1)}%` : String(v);
 
+  // 'all' bar-width: plot every series as a line, and accumulate the additive ones
+  // (money totals, counts) into a running total. Averages/rates (additive:false) plot
+  // their per-bucket value — a cumulative average/rate would be meaningless.
+  const plot = isCumulativeMode();
+  const cumulative = plot && additive;
+  const seriesData = (key) => {
+    const raw = list.map(r => Number(r[key] || 0));
+    if (!cumulative) return raw;
+    let acc = 0;
+    return raw.map(v => (acc += v));
+  };
+  const drawType = plot ? 'line' : type;
+
   const datasets = metrics.map(m => {
     const col = c[m.color] || c.cyan;
-    if (type === 'line') {
+    if (drawType === 'line') {
       return {
-        label: m.label, data: list.map(r => Number(r[m.key] || 0)),
+        label: m.label, data: seriesData(m.key),
         borderColor: col, backgroundColor: hexToRgba(col, 0.18),
         borderWidth: 2, fill: true, tension: 0.35, pointRadius: 0, pointHoverRadius: 4,
+        ...(stacked ? { stack: 's' } : {}),
       };
     }
     return {
-      label: m.label, data: list.map(r => Number(r[m.key] || 0)),
+      label: m.label, data: seriesData(m.key),
       backgroundColor: col + 'cc', borderRadius: 4, barPercentage: 0.7, categoryPercentage: 0.8,
       ...(stacked ? { stack: 's' } : {}),
     };
@@ -228,7 +250,7 @@ function drawSeries(canvasId, payload, opts) {
   };
   if (stacked) { scales.x.stacked = true; scales.y.stacked = true; }
 
-  const fn = type === 'line' ? Charts.line : Charts.bar;
+  const fn = drawType === 'line' ? Charts.line : Charts.bar;
   guardDraw(fn.call(Charts, canvasId, {
     labels, datasets,
     options: {
@@ -345,13 +367,13 @@ function drawForecast(canvasId, payload) {
 function drawAllCharts(d) {
   try {
     // Row 1 — Money
-    drawSeries('dash-c-revenue', d.sRevenue, { type: 'bar', metrics: [{ label: 'Revenue', key: 'revenue', color: 'success' }], isMoney: true });
-    drawSeries('dash-c-gross-profit', d.sGrossProfit, { type: 'bar', metrics: [{ label: 'Gross profit', key: 'gross_profit', color: 'cyan' }], isMoney: true });
+    drawSeries('dash-c-revenue', d.sRevenue, { type: 'bar', additive: true, metrics: [{ label: 'Revenue', key: 'revenue', color: 'success' }], isMoney: true });
+    drawSeries('dash-c-gross-profit', d.sGrossProfit, { type: 'bar', additive: true, metrics: [{ label: 'Gross profit', key: 'gross_profit', color: 'cyan' }], isMoney: true });
     // Row 2 — Products
     drawRanked('dash-c-sku-revenue', d.topSkusRev, { listKeys: ['products', 'skus'], labelKey: 'sku', valueKey: 'revenue', color: 'success', isMoney: true });
     drawRanked('dash-c-sku-profit', d.topSkusProfit, { listKeys: ['products', 'skus'], labelKey: 'sku', valueKey: 'gross_profit', color: 'cyan', isMoney: true });
     // Row 3 — Sales
-    drawSeries('dash-c-orders', d.sOrders, { type: 'line', metrics: [{ label: 'Orders', key: 'orders', color: 'yellow' }], isMoney: false });
+    drawSeries('dash-c-orders', d.sOrders, { type: 'line', additive: true, metrics: [{ label: 'Orders', key: 'orders', color: 'yellow' }], isMoney: false });
     drawSeries('dash-c-aov', d.sAov, { type: 'line', metrics: [{ label: 'AOV', key: 'aov', color: 'cyan' }], isMoney: true });
     // Row 4 — Margin
     drawRanked('dash-c-margin-brand', d.marginBrand, { listKeys: ['brands'], labelKey: 'brand', valueKey: 'margin_pct', color: 'magenta', isMoney: false, isPercent: true });
@@ -360,7 +382,7 @@ function drawAllCharts(d) {
     drawShare('dash-c-traffic-source', d.trafficSource, { listKeys: ['sources'], labelKey: 'source', valueKey: 'sessions' });
     drawRanked('dash-c-conversion-source', d.conversionSource, { listKeys: ['sources'], labelKey: 'source', valueKey: 'conversion_pct', color: 'success', isMoney: false, isPercent: true });
     // Row 6 — Customers
-    drawSeries('dash-c-cust-type', d.custType, { type: 'bar', stacked: true, isMoney: true, metrics: [{ label: 'New', key: 'new_revenue', color: 'cyan' }, { label: 'Returning', key: 'returning_revenue', color: 'success' }] });
+    drawSeries('dash-c-cust-type', d.custType, { type: 'bar', stacked: true, additive: true, isMoney: true, metrics: [{ label: 'New', key: 'new_revenue', color: 'cyan' }, { label: 'Returning', key: 'returning_revenue', color: 'success' }] });
     drawRanked('dash-c-reorder', d.reorder, { listKeys: ['buckets'], labelKey: 'days_label', valueKey: 'customer_count', color: 'cyan', isMoney: false, horizontal: false, sort: false, limit: 24 });
     // Row 7 — Suppliers
     drawRanked('dash-c-supplier-rev', d.supplierRev, { listKeys: ['suppliers'], labelKey: 'supplier', valueKey: 'revenue', color: 'success', isMoney: true });
@@ -766,7 +788,7 @@ export default {
     _container = container;
     // Dashboard-local defaults (range = all) applied only when the URL omits them,
     // and the bar-width control shown for this page only.
-    FilterState.setDefaults({ period: 'all', granularity: 'day' });
+    FilterState.setDefaults({ period: 'all', granularity: 'all' });
     FilterState.setGranularityVisible(true);
     await loadDashboard();
   },

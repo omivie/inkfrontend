@@ -18,16 +18,19 @@ const PERIOD_PRESETS = [
   { key: 'custom', label: 'Custom', days: null },
 ];
 
-// Bar/bucket granularity — independent of the data range. The chosen value is sent
-// to the backend so it returns pre-bucketed series (the frontend never re-buckets).
-// Day is the default; a grain too fine for the range is disabled + clamped coarser.
+// Bar/bucket granularity — independent of the data range. day/week/month/quarter are
+// real backend bucket widths (sent so it returns pre-bucketed series). 'all' is a
+// FE-only mode: the dashboard plots the additive series as a CUMULATIVE line ("total
+// over time") off the finest underlying grain — it is never sent to the backend.
+// 'all' is the default; a real grain too fine for the range is disabled + clamped coarser.
 const GRANULARITY_PRESETS = [
+  { key: 'all', label: 'All' },
   { key: 'day', label: 'Day' },
   { key: 'week', label: 'Week' },
   { key: 'month', label: 'Month' },
   { key: 'quarter', label: 'Quarter' },
 ];
-const DEFAULT_GRANULARITY = 'day';
+const DEFAULT_GRANULARITY = 'all';
 
 // Approx days per bucket, used to keep the bucket count under the backend cap.
 // The analytics router rejects any series with > BUCKET_CAP buckets ("Too many
@@ -40,7 +43,7 @@ const BUCKET_CAP = 750;
 const FilterState = {
   _state: {
     period: '3m',
-    granularity: 'day',
+    granularity: 'all',
     dateFrom: '',
     dateTo: '',
     brands: [],
@@ -120,7 +123,9 @@ const FilterState = {
     if (this._state.suppliers.length) p.set('suppliers', this._state.suppliers.join(','));
     if (this._state.statuses.length) p.set('statuses', this._state.statuses.join(','));
     if (this._state.categories.length) p.set('categories', this._state.categories.join(','));
-    if (this._state.granularity) p.set('granularity', this._state.granularity);
+    // 'all' is FE-only (cumulative plot) — never sent; the dashboard passes the resolved
+    // real grain to the bundle call. Real grains go through so series endpoints bucket correctly.
+    if (this._state.granularity && this._state.granularity !== 'all') p.set('granularity', this._state.granularity);
     return p;
   },
 
@@ -172,7 +177,7 @@ const FilterState = {
 
   // Would this granularity stay under the backend's bucket cap for the range?
   granularityAllowed(key) {
-    if (!key) return true;
+    if (!key || key === 'all') return true;   // 'all' resolves to a real grain at fetch time
     const gd = GRANULARITY_DAYS[key];
     if (!gd) return true;
     return (this.rangeDays() / gd) <= BUCKET_CAP;
