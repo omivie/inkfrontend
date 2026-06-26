@@ -13,13 +13,27 @@ const PERIOD_PRESETS = [
   { key: '3m', label: '3m', days: 90 },
   { key: '6m', label: '6m', days: 180 },
   { key: '1y', label: '1y', days: 365 },
+  { key: '2y', label: '2y', days: 730 },
   { key: 'all', label: 'All', days: -1 },
   { key: 'custom', label: 'Custom', days: null },
+];
+
+// Bar/bucket granularity — independent of the data range. 'auto' lets each
+// page derive a sensible bucket width from the range; explicit values are sent
+// to the backend so it returns pre-bucketed series (the frontend never re-buckets).
+const GRANULARITY_PRESETS = [
+  { key: 'auto', label: 'Auto' },
+  { key: 'hour', label: 'Hour' },
+  { key: 'day', label: 'Day' },
+  { key: 'week', label: 'Week' },
+  { key: 'month', label: 'Month' },
+  { key: 'quarter', label: 'Quarter' },
 ];
 
 const FilterState = {
   _state: {
     period: '3m',
+    granularity: 'auto',
     dateFrom: '',
     dateTo: '',
     brands: [],
@@ -32,6 +46,7 @@ const FilterState = {
   _el: null,
   _dropdowns: new Map(),
   _visibleFilters: null, // null = show all; array = only show these keys
+  _showGranularity: false, // pages opt in via setGranularityVisible(true)
 
   // Available options (populated from data)
   _options: {
@@ -90,6 +105,7 @@ const FilterState = {
     if (this._state.suppliers.length) p.set('suppliers', this._state.suppliers.join(','));
     if (this._state.statuses.length) p.set('statuses', this._state.statuses.join(','));
     if (this._state.categories.length) p.set('categories', this._state.categories.join(','));
+    if (this._state.granularity && this._state.granularity !== 'auto') p.set('granularity', this._state.granularity);
     return p;
   },
 
@@ -113,6 +129,32 @@ const FilterState = {
     this._render();
   },
 
+  // Show/hide the bar-width (granularity) control. Off by default so it only
+  // appears on pages that explicitly want it (e.g. the dashboard).
+  setGranularityVisible(show = true) {
+    this._showGranularity = !!show;
+    this._render();
+  },
+
+  // Apply page-local defaults (e.g. dashboard wants range=all) only when the
+  // URL hash did not already specify them — keeps other pages' defaults intact.
+  setDefaults(defaults = {}) {
+    const hash = window.location.hash;
+    const qIdx = hash.indexOf('?');
+    const params = qIdx === -1 ? new URLSearchParams() : new URLSearchParams(hash.slice(qIdx + 1));
+    let changed = false;
+    if (defaults.period !== undefined && !params.has('period')) {
+      this._state.period = defaults.period; changed = true;
+    }
+    if (defaults.granularity !== undefined && !params.has('granularity')) {
+      this._state.granularity = defaults.granularity; changed = true;
+    }
+    if (changed) {
+      this._writeToURL();
+      this._updateUI();
+    }
+  },
+
   subscribe(cb) {
     this._listeners.push(cb);
     return () => {
@@ -122,7 +164,7 @@ const FilterState = {
 
   reset() {
     this._state = {
-      period: '3m', dateFrom: '', dateTo: '',
+      period: '3m', granularity: 'auto', dateFrom: '', dateTo: '',
       brands: [], suppliers: [], statuses: [], categories: [],
     };
     this._writeToURL();
@@ -149,6 +191,7 @@ const FilterState = {
     if (qIdx === -1) return;
     const params = new URLSearchParams(hash.slice(qIdx + 1));
     if (params.has('period')) this._state.period = params.get('period');
+    if (params.has('granularity')) this._state.granularity = params.get('granularity');
     if (params.has('from')) this._state.dateFrom = params.get('from');
     if (params.has('to')) this._state.dateTo = params.get('to');
     if (params.has('brands')) this._state.brands = params.get('brands').split(',').filter(Boolean);
@@ -162,6 +205,7 @@ const FilterState = {
     const baseHash = hash.split('?')[0] || '#dashboard';
     const parts = [];
     if (this._state.period !== '3m') parts.push('period=' + this._state.period);
+    if (this._state.granularity && this._state.granularity !== 'auto') parts.push('granularity=' + this._state.granularity);
     if (this._state.dateFrom) parts.push('from=' + this._state.dateFrom);
     if (this._state.dateTo) parts.push('to=' + this._state.dateTo);
     if (this._state.brands.length) parts.push('brands=' + this._state.brands.join(','));
@@ -188,6 +232,10 @@ const FilterState = {
     // Update period buttons
     this._el.querySelectorAll('[data-period]').forEach(btn => {
       btn.classList.toggle('active', btn.dataset.period === this._state.period);
+    });
+    // Granularity buttons
+    this._el.querySelectorAll('[data-granularity]').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.granularity === this._state.granularity);
     });
     // Custom date visibility
     const dateEl = this._el.querySelector('.admin-filter-date');
@@ -236,6 +284,15 @@ const FilterState = {
     centerHtml += `<span>to</span>`;
     centerHtml += `<input type="date" class="admin-date-to" value="${esc(s.dateTo)}">`;
     centerHtml += '</div>';
+
+    // Bar-width / granularity presets (opt-in per page)
+    if (this._showGranularity) {
+      centerHtml += '<div class="admin-filter-group admin-filter-group--granularity" title="Bar width">';
+      for (const g of GRANULARITY_PRESETS) {
+        centerHtml += `<button class="admin-filter-btn${s.granularity === g.key ? ' active' : ''}" data-granularity="${g.key}">${g.label}</button>`;
+      }
+      centerHtml += '</div>';
+    }
 
     // Reset button (right)
     const hasFilters = s.brands.length || s.suppliers.length || s.statuses.length || s.categories.length || s.period !== '3m';
@@ -295,6 +352,16 @@ const FilterState = {
         this._writeToURL();
         this._updateUI();
         this._render();
+        this._notifyDebounced();
+      });
+    });
+
+    // Granularity (bar-width) buttons
+    this._el.querySelectorAll('[data-granularity]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        this._state.granularity = btn.dataset.granularity;
+        this._writeToURL();
+        this._updateUI();
         this._notifyDebounced();
       });
     });

@@ -4,6 +4,29 @@ Log every error encountered here. Before editing a file, scan for known issues. 
 
 ---
 
+## ERR-045 — Admin SPA: async page load resolves AFTER `destroy()`, throws on a nulled module ref (2026-06-25)
+
+**Symptom:** Spurious red toast on the Dashboard — "Failed to load segments: Cannot
+read properties of null (reading 'setData')". The Segments page wasn't even visible.
+
+**Root cause:** `pages/segments.js` `loadData()` guards `if (!_table) return` only
+*before* `await AdminAPI.getSegments()`. Navigating away during the in-flight request
+runs the page's `destroy()`, which sets the module-level `_table = null`. When the
+request resolves, execution resumes at `_table.setData(rows)` → null deref. Classic
+"async function outlives the component it touches" race. The router already solves the
+same problem for itself with a `_navToken` re-check after its awaits (`app.js:246/286`);
+page controllers must do the equivalent internally.
+
+**Fix:** Re-check the page-liveness ref AFTER every `await` (and at the top of the
+`catch`), then silently `return`. Pattern to apply in any `*-page.js`/`pages/*.js`
+controller whose `destroy()` nulls a module ref used after an await:
+```js
+const data = await AdminAPI.getX();
+if (!_table) return;        // page destroyed mid-await → bail, don't paint/throw
+```
+
+---
+
 ## ERR-044 — Per-page `pages.css` cache token broke the shared three-card-CSS rollout-token invariant (2026-06-24)
 
 **Symptom:** Added loyalty styles to `css/pages.css` and bumped only the 5 touched

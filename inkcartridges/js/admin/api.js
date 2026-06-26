@@ -96,9 +96,11 @@ function analyticsQuery(filterParams, extra = {}) {
   const to = p.get('to');
   if (from) q.set('date_from', from);
   if (to) q.set('date_to', to);
-  if (p.get('brands'))    q.set('brand_filter', p.get('brands'));
-  if (p.get('suppliers')) q.set('supplier_filter', p.get('suppliers'));
-  if (p.get('statuses'))  q.set('status_filter', p.get('statuses'));
+  if (p.get('brands'))     q.set('brand_filter', p.get('brands'));
+  if (p.get('suppliers'))  q.set('supplier_filter', p.get('suppliers'));
+  if (p.get('statuses'))   q.set('status_filter', p.get('statuses'));
+  if (p.get('categories')) q.set('category_filter', p.get('categories'));
+  if (p.get('granularity')) q.set('granularity', p.get('granularity'));
   for (const [k, v] of Object.entries(extra)) {
     if (v != null && v !== '') q.set(k, String(v));
   }
@@ -458,6 +460,81 @@ const AdminAPI = {
       brand_filter: filterParams.get('brands') || null,
       result_limit: 10,
     }, signal);
+  },
+
+  // ---- Dashboard graph series (paired-row redesign, Jun 2026) ----
+  // Every chart below pulls a backend-computed, backend-bucketed payload — the
+  // frontend never aggregates or computes margins/profit itself. `granularity`
+  // (the bar width: hour|day|week|month|quarter) is resolved by the dashboard
+  // and forwarded so the backend returns one row per bucket. Each method
+  // returns the raw `data` (or null when the endpoint is missing) so a not-yet-
+  // implemented endpoint renders an "awaiting data" empty state, never a crash.
+
+  // Preferred path: one request for every chart (backend buckets + computes all).
+  // Avoids the per-chart parallel fan-out that tripped the rate limiter. Returns
+  // the `data` map ({ revenue_series, top_skus_revenue, ... }) or null on failure.
+  async getDashboardBundle(filterParams, granularity, signal) {
+    return analyticsHttpGet(`/api/admin/analytics/dashboard-bundle?${analyticsQuery(filterParams, { granularity })}`, signal);
+  },
+
+  async getSeriesRevenue(filterParams, granularity, signal) {
+    return analyticsHttpGet(`/api/admin/analytics/series/revenue?${analyticsQuery(filterParams, { granularity })}`, signal);
+  },
+  async getSeriesGrossProfit(filterParams, granularity, signal) {
+    return analyticsHttpGet(`/api/admin/analytics/series/gross-profit?${analyticsQuery(filterParams, { granularity })}`, signal);
+  },
+  async getSeriesOrders(filterParams, granularity, signal) {
+    return analyticsHttpGet(`/api/admin/analytics/series/orders?${analyticsQuery(filterParams, { granularity })}`, signal);
+  },
+  async getSeriesAOV(filterParams, granularity, signal) {
+    return analyticsHttpGet(`/api/admin/analytics/series/aov?${analyticsQuery(filterParams, { granularity })}`, signal);
+  },
+  async getSeriesRefundRate(filterParams, granularity, signal) {
+    return analyticsHttpGet(`/api/admin/analytics/series/refund-rate?${analyticsQuery(filterParams, { granularity })}`, signal);
+  },
+  async getRevenueByCustomerType(filterParams, granularity, signal) {
+    return analyticsHttpGet(`/api/admin/analytics/series/revenue-by-customer-type?${analyticsQuery(filterParams, { granularity })}`, signal);
+  },
+  async getRevenueForecast(filterParams, granularity, signal) {
+    return analyticsHttpGet(`/api/admin/analytics/forecast/revenue?${analyticsQuery(filterParams, { granularity })}`, signal);
+  },
+
+  async getTopSkusByRevenue(filterParams, limit = 10, signal) {
+    return analyticsHttpGet(`/api/admin/analytics/top-skus/revenue?${analyticsQuery(filterParams, { result_limit: limit })}`, signal);
+  },
+  async getTopSkusByProfit(filterParams, limit = 10, signal) {
+    return analyticsHttpGet(`/api/admin/analytics/top-skus/gross-profit?${analyticsQuery(filterParams, { result_limit: limit })}`, signal);
+  },
+  async getMarginByBrand(filterParams, signal) {
+    return analyticsHttpGet(`/api/admin/analytics/margin/by-brand?${analyticsQuery(filterParams)}`, signal);
+  },
+  async getMarginByCategory(filterParams, signal) {
+    return analyticsHttpGet(`/api/admin/analytics/margin/by-category?${analyticsQuery(filterParams)}`, signal);
+  },
+
+  async getTrafficBySource(filterParams, signal) {
+    return analyticsHttpGet(`/api/admin/analytics/series/traffic-by-source?${analyticsQuery(filterParams)}`, signal);
+  },
+  async getConversionBySource(filterParams, signal) {
+    return analyticsHttpGet(`/api/admin/analytics/conversion-by-source?${analyticsQuery(filterParams)}`, signal);
+  },
+
+  async getSupplierRevenue(filterParams, signal) {
+    return analyticsHttpGet(`/api/admin/analytics/suppliers/revenue?${analyticsQuery(filterParams)}`, signal);
+  },
+  async getSupplierProblemRate(filterParams, signal) {
+    return analyticsHttpGet(`/api/admin/analytics/suppliers/problem-rate?${analyticsQuery(filterParams)}`, signal);
+  },
+
+  async getReorderInterval(filterParams, signal) {
+    return analyticsHttpGet(`/api/admin/analytics/customers/reorder-interval?${analyticsQuery(filterParams)}`, signal);
+  },
+
+  async getTopConvertingSearches(filterParams, limit = 10, signal) {
+    return analyticsHttpGet(`/api/admin/analytics/search/top-converting?${analyticsQuery(filterParams, { result_limit: limit })}`, signal);
+  },
+  async getZeroResultSearches(filterParams, limit = 10, signal) {
+    return analyticsHttpGet(`/api/admin/analytics/search/zero-result?${analyticsQuery(filterParams, { result_limit: limit })}`, signal);
   },
 
   async getNewOrders24h(signal) {

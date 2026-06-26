@@ -127,14 +127,15 @@ test('main.js — initBasicAutocomplete and its DOM are deleted', () => {
     // unreachable in practice and ~210 lines of duplicated logic.
     assert.doesNotMatch(MAIN_CODE, /\bfunction\s+initBasicAutocomplete\b/);
     assert.doesNotMatch(MAIN_CODE, /API\.getAutocomplete\b/,
-        'main.js: basic fallback used /api/search/autocomplete — gone, SmartSearch uses /api/search/suggest');
+        'main.js: basic fallback used /api/search/autocomplete — gone, SmartSearch drives the dropdown off /api/search/smart');
 });
 
 test('api.js — dead autocomplete wrappers stay deleted (getAutocomplete, getAutocompleteRich)', () => {
     // initBasicAutocomplete was deleted; nothing in the storefront calls
-    // /api/search/autocomplete any more. Suggest is the typeahead endpoint
-    // (invoked directly by search.js's fetchSuggest), smart is the results
-    // endpoint (via API.smartSearch).
+    // /api/search/autocomplete any more. As of Jun 2026 the dropdown also
+    // drives off /api/search/smart (search.js fetchSuggest — same endpoint as
+    // the results page, limit 40, grouped like the product grid); the literal
+    // /suggest endpoint is retired from the storefront (it capped at 24).
     //
     // searchByPart was previously listed here as "never called" — it's now
     // restored intentionally for the May 2026 search-enrichment contract

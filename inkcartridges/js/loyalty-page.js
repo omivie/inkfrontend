@@ -27,6 +27,7 @@
         bonus: 'Bonus',
         redeem: 'Redeemed',
         clawback: 'Reversed',
+        restore: 'Restored',
         adjust: 'Adjustment'
     };
 
@@ -54,45 +55,66 @@
                     API.getOrders({ limit: 200 })
                 ]);
 
-                if (loyaltySettled.status !== 'fulfilled') throw loyaltySettled.reason;
-                const res = loyaltySettled.value;
-                if (!res || res.ok === false) throw new Error(API.extractErrorMessage(res, 'Loyalty load failed'));
-
-                const data = res.data || {};
-                this.loyalty = data;
-                this.ledger = Array.isArray(data.ledger) ? data.ledger : [];
-                this.page = (res.meta && res.meta.page) || 1;
-                this.totalPages = (res.meta && res.meta.total_pages) || 1;
-
+                // Coupons + orders are independent of the points-balance endpoint, so
+                // they still populate the rewards list and the order-savings graph line
+                // even if /api/user/loyalty isn't live yet.
                 this.coupons = (couponsSettled.status === 'fulfilled' && Array.isArray(couponsSettled.value?.data))
                     ? couponsSettled.value.data : [];
-
                 const od = (ordersSettled.status === 'fulfilled') ? ordersSettled.value?.data : null;
                 this.orders = Array.isArray(od) ? od : (Array.isArray(od?.orders) ? od.orders : []);
+
+                // Points balance + ledger. May be unavailable (e.g. GET /api/user/loyalty
+                // not deployed yet) — degrade gracefully rather than blanking the page.
+                const res = (loyaltySettled.status === 'fulfilled') ? loyaltySettled.value : null;
+                const loyaltyOk = !!(res && res.ok !== false && res.data);
+                if (loyaltyOk) {
+                    this.loyalty = res.data;
+                    this.ledger = Array.isArray(res.data.ledger) ? res.data.ledger : [];
+                    this.page = (res.meta && res.meta.page) || 1;
+                    this.totalPages = (res.meta && res.meta.total_pages) || 1;
+                } else {
+                    this.loyalty = null;
+                    this.ledger = [];
+                    if (typeof DebugLog !== 'undefined') {
+                        DebugLog.warn('Loyalty balance unavailable:', loyaltySettled.reason || (res && res.error));
+                    }
+                }
 
                 document.getElementById('loyalty-loading').hidden = true;
 
                 // Program switched off entirely — show a neutral notice and stop.
-                if (data.program_active === false) {
+                if (loyaltyOk && this.loyalty.program_active === false) {
                     const off = document.getElementById('loyalty-disabled');
                     if (off) off.hidden = false;
                     return;
                 }
 
-                this.setInfoCopy();
-
-                const balance = data.points_balance || 0;
-                if (balance === 0 && !this.ledger.length && !this.coupons.length) {
-                    const empty = document.getElementById('loyalty-empty');
-                    if (empty) empty.hidden = false;
-                    // Still show the (zeroed) balance hero for context.
-                    this.renderBalance();
+                // Nothing at all to show (points down AND no orders AND no coupons) → hard error.
+                if (!loyaltyOk && !this.orders.length && !this.coupons.length) {
+                    document.getElementById('loyalty-error').hidden = false;
                     return;
                 }
 
-                this.renderBalance();
+                if (loyaltyOk) {
+                    this.setInfoCopy();
+                    const balance = this.loyalty.points_balance || 0;
+                    if (balance === 0 && !this.ledger.length && !this.coupons.length) {
+                        const empty = document.getElementById('loyalty-empty');
+                        if (empty) empty.hidden = false;
+                        this.renderBalance();
+                        return;
+                    }
+                    this.renderBalance();
+                    this.renderHistory();
+                } else {
+                    // Soft, honest notice: points balance/history need the backend endpoint.
+                    const notice = document.getElementById('loyalty-balance-unavailable');
+                    if (notice) notice.hidden = false;
+                }
+
+                // Graph renders from whatever is available — the order-savings line comes
+                // from /api/orders alone; the points-accrued line needs the ledger.
                 this.renderGraph();
-                this.renderHistory();
                 this.renderCoupons();
             } catch (err) {
                 if (typeof DebugLog !== 'undefined') DebugLog.error('Loyalty load failed:', err);
@@ -158,7 +180,7 @@
             if (!host || !section) return;
             section.hidden = false;
 
-            const rate = this.loyalty.redemption_rate || 100;
+            const rate = (this.loyalty && this.loyalty.redemption_rate) || 100;
 
             const accrual = this.ledger
                 .filter((r) => (r.type === 'earn' || r.type === 'bonus') && r.points > 0 && r.created_at)
@@ -166,8 +188,12 @@
                 .filter((p) => !isNaN(p.t))
                 .sort((a, b) => a.t - b.t);
 
+            // Per-order savings comes from the dedicated discount_amount column
+            // (coupon + loyalty + B2B combined). NOT subtotal − total: in this data
+            // model subtotal is ex-GST and total includes GST + shipping, so that
+            // subtraction goes negative. discount_amount is 0 when no discount applied.
             const savings = this.orders
-                .map((o) => ({ t: new Date(o.created_at).getTime(), v: Math.max(0, (Number(o.subtotal) || 0) - (Number(o.total) || 0)) }))
+                .map((o) => ({ t: new Date(o.created_at).getTime(), v: Math.max(0, Number(o.discount_amount) || 0) }))
                 .filter((p) => !isNaN(p.t) && p.v > 0)
                 .sort((a, b) => a.t - b.t);
 

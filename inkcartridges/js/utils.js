@@ -738,11 +738,14 @@ const ProductSort = (function() {
 
     function yieldTier(product) {
         // PRIMARY: the backend signal yield_tier: 'STD'|'XL'|'XXL' (from
-        // detectYieldTier()). When present it always wins — but as of Jun 2026
-        // the live API does NOT emit it on any list endpoint (confirmed null on
-        // /api/search/smart, /api/products, /api/shop), so the detector below is
-        // doing the real work today. Keep this branch first so the field takes
-        // over automatically once the backend ships it.
+        // detectYieldTier()). As of the Jun 2026 backend release this is now
+        // emitted on every product-list endpoint (/api/shop, /api/products,
+        // /api/search/{smart,by-printer,by-part}, /api/printers/:slug/products)
+        // with correct values (verified live: Epson 200=STD/200HY=XL with the
+        // colour-Y guard, HP 975A=STD/975X=XL). It always wins; the FE detector
+        // below is now only a fallback for any pre-release cached payload that
+        // still lacks the field. (Lexmark bare-letter yields stay STD — backend
+        // follow-up; do not work around here.)
         const yt = (product && product.yield_tier || '').toString().toUpperCase();
         if (yt === 'XXL') return 2;
         if (yt === 'XL')  return 1;

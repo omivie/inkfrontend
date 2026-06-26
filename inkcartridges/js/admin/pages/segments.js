@@ -23,9 +23,11 @@ async function loadData() {
   _table.setLoading(true);
   try {
     const data = await AdminAPI.getSegments();
+    if (!_table) return;                 // page destroyed mid-await → silently bail
     const rows = Array.isArray(data) ? data : (data?.segments || data?.rows || []);
     _table.setData(rows);
   } catch (e) {
+    if (!_table) return;                 // stale failure from a page we've left
     Toast.error(`Failed to load segments: ${e.message}`);
     _table.setData([]);
   }

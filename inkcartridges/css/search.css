@@ -661,9 +661,33 @@ mark.smart-ac__mark {
 
 .smart-ac__grid {
     display: grid;
-    grid-template-columns: repeat(6, 1fr);
+    grid-template-columns: repeat(7, 1fr);
     gap: 6px;
     padding: 8px;
+}
+
+/* Row-break parity with the product/shop grid (code-yield-grouping-may2026).
+   shop-page.js / search.js inject a .products-row__break before each
+   (familyKey, yieldTier) group. The pages.css rule uses flex-basis:100%, which
+   a CSS grid ignores — span the full row here so each cartridge family (e.g.
+   LC536 / LC536XL / LC536XXL) starts on its own row. */
+.smart-ac__grid .products-row__break {
+    grid-column: 1 / -1;
+    height: 0;
+    margin: 0;
+    padding: 0;
+}
+
+/* Two-section split (Compatible / Genuine) mirroring the product/shop page,
+   which never interleaves the two sources. Each section gets a compact badge
+   header (reusing the page's global .products-section__badge--* chips) above
+   its own 7-up grid. Lighter than the page's big .products-section__title. */
+.smart-ac__section-head {
+    padding: 8px 8px 0;
+}
+.smart-ac__section + .smart-ac__section .smart-ac__section-head {
+    border-top: 1px solid var(--color-border, #e5e7eb);
+    padding-top: 10px;
 }
 
 .smart-ac__grid .product-card {
@@ -786,6 +810,12 @@ mark.smart-ac__mark {
         grid-template-columns: repeat(2, minmax(0, 1fr));
         gap: 8px;
         padding: 8px;
+    }
+    /* The (familyKey, yieldTier) row-break is a desktop 7-up affordance; in the
+       narrow 2-col / single-row mobile layouts it only adds dead vertical gaps,
+       so collapse it. */
+    .smart-ac__grid .products-row__break {
+        display: none;
     }
 }
 

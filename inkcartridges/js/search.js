@@ -10,15 +10,19 @@
 (function () {
     'use strict';
 
-    // /suggest is the type-ahead endpoint that returns matched_printer and
-    // did_you_mean metadata. /autocomplete allows higher limits but omits
-    // those fields, so we stick with /suggest at its max of 10.
-    const ENDPOINT = '/api/search/suggest';
+    // /smart is the canonical search endpoint the results page uses. It returns
+    // the full enriched envelope (products[] with retail_price/color/source/
+    // series_codes/discounts, plus matched_printer + did_you_mean) and accepts
+    // limit up to 40. The literal /suggest endpoint we used previously is
+    // hard-capped at 24 by the backend, so it cannot surface the 40 products we
+    // now want; driving the dropdown off /smart also makes it group and render
+    // identically to the product/shop grid (byCodeThenColor + row-breaks below).
+    const ENDPOINT = '/api/search/smart';
     // 250ms debounce — backend bucket is 120 req/min/IP; a fast typer hammering
     // backspace at <250ms intervals can still trip it, so we err on the safe side.
     const DEBOUNCE_MS = 250;
     const MIN_QUERY_LENGTH = 2;
-    const LIMIT = 10;
+    const LIMIT = 40;
     const SKELETON_DELAY_MS = 150;
     const RECENT_KEY = 'recentSearches';
     const RECENT_MAX = 5;
@@ -149,8 +153,16 @@
             throw err;
         }
         const data = json.data || {};
+        // /smart returns the result set under `products` (the literal /suggest
+        // endpoint we used previously returned `suggestions`). Map it into the
+        // same slot so renderResults — which reads `data.suggestions` — is
+        // untouched; fall back to `suggestions` for resilience if the envelope
+        // shape changes.
+        const items = Array.isArray(data.products)
+            ? data.products
+            : (Array.isArray(data.suggestions) ? data.suggestions : []);
         return {
-            suggestions: Array.isArray(data.suggestions) ? data.suggestions : [],
+            suggestions: items,
             matched_printer: data.matched_printer || null,
             did_you_mean: data.did_you_mean || null,
         };
@@ -183,8 +195,19 @@
             const isMobile = window.innerWidth <= 640;
             // On mobile, center the dropdown across the viewport (not the form,
             // which is a narrow 260px centered box). 16px side margins.
-            const left = isMobile ? 16 : Math.round(formRect.left);
-            const width = isMobile ? (window.innerWidth - 32) : Math.round(formRect.width);
+            //
+            // On desktop the search input is far narrower than seven product
+            // cards, so we widen the panel to a comfortable fixed width (clamped
+            // to the viewport) and keep it anchored under the input — shifting
+            // left only as much as needed to stay on-screen. This makes the
+            // dropdown read like the product/shop grid (~7 cards × 150px + gaps).
+            const DESKTOP_PANEL = 1120;
+            const width = isMobile
+                ? (window.innerWidth - 32)
+                : Math.min(DESKTOP_PANEL, window.innerWidth - 32);
+            const left = isMobile
+                ? 16
+                : Math.min(Math.max(16, Math.round(formRect.left)), window.innerWidth - width - 16);
             const top = Math.round(inputRect.bottom + 6);
             // Fill available viewport beneath the input so two full rows of
             // product cards + the sticky "View all results" footer always fit.
@@ -369,7 +392,46 @@
                    </button>`
                 : '';
             const q = state.input.value.trim();
-            const cardsHTML = list.map((p, i) => Products.renderCard(adaptForCard(p), i)).join('');
+            // Organize exactly like the product/shop page: split into a
+            // Compatible section and a Genuine section (page order: compatible
+            // first — shop.html #compatible-section precedes #genuine-section),
+            // then within each section sort by code → yield → colour and break
+            // each (familyKey, yieldTier) group onto its own row. A single mixed
+            // grid interleaves genuine + compatible variants of the same code,
+            // which is the "unorganised" order the page never shows.
+            //
+            // Partition on the backend canonical `source` BEFORE adaptForCard so
+            // byCodeThenColor still sees the grouping fields (series_codes,
+            // color, name, product_type, pack_type). Same predicate as
+            // shop-page.js loadSearchResults (source === 'compatible'). The
+            // injected break <div>s and section heads are skipped by the
+            // .product-card keyboard-nav / highlight selectors below.
+            const isCompatibleProduct = (p) =>
+                (p.source || (p.is_genuine ? 'genuine' : 'compatible')) === 'compatible';
+            const compatibleItems = list.filter(isCompatibleProduct);
+            const genuineItems = list.filter((p) => !isCompatibleProduct(p));
+
+            const renderSection = (items, badgeClass, label) => {
+                if (!items.length) return '';
+                const sorted = (typeof ProductSort !== 'undefined' && ProductSort.byCodeThenColor)
+                    ? ProductSort.byCodeThenColor(items)
+                    : items;
+                const breaks = (typeof ProductSort !== 'undefined' && ProductSort.rowBreakIndices)
+                    ? new Set(ProductSort.rowBreakIndices(sorted))
+                    : new Set();
+                const cards = sorted.map((p, i) =>
+                    (breaks.has(i) ? '<div class="products-row__break" aria-hidden="true"></div>' : '')
+                    + Products.renderCard(adaptForCard(p), i)
+                ).join('');
+                return `<div class="smart-ac__section">`
+                    + `<div class="smart-ac__section-head"><span class="products-section__badge ${badgeClass}">${label}</span></div>`
+                    + `<div class="product-grid smart-ac__grid">${cards}</div>`
+                    + `</div>`;
+            };
+
+            const sectionsHTML =
+                renderSection(compatibleItems, 'products-section__badge--compatible', 'Compatible')
+                + renderSection(genuineItems, 'products-section__badge--genuine', 'Genuine');
             // Spec (search-dropdown-routing.md, "Three-handler invariant"):
             // the "View all results" footer ALWAYS goes to /search?q=<query>,
             // independent of matched_printer. Branching on matched_printer here
@@ -381,7 +443,7 @@
             const viewAllHTML = q
                 ? `<div class="smart-ac__view-all-wrap"><a class="smart-ac__view-all" href="${escAttr(viewAllHref)}">View all results for “${esc(q)}” →</a></div>`
                 : '';
-            state.list.innerHTML = `${matchedRowHTML}${dymRowHTML}<div class="product-grid smart-ac__grid">${cardsHTML}</div>${viewAllHTML}`;
+            state.list.innerHTML = `${matchedRowHTML}${dymRowHTML}${sectionsHTML}${viewAllHTML}`;
             positionDropdown();
 
             // Apply <mark> highlighting to the (already-escaped) product titles.

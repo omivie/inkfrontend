@@ -120,10 +120,11 @@ test('loyalty-page.js: points page, no stamp/tier vocabulary, no redeem widget',
     assert.doesNotMatch(src, /redeemLoyaltyPoints|\/loyalty\/redeem/, 'account page must not mint redemption coupons');
 });
 
-test('loyalty-page.js: graph derives points-accrued from ledger and savings from subtotal−total', () => {
+test('loyalty-page.js: graph derives points-accrued from ledger and savings from order.discount_amount', () => {
     const src = JS('loyalty-page.js');
     assert.match(src, /type === 'earn'[\s\S]{0,40}type === 'bonus'/, 'accrual series filters earn + bonus ledger rows');
-    assert.match(src, /subtotal[\s\S]{0,40}total/, 'savings series uses order subtotal − total');
+    assert.match(src, /discount_amount/, 'savings series uses order.discount_amount (NOT subtotal − total)');
+    assert.doesNotMatch(src, /Number\(o\.subtotal\)[\s\S]{0,20}Number\(o\.total\)/, 'must not compute savings as subtotal − total');
     assert.match(src, /<polyline/, 'renders inline SVG polylines (no external chart library)');
 });
 
@@ -166,10 +167,12 @@ test('account sidebar nav relabelled "Loyalty Points" across pages', () => {
 // RUNTIME: the loyalty page renders a dual-line SVG from ledger + orders.
 // ─────────────────────────────────────────────────────────────────────────────
 
-function runLoyaltyPage(loyaltyData, coupons, orders) {
+function runLoyaltyPage(loyaltyData, coupons, orders, opts = {}) {
     const els = {};
+    // Panes/sections start hidden in the real HTML; mirror that so "did the
+    // controller reveal it?" is a meaningful assertion.
     const makeEl = () => ({
-        hidden: false, innerHTML: '', textContent: '', disabled: false,
+        hidden: true, innerHTML: '', textContent: '', disabled: false,
         style: {}, dataset: {},
         classList: { add() {}, remove() {}, toggle() {} },
         querySelector() { return null; },
@@ -187,7 +190,10 @@ function runLoyaltyPage(loyaltyData, coupons, orders) {
         DebugLog: { log() {}, warn() {}, error() {} },
         Auth: { isAuthenticated: () => true, waitForReady: async () => {} },
         API: {
-            getLoyalty: async () => ({ ok: true, data: loyaltyData, meta: { page: 1, total_pages: 1 } }),
+            getLoyalty: async () => {
+                if (opts.loyaltyFails) return { ok: false, code: 'NOT_FOUND', error: 'not found' };
+                return { ok: true, data: loyaltyData, meta: { page: 1, total_pages: 1 } };
+            },
             getLoyaltyCoupons: async () => ({ ok: true, data: coupons }),
             getOrders: async () => ({ ok: true, data: orders }),
             extractErrorMessage: (_e, f) => f,
@@ -220,8 +226,8 @@ test('runtime: graph draws both series (points accrued + order savings)', async 
         ],
     };
     const orders = [
-        { created_at: '2026-01-03T00:00:00Z', subtotal: 90, total: 57 },
-        { created_at: '2026-01-05T00:00:00Z', subtotal: 50, total: 50 },
+        { created_at: '2026-01-03T00:00:00Z', subtotal: 90, total: 57, discount_amount: 33 },
+        { created_at: '2026-01-05T00:00:00Z', subtotal: 50, total: 50, discount_amount: 0 },
     ];
     const { els, run } = runLoyaltyPage(loyalty, [], orders);
     await run();
@@ -240,4 +246,42 @@ test('runtime: empty balance + no history shows the empty state, not the graph',
     const { els, run } = runLoyaltyPage(loyalty, [], []);
     await run();
     assert.equal(els['loyalty-empty'].hidden, false, 'empty state shown');
+});
+
+test('runtime: a "restore" ledger row renders as "Restored" with a + sign', async () => {
+    const loyalty = {
+        program_active: true, points_balance: 500, redemption_rate: 100, min_redemption_points: 500,
+        ledger: [{ type: 'restore', points: 500, balance_after: 500, created_at: '2026-02-01T00:00:00Z' }],
+    };
+    const { els, run } = runLoyaltyPage(loyalty, [], []);
+    await run();
+    const history = els['loyalty-history-list'].innerHTML;
+    assert.match(history, /Restored/, 'restore row labelled "Restored"');
+    assert.match(history, /\+500 pts/, 'restore row shows a + sign (credit)');
+});
+
+test('runtime: getLoyalty unavailable → soft notice + savings graph + coupons still render (no hard error)', async () => {
+    const orders = [
+        { created_at: '2026-01-03T00:00:00Z', subtotal: 90, total: 57, discount_amount: 12 },
+        { created_at: '2026-01-08T00:00:00Z', subtotal: 60, total: 45, discount_amount: 8 },
+    ];
+    const coupons = [{ coupon: { code: 'POINTS-AB12CD', discount_type: 'fixed_amount', discount_value: 5 }, status: 'active' }];
+    const { els, run } = runLoyaltyPage(null, coupons, orders, { loyaltyFails: true });
+    await run();
+
+    const errEl = els['loyalty-error'];
+    assert.ok(!errEl || errEl.hidden === true, 'no hard error pane when orders/coupons exist');
+    assert.equal(els['loyalty-balance-unavailable'].hidden, false, 'soft balance-unavailable notice shown');
+    // Savings graph still draws the order-savings line (from /api/orders alone).
+    const svg = els['loyalty-graph'].innerHTML;
+    assert.match(svg, /loyalty-chart__line--savings/, 'order-savings line renders without the ledger');
+    assert.doesNotMatch(svg, /loyalty-chart__line--accrued/, 'no points-accrued line without the ledger');
+    // Coupons still render.
+    assert.match(els['loyalty-rewards-list'].innerHTML, /POINTS-AB12CD/, 'reward coupons still render');
+});
+
+test('runtime: everything unavailable (points down, no orders, no coupons) → hard error pane', async () => {
+    const { els, run } = runLoyaltyPage(null, [], [], { loyaltyFails: true });
+    await run();
+    assert.equal(els['loyalty-error'].hidden, false, 'hard error pane shown when nothing is available');
 });
