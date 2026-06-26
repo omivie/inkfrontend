@@ -523,9 +523,9 @@ const AdminAPI = {
     // that actually served on the payload (`_granularity`) so the x-axis labels match
     // the bars. A non-cap failure (or running out of grains) returns null → the chart's
     // normal "awaiting data" empty state. See isTooManyBucketsError above.
-    const order = ['hour', 'day', 'week', 'month', 'quarter'];
+    const order = ['day', 'week', 'month', 'quarter'];
     const start = order.indexOf(granularity);
-    const ladder = start === -1 ? [granularity || 'auto'] : order.slice(start);
+    const ladder = start === -1 ? [granularity || 'day'] : order.slice(start);
     for (const g of ladder) {
       if (signal?.aborted) return null;
       try {

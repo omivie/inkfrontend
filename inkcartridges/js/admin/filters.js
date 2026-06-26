@@ -18,30 +18,29 @@ const PERIOD_PRESETS = [
   { key: 'custom', label: 'Custom', days: null },
 ];
 
-// Bar/bucket granularity — independent of the data range. 'auto' lets each
-// page derive a sensible bucket width from the range; explicit values are sent
+// Bar/bucket granularity — independent of the data range. The chosen value is sent
 // to the backend so it returns pre-bucketed series (the frontend never re-buckets).
+// Day is the default; a grain too fine for the range is disabled + clamped coarser.
 const GRANULARITY_PRESETS = [
-  { key: 'auto', label: 'Auto' },
-  { key: 'hour', label: 'Hour' },
   { key: 'day', label: 'Day' },
   { key: 'week', label: 'Week' },
   { key: 'month', label: 'Month' },
   { key: 'quarter', label: 'Quarter' },
 ];
+const DEFAULT_GRANULARITY = 'day';
 
 // Approx days per bucket, used to keep the bucket count under the backend cap.
 // The analytics router rejects any series with > BUCKET_CAP buckets ("Too many
 // buckets … Narrow the window or use a coarser granularity"), so we disable any
 // granularity that would exceed it for the selected range — otherwise picking
-// e.g. Hour over All-time 400s and blanks every chart.
+// e.g. Day over a multi-year range 400s and blanks every chart.
 const GRANULARITY_DAYS = { hour: 1 / 24, day: 1, week: 7, month: 30.4, quarter: 91 };
 const BUCKET_CAP = 750;
 
 const FilterState = {
   _state: {
     period: '3m',
-    granularity: 'auto',
+    granularity: 'day',
     dateFrom: '',
     dateTo: '',
     brands: [],
@@ -121,7 +120,7 @@ const FilterState = {
     if (this._state.suppliers.length) p.set('suppliers', this._state.suppliers.join(','));
     if (this._state.statuses.length) p.set('statuses', this._state.statuses.join(','));
     if (this._state.categories.length) p.set('categories', this._state.categories.join(','));
-    if (this._state.granularity && this._state.granularity !== 'auto') p.set('granularity', this._state.granularity);
+    if (this._state.granularity) p.set('granularity', this._state.granularity);
     return p;
   },
 
@@ -173,21 +172,22 @@ const FilterState = {
 
   // Would this granularity stay under the backend's bucket cap for the range?
   granularityAllowed(key) {
-    if (!key || key === 'auto') return true;
+    if (!key) return true;
     const gd = GRANULARITY_DAYS[key];
     if (!gd) return true;
     return (this.rangeDays() / gd) <= BUCKET_CAP;
   },
 
-  // If the current granularity is now too fine for the range, fall back to 'auto'.
-  // Returns true if it changed. (Caller decides whether to persist/notify.)
+  // If the current granularity is now too fine for the range, step it to the finest
+  // coarser grain that fits the bucket cap. Returns true if it changed.
   _clampGranularity() {
-    if (this._state.granularity !== 'auto' && !this.granularityAllowed(this._state.granularity)) {
-      this._state.granularity = 'auto';
-      this._writeToURL();
-      return true;
-    }
-    return false;
+    if (this.granularityAllowed(this._state.granularity)) return false;
+    const order = GRANULARITY_PRESETS.map(g => g.key);
+    const start = Math.max(0, order.indexOf(this._state.granularity));
+    const next = order.slice(start).find(k => this.granularityAllowed(k)) || 'quarter';
+    this._state.granularity = next;
+    this._writeToURL();
+    return true;
   },
 
   // Apply page-local defaults (e.g. dashboard wants range=all) only when the
@@ -218,7 +218,7 @@ const FilterState = {
 
   reset() {
     this._state = {
-      period: '3m', granularity: 'auto', dateFrom: '', dateTo: '',
+      period: '3m', granularity: DEFAULT_GRANULARITY, dateFrom: '', dateTo: '',
       brands: [], suppliers: [], statuses: [], categories: [],
     };
     this._writeToURL();
@@ -245,7 +245,10 @@ const FilterState = {
     if (qIdx === -1) return;
     const params = new URLSearchParams(hash.slice(qIdx + 1));
     if (params.has('period')) this._state.period = params.get('period');
-    if (params.has('granularity')) this._state.granularity = params.get('granularity');
+    // Ignore retired/invalid grains from old bookmarks (e.g. ?granularity=auto|hour).
+    if (params.has('granularity') && GRANULARITY_PRESETS.some(g => g.key === params.get('granularity'))) {
+      this._state.granularity = params.get('granularity');
+    }
     if (params.has('from')) this._state.dateFrom = params.get('from');
     if (params.has('to')) this._state.dateTo = params.get('to');
     if (params.has('brands')) this._state.brands = params.get('brands').split(',').filter(Boolean);
@@ -259,7 +262,7 @@ const FilterState = {
     const baseHash = hash.split('?')[0] || '#dashboard';
     const parts = [];
     if (this._state.period !== '3m') parts.push('period=' + this._state.period);
-    if (this._state.granularity && this._state.granularity !== 'auto') parts.push('granularity=' + this._state.granularity);
+    if (this._state.granularity && this._state.granularity !== DEFAULT_GRANULARITY) parts.push('granularity=' + this._state.granularity);
     if (this._state.dateFrom) parts.push('from=' + this._state.dateFrom);
     if (this._state.dateTo) parts.push('to=' + this._state.dateTo);
     if (this._state.brands.length) parts.push('brands=' + this._state.brands.join(','));

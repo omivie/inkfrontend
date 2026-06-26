@@ -96,13 +96,12 @@ function hexToRgba(hex, alpha) {
   return hex;
 }
 
-// Resolve the active bar-width sent to the backend. An explicit granularity wins
-// — but is CLAMPED coarser if it would exceed the backend's ~750-bucket cap for
-// the real window span (else the request 400s and blanks every chart). 'auto'
-// derives a sensible bucket from the span. FilterState gates the UI to match;
-// this is the safety net for a stale URL like ?period=all&granularity=hour.
-const GRAN_ORDER = ['hour', 'day', 'week', 'month', 'quarter'];
-const GRAN_DAYS = { hour: 1 / 24, day: 1, week: 7, month: 30.4, quarter: 91 };
+// Resolve the active bar-width sent to the backend. The chosen granularity (Day by
+// default) wins — but is CLAMPED coarser if it would exceed the backend's ~750-bucket
+// cap for the real window span (else the request 400s and blanks every chart).
+// FilterState gates the UI to match; this is the safety net for a stale/over-cap URL.
+const GRAN_ORDER = ['day', 'week', 'month', 'quarter'];
+const GRAN_DAYS = { day: 1, week: 7, month: 30.4, quarter: 91 };
 const GRAN_BUCKET_CAP = 750;
 
 function realRangeDays() {
@@ -113,25 +112,19 @@ function realRangeDays() {
 function resolveGranularity() {
   const days = realRangeDays();
   const fits = (g) => days / GRAN_DAYS[g] <= GRAN_BUCKET_CAP;
-  const explicit = FilterState.get('granularity');
-  if (explicit && explicit !== 'auto') {
-    if (fits(explicit)) return explicit;
-    for (let i = GRAN_ORDER.indexOf(explicit); i < GRAN_ORDER.length; i++) {
-      if (fits(GRAN_ORDER[i])) return GRAN_ORDER[i];
-    }
-    return 'quarter';
+  const explicit = FilterState.get('granularity') || 'day';
+  if (fits(explicit)) return explicit;
+  for (let i = Math.max(0, GRAN_ORDER.indexOf(explicit)); i < GRAN_ORDER.length; i++) {
+    if (fits(GRAN_ORDER[i])) return GRAN_ORDER[i];
   }
-  if (days <= 2) return 'hour';
-  if (days <= 100) return 'day';
-  if (days <= 200) return 'week';
-  return 'month';
+  return 'quarter';
 }
 
 // Format a backend bucket_start for the x-axis at the active granularity.
 // The backend sends an Auckland-LOCAL label, not a UTC ISO timestamp:
-//   day/week/month/quarter → "YYYY-MM-DD"   ·   hour → "YYYY-MM-DDTHH:00"
-// We parse it as a LOCAL date (never `new Date("YYYY-MM-DD")`, which is UTC and
-// would shift the label a day in NZ) so bars line up with the Orders list.
+//   day/week/month/quarter → "YYYY-MM-DD". We parse it as a LOCAL date (never
+// `new Date("YYYY-MM-DD")`, which is UTC and would shift the label a day in NZ)
+// so bars line up with the Orders list.
 function fmtBucket(v) {
   if (v == null) return '';
   const s = String(v);
@@ -141,7 +134,6 @@ function fmtBucket(v) {
     ? new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]), m[4] ? Number(m[4]) : 0)
     : new Date(s);
   if (isNaN(d.getTime())) return s;
-  if (g === 'hour') return d.toLocaleTimeString('en-NZ', { hour: 'numeric' });
   if (g === 'month' || g === 'quarter') return d.toLocaleDateString('en-NZ', { month: 'short', year: '2-digit' });
   return d.toLocaleDateString('en-NZ', { day: 'numeric', month: 'short' });
 }
@@ -774,7 +766,7 @@ export default {
     _container = container;
     // Dashboard-local defaults (range = all) applied only when the URL omits them,
     // and the bar-width control shown for this page only.
-    FilterState.setDefaults({ period: 'all', granularity: 'auto' });
+    FilterState.setDefaults({ period: 'all', granularity: 'day' });
     FilterState.setGranularityVisible(true);
     await loadDashboard();
   },
