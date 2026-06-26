@@ -39,28 +39,15 @@ let _effectiveGranularity = null;
 const _payloadCache = new Map();
 const _PAYLOAD_CACHE_MAX = 12;
 
-// ---------- combined "all metrics over time" graph ----------
+// ---------- action-alert thresholds ----------
 
-// One toggleable line per time-series metric, each pointing at a payload key already
-// produced by bundleToGraphs() and the field inside that payload's `series` rows. The
-// series have different units ($/count/%), so the combined chart normalizes each line to
-// 0–100% of its own peak (real values live in the tooltip). Colors use theme keys plus the
-// two extras drawShare already uses ('#60a5fa', '#a78bfa').
-const COMBINED_METRICS = [
-  { id: 'revenue',           label: 'Revenue',            payloadKey: 'sRevenue',     seriesKey: 'revenue',           color: 'success', unit: 'money',   additive: true  },
-  { id: 'gross_profit',      label: 'Gross profit',       payloadKey: 'sGrossProfit', seriesKey: 'gross_profit',      color: 'cyan',    unit: 'money',   additive: true  },
-  // additive:false → in 'all' mode this plots each bucket's own order count (orders per day),
-  // not a cumulative running total, so the line reads as daily volume.
-  { id: 'orders',            label: 'Orders',             payloadKey: 'sOrders',      seriesKey: 'orders',            color: 'yellow',  unit: 'count',   additive: false },
-  { id: 'aov',               label: 'AOV',                payloadKey: 'sAov',         seriesKey: 'aov',               color: 'magenta', unit: 'money',   additive: false },
-  { id: 'refund_rate',       label: 'Refund rate',        payloadKey: 'sRefundRate',  seriesKey: 'refund_rate_pct',   color: 'danger',  unit: 'percent', additive: false },
-  { id: 'new_revenue',       label: 'New cust. revenue',  payloadKey: 'custType',     seriesKey: 'new_revenue',       color: '#60a5fa', unit: 'money',   additive: true  },
-  { id: 'returning_revenue', label: 'Returning revenue',  payloadKey: 'custType',     seriesKey: 'returning_revenue', color: '#a78bfa', unit: 'money',   additive: true  },
-];
-
-// Toggle state survives re-renders (filter changes) and SPA nav, like _payloadCache.
-const _combinedEnabled = new Set(['revenue', 'gross_profit', 'orders']);
-let _lastPayload = null; // set in render(d); read by the toggle handler to redraw without refetch
+// Net-margin % below which a product is "reprice or drop" urgent. The backend's own
+// margin floors (16–47%) flag thousands of products as under-floor — too many to be a daily
+// action — so the alert uses this tighter threshold to surface only the genuinely thin ones.
+const LOW_MARGIN_PCT = 10;
+// A zero-result search must reach this volume to be "worth acting on" (add a product,
+// synonym or redirect). Quieter one-off typos stay out of the alert.
+const ZERO_SEARCH_MIN = 5;
 
 // ---------- small helpers ----------
 
@@ -190,6 +177,102 @@ function sumRefundAmounts(refunds) {
   const series = firstArray(refunds, ['series', 'refunds', 'data']);
   if (!series.length) return null;
   return series.reduce((sum, r) => sum + Number(r.refund_amount ?? r.amount ?? r.total ?? 0), 0);
+}
+
+// ---------- action-alert data shaping ----------
+
+// Pull a net-margin % off an under-margin row. The endpoint exposes a few shapes; prefer the
+// fields already labelled "_pct" (definitely a percentage), and only treat a bare `net_margin`
+// as a fraction (×100) when it's clearly ≤1 in magnitude.
+function rowMarginPct(r) {
+  if (r == null) return null;
+  for (const k of ['net_margin_pct', 'estimated_margin_pct', 'margin_pct']) {
+    if (r[k] != null) return Number(r[k]);
+  }
+  if (r.net_margin != null) {
+    const v = Number(r.net_margin);
+    return Math.abs(v) <= 1.5 ? v * 100 : v;   // fraction → percent
+  }
+  return null;
+}
+
+// Normalize one-or-more getUnderMarginProducts() responses into ranked rows the worst-margin
+// chart + low-margin alert both read: { sku, name, _label, _marginPct }, MERGED across sources
+// and sorted ascending (worst first). Returns null only when every response is missing, so the
+// chart shows "awaiting data" honestly. Each source is fetched worst-first, so the merged head
+// is the catalog-wide worst.
+function normalizeWorstMargin(responses) {
+  const list = Array.isArray(responses) ? responses : [responses];
+  if (list.every(r => r == null)) return null;
+  const out = [];
+  for (const resp of list) {
+    const rows = firstArray(resp, ['data', 'rows', 'products', 'items']);
+    for (const r of rows) {
+      const pct = rowMarginPct(r);
+      if (pct == null) continue;
+      const sku = r.sku || r.SKU || '';
+      const name = r.name || r.product_name || sku || MISSING;
+      out.push({ sku, name, source: r.source || '', _label: sku || String(name).slice(0, 18), _marginPct: pct });
+    }
+  }
+  out.sort((a, b) => a._marginPct - b._marginPct);
+  return out;
+}
+
+// Alert A — orders needing tracking. Union of pending tracking requests (customer asked) and
+// paid/processing orders that still have no tracking_number, deduped by order number.
+function computeTrackingAlert(trackingReq, trackingOrders) {
+  const reqList = firstArray(trackingReq, ['requests', 'data', 'items']);
+  const orders = firstArray(trackingOrders, ['orders', 'data', 'items']);
+  const keys = new Set();
+  let hasOrderTrackingField = false;
+  for (const r of reqList) {
+    const k = r.order_number || r.order?.order_number || r.id;
+    if (k != null) keys.add(`r:${k}`);
+  }
+  for (const o of orders) {
+    if ('tracking_number' in o) hasOrderTrackingField = true;
+    if (!o.tracking_number) {
+      const k = o.order_number || o.id;
+      if (k != null) keys.add(`o:${k}`);
+    }
+  }
+  // If the orders endpoint never exposes tracking_number, fall back to the tracking-request
+  // count alone rather than over-counting every open order.
+  const count = (!hasOrderTrackingField && orders.length)
+    ? (typeof trackingReq?.total === 'number' ? trackingReq.total : reqList.length)
+    : keys.size;
+  const sample = reqList.slice(0, 3).map(r => r.order_number || r.order?.order_number || r.id).filter(Boolean);
+  return { count, sample };
+}
+
+// Alert B — high-volume zero-result searches worth acting on (add product / synonym / redirect).
+function computeZeroSearchAlert(searchZero) {
+  const list = firstArray(searchZero, ['terms', 'searches', 'data']);
+  const ranked = list
+    .map(r => ({ term: r.term || r.query || r.q || MISSING, n: Number(r.searches ?? r.count ?? r.volume ?? 0) }))
+    .filter(r => r.n >= ZERO_SEARCH_MIN)
+    .sort((a, b) => b.n - a.n);
+  return { count: ranked.length, sample: ranked.slice(0, 3) };
+}
+
+// Alert C — low-margin products. Prefers real per-SKU under-margin rows; falls back to
+// brand-level margin_by_brand when that endpoint is unavailable so the alert still fires.
+// `capped` is set when every fetched row is under threshold (so there may be more than shown).
+function computeLowMarginAlert(worstMarginSkus, marginBrand, truncated = false) {
+  if (Array.isArray(worstMarginSkus) && worstMarginSkus.length) {
+    const low = worstMarginSkus.filter(r => r._marginPct < LOW_MARGIN_PCT);
+    return {
+      count: low.length, capped: !!truncated, grain: 'sku',
+      sample: low.slice(0, 3).map(r => ({ label: r._label, pct: r._marginPct })),
+    };
+  }
+  const brands = firstArray(marginBrand, ['brands', 'data']);
+  const low = brands
+    .map(b => ({ label: b.brand || MISSING, pct: Number(b.margin_pct) }))
+    .filter(b => Number.isFinite(b.pct) && b.pct < LOW_MARGIN_PCT)
+    .sort((a, b) => a.pct - b.pct);
+  return { count: low.length, capped: false, grain: 'brand', sample: low.slice(0, 3) };
 }
 
 // ---------- chart empty/await state ----------
@@ -450,85 +533,102 @@ function drawForecast(canvasId, payload) {
   }), canvasId);
 }
 
-// Combined multi-metric line chart. Merges the enabled series by bucket_start, applies the
-// same cumulative-mode accumulation the sibling charts use, normalizes each series to its
-// own peak (so mismatched units share one 0–100% axis), and draws one chart. Reuses the
-// existing helpers rather than re-bucketing anything.
-function drawCombined(d) {
-  const canvasId = 'dash-c-combined';
-  const enabled = COMBINED_METRICS.filter(m => _combinedEnabled.has(m.id));
-  if (!enabled.length) { chartEmpty(canvasId, 'Select at least one metric'); return; }
+// Performance overview — real numbers, NOT normalized (replaces the old 0–100% combined
+// chart, which made small metrics look as important as big ones). Revenue + gross profit
+// ride the left $ axis; order volume rides the right count axis. Merges the three series by
+// bucket_start and honors cumulative 'all' mode for the money series (orders stay per-bucket
+// so the line always reads as daily/weekly volume, never a runaway running total).
+function drawPerformanceOverview(d) {
+  const canvasId = 'dash-c-overview';
+  const revList = resolveList(d.sRevenue, ['series', 'data']) || [];
+  const gpList  = resolveList(d.sGrossProfit, ['series', 'data']) || [];
+  const ordList = resolveList(d.sOrders, ['series', 'data']) || [];
 
-  // Build the union x-axis from all enabled series' bucket_start (they share grain/range,
-  // so this is normally identical across series). Map keeps first-seen order.
-  const byBucket = new Map(); // bucket_start -> { [metricId]: rawValue }
+  const byBucket = new Map(); // bucket_start -> { revenue, gross_profit, orders }
   const order = [];
-  for (const m of enabled) {
-    const list = resolveList(d[m.payloadKey], ['series', 'data']) || [];
+  const merge = (list, srcKey, dstKey) => {
     for (const r of list) {
       const b = r.bucket_start ?? r.date;
       if (!byBucket.has(b)) { byBucket.set(b, {}); order.push(b); }
-      byBucket.get(b)[m.id] = Number(r[m.seriesKey] || 0);
+      byBucket.get(b)[dstKey] = Number(r[srcKey] || 0);
     }
-  }
-  if (!order.length) { chartEmpty(canvasId, EMPTY_MSG); return; }
-  order.sort(); // "YYYY-MM-DD" labels sort chronologically
+  };
+  merge(revList, 'revenue', 'revenue');
+  merge(gpList, 'gross_profit', 'gross_profit');
+  merge(ordList, 'orders', 'orders');
+  if (!order.length) { chartEmpty(canvasId, d.sRevenue == null ? AWAIT_MSG : EMPTY_MSG); return; }
+  order.sort(); // "YYYY-MM-DD" sorts chronologically
 
+  const c = Charts.getThemeColors();
   const labels = order.map(fmtBucket);
   const plot = isCumulativeMode();
-  const c = Charts.getThemeColors();
-  const fmtVal = (u, v) => u === 'money' ? formatPrice(v) : u === 'percent' ? `${Number(v).toFixed(1)}%` : String(Math.round(v));
+  const accum = (arr) => { if (!plot) return arr; let acc = 0; return arr.map(v => (acc += v)); };
+  const revenue = accum(order.map(b => Number(byBucket.get(b)?.revenue || 0)));
+  const profit  = accum(order.map(b => Number(byBucket.get(b)?.gross_profit || 0)));
+  const orders  = order.map(b => Number(byBucket.get(b)?.orders || 0)); // never cumulative
 
-  const datasets = enabled.map(m => {
-    let raw = order.map(b => Number(byBucket.get(b)?.[m.id] || 0));
-    if (plot && m.additive) { let acc = 0; raw = raw.map(v => (acc += v)); } // cumulative in 'all' mode
-    const max = Math.max(...raw.map(Math.abs), 0);
-    const norm = raw.map(v => max ? (v / max) * 100 : 0); // normalize to 0–100% of own peak
-    const col = c[m.color] || m.color;
-    return {
-      label: m.label, data: norm,
-      borderColor: col, backgroundColor: hexToRgba(col, 0.06),
-      borderWidth: 2, fill: false, tension: 0.35, pointRadius: 0, pointHoverRadius: 4,
-      _raw: raw, _unit: m.unit, // stashed so the tooltip shows real values, not the 0–100 scale
-    };
-  });
+  const drawType = plot ? 'line' : 'bar';
+  const mkMoney = (label, data, color) => drawType === 'line'
+    ? { label, data, yAxisID: 'y', borderColor: color, backgroundColor: hexToRgba(color, 0.16),
+        borderWidth: 2, fill: true, tension: 0.35, pointRadius: 0, pointHoverRadius: 4 }
+    : { label, data, yAxisID: 'y', backgroundColor: color + 'cc', borderRadius: 4,
+        barPercentage: 0.7, categoryPercentage: 0.8 };
 
-  guardDraw(Charts.line(canvasId, {
+  const datasets = [
+    mkMoney('Revenue', revenue, c.success),
+    mkMoney('Gross profit', profit, c.cyan),
+    // Orders always a line on the right axis so it reads against the money bars/lines.
+    { label: 'Orders', data: orders, yAxisID: 'y1', type: 'line',
+      borderColor: c.yellow, backgroundColor: hexToRgba(c.yellow, 0.12),
+      borderWidth: 2, fill: false, tension: 0.35, pointRadius: 0, pointHoverRadius: 4 },
+  ];
+
+  // Bar base with a line dataset mixed in (Chart.js honors per-dataset `type`).
+  const fn = drawType === 'line' ? Charts.line : Charts.bar;
+  guardDraw(fn.call(Charts, canvasId, {
     labels, datasets,
     options: {
       plugins: {
-        legend: { display: false }, // our checkbox toolbar is the legend
+        legend: { display: true, position: 'top', labels: { color: c.textMuted, font: { size: 11 }, boxWidth: 10, boxHeight: 10 } },
         tooltip: { callbacks: {
-          label: (ctx) => {
-            const ds = ctx.dataset;
-            return `${ds.label}: ${fmtVal(ds._unit, ds._raw?.[ctx.dataIndex] ?? 0)} (${Math.round(ctx.raw)}%)`;
-          },
+          label: (ctx) => ctx.dataset.yAxisID === 'y1'
+            ? `${ctx.dataset.label}: ${Math.round(ctx.raw || 0)}`
+            : `${ctx.dataset.label}: ${formatPrice(ctx.raw || 0)}`,
         } },
       },
-      scales: { x: { ticks: { maxTicksLimit: 10 } }, y: { beginAtZero: true, max: 100, ticks: { callback: (v) => `${v}%` } } },
+      scales: {
+        x: { ticks: { maxTicksLimit: 10 } },
+        y:  { beginAtZero: true, min: 0, position: 'left',  ticks: { callback: (v) => formatPrice(v) } },
+        y1: { beginAtZero: true, min: 0, position: 'right', grid: { drawOnChartArea: false },
+              ticks: { color: c.textMuted, font: { size: 11 }, precision: 0, callback: (v) => Math.round(v) } },
+      },
     },
   }), canvasId);
 }
 
 function drawAllCharts(d) {
   try {
-    // Combined overview (above Money)
-    drawCombined(d);
+    // Performance overview (real numbers, above the rest) — replaces the old normalized chart
+    drawPerformanceOverview(d);
     // Row 1 — Money: revenue + gross profit merged (left), forecast (right)
     drawRevenueProfit(d);
     drawForecast('dash-c-forecast', d.forecast);
-    // Row 2 — Products
+    // Row 2 — Products (3-up): top by revenue, top by profit, worst margin
     drawRanked('dash-c-sku-revenue', d.topSkusRev, { listKeys: ['products', 'skus'], labelKey: 'sku', valueKey: 'revenue', color: 'success', isMoney: true });
     drawRanked('dash-c-sku-profit', d.topSkusProfit, { listKeys: ['products', 'skus'], labelKey: 'sku', valueKey: 'gross_profit', color: 'cyan', isMoney: true });
+    // Worst-margin SKUs come pre-sorted ascending from getUnderMarginProducts (sort:false here).
+    drawRanked('dash-c-sku-worst-margin', d.worstMarginSkus, { listKeys: ['products', 'rows', 'data'], labelKey: '_label', valueKey: '_marginPct', color: 'danger', isMoney: false, isPercent: true, sort: false, limit: 8 });
     // Row 3 — Sales
     drawSeries('dash-c-orders', d.sOrders, { type: 'line', additive: true, metrics: [{ label: 'Orders', key: 'orders', color: 'yellow' }], isMoney: false });
     drawSeries('dash-c-aov', d.sAov, { type: 'line', metrics: [{ label: 'AOV', key: 'aov', color: 'cyan' }], isMoney: true });
     // Row 4 — Margin
     drawRanked('dash-c-margin-brand', d.marginBrand, { listKeys: ['brands'], labelKey: 'brand', valueKey: 'margin_pct', color: 'magenta', isMoney: false, isPercent: true });
     drawRanked('dash-c-margin-category', d.marginCategory, { listKeys: ['categories'], labelKey: 'category', valueKey: 'margin_pct', color: 'magenta', isMoney: false, isPercent: true });
-    // Row 5 — Marketing
+    // Row 5 — Marketing (traffic only). Conversion-by-source is HIDDEN: the backend
+    // conversion_pct returns >100% (bad sessions↔orders attribution, see handoff doc).
+    // Restore the card in render() + uncomment below once the backend math is fixed:
+    //   drawRanked('dash-c-conversion-source', d.conversionSource, { listKeys: ['sources'], labelKey: 'source', valueKey: 'conversion_pct', color: 'success', isMoney: false, isPercent: true });
     drawShare('dash-c-traffic-source', d.trafficSource, { listKeys: ['sources'], labelKey: 'source', valueKey: 'sessions' });
-    drawRanked('dash-c-conversion-source', d.conversionSource, { listKeys: ['sources'], labelKey: 'source', valueKey: 'conversion_pct', color: 'success', isMoney: false, isPercent: true });
     // Row 6 — Customers
     drawSeries('dash-c-cust-type', d.custType, { type: 'bar', stacked: true, additive: true, isMoney: true, metrics: [{ label: 'New', key: 'new_revenue', color: 'cyan' }, { label: 'Returning', key: 'returning_revenue', color: 'success' }] });
     drawRanked('dash-c-reorder', d.reorder, { listKeys: ['buckets'], labelKey: 'days_label', valueKey: 'customer_count', color: 'cyan', isMoney: false, horizontal: false, sort: false, limit: 24 });
@@ -618,7 +718,8 @@ async function loadDashboard() {
   const from = params.get('from'), to = params.get('to');
   // One bundle call covers all 18 graph charts (backend's preferred path — avoids
   // the parallel fan-out that tripped the rate limiter). The KPI band, tables and
-  // refund reasons stay on their existing dedicated endpoints. 7 calls total.
+  // refund reasons stay on their existing dedicated endpoints. The last three feed the
+  // "Action needed" panel + worst-margin card. 10 calls total (under the 60/min limit).
   const promises = [
     AdminAPI.getDashboardBundle(params, g, signal),          // 0  all graph charts
     AdminAPI.getDashboardKPIs(params, signal),               // 1  KPI band
@@ -627,6 +728,13 @@ async function loadDashboard() {
     AdminAPI.getOutOfStock({ limit: 5 }),                    // 4  out-of-stock KPI
     AdminAPI.getOrders({ from, to }, 1, 8, signal),          // 5  recent orders table
     AdminAPI.getTopProducts(params, signal),                 // 6  most-bought table
+    AdminAPI.getTrackingRequests({ status: 'pending' }),     // 7  alert: orders needing tracking
+    AdminAPI.getOrders({ from, to, statuses: ['paid', 'processing'] }, 1, 50, signal), // 8  alert: untracked open orders
+    // Worst-margin SKUs + low-margin alert. The endpoint needs a concrete source ('' → 400),
+    // so fetch genuine + compatible worst-first and merge. limit:60 each gives a deep enough
+    // tail to count everything under the alert threshold accurately for this catalog.
+    AdminAPI.getUnderMarginProducts('genuine', 1, 60, 'under-margin', 'net_margin', 'asc'),    // 9
+    AdminAPI.getUnderMarginProducts('compatible', 1, 60, 'under-margin', 'net_margin', 'asc'), // 10
   ];
 
   const results = await Promise.allSettled(promises);
@@ -645,14 +753,29 @@ async function loadDashboard() {
   const graphs = bundleToGraphs(bundle);
   _container.classList.remove('admin-page--reloading');
 
+  const UM_LIMIT = 60;
+  const umResponses = [val(9), val(10)];
+  const worstMargin = normalizeWorstMargin(umResponses);
+  // The low-margin count is truncated (show "N+") when a source returned a full page whose
+  // every row is still under the alert threshold — i.e. there are more below it than we fetched.
+  const worstMarginTruncated = umResponses.some(r => {
+    const rows = firstArray(r, ['data', 'rows', 'products', 'items']);
+    if (rows.length < UM_LIMIT) return false;
+    const pcts = rows.map(rowMarginPct).filter(p => p != null);
+    return pcts.length > 0 && Math.max(...pcts) < LOW_MARGIN_PCT;
+  });
+
   const payload = {
     isOwner: true,
     // The grain the bundle ACTUALLY served at (getDashboardBundle may have escalated past
     // a backend bucket-cap rejection). Carried in the payload — not just a module var — so
     // a stale-while-revalidate cache repaint labels its x-axis to match its own bars.
     _effectiveGranularity: (bundle && bundle._granularity) || g,
+    _loadedAt: new Date().toISOString(),   // drives the "Updated …" stamp in the header
     kpis: val(1), custStats: val(2), refunds: val(3), outOfStock: val(4),
     recentOrders: val(5), topProducts: val(6),
+    trackingReq: val(7), trackingOrders: val(8),
+    worstMarginSkus: worstMargin, worstMarginTruncated,
     ...graphs,
   };
 
@@ -685,8 +808,26 @@ function render(d) {
   }
 
   _container.innerHTML = `
-    <div class="admin-page-header admin-page-header--dash"><h1>Dashboard</h1></div>
+    <div class="admin-page-header admin-page-header--dash">
+      <h1>Dashboard</h1>
+      <span class="admin-dash__updated">Updated ${esc(timeAgo(d._loadedAt))}</span>
+    </div>
     ${renderKpiStrip(d)}
+    ${renderAlertsSection(d)}
+    ${renderOverviewSection()}
+    ${rowN('Products', 'cyan', [
+      chartCard('Top SKUs by revenue', 'top 8', 'dash-c-sku-revenue', 4),
+      chartCard('Top SKUs by gross profit', 'top 8', 'dash-c-sku-profit', 4),
+      chartCard('Worst-margin SKUs', 'lowest net %', 'dash-c-sku-worst-margin', 4),
+    ])}
+    ${row('Search', 'magenta', chartCard('Top searches', 'by volume', 'dash-c-search-top'), chartCard('Zero-result searches', 'demand gaps', 'dash-c-search-zero'))}
+    <section class="admin-dash-row">
+      <div class="admin-dash-row__label admin-dash-row__label--success">Operations <small>${esc(rangeLabel())}</small></div>
+      <div class="admin-dash">
+        ${renderRecentOrdersCard(d.recentOrders)}
+        ${renderFulfillmentCard(d)}
+      </div>
+    </section>
     <section class="admin-dash-row">
       <div class="admin-dash-row__label admin-dash-row__label--success">Money <small>${esc(rangeLabel())}</small></div>
       <div class="admin-dash">
@@ -695,39 +836,33 @@ function render(d) {
           <div class="admin-chart-box"><canvas id="dash-c-revenue-profit"></canvas></div>
         </div>
         <div class="admin-dash__cell--6 admin-card">
-          <div class="admin-card__title"><span>30-day revenue forecast <small>actual + projection · trend estimate</small></span></div>
+          <div class="admin-card__title"><span>30-day revenue estimate <small>actual + projection · trend only, bands pending</small></span></div>
           <div class="admin-chart-box"><canvas id="dash-c-forecast"></canvas></div>
         </div>
       </div>
     </section>
-    ${renderCombinedSection()}
-    ${row('Products', 'cyan', chartCard('Top SKUs by revenue', 'top 10', 'dash-c-sku-revenue'), chartCard('Top SKUs by gross profit', 'top 10', 'dash-c-sku-profit'))}
     ${row('Sales', 'yellow', chartCard('Orders', 'over time', 'dash-c-orders'), chartCard('Average order value', 'over time', 'dash-c-aov'))}
     ${row('Margin', 'magenta', chartCard('Gross margin by brand', '%', 'dash-c-margin-brand'), chartCard('Gross margin by category', '%', 'dash-c-margin-category'))}
-    ${row('Marketing', 'success', chartCard('Traffic by source', 'sessions · approx', 'dash-c-traffic-source'), chartCard('Conversion by source', '% · approx', 'dash-c-conversion-source'))}
     ${row('Customers', 'cyan', chartCard('New vs returning revenue', 'over time', 'dash-c-cust-type'), chartCard('Reorder interval', 'days between orders', 'dash-c-reorder'))}
-    ${row('Search', 'magenta', chartCard('Top searches', 'by volume — conversion pending', 'dash-c-search-top'), chartCard('Zero-result searches', '', 'dash-c-search-zero'))}
-    ${row('Risk', 'danger', chartCard('Refund rate', 'over time', 'dash-c-refund-rate'), chartCard('Refund reasons', 'share', 'dash-c-refund-reasons'))}
     <section class="admin-dash-row">
-      <div class="admin-dash-row__label">Latest</div>
+      <div class="admin-dash-row__label admin-dash-row__label--success">Marketing <small>${esc(rangeLabel())}</small></div>
       <div class="admin-dash">
-        ${renderRecentOrdersCard(d.recentOrders)}
+        ${chartCard('Traffic by source', 'sessions · approx', 'dash-c-traffic-source')}
         ${renderTopProductsCard(d.topProducts)}
       </div>
     </section>
+    ${row('Risk', 'danger', chartCard('Refund rate', 'over time', 'dash-c-refund-rate'), chartCard('Refund reasons', 'share', 'dash-c-refund-reasons'))}
   `;
 
-  _lastPayload = d;   // toggle handler redraws the combined chart from this without refetch
   drawAllCharts(d);
   wireOrderRowClicks();
-  wireCombinedToggles();
 }
 
 // ---------- layout helpers ----------
 
-function chartCard(title, sub, canvasId) {
+function chartCard(title, sub, canvasId, cell = 6) {
   return `
-    <div class="admin-dash__cell--6 admin-card">
+    <div class="admin-dash__cell--${cell} admin-card">
       <div class="admin-card__title"><span>${esc(title)}${sub ? ` <small>${esc(sub)}</small>` : ''}</span></div>
       <div class="admin-chart-box"><canvas id="${canvasId}"></canvas></div>
     </div>
@@ -735,63 +870,147 @@ function chartCard(title, sub, canvasId) {
 }
 
 function row(label, accent, leftCard, rightCard) {
+  return rowN(label, accent, [leftCard, rightCard]);
+}
+
+// N-card row variant (used by the 3-up Products row and the alerts panel). Cards carry
+// their own cell-width class so a row can hold two --6 cells or three --4 cells.
+function rowN(label, accent, cards) {
+  const acc = accent ? ` admin-dash-row__label--${accent}` : '';
   return `
     <section class="admin-dash-row">
-      <div class="admin-dash-row__label admin-dash-row__label--${accent}">${esc(label)} <small>${esc(rangeLabel())}</small></div>
-      <div class="admin-dash">${leftCard}${rightCard}</div>
+      <div class="admin-dash-row__label${acc}">${esc(label)} <small>${esc(rangeLabel())}</small></div>
+      <div class="admin-dash">${cards.join('')}</div>
     </section>
   `;
 }
 
-// Full-width combined-metrics section (above Money). A checkbox toolbar drives which series
-// overlay on one normalized chart; the checkboxes ARE the legend (chart legend is hidden).
-function renderCombinedSection() {
-  const toggles = COMBINED_METRICS.map(m => {
-    const c = Charts.getThemeColors();
-    const col = c[m.color] || m.color;
-    const checked = _combinedEnabled.has(m.id) ? ' checked' : '';
-    return `<label><input type="checkbox" data-metric="${esc(m.id)}"${checked}>`
-      + `<span class="admin-combined-swatch" style="background:${esc(col)}"></span>${esc(m.label)}</label>`;
-  }).join('');
-
+// Full-width real-numbers performance overview (replaces the old normalized "All metrics"
+// chart). Just a tall canvas — drawPerformanceOverview fills it; no toolbar/legend wiring.
+function renderOverviewSection() {
   return `
     <section class="admin-dash-row">
-      <div class="admin-dash-row__label admin-dash-row__label--cyan">All metrics <small>${esc(rangeLabel())}</small></div>
+      <div class="admin-dash-row__label admin-dash-row__label--cyan">Performance <small>${esc(rangeLabel())}</small></div>
       <div class="admin-dash">
         <div class="admin-dash__cell--12 admin-card">
-          <div class="admin-card__title"><span>All metrics <small>over time · normalized to each series' peak</small></span></div>
-          <div class="admin-combined-toggles">${toggles}</div>
-          <div class="admin-chart-box admin-chart-box--tall"><canvas id="dash-c-combined"></canvas></div>
+          <div class="admin-card__title"><span>Performance overview <small>revenue · gross profit · orders — real values, not normalized</small></span></div>
+          <div class="admin-chart-box admin-chart-box--tall"><canvas id="dash-c-overview"></canvas></div>
         </div>
       </div>
     </section>
   `;
 }
 
-function wireCombinedToggles() {
-  _container?.querySelectorAll('.admin-combined-toggles input[type="checkbox"]').forEach(cb => {
-    cb.addEventListener('change', () => {
-      const id = cb.getAttribute('data-metric');
-      if (cb.checked) _combinedEnabled.add(id); else _combinedEnabled.delete(id);
-      if (_lastPayload) drawCombined(_lastPayload); // redraw only this chart, no refetch
-    });
-  });
+// ---------- action alerts ----------
+
+// "Action needed" panel — surfaces what the owner should do today rather than just what
+// happened. Three clickable cards; each routes to the relevant admin page via the hash.
+function renderAlertsSection(d) {
+  const tracking = computeTrackingAlert(d.trackingReq, d.trackingOrders);
+  const zero = computeZeroSearchAlert(d.searchZero);
+  const lowMargin = computeLowMarginAlert(d.worstMarginSkus, d.marginBrand, d.worstMarginTruncated);
+
+  const trackingList = tracking.sample.length
+    ? tracking.sample.map(n => `<li>#${esc(String(n).slice(-8))}</li>`).join('')
+    : '<li class="admin-alert-card__none">All caught up</li>';
+  const zeroList = zero.sample.length
+    ? zero.sample.map(s => `<li>${esc(s.term)} <span class="admin-badge">${esc(String(s.n))}</span></li>`).join('')
+    : '<li class="admin-alert-card__none">No high-volume misses</li>';
+  const lowList = lowMargin.sample.length
+    ? lowMargin.sample.map(s => `<li>${esc(s.label)} <span class="admin-badge admin-badge--failed">${esc(Number(s.pct).toFixed(1))}%</span></li>`).join('')
+    : '<li class="admin-alert-card__none">None under threshold</li>';
+
+  const card = (href, accent, title, count, why, list, sev) => `
+    <a class="admin-dash__cell--4 admin-card admin-alert-card${sev ? ' admin-alert-card--' + sev : ''}" href="#${href}">
+      <div class="admin-card__title"><span>${esc(title)}</span></div>
+      <div class="admin-alert-card__count">${esc(String(count))}</div>
+      <div class="admin-alert-card__why">${esc(why)}</div>
+      <ul class="admin-alert-card__list">${list}</ul>
+    </a>
+  `;
+
+  const lowUnit = lowMargin.grain === 'brand' ? 'brands' : 'SKUs';
+  const lowWhy = `${lowUnit} under ${LOW_MARGIN_PCT}% net margin — reprice or drop`;
+  const lowCount = `${lowMargin.count}${lowMargin.capped ? '+' : ''}`;
+
+  return rowN('Action needed', 'danger', [
+    card('tracking-requests', 'danger', 'Orders needing tracking', tracking.count,
+      'paid/processing orders awaiting tracking', trackingList, tracking.count > 0 ? 'danger' : null),
+    card('products', 'yellow', 'Zero-result searches', zero.count,
+      `searches with ≥${ZERO_SEARCH_MIN} hits returning nothing — add products/synonyms`, zeroList, zero.count > 0 ? 'warning' : null),
+    card('margin', 'magenta', 'Low-margin products', lowCount,
+      lowWhy, lowList, lowMargin.count > 0 ? 'warning' : null),
+  ]);
+}
+
+// Fulfillment card for the Operations row — a compact list of paid/processing orders that
+// still need tracking, each clickable through to the order. Complements the alert count.
+function renderFulfillmentCard(d) {
+  const orders = firstArray(d.trackingOrders, ['orders', 'data', 'items'])
+    .filter(o => !o.tracking_number)
+    .slice(0, 8);
+  if (!orders.length) {
+    return `
+      <div class="admin-dash__cell--6 admin-card">
+        <div class="admin-card__title">Needs tracking <small>paid · processing</small></div>
+        <div class="admin-dash-inline-empty">Nothing awaiting tracking 🎉</div>
+      </div>
+    `;
+  }
+  const rows = orders.map(o => {
+    const id = o.order_number || o.id || '';
+    const who = o.customer_name || o.customer_email || o.email || 'Guest';
+    const status = (o.status || 'pending').toLowerCase();
+    const when = timeAgo(o.created_at || o.createdAt);
+    return `
+      <tr data-order-id="${esc(String(o.id || id))}">
+        <td class="cell-mono">${esc(String(id).slice(-8))}</td>
+        <td class="cell-truncate">${esc(who)}</td>
+        <td><span class="admin-badge admin-badge--${esc(status)}">${esc(status)}</span></td>
+        <td class="cell-muted cell-mono">${esc(when)}</td>
+      </tr>
+    `;
+  }).join('');
+  return `
+    <div class="admin-dash__cell--6 admin-card">
+      <div class="admin-card__title">
+        <span>Needs tracking <small>paid · processing</small></span>
+        <a href="#tracking-requests" class="admin-mini-card__sub">View all →</a>
+      </div>
+      <table class="admin-dash-table">
+        <thead><tr><th>Order</th><th>Customer</th><th>Status</th><th>When</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>
+  `;
 }
 
 // ---------- KPI band ----------
 
-function renderKpiTile(t, extraClass = '') {
+function renderKpiTile(t, extraClass = '', noDelta = false) {
   const alertCls = t.alert ? ' admin-kpi--alert' : '';
+  const tipAttr = t.tooltip ? ` data-tooltip="${esc(t.tooltip)}"` : '';
   let h = `<div class="admin-kpi admin-kpi--compact${alertCls}${extraClass}">`;
-  h += `<div class="admin-kpi__label">${esc(t.label)}</div>`;
+  h += `<div class="admin-kpi__label"${tipAttr}>${esc(t.label)}</div>`;
   if (t.value != null) {
     h += `<div class="admin-kpi__value">${esc(t.value)}</div>`;
-    h += deltaBadge(t.raw, t.prev, t.deltaOpts || {});
+    // In all-time view every "previous" is 0, so deltas read "↑ new" everywhere — noise.
+    if (!noDelta) h += deltaBadge(t.raw, t.prev, t.deltaOpts || {});
   } else {
     h += missingValue(t.tooltip || 'Data unavailable');
   }
   h += '</div>';
   return h;
+}
+
+// Format a backend margin field as a percent. Margins arrive as percentages (e.g. 33.2);
+// guard the rare fraction shape (≤1.5 → ×100) so 0.33 doesn't render as "0.3%".
+function fmtPct(v) {
+  if (v == null) return null;
+  let n = Number(v);
+  if (!Number.isFinite(n)) return null;
+  if (Math.abs(n) <= 1.5) n *= 100;
+  return `${n.toFixed(1)}%`;
 }
 
 function renderKpiStrip(d) {
@@ -812,51 +1031,74 @@ function renderKpiStrip(d) {
   const newCustomers     = cc.new_customers ?? cc.new ?? null;
   const newCustomersPrev = cp.new_customers ?? cp.new ?? null;
   const netProfit = cur.net_profit ?? null;
+  const noDelta = FilterState.get('period') === 'all';   // all-time → deltas are meaningless
+
+  // Backend kpi-summary omits gross_margin/net_margin → derive from profit ÷ revenue (matches
+  // how the headline tiles read). Uses each profit's own revenue base; null when revenue is 0.
+  const marginOf = (profit, revenue) =>
+    profit != null && revenue ? (profit / revenue) * 100 : null;
+  const grossMarginPct     = cur.gross_margin  != null ? Number(cur.gross_margin)  : marginOf(cur.gross_profit, cur.revenue);
+  const grossMarginPctPrev = prev.gross_margin != null ? Number(prev.gross_margin) : marginOf(prev.gross_profit, prev.revenue);
+  const netMarginPct       = cur.net_margin    != null ? Number(cur.net_margin)    : marginOf(netProfit, cur.revenue);
+  const netMarginPctPrev   = prev.net_margin   != null ? Number(prev.net_margin)   : marginOf(prev.net_profit, prev.revenue);
 
   const tiles = [
-    { label: 'Revenue', value: cur.revenue != null ? formatPrice(cur.revenue) : null, raw: cur.revenue, prev: prev.revenue },
+    { label: 'Revenue', value: cur.revenue != null ? formatPrice(cur.revenue) : null, raw: cur.revenue, prev: prev.revenue,
+      tooltip: 'Total sales (incl. GST) for the selected range.' },
     {
       label: 'Gross Profit', value: cur.gross_profit != null ? formatPrice(cur.gross_profit) : null,
-      raw: cur.gross_profit, prev: prev.gross_profit,
+      raw: cur.gross_profit, prev: prev.gross_profit, stackNext: true,
       tooltip: 'Revenue (ex-GST) − COGS, computed by the backend.',
     },
     {
+      label: 'Gross Margin', value: fmtPct(grossMarginPct), raw: grossMarginPct, prev: grossMarginPctPrev,
+      tooltip: 'Gross profit ÷ revenue. Profit quality, not size.',
+    },
+    {
       label: 'Net Profit', value: netProfit != null ? formatPrice(netProfit) : null,
-      raw: netProfit, prev: prev.net_profit, alert: netProfit != null && netProfit < 0,
+      raw: netProfit, prev: prev.net_profit, alert: netProfit != null && netProfit < 0, stackNext: true,
       tooltip: 'Revenue − COGS − fees − GST − Opex, computed by the backend.',
     },
-    { label: 'Orders', value: cur.orders != null ? String(cur.orders) : null, raw: cur.orders, prev: prev.orders },
-    { label: 'Avg Order Value', value: aov != null ? formatPrice(aov) : null, raw: aov, prev: aovPrev },
-    { label: 'New Customers', value: newCustomers != null ? String(newCustomers) : null, raw: newCustomers, prev: newCustomersPrev },
+    {
+      label: 'Net Margin', value: fmtPct(netMarginPct), raw: netMarginPct, prev: netMarginPctPrev,
+      alert: netMarginPct != null && netMarginPct < 0,
+      tooltip: 'Net profit ÷ revenue. What you actually keep.',
+    },
+    { label: 'Orders', value: cur.orders != null ? String(cur.orders) : null, raw: cur.orders, prev: prev.orders,
+      tooltip: 'Paid orders placed in the selected range.' },
+    { label: 'Avg Order Value', value: aov != null ? formatPrice(aov) : null, raw: aov, prev: aovPrev,
+      tooltip: 'Revenue ÷ orders.' },
+    { label: 'New Customers', value: newCustomers != null ? String(newCustomers) : null, raw: newCustomers, prev: newCustomersPrev,
+      tooltip: 'First-time buyers in the range.' },
     {
       label: 'Returning %', value: cc.returning_pct != null ? `${cc.returning_pct}%` : null,
-      raw: cc.returning_pct, prev: cp.returning_pct, tooltip: 'Requires analytics_customer_stats',
+      raw: cc.returning_pct, prev: cp.returning_pct, tooltip: 'Share of buyers who had ordered before. Requires analytics_customer_stats.',
     },
     {
       label: 'Refund Rate', value: refundPct != null ? `${refundPct.toFixed(1)}%` : null,
-      alert: refundPct != null && refundPct > 3,
+      alert: refundPct != null && refundPct > 3, tooltip: 'Refunded value ÷ revenue. Flagged above 3%.',
     },
     {
       label: 'Out of Stock', value: oosCount != null ? String(oosCount) : null,
-      alert: oosCount > 0, tooltip: 'Products currently flagged out of stock',
+      alert: oosCount > 0, tooltip: 'Products currently flagged out of stock.',
     },
   ];
 
-  // Gross Profit + Net Profit share one grid cell (stacked half-height) so the
-  // strip stays at 8 cells (2 rows of 4) rather than spilling onto a third row.
-  let html = '<div class="admin-kpi-grid admin-kpi-grid--8">';
+  // Each profit tile (stackNext) shares one grid cell with the margin % tile that follows it
+  // — so Gross/Net profit and their margins ride together and the strip stays at 9 cells.
+  let html = '<div class="admin-kpi-grid admin-kpi-grid--9">';
   for (let i = 0; i < tiles.length; i++) {
     const t = tiles[i];
     const next = tiles[i + 1];
-    if (t.label === 'Gross Profit' && next && next.label === 'Net Profit') {
+    if (t.stackNext && next) {
       html += '<div class="admin-kpi-stack">'
-            + renderKpiTile(t, ' admin-kpi--half')
-            + renderKpiTile(next, ' admin-kpi--half')
+            + renderKpiTile(t, ' admin-kpi--half', noDelta)
+            + renderKpiTile(next, ' admin-kpi--half', noDelta)
             + '</div>';
       i += 1;
       continue;
     }
-    html += renderKpiTile(t);
+    html += renderKpiTile(t, '', noDelta);
   }
   html += '</div>';
   return html;

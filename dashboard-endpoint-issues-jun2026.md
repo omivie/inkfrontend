@@ -132,3 +132,30 @@ curl -sS -H "$A" "$B/series/gross-profit?date_from=2026-05-27&date_to=2026-06-25
 - The `analytics_customer_stats` Supabase RPC returns **403** (grant dropped) → **Returning %** tile shows
   "—". Either restore the `GRANT EXECUTE`, or expose the `returning_pct` via the HTTP `/customer-stats`
   wrapper the handoff references.
+
+## Decision-priority dashboard — data gaps (Jun 2026)
+
+The dashboard was reorganized around "what to do next" (action-alerts panel, real-numbers
+performance overview, margin % KPIs, search demand promoted). These items are wired
+frontend-side already and light up the moment the backend ships the data — no FE changes needed.
+
+1. **Per-SKU margin % on `top_skus_gross_profit`.** The bundle's `top_skus_gross_profit` rows
+   carry only `sku` + `gross_profit`. The FE currently powers the **Worst-margin SKUs** card and
+   the SKU-level **Low-margin** alert from `/api/admin/pricing/under-margin` instead (an extra call).
+   Adding `net_margin_pct` (and `gross_margin_pct`) to `top_skus_gross_profit` rows lets both read
+   straight from the bundle and drops the extra request. *(FE reads `net_margin_pct` →
+   `estimated_margin_pct` → `margin_pct` → `net_margin`, in that order.)*
+2. **Real conversion attribution.** `conversion_by_source.conversion_pct` returns values **>100%**
+   (bad sessions↔orders attribution). The **Conversion by source** card is **hidden FE-side** until
+   this is correct — the `drawRanked` call is preserved (commented) in `drawAllCharts` to restore.
+3. **Forecast bands.** `forecast/revenue` returns a single trend line. For the renamed
+   **30-day revenue estimate** to show conservative/expected/optimistic bands, add `revenue_low` /
+   `revenue_high` per forecast row. Until then the card is labelled "trend only, bands pending".
+4. **Supplier delivery / lead times.** `suppliers/*` exposes revenue + problem-rate but no lead/
+   delivery time → blocks an Operations SLA tile (supplier on-time %, avg fulfilment days).
+5. **`tracking_number` on `/api/admin/orders` list rows.** The **Orders needing tracking** alert and
+   the **Needs tracking** Operations card count paid/processing orders missing a tracking number.
+   If list rows omit `tracking_number`, the FE falls back to the pending tracking-request count
+   alone (so it under-counts). Confirm the field is present on list rows.
+6. **Shipping cost + discounts as separate KPI/series fields.** Needed for an exact net margin and a
+   future discount-impact view; today they're folded into the Stripe-fee math.
