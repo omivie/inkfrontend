@@ -141,6 +141,11 @@ function computeTotals(d) {
   return { subtotal, freight, gst, total };
 }
 
+// A line counts only if it has a product code or description. A content-less
+// default row (just qty=1) is dropped so we never POST a phantom blank line —
+// the backend would otherwise accept it and create a $0 line.
+const realLines = (d) => (d.lines || []).filter((l) => (l.code || '').trim() || (l.description || '').trim());
+
 function buildPayload(d) {
   return {
     invoice_number: d.invoice_number || null,   // null => backend assigns next in series
@@ -149,8 +154,7 @@ function buildPayload(d) {
     source_order_id: d.source_order_id || null,
     seller: { ...d.seller, address: lines(d.seller.address) },
     customer: { ...d.customer, address: lines(d.customer.address) },
-    line_items: (d.lines || [])
-      .filter((l) => l.code || l.description || num(l.qty) || num(l.unitCost))
+    line_items: realLines(d)
       .map((l) => ({ product_code: l.code, description: l.description, quantity: num(l.qty), unit_cost_excl_gst: round2(num(l.unitCost)) })),
     freight_excl_gst: round2(num(d.freight)),
     footer: d.footer,
@@ -379,6 +383,17 @@ async function onEditorFooterClick(e) {
 }
 
 async function saveInvoice() {
+  // Client-side guards — give a clear, specific message instead of bouncing off
+  // the server with a generic "Validation failed". An invoice with no real line
+  // is meaningless; the backend additionally hard-requires a customer name.
+  if (!realLines(_draft).length) {
+    Toast.warning('Add at least one line item (a product code or description) before saving.');
+    return;
+  }
+  if (!(_draft.customer.name || '').trim()) {
+    Toast.warning('Add a customer name (the "Invoice to" name) before saving.');
+    return;
+  }
   const btn = _editorRefs?.drawer.footer.querySelector('[data-ed-action="save"]');
   if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
   try {
