@@ -50,7 +50,13 @@ function adminApiWarn(label, e) {
 // stay tolerant of a legacy string `error`. Mirrors the createCoupon pattern.
 function invoiceError(resp, fallback) {
   const e = resp?.error;
-  const err = new Error((e && typeof e === 'object' ? e.message : e) || fallback);
+  let msg = (e && typeof e === 'object' ? e.message : e) || fallback;
+  // VALIDATION_FAILED carries field-level specifics in details[]; surface them
+  // so the operator sees what to fix, not just a generic "Validation failed".
+  if (e && typeof e === 'object' && Array.isArray(e.details) && e.details.length) {
+    msg += ': ' + e.details.map((d) => d.message || d).join(', ');
+  }
+  const err = new Error(msg);
   if (e && typeof e === 'object') { err.code = e.code; err.details = e.details; }
   return err;
 }
