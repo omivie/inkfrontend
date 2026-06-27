@@ -87,6 +87,15 @@ let _page = 1;
 let _search = '';
 let _sort = 'name';
 let _sortDir = 'asc';
+
+// Read a query param from the SPA hash, e.g. "#products?search=GC973CMY" → "GC973CMY".
+// Lets other pages (e.g. the dashboard action-alerts) deep-link straight to a filtered list.
+function getHashParam(key) {
+  const hash = window.location.hash || '';
+  const qIndex = hash.indexOf('?');
+  if (qIndex === -1) return null;
+  return new URLSearchParams(hash.slice(qIndex + 1)).get(key);
+}
 let _brandFilter = '';
 let _activeFilter = '';
 let _imageFilter = '';
@@ -3787,7 +3796,9 @@ function destroyProductsContent() {
 async function renderProductsContent(contentEl) {
   const container = contentEl;
   _page = 1;
-  _search = '';
+  // Seed the search from a deep link (#products?search=…) so dashboard alerts can jump
+  // straight to a specific SKU or zero-result term; otherwise start empty.
+  _search = getHashParam('search') || '';
 
   // Load brands for filter + edit form
   const brandsData = await AdminAPI.getBrands();
@@ -3838,7 +3849,7 @@ async function renderProductsContent(contentEl) {
       <div class="admin-toolbar">
         <div class="admin-search" id="product-search-wrap">
           <span class="admin-search__icon">${icon('search', 14, 14)}</span>
-          <input type="search" placeholder="Search\u2026" id="product-search">
+          <input type="search" placeholder="Search\u2026" id="product-search" value="${esc(_search)}">
         </div>
         <select class="admin-select" id="brand-filter">${brandOpts}</select>
         <select class="admin-select" id="active-filter">

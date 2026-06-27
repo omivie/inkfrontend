@@ -219,52 +219,64 @@ function normalizeWorstMargin(responses) {
   return out;
 }
 
-// Alert A — orders needing tracking. Union of pending tracking requests (customer asked) and
-// paid/processing orders that still have no tracking_number, deduped by order number.
+// Each alert returns a full `items` list (each row clickable to its own destination) plus a
+// headline `count`. The card renders the first 5 and expands to the rest on demand.
+
+// Alert A — orders needing tracking. Union of paid/processing orders missing a tracking_number
+// (deep-linkable to the order) and pending tracking requests, deduped by order number.
 function computeTrackingAlert(trackingReq, trackingOrders) {
   const reqList = firstArray(trackingReq, ['requests', 'data', 'items']);
   const orders = firstArray(trackingOrders, ['orders', 'data', 'items']);
-  const keys = new Set();
+  const items = [];
+  const seen = new Set();
   let hasOrderTrackingField = false;
-  for (const r of reqList) {
-    const k = r.order_number || r.order?.order_number || r.id;
-    if (k != null) keys.add(`r:${k}`);
-  }
+  // Order rows carry an id → deep-link straight to the order detail.
   for (const o of orders) {
     if ('tracking_number' in o) hasOrderTrackingField = true;
-    if (!o.tracking_number) {
-      const k = o.order_number || o.id;
-      if (k != null) keys.add(`o:${k}`);
-    }
+    if (o.tracking_number) continue;
+    const num = o.order_number || o.id;
+    if (num == null || seen.has(String(num))) continue;
+    seen.add(String(num));
+    items.push({ label: `#${String(num).slice(-8)}`, href: o.id ? `orders?order=${encodeURIComponent(o.id)}` : 'tracking-requests' });
   }
-  // If the orders endpoint never exposes tracking_number, fall back to the tracking-request
-  // count alone rather than over-counting every open order.
-  const count = (!hasOrderTrackingField && orders.length)
-    ? (typeof trackingReq?.total === 'number' ? trackingReq.total : reqList.length)
-    : keys.size;
-  const sample = reqList.slice(0, 3).map(r => r.order_number || r.order?.order_number || r.id).filter(Boolean);
-  return { count, sample };
+  // Tracking-request rows lack an order id → route to the tracking-requests queue.
+  for (const r of reqList) {
+    const num = r.order_number || r.order?.order_number || r.id;
+    if (num == null || seen.has(String(num))) continue;
+    seen.add(String(num));
+    items.push({ label: `#${String(num).slice(-8)}`, href: 'tracking-requests' });
+  }
+  // If the orders endpoint never exposes tracking_number we can't trust the order-derived
+  // items; fall back to just the tracking-request queue + its total count.
+  if (!hasOrderTrackingField && orders.length) {
+    const reqItems = reqList.map(r => ({ label: `#${String(r.order_number || r.order?.order_number || r.id).slice(-8)}`, href: 'tracking-requests' }));
+    const count = typeof trackingReq?.total === 'number' ? trackingReq.total : reqItems.length;
+    return { count, items: reqItems };
+  }
+  return { count: items.length, items };
 }
 
 // Alert B — high-volume zero-result searches worth acting on (add product / synonym / redirect).
+// Each term links to the Products list filtered by it, ready to add a matching product.
 function computeZeroSearchAlert(searchZero) {
   const list = firstArray(searchZero, ['terms', 'searches', 'data']);
-  const ranked = list
+  const items = list
     .map(r => ({ term: r.term || r.query || r.q || MISSING, n: Number(r.searches ?? r.count ?? r.volume ?? 0) }))
     .filter(r => r.n >= ZERO_SEARCH_MIN)
-    .sort((a, b) => b.n - a.n);
-  return { count: ranked.length, sample: ranked.slice(0, 3) };
+    .sort((a, b) => b.n - a.n)
+    .map(r => ({ label: r.term, badge: String(r.n), href: `products?search=${encodeURIComponent(r.term)}` }));
+  return { count: items.length, items };
 }
 
-// Alert C — low-margin products. Prefers real per-SKU under-margin rows; falls back to
-// brand-level margin_by_brand when that endpoint is unavailable so the alert still fires.
+// Alert C — low-margin products. Prefers real per-SKU under-margin rows (each links to the
+// product); falls back to brand-level margin_by_brand when that endpoint is unavailable.
 // `capped` is set when every fetched row is under threshold (so there may be more than shown).
 function computeLowMarginAlert(worstMarginSkus, marginBrand, truncated = false) {
   if (Array.isArray(worstMarginSkus) && worstMarginSkus.length) {
     const low = worstMarginSkus.filter(r => r._marginPct < LOW_MARGIN_PCT);
     return {
       count: low.length, capped: !!truncated, grain: 'sku',
-      sample: low.slice(0, 3).map(r => ({ label: r._label, pct: r._marginPct })),
+      items: low.map(r => ({ label: r._label, badge: `${Number(r._marginPct).toFixed(1)}%`, badgeCls: 'admin-badge--failed', href: `products?search=${encodeURIComponent(r.sku || r._label)}` })),
     };
   }
   const brands = firstArray(marginBrand, ['brands', 'data']);
@@ -272,7 +284,10 @@ function computeLowMarginAlert(worstMarginSkus, marginBrand, truncated = false) 
     .map(b => ({ label: b.brand || MISSING, pct: Number(b.margin_pct) }))
     .filter(b => Number.isFinite(b.pct) && b.pct < LOW_MARGIN_PCT)
     .sort((a, b) => a.pct - b.pct);
-  return { count: low.length, capped: false, grain: 'brand', sample: low.slice(0, 3) };
+  return {
+    count: low.length, capped: false, grain: 'brand',
+    items: low.map(b => ({ label: b.label, badge: `${b.pct.toFixed(1)}%`, badgeCls: 'admin-badge--failed', href: 'margin' })),
+  };
 }
 
 // ---------- chart empty/await state ----------
@@ -813,8 +828,8 @@ function render(d) {
       <span class="admin-dash__updated">Updated ${esc(timeAgo(d._loadedAt))}</span>
     </div>
     ${renderKpiStrip(d)}
-    ${renderAlertsSection(d)}
     ${renderOverviewSection()}
+    ${renderAlertsSection(d)}
     ${rowN('Products', 'cyan', [
       chartCard('Top SKUs by revenue', 'top 8', 'dash-c-sku-revenue', 4),
       chartCard('Top SKUs by gross profit', 'top 8', 'dash-c-sku-profit', 4),
@@ -856,6 +871,7 @@ function render(d) {
 
   drawAllCharts(d);
   wireOrderRowClicks();
+  wireAlertToggles();
 }
 
 // ---------- layout helpers ----------
@@ -903,44 +919,63 @@ function renderOverviewSection() {
 
 // ---------- action alerts ----------
 
-// "Action needed" panel — surfaces what the owner should do today rather than just what
-// happened. Three clickable cards; each routes to the relevant admin page via the hash.
+// "Action needed" panel — surfaces what the owner should do today. The card itself is NOT a
+// link; each row is its own clickable link to that item's page. Shows up to ALERT_PREVIEW rows
+// and expands to the full list on demand (wireAlertToggles).
+const ALERT_PREVIEW = 5;
+
+function alertCard(title, count, why, items, sev, emptyMsg) {
+  const rows = items.length
+    ? items.map(it => {
+        const badge = it.badge != null
+          ? `<span class="admin-badge ${it.badgeCls || ''}">${esc(it.badge)}</span>` : '';
+        return `<a class="admin-alert-card__item" href="#${esc(it.href)}"><span class="admin-alert-card__item-label">${esc(it.label)}</span>${badge}</a>`;
+      }).join('')
+    : `<div class="admin-alert-card__none">${esc(emptyMsg)}</div>`;
+  const collapsed = items.length > ALERT_PREVIEW ? ' admin-alert-card__list--collapsed' : '';
+  const toggle = items.length > ALERT_PREVIEW
+    ? `<button type="button" class="admin-alert-card__toggle" data-alert-toggle>Show all ${items.length}</button>`
+    : '';
+  return `
+    <div class="admin-dash__cell--4 admin-card admin-alert-card${sev ? ' admin-alert-card--' + sev : ''}">
+      <div class="admin-card__title"><span>${esc(title)}</span></div>
+      <div class="admin-alert-card__count">${esc(String(count))}</div>
+      <div class="admin-alert-card__why">${esc(why)}</div>
+      <div class="admin-alert-card__list${collapsed}">${rows}</div>
+      ${toggle}
+    </div>
+  `;
+}
+
 function renderAlertsSection(d) {
   const tracking = computeTrackingAlert(d.trackingReq, d.trackingOrders);
   const zero = computeZeroSearchAlert(d.searchZero);
   const lowMargin = computeLowMarginAlert(d.worstMarginSkus, d.marginBrand, d.worstMarginTruncated);
-
-  const trackingList = tracking.sample.length
-    ? tracking.sample.map(n => `<li>#${esc(String(n).slice(-8))}</li>`).join('')
-    : '<li class="admin-alert-card__none">All caught up</li>';
-  const zeroList = zero.sample.length
-    ? zero.sample.map(s => `<li>${esc(s.term)} <span class="admin-badge">${esc(String(s.n))}</span></li>`).join('')
-    : '<li class="admin-alert-card__none">No high-volume misses</li>';
-  const lowList = lowMargin.sample.length
-    ? lowMargin.sample.map(s => `<li>${esc(s.label)} <span class="admin-badge admin-badge--failed">${esc(Number(s.pct).toFixed(1))}%</span></li>`).join('')
-    : '<li class="admin-alert-card__none">None under threshold</li>';
-
-  const card = (href, accent, title, count, why, list, sev) => `
-    <a class="admin-dash__cell--4 admin-card admin-alert-card${sev ? ' admin-alert-card--' + sev : ''}" href="#${href}">
-      <div class="admin-card__title"><span>${esc(title)}</span></div>
-      <div class="admin-alert-card__count">${esc(String(count))}</div>
-      <div class="admin-alert-card__why">${esc(why)}</div>
-      <ul class="admin-alert-card__list">${list}</ul>
-    </a>
-  `;
 
   const lowUnit = lowMargin.grain === 'brand' ? 'brands' : 'SKUs';
   const lowWhy = `${lowUnit} under ${LOW_MARGIN_PCT}% net margin — reprice or drop`;
   const lowCount = `${lowMargin.count}${lowMargin.capped ? '+' : ''}`;
 
   return rowN('Action needed', 'danger', [
-    card('tracking-requests', 'danger', 'Orders needing tracking', tracking.count,
-      'paid/processing orders awaiting tracking', trackingList, tracking.count > 0 ? 'danger' : null),
-    card('products', 'yellow', 'Zero-result searches', zero.count,
-      `searches with ≥${ZERO_SEARCH_MIN} hits returning nothing — add products/synonyms`, zeroList, zero.count > 0 ? 'warning' : null),
-    card('margin', 'magenta', 'Low-margin products', lowCount,
-      lowWhy, lowList, lowMargin.count > 0 ? 'warning' : null),
+    alertCard('Orders needing tracking', tracking.count,
+      'paid/processing orders awaiting tracking', tracking.items, tracking.count > 0 ? 'danger' : null, 'All caught up'),
+    alertCard('Zero-result searches', zero.count,
+      `searches with ≥${ZERO_SEARCH_MIN} hits returning nothing — add products/synonyms`, zero.items, zero.count > 0 ? 'warning' : null, 'No high-volume misses'),
+    alertCard('Low-margin products', lowCount,
+      lowWhy, lowMargin.items, lowMargin.count > 0 ? 'warning' : null, 'None under threshold'),
   ]);
+}
+
+// Expand/collapse the alert item lists (show all ↔ show first ALERT_PREVIEW).
+function wireAlertToggles() {
+  _container?.querySelectorAll('[data-alert-toggle]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const list = btn.previousElementSibling;
+      const collapsed = list?.classList.toggle('admin-alert-card__list--collapsed');
+      const total = list?.querySelectorAll('.admin-alert-card__item').length || 0;
+      btn.textContent = collapsed ? `Show all ${total}` : 'Show less';
+    });
+  });
 }
 
 // Fulfillment card for the Operations row — a compact list of paid/processing orders that
