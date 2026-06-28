@@ -2413,6 +2413,15 @@ const AdminAPI = {
     return resp?.data ?? null;
   },
 
+  // Flip an invoice's internal paid/unpaid status from the list (inline toggle).
+  // Mirrors the /void sub-route shape; backend route POST /api/admin/invoices/:id/paid
+  // is pending — a 404 surfaces as err.code 'NOT_FOUND' so the caller fails soft.
+  async markInvoicePaid(invoiceId, paid) {
+    const resp = await window.API.post(`/api/admin/invoices/${encodeURIComponent(invoiceId)}/paid`, { paid: !!paid });
+    if (resp && resp.ok === false) throw invoiceError(resp, 'Mark invoice paid/unpaid failed');
+    return resp?.data ?? null;
+  },
+
   // Hard-delete (permanent removal) — for operator cleanup of test/erroneous
   // invoices. Normal lifecycle is void (kept for records). Backend route
   // DELETE /api/admin/invoices/:id is pending; a 404 surfaces as a clean toast.

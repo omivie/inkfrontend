@@ -4,6 +4,39 @@ Log every error encountered here. Before editing a file, scan for known issues. 
 
 ---
 
+## ERR-051 — Admin Invoices: status leaked onto customer invoice; need inline paid/unpaid (2026-06-28)
+
+**Symptom (request, not a crash):** The invoice "Status" (draft/unpaid/paid/void) printed on the
+**customer-facing** invoice (live preview + PDF header). The operator doesn't want customers to see
+it, and wanted to track paid/unpaid from the list directly.
+
+**Fix (frontend, this repo):**
+- **Removed Status from the customer doc** — `invoiceMeta()` (the single source for both the HTML
+  preview and the jsPDF header) no longer pushes a Status row. Header is now Invoice No / Date /
+  GST No only. (`pages/invoices.js`)
+- **List column** — replaced the read-only Status badge with an inline **Paid** toggle
+  (`.inv-paid` switch). Voided rows show a muted "Void" label (no toggle), mirroring how the Void
+  row-action already hides itself for void rows.
+- **Filter** — dropdown is now All / Paid / Unpaid / Void (Draft dropped).
+- **Editor** — status select reduced to Unpaid / Paid (labelled "internal — not shown to the
+  customer"); **Draft retired** from `STATUS_META` everywhere. Void stays driven by the row-action.
+- **Toggle wiring** — `AdminAPI.markInvoicePaid(id, paid)` → `POST /api/admin/invoices/:id/paid`,
+  optimistic flip + fail-soft (reverts on error). Backend route is **pending** — a 404 surfaces as
+  `err.code 'NOT_FOUND'` (via the ERR-050 `invoiceError` top-level-code lift) → toast "Mark-paid
+  isn't available yet (backend endpoint pending)."; no crash.
+
+**Click-vs-row-open gotcha:** DataTable's per-row click handler opens the editor unless the click
+target matches `closest('button, a, input')`. The `.admin-toggle` component's input is zero-size,
+so clicks land on the slider `<span>` → would open the editor. The `.inv-paid` toggle puts the
+`<input>` as a full-size, opacity-0 top layer (`z-index:2`), so the click target is always an
+`<input>` → row-open guard ignores it. (`css/admin.css`)
+
+**Backend dependency:** `POST /api/admin/invoices/:id/paid` (owner-only, `{ paid:bool }` →
+`status='paid'|'unpaid'`). Contract in `readfirst/invoice-mark-paid-backend-handoff-jun2026.md`.
+Until it ships, the toggle fails soft.
+
+---
+
 ## ERR-050 — Admin Invoices: "can't delete invoices" — trash icon only voided; no delete existed (2026-06-28)
 
 **Symptom:** Operator clicking the trash icon on `/admin#invoices` couldn't get rid of

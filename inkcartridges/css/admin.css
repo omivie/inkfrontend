@@ -4488,6 +4488,19 @@ button.admin-active-dot--clickable:hover::after { opacity: 1; }
 
 .inv-field { display: flex; flex-direction: column; gap: 4px; margin-top: 0; }
 .inv-field__label { font-size: 11px; color: var(--text-muted); font-weight: 600; }
+.inv-field__hint { font-weight: 400; opacity: 0.75; }
+
+/* Invoices list — inline Paid toggle. The <input> is the full-size top layer
+   so the click target is always an <input>; DataTable's row-click guard
+   (button,a,input) ignores it and the editor never opens on a toggle. */
+.inv-paid { position: relative; display: inline-block; width: 40px; height: 22px; vertical-align: middle; }
+.inv-paid input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: pointer; z-index: 2; }
+.inv-paid__slider { position: absolute; inset: 0; background: var(--input-border); border-radius: 11px; transition: background 0.2s var(--ease); pointer-events: none; }
+.inv-paid__slider::before { content: ''; position: absolute; left: 2px; top: 2px; width: 18px; height: 18px; background: #fff; border-radius: 50%; transition: transform 0.2s var(--ease); }
+.inv-paid input:checked + .inv-paid__slider { background: var(--cyan); }
+.inv-paid input:checked + .inv-paid__slider::before { transform: translateX(18px); }
+.inv-paid input:disabled { cursor: progress; }
+.inv-paid__void { color: var(--text-muted); font-size: 12px; }
 /* Required-field validation cue (invoice editor) */
 .admin-input--error,
 .admin-select--error {

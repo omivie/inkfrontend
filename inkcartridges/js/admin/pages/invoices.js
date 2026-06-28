@@ -56,8 +56,10 @@ function formatInvoiceDate(iso) {
 }
 const lines = (s) => String(s || '').split('\n').map((x) => x.trim()).filter(Boolean);
 
+// Internal-only states. Status is NEVER shown on the customer-facing invoice
+// (preview/PDF) — operators track paid/unpaid here; void is a records-keeping
+// state set by the Void row-action.
 const STATUS_META = {
-  draft:  { label: 'Draft',  cls: 'admin-badge--pending' },
   unpaid: { label: 'Unpaid', cls: 'admin-badge--processing' },
   paid:   { label: 'Paid',   cls: 'admin-badge--delivered' },
   void:   { label: 'Void',   cls: 'admin-badge--cancelled' },
@@ -160,8 +162,8 @@ const hasDelivery = (d) => !!(d.delivery
 function invoiceMeta(d) {
   const rows = [['Invoice No', d.invoice_number || '—'], ['Date', formatInvoiceDate(d.date)]];
   if (d.seller.gst) rows.push(['GST No', d.seller.gst]);
-  const st = STATUS_META[d.status];
-  if (st) rows.push(['Status', st.label]);
+  // NB: paid/unpaid status is deliberately NOT rendered on the customer-facing
+  // invoice — it's an internal field only (see the list's Paid toggle).
   return rows;
 }
 
@@ -238,10 +240,9 @@ export default {
         <div class="admin-filters" style="display:flex;gap:var(--spacing-2);margin-bottom:var(--spacing-3);flex-wrap:wrap">
           <input class="admin-input" id="inv-search" type="search" placeholder="Search invoice #, customer, email…" autocomplete="off" style="flex:1;min-width:240px">
           <select class="admin-select" id="inv-status" style="min-width:150px">
-            <option value="">All statuses</option>
-            <option value="unpaid">Unpaid</option>
+            <option value="">All invoices</option>
             <option value="paid">Paid</option>
-            <option value="draft">Draft</option>
+            <option value="unpaid">Unpaid</option>
             <option value="void">Void</option>
           </select>
         </div>
@@ -293,8 +294,17 @@ const COLUMNS = [
   { key: 'customer', label: 'Customer', render: (r) => esc(r.customer_name || r.customer?.name || '—') },
   { key: 'total', label: 'Total (incl GST)', align: 'right', sortable: true, render: (r) => money(r.total_incl_gst ?? r.total ?? 0) },
   {
-    key: 'status', label: 'Status', align: 'center',
-    render: (r) => { const m = STATUS_META[r.status] || STATUS_META.unpaid; return `<span class="admin-badge ${m.cls}">${m.label}</span>`; },
+    key: 'paid', label: 'Paid', align: 'center',
+    // Voided invoices are kept for records — show a muted label, no toggle.
+    // Otherwise an inline switch. The <input> is the full-size top layer of
+    // .inv-paid, so the click target is always an <input> — DataTable's
+    // row-click guard (button,a,input) ignores it and the editor never opens.
+    render: (r) => r.status === 'void'
+      ? `<span class="inv-paid__void">Void</span>`
+      : `<span class="inv-paid" title="${r.status === 'paid' ? 'Paid — click to mark unpaid' : 'Unpaid — click to mark paid'}">
+           <input type="checkbox" data-row-action="toggle-paid" data-id="${escA(r.id)}"${r.status === 'paid' ? ' checked' : ''} aria-label="Mark paid">
+           <span class="inv-paid__slider"></span>
+         </span>`,
   },
   {
     key: 'actions', label: '', align: 'right',
@@ -322,7 +332,23 @@ async function onRowAction(e) {
   e.stopPropagation();
   const id = btn.dataset.id;
   const action = btn.dataset.rowAction;
-  if (action === 'download') {
+  if (action === 'toggle-paid') {
+    // The checkbox has already flipped by click time — read its new state.
+    const paid = btn.checked;
+    btn.disabled = true;
+    try {
+      await AdminAPI.markInvoicePaid(id, paid);
+      Toast.success(paid ? 'Marked paid.' : 'Marked unpaid.');
+      // Optimistic: the toggle already reflects the new state, no reload needed.
+    } catch (err) {
+      btn.checked = !paid;   // revert the optimistic flip
+      Toast.error(err.code === 'NOT_FOUND'
+        ? 'Mark-paid isn’t available yet (backend endpoint pending).'
+        : (err.message || 'Could not update.'));
+    } finally {
+      btn.disabled = false;
+    }
+  } else if (action === 'download') {
     const rec = await AdminAPI.getInvoice(id);
     if (rec) downloadPdf(draftFromInvoice(rec));
     else Toast.error('Could not load invoice to download.');
@@ -632,9 +658,9 @@ function editorBodyHtml(d) {
         <div class="inv-grid-3">
           ${numberLine}
           ${field('Date', 'date', d.date, { type: 'date' })}
-          <label class="inv-field"><span class="inv-field__label">Status</span>
+          <label class="inv-field"><span class="inv-field__label">Paid status <span class="inv-field__hint">(internal — not shown to the customer)</span></span>
             <select class="admin-select" data-field="status">
-              ${['unpaid', 'paid', 'draft', 'void'].map((s) => `<option value="${s}"${d.status === s ? ' selected' : ''}>${STATUS_META[s].label}</option>`).join('')}
+              ${['unpaid', 'paid'].map((s) => `<option value="${s}"${d.status === s ? ' selected' : ''}>${STATUS_META[s].label}</option>`).join('')}
             </select>
           </label>
         </div>

@@ -1,11 +1,11 @@
 /**
  * Admin SPA — Entry point, router, shell
  */
-const APP_VERSION = '2026.06.28-invoice-delete';
+const APP_VERSION = '2026.06.28-invoice-paid-toggle';
 
 import { AdminAuth } from './auth.js';
 import { FilterState } from './filters.js';
-import { AdminAPI } from './api.js?v=invoices-delete-jun2026';
+import { AdminAPI } from './api.js?v=invoices-paid-jun2026';
 
 const esc = (s) => Security.escapeHtml(String(s));
 
