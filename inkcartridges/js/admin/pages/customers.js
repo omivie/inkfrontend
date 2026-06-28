@@ -4,6 +4,7 @@
 import { AdminAuth, FilterState, AdminAPI, icon, esc, exportDropdown, bindExportDropdown } from '../app.js';
 import { DataTable } from '../components/table.js';
 import { Drawer } from '../components/drawer.js';
+import { Modal } from '../components/modal.js';
 import { Toast } from '../components/toast.js';
 import { Charts } from '../components/charts.js';
 
@@ -76,9 +77,16 @@ async function openCustomerDrawer(customer) {
   if (!drawer) return;
   drawer.setLoading(true);
 
-  // Fetch recent orders for this customer
-  const ordersData = await AdminAPI.getOrders({ user_id: customer.id }, 1, 5);
+  // Fetch recent orders + loyalty in parallel (loyalty is fail-soft / 404 until
+  // the backend ships /api/admin/customers/:id/loyalty — see admin-loyalty-endpoints-jun2026.md).
+  const [ordersRes, loyaltyRes] = await Promise.allSettled([
+    AdminAPI.getOrders({ user_id: customer.id }, 1, 5),
+    AdminAPI.getCustomerLoyalty(customer.id),
+  ]);
+  if (!drawer.el.isConnected) return; // drawer closed during await
+  const ordersData = ordersRes.status === 'fulfilled' ? ordersRes.value : null;
   const orders = ordersData ? (Array.isArray(ordersData) ? ordersData : (ordersData.orders || ordersData.data || [])) : [];
+  let loyaltyState = loyaltyRes.status === 'fulfilled' ? loyaltyRes.value : null;
 
   let html = '';
 
@@ -124,7 +132,151 @@ async function openCustomerDrawer(customer) {
   }
   html += `</div>`;
 
+  // Loyalty Points
+  html += loyaltyPanelBlock(loyaltyState);
+
   drawer.setBody(html);
+
+  // Owner-only: wire the "Adjust points" action. The button is only rendered for
+  // owners (loyaltyPanelBlock), so this is a no-op for non-owner admins.
+  const adjustBtn = drawer.body.querySelector('#cust-loyalty-adjust');
+  if (adjustBtn) {
+    adjustBtn.addEventListener('click', () => openAdjustModal({
+      customer,
+      getState: () => loyaltyState,
+      onAdjusted: (updated) => {
+        if (updated) loyaltyState = updated;
+        if (!drawer.el.isConnected) return;
+        const panel = drawer.body.querySelector('#cust-loyalty-panel');
+        if (panel) panel.innerHTML = loyaltyPanelInner(loyaltyState);
+      },
+    }));
+  }
+}
+
+// ---- Loyalty points (admin view + adjust) ----
+const LOYALTY_LEDGER_LABELS = {
+  earn: 'Earned', bonus: 'Bonus', redeem: 'Redeemed',
+  clawback: 'Reversed', restore: 'Restored', adjust: 'Adjustment',
+};
+
+// Inner content of the loyalty panel (re-rendered after an adjustment). Fail-soft:
+// a null `loyalty` (e.g. backend still 404) shows a muted notice, never crashes.
+function loyaltyPanelInner(loyalty) {
+  if (!loyalty) return `<p class="admin-text-muted">Loyalty data unavailable.</p>`;
+  const rate = loyalty.redemption_rate || 100;
+  const balance = Number(loyalty.points_balance) || 0;
+  const lifetime = loyalty.lifetime_earned;
+  let h = `<div class="admin-kpi-grid" style="grid-template-columns:repeat(3,1fr);margin-bottom:12px">`;
+  h += miniKpi('Points', balance.toLocaleString('en-NZ'));
+  h += miniKpi('Value', formatPrice(balance / rate));
+  h += miniKpi('Lifetime earned', lifetime != null ? Number(lifetime).toLocaleString('en-NZ') : MISSING);
+  h += `</div>`;
+  const ledger = Array.isArray(loyalty.ledger) ? loyalty.ledger : [];
+  if (ledger.length) {
+    h += `<table class="admin-order-items"><thead><tr><th>Date</th><th>Type</th><th class="cell-right">Points</th><th>Reason</th></tr></thead><tbody>`;
+    for (const L of ledger.slice(0, 5)) {
+      const pts = Number(L.points) || 0;
+      const sign = pts > 0 ? '+' : '';
+      h += `<tr>`;
+      h += `<td class="cell-nowrap">${formatDate(L.created_at)}</td>`;
+      h += `<td>${esc(LOYALTY_LEDGER_LABELS[L.type] || L.type || MISSING)}</td>`;
+      h += `<td class="cell-right mono">${sign}${pts.toLocaleString('en-NZ')}</td>`;
+      h += `<td>${esc(L.reason || L.order_number || MISSING)}</td>`;
+      h += `</tr>`;
+    }
+    h += `</tbody></table>`;
+  } else {
+    h += `<p class="admin-text-muted">No points activity yet.</p>`;
+  }
+  return h;
+}
+
+function loyaltyPanelBlock(loyalty) {
+  const adjustBtn = AdminAuth.isOwner()
+    ? `<button class="admin-btn admin-btn--ghost admin-btn--sm" id="cust-loyalty-adjust" type="button">${icon('finance', 13, 13)} Adjust points</button>`
+    : '';
+  return `<div class="admin-detail-block">
+    <div class="admin-detail-block__title" style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+      <span>Loyalty Points</span>${adjustBtn}
+    </div>
+    <div id="cust-loyalty-panel">${loyaltyPanelInner(loyalty)}</div>
+  </div>`;
+}
+
+function adjustForm(balance, rate) {
+  return `
+    <p class="admin-text-muted" style="margin-top:0">Current balance: <strong>${balance.toLocaleString('en-NZ')} pts</strong> (${formatPrice(balance / (rate || 100))})</p>
+    <div class="admin-form-row" style="display:grid;grid-template-columns:1fr 1fr;gap:var(--spacing-3)">
+      <div class="admin-form-group">
+        <label>Direction *</label>
+        <select class="admin-select" id="lp-dir">
+          <option value="add">Add points</option>
+          <option value="remove">Remove points</option>
+        </select>
+      </div>
+      <div class="admin-form-group">
+        <label>Points *</label>
+        <input class="admin-input" type="number" min="1" step="1" id="lp-points" placeholder="e.g. 500">
+      </div>
+    </div>
+    <div class="admin-form-group">
+      <label>Reason *</label>
+      <input class="admin-input" id="lp-reason" maxlength="200" placeholder="e.g. Goodwill credit for delayed order">
+    </div>
+  `;
+}
+
+// Validate + build the signed adjustment payload. Returns null (and toasts) on
+// invalid input. Backend also re-validates (INSUFFICIENT_BALANCE etc.).
+function collectAdjust(body, balance) {
+  const dir = body.querySelector('#lp-dir').value;
+  const raw = parseInt(body.querySelector('#lp-points').value, 10);
+  const reason = body.querySelector('#lp-reason').value.trim();
+  if (!Number.isInteger(raw) || raw <= 0) { Toast.warning('Enter a whole number of points greater than zero'); return null; }
+  if (!reason) { Toast.warning('A reason is required'); return null; }
+  const points = dir === 'remove' ? -raw : raw;
+  if (points < 0 && Math.abs(points) > balance) {
+    Toast.warning(`Cannot remove more than the current balance (${balance.toLocaleString('en-NZ')} pts)`);
+    return null;
+  }
+  return { points, reason, type: 'adjust' };
+}
+
+function openAdjustModal({ customer, getState, onAdjusted }) {
+  const state = getState() || {};
+  const balance = Number(state.points_balance) || 0;
+  const rate = state.redemption_rate || 100;
+  const who = [customer.first_name, customer.last_name].filter(Boolean).join(' ') || customer.email || 'Customer';
+  const modal = Modal.open({
+    title: `Adjust points — ${who}`,
+    body: adjustForm(balance, rate),
+    footer: `
+      <button class="admin-btn admin-btn--ghost" data-action="cancel">Cancel</button>
+      <button class="admin-btn admin-btn--primary" data-action="save">Save adjustment</button>
+    `,
+  });
+  if (!modal) return;
+
+  modal.footer.querySelector('[data-action="cancel"]').addEventListener('click', () => Modal.close());
+  const saveBtn = modal.footer.querySelector('[data-action="save"]');
+  saveBtn.addEventListener('click', async () => {
+    const payload = collectAdjust(modal.body, balance);
+    if (!payload) return;
+    saveBtn.disabled = true;
+    const orig = saveBtn.textContent;
+    saveBtn.textContent = 'Saving…';
+    try {
+      const updated = await AdminAPI.adjustCustomerPoints(customer.id, payload);
+      Toast.success('Points adjusted');
+      Modal.close();
+      await onAdjusted(updated);
+    } catch (e) {
+      Toast.error(`Adjustment failed: ${e.message}`);
+      saveBtn.disabled = false;
+      saveBtn.textContent = orig;
+    }
+  });
 }
 
 function detailRow(label, value) {

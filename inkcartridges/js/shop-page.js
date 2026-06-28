@@ -3709,6 +3709,10 @@
             set('og-description',   'content', description);
             set('og-url',           'content', canonical);
             set('canonical-url',    'href',    canonical);
+            // Keep hreflang alternates pointed at the live canonical (single
+            // locale, self-referential) so filtered views don't go stale.
+            set('hreflang-en',      'href',    canonical);
+            set('hreflang-default', 'href',    canonical);
 
             // Update JSON-LD CollectionPage schema
             const schemaEl = document.getElementById('shop-schema');

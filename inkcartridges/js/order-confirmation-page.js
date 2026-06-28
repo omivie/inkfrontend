@@ -222,7 +222,21 @@
                 // tests/tracking-on-demand-may2026.test.js.
                 invoiceNumber: apiOrder.invoice?.invoice_number || null,
                 invoiceDate: apiOrder.invoice?.invoice_date || null,
-                googleCustomerReviews: apiOrder.google_customer_reviews || null
+                googleCustomerReviews: apiOrder.google_customer_reviews || null,
+                // loyalty-points-jun2026 — backend field name confirmed during
+                // live verification; read several candidates defensively. Discount
+                // is the points redeemed on this order; earned is points credited.
+                loyaltyDiscount: Number(
+                    apiOrder.loyalty_discount_amount
+                    ?? apiOrder.loyalty?.discount_amount
+                    ?? 0
+                ) || 0,
+                pointsEarned: Number(
+                    apiOrder.points_earned
+                    ?? apiOrder.loyalty_points_earned
+                    ?? apiOrder.loyalty?.points_earned
+                    ?? 0
+                ) || 0
             };
         },
 
@@ -523,6 +537,38 @@
 
             if (totalEl) {
                 totalEl.textContent = `$${parseFloat(total).toFixed(2)} NZD`;
+            }
+
+            // loyalty-points-jun2026 — points redeemed on this order (only if used)
+            const loyaltyRow = document.getElementById('totals-loyalty-row');
+            const loyaltyEl = document.getElementById('totals-loyalty');
+            const loyaltyDiscount = Number(order.loyaltyDiscount) || 0;
+            if (loyaltyRow && loyaltyEl) {
+                if (loyaltyDiscount > 0) {
+                    loyaltyEl.textContent = `-$${loyaltyDiscount.toFixed(2)}`;
+                    loyaltyRow.hidden = false;
+                } else {
+                    loyaltyRow.hidden = true;
+                }
+            }
+
+            // Points earned on this order. Prefer the backend's figure; otherwise
+            // estimate at 1pt/$1 on the order value ex-shipping (the backend earns on
+            // order_total − shipping, GST-inclusive — see the loyalty ledger metadata)
+            // and mark it ≈ so it reads as an estimate.
+            const earnedRow = document.getElementById('totals-earned-row');
+            const earnedEl = document.getElementById('totals-earned');
+            if (earnedRow && earnedEl) {
+                const exact = Number(order.pointsEarned) || 0;
+                const earnBasis = Math.max(0, (Number(total) || 0) - (Number(shippingCost) || 0));
+                const earned = exact > 0 ? exact : Math.floor(earnBasis);
+                if (earned > 0) {
+                    const prefix = exact > 0 ? '+' : '≈ +';
+                    earnedEl.textContent = `${prefix}${earned.toLocaleString('en-NZ')} pts`;
+                    earnedRow.hidden = false;
+                } else {
+                    earnedRow.hidden = true;
+                }
             }
         },
 

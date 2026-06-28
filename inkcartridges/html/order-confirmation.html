@@ -18,11 +18,15 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link rel="stylesheet" href="/css/base.css?v=white-cards-may2026">
     <link rel="stylesheet" href="/css/layout.css?v=mobile-parity-may2026">
-    <link rel="stylesheet" href="/css/components.css?v=loyalty-points-jun2026">
+    <link rel="stylesheet" href="/css/components.css?v=loyalty-points-jun2026b">
     <link rel="stylesheet" href="/css/modern-effects.css?v=ade3173d">
-    <link rel="stylesheet" href="/css/pages.css?v=loyalty-points-jun2026">
-    <link rel="stylesheet" href="/css/search.css?v=loyalty-points-jun2026">
+    <link rel="stylesheet" href="/css/pages.css?v=loyalty-points-jun2026b">
+    <link rel="stylesheet" href="/css/search.css?v=loyalty-points-jun2026b">
     <link rel="stylesheet" href="/css/checkout-compact.css?v=68530e74">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="Order Confirmed | InkCartridges.co.nz">
+    <meta name="twitter:description" content="Order Confirmation - InkCartridges.co.nz">
+    <meta name="twitter:image" content="https://www.inkcartridges.co.nz/assets/images/logo.png">
 </head>
 <body>
     <a href="#main-content" class="skip-link">Skip to main content</a>
@@ -126,6 +130,10 @@
                                 <dt>Shipping</dt>
                                 <dd id="totals-shipping">--</dd>
                             </div>
+                            <div class="confirmation-totals__row confirmation-totals__row--loyalty" id="totals-loyalty-row" hidden>
+                                <dt>Loyalty points applied</dt>
+                                <dd id="totals-loyalty">--</dd>
+                            </div>
                             <div class="confirmation-totals__row">
                                 <dt>GST (15%)</dt>
                                 <dd>Included</dd>
@@ -133,6 +141,10 @@
                             <div class="confirmation-totals__row confirmation-totals__row--total">
                                 <dt>Total Paid</dt>
                                 <dd id="totals-total">--</dd>
+                            </div>
+                            <div class="confirmation-totals__row confirmation-totals__row--earned" id="totals-earned-row" hidden>
+                                <dt>Loyalty points earned</dt>
+                                <dd id="totals-earned">--</dd>
                             </div>
                         </dl>
                     </div>

@@ -781,6 +781,30 @@ const AccountPage = {
         this.syncProfileToBackend();
         // Load lifetime savings (non-blocking)
         this.loadSavingsBanner();
+        // Load loyalty points balance for the dashboard card (non-blocking)
+        this.loadLoyaltyBalance();
+    },
+
+    /**
+     * Show the live loyalty points balance on the dashboard loyalty card.
+     * loyalty-points-jun2026 — economic values are server-driven; only the
+     * 100pts=$1 default rate is a display fallback. Silent no-op if the element
+     * isn't present or the call fails (mirrors loadSavingsBanner).
+     */
+    async loadLoyaltyBalance() {
+        const el = document.getElementById('dash-loyalty-balance');
+        if (!el) return;
+        try {
+            const res = await API.getLoyalty({ page: 1, limit: 1 });
+            if (!res || res.ok === false || !res.data) return;
+            const lo = res.data;
+            const balance = Number(lo.points_balance ?? 0);
+            if (!isFinite(balance) || balance <= 0) return;
+            const rate = lo.redemption_rate || 100;
+            const money = (typeof formatPrice === 'function') ? formatPrice(balance / rate) : ('$' + (balance / rate).toFixed(2));
+            el.textContent = `${balance.toLocaleString('en-NZ')} pts · ${money}`;
+            el.hidden = false;
+        } catch { /* silent */ }
     },
 
     /**

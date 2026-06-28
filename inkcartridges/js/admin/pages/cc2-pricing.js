@@ -6,13 +6,16 @@
  * and the server returns up to 5,000 affected SKUs with before/after retail,
  * net margin, and gross markup.
  *
- * The simulator is preview-only — committing changes still goes through
- * the existing `PUT /api/admin/pricing/tier-multipliers` endpoint elsewhere
- * in admin (see /admin#analytics → Pricing). We surface a Copy-to-Clipboard
- * for the proposed JSON so the operator can paste into the commit form.
+ * Owners can edit the multipliers and hit "Confirm & save" to commit them
+ * straight to the live store via `PUT /api/admin/pricing/tier-multipliers`
+ * (the same endpoint the legacy /admin#analytics → Pricing form uses). The
+ * Confirm payload is identical to the Copy-to-Clipboard JSON, so what you see
+ * in the preview is exactly what gets saved. Staff (non-owners) still get the
+ * preview + Copy-JSON path only.
  */
-import { AdminAPI, esc, icon } from '../app.js';
+import { AdminAPI, AdminAuth, esc, icon } from '../app.js';
 import { Toast } from '../components/toast.js';
+import { Modal } from '../components/modal.js';
 import {
   GST_RATE, STRIPE_RATE,
   DEFAULT_TIERS, COARSE_4_TIER_PRESET,
@@ -23,6 +26,8 @@ import {
 const COPY = {
   title: 'Margin simulator',
   cta_preview: 'Preview impact',
+  cta_confirm: 'Confirm & save',
+  cta_saving: 'Saving…',
   cta_running: 'Running…',
   empty_help: 'Adjust tiers and click Preview impact to see how prices would change.',
   presets: {
@@ -92,9 +97,13 @@ function renderShell() {
         </div>
         <div class="cc2-pricing__tiers" data-tiers></div>
         <div class="cc2-pricing__actions">
-          <button class="admin-btn admin-btn--primary" data-action="preview">
+          <button class="admin-btn" data-action="preview">
             ${icon('search', 14, 14)} <span data-cta>${esc(COPY.cta_preview)}</span>
           </button>
+          ${AdminAuth.isOwner() ? `
+          <button class="admin-btn admin-btn--primary" data-action="confirm">
+            ${icon('check', 14, 14)} <span data-confirm-cta>${esc(COPY.cta_confirm)}</span>
+          </button>` : ''}
           <button class="admin-btn admin-btn--ghost" data-action="copy-json" title="Copy proposed_tiers JSON for the commit form">
             ${icon('copy', 14, 14)} Copy proposed JSON
           </button>
@@ -121,6 +130,8 @@ function renderShell() {
   });
   _host.querySelector('[data-action="preview"]').addEventListener('click', runSimulation);
   _host.querySelector('[data-action="copy-json"]').addEventListener('click', copyProposedJson);
+  const confirmBtn = _host.querySelector('[data-action="confirm"]');
+  if (confirmBtn) confirmBtn.addEventListener('click', confirmAndSave);
 }
 
 function renderTiers() {
@@ -220,6 +231,73 @@ function setCta(loading) {
   if (!btn) return;
   btn.disabled = loading;
   btn.querySelector('[data-cta]').textContent = loading ? COPY.cta_running : COPY.cta_preview;
+}
+
+// Owner-only: persist the edited multipliers for the active source straight to
+// the live tier-multipliers store. Same payload shape as Copy-JSON, so what you
+// save is exactly what you'd otherwise paste into the legacy commit form.
+function confirmAndSave() {
+  // Pre-flight validation matches the server's 1.05 ≤ m ≤ 5.
+  const v = validateTierMap(_state.tiers[_state.source], _state.source);
+  if (!v.ok) {
+    const first = v.errors[0];
+    Toast.error(`Tier ${first.key}: ${first.reason.replace('_', ' ')}`);
+    return;
+  }
+  const source = _state.source;
+  const keys = tierKeysFor(source);
+  const map = _state.tiers[source];
+  const rows = keys.map(k => `<tr>
+      <td class="cell-mono">${esc(k)}</td>
+      <td style="text-align:right" class="cell-mono">${Number(map[k]).toFixed(4)}</td>
+      <td style="text-align:right;color:var(--text-muted)">≈ ${((map[k] - 1) * 100).toFixed(0)}% markup</td>
+    </tr>`).join('');
+  const m = Modal.open({
+    title: `Save ${source} multipliers?`,
+    body: `<p style="margin:0 0 8px;color:var(--text-secondary)">These multipliers go live and all affected <strong>${esc(source)}</strong> prices reprice automatically in the background (about a minute).</p>
+      <div class="admin-table-wrap"><table class="admin-table" style="margin:0">
+        <thead><tr><th>Tier</th><th style="text-align:right">Multiplier</th><th style="text-align:right">Markup</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table></div>`,
+    footer: `
+      <button class="admin-btn admin-btn--ghost" data-action="cancel">Cancel</button>
+      <button class="admin-btn admin-btn--primary" data-action="confirm">Save changes</button>
+    `,
+  });
+  if (!m) return;
+  m.footer.querySelector('[data-action="cancel"]').addEventListener('click', () => m.close());
+  m.footer.querySelector('[data-action="confirm"]').addEventListener('click', async () => {
+    const btn = m.footer.querySelector('[data-action="confirm"]');
+    btn.disabled = true;
+    btn.textContent = COPY.cta_saving;
+    try {
+      await AdminAPI.controlCenter.commitPricing({
+        proposed_tiers: { [source]: map },
+        apply_ending_snap: true,
+      });
+      // Guard against the page being unmounted mid-flight (ERR-045).
+      if (!_host) return;
+      Toast.success(`Saved — ${source} prices are repricing in the background.`);
+      m.close();
+      // Refresh the live baseline so the "Live" preset reflects what we just saved.
+      const live = await AdminAPI.controlCenter.getTierMultipliers();
+      if (!_host) return;
+      const effective = live?.effective || live;
+      if (effective && (effective.genuine || effective.compatible)) {
+        _state.liveTiers = {
+          genuine: { ...DEFAULT_TIERS.genuine, ...(effective.genuine || {}) },
+          compatible: { ...DEFAULT_TIERS.compatible, ...(effective.compatible || {}) },
+        };
+      }
+    } catch (e) {
+      if (e.code === 'RATE_LIMITED') Toast.warning('Slow down — try again in a few seconds.');
+      else if (e.code === 'FORBIDDEN') Toast.error('This action requires super_admin.');
+      else if (e.code === 'VALIDATION_FAILED') Toast.error(`Validation failed: ${e.message}`);
+      else Toast.error(e.message || 'Save failed');
+      btn.disabled = false;
+      btn.textContent = 'Save changes';
+    }
+  });
 }
 
 function copyProposedJson() {

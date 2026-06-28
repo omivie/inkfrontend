@@ -43,6 +43,10 @@ const READ = (p)   => fs.readFileSync(p, 'utf8');
 const API_SRC      = READ(JS('api.js'));
 const LANDING_SRC  = READ(JS('landing.js'));
 const CONTACT_SRC  = READ(JS('contact-page.js'));
+// The newsletter subscribe handler moved into the shared footer binder (Jun
+// 2026, ERR-049) so it works on every page, not just the homepage. landing.js
+// now delegates to window.NewsletterForm.bind — the contract lives here.
+const FOOTER_SRC   = READ(JS('footer.js'));
 
 // ─────────────────────────────────────────────────────────────────────────────
 // §1 — Static guarantees: api.js wires x-request-id through every branch
@@ -158,27 +162,33 @@ test('mapError reads request_id nested under .error too', () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// §3 — Newsletter (landing.js) and contact form propagate the contract
+// §3 — Newsletter (shared footer binder) and contact form propagate the contract
 // ─────────────────────────────────────────────────────────────────────────────
 
-test('landing.js newsletter handler routes INTERNAL_ERROR through mapError', () => {
+test('newsletter handler routes INTERNAL_ERROR through mapError', () => {
     assert.match(
-        LANDING_SRC,
+        FOOTER_SRC,
         /res\.code\s*===\s*['"]INTERNAL_ERROR['"][\s\S]{0,200}API\.mapError\(res\)\.message/,
         'newsletter must call API.mapError(res) for INTERNAL_ERROR responses'
     );
 });
 
-test('landing.js newsletter logs request_id via DebugLog.warn (dev-only, no production leak)', () => {
+test('newsletter logs request_id via DebugLog.warn (dev-only, no production leak)', () => {
     // 2026-05-18 console audit: routed through DebugLog so it stays silent
     // outside localhost. The toast still carries the customer-facing ref.
-    assert.match(LANDING_SRC, /DebugLog\.warn\(\s*['"]\[newsletter\]\s+subscribe failed/);
-    assert.match(LANDING_SRC, /request_id:\s*res\.request_id/);
-    assert.doesNotMatch(LANDING_SRC, /console\.warn\(\s*['"]\[newsletter\]/, 'must not bypass DebugLog');
+    assert.match(FOOTER_SRC, /DebugLog\.warn\(\s*['"]\[newsletter\]\s+subscribe failed/);
+    assert.match(FOOTER_SRC, /request_id:\s*res\.request_id/);
+    assert.doesNotMatch(FOOTER_SRC, /console\.warn\(\s*['"]\[newsletter\]/, 'must not bypass DebugLog');
 });
 
-test('landing.js newsletter catch block also logs request_id when err carries it', () => {
-    assert.match(LANDING_SRC, /err\.request_id[\s\S]{0,260}DebugLog\.warn\(\s*['"]\[newsletter\]\s+subscribe threw/);
+test('newsletter catch block also logs request_id when err carries it', () => {
+    assert.match(FOOTER_SRC, /err\.request_id[\s\S]{0,260}DebugLog\.warn\(\s*['"]\[newsletter\]\s+subscribe threw/);
+});
+
+test('landing.js delegates newsletter to the shared binder (no duplicate handler)', () => {
+    assert.match(LANDING_SRC, /window\.NewsletterForm/);
+    assert.doesNotMatch(LANDING_SRC, /\[newsletter\]\s+subscribe failed/,
+        'the inline handler must live only in footer.js now');
 });
 
 test('contact-page.js shows the short ref on the fetch fallback 500 path', () => {

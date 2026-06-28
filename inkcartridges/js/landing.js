@@ -84,98 +84,13 @@
     // ============================================
     // NEWSLETTER FORM
     // ============================================
-
-    const newsletterForm = document.querySelector('.newsletter__form');
-
-    if (newsletterForm) {
-        // Init Turnstile if configured
-        let newsletterTurnstileToken = null;
-        const siteKey = typeof Config !== 'undefined' && Config.TURNSTILE_SITE_KEY;
-        if (siteKey && typeof turnstile !== 'undefined') {
-            turnstile.render('#newsletter-turnstile', {
-                sitekey: siteKey,
-                callback: (token) => { newsletterTurnstileToken = token; },
-                'expired-callback': () => { newsletterTurnstileToken = null; }
-            });
-        }
-
-        newsletterForm.addEventListener('submit', async (e) => {
-            e.preventDefault();
-
-            const emailInput = newsletterForm.querySelector('input[type="email"]');
-            const submitBtn = newsletterForm.querySelector('button[type="submit"]');
-            const email = emailInput.value.trim();
-
-            if (!email) return;
-
-            const originalText = submitBtn.textContent;
-            submitBtn.textContent = 'Subscribing...';
-            submitBtn.disabled = true;
-
-            try {
-                if (typeof API !== 'undefined' && API.subscribe) {
-                    const payload = { email: email, source: 'landing' };
-                    if (newsletterTurnstileToken) payload.turnstile_token = newsletterTurnstileToken;
-                    const res = await API.subscribe(payload);
-
-                    if (res && res.ok === false) {
-                        // Validation: per-field message wins. Server hiccup (500/INTERNAL_ERROR):
-                        // run through API.mapError so the customer sees a friendly message AND
-                        // a short reference id we can grep against Render's stderr.
-                        let fieldMsg;
-                        if (Array.isArray(res.details) && res.details[0]?.message) {
-                            fieldMsg = res.details[0].message;
-                        } else if (res.code === 'INTERNAL_ERROR' || (typeof res.status === 'number' && res.status >= 500)) {
-                            fieldMsg = (typeof API.mapError === 'function')
-                                ? API.mapError(res).message
-                                : 'Server hiccup — please try again.';
-                        } else {
-                            fieldMsg = API.extractErrorMessage(res, 'Could not subscribe. Please try again.');
-                        }
-                        if (res.request_id) {
-                            // Dev-only: DebugLog gates on localhost, so this surfaces the full
-                            // request_id while debugging without leaking it into production
-                            // DevTools. The customer-facing toast carries the 8-char ref for
-                            // support correlation (see API.mapError).
-                            DebugLog.warn('[newsletter] subscribe failed', { code: res.code, request_id: res.request_id });
-                        }
-                        if (typeof showToast === 'function') showToast(fieldMsg, 'error');
-                        if (siteKey && typeof turnstile !== 'undefined') turnstile.reset('#newsletter-turnstile');
-                        newsletterTurnstileToken = null;
-                        submitBtn.textContent = originalText;
-                        submitBtn.disabled = false;
-                        return;
-                    }
-                }
-
-                if (typeof showToast === 'function') {
-                    showToast('Thank you for subscribing!', 'success');
-                }
-                emailInput.value = '';
-                newsletterTurnstileToken = null;
-                if (siteKey && typeof turnstile !== 'undefined') turnstile.reset('#newsletter-turnstile');
-            } catch (err) {
-                if (err && err.request_id) {
-                    DebugLog.warn('[newsletter] subscribe threw', { code: err.code, status: err.status, request_id: err.request_id });
-                }
-                const mapped = (typeof API !== 'undefined' && typeof API.mapError === 'function')
-                    ? API.mapError(err) : null;
-                const msg = (mapped && mapped.message)
-                    || err.message
-                    || 'Could not subscribe. Please try again.';
-                if (typeof showToast === 'function') {
-                    if (msg.includes('temporarily unavailable')) {
-                        showToast('Service temporarily unavailable. Please try again later.', 'error');
-                    } else {
-                        showToast(msg, 'error');
-                    }
-                }
-                if (siteKey && typeof turnstile !== 'undefined') turnstile.reset('#newsletter-turnstile');
-                newsletterTurnstileToken = null;
-            }
-
-            submitBtn.textContent = originalText;
-            submitBtn.disabled = false;
+    // The signup now lives in the shared footer (footer.js renders + binds it
+    // on every page). The single implementation is window.NewsletterForm.bind
+    // (idempotent), so we just delegate here for any landing-specific form.
+    // footer.js is defer-loaded before landing.js, so the global is ready.
+    if (window.NewsletterForm) {
+        document.querySelectorAll('.newsletter__form').forEach((f) => {
+            window.NewsletterForm.bind(f, 'landing');
         });
     }
 

@@ -116,16 +116,18 @@ test('audit Fix 1 — the 4 flagged homepage-bundle call sites use DebugLog', ()
     'search.js suggest-fetch catch must log via DebugLog.error'
   );
 
-  const landing = read('inkcartridges/js/landing.js');
+  // The newsletter handler moved into the shared footer binder (Jun 2026,
+  // ERR-049) so it runs on every page; the DebugLog contract moved with it.
+  const footer = read('inkcartridges/js/footer.js');
   assert.match(
-    landing,
+    footer,
     /DebugLog\.warn\('\[newsletter\] subscribe failed'/,
-    'landing.js newsletter failed-envelope branch must log via DebugLog.warn'
+    'newsletter failed-envelope branch must log via DebugLog.warn'
   );
   assert.match(
-    landing,
+    footer,
     /DebugLog\.warn\('\[newsletter\] subscribe threw'/,
-    'landing.js newsletter catch must log via DebugLog.warn'
+    'newsletter catch must log via DebugLog.warn'
   );
 });
 

@@ -1480,7 +1480,10 @@ const API = {
         if (params.category) qs.append('category', params.category);
         const query = qs.toString();
         if (!query) return { ok: false, error: 'brand or category required' };
-        return this.get(`/api/schema/collection?${query}`);
+        // SWR (5-min TTL) so the init + popstate + pageshow burst on the same
+        // brand/category URL collapses to one request instead of tripping the
+        // backend rate limiter (429). FE audit Jun 2026, ERR-049.
+        return this.getWithSWR(`/api/schema/collection?${query}`, { ttl: 5 * 60 * 1000 });
     },
 
     /**
@@ -1488,7 +1491,8 @@ const API = {
      * @param {string} printerSlug - Printer slug (e.g. "brother-mfc-j870")
      */
     async getPrinterSchema(printerSlug) {
-        return this.get(`/api/schema/printer/${encodeURIComponent(printerSlug)}`);
+        // SWR for the same burst-on-navigation reason as getCollectionSchema.
+        return this.getWithSWR(`/api/schema/printer/${encodeURIComponent(printerSlug)}`, { ttl: 5 * 60 * 1000 });
     },
 
     /**

@@ -155,6 +155,45 @@ const realLines = (d) => (d.lines || []).filter((l) => (l.code || '').trim() || 
 const hasDelivery = (d) => !!(d.delivery
   && ((d.delivery.attn || '').trim() || (d.delivery.company || '').trim() || lines(d.delivery.address).length));
 
+// Shared layout data so the live preview and the client PDF render identically.
+// The header meta (right side of the title band): label/value pairs.
+function invoiceMeta(d) {
+  const rows = [['Invoice No', d.invoice_number || '—'], ['Date', formatInvoiceDate(d.date)]];
+  if (d.seller.gst) rows.push(['GST No', d.seller.gst]);
+  const st = STATUS_META[d.status];
+  if (st) rows.push(['Status', st.label]);
+  return rows;
+}
+
+// The aligned party columns: From (seller), Bill To (customer), Deliver To (optional).
+function invoiceParties(d) {
+  const out = [];
+
+  const fromLines = [...lines(d.seller.address)];
+  if (d.seller.phone) fromLines.push(`Ph: ${d.seller.phone}`);
+  if (d.seller.contact) fromLines.push(`Contact: ${d.seller.contact}`);
+  out.push({ label: 'From', name: d.seller.name || '', lines: fromLines });
+
+  const billLines = [];
+  if (d.customer.company) billLines.push(d.customer.company);
+  if (d.customer.attn) billLines.push(`Attn: ${d.customer.attn}`);
+  billLines.push(...lines(d.customer.address));
+  if (d.customer.phone) billLines.push(d.customer.phone);
+  if (d.customer.email) billLines.push(d.customer.email);
+  out.push({ label: 'Bill To', name: d.customer.name || '', lines: billLines });
+
+  if (hasDelivery(d)) {
+    const addr = lines(d.delivery.address);
+    const useAddrAsName = !d.delivery.company && !d.delivery.attn;
+    const name = d.delivery.company || d.delivery.attn || addr[0] || '';
+    const dl = [];
+    if (d.delivery.company && d.delivery.attn) dl.push(`Attn: ${d.delivery.attn}`);
+    dl.push(...(useAddrAsName ? addr.slice(1) : addr));
+    out.push({ label: 'Deliver To', name, lines: dl });
+  }
+  return out;
+}
+
 function buildPayload(d) {
   return {
     invoice_number: d.invoice_number || null,   // null => backend assigns next in series
@@ -404,8 +443,11 @@ async function onEditorFooterClick(e) {
 // description, AND qty > 0, AND unit cost > 0). Fully-blank phantom rows are ignored.
 function validateInvoice(d) {
   const errs = [];
+  if (!d) return errs;
   if (!(d.customer.name || '').trim())
     errs.push({ field: 'customer.name', msg: 'Customer name is required' });
+  if (!lines(d.customer.address).length)
+    errs.push({ field: 'customer.address', msg: 'Bill To address is required' });
 
   const started = (d.lines || [])
     .map((l, i) => ({ l, i }))
@@ -466,19 +508,59 @@ function ensureInvoiceValid() {
   return false;
 }
 
+// Persist the current draft to the backend (create or update). Updates _draft with
+// the server-assigned id + invoice_number. Returns the saved record (or null).
+// Does NOT close the drawer — callers decide. Throws on API error.
+// Map the backend's authoritative totals (whatever field names it returns) onto the
+// {subtotal, freight, gst, total} shape; null if none recognised — in which case the
+// PDF falls back to the client computeTotals (same GST math, so they agree).
+function serverTotals(rec) {
+  if (!rec || typeof rec !== 'object') return null;
+  const pick = (...keys) => { for (const k of keys) { if (rec[k] != null) return num(rec[k]); } return null; };
+  const subtotal = pick('subtotal_excl_gst', 'subtotal', 'sub_total');
+  const gst = pick('gst_amount', 'gst', 'tax_amount');
+  const total = pick('total_incl_gst', 'total', 'grand_total');
+  const freight = pick('freight_excl_gst', 'freight', 'shipping_excl_gst');
+  if (subtotal == null && total == null) return null;
+  return { subtotal: subtotal ?? 0, freight: freight ?? 0, gst: gst ?? 0, total: total ?? 0 };
+}
+
+// Upload the freshly-rendered PDF so the backend's stored copy (served by GET /:id/pdf
+// and attached to customer emails) matches the frontend layout 1:1. Best-effort: a
+// missing endpoint (404) or any error is logged, never surfaced — the save succeeded.
+async function syncStoredPdf() {
+  if (!_draft?.id) return;
+  const doc = buildInvoiceDoc(_draft);
+  if (!doc) return;   // jsPDF not loaded
+  const base64 = (doc.output('datauristring').split(',')[1]) || '';
+  await AdminAPI.uploadInvoicePdf(_draft.id, base64, `Invoice-${_draft.invoice_number || _draft.id}.pdf`);
+}
+
+async function persistDraft() {
+  const payload = buildPayload(_draft);
+  const saved = _draft.id
+    ? await AdminAPI.updateInvoice(_draft.id, payload)
+    : await AdminAPI.createInvoice(payload);
+  if (saved) {
+    _draft.id = saved.id ?? _draft.id;
+    if (saved.invoice_number) _draft.invoice_number = saved.invoice_number;
+    const st = serverTotals(saved);
+    if (st) _draft._serverTotals = st;
+    // Push the rendered PDF up so the backend serves/emails the same document.
+    try { await syncStoredPdf(); }
+    catch (err) { warn('stored-PDF sync skipped (backend endpoint pending?)', err); }
+  }
+  return saved;
+}
+
 async function saveInvoice() {
   // Block the save until all essentials are filled; highlight what's missing.
   if (!ensureInvoiceValid()) return;
   const btn = _editorRefs?.drawer.footer.querySelector('[data-ed-action="save"]');
   if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
   try {
-    const payload = buildPayload(_draft);
-    const saved = _draft.id
-      ? await AdminAPI.updateInvoice(_draft.id, payload)
-      : await AdminAPI.createInvoice(payload);
+    const saved = await persistDraft();
     if (saved) {
-      _draft.id = saved.id ?? _draft.id;
-      if (saved.invoice_number) _draft.invoice_number = saved.invoice_number;
       Toast.success(`Invoice ${_draft.invoice_number || ''} saved.`.replace('  ', ' '));
       Drawer.close();
       loadData();
@@ -760,9 +842,8 @@ function refreshPreview() {
 
 function renderPreview(d) {
   const t = computeTotals(d);
-  const sellerAddr = lines(d.seller.address).map((l) => esc(l)).join('<br>');
-  const custAddr = lines(d.customer.address).map((l) => esc(l)).join('<br>');
-  const delivAddr = lines(d.delivery.address).map((l) => esc(l)).join('<br>');
+  const meta = invoiceMeta(d);
+  const parties = invoiceParties(d);
   const rows = (d.lines || [])
     .filter((l) => l.code || l.description || num(l.qty) || num(l.unitCost))
     .map((l) => `<tr>
@@ -776,28 +857,19 @@ function renderPreview(d) {
 
   return `
   <div class="inv-doc">
-    <div class="inv-doc__top">
-      <div class="inv-doc__from">
-        <div class="inv-doc__label">Invoice from:</div>
-        <div class="inv-doc__seller">${esc(d.seller.name)}</div>
-        <table class="inv-doc__meta">
-          <tr><td>Invoice No:</td><td><strong>${esc(d.invoice_number || '—')}</strong></td></tr>
-          <tr><td>Date:</td><td>${esc(formatInvoiceDate(d.date))}</td></tr>
-          ${d.seller.gst ? `<tr><td>Gst:</td><td>${esc(d.seller.gst)}</td></tr>` : ''}
-        </table>
-        <div class="inv-doc__selleraddr">${sellerAddr}${d.seller.phone ? `<br>ph: ${esc(d.seller.phone)}` : ''}${d.seller.contact ? `<br>Contact : ${esc(d.seller.contact)}` : ''}</div>
-      </div>
-      <div class="inv-doc__to">
-        ${(d.customer.attn || d.customer.name) ? `<div class="inv-doc__attn">Attn: <strong>${esc(d.customer.attn || d.customer.name)}</strong></div>` : ''}
-        <div class="inv-doc__label">Invoice To:</div>
-        <div class="inv-doc__buyer">${esc(d.customer.name)}</div>
-        <div class="inv-doc__buyeraddr">${d.customer.company ? `${esc(d.customer.company)}<br>` : ''}${custAddr}${d.customer.phone ? `<br>${esc(d.customer.phone)}` : ''}${d.customer.email ? `<br>${esc(d.customer.email)}` : ''}</div>
-        ${hasDelivery(d) ? `<div class="inv-doc__deliver">
-          <div class="inv-doc__label">Deliver to:</div>
-          ${d.delivery.attn ? `<div class="inv-doc__buyer">${esc(d.delivery.attn)}</div>` : ''}
-          <div class="inv-doc__buyeraddr">${d.delivery.company ? `${esc(d.delivery.company)}<br>` : ''}${delivAddr}</div>
-        </div>` : ''}
-      </div>
+    <div class="inv-doc__head">
+      <div class="inv-doc__title">Tax Invoice</div>
+      <table class="inv-doc__meta"><tbody>
+        ${meta.map(([k, v]) => `<tr><td>${esc(k)}</td><td>${esc(v)}</td></tr>`).join('')}
+      </tbody></table>
+    </div>
+
+    <div class="inv-doc__parties" style="--inv-cols:${parties.length}">
+      ${parties.map((p) => `<div class="inv-doc__party">
+        <div class="inv-doc__party-label">${esc(p.label)}</div>
+        <div class="inv-doc__party-name">${esc(p.name) || '&nbsp;'}</div>
+        <div class="inv-doc__party-lines">${p.lines.map((l) => esc(l)).join('<br>') || '&nbsp;'}</div>
+      </div>`).join('')}
     </div>
 
     <table class="inv-doc__items">
@@ -827,85 +899,92 @@ function renderPreview(d) {
 //  PDF — backend first, client-side jsPDF fallback
 // =========================================================================
 async function downloadPdf(d) {
-  // Same required-field gate as save — never emit a $0 / no-customer PDF.
-  if (!ensureInvoiceValid()) return;
-  // A saved invoice can use the backend-rendered PDF (authoritative).
-  if (d.id) {
-    try {
-      const url = await AdminAPI.downloadInvoicePdf(d.id);
-      triggerDownload(url, `Invoice-${d.invoice_number || d.id}.pdf`);
-      setTimeout(() => URL.revokeObjectURL(url), 4000);
-      return;
-    } catch (err) {
-      warn('backend PDF unavailable, using client fallback', err);
+  // Two entry points: the open editor (d === _draft) and a list-row button
+  // (d is a freshly-mapped saved record, _draft is null). Only the editor draft
+  // needs the required-field gate + in-form highlighting.
+  const isEditorDraft = !!_editorRefs && d === _draft;
+  if (isEditorDraft) {
+    if (!ensureInvoiceValid()) return;
+    // The invoice number is assigned by the backend on save. An unsaved draft has
+    // none — so save it first (keeping the editor open) before producing the PDF,
+    // otherwise the document would print with no invoice number.
+    if (!d.id) {
+      const btn = _editorRefs.drawer.footer.querySelector('[data-ed-action="download"]');
+      if (btn) btn.disabled = true;
+      try {
+        const saved = await persistDraft();
+        if (!saved) { Toast.error('Could not save the invoice to assign a number.'); return; }
+        Toast.success(`Invoice ${d.invoice_number || ''} saved — assigning number to the PDF.`.replace('  ', ' '));
+        rebuildEditor();   // reflect the new Invoice No in the header + preview
+        loadData();        // refresh the list behind the drawer
+      } catch (err) {
+        warn('auto-save before download failed', err);
+        Toast.error(err.message || 'Could not save the invoice to assign a number.');
+        return;
+      } finally {
+        if (btn) btn.disabled = false;
+      }
     }
   }
+  // Render the PDF client-side so the download matches the professional on-screen
+  // layout (and carries the now-assigned invoice number). The backend still renders
+  // its own PDF for customer emails until that template is aligned.
   generateClientPdf(d);
 }
 
-function triggerDownload(url, filename) {
-  const a = document.createElement('a');
-  a.href = url; a.download = filename;
-  document.body.appendChild(a); a.click(); a.remove();
-}
-
-function generateClientPdf(d) {
+// Builds the jsPDF document (the single source of the invoice layout) and returns
+// it — callers either .save() it (download) or .output() it (upload to backend).
+// Returns null if the jsPDF library hasn't loaded. Prefers server-confirmed totals
+// (set on the draft after save) so the document never disagrees with the backend.
+function buildInvoiceDoc(d) {
   const JsPDF = window.jspdf?.jsPDF;
-  if (!JsPDF) { Toast.error('PDF library not loaded.'); return; }
-  const t = computeTotals(d);
+  if (!JsPDF) return null;
+  const t = d._serverTotals || computeTotals(d);
   const doc = new JsPDF({ unit: 'pt', format: 'a4' });
   const pageW = doc.internal.pageSize.getWidth();
   const M = 48;
-  const rightX = pageW / 2 + 12;
 
   const text = (s, x, y) => doc.text(String(s ?? ''), x, y);
-  const block = (arr, x, y, lh = 13) => { arr.forEach((l, i) => text(l, x, y + i * lh)); return y + arr.length * lh; };
 
-  // --- Attn (top right) + Invoice To ---
-  doc.setFont('helvetica', 'normal'); doc.setFontSize(10);
-  text('Attn:', rightX, 60);
-  doc.setFont('helvetica', 'bold'); text(d.customer.attn || d.customer.name || '', rightX + 30, 60);
+  // --- Header band: title (left) + meta key/values (right) ---
+  doc.setFont('helvetica', 'bold'); doc.setFontSize(22); doc.setTextColor(25);
+  doc.text('TAX INVOICE', M, 72);
+  let my = 56;
+  invoiceMeta(d).forEach(([k, v]) => {
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(8); doc.setTextColor(140);
+    doc.text(k.toUpperCase(), pageW - M - 92, my, { align: 'right' });
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(10); doc.setTextColor(25);
+    doc.text(String(v ?? ''), pageW - M, my, { align: 'right' });
+    my += 15;
+  });
+  const headBottom = Math.max(86, my + 2);
+  doc.setDrawColor(25); doc.setLineWidth(1.2);
+  doc.line(M, headBottom, pageW - M, headBottom);
 
-  // --- Invoice from (left) ---
-  doc.setFont('helvetica', 'normal'); doc.setFontSize(10);
-  text('Invoice from:', M, 96);
-  doc.setFont('helvetica', 'bold'); doc.setFontSize(17);
-  text(d.seller.name, M, 116);
-  doc.setFont('helvetica', 'normal'); doc.setFontSize(10);
-  let ly = 140;
-  text('Invoice No:', M, ly); doc.setFont('helvetica', 'bold'); text(d.invoice_number || '—', M + 70, ly); doc.setFont('helvetica', 'normal');
-  ly += 14; text('Date:', M, ly); text(formatInvoiceDate(d.date), M + 70, ly);
-  if (d.seller.gst) { ly += 14; text('Gst:', M, ly); text(d.seller.gst, M + 70, ly); }
-  ly += 22;
-  ly = block(lines(d.seller.address), M, ly);
-  if (d.seller.phone) ly = block([`ph: ${d.seller.phone}`], M, ly);
-  if (d.seller.contact) ly = block([`Contact : ${d.seller.contact}`], M, ly);
-
-  // --- Invoice To (right) ---
-  doc.setFontSize(10); text('Invoice To:', rightX, 96);
-  doc.setFont('helvetica', 'bold'); doc.setFontSize(15); text(d.customer.name || '', rightX, 116);
-  doc.setFont('helvetica', 'normal'); doc.setFontSize(10);
-  const toLines = [];
-  if (d.customer.company) toLines.push(d.customer.company);
-  toLines.push(...lines(d.customer.address));
-  if (d.customer.phone) toLines.push(d.customer.phone);
-  if (d.customer.email) toLines.push(d.customer.email);
-  let toY = block(toLines, rightX, 134);
-
-  // --- Deliver to (right, below Invoice To) — only when filled ---
-  if (hasDelivery(d)) {
-    toY += 10;
-    doc.setFont('helvetica', 'bold'); text('Deliver to:', rightX, toY); toY += 14;
-    const dl = [];
-    if (d.delivery.attn) dl.push(d.delivery.attn);
-    if (d.delivery.company) dl.push(d.delivery.company);
-    dl.push(...lines(d.delivery.address));
-    doc.setFont('helvetica', 'normal');
-    toY = block(dl, rightX, toY);
-  }
+  // --- Aligned party columns: From | Bill To | Deliver To ---
+  const parties = invoiceParties(d);
+  const colTop = headBottom + 28;
+  const gap = 20;
+  const colW = (pageW - 2 * M - gap * (parties.length - 1)) / parties.length;
+  let partyBottom = colTop;
+  parties.forEach((p, i) => {
+    const x = M + i * (colW + gap);
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(8); doc.setTextColor(140);
+    doc.text(p.label.toUpperCase(), x, colTop);
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(11.5); doc.setTextColor(25);
+    let yy = colTop + 16;
+    doc.splitTextToSize(p.name || '', colW).forEach((w) => { doc.text(w, x, yy); yy += 14; });
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(9.5); doc.setTextColor(45);
+    yy += 2;
+    p.lines.forEach((l) => {
+      doc.splitTextToSize(String(l), colW).forEach((w) => { doc.text(w, x, yy); yy += 12; });
+    });
+    if (yy > partyBottom) partyBottom = yy;
+  });
+  doc.setTextColor(20);
 
   // --- Items table ---
-  const startY = Math.max(ly + 16, toY + 16, 250);
+  const startY = Math.max(partyBottom + 18, 250);
   const rows = (d.lines || [])
     .filter((l) => l.code || l.description || num(l.qty) || num(l.unitCost))
     .map((l) => [l.code || '', l.description || '', String(num(l.qty)), money(num(l.qty) * num(l.unitCost))]);
@@ -921,19 +1000,23 @@ function generateClientPdf(d) {
   });
 
   // --- Totals (right aligned) ---
-  let ty = (doc.lastAutoTable?.finalY || startY) + 30;
-  const labelX = pageW - M - 150;
+  let ty = (doc.lastAutoTable?.finalY || startY) + 28;
+  const labelX = pageW - M - 170;
   const valX = pageW - M;
-  const totRow = (label, val, bold) => {
-    doc.setFont('helvetica', bold ? 'bold' : 'normal');
-    text(label, labelX, ty);
+  doc.setTextColor(20);
+  const totRow = (label, val, opts = {}) => {
+    doc.setFont('helvetica', opts.bold ? 'bold' : 'normal');
+    doc.setFontSize(opts.size || 10);
+    doc.text(label, labelX, ty);
     doc.text(String(val), valX, ty, { align: 'right' });
-    ty += 16;
+    ty += opts.gap || 15;
   };
   totRow('Sub Total', money(t.subtotal));
-  totRow('Freight', t.freight > 0 ? money(t.freight) : 'free');
+  totRow('Freight', t.freight > 0 ? money(t.freight) : 'Free');
   totRow('GST', money(t.gst));
-  ty += 4; totRow('Total', money(t.total), true);
+  ty += 6;
+  doc.setDrawColor(20); doc.setLineWidth(1); doc.line(labelX, ty - 11, valX, ty - 11);
+  totRow('Total', money(t.total), { bold: true, size: 13, gap: 16 });
 
   // --- Payment block ---
   let py = ty + 24;
@@ -944,5 +1027,12 @@ function generateClientPdf(d) {
   doc.setFont('helvetica', 'normal'); text('a/c Number:', M, py); doc.setFont('helvetica', 'bold'); text(d.footer.bankAcct || '', M + 70, py);
   if (d.footer.thankYou) { py += 30; doc.setFont('helvetica', 'bold'); doc.setFontSize(9); doc.text(doc.splitTextToSize(d.footer.thankYou, pageW - 2 * M), M, py); }
 
+  return doc;
+}
+
+// Render + trigger a browser download of the invoice PDF.
+function generateClientPdf(d) {
+  const doc = buildInvoiceDoc(d);
+  if (!doc) { Toast.error('PDF library not loaded.'); return; }
   doc.save(`Invoice-${d.invoice_number || 'draft'}.pdf`);
 }

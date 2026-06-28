@@ -285,3 +285,53 @@ test('runtime: everything unavailable (points down, no orders, no coupons) → h
     await run();
     assert.equal(els['loyalty-error'].hidden, false, 'hard error pane shown when nothing is available');
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Account dashboard balance (account.js + account/index.html) — Jun 2026
+// The dashboard loyalty card surfaces the live points balance at a glance, not
+// just a link to the dedicated page.
+// ─────────────────────────────────────────────────────────────────────────────
+
+test('account.js: loadLoyaltyBalance fetches getLoyalty and renders into the dashboard card', () => {
+    const src = JS('account.js');
+    assert.match(src, /loadLoyaltyBalance\(\)/, 'loadDashboard must invoke loadLoyaltyBalance');
+    assert.match(src, /async loadLoyaltyBalance\(\)\s*{/, 'loadLoyaltyBalance must be defined');
+    assert.match(src, /getElementById\('dash-loyalty-balance'\)/, 'must target #dash-loyalty-balance');
+    assert.match(src, /API\.getLoyalty\(/, 'must call API.getLoyalty');
+    assert.match(src, /points_balance/, 'must read points_balance');
+    assert.match(src, /redemption_rate/, 'must read the server-driven redemption_rate (not hardcode the value)');
+    // Graceful: bail when the balance is zero/unknown so the card stays a plain link.
+    assert.match(src, /balance\s*<=\s*0/, 'must hide the balance when zero/unknown');
+});
+
+test('account/index.html: dashboard loyalty card has the balance element', () => {
+    const src = HTML('html/account/index.html');
+    assert.match(src, /id="dash-loyalty-balance"/, 'dashboard must contain #dash-loyalty-balance');
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Order confirmation: points earned + redemption applied (Jun 2026)
+// ─────────────────────────────────────────────────────────────────────────────
+
+test('order-confirmation-page.js: passes through loyalty fields and renders both totals rows', () => {
+    const src = JS('order-confirmation-page.js');
+    // transformAPIOrder normalises the backend fields (defensive on naming).
+    assert.match(src, /loyaltyDiscount:/, 'transform must expose loyaltyDiscount');
+    assert.match(src, /pointsEarned:/, 'transform must expose pointsEarned');
+    assert.match(src, /loyalty_discount_amount/, 'must read loyalty_discount_amount');
+    assert.match(src, /points_earned/, 'must read points_earned');
+    // renderTotals populates the rows.
+    assert.match(src, /totals-loyalty-row/, 'must drive the applied-points row');
+    assert.match(src, /totals-earned-row/, 'must drive the points-earned row');
+    // Earn estimate mirrors the backend basis: order value ex-shipping, not ex-GST subtotal.
+    assert.match(src, /Number\(total\)[\s\S]{0,40}Number\(shippingCost\)/, 'estimate basis is total − shipping');
+    assert.match(src, /≈/, 'estimated (non-backend) earn is marked with ≈');
+});
+
+test('order-confirmation.html: totals has loyalty-applied and points-earned rows', () => {
+    const src = HTML('html/order-confirmation.html');
+    assert.match(src, /id="totals-loyalty-row"[\s\S]*?hidden/, 'applied-points row present and hidden by default');
+    assert.match(src, /id="totals-earned-row"[\s\S]*?hidden/, 'points-earned row present and hidden by default');
+    assert.match(src, /id="totals-loyalty"/, 'applied-points value element present');
+    assert.match(src, /id="totals-earned"/, 'points-earned value element present');
+});

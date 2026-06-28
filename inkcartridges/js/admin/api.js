@@ -643,6 +643,26 @@ const AdminAPI = {
     }
   },
 
+  // ---- Customer loyalty points (admin) ----
+  // Contract documented in admin-loyalty-endpoints-jun2026.md (repo root). Read is fail-soft
+  // (returns null so the drawer degrades gracefully); adjust throws so the modal
+  // can surface the backend message. Both 404 until the backend ships them.
+  async getCustomerLoyalty(customerId) {
+    try {
+      const resp = await window.API.get(`/api/admin/customers/${customerId}/loyalty`);
+      return resp?.data?.loyalty ?? resp?.data ?? null;
+    } catch (e) {
+      adminApiWarn('Failed to load customer loyalty', e);
+      return null;
+    }
+  },
+
+  async adjustCustomerPoints(customerId, { points, reason, type = 'adjust' }) {
+    const resp = await window.API.post(`/api/admin/customers/${customerId}/loyalty/adjust`, { points, reason, type });
+    if (resp && resp.ok === false) throw new Error(resp.error?.message || resp.error || 'Adjustment failed');
+    return resp?.data?.loyalty ?? resp?.data ?? null;
+  },
+
   // ---- Customer Intelligence (stubs — backend endpoints not yet implemented) ----
   async getCustomerLTV() { return null; },
   async getCohorts() { return null; },
@@ -2396,6 +2416,16 @@ const AdminAPI = {
     return resp?.data ?? null;
   },
 
+  // Upload the frontend-rendered PDF so the backend stores it and serves/emails THAT
+  // exact file (single source of truth = the frontend layout). pdfBase64 is the raw
+  // base64 (no data: prefix). Backend endpoint is pending — a 404 is expected until
+  // it ships, and the caller swallows the error so saves never break.
+  async uploadInvoicePdf(invoiceId, pdfBase64, filename) {
+    const resp = await window.API.post(`/api/admin/invoices/${encodeURIComponent(invoiceId)}/pdf`, { pdf_base64: pdfBase64, filename });
+    if (resp && resp.ok === false) throw invoiceError(resp, 'Upload invoice PDF failed');
+    return resp?.data ?? null;
+  },
+
   // Backend-rendered PDF — returns a Blob object URL (mirrors
   // getInvoicePreviewUrl). The page falls back to client-side jsPDF when this
   // endpoint isn't available yet, so a 404/network error is expected pre-backend.
@@ -2729,6 +2759,19 @@ const AdminAPI = {
         const resp = await window.API.get('/api/admin/pricing/tier-multipliers');
         return resp?.data ?? null;
       } catch (e) { adminApiWarn('Load tier multipliers', e); return null; }
+    },
+
+    // Commit edited tier multipliers. Mirrors the Copy-JSON payload exactly:
+    // { proposed_tiers: { [source]: {...} }, apply_ending_snap: true }.
+    // Surfaces backend error codes (FORBIDDEN / VALIDATION_FAILED / RATE_LIMITED).
+    async commitPricing(payload) {
+      const resp = await window.API.put('/api/admin/pricing/tier-multipliers', payload);
+      if (resp && resp.ok === false) {
+        const err = new Error(resp.error?.message || resp.error || 'Commit failed');
+        err.code = resp.error?.code; err.details = resp.error?.details;
+        throw err;
+      }
+      return resp?.data ?? null;
     },
 
     async getPackHealth(skuOrId) {

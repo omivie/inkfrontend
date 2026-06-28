@@ -360,6 +360,12 @@
             // Canonical URL
             document.getElementById('canonical-url').href = canonicalUrl;
 
+            // hreflang alternates track the canonical (single locale, self-referential).
+            const hrefEn = document.getElementById('hreflang-en');
+            const hrefDefault = document.getElementById('hreflang-default');
+            if (hrefEn) hrefEn.href = canonicalUrl;
+            if (hrefDefault) hrefDefault.href = canonicalUrl;
+
             // Structured data (Product / BreadcrumbList / FAQPage) is deliberately
             // NOT emitted client-side. See marketing-audit-may-2026.md §4 and the
             // comment block in html/product/index.html: the backend prerender

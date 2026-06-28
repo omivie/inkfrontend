@@ -37,6 +37,108 @@
     };
   })();
 
+  // ─── Newsletter subscribe — shared, idempotent binder ────────────────
+  // One implementation, bound at most once per form (dataset guard), reused by
+  // the footer (every page) and the homepage landing controller. Mirrors the
+  // existing robust error handling (per-field message → mapError → friendly
+  // toast + dev-only request_id correlation). Turnstile stays optional: it only
+  // renders when a [data-newsletter-turnstile] host AND the global are present,
+  // so the plain footer form submits { email, source } without a token.
+  // FE audit Jun 2026 — surfaces the dormant POST /api/newsletter/subscribe (ERR-049).
+  function bindNewsletterForm(form, source) {
+    if (!form || form.dataset.nlBound === '1') return;
+    form.dataset.nlBound = '1';
+
+    let turnstileToken = null;
+    const tsHost = form.querySelector('[data-newsletter-turnstile]');
+    const siteKey = (typeof Config !== 'undefined' && Config.TURNSTILE_SITE_KEY) || null;
+    if (tsHost && siteKey && typeof turnstile !== 'undefined') {
+      try {
+        turnstile.render(tsHost, {
+          sitekey: siteKey,
+          callback: (t) => { turnstileToken = t; },
+          'expired-callback': () => { turnstileToken = null; },
+        });
+      } catch (e) { /* non-fatal */ }
+    }
+    const resetTurnstile = () => {
+      turnstileToken = null;
+      if (tsHost && siteKey && typeof turnstile !== 'undefined') {
+        try { turnstile.reset(tsHost); } catch (e) { /* ignore */ }
+      }
+    };
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const emailInput = form.querySelector('input[type="email"]');
+      const submitBtn = form.querySelector('button[type="submit"]');
+      if (!emailInput || !submitBtn) return;
+      const email = emailInput.value.trim();
+      if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        emailInput.focus();
+        if (typeof showToast === 'function') showToast('Please enter a valid email address.', 'error');
+        return;
+      }
+
+      const originalText = submitBtn.textContent;
+      submitBtn.textContent = 'Subscribing…';
+      submitBtn.disabled = true;
+
+      try {
+        if (typeof API !== 'undefined' && API.subscribe) {
+          const payload = { email: email, source: source || 'footer' };
+          if (turnstileToken) payload.turnstile_token = turnstileToken;
+          const res = await API.subscribe(payload);
+          if (res && res.ok === false) {
+            // Per-field validation message wins; 5xx/INTERNAL_ERROR → friendly
+            // mapError copy carrying an 8-char support ref; else generic.
+            let msg;
+            if (Array.isArray(res.details) && res.details[0] && res.details[0].message) {
+              msg = res.details[0].message;
+            } else if (res.code === 'INTERNAL_ERROR' || (typeof res.status === 'number' && res.status >= 500)) {
+              msg = (typeof API.mapError === 'function') ? API.mapError(res).message : 'Server hiccup — please try again.';
+            } else {
+              msg = (typeof API.extractErrorMessage === 'function')
+                ? API.extractErrorMessage(res, 'Could not subscribe. Please try again.')
+                : 'Could not subscribe. Please try again.';
+            }
+            if (res.request_id && typeof DebugLog !== 'undefined') {
+              DebugLog.warn('[newsletter] subscribe failed', { code: res.code, request_id: res.request_id });
+            }
+            if (typeof showToast === 'function') showToast(msg, 'error');
+            resetTurnstile();
+            submitBtn.textContent = originalText;
+            submitBtn.disabled = false;
+            return;
+          }
+        }
+        if (typeof showToast === 'function') showToast('Thanks for subscribing! Check your inbox for your welcome code.', 'success');
+        emailInput.value = '';
+        resetTurnstile();
+      } catch (err) {
+        if (err && err.request_id && typeof DebugLog !== 'undefined') {
+          DebugLog.warn('[newsletter] subscribe threw', { code: err.code, status: err.status, request_id: err.request_id });
+        }
+        const mapped = (typeof API !== 'undefined' && typeof API.mapError === 'function') ? API.mapError(err) : null;
+        const msg = (mapped && mapped.message) || (err && err.message) || 'Could not subscribe. Please try again.';
+        if (typeof showToast === 'function') {
+          showToast(msg.indexOf('temporarily unavailable') !== -1
+            ? 'Service temporarily unavailable. Please try again later.' : msg, 'error');
+        }
+        resetTurnstile();
+      }
+      submitBtn.textContent = originalText;
+      submitBtn.disabled = false;
+    });
+  }
+
+  // Expose so the homepage controller (landing.js) delegates here instead of
+  // shipping a second copy. footer.js is `defer`-loaded before landing.js, so
+  // this global is defined by the time landing.js runs.
+  if (typeof window !== 'undefined') {
+    window.NewsletterForm = { bind: bindNewsletterForm };
+  }
+
   function initFooter() {
     const footer = document.querySelector('footer.site-footer');
     if (!footer) return;
@@ -54,6 +156,14 @@
                             We supply New Zealand homes and businesses with genuine and
                             compatible ink and toner cartridges.
                         </p>
+                        <div class="footer-newsletter">
+                            <p class="footer-newsletter__text">Get printer tips, deals &amp; a welcome code in your inbox.</p>
+                            <form class="newsletter__form footer-newsletter__form" novalidate>
+                                <label class="visually-hidden" for="footer-newsletter-email">Email address</label>
+                                <input type="email" id="footer-newsletter-email" name="email" class="footer-newsletter__input" placeholder="you@email.com" required autocomplete="email" maxlength="200">
+                                <button type="submit" class="footer-newsletter__button">Subscribe</button>
+                            </form>
+                        </div>
                     </div>
 
                     <details class="footer-column" data-footer-accordion open>
@@ -267,6 +377,9 @@
     // column stays expanded (CSS also neuters the summary so it reads as a
     // plain heading); on mobile only Contact stays open, the rest collapse.
     syncFooterAccordions();
+
+    // Wire the newsletter form now that it's in the DOM (idempotent).
+    bindNewsletterForm(footer.querySelector('.newsletter__form'), 'footer');
 
     // Google Customer Reviews - badge + opt-in survey loader
     (function () {

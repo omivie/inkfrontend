@@ -7030,6 +7030,15 @@
     line-height: 1.4;
 }
 
+/* loyalty-points-jun2026 — live balance shown on the dashboard loyalty card */
+.dash-nav-card__balance {
+    font-size: var(--font-size-sm);
+    font-weight: var(--font-weight-bold);
+    color: var(--color-primary, #267FB5);
+    margin: 0;
+    line-height: 1.3;
+}
+
 @media (max-width: 1024px) {
     .dash-nav-grid {
         grid-template-columns: repeat(2, 1fr);
@@ -8473,6 +8482,18 @@
 .confirmation-totals__row--total dd {
     font-weight: var(--font-weight-bold);
     color: var(--color-text);
+}
+
+/* loyalty-points-jun2026 — points redeemed / earned on the confirmation totals */
+.confirmation-totals__row--loyalty dd {
+    color: var(--color-success);
+    font-weight: var(--font-weight-semibold);
+}
+
+.confirmation-totals__row--earned dt,
+.confirmation-totals__row--earned dd {
+    color: var(--color-primary, #267FB5);
+    font-weight: var(--font-weight-semibold);
 }
 
 /* Post-purchase prompt cards */
