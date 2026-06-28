@@ -99,6 +99,9 @@ function freshDraft() {
       contact: inv.contactName || '',
     },
     customer: { attn: '', name: '', company: '', address: '', phone: '', email: '' },
+    // Optional second address — where the physical goods are shipped when that
+    // differs from the billing ("Invoice To") address. Rendered only when filled.
+    delivery: { attn: '', company: '', address: '' },
     lines: [blankLine()],
     freight: 0,
     footer: {
@@ -120,6 +123,7 @@ function draftFromInvoice(rec) {
   d.source_order_id = rec.source_order_id ?? null;
   if (rec.seller) d.seller = { ...d.seller, ...rec.seller, address: Array.isArray(rec.seller.address) ? rec.seller.address.join('\n') : (rec.seller.address ?? d.seller.address) };
   if (rec.customer) d.customer = { ...d.customer, ...rec.customer, address: Array.isArray(rec.customer.address) ? rec.customer.address.join('\n') : (rec.customer.address ?? '') };
+  if (rec.delivery) d.delivery = { ...d.delivery, ...rec.delivery, address: Array.isArray(rec.delivery.address) ? rec.delivery.address.join('\n') : (rec.delivery.address ?? '') };
   const items = rec.line_items || rec.lines || [];
   d.lines = items.length ? items.map((l) => ({
     code: l.product_code ?? l.code ?? '',
@@ -146,6 +150,11 @@ function computeTotals(d) {
 // the backend would otherwise accept it and create a $0 line.
 const realLines = (d) => (d.lines || []).filter((l) => (l.code || '').trim() || (l.description || '').trim());
 
+// The optional "Deliver to" block is only surfaced (preview/PDF) when the operator
+// actually entered something in it.
+const hasDelivery = (d) => !!(d.delivery
+  && ((d.delivery.attn || '').trim() || (d.delivery.company || '').trim() || lines(d.delivery.address).length));
+
 function buildPayload(d) {
   return {
     invoice_number: d.invoice_number || null,   // null => backend assigns next in series
@@ -154,6 +163,9 @@ function buildPayload(d) {
     source_order_id: d.source_order_id || null,
     seller: { ...d.seller, address: lines(d.seller.address) },
     customer: { ...d.customer, address: lines(d.customer.address) },
+    // Sent only when filled; backend ignores unknown keys (cf. preview_totals) until
+    // it persists/renders this on the server-side PDF.
+    delivery: hasDelivery(d) ? { ...d.delivery, address: lines(d.delivery.address) } : null,
     line_items: realLines(d)
       .map((l) => ({ product_code: l.code, description: l.description, quantity: num(l.qty), unit_cost_excl_gst: round2(num(l.unitCost)) })),
     freight_excl_gst: round2(num(d.freight)),
@@ -354,6 +366,9 @@ function onFormInput(e) {
     const i = +t.dataset.line;
     if (_draft.lines[i]) _draft.lines[i][t.dataset.lfield] = t.value;
   } else { return; }
+  // Clear the error highlight on the field as soon as the user edits it.
+  t.classList.remove('admin-input--error', 'admin-select--error');
+  t.closest('.inv-field')?.classList.remove('inv-field--error');
   refreshPreview();
 }
 
@@ -382,18 +397,78 @@ async function onEditorFooterClick(e) {
   }
 }
 
+// Required-field validation. Returns an array of error targets (empty = valid):
+//   { field: 'customer.name', msg }        — a top-level/nested data-field input
+//   { line: i, lfield: 'qty', msg }         — a line-item input
+// Essentials only: a customer name + at least one *complete* line item (code or
+// description, AND qty > 0, AND unit cost > 0). Fully-blank phantom rows are ignored.
+function validateInvoice(d) {
+  const errs = [];
+  if (!(d.customer.name || '').trim())
+    errs.push({ field: 'customer.name', msg: 'Customer name is required' });
+
+  const started = (d.lines || [])
+    .map((l, i) => ({ l, i }))
+    .filter(({ l }) => (l.code || '').trim() || (l.description || '').trim()
+      || num(l.qty) > 0 || num(l.unitCost) > 0);   // ignore fully-blank phantom rows
+
+  if (!started.length) {
+    errs.push({ line: 0, lfield: 'code', msg: 'Add at least one line item' });
+  } else {
+    started.forEach(({ l, i }) => {
+      if (!((l.code || '').trim() || (l.description || '').trim()))
+        errs.push({ line: i, lfield: 'code', msg: `Line ${i + 1}: code or description required` });
+      if (!(num(l.qty) > 0))      errs.push({ line: i, lfield: 'qty',      msg: `Line ${i + 1}: quantity required` });
+      if (!(num(l.unitCost) > 0)) errs.push({ line: i, lfield: 'unitCost', msg: `Line ${i + 1}: unit cost required` });
+    });
+  }
+  return errs;
+}
+
+function clearInvoiceErrors() {
+  const body = _editorRefs?.drawer.body;
+  if (!body) return;
+  body.querySelectorAll('.admin-input--error, .admin-select--error')
+    .forEach((el) => el.classList.remove('admin-input--error', 'admin-select--error'));
+  body.querySelectorAll('.inv-field--error')
+    .forEach((el) => el.classList.remove('inv-field--error'));
+}
+
+function markInvoiceErrors(errs) {
+  const body = _editorRefs?.drawer.body;
+  if (!body) return null;
+  let first = null;
+  errs.forEach((e) => {
+    const sel = e.field
+      ? `[data-field="${e.field}"]`
+      : `[data-line="${e.line}"][data-lfield="${e.lfield}"]`;
+    const el = body.querySelector(sel);
+    if (!el) return;
+    el.classList.add(el.tagName === 'SELECT' ? 'admin-select--error' : 'admin-input--error');
+    el.closest('.inv-field')?.classList.add('inv-field--error');   // line inputs have no .inv-field — no-op
+    if (!first) first = el;
+  });
+  return first;
+}
+
+// Validate, paint the offending fields, scroll/focus the first. Returns true when OK.
+function ensureInvoiceValid() {
+  clearInvoiceErrors();
+  const errs = validateInvoice(_draft);
+  if (!errs.length) return true;
+  const first = markInvoiceErrors(errs);
+  if (first) {
+    first.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    first.focus({ preventScroll: true });
+  }
+  Toast.warning(errs.length === 1 ? errs[0].msg
+    : `Please complete the highlighted fields (${errs.length}).`);
+  return false;
+}
+
 async function saveInvoice() {
-  // Client-side guards — give a clear, specific message instead of bouncing off
-  // the server with a generic "Validation failed". An invoice with no real line
-  // is meaningless; the backend additionally hard-requires a customer name.
-  if (!realLines(_draft).length) {
-    Toast.warning('Add at least one line item (a product code or description) before saving.');
-    return;
-  }
-  if (!(_draft.customer.name || '').trim()) {
-    Toast.warning('Add a customer name (the "Invoice to" name) before saving.');
-    return;
-  }
+  // Block the save until all essentials are filled; highlight what's missing.
+  if (!ensureInvoiceValid()) return;
   const btn = _editorRefs?.drawer.footer.querySelector('[data-ed-action="save"]');
   if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
   try {
@@ -487,6 +562,15 @@ function editorBodyHtml(d) {
           ${field('Email', 'customer.email', d.customer.email, { type: 'email' })}
         </div>
         ${areaField('Address (one line per row)', 'customer.address', d.customer.address)}
+      </section>
+
+      <section class="inv-section">
+        <div class="inv-section__title">Deliver to (goods) — optional</div>
+        <div class="inv-grid-2">
+          ${field('Attn', 'delivery.attn', d.delivery.attn)}
+          ${field('Company / line', 'delivery.company', d.delivery.company)}
+        </div>
+        ${areaField('Delivery address (leave blank to ship to the invoice address)', 'delivery.address', d.delivery.address)}
       </section>
 
       <section class="inv-section">
@@ -678,6 +762,7 @@ function renderPreview(d) {
   const t = computeTotals(d);
   const sellerAddr = lines(d.seller.address).map((l) => esc(l)).join('<br>');
   const custAddr = lines(d.customer.address).map((l) => esc(l)).join('<br>');
+  const delivAddr = lines(d.delivery.address).map((l) => esc(l)).join('<br>');
   const rows = (d.lines || [])
     .filter((l) => l.code || l.description || num(l.qty) || num(l.unitCost))
     .map((l) => `<tr>
@@ -707,6 +792,11 @@ function renderPreview(d) {
         <div class="inv-doc__label">Invoice To:</div>
         <div class="inv-doc__buyer">${esc(d.customer.name)}</div>
         <div class="inv-doc__buyeraddr">${d.customer.company ? `${esc(d.customer.company)}<br>` : ''}${custAddr}${d.customer.phone ? `<br>${esc(d.customer.phone)}` : ''}${d.customer.email ? `<br>${esc(d.customer.email)}` : ''}</div>
+        ${hasDelivery(d) ? `<div class="inv-doc__deliver">
+          <div class="inv-doc__label">Deliver to:</div>
+          ${d.delivery.attn ? `<div class="inv-doc__buyer">${esc(d.delivery.attn)}</div>` : ''}
+          <div class="inv-doc__buyeraddr">${d.delivery.company ? `${esc(d.delivery.company)}<br>` : ''}${delivAddr}</div>
+        </div>` : ''}
       </div>
     </div>
 
@@ -737,6 +827,8 @@ function renderPreview(d) {
 //  PDF — backend first, client-side jsPDF fallback
 // =========================================================================
 async function downloadPdf(d) {
+  // Same required-field gate as save — never emit a $0 / no-customer PDF.
+  if (!ensureInvoiceValid()) return;
   // A saved invoice can use the backend-rendered PDF (authoritative).
   if (d.id) {
     try {
@@ -798,10 +890,22 @@ function generateClientPdf(d) {
   toLines.push(...lines(d.customer.address));
   if (d.customer.phone) toLines.push(d.customer.phone);
   if (d.customer.email) toLines.push(d.customer.email);
-  block(toLines, rightX, 134);
+  let toY = block(toLines, rightX, 134);
+
+  // --- Deliver to (right, below Invoice To) — only when filled ---
+  if (hasDelivery(d)) {
+    toY += 10;
+    doc.setFont('helvetica', 'bold'); text('Deliver to:', rightX, toY); toY += 14;
+    const dl = [];
+    if (d.delivery.attn) dl.push(d.delivery.attn);
+    if (d.delivery.company) dl.push(d.delivery.company);
+    dl.push(...lines(d.delivery.address));
+    doc.setFont('helvetica', 'normal');
+    toY = block(dl, rightX, toY);
+  }
 
   // --- Items table ---
-  const startY = Math.max(ly + 16, 250);
+  const startY = Math.max(ly + 16, toY + 16, 250);
   const rows = (d.lines || [])
     .filter((l) => l.code || l.description || num(l.qty) || num(l.unitCost))
     .map((l) => [l.code || '', l.description || '', String(num(l.qty)), money(num(l.qty) * num(l.unitCost))]);

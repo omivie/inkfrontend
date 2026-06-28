@@ -4488,6 +4488,13 @@ button.admin-active-dot--clickable:hover::after { opacity: 1; }
 
 .inv-field { display: flex; flex-direction: column; gap: 4px; margin-top: 0; }
 .inv-field__label { font-size: 11px; color: var(--text-muted); font-weight: 600; }
+/* Required-field validation cue (invoice editor) */
+.admin-input--error,
+.admin-select--error {
+  border-color: var(--danger) !important;
+  box-shadow: 0 0 0 1px var(--danger);
+}
+.inv-field--error .inv-field__label { color: var(--danger); }
 .inv-textarea { resize: vertical; min-height: 64px; font-family: inherit; line-height: 1.5; }
 .inv-field--freight { margin-top: 12px; max-width: 320px; }
 .inv-readonly { padding: 6px 10px; border: 1px dashed var(--border); border-radius: var(--radius); font-size: 13px; }
@@ -4543,6 +4550,8 @@ button.admin-active-dot--clickable:hover::after { opacity: 1; }
 .inv-doc__meta { border-collapse: collapse; margin-bottom: 12px; }
 .inv-doc__meta td { padding: 1px 14px 1px 0; vertical-align: top; }
 .inv-doc__selleraddr, .inv-doc__buyeraddr { color: #1b1b1b; }
+.inv-doc__deliver { margin-top: 12px; padding-top: 10px; border-top: 1px dashed var(--border); }
+.inv-doc__deliver .inv-doc__buyer { font-size: 14px; }
 
 .inv-doc__items { width: 100%; border-collapse: collapse; margin: 22px 0; }
 .inv-doc__items th { text-align: left; font-weight: 700; border-bottom: 1.5px solid #1b1b1b; padding: 4px 6px; }
