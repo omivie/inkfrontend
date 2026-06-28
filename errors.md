@@ -4,6 +4,36 @@ Log every error encountered here. Before editing a file, scan for known issues. 
 
 ---
 
+## ERR-050 — Admin Invoices: "can't delete invoices" — trash icon only voided; no delete existed (2026-06-28)
+
+**Symptom:** Operator clicking the trash icon on `/admin#invoices` couldn't get rid of
+test invoices — they kept showing in the list (most already `Void`).
+
+**Root cause:** The trash icon was wired to **Void**, not delete
+(`data-row-action="void"` → `POST /api/admin/invoices/:id/void`). Voiding *worked* (route
+is live; probe returns 401 unauthed, not 404) but voided invoices are kept for records and
+stay in the list, so it read as "delete is broken." Re-voiding an already-void row did
+nothing visible. There was **no delete capability at all** — `DELETE /api/admin/invoices/:id`
+(and `POST .../delete`, `POST .../destroy`) all return 404 on the backend.
+
+**Fix (frontend, this repo):**
+- Added a distinct **Delete** row action (trash icon, `data-row-action="delete"`) →
+  `AdminAPI.deleteInvoice(id)` → `window.API.delete('/api/admin/invoices/:id')`, with a
+  destructive confirm modal and list reload on success. (`pages/invoices.js`, `api.js`)
+- Re-iconed **Void** to a new `ban` slash-circle glyph (`app.js` icon map) and hid the
+  Void button on rows already `void` (kills the no-op re-void confusion).
+- `invoiceError` now also carries the top-level envelope `code` (string-error 404s expose
+  `code:'NOT_FOUND'` at top level), so the delete catch shows a friendly "Delete isn't
+  available yet (backend endpoint pending)." while the backend route is missing — fail-soft,
+  no crash, row stays.
+
+**Backend dependency:** permanent removal needs the new `DELETE /api/admin/invoices/:id`
+endpoint (owner-only hard delete, line items cascade, drop stored `invoices/<id>.pdf`).
+Contract handed off in `readfirst/invoice-delete-backend-handoff-jun2026.md`. Until it
+ships, Delete fails soft.
+
+---
+
 ## ERR-045 — Admin SPA: async page load resolves AFTER `destroy()`, throws on a nulled module ref (2026-06-25)
 
 **Symptom:** Spurious red toast on the Dashboard — "Failed to load segments: Cannot

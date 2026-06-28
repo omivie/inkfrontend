@@ -1,11 +1,11 @@
 /**
  * Admin SPA — Entry point, router, shell
  */
-const APP_VERSION = '2026.06.28-customer-loyalty';
+const APP_VERSION = '2026.06.28-invoice-delete';
 
 import { AdminAuth } from './auth.js';
 import { FilterState } from './filters.js';
-import { AdminAPI } from './api.js?v=invoices-errshape2-jun2026';
+import { AdminAPI } from './api.js?v=invoices-delete-jun2026';
 
 const esc = (s) => Security.escapeHtml(String(s));
 
@@ -33,6 +33,7 @@ const I = {
   plus: '<line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>',
   trash: '<polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6m3 0V4a1 1 0 011-1h4a1 1 0 011 1v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/>',
   close: '<line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>',
+  ban: '<circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/>',
   lock: '<rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0110 0v4"/>',
   'lock-open': '<rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 019.9-1"/>',
   invoice: '<path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><line x1="10" y1="9" x2="12" y2="9"/>',

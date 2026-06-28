@@ -58,6 +58,9 @@ function invoiceError(resp, fallback) {
   }
   const err = new Error(msg);
   if (e && typeof e === 'object') { err.code = e.code; err.details = e.details; }
+  // String-error envelopes (e.g. 404 "Endpoint not found") carry the machine
+  // code at the top level — keep it so callers can branch (e.g. "backend pending").
+  if (!err.code && resp?.code) err.code = resp.code;
   return err;
 }
 
@@ -2407,6 +2410,15 @@ const AdminAPI = {
   async voidInvoice(invoiceId) {
     const resp = await window.API.post(`/api/admin/invoices/${encodeURIComponent(invoiceId)}/void`, {});
     if (resp && resp.ok === false) throw invoiceError(resp, 'Void invoice failed');
+    return resp?.data ?? null;
+  },
+
+  // Hard-delete (permanent removal) — for operator cleanup of test/erroneous
+  // invoices. Normal lifecycle is void (kept for records). Backend route
+  // DELETE /api/admin/invoices/:id is pending; a 404 surfaces as a clean toast.
+  async deleteInvoice(invoiceId) {
+    const resp = await window.API.delete(`/api/admin/invoices/${encodeURIComponent(invoiceId)}`);
+    if (resp && resp.ok === false) throw invoiceError(resp, 'Delete invoice failed');
     return resp?.data ?? null;
   },
 

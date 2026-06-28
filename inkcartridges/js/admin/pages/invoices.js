@@ -301,7 +301,8 @@ const COLUMNS = [
     render: (r) => `
       <button class="admin-btn admin-btn--ghost admin-btn--sm" data-row-action="download" data-id="${escA(r.id)}" title="Download PDF">${icon('download', 13, 13)}</button>
       <button class="admin-btn admin-btn--ghost admin-btn--sm" data-row-action="email" data-id="${escA(r.id)}" title="Email to customer">${icon('mail', 13, 13)}</button>
-      <button class="admin-btn admin-btn--ghost admin-btn--sm" data-row-action="void" data-id="${escA(r.id)}" title="Void">${icon('trash', 13, 13)}</button>`,
+      ${r.status === 'void' ? '' : `<button class="admin-btn admin-btn--ghost admin-btn--sm" data-row-action="void" data-id="${escA(r.id)}" title="Void">${icon('ban', 13, 13)}</button>`}
+      <button class="admin-btn admin-btn--ghost admin-btn--sm" data-row-action="delete" data-id="${escA(r.id)}" data-num="${escA(r.invoice_number)}" title="Delete permanently">${icon('trash', 13, 13)}</button>`,
   },
 ];
 
@@ -337,6 +338,22 @@ async function onRowAction(e) {
       onConfirm: async () => {
         try { await AdminAPI.voidInvoice(id); Toast.success('Invoice voided.'); loadData(); }
         catch (err) { Toast.error(err.message || 'Void failed (backend pending).'); }
+      },
+    });
+  } else if (action === 'delete') {
+    const num = btn.dataset.num;
+    Modal.confirm({
+      title: 'Delete this invoice?',
+      message: `Invoice #${num || ''} will be permanently removed. This cannot be undone.`,
+      confirmLabel: 'Delete',
+      confirmClass: 'admin-btn--danger',
+      onConfirm: async () => {
+        try { await AdminAPI.deleteInvoice(id); Toast.success('Invoice deleted.'); loadData(); }
+        catch (err) {
+          Toast.error(err.code === 'NOT_FOUND'
+            ? 'Delete isn’t available yet (backend endpoint pending).'
+            : (err.message || 'Delete failed.'));
+        }
       },
     });
   }
