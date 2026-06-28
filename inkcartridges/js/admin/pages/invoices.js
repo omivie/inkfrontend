@@ -898,6 +898,14 @@ function renderPreview(d) {
 
   const freightCell = t.freight > 0 ? money(t.freight) : 'Free';
 
+  // From sits left; Bill To sits right with Deliver To stacked beneath it.
+  const partyBlock = (p) => p ? `<div class="inv-doc__party">
+        <div class="inv-doc__party-label">${esc(p.label)}</div>
+        <div class="inv-doc__party-name">${esc(p.name) || '&nbsp;'}</div>
+        <div class="inv-doc__party-lines">${p.lines.map((l) => esc(l)).join('<br>') || '&nbsp;'}</div>
+      </div>` : '';
+  const [fromParty, billParty, deliverParty] = parties;
+
   return `
   <div class="inv-doc">
     <div class="inv-doc__head">
@@ -907,12 +915,12 @@ function renderPreview(d) {
       </tbody></table>
     </div>
 
-    <div class="inv-doc__parties" style="--inv-cols:${parties.length}">
-      ${parties.map((p) => `<div class="inv-doc__party">
-        <div class="inv-doc__party-label">${esc(p.label)}</div>
-        <div class="inv-doc__party-name">${esc(p.name) || '&nbsp;'}</div>
-        <div class="inv-doc__party-lines">${p.lines.map((l) => esc(l)).join('<br>') || '&nbsp;'}</div>
-      </div>`).join('')}
+    <div class="inv-doc__parties">
+      ${partyBlock(fromParty)}
+      <div class="inv-doc__party-stack">
+        ${partyBlock(billParty)}
+        ${partyBlock(deliverParty)}
+      </div>
     </div>
 
     <table class="inv-doc__items">
@@ -990,40 +998,47 @@ function buildInvoiceDoc(d) {
   const text = (s, x, y) => doc.text(String(s ?? ''), x, y);
 
   // --- Header band: title (left) + meta key/values (right) ---
-  doc.setFont('helvetica', 'bold'); doc.setFontSize(22); doc.setTextColor(25);
+  doc.setFont('helvetica', 'bold'); doc.setFontSize(24); doc.setTextColor(25);
   doc.text('TAX INVOICE', M, 72);
   let my = 56;
   invoiceMeta(d).forEach(([k, v]) => {
-    doc.setFont('helvetica', 'normal'); doc.setFontSize(8); doc.setTextColor(140);
-    doc.text(k.toUpperCase(), pageW - M - 92, my, { align: 'right' });
-    doc.setFont('helvetica', 'bold'); doc.setFontSize(10); doc.setTextColor(25);
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(9); doc.setTextColor(140);
+    doc.text(k.toUpperCase(), pageW - M - 100, my, { align: 'right' });
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(11); doc.setTextColor(25);
     doc.text(String(v ?? ''), pageW - M, my, { align: 'right' });
-    my += 15;
+    my += 16;
   });
   const headBottom = Math.max(86, my + 2);
   doc.setDrawColor(25); doc.setLineWidth(1.2);
   doc.line(M, headBottom, pageW - M, headBottom);
 
-  // --- Aligned party columns: From | Bill To | Deliver To ---
+  // --- Party columns: From (left) | Bill To (right), with Deliver To stacked
+  //     beneath Bill To in the right column. ---
   const parties = invoiceParties(d);
+  const [fromParty, billParty, deliverParty] = parties;
   const colTop = headBottom + 28;
   const gap = 20;
-  const colW = (pageW - 2 * M - gap * (parties.length - 1)) / parties.length;
-  let partyBottom = colTop;
-  parties.forEach((p, i) => {
-    const x = M + i * (colW + gap);
-    doc.setFont('helvetica', 'bold'); doc.setFontSize(8); doc.setTextColor(140);
-    doc.text(p.label.toUpperCase(), x, colTop);
-    doc.setFont('helvetica', 'bold'); doc.setFontSize(11.5); doc.setTextColor(25);
-    let yy = colTop + 16;
-    doc.splitTextToSize(p.name || '', colW).forEach((w) => { doc.text(w, x, yy); yy += 14; });
-    doc.setFont('helvetica', 'normal'); doc.setFontSize(9.5); doc.setTextColor(45);
+  const colW = (pageW - 2 * M - gap) / 2;   // two equal columns
+  // Draw one party block at (x, top); returns the y just below it.
+  const drawParty = (p, x, top) => {
+    if (!p) return top;
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(9); doc.setTextColor(140);
+    doc.text(p.label.toUpperCase(), x, top);
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(13); doc.setTextColor(25);
+    let yy = top + 17;
+    doc.splitTextToSize(p.name || '', colW).forEach((w) => { doc.text(w, x, yy); yy += 15; });
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(11); doc.setTextColor(45);
     yy += 2;
     p.lines.forEach((l) => {
-      doc.splitTextToSize(String(l), colW).forEach((w) => { doc.text(w, x, yy); yy += 12; });
+      doc.splitTextToSize(String(l), colW).forEach((w) => { doc.text(w, x, yy); yy += 13.5; });
     });
-    if (yy > partyBottom) partyBottom = yy;
-  });
+    return yy;
+  };
+  const rightX = M + colW + gap;
+  const leftBottom = drawParty(fromParty, M, colTop);
+  let rightBottom = drawParty(billParty, rightX, colTop);
+  if (deliverParty) rightBottom = drawParty(deliverParty, rightX, rightBottom + 16);
+  const partyBottom = Math.max(leftBottom, rightBottom);
   doc.setTextColor(20);
 
   // --- Items table ---
@@ -1036,7 +1051,7 @@ function buildInvoiceDoc(d) {
     head: [['Product Code', 'Description', 'Number', 'Cost']],
     body: rows.length ? rows : [['', '', '', '']],
     theme: 'plain',
-    styles: { fontSize: 10, cellPadding: 4 },
+    styles: { fontSize: 11, cellPadding: 4.5 },
     headStyles: { fontStyle: 'bold', halign: 'left' },
     columnStyles: { 2: { halign: 'center' }, 3: { halign: 'right' } },
     margin: { left: M, right: M },
@@ -1049,26 +1064,26 @@ function buildInvoiceDoc(d) {
   doc.setTextColor(20);
   const totRow = (label, val, opts = {}) => {
     doc.setFont('helvetica', opts.bold ? 'bold' : 'normal');
-    doc.setFontSize(opts.size || 10);
+    doc.setFontSize(opts.size || 11);
     doc.text(label, labelX, ty);
     doc.text(String(val), valX, ty, { align: 'right' });
-    ty += opts.gap || 15;
+    ty += opts.gap || 16;
   };
   totRow('Sub Total', money(t.subtotal));
   totRow('Freight', t.freight > 0 ? money(t.freight) : 'Free');
   totRow('GST', money(t.gst));
   ty += 6;
   doc.setDrawColor(20); doc.setLineWidth(1); doc.line(labelX, ty - 11, valX, ty - 11);
-  totRow('Total', money(t.total), { bold: true, size: 13, gap: 16 });
+  totRow('Total', money(t.total), { bold: true, size: 14, gap: 16 });
 
   // --- Payment block ---
   let py = ty + 24;
-  doc.setFont('helvetica', 'bold'); doc.setFontSize(10);
-  text('Please make payment to:', M, py); py += 18;
+  doc.setFont('helvetica', 'bold'); doc.setFontSize(11);
+  text('Please make payment to:', M, py); py += 19;
   doc.setFont('helvetica', 'normal');
-  text(`a/c Name:`, M, py); doc.setFont('helvetica', 'bold'); text(d.footer.bankName || '', M + 70, py); py += 14;
-  doc.setFont('helvetica', 'normal'); text('a/c Number:', M, py); doc.setFont('helvetica', 'bold'); text(d.footer.bankAcct || '', M + 70, py);
-  if (d.footer.thankYou) { py += 30; doc.setFont('helvetica', 'bold'); doc.setFontSize(9); doc.text(doc.splitTextToSize(d.footer.thankYou, pageW - 2 * M), M, py); }
+  text(`a/c Name:`, M, py); doc.setFont('helvetica', 'bold'); text(d.footer.bankName || '', M + 76, py); py += 15;
+  doc.setFont('helvetica', 'normal'); text('a/c Number:', M, py); doc.setFont('helvetica', 'bold'); text(d.footer.bankAcct || '', M + 76, py);
+  if (d.footer.thankYou) { py += 30; doc.setFont('helvetica', 'bold'); doc.setFontSize(10); doc.text(doc.splitTextToSize(d.footer.thankYou, pageW - 2 * M), M, py); }
 
   return doc;
 }

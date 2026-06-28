@@ -4551,30 +4551,33 @@ button.admin-active-dot--clickable:hover::after { opacity: 1; }
   background: #ffffff; color: #1b1b1b;
   border: 1px solid #d8d8d8; border-radius: 6px;
   box-shadow: 0 6px 22px rgba(0,0,0,0.10);
-  padding: 30px 32px; font-family: Georgia, 'Times New Roman', serif; font-size: 12px; line-height: 1.5;
+  padding: 30px 32px; font-family: Georgia, 'Times New Roman', serif; font-size: 13.5px; line-height: 1.5;
 }
 /* Header band: title left, invoice meta right */
 .inv-doc__head {
   display: flex; justify-content: space-between; align-items: flex-start;
   gap: 24px; padding-bottom: 14px; margin-bottom: 22px; border-bottom: 2px solid #1b1b1b;
 }
-.inv-doc__title { font-size: 20px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; line-height: 1; white-space: nowrap; }
+.inv-doc__title { font-size: 22px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; line-height: 1; white-space: nowrap; }
 .inv-doc__meta { border-collapse: collapse; margin: 0; width: max-content; }
-.inv-doc__meta td { padding: 2px 0; font-size: 12px; vertical-align: top; }
+.inv-doc__meta td { padding: 2px 0; font-size: 13px; vertical-align: top; }
 .inv-doc__meta td:first-child {
-  color: #777; text-transform: uppercase; font-size: 10px; letter-spacing: 0.05em;
+  color: #777; text-transform: uppercase; font-size: 11px; letter-spacing: 0.05em;
   padding-right: 24px; text-align: left; white-space: nowrap;
 }
 .inv-doc__meta td:last-child { text-align: right; font-weight: 700; white-space: nowrap; }
 
-/* Aligned party columns: From | Bill To | Deliver To */
-.inv-doc__parties { display: flex; gap: 28px; margin-bottom: 26px; }
+/* Party columns: From (left) | Bill To (right), with Deliver To stacked
+   beneath Bill To in the right column. */
+.inv-doc__parties { display: flex; gap: 28px; margin-bottom: 26px; align-items: flex-start; }
 .inv-doc__party { flex: 1; min-width: 0; }
+.inv-doc__party-stack { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 18px; }
+.inv-doc__party-stack .inv-doc__party { flex: initial; }
 .inv-doc__party-label {
-  font-size: 10px; text-transform: uppercase; letter-spacing: 0.09em;
+  font-size: 11px; text-transform: uppercase; letter-spacing: 0.09em;
   color: #888; font-weight: 700; margin-bottom: 6px;
 }
-.inv-doc__party-name { font-size: 15px; font-weight: 700; line-height: 1.25; margin-bottom: 4px; }
+.inv-doc__party-name { font-size: 16px; font-weight: 700; line-height: 1.25; margin-bottom: 4px; }
 .inv-doc__party-lines { color: #333; line-height: 1.55; }
 
 .inv-doc__items { width: 100%; border-collapse: collapse; margin: 22px 0; }
@@ -4588,9 +4591,9 @@ button.admin-active-dot--clickable:hover::after { opacity: 1; }
 .inv-doc__totals { margin-left: auto; border-collapse: collapse; min-width: 230px; margin-bottom: 22px; }
 .inv-doc__totals td { padding: 2px 0; }
 .inv-doc__totals td:last-child { text-align: right; padding-left: 28px; white-space: nowrap; }
-.inv-doc__grand td { border-top: 1.5px solid #1b1b1b; font-weight: 700; font-size: 15px; padding-top: 6px; }
+.inv-doc__grand td { border-top: 1.5px solid #1b1b1b; font-weight: 700; font-size: 16px; padding-top: 6px; }
 
 .inv-doc__pay-title { font-weight: 700; text-decoration: underline; margin-bottom: 6px; }
 .inv-doc__pay table { border-collapse: collapse; }
 .inv-doc__pay td { padding: 1px 14px 1px 0; }
-.inv-doc__thanks { margin-top: 22px; font-weight: 700; font-size: 11px; }
+.inv-doc__thanks { margin-top: 22px; font-weight: 700; font-size: 12px; }
