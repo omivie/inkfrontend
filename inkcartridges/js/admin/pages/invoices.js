@@ -103,7 +103,7 @@ function freshDraft() {
     customer: { attn: '', name: '', company: '', address: '', phone: '', email: '' },
     // Optional second address — where the physical goods are shipped when that
     // differs from the billing ("Invoice To") address. Rendered only when filled.
-    delivery: { attn: '', company: '', address: '' },
+    delivery: { attn: '', company: '', address: '', phone: '' },
     lines: [blankLine()],
     freight: 0,
     footer: {
@@ -155,7 +155,8 @@ const realLines = (d) => (d.lines || []).filter((l) => (l.code || '').trim() || 
 // The optional "Deliver to" block is only surfaced (preview/PDF) when the operator
 // actually entered something in it.
 const hasDelivery = (d) => !!(d.delivery
-  && ((d.delivery.attn || '').trim() || (d.delivery.company || '').trim() || lines(d.delivery.address).length));
+  && ((d.delivery.attn || '').trim() || (d.delivery.company || '').trim()
+    || (d.delivery.phone || '').trim() || lines(d.delivery.address).length));
 
 // Shared layout data so the live preview and the client PDF render identically.
 // The header meta (right side of the title band): label/value pairs.
@@ -191,6 +192,7 @@ function invoiceParties(d) {
     const dl = [];
     if (d.delivery.company && d.delivery.attn) dl.push(`Attn: ${d.delivery.attn}`);
     dl.push(...(useAddrAsName ? addr.slice(1) : addr));
+    if (d.delivery.phone) dl.push(`Ph: ${d.delivery.phone}`);
     out.push({ label: 'Deliver To', name, lines: dl });
   }
   return out;
@@ -696,6 +698,7 @@ function editorBodyHtml(d) {
           ${field('Company / line', 'delivery.company', d.delivery.company)}
         </div>
         ${areaField('Delivery address (leave blank to ship to the invoice address)', 'delivery.address', d.delivery.address)}
+        ${field('Phone (delivery contact)', 'delivery.phone', d.delivery.phone, { placeholder: 'For the person receiving the goods' })}
       </section>
 
       <section class="inv-section">

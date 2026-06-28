@@ -1,7 +1,7 @@
 /**
  * Admin SPA — Entry point, router, shell
  */
-const APP_VERSION = '2026.06.28-invoice-deliver-stack';
+const APP_VERSION = '2026.06.28-invoice-deliver-phone';
 
 import { AdminAuth } from './auth.js';
 import { FilterState } from './filters.js';
