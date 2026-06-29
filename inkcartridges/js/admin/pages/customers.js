@@ -525,6 +525,7 @@ function destroyCustomersTab() {
 // ---- Tab switching ----
 async function switchCustomerTab(tab) {
   if (tab === _activeTab) return;
+  if (tab === 'contacts' && !AdminAuth.isOwner()) return; // owner-only surface
 
   if (_activeTab === 'all') destroyCustomersTab();
   if (_subTabModule?.destroy) _subTabModule.destroy();
@@ -575,12 +576,17 @@ export default {
     _activeTab = 'all';
     _subTabModule = null;
 
-    // Tab bar
+    // Tab bar. Contacts is owner-only — the backend gates /api/admin/contacts to
+    // super_admin (matching the standalone-invoices owner gate), so a non-owner
+    // admin would only see 403s. Hide the tab rather than show a broken surface.
     const tabBar = document.createElement('div');
     tabBar.className = 'admin-tabs';
+    const contactsTab = AdminAuth.isOwner()
+      ? '<button class="admin-tab" data-cust-tab="contacts">Contacts</button>'
+      : '';
     tabBar.innerHTML = `
       <button class="admin-tab active" data-cust-tab="all">All Customers</button>
-      <button class="admin-tab" data-cust-tab="contacts">Contacts</button>
+      ${contactsTab}
       <button class="admin-tab" data-cust-tab="reviews">Reviews</button>
     `;
     container.appendChild(tabBar);

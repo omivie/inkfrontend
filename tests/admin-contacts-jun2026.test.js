@@ -122,6 +122,13 @@ test('customers.js: wires the Contacts tab', () => {
   assert.match(customers, /import\('\.\/contacts\.js'\)/);
 });
 
+test('customers.js: Contacts tab is owner-only (backend gates /contacts to super_admin)', () => {
+  // The tab markup is conditioned on AdminAuth.isOwner()...
+  assert.match(customers, /AdminAuth\.isOwner\(\)[\s\S]*?data-cust-tab="contacts"/);
+  // ...and switchCustomerTab refuses a 'contacts' switch for non-owners.
+  assert.match(customers, /tab === 'contacts' && !AdminAuth\.isOwner\(\)/);
+});
+
 test('customers.js: invoicing block is owner-gated', () => {
   assert.match(customers, /function invoicingBlock/);
   const body = customers.slice(customers.indexOf('function invoicingBlock'));

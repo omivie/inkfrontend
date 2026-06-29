@@ -174,10 +174,11 @@
           return;
         }
         // Success is intentionally identical for new vs. already-subscribed
-        // (anti-enumeration). Prefer the backend's message; fall back to the
-        // brand welcome-code copy when the envelope carries none.
+        // (anti-enumeration). Prefer the backend's message; the fallback is
+        // byte-identical to the live data.message. No welcome-code promise —
+        // we intentionally do not issue a newsletter coupon.
         const successMsg = (res && res.data && res.data.message)
-          || 'Thanks for subscribing! Check your inbox for your welcome code.';
+          || 'Thanks for subscribing!';
         setNewsletterFeedback(feedbackEl, 'success', successMsg);
         emailInput.value = '';
         resetTurnstile();
@@ -219,7 +220,7 @@
                             compatible ink and toner cartridges.
                         </p>
                         <div class="footer-newsletter">
-                            <p class="footer-newsletter__text">Get printer tips, deals &amp; a welcome code in your inbox.</p>
+                            <p class="footer-newsletter__text">Get printer tips &amp; deals in your inbox.</p>
                             <form class="newsletter__form footer-newsletter__form" novalidate>
                                 <label class="visually-hidden" for="footer-newsletter-email">Email address</label>
                                 <input type="email" id="footer-newsletter-email" name="email" class="footer-newsletter__input" placeholder="you@email.com" required autocomplete="email" maxlength="200">

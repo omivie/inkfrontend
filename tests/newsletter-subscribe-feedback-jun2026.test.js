@@ -91,7 +91,11 @@ test('ensureFeedbackEl self-installs a feedback node for dynamically bound forms
 test('success renders inline and prefers res.data.message with a fallback', () => {
   // Contract success body: { ok:true, data:{ message:"Thank you for subscribing!" } }
   assert.match(FOOTER_CODE, /res\.data\.message/, 'success must read res.data.message');
-  assert.match(FOOTER_CODE, /Check your inbox for your welcome code/, 'brand welcome-code fallback copy missing');
+  // newsletter-copy-fix-jun2026: the false "welcome code" promise was removed —
+  // there is no newsletter coupon. The fallback is now byte-identical to the
+  // backend's live data.message ("Thank you for subscribing!" ⇄ "Thanks for subscribing!").
+  assert.match(FOOTER_CODE, /Thanks for subscribing!/, 'success fallback copy missing');
+  assert.doesNotMatch(FOOTER_CODE, /welcome code/i, 'must not promise a welcome code (no coupon is issued)');
   // success uses the inline pill with the success kind
   assert.match(FOOTER_CODE, /setNewsletterFeedback\([^)]*['"]success['"]/, 'success must use setNewsletterFeedback(..., "success", ...)');
   // and clears the input on success
@@ -168,9 +172,9 @@ test('all footer.js/layout.css refs carry the new rollout token', () => {
     const html = fs.readFileSync(p, 'utf8');
     if (/footer\.js\?v=/.test(html)) {
       footerRefs++;
-      assert.match(html, /footer\.js\?v=newsletter-feedback-jun2026/,
+      assert.match(html, /footer\.js\?v=newsletter-copy-fix-jun2026/,
         `${path.relative(ICR, p)} has a stale footer.js cache-bust token`);
-      assert.doesNotMatch(html, /footer\.js\?v=mobile-parity-may2026/,
+      assert.doesNotMatch(html, /footer\.js\?v=newsletter-feedback-jun2026/,
         `${path.relative(ICR, p)} still references the old footer.js token`);
     }
     if (/layout\.css\?v=/.test(html)) {

@@ -1,7 +1,7 @@
 /**
  * Admin SPA — Entry point, router, shell
  */
-const APP_VERSION = '2026.06.29-contacts-invoice-pickers';
+const APP_VERSION = '2026.06.29-contacts-owner-gate';
 
 import { AdminAuth } from './auth.js';
 import { FilterState } from './filters.js';
