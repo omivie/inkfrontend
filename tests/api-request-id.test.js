@@ -166,16 +166,19 @@ test('mapError reads request_id nested under .error too', () => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 test('newsletter handler routes INTERNAL_ERROR through mapError', () => {
+    // Jun 2026 (ERR-052): the inline-feedback rollout centralised error copy in
+    // newsletterErrorMessage(errLike), which still routes INTERNAL_ERROR / 5xx
+    // through API.mapError for the friendly message.
     assert.match(
         FOOTER_SRC,
-        /res\.code\s*===\s*['"]INTERNAL_ERROR['"][\s\S]{0,200}API\.mapError\(res\)\.message/,
-        'newsletter must call API.mapError(res) for INTERNAL_ERROR responses'
+        /['"]INTERNAL_ERROR['"][\s\S]{0,200}API\.mapError\(/,
+        'newsletter must route INTERNAL_ERROR responses through API.mapError'
     );
 });
 
 test('newsletter logs request_id via DebugLog.warn (dev-only, no production leak)', () => {
     // 2026-05-18 console audit: routed through DebugLog so it stays silent
-    // outside localhost. The toast still carries the customer-facing ref.
+    // outside localhost. The inline feedback carries the customer-facing message.
     assert.match(FOOTER_SRC, /DebugLog\.warn\(\s*['"]\[newsletter\]\s+subscribe failed/);
     assert.match(FOOTER_SRC, /request_id:\s*res\.request_id/);
     assert.doesNotMatch(FOOTER_SRC, /console\.warn\(\s*['"]\[newsletter\]/, 'must not bypass DebugLog');
