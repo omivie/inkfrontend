@@ -1384,6 +1384,34 @@
     background-color: var(--color-accent-dark);
 }
 
+/* Newsletter inline confirmation (footer + landing). Mirrors the contact-form
+   result pill; a light pill reads on both the dark footer and the landing
+   gradient. Added Jun 2026 (ERR-052) — replaces the old corner toast. */
+.newsletter-feedback {
+    margin-top: var(--spacing-3);
+    padding: 10px 14px;
+    border-radius: var(--radius-md);
+    font-size: var(--font-size-sm);
+    line-height: 1.45;
+    overflow-wrap: anywhere;
+}
+
+.newsletter-feedback[hidden] {
+    display: none;
+}
+
+.newsletter-feedback--success {
+    background: #ecfdf5;
+    color: #065f46;
+    border: 1px solid #6ee7b7;
+}
+
+.newsletter-feedback--error {
+    background: #fef2f2;
+    color: #991b1b;
+    border: 1px solid #fecaca;
+}
+
 /* Footer trust badges */
 .footer-trust {
     display: flex;

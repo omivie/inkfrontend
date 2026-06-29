@@ -22,6 +22,7 @@ import { DataTable } from '../components/table.js';
 import { Drawer } from '../components/drawer.js';
 import { Modal } from '../components/modal.js';
 import { Toast } from '../components/toast.js';
+import { attachAutocomplete } from '../components/autocomplete.js';
 
 const GST_RATE = 0.15;
 
@@ -55,6 +56,7 @@ function formatInvoiceDate(iso) {
   return `${ordinal(d)} ${MONTHS[m]} ${y}`;
 }
 const lines = (s) => String(s || '').split('\n').map((x) => x.trim()).filter(Boolean);
+const joinLines = (a) => (Array.isArray(a) ? a.filter(Boolean).join('\n') : (a || ''));
 
 // Internal-only states. Status is NEVER shown on the customer-facing invoice
 // (preview/PDF) — operators track paid/unpaid here; void is a records-keeping
@@ -76,6 +78,7 @@ let _searchDebounce = null;
 let _draft = null;        // the invoice currently in the editor
 let _editorRefs = null;   // { drawer }
 let _editorToken = 0;     // bumped each editor open/close — async destroy guard
+let _fillSource = null;   // { type:'contact'|'customer'|'order', label } — drives the "filled from" chip
 const editorAlive = (token) => token === _editorToken && _editorRefs != null;
 
 // =========================================================================
@@ -240,7 +243,10 @@ export default {
           </div>
         </div>
         <div class="admin-filters" style="display:flex;gap:var(--spacing-2);margin-bottom:var(--spacing-3);flex-wrap:wrap">
-          <input class="admin-input" id="inv-search" type="search" placeholder="Search invoice #, customer, email…" autocomplete="off" style="flex:1;min-width:240px">
+          <div class="admin-search" style="flex:1;min-width:240px">
+            <span class="admin-search__icon">${icon('search', 14, 14)}</span>
+            <input class="admin-input" id="inv-search" type="search" placeholder="Search invoice #, customer, email…" autocomplete="off" style="width:100%;padding-left:32px">
+          </div>
           <select class="admin-select" id="inv-status" style="min-width:150px">
             <option value="">All invoices</option>
             <option value="paid">Paid</option>
@@ -287,6 +293,7 @@ export default {
     _container = null;
     _draft = null;
     _editorRefs = null;
+    _fillSource = null;
   },
 };
 
@@ -397,6 +404,7 @@ async function openExisting(row) {
 // =========================================================================
 function openEditor(draft) {
   _draft = draft;
+  _fillSource = null;
   const token = ++_editorToken;
   const footer = `
     <button class="admin-btn admin-btn--ghost" data-ed-action="cancel">Cancel</button>
@@ -465,6 +473,13 @@ function onFormClick(e) {
     _draft.lines.splice(i, 1);
     if (!_draft.lines.length) _draft.lines.push(blankLine());
     renderLines(); refreshPreview();
+  } else if (act === 'clear-fill') {
+    // Undo an auto-fill: blank the billing + delivery parties and drop the source link.
+    _draft.customer = { attn: '', name: '', company: '', address: '', phone: '', email: '' };
+    _draft.delivery = { attn: '', company: '', address: '', phone: '' };
+    _draft.source_order_id = null;
+    _fillSource = null;
+    rebuildEditor();
   }
 }
 
@@ -634,6 +649,13 @@ function areaField(label, path, value) {
   return `<label class="inv-field"><span class="inv-field__label">${esc(label)}</span><textarea class="admin-input inv-textarea" data-field="${path}" rows="3">${esc(value)}</textarea></label>`;
 }
 
+// "Filled from contact/customer/order X — clear" chip, shown after an auto-fill.
+function fillChipHtml() {
+  if (!_fillSource) return '<div id="inv-fill-chip"></div>';
+  return `<div id="inv-fill-chip"><span class="inv-fill-chip">Filled from ${esc(_fillSource.type)}: <strong>${esc(_fillSource.label)}</strong>
+    <button type="button" class="inv-fill-chip__clear" data-form-action="clear-fill" title="Clear the filled details" aria-label="Clear filled details">✕</button></span></div>`;
+}
+
 function editorBodyHtml(d) {
   const numberLine = d.id || d.invoice_number
     ? `<div class="inv-field"><span class="inv-field__label">Invoice No</span><div class="inv-readonly">${esc(d.invoice_number || '—')}</div></div>`
@@ -647,12 +669,13 @@ function editorBodyHtml(d) {
         <div class="inv-section__title">Start from</div>
         <div class="inv-grid-2">
           <label class="inv-field"><span class="inv-field__label">Existing order</span>
-            <div class="inv-ac"><input class="admin-input" id="inv-order-search" type="search" placeholder="Search order # / email to auto-fill…" autocomplete="off"></div>
+            <div class="admin-ac"><input class="admin-input" id="inv-order-search" type="search" placeholder="Search order # / email to auto-fill…" autocomplete="off"></div>
           </label>
-          <label class="inv-field"><span class="inv-field__label">Find customer</span>
-            <div class="inv-ac"><input class="admin-input" id="inv-customer-search" type="search" placeholder="Search a customer to fill their details…" autocomplete="off"></div>
+          <label class="inv-field"><span class="inv-field__label">Fill details from</span>
+            <div class="admin-ac"><input class="admin-input" id="inv-party-search" type="search" placeholder="Search a contact or customer…" autocomplete="off"></div>
           </label>
         </div>
+        ${fillChipHtml()}
       </section>
 
       <section class="inv-section">
@@ -768,17 +791,31 @@ function attachTopAutocompletes() {
       const data = await AdminAPI.getOrders({ search: q }, 1, 8);
       return data?.orders || data?.items || [];
     },
-    render: (o) => `<span class="inv-ac__code">${esc(o.order_number || o.id || '')}</span> ${esc(o.customer_name || o.customer_email || '')} · ${money(o.total_amount ?? o.total ?? 0)}`,
+    render: (o) => `<span class="admin-ac__code">${esc(o.order_number || o.id || '')}</span> ${esc(o.customer_name || o.customer_email || '')} <span class="admin-ac__meta">· ${money(o.total_amount ?? o.total ?? 0)}</span>`,
     onPick: (o) => loadFromOrder(o.id || o.order_id),
   });
-  const custInput = body.querySelector('#inv-customer-search');
-  if (custInput) attachAutocomplete(custInput, {
+  // Unified "Fill details from…" picker — Contacts first, then Customers, in one
+  // sectioned dropdown (mirrors the storefront Compatible/Genuine split).
+  const partyInput = body.querySelector('#inv-party-search');
+  if (partyInput) attachAutocomplete(partyInput, {
     fetch: async (q) => {
-      const data = await AdminAPI.getCustomers({ search: q }, 1, 8);
-      return data?.customers || data?.items || [];
+      const [cts, cus] = await Promise.all([
+        AdminAPI.listContacts({ search: q }, 1, 6),
+        AdminAPI.getCustomers({ search: q }, 1, 6),
+      ]);
+      const contacts = (Array.isArray(cts) ? cts : (cts?.contacts || cts?.items || []))
+        .map((x) => ({ ...x, __type: 'contact' }));
+      const customers = (cus?.customers || cus?.items || [])
+        .map((x) => ({ ...x, __type: 'customer' }));
+      const sections = [];
+      if (contacts.length) sections.push({ title: 'Contacts', items: contacts });
+      if (customers.length) sections.push({ title: 'Customers', items: customers });
+      return sections;
     },
-    render: (c) => `${esc(c.full_name || `${c.first_name || ''} ${c.last_name || ''}`.trim() || '—')} · ${esc(c.email || '')}`,
-    onPick: (c) => loadFromCustomer(c),
+    render: (it) => it.__type === 'contact'
+      ? `<span class="admin-ac__code">${esc(it.label || it.bill_to?.name || 'Contact')}</span> <span class="admin-ac__meta">${esc(it.bill_to?.company || it.bill_to?.email || '')}</span>`
+      : `${esc(it.full_name || `${it.first_name || ''} ${it.last_name || ''}`.trim() || '—')} <span class="admin-ac__meta">· ${esc(it.email || '')}</span>`,
+    onPick: (it) => { if (it.__type === 'contact') loadFromContact(it); else loadFromCustomer(it); },
   });
 }
 
@@ -813,19 +850,68 @@ async function loadFromOrder(orderId) {
   const shipIncl = num(breakdown?.shipping_fee ?? order.shipping_fee ?? 0);
   _draft.freight = shipIncl > 0 ? round2(shipIncl / (1 + GST_RATE)) : 0;
 
+  _fillSource = { type: 'order', label: order.order_number || String(orderId) };
   rebuildEditor();
   Toast.success(`Filled from order ${order.order_number || ''}`.trim());
+}
+
+// Fill the non-goods fields from a saved Contact (bill-to + deliver-to + note).
+function loadFromContact(c) {
+  if (!c) return;
+  const b = c.bill_to || {};
+  const d = c.deliver_to || {};
+  _draft.source_order_id = null;
+  _draft.customer = {
+    attn: b.attn || b.name || '',
+    name: b.name || b.company || '',
+    company: b.company || '',
+    address: joinLines(b.address),
+    phone: b.phone || '',
+    email: b.email || '',
+  };
+  _draft.delivery = {
+    attn: d.attn || '',
+    company: d.company || '',
+    address: joinLines(d.address),
+    phone: d.phone || '',
+  };
+  if (c.notes) _draft.notes = c.notes;
+  _fillSource = { type: 'contact', label: c.label || b.name || b.company || 'contact' };
+  rebuildEditor();
+  Toast.success(`Filled from contact ${_fillSource.label}`.trim());
 }
 
 async function loadFromCustomer(c) {
   if (!c) return;
   const token = _editorToken;
   const name = c.full_name || `${c.first_name || ''} ${c.last_name || ''}`.trim();
+
+  // Prefer the customer's saved invoicing profile (Customers drawer → Invoicing
+  // details) over scraping their latest order.
+  const inv = c.invoicing;
+  if (inv && (inv.bill_to || inv.deliver_to)) {
+    const b = inv.bill_to || {};
+    const d = inv.deliver_to || {};
+    _draft.customer = {
+      attn: b.attn || name,
+      name: b.name || name,
+      company: b.company || '',
+      address: joinLines(b.address),
+      phone: b.phone || c.phone || '',
+      email: b.email || c.email || '',
+    };
+    _draft.delivery = { attn: d.attn || '', company: d.company || '', address: joinLines(d.address), phone: d.phone || '' };
+    _fillSource = { type: 'customer', label: name };
+    rebuildEditor();
+    Toast.success(`Filled customer ${name}`.trim());
+    return;
+  }
+
+  // No saved profile — fall back to the legacy "scrape latest order address" path.
   _draft.customer.name = name;
   _draft.customer.attn = _draft.customer.attn || name;
   _draft.customer.email = c.email || _draft.customer.email;
   _draft.customer.phone = c.phone || _draft.customer.phone;
-  // Pull the customer's most recent order for a shipping address, if any.
   const od = await AdminAPI.getOrders({ user_id: c.id }, 1, 1);
   if (!editorAlive(token)) return;
   const order = od?.orders?.[0];
@@ -835,46 +921,9 @@ async function loadFromCustomer(c) {
       [addr.city, addr.region, addr.postal_code].filter(Boolean).join(', '), addr.country].filter(Boolean).join('\n');
     if (!_draft.customer.phone) _draft.customer.phone = addr.phone || '';
   }
+  _fillSource = { type: 'customer', label: name };
   rebuildEditor();
   Toast.success(`Filled customer ${name}`.trim());
-}
-
-// =========================================================================
-//  Autocomplete primitive
-// =========================================================================
-function attachAutocomplete(input, opts) {
-  const wrap = input.closest('.inv-ac');
-  if (!wrap) return;
-  const token = _editorToken;
-  let menu = wrap.querySelector('.inv-ac__menu');
-  if (!menu) { menu = document.createElement('div'); menu.className = 'inv-ac__menu'; wrap.appendChild(menu); }
-  let items = [];
-  let timer = null;
-  const hide = () => { menu.style.display = 'none'; menu.innerHTML = ''; };
-
-  input.addEventListener('input', () => {
-    const q = input.value.trim();
-    clearTimeout(timer);
-    if (q.length < 2) { hide(); return; }
-    timer = setTimeout(async () => {
-      const res = await opts.fetch(q);
-      if (!editorAlive(token)) return;
-      items = res || [];
-      if (!items.length) { hide(); return; }
-      menu.innerHTML = items.map((it, i) => `<button type="button" class="inv-ac__item" data-i="${i}">${opts.render(it)}</button>`).join('');
-      menu.style.display = 'block';
-    }, 250);
-  });
-  // mousedown fires before the input's blur so the pick isn't lost.
-  menu.addEventListener('mousedown', (e) => {
-    const btn = e.target.closest('.inv-ac__item');
-    if (!btn) return;
-    e.preventDefault();
-    const it = items[+btn.dataset.i];
-    hide();
-    if (it) opts.onPick(it);
-  });
-  input.addEventListener('blur', () => setTimeout(hide, 150));
 }
 
 // =========================================================================

@@ -1,15 +1,24 @@
 /**
- * TRACK-ORDER-PAGE.JS — customer tracking REQUEST controller (May 2026).
+ * TRACK-ORDER-PAGE.JS — customer INLINE tracking controller (Jun 2026).
  *
- * Request-based tracking model
- * ============================
- * We deliberately no longer reveal tracking automatically. A customer submits
- * their order number (plus the email used to place the order) and we record a
- * request + notify the opted-in admins. An admin then enters the carrier,
- * tracking number, and status in the admin panel — that action is what emails
- * the customer their tracking details. So this page NEVER renders a tracking
- * number, carrier, timeline, or live events; it only confirms the request was
- * received.
+ * Inline-tracking model
+ * =====================
+ * The customer enters their order number + the email used at checkout and we
+ * look the order up via POST /api/orders/track-lookup, then render the result
+ * RIGHT ON THE PAGE: a status badge, a progress timeline (Order placed →
+ * Processing → Shipped → Delivered), the tracking number + carrier + estimated
+ * delivery, a "Track with {carrier}" link, and the live courier scan history.
+ *
+ * This supersedes the May-2026 request-only model (where the page only queued an
+ * email and showed "we'll reply within one business day"). We still keep that
+ * email path as a FALLBACK: when a lookup succeeds but the order hasn't shipped
+ * yet (tracking_number === null) we quietly fire POST /api/orders/track-request
+ * so the customer is emailed the moment it dispatches and the admin Tracking
+ * Requests queue is fed. See API.trackLookup / API.requestOrderTracking.
+ *
+ * Anti-enumeration: the backend returns the SAME generic 404 for "no such
+ * order" AND "email doesn't match", so a stranger guessing order numbers learns
+ * nothing. We surface that message verbatim and NEVER reveal which field failed.
  *
  * One controller, two mounts
  * ==========================
@@ -21,14 +30,40 @@
  * is usable by anyone with an order number.
  *
  * When the visitor IS signed in we prefill their email and list their recent
- * orders, each with a one-click "Request tracking" button.
+ * orders, each with a one-click "Track order" button.
  *
  * Shared DOM contract (present on both pages):
  *   #track-order-form  #track-order-number  #track-email  #track-submit
  *   #track-result      #recent-orders-list (optional)
  */
 (function () {
+    // Format a YYYY-MM-DD or ISO date for display; '' for null/invalid input so
+    // callers can conditionally omit the surrounding element.
+    function fmtDate(x) {
+        if (!x) return '';
+        const d = new Date(x);
+        if (isNaN(d.getTime())) return '';
+        return d.toLocaleDateString('en-NZ', { day: 'numeric', month: 'short', year: 'numeric' });
+    }
+
+    // Carrier scan timestamps carry a time component worth showing.
+    function fmtDateTime(x) {
+        if (!x) return '';
+        const d = new Date(x);
+        if (isNaN(d.getTime())) return '';
+        return d.toLocaleString('en-NZ', {
+            day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit'
+        });
+    }
+
     const TrackOrderPage = {
+
+        // Re-running a lookup (the "Check again" button / recent-order clicks)
+        // reuses these. _lastRefreshAt debounces the refresh against the
+        // backend's 15-requests/15-minutes-per-IP rate limit.
+        _lastQuery: null,
+        _lastRefreshAt: 0,
+        REFRESH_MIN_GAP_MS: 8000,
 
         async init() {
             // Wait briefly for Auth to settle so prefill / recent-orders work.
@@ -80,7 +115,7 @@
             if (form) {
                 form.addEventListener('submit', (e) => {
                     e.preventDefault();
-                    this.submitRequest(
+                    this.submitLookup(
                         document.getElementById('track-order-number')?.value.trim(),
                         document.getElementById('track-email')?.value.trim()
                     );
@@ -114,19 +149,17 @@
 
             const esc = Security.escapeHtml;
             const rows = orders.map(order => {
-                const date = new Date(order.created_at).toLocaleDateString('en-NZ', {
-                    day: 'numeric', month: 'short', year: 'numeric'
-                });
+                const date = fmtDate(order.created_at);
                 return `
                     <div class="recent-order-row">
                         <div class="recent-order-row__main">
                             <span class="recent-order-row__number">${esc(order.order_number)}</span>
                             <span class="order-status-badge order-status-badge--${esc(order.status)}">${esc(order.status_label || order.status)}</span>
-                            <span class="recent-order-row__date">${date}</span>
+                            ${date ? `<span class="recent-order-row__date">${esc(date)}</span>` : ''}
                         </div>
                         <div class="recent-order-row__actions">
                             <span class="recent-order-row__total">${typeof formatPrice === 'function' ? formatPrice(order.total) : ''}</span>
-                            <button type="button" class="btn btn--sm btn--secondary recent-order-track-btn" data-order="${esc(order.order_number)}">Request tracking</button>
+                            <button type="button" class="btn btn--sm btn--secondary recent-order-track-btn" data-order="${esc(order.order_number)}">Track order</button>
                         </div>
                     </div>
                 `;
@@ -140,7 +173,7 @@
                     const input = document.getElementById('track-order-number');
                     if (input) input.value = num;
                     const email = document.getElementById('track-email')?.value.trim();
-                    this.submitRequest(num, email);
+                    this.submitLookup(num, email);
                     // Bring the result into view on the (often long) account page.
                     document.getElementById('track-result')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
                 });
@@ -155,7 +188,7 @@
             el.innerHTML = html;
         },
 
-        setSubmitting(busy) {
+        setSubmitting(busy, label) {
             const btn = document.getElementById('track-submit');
             if (!btn) return;
             btn.disabled = busy;
@@ -164,14 +197,19 @@
             // button doesn't lose its icon after the first submit.
             if (busy) {
                 if (btn._originalHtml == null) btn._originalHtml = btn.innerHTML;
-                btn.textContent = 'Sending request…';
+                btn.textContent = label || 'Checking…';
             } else if (btn._originalHtml != null) {
                 btn.innerHTML = btn._originalHtml;
                 btn._originalHtml = null;
             }
         },
 
-        async submitRequest(orderNumber, email) {
+        /**
+         * Validate inputs and look the order up. Renders the tracking card on
+         * success and a friendly inline message on every documented failure.
+         * The form is always left in place so the customer can correct + retry.
+         */
+        async submitLookup(orderNumber, email) {
             const esc = Security.escapeHtml;
 
             if (!orderNumber) {
@@ -180,10 +218,10 @@
                 return;
             }
 
-            // Email is mandatory — it's how the team confirms ownership and where
-            // the tracking reply is sent. For signed-in customers we fall back to
-            // the session email so the backend (which requires a valid email)
-            // always receives one even if the visible field was cleared.
+            // Email is mandatory — it's how the backend confirms ownership (the
+            // lookup is matched on order number + email). For signed-in customers
+            // we fall back to the session email so a valid one is always sent
+            // even if the visible field was cleared.
             const authed = typeof Auth !== 'undefined' && Auth.isAuthenticated();
             const effectiveEmail = email || (authed && Auth.user?.email) || '';
             if (!effectiveEmail) {
@@ -192,49 +230,181 @@
                 return;
             }
 
-            this.setSubmitting(true);
-            this.showResult('<p class="text-muted">Sending your request…</p>', null);
+            // Remember the query so "Check again" can re-run the same lookup.
+            this._lastQuery = { order_number: orderNumber, email: effectiveEmail };
+
+            this.setSubmitting(true, 'Checking…');
+            this.showResult('<p class="text-muted">Looking up your order…</p>', null);
 
             try {
-                const response = await API.requestOrderTracking({ order_number: orderNumber, email: effectiveEmail });
+                const response = await API.trackLookup({ order_number: orderNumber, email: effectiveEmail });
 
-                if (response.ok) {
-                    const dest = effectiveEmail || 'the email on your order';
-                    this.showResult(`
-                        <div class="track-result__icon" aria-hidden="true">
-                            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
-                        </div>
-                        <h3 class="track-result__title">Request received</h3>
-                        <p>Thanks — we've passed your request to our dispatch team for order
-                        <strong>${esc(orderNumber)}</strong>. We'll email your tracking number and
-                        delivery status to <strong>${esc(dest)}</strong>, usually within one business day.</p>
-                        <p class="text-muted">Didn't get it? Check your spam folder or
-                        <a href="/contact">contact us</a> and we'll help right away.</p>
-                    `, 'success');
-                    const form = document.getElementById('track-order-form');
-                    if (form) form.reset();
-                    // Re-prefill email after reset for signed-in customers.
-                    if (authed && Auth.user?.email) {
-                        const emailInput = document.getElementById('track-email');
-                        if (emailInput) emailInput.value = Auth.user.email;
-                    }
+                if (response.ok && response.data) {
+                    this.renderTracking(response.data, effectiveEmail);
                 } else if (response.code === 'RATE_LIMITED') {
-                    this.showResult('<p>You\'ve sent a few requests in a short time. Please wait a minute and try again.</p>', 'error');
+                    this.showResult('<p>You\'ve checked a few times in quick succession. Please wait a minute and try again.</p>', 'error');
                 } else if (response.code === 'VALIDATION_FAILED') {
-                    // Malformed order number or email — guide the customer rather
-                    // than surfacing the backend's terse "Validation failed".
-                    this.showResult('<p>Please double-check your order number and email address, then try again. Your order number is in your confirmation email.</p>', 'error');
+                    // Malformed order number / email. Lead with a friendly line;
+                    // append the backend's per-field hints when present.
+                    const detail = Array.isArray(response.details) && response.details.length
+                        ? ' ' + response.details.map(d => esc(d && d.message)).filter(Boolean).join(' ')
+                        : '';
+                    this.showResult(`<p>Please double-check your order number and the email you used to place the order, then try again. Your order number is in your confirmation email.${detail}</p>`, 'error');
+                } else if (response.code === 'NOT_FOUND') {
+                    // Anti-enumeration: the backend returns one generic message
+                    // whether the order is missing or the email mismatches. Show
+                    // it verbatim — NEVER reveal which field failed.
+                    const msg = esc(response.error || 'We couldn\'t find an order matching those details. Double-check your order number and the email you used at checkout.');
+                    this.showResult(`<p>${msg}</p><p class="text-muted">Still stuck? <a href="/contact">Contact us</a> and we'll look it up for you.</p>`, 'error');
                 } else {
-                    const msg = (typeof API.extractErrorMessage === 'function')
-                        ? API.extractErrorMessage(response)
-                        : (response.error || 'We couldn\'t submit your request.');
-                    this.showResult(`<p>${esc(msg)} Please try again, or <a href="/contact">contact us</a>.</p>`, 'error');
+                    const fallback = (typeof API.extractErrorMessage === 'function')
+                        ? API.extractErrorMessage(response, 'We couldn\'t look up your order.')
+                        : (response.error || 'We couldn\'t look up your order.');
+                    this.showResult(`<p>${esc(fallback)} Please try again, or <a href="/contact">contact us</a>.</p>`, 'error');
                 }
             } catch (err) {
                 this.showResult('<p>We couldn\'t reach the server. Please check your connection and try again, or <a href="/contact">contact us</a>.</p>', 'error');
             } finally {
                 this.setSubmitting(false);
             }
+        },
+
+        /**
+         * Render the tracking detail card from a successful lookup payload.
+         * Every field is treated defensively — the timeline length varies
+         * (5 normal, 4 for Net-30, [placed, cancelled] when cancelled) and
+         * tracking_number / tracking_url / carrier / events may all be null.
+         */
+        renderTracking(data, email) {
+            const esc = Security.escapeHtml;
+            const status = data.status || 'pending';
+            const statusLabel = data.status_label || status;
+            const notShipped = data.tracking_number == null;
+            const orderNumber = data.order_number || this._lastQuery?.order_number || '';
+
+            const html = `
+                <div class="tracking-detail">
+                    <div class="tracking-detail__header">
+                        <span class="tracking-detail__order-number">${esc(orderNumber)}</span>
+                        <span class="order-status-badge order-status-badge--${esc(status)}">${esc(statusLabel)}</span>
+                    </div>
+                    ${this.buildTimeline(data.timeline)}
+                    ${notShipped ? this.buildNotShippedNote() : ''}
+                    ${this.buildInfoRows(data)}
+                    ${this.buildTrackButton(data)}
+                    ${this.buildEvents(data.tracking_events)}
+                    ${this.buildRefreshRow()}
+                </div>
+            `;
+            this.showResult(html, 'tracking');
+
+            // Not shipped yet → register a notify-me in the background so the
+            // customer is emailed on dispatch and the admin queue is fed. Its
+            // body is intentionally ignored (always a generic 200).
+            if (notShipped && orderNumber) {
+                API.requestOrderTracking({ order_number: orderNumber, email }).catch(() => {});
+            }
+
+            this.bindRefresh();
+            document.getElementById('track-result')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        },
+
+        // Progress stepper. Map over the array — never hardcode the step count.
+        buildTimeline(timeline) {
+            if (!Array.isArray(timeline) || !timeline.length) return '';
+            const esc = Security.escapeHtml;
+            const steps = timeline.map(step => {
+                const cancelled = step && step.step === 'cancelled';
+                const mod = cancelled ? ' timeline-step--cancelled'
+                    : (step && step.completed) ? ' timeline-step--completed' : '';
+                const date = fmtDate(step && step.date);
+                return `
+                    <div class="timeline-step${mod}">
+                        <span class="timeline-step__dot"></span>
+                        <span class="timeline-step__label">${esc((step && step.label) || '')}</span>
+                        ${date ? `<span class="timeline-step__date">${esc(date)}</span>` : ''}
+                    </div>`;
+            }).join('');
+            return `<div class="order-timeline">${steps}</div>`;
+        },
+
+        // Tracking number / carrier / ETA / shipped rows — only the present ones.
+        buildInfoRows(data) {
+            const esc = Security.escapeHtml;
+            const rows = [];
+            if (data.tracking_number) rows.push(this._infoRow('Tracking number', data.tracking_number));
+            if (data.carrier) rows.push(this._infoRow('Carrier', data.carrier));
+            const eta = fmtDate(data.estimated_delivery);
+            if (eta) {
+                rows.push(`<div class="tracking-info-row"><span class="tracking-info-label">Estimated delivery</span><span class="tracking-info-value tracking-info-value--eta">${esc(eta)}</span></div>`);
+            }
+            const shipped = fmtDate(data.shipped_at);
+            if (shipped) rows.push(this._infoRow('Shipped', shipped));
+            return rows.length ? `<div class="tracking-info">${rows.join('')}</div>` : '';
+        },
+
+        _infoRow(label, value) {
+            const esc = Security.escapeHtml;
+            return `<div class="tracking-info-row"><span class="tracking-info-label">${esc(label)}</span><span class="tracking-info-value">${esc(value)}</span></div>`;
+        },
+
+        // "Track with {carrier}" — only when a usable tracking_url is present.
+        buildTrackButton(data) {
+            if (!data.tracking_url) return '';
+            const href = Security.sanitizeUrl(data.tracking_url);
+            if (!href || href === '#') return ''; // rejected (e.g. javascript:) — don't render a dead link
+            const carrier = data.carrier ? Security.escapeHtml(data.carrier) : 'the carrier';
+            return `<p class="tracking-cta"><a class="btn btn--primary" href="${Security.escapeAttr(href)}" target="_blank" rel="noopener noreferrer">Track with ${carrier}</a></p>`;
+        },
+
+        // Live courier scans. Backend lists newest-first; render in array order.
+        buildEvents(events) {
+            if (!Array.isArray(events) || !events.length) return '';
+            const esc = Security.escapeHtml;
+            const items = events.map(ev => {
+                const label = esc((ev && ev.status) || '');
+                const loc = ev && ev.location ? ` · ${esc(ev.location)}` : '';
+                const when = fmtDateTime(ev && ev.timestamp);
+                if (!label && !loc && !when) return '';
+                return `
+                    <div class="tracking-event">
+                        <span class="tracking-event__dot"></span>
+                        <div class="tracking-event__body">
+                            <span class="tracking-event__label">${label}${loc}</span>
+                            ${when ? `<span class="tracking-event__date">${esc(when)}</span>` : ''}
+                        </div>
+                    </div>`;
+            }).join('');
+            if (!items.trim()) return '';
+            return `<div class="tracking-events"><h4 class="tracking-events__heading">Tracking history</h4>${items}</div>`;
+        },
+
+        buildNotShippedNote() {
+            return '<p class="tracking-note">Not shipped yet — we\'ll email you the moment it\'s on its way.</p>';
+        },
+
+        buildRefreshRow() {
+            return '<div class="tracking-refresh"><button type="button" id="track-refresh" class="btn btn--sm btn--secondary">Check again</button></div>';
+        },
+
+        // Debounced re-lookup so a customer mashing "Check again" can't trip the
+        // 15-requests/15-minutes-per-IP limit.
+        bindRefresh() {
+            const btn = document.getElementById('track-refresh');
+            if (!btn) return;
+            btn.addEventListener('click', () => {
+                const now = Date.now();
+                const since = now - this._lastRefreshAt;
+                if (this._lastRefreshAt && since < this.REFRESH_MIN_GAP_MS) {
+                    const wait = Math.ceil((this.REFRESH_MIN_GAP_MS - since) / 1000);
+                    btn.textContent = `Please wait ${wait}s…`;
+                    return;
+                }
+                this._lastRefreshAt = now;
+                if (this._lastQuery) {
+                    this.submitLookup(this._lastQuery.order_number, this._lastQuery.email);
+                }
+            });
         }
     };
 

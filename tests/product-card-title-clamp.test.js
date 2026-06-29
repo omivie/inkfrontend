@@ -167,7 +167,9 @@ test('no .product-card / .product-box / .smart-ac selector still clamps below 4 
 // buybox-may2026 superseded it when the four-row PDP buy-box landed in pages.css.
 // loading-spinner-jun2026 superseded it when the loading-state rework reshaped the
 // product-card skeletons (pages.css) and normalised all three card CSS files.
-const CARD_CSS_TOKEN = 'loyalty-points-jun2026b';
+// track-lookup-inline-jun2026 superseded it when the inline order-tracking
+// rework added the .tracking-detail/.tracking-note display rules to pages.css.
+const CARD_CSS_TOKEN = 'track-lookup-inline-jun2026';
 
 test(`all HTML pages cache-bust the three card CSS files to v=${CARD_CSS_TOKEN}`, () => {
     const htmlRoot = path.join(ROOT, 'inkcartridges');

@@ -185,8 +185,9 @@ test('shop.html bumps the search.css cache key so the pager CSS lands', () => {
     // again (mobile-parity-may2026); the four-row buy-box release
     // (buybox-may2026) bumped it; the loading-state rework (loading-spinner-jun2026)
     // bumped it again; the loyalty points styles (loyalty-points-jun2026) bumped it
-    // again. The guarantee here is simply that shop.html requests the
+    // again. The inline order-tracking rework (track-lookup-inline-jun2026)
+    // bumped it again. The guarantee here is simply that shop.html requests the
     // *current* search.css build.
-    assert.match(shopHtml, /search\.css\?v=loyalty-points-jun2026/);
+    assert.match(shopHtml, /search\.css\?v=track-lookup-inline-jun2026/);
     assert.doesNotMatch(shopHtml, /search\.css\?v=search-pagination-may2026/);
 });

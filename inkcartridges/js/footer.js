@@ -39,15 +39,82 @@
 
   // ─── Newsletter subscribe — shared, idempotent binder ────────────────
   // One implementation, bound at most once per form (dataset guard), reused by
-  // the footer (every page) and the homepage landing controller. Mirrors the
-  // existing robust error handling (per-field message → mapError → friendly
-  // toast + dev-only request_id correlation). Turnstile stays optional: it only
-  // renders when a [data-newsletter-turnstile] host AND the global are present,
-  // so the plain footer form submits { email, source } without a token.
-  // FE audit Jun 2026 — surfaces the dormant POST /api/newsletter/subscribe (ERR-049).
+  // the footer (every page) and the homepage landing controller. Turnstile stays
+  // optional: it only renders when a [data-newsletter-turnstile] host AND the
+  // global are present, so the plain footer form submits { email, source }
+  // without a token (the backend made Turnstile optional — Jun 2026 handoff).
+  //
+  // Feedback is INLINE — a .newsletter-feedback aria-live region right under the
+  // form, mirroring the contact / track-order / review / cart-coupon pattern.
+  // This replaces the old global corner toast, which was easy to miss, was the
+  // only form in the app not using inline feedback, and silently no-opped on the
+  // few pages that don't load main.js (forgot/reset/verify). ERR-052.
+  // FE audit Jun 2026 — surfaced the dormant POST /api/newsletter/subscribe (ERR-049).
+
+  // Inline status pill: empty msg clears + hides; otherwise shows with --kind.
+  function setNewsletterFeedback(el, kind, msg) {
+    if (!el) return;
+    if (!msg) {
+      el.hidden = true;
+      el.textContent = '';
+      el.className = 'newsletter-feedback';
+      return;
+    }
+    el.className = 'newsletter-feedback newsletter-feedback--' + kind;
+    el.textContent = msg;
+    el.hidden = false;
+  }
+
+  // The footer template ships a .newsletter-feedback sibling; for any form bound
+  // dynamically (e.g. a standalone landing form) we self-install one so feedback
+  // never depends on page markup being present.
+  function ensureFeedbackEl(form) {
+    const next = form.nextElementSibling;
+    if (next && next.classList && next.classList.contains('newsletter-feedback')) return next;
+    const adjacent = form.parentNode ? form.parentNode.querySelector('.newsletter-feedback') : null;
+    if (adjacent) return adjacent;
+    const el = document.createElement('div');
+    el.className = 'newsletter-feedback';
+    el.setAttribute('role', 'status');
+    el.setAttribute('aria-live', 'polite');
+    el.hidden = true;
+    form.insertAdjacentElement('afterend', el);
+    return el;
+  }
+
+  // Map a backend error envelope OR a thrown Error (both carry .code/.status/
+  // .request_id/.details after api.js normalisation) to friendly inline copy,
+  // aligned to the Jun 2026 contract: 400 VALIDATION_* → invalid-email copy,
+  // 429 RATE_LIMITED → the backend's "too many attempts" message, 5xx → hiccup.
+  function newsletterErrorMessage(errLike) {
+    if (!errLike) return 'Could not subscribe. Please try again.';
+    const code = errLike.code || (errLike.error && errLike.error.code) || null;
+    const status = typeof errLike.status === 'number' ? errLike.status : null;
+    if (Array.isArray(errLike.details) && errLike.details[0] && errLike.details[0].message) {
+      return errLike.details[0].message;
+    }
+    if (code === 'VALIDATION_ERROR' || code === 'VALIDATION_FAILED' || status === 400) {
+      return 'Please enter a valid email address.';
+    }
+    if (code === 'RATE_LIMITED' || status === 429) {
+      return (typeof API !== 'undefined' && typeof API.extractErrorMessage === 'function')
+        ? API.extractErrorMessage(errLike, 'Too many attempts. Please try again later.')
+        : 'Too many attempts. Please try again later.';
+    }
+    if (code === 'INTERNAL_ERROR' || (status !== null && status >= 500)) {
+      const mapped = (typeof API !== 'undefined' && typeof API.mapError === 'function') ? API.mapError(errLike) : null;
+      return (mapped && mapped.message) || 'Server hiccup — please try again in a moment.';
+    }
+    return (typeof API !== 'undefined' && typeof API.extractErrorMessage === 'function')
+      ? API.extractErrorMessage(errLike, 'Could not subscribe. Please try again.')
+      : (errLike.message || 'Could not subscribe. Please try again.');
+  }
+
   function bindNewsletterForm(form, source) {
     if (!form || form.dataset.nlBound === '1') return;
     form.dataset.nlBound = '1';
+
+    const feedbackEl = ensureFeedbackEl(form);
 
     let turnstileToken = null;
     const tsHost = form.querySelector('[data-newsletter-turnstile]');
@@ -68,6 +135,12 @@
       }
     };
 
+    // Dismiss a stale success/error note as soon as the user edits the field.
+    const emailAtBind = form.querySelector('input[type="email"]');
+    if (emailAtBind) {
+      emailAtBind.addEventListener('input', () => setNewsletterFeedback(feedbackEl, null, ''));
+    }
+
     form.addEventListener('submit', async (e) => {
       e.preventDefault();
       const emailInput = form.querySelector('input[type="email"]');
@@ -76,59 +149,48 @@
       const email = emailInput.value.trim();
       if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
         emailInput.focus();
-        if (typeof showToast === 'function') showToast('Please enter a valid email address.', 'error');
+        setNewsletterFeedback(feedbackEl, 'error', 'Please enter a valid email address.');
         return;
       }
 
       const originalText = submitBtn.textContent;
       submitBtn.textContent = 'Subscribing…';
       submitBtn.disabled = true;
+      setNewsletterFeedback(feedbackEl, null, ''); // clear any prior note while in-flight
 
       try {
-        if (typeof API !== 'undefined' && API.subscribe) {
-          const payload = { email: email, source: source || 'footer' };
-          if (turnstileToken) payload.turnstile_token = turnstileToken;
-          const res = await API.subscribe(payload);
-          if (res && res.ok === false) {
-            // Per-field validation message wins; 5xx/INTERNAL_ERROR → friendly
-            // mapError copy carrying an 8-char support ref; else generic.
-            let msg;
-            if (Array.isArray(res.details) && res.details[0] && res.details[0].message) {
-              msg = res.details[0].message;
-            } else if (res.code === 'INTERNAL_ERROR' || (typeof res.status === 'number' && res.status >= 500)) {
-              msg = (typeof API.mapError === 'function') ? API.mapError(res).message : 'Server hiccup — please try again.';
-            } else {
-              msg = (typeof API.extractErrorMessage === 'function')
-                ? API.extractErrorMessage(res, 'Could not subscribe. Please try again.')
-                : 'Could not subscribe. Please try again.';
-            }
-            if (res.request_id && typeof DebugLog !== 'undefined') {
-              DebugLog.warn('[newsletter] subscribe failed', { code: res.code, request_id: res.request_id });
-            }
-            if (typeof showToast === 'function') showToast(msg, 'error');
-            resetTurnstile();
-            submitBtn.textContent = originalText;
-            submitBtn.disabled = false;
-            return;
-          }
+        if (typeof API === 'undefined' || !API.subscribe) {
+          throw new Error('Subscriptions are temporarily unavailable. Please try again later.');
         }
-        if (typeof showToast === 'function') showToast('Thanks for subscribing! Check your inbox for your welcome code.', 'success');
+        const payload = { email: email, source: source || 'footer' };
+        if (turnstileToken) payload.turnstile_token = turnstileToken;
+        const res = await API.subscribe(payload);
+        if (res && res.ok === false) {
+          if (res.request_id && typeof DebugLog !== 'undefined') {
+            DebugLog.warn('[newsletter] subscribe failed', { code: res.code, request_id: res.request_id });
+          }
+          setNewsletterFeedback(feedbackEl, 'error', newsletterErrorMessage(res));
+          resetTurnstile();
+          return;
+        }
+        // Success is intentionally identical for new vs. already-subscribed
+        // (anti-enumeration). Prefer the backend's message; fall back to the
+        // brand welcome-code copy when the envelope carries none.
+        const successMsg = (res && res.data && res.data.message)
+          || 'Thanks for subscribing! Check your inbox for your welcome code.';
+        setNewsletterFeedback(feedbackEl, 'success', successMsg);
         emailInput.value = '';
         resetTurnstile();
       } catch (err) {
         if (err && err.request_id && typeof DebugLog !== 'undefined') {
           DebugLog.warn('[newsletter] subscribe threw', { code: err.code, status: err.status, request_id: err.request_id });
         }
-        const mapped = (typeof API !== 'undefined' && typeof API.mapError === 'function') ? API.mapError(err) : null;
-        const msg = (mapped && mapped.message) || (err && err.message) || 'Could not subscribe. Please try again.';
-        if (typeof showToast === 'function') {
-          showToast(msg.indexOf('temporarily unavailable') !== -1
-            ? 'Service temporarily unavailable. Please try again later.' : msg, 'error');
-        }
+        setNewsletterFeedback(feedbackEl, 'error', newsletterErrorMessage(err));
         resetTurnstile();
+      } finally {
+        submitBtn.textContent = originalText;
+        submitBtn.disabled = false;
       }
-      submitBtn.textContent = originalText;
-      submitBtn.disabled = false;
     });
   }
 
@@ -163,6 +225,7 @@
                                 <input type="email" id="footer-newsletter-email" name="email" class="footer-newsletter__input" placeholder="you@email.com" required autocomplete="email" maxlength="200">
                                 <button type="submit" class="footer-newsletter__button">Subscribe</button>
                             </form>
+                            <div class="newsletter-feedback" role="status" aria-live="polite" hidden></div>
                         </div>
                     </div>
 

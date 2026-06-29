@@ -666,6 +666,65 @@ const AdminAPI = {
     return resp?.data?.loyalty ?? resp?.data ?? null;
   },
 
+  // Save a customer's reusable invoicing profile (bill-to / deliver-to defaults
+  // used to pre-fill invoices). Fail-soft like loyalty: the backend route
+  // PUT /api/admin/customers/:id/invoicing is pending and 404s until it ships,
+  // so the drawer surfaces a clean toast and nothing breaks. The saved profile
+  // is echoed back on the customer row as `invoicing` (tolerant if absent).
+  async updateCustomerInvoicing(customerId, payload) {
+    const resp = await window.API.put(`/api/admin/customers/${customerId}/invoicing`, payload);
+    if (resp && resp.ok === false) throw new Error(resp.error?.message || resp.error || 'Save invoicing details failed');
+    return resp?.data?.customer ?? resp?.data ?? null;
+  },
+
+  // ---- Contacts (manually-entered billing/delivery parties for invoicing) ----
+  // Standalone address book that lives alongside Customers. Reads fail soft
+  // (return null/empty so the page degrades); writes throw so the editor can
+  // surface the backend message. All routes 404 until the backend ships them.
+  async listContacts(filters = {}, page = 1, limit = 20) {
+    try {
+      const params = new URLSearchParams();
+      params.set('page', page);
+      params.set('limit', limit);
+      if (filters.search) params.set('search', filters.search);
+      if (filters.sort) params.set('sort', filters.sort);
+      if (filters.order) params.set('order', filters.order);
+      const resp = await window.API.get(`/api/admin/contacts?${params}`);
+      return resp?.data ?? null;
+    } catch (e) {
+      adminApiWarn('Failed to load contacts', e);
+      return null;
+    }
+  },
+
+  async getContact(contactId) {
+    try {
+      const resp = await window.API.get(`/api/admin/contacts/${encodeURIComponent(contactId)}`);
+      return resp?.data?.contact ?? resp?.data ?? null;
+    } catch (e) {
+      adminApiWarn('Failed to load contact', e);
+      return null;
+    }
+  },
+
+  async createContact(payload) {
+    const resp = await window.API.post('/api/admin/contacts', payload);
+    if (resp && resp.ok === false) throw new Error(resp.error?.message || resp.error || 'Create contact failed');
+    return resp?.data?.contact ?? resp?.data ?? null;
+  },
+
+  async updateContact(contactId, payload) {
+    const resp = await window.API.put(`/api/admin/contacts/${encodeURIComponent(contactId)}`, payload);
+    if (resp && resp.ok === false) throw new Error(resp.error?.message || resp.error || 'Update contact failed');
+    return resp?.data?.contact ?? resp?.data ?? null;
+  },
+
+  async deleteContact(contactId) {
+    const resp = await window.API.delete(`/api/admin/contacts/${encodeURIComponent(contactId)}`);
+    if (resp && resp.ok === false) throw new Error(resp.error?.message || resp.error || 'Delete contact failed');
+    return resp?.data ?? null;
+  },
+
   // ---- Customer Intelligence (stubs — backend endpoints not yet implemented) ----
   async getCustomerLTV() { return null; },
   async getCohorts() { return null; },

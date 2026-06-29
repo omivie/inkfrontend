@@ -1955,6 +1955,32 @@ const API = {
     },
 
     /**
+     * Look up live tracking for an order and return it for INLINE display
+     * (June 2026 inline-tracking model).
+     *
+     * Unlike requestOrderTracking() — which only registers a "notify me when it
+     * ships" request — this returns the full tracking payload in the HTTP
+     * response so /track-order can render it immediately: status + status_label,
+     * the progress timeline, tracking number / carrier / tracking_url, estimated
+     * delivery, and the live courier `tracking_events`.
+     *
+     * Anti-enumeration (by backend design): a wrong email and a non-existent
+     * order both return the SAME 404 envelope
+     *   { ok:false, code:'NOT_FOUND', error:'<generic message>' }
+     * Callers MUST NOT try to tell the customer which field was wrong — surface
+     * response.error verbatim. Malformed input → VALIDATION_FAILED (with
+     * details[]); too many lookups → RATE_LIMITED (15 req / 15 min per IP).
+     *
+     * @param {{ order_number: string, email: string }} payload
+     */
+    async trackLookup(payload) {
+        return this.post('/api/orders/track-lookup', {
+            order_number: payload.order_number,
+            email: payload.email,
+        });
+    },
+
+    /**
      * Check for a recent pending order (checkout timeout recovery)
      * Call when order creation times out to check if order was actually created
      */

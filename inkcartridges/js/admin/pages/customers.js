@@ -10,6 +10,10 @@ import { Charts } from '../components/charts.js';
 
 const formatPrice = (v) => window.formatPrice ? window.formatPrice(v) : `$${Number(v).toFixed(2)}`;
 const MISSING = '\u2014';
+const escA = (s) => (window.Security?.escapeAttr ? Security.escapeAttr(String(s ?? '')) : String(s ?? '').replace(/"/g, '&quot;'));
+// Invoicing address is stored as string[]; edited as a \n-joined textarea.
+const linesToText = (a) => (Array.isArray(a) ? a.join('\n') : (a || ''));
+const textToLines = (s) => String(s || '').split('\n').map((x) => x.trim()).filter(Boolean);
 
 function formatDate(d) {
   if (!d) return MISSING;
@@ -23,7 +27,7 @@ let _page = 1;
 let _search = '';
 let _sort = 'first_name';
 let _sortDir = 'asc';
-let _activeTab = 'all'; // all | reviews
+let _activeTab = 'all'; // all | contacts | reviews
 let _subTabModule = null;
 
 const COLUMNS = [
@@ -135,6 +139,9 @@ async function openCustomerDrawer(customer) {
   // Loyalty Points
   html += loyaltyPanelBlock(loyaltyState);
 
+  // Saved invoicing profile (owner-only)
+  html += invoicingBlock(customer);
+
   drawer.setBody(html);
 
   // Owner-only: wire the "Adjust points" action. The button is only rendered for
@@ -151,6 +158,29 @@ async function openCustomerDrawer(customer) {
         if (panel) panel.innerHTML = loyaltyPanelInner(loyaltyState);
       },
     }));
+  }
+
+  // Owner-only: save the invoicing profile. Fail-soft until the backend ships.
+  const invSaveBtn = drawer.body.querySelector('#cust-invoicing-save');
+  if (invSaveBtn) {
+    invSaveBtn.addEventListener('click', async () => {
+      const scope = drawer.body.querySelector('#cust-invoicing');
+      if (!scope) return;
+      const payload = collectInvoicing(scope);
+      invSaveBtn.disabled = true;
+      const orig = invSaveBtn.textContent;
+      invSaveBtn.textContent = 'Saving…';
+      try {
+        await AdminAPI.updateCustomerInvoicing(customer.id, payload);
+        if (!drawer.el.isConnected) return;
+        customer.invoicing = payload; // keep in-memory row in sync for re-open
+        Toast.success('Invoicing details saved');
+      } catch (e) {
+        Toast.error(e.message || 'Could not save — the invoicing backend may not be live yet.');
+      } finally {
+        if (drawer.el.isConnected) { invSaveBtn.disabled = false; invSaveBtn.textContent = orig; }
+      }
+    });
   }
 }
 
@@ -190,6 +220,56 @@ function loyaltyPanelInner(loyalty) {
     h += `<p class="admin-text-muted">No points activity yet.</p>`;
   }
   return h;
+}
+
+// ---- Saved invoicing profile (owner-only) ----
+// A reusable bill-to / deliver-to profile stored on the customer so the Invoices
+// editor can pre-fill from it (preferred over scraping their latest order). The
+// backend route PUT /api/admin/customers/:id/invoicing is fail-soft until live.
+function invField(label, name, value, type = 'text') {
+  return `<label class="inv-field"><span class="inv-field__label">${esc(label)}</span>
+    <input class="admin-input" type="${type}" data-if="${name}" value="${escA(value)}"></label>`;
+}
+function invArea(label, name, value) {
+  return `<label class="inv-field"><span class="inv-field__label">${esc(label)}</span>
+    <textarea class="admin-input inv-textarea" data-if="${name}" rows="2">${esc(value)}</textarea></label>`;
+}
+function invoicingBlock(customer) {
+  if (!AdminAuth.isOwner()) return '';
+  const inv = customer.invoicing || {};
+  const b = inv.bill_to || {};
+  const d = inv.deliver_to || {};
+  return `<div class="admin-detail-block">
+    <div class="admin-detail-block__title">Invoicing details</div>
+    <p class="admin-text-muted" style="margin-top:0;font-size:12px">Used to pre-fill invoices for this customer (falls back to their latest order address).</p>
+    <div id="cust-invoicing">
+      <div class="inv-section__title" style="margin-top:4px">Bill to</div>
+      <div class="inv-grid-2">
+        ${invField('Attn', 'bill_to.attn', b.attn || '')}
+        ${invField('Name', 'bill_to.name', b.name || '')}
+        ${invField('Company / line', 'bill_to.company', b.company || '')}
+        ${invField('Phone', 'bill_to.phone', b.phone || '')}
+        ${invField('Email', 'bill_to.email', b.email || '', 'email')}
+      </div>
+      ${invArea('Address (one line per row)', 'bill_to.address', linesToText(b.address))}
+      <div class="inv-section__title" style="margin-top:8px">Deliver to (optional)</div>
+      <div class="inv-grid-2">
+        ${invField('Attn', 'deliver_to.attn', d.attn || '')}
+        ${invField('Company / line', 'deliver_to.company', d.company || '')}
+        ${invField('Phone', 'deliver_to.phone', d.phone || '')}
+      </div>
+      ${invArea('Delivery address', 'deliver_to.address', linesToText(d.address))}
+      <button class="admin-btn admin-btn--ghost admin-btn--sm" id="cust-invoicing-save" type="button" style="margin-top:8px">${icon('check', 13, 13)} Save invoicing details</button>
+    </div>
+  </div>`;
+}
+function collectInvoicing(scope) {
+  const out = { bill_to: {}, deliver_to: {} };
+  scope.querySelectorAll('[data-if]').forEach((el) => {
+    const [grp, key] = el.dataset.if.split('.');
+    out[grp][key] = key === 'address' ? textToLines(el.value) : el.value.trim();
+  });
+  return out;
 }
 
 function loyaltyPanelBlock(loyalty) {
@@ -463,6 +543,15 @@ async function switchCustomerTab(tab) {
   if (tab === 'all') {
     content.innerHTML = '';
     await renderCustomersTab(content);
+  } else if (tab === 'contacts') {
+    try {
+      const mod = await import('./contacts.js');
+      _subTabModule = mod.default;
+      content.innerHTML = '';
+      await _subTabModule.init(content);
+    } catch (e) {
+      content.innerHTML = `<div class="admin-empty"><div class="admin-empty__title">Failed to load Contacts</div><div class="admin-empty__text">${esc(e.message)}</div></div>`;
+    }
   } else if (tab === 'reviews') {
     try {
       const mod = await import('./reviews.js');
@@ -491,6 +580,7 @@ export default {
     tabBar.className = 'admin-tabs';
     tabBar.innerHTML = `
       <button class="admin-tab active" data-cust-tab="all">All Customers</button>
+      <button class="admin-tab" data-cust-tab="contacts">Contacts</button>
       <button class="admin-tab" data-cust-tab="reviews">Reviews</button>
     `;
     container.appendChild(tabBar);

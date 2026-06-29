@@ -11621,6 +11621,47 @@ body.page-shop {
     font-weight: 500;
 }
 
+/* Inline-tracking display (Jun 2026): the lookup result renders a self-contained
+   .tracking-detail card, so reset the shared #track-result success wrapper to a
+   plain left-aligned surface — otherwise the white card sits inside the green
+   centred panel (double card). */
+.track-result--tracking {
+    margin-top: 1.5rem;
+    padding: 0;
+    border: none;
+    background: transparent;
+    text-align: left;
+}
+/* "Not shipped yet" note shown when the lookup succeeds but tracking_number is null */
+.tracking-note {
+    margin: 0 0 1rem;
+    padding: 0.6rem 0.85rem;
+    background: #fef9e7;
+    border: 1px solid #fdf0c4;
+    border-radius: 6px;
+    font-size: 0.88rem;
+    color: #856404;
+}
+/* Emphasised estimated-delivery value */
+.tracking-info-value--eta {
+    color: var(--color-primary, #267FB5);
+    font-weight: 700;
+}
+/* "Track with {carrier}" CTA — its own wrapper so the existing .tracking-fallback
+   anchor-colour rule (primary blue) doesn't repaint the button text blue-on-blue. */
+.tracking-cta {
+    margin-top: 1rem;
+}
+.tracking-cta .btn--primary {
+    color: #fff;
+}
+/* "Check again" refresh row */
+.tracking-refresh {
+    margin-top: 1.25rem;
+    display: flex;
+    justify-content: flex-end;
+}
+
 /* Recent orders list */
 .recent-orders-list {
     margin-top: 1rem;

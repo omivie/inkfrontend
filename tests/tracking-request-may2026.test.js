@@ -49,16 +49,33 @@ test('api.js exposes requestOrderTracking → POST /api/orders/track-request', (
   assert.match(fn.slice(0, 400), /order_number/, 'payload must carry order_number');
 });
 
+test('api.js exposes trackLookup → POST /api/orders/track-lookup (Jun 2026 inline model)', () => {
+  const api = read('js/api.js');
+  assert.match(api, /async trackLookup\(/, 'trackLookup() missing');
+  assert.match(api, /\/api\/orders\/track-lookup/, 'must POST to /api/orders/track-lookup');
+  const fn = api.slice(api.indexOf('async trackLookup('));
+  assert.match(fn.slice(0, 400), /this\.post\(/, 'trackLookup must use POST');
+  assert.match(fn.slice(0, 400), /order_number/, 'payload must carry order_number');
+});
+
 // ─── Customer controller ───────────────────────────────────────────────────
-test('track-order-page.js is a REQUEST controller, not an auto-display one', () => {
+// NOTE: the customer /track-order page moved to an INLINE-display model in
+// Jun 2026 (POST /api/orders/track-lookup → render timeline + tracking inline).
+// The deep behavioural contract for that lives in
+// tests/tracking-inline-lookup-jun2026.test.js. This block now only pins that
+// the controller IS the inline-display one and still keeps the notify-me
+// fallback (requestOrderTracking) that feeds the admin queue.
+test('track-order-page.js is the INLINE-display controller (Jun 2026)', () => {
   const ctrl = read('js/track-order-page.js');
-  assert.match(ctrl, /requestOrderTracking/, 'controller must call requestOrderTracking');
-  assert.match(ctrl, /submitRequest/, 'controller must have submitRequest flow');
-  // The old auto-display path is gone: no tracking number / timeline rendering.
-  assert.ok(!ctrl.includes('getOrderTracking'), 'must NOT auto-fetch tracking via getOrderTracking');
-  assert.ok(!/renderTracking\b/.test(ctrl), 'must NOT render a tracking detail panel');
-  assert.ok(!/buildTimelineHtml/.test(ctrl), 'must NOT render a tracking timeline');
-  assert.ok(!/tracking_number/.test(ctrl), 'controller must not surface tracking_number');
+  assert.match(ctrl, /trackLookup/, 'controller must call API.trackLookup');
+  assert.match(ctrl, /submitLookup/, 'controller must have a submitLookup flow');
+  assert.match(ctrl, /renderTracking\b/, 'controller must render a tracking detail panel');
+  assert.match(ctrl, /buildTimeline\b/, 'controller must build the progress timeline');
+  assert.match(ctrl, /tracking-detail/, 'controller must render the .tracking-detail card');
+  // Notify-me fallback for not-yet-shipped orders is retained.
+  assert.match(ctrl, /requestOrderTracking/, 'controller must keep the notify-me fallback (requestOrderTracking)');
+  // It uses the live lookup, not the legacy per-order GET tracking endpoint.
+  assert.ok(!ctrl.includes('getOrderTracking'), 'must NOT use the legacy getOrderTracking endpoint');
 });
 
 test('track-order controller is auth-aware: only the account mount redirects', () => {
@@ -69,9 +86,9 @@ test('track-order controller is auth-aware: only the account mount redirects', (
   assert.match(ctrl, /\/account\/login\?redirect=/, 'account mount redirects unauthenticated visitors to login');
 });
 
-test('track-order controller renders a confirmation, prefills email when signed in', () => {
+test('track-order controller renders inline tracking, prefills email when signed in', () => {
   const ctrl = read('js/track-order-page.js');
-  assert.match(ctrl, /Request received/i, 'success state must confirm the request was received');
+  assert.match(ctrl, /order-timeline/, 'success state must render the inline tracking timeline');
   assert.match(ctrl, /track-result/, 'uses the shared #track-result surface');
   assert.match(ctrl, /Auth\.user\?\.email/, 'prefills the signed-in customer email');
   assert.match(ctrl, /RATE_LIMITED/, 'handles the rate-limit response code');
@@ -130,10 +147,14 @@ test('account /track-order page uses the new request-form field IDs', () => {
 });
 
 // ─── Footer entry points ─────────────────────────────────────────────────────
-test('footer.js links to /track-order in both the column and the bottom nav', () => {
+// The footer was redesigned (commits 80f71c4 / 6dc79dd): the bottom link nav was
+// replaced by the payment-card strip, so /track-order now lives only in the
+// Information column. (Previously this asserted hits >= 2; updated to match the
+// redesign — see errors.md "footer bottom-nav track-order link removed".)
+test('footer.js links to /track-order in the Information column', () => {
   const footer = read('js/footer.js');
   const hits = (footer.match(/href="\/track-order"/g) || []).length;
-  assert.ok(hits >= 2, `expected /track-order in the Information column AND the bottom nav, found ${hits}`);
+  assert.ok(hits >= 1, `expected a /track-order link in the footer Information column, found ${hits}`);
 });
 
 // ─── Admin API ───────────────────────────────────────────────────────────────
