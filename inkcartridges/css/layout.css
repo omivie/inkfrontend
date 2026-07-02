@@ -1251,9 +1251,8 @@
 
 .footer-grid {
     display: grid;
-    /* 4 link columns since the Categories column (IA reorg Jul 2026) */
-    grid-template-columns: 2fr repeat(4, 1fr);
-    gap: var(--spacing-2xl);
+    grid-template-columns: 2fr repeat(3, 1fr);
+    gap: var(--spacing-3xl);
 }
 
 .footer-brand {

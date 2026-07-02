@@ -186,37 +186,22 @@ test('§4 mega-nav hydrates from the feed inside try/catch (fail-open)', () => {
     assert.match(MEGA_NAV_JS, /hydrateFromSiteNav\(\);/, 'hydration must run at init');
 });
 
-test('§4 footer hydration filters the dead /genuine-vs-compatible path', () => {
-    // The nav mega no longer renders feed categories (removed 2026-07-02) —
-    // the footer is the only feed-category surface and must keep the filter.
-    assert.match(FOOTER_JS, /c\.path !== '\/genuine-vs-compatible'/);
-});
-
-test('§4 hydrated footer links are escaped and same-origin only', () => {
-    assert.match(FOOTER_JS, /c\.path\.startsWith\('\/'\)/);
-    assert.match(FOOTER_JS, /Security\.escapeAttr\(c\.path\)/);
-});
-
 // ─────────────────────────────────────────────────────────────────────────────
-// §5 — footer Categories column
+// §5 — NO footer Categories column (owner decision, 2026-07-02)
+//
+// The feed-hydrated column shipped with the IA reorg and was removed the same
+// day, right after the matching nav mega. Pins the removal + the reverted
+// 3-link-column footer grid.
 // ─────────────────────────────────────────────────────────────────────────────
 
-test('§5 footer ships a static Categories column with the 6 canonical links', () => {
-    assert.match(FOOTER_JS, /<summary class="footer-column__heading">Categories<\/summary>/);
-    assert.match(FOOTER_JS, /id="footer-categories-links"/);
-    for (const href of [
-        '/ink-cartridges', '/toner-cartridges', '/ribbons',
-        '/shop?category=drums', '/shop?category=label', '/shop?category=paper',
-    ]) {
-        assert.ok(FOOTER_JS.includes(`<li><a href="${href}">`),
-            `footer Categories column must statically link ${href}`);
-    }
-    assert.match(FOOTER_JS, /\.catch\(\(\)\s*=>\s*\{\s*\/\*\s*fail-open\s*\*\/\s*\}\)/,
-        'footer hydration must swallow errors (fail-open)');
-});
-
-test('§5 footer grid gained the fourth link column', () => {
-    assert.match(LAYOUT_CSS, /\.footer-grid\s*\{[^}]*grid-template-columns:\s*2fr repeat\(4, 1fr\)/s);
+test('§5 footer ships no Categories column and no feed-category hydration', () => {
+    assert.ok(!FOOTER_JS.includes('footer-categories-links'),
+        'footer.js must not render the removed Categories column');
+    assert.doesNotMatch(FOOTER_JS, /<summary class="footer-column__heading">Categories<\/summary>/);
+    assert.ok(!stripComments(FOOTER_JS).includes('getSiteNav'),
+        'footer.js must not fetch the nav feed any more');
+    assert.match(LAYOUT_CSS, /\.footer-grid\s*\{[^}]*grid-template-columns:\s*2fr repeat\(3, 1fr\)/s,
+        'footer grid must be back to 3 link columns');
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
