@@ -247,10 +247,25 @@ test('§5 legacy ?printer= alias accepted only with brand', () => {
 test('§5 NO prerender for non-canonical / deep surfaces -> null', () => {
     assert.equal(P('/shop', '?q=650'), null);            // search
     assert.equal(P('/shop', '?search=650'), null);
-    assert.equal(P('/shop', '?category=ink'), null);     // category-only /shop (canonicals to /ink-cartridges)
     assert.equal(P('/shop', '?printer_slug=x'), null);   // bare printer (no brand) — middleware skips
     assert.equal(P('/account'), null);
     assert.equal(P('/products/foo/SKU1'), null);         // products use API seo, not this
+});
+
+// IA reorg Jul 2026: a canonical category as the SOLE /shop filter routes to
+// its category prerender — middleware gained the matching arm, and
+// Drums/Label/Paper have no dedicated landing route so /shop?category=<slug>
+// IS their landing.
+test('§5 sole-filter category on /shop -> category prerender (IA reorg Jul 2026)', () => {
+    assert.equal(P('/shop', '?category=ink'), '/api/prerender/category/ink');
+    assert.equal(P('/shop', '?category=drums'), '/api/prerender/category/drums');
+    assert.equal(P('/shop', '?category=label'), '/api/prerender/category/label');
+    assert.equal(P('/shop', '?category=paper'), '/api/prerender/category/paper');
+    assert.equal(P('/shop', '?category=ribbon'), '/api/prerender/category/ribbon');
+    assert.equal(P('/shop', '?category=consumable'), null);        // non-canonical
+    assert.equal(P('/shop', '?category=drums&code=DR2325'), null); // not sole filter
+    assert.equal(P('/shop', '?category=drums&q=x'), null);
+    assert.equal(P('/shop', '?category=drums&type=genuine'), null);
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -267,8 +282,16 @@ test('§6 surface mapping', () => {
     assert.equal(S('/shop', '?brand=canon&category=ink'), 'brand');
     assert.equal(S('/shop', '?brand=brother&printer_slug=x'), 'printer');
     assert.equal(S('/shop', '?q=650'), null);
-    assert.equal(S('/shop', '?category=ink'), null);
     assert.equal(S('/shop', '?brand=canon&code=PG-540'), 'brand');
+    // IA reorg Jul 2026 — sole-filter canonical categories get their own
+    // surface (ribbon reuses the existing category-ribbons name).
+    assert.equal(S('/shop', '?category=ink'), 'category-ink');
+    assert.equal(S('/shop', '?category=drums'), 'category-drums');
+    assert.equal(S('/shop', '?category=label'), 'category-label');
+    assert.equal(S('/shop', '?category=paper'), 'category-paper');
+    assert.equal(S('/shop', '?category=ribbon'), 'category-ribbons');
+    assert.equal(S('/shop', '?category=consumable'), null);
+    assert.equal(S('/shop', '?category=drums&code=X'), null);
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

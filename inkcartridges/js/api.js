@@ -1504,6 +1504,17 @@ const API = {
     },
 
     /**
+     * Get the canonical navigation feed (categories + brands + links) from the
+     * one backend taxonomy, so the header/mega-nav/footer can never drift from
+     * what /api/shop accepts (IA reorg, Jul 2026). CDN-cached 1h server-side;
+     * SWR here for the same burst-collapse reason as getCollectionSchema
+     * (ERR-049). Consumers fail open to their static markup on any error.
+     */
+    async getSiteNav() {
+        return this.getWithSWR('/api/site/nav', { ttl: 5 * 60 * 1000 });
+    },
+
+    /**
      * Get the dedicated Product / BreadcrumbList / FAQ JSON-LD payload for a SKU.
      * `/api/products/:sku` already embeds a `seo.jsonLd` blob; this dedicated
      * endpoint is the canonical source per spec §5.6 — embed verbatim.

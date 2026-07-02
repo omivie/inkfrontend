@@ -253,6 +253,18 @@
                     </details>
 
                     <details class="footer-column" data-footer-accordion>
+                        <summary class="footer-column__heading">Categories</summary>
+                        <ul class="footer-links" id="footer-categories-links">
+                            <li><a href="/ink-cartridges">Ink Cartridges</a></li>
+                            <li><a href="/toner-cartridges">Toner Cartridges</a></li>
+                            <li><a href="/ribbons">Ribbons</a></li>
+                            <li><a href="/shop?category=drums">Drums &amp; Supplies</a></li>
+                            <li><a href="/shop?category=label">Label Tape</a></li>
+                            <li><a href="/shop?category=paper">Photo Paper</a></li>
+                        </ul>
+                    </details>
+
+                    <details class="footer-column" data-footer-accordion>
                         <summary class="footer-column__heading">Information</summary>
                         <ul class="footer-links">
                             <li><a href="/about">About Us</a></li>
@@ -444,6 +456,26 @@
 
     // Wire the newsletter form now that it's in the DOM (idempotent).
     bindNewsletterForm(footer.querySelector('.newsletter__form'), 'footer');
+
+    // IA reorg Jul 2026 — hydrate the Categories column from the backend's
+    // canonical nav feed so the footer can't drift from what /api/shop
+    // accepts. Fail-open: the static list above already rendered.
+    if (typeof API !== 'undefined' && typeof API.getSiteNav === 'function') {
+        API.getSiteNav().then(res => {
+            const cats = res?.data?.categories;
+            const list = document.getElementById('footer-categories-links');
+            if (!Array.isArray(cats) || !cats.length || !list) return;
+            const items = cats
+                // Same-origin paths only; /genuine-vs-compatible is a
+                // known-dead route (404s on both origins) — filtered until
+                // the backend ships the page.
+                .filter(c => c && c.label && typeof c.path === 'string'
+                    && c.path.startsWith('/')
+                    && c.path !== '/genuine-vs-compatible')
+                .map(c => `<li><a href="${Security.escapeAttr(c.path)}">${Security.escapeHtml(c.label)}</a></li>`);
+            if (items.length) list.innerHTML = items.join('\n');
+        }).catch(() => { /* fail-open */ });
+    }
 
     // Google Customer Reviews - badge + opt-in survey loader
     (function () {

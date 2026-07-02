@@ -191,6 +191,14 @@
             { id: 'ribbons',      name: 'Printer Ribbons',  icon: 'file-text', apiCategory: 'ribbons' }
         ],
 
+        // URL-boundary translation between the backend's canonical category
+        // slugs (ink, toner, ribbon, drums, label, paper — IA reorg Jul 2026)
+        // and this controller's internal tab ids. Internal ids stay untouched
+        // everywhere else (tab state, cache keys, counts, display names);
+        // ONLY what we read from and write to the address bar is translated.
+        CATEGORY_INTERNAL_BY_CANONICAL: { drums: 'consumable', label: 'label_tape', ribbon: 'ribbons' },
+        CATEGORY_CANONICAL_BY_INTERNAL: { consumable: 'drums', label_tape: 'label', ribbons: 'ribbon' },
+
         // (`compatiblePrefix` field removed 2026-05-03 — five duplicate
         // `isCompatibleProduct` definitions used to fall back to
         // `name.includes(compatiblePrefix)` for legacy data; all now trust
@@ -565,7 +573,32 @@
                 : (window.location.pathname === '/toner-cartridges' || window.location.pathname === '/toner-cartridges/')
                     ? 'toner'
                     : null;
-            this.state.category = params.get('category') || pathCategory;
+            // Canonicalize the incoming slug (IA reorg Jul 2026): the address
+            // bar speaks the backend's canonical slugs (drums/label/ribbon…)
+            // while internal state keeps the historical tab ids
+            // (consumable/label_tape/ribbons). Legacy params (consumable,
+            // label_tape, drum) map to their canonical equivalents; params
+            // with no canonical form (cartridge, junk) are dropped. The
+            // `typeof` guard keeps vm-sandboxed tests (url-consolidation)
+            // working without a canonicalizeCategory stub.
+            const _rawCategory = params.get('category');
+            const _canonCategory = _rawCategory
+                ? ((typeof canonicalizeCategory === 'function') ? canonicalizeCategory(_rawCategory) : _rawCategory)
+                : null;
+            this.state.category = _canonCategory
+                ? (this.CATEGORY_INTERNAL_BY_CANONICAL[_canonCategory] || _canonCategory)
+                : pathCategory;
+            // Fix a non-canonical param in the address bar without a reload
+            // (replaceState fires no popstate, so this can't loop). The edge
+            // middleware already 301s document loads; this covers SPA-internal
+            // entries (pushState/popstate) and non-Vercel environments.
+            if (_rawCategory && _canonCategory !== _rawCategory) {
+                const _fixed = new URLSearchParams(window.location.search);
+                if (_canonCategory) _fixed.set('category', _canonCategory);
+                else _fixed.delete('category');
+                const _qs = _fixed.toString();
+                history.replaceState(history.state, '', window.location.pathname + (_qs ? `?${_qs}` : ''));
+            }
             const _rawCode = params.get('code');
             this.state.code = (typeof window !== 'undefined' && window.SeriesCodes && _rawCode)
                 ? window.SeriesCodes.collapseYieldSuffix(_rawCode)
@@ -656,7 +689,9 @@
             // On a category-landing path the category is implied by pathname;
             // omitting the param keeps the URL canonical (no /ink-cartridges?category=ink).
             const categoryImpliedByPath = pathname === '/ink-cartridges' || pathname === '/toner-cartridges';
-            if (this.state.category && !categoryImpliedByPath) params.set('category', this.state.category);
+            // Emit the backend's canonical slug, never the internal tab id
+            // (consumable→drums etc. — IA reorg Jul 2026).
+            if (this.state.category && !categoryImpliedByPath) params.set('category', this.CATEGORY_CANONICAL_BY_INTERNAL[this.state.category] || this.state.category);
             if (this.state.code) params.set('code', this.state.code);
             if (this.state.type) params.set('type', this.state.type);
             if (this.state.search) params.set('q', this.state.search);
@@ -920,7 +955,8 @@
             const ribbonsSection = document.getElementById('ribbons-section');
             const sectionTitle = this.elements.levelBrands?.querySelector('.shop-section-card__title');
             if (categoryPicker) {
-                const labels = { ink: 'ink cartridges', toner: 'toner', drum: 'drums', paper: 'paper' };
+                // Keys are the INTERNAL tab ids (see this.categories).
+                const labels = { ink: 'ink cartridges', toner: 'toner', consumable: 'drums & supplies', label_tape: 'label tape', paper: 'photo paper' };
                 const label = labels[this.state.category] || `${this.state.category} products`;
                 if (sectionTitle) sectionTitle.textContent = `Choose a brand to see ${label}`;
                 if (ribbonsSection) ribbonsSection.hidden = true;
@@ -3534,7 +3570,8 @@
             if (this.state.category) {
                 const cat = this.categories?.find(c => c.id === this.state.category);
                 const catName = cat?.name || this.state.category;
-                pageUrl += (pageUrl.includes('?') ? '&' : '?') + 'category=' + encodeURIComponent(this.state.category);
+                // Canonical slug in the URL, internal id for the display name.
+                pageUrl += (pageUrl.includes('?') ? '&' : '?') + 'category=' + encodeURIComponent(this.CATEGORY_CANONICAL_BY_INTERNAL[this.state.category] || this.state.category);
                 pageName = pageName + ' \u2014 ' + catName;
                 items.push({ "@type": "ListItem", "position": items.length + 1, "name": catName, "item": pageUrl });
             }
@@ -3633,9 +3670,11 @@
             const category = this.state.category;
             const code = this.state.code;
             const brandName = this.brandInfo[brand]?.name || brand || '';
+            // Keys are the INTERNAL tab ids (see this.categories).
             const categoryLabels = {
                 ink: 'Ink Cartridges', toner: 'Toner Cartridges',
-                drum: 'Drum Units', consumable: 'Consumables'
+                consumable: 'Drums & Supplies', label_tape: 'Label Tape',
+                paper: 'Photo Paper'
             };
             const catLabel = categoryLabels[category] || 'Printing Supplies';
 
@@ -3658,7 +3697,7 @@
             } else {
                 const params = new URLSearchParams();
                 if (brand)                params.set('brand',        lc(brand));
-                if (category)             params.set('category',     lc(category));
+                if (category)             params.set('category',     lc(this.CATEGORY_CANONICAL_BY_INTERNAL[category] || category));
                 if (code)                 params.set('code',         code);
                 if (this.state.printer)   params.set('printer_slug', lc(this.state.printer));
                 if (this.state.search)    params.set('q',            this.state.search);
@@ -3698,7 +3737,12 @@
                 default: // brands level
                     title       = 'Shop Ink Cartridges & Toner NZ | InkCartridges.co.nz';
                     description = 'Browse all printing supplies — ink cartridges, toner, drums and accessories. Filter by brand, type, and compatibility.';
-                    canonical   = `${BASE}/shop`;
+                    // No canonical overwrite here (IA reorg Jul 2026): the
+                    // category-only landings run at the brands level too (the
+                    // S0.3 brand picker), and a hardcoded `${BASE}/shop` was
+                    // stomping their computed canonical (/ink-cartridges,
+                    // /shop?category=drums, …). The builder above already
+                    // yields `${BASE}/shop` when no filter is set.
             }
 
             document.title = title;

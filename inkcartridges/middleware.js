@@ -25,6 +25,16 @@ const BACKEND = 'https://ink-backend-zaeq.onrender.com';
 // matches by simply not routing them to the prerender either.
 const BOT_PATTERN = /googlebot|adsbot-google|storebot-google|google-inspectiontool|bingbot|slurp|duckduckbot|baiduspider|yandexbot|facebookexternalhit|facebot|twitterbot|linkedinbot|whatsapp|telegrambot|applebot|pinterest|semrushbot|ahrefsbot|mj12bot|dotbot|rogerbot|embedly|quora link preview|showyoubot|outbrain|chrome-lighthouse|google-structured-data-testing-tool|gptbot|chatgpt-user|oai-searchbot|perplexitybot|perplexity-user|claudebot|anthropic-ai|claude-web|google-extended|applebot-extended|meta-externalagent|amazonbot/i;
 
+// Canonical category slugs + backend alias map (IA reorg, Jul 2026). Must
+// stay in sync with the backend's CATEGORY_TAXONOMY / redirect rules and with
+// js/utils.js canonicalizeCategory(). Note the deliberate divergence from the
+// client helper: the edge STRIPS `consumable` (exact backend mirror for
+// document requests) while the client maps consumable→drums for SPA-internal
+// state — legacy bookmarks lose the catch-all category on load, exactly like
+// they do on the backend host.
+const CATEGORY_CANONICAL = new Set(['ink', 'toner', 'ribbon', 'drums', 'label', 'paper']);
+const CATEGORY_ALIASES = { ribbons: 'ribbon', 'ink-cartridges': 'ink' };
+
 export default async function middleware(request) {
   const url = new URL(request.url);
   const path = url.pathname;
@@ -36,6 +46,28 @@ export default async function middleware(request) {
       const loginUrl = new URL('/account/login', request.url);
       loginUrl.searchParams.set('redirect', path + url.search);
       return Response.redirect(loginUrl.toString(), 302);
+    }
+  }
+
+  // /shop ?category 301 normalization — ALL user agents, before the bot gate
+  // (IA reorg, Jul 2026). Mirrors the backend's redirect rules exactly:
+  // canonical slugs pass through, ribbons→ribbon / ink-cartridges→ink are
+  // aliased, everything else (consumable, cartridge, unknowns) is stripped.
+  // vercel.json redirects cannot strip a single query param (untouched params
+  // pass through, which would loop), so the edge middleware is the only FE
+  // layer that can express this. Loop-safe: redirects only when the
+  // normalized value differs from the raw one, and the target always carries
+  // a canonical-or-absent category.
+  if (path === '/shop' && url.searchParams.has('category')) {
+    const raw = url.searchParams.get('category');
+    let next;
+    if (CATEGORY_CANONICAL.has(raw)) next = raw;
+    else if (CATEGORY_ALIASES[raw]) next = CATEGORY_ALIASES[raw];
+    else next = null;
+    if (next !== raw) {
+      url.searchParams.delete('category'); // also collapses duplicated params
+      if (next) url.searchParams.set('category', next);
+      return Response.redirect(url.toString(), 301);
     }
   }
 
@@ -130,6 +162,22 @@ export default async function middleware(request) {
       prerenderPath = `/api/prerender/printer/${encodeURIComponent(brandSlug)}/${encodeURIComponent(printerSlug)}`;
     } else if (brandSlug) {
       prerenderPath = `/api/prerender/brand/${encodeURIComponent(brandSlug)}`;
+    } else {
+      // /shop?category=<canonical slug> with no other filter → category
+      // prerender (IA reorg, Jul 2026). Drums/Label/Paper deliberately have
+      // no dedicated landing route (they live at /shop?category=<slug>), and
+      // the backend ships prerenders for all six canonical slugs — without
+      // this arm, bots following the nav's Drums/Label/Paper links get the
+      // bare SPA shell. "Sole filter" gate: any narrowing param means the
+      // category prerender would misrepresent the page. The excluded-param
+      // list must stay byte-identical to seo-meta.js prerenderPathForLocation
+      // (SPA/bot parity) — pinned by tests/ia-reorg-jul2026.test.js.
+      const cat = url.searchParams.get('category');
+      const soleFilter = cat && CATEGORY_CANONICAL.has(cat)
+        && !url.searchParams.get('code') && !url.searchParams.get('q')
+        && !url.searchParams.get('search') && !url.searchParams.get('type')
+        && !url.searchParams.get('printer_model');
+      if (soleFilter) prerenderPath = `/api/prerender/category/${cat}`;
     }
   }
 

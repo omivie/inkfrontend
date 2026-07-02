@@ -2,8 +2,16 @@
  * MEGA-NAV.JS
  * ===========
  * Mega dropdowns for the top navigation.
- * - "Ink Cartridge Brands" panel: brand cards with category links
+ * - "Shop by Category" panel: canonical category links (static markup shipped
+ *   in the header for bots/no-JS; hydrated from GET /api/site/nav)
+ * - "Cartridge Brands" panel: brand cards with category links (hardcoded
+ *   BRANDS fallback; hydrated from the same feed, ordered by product_count)
  * - "Ribbons" panel: typewriter/printer ribbon brand buttons
+ *
+ * IA reorg Jul 2026: the nav is sourced from the backend's one taxonomy
+ * (/api/site/nav) so it can never drift from what /api/shop accepts. All
+ * category params are canonical slugs (ink, toner, ribbon, drums, label,
+ * paper) — never the retired consumable/label_tape/cartridge values.
  */
 
 'use strict';
@@ -28,6 +36,13 @@
     const ribbonsGrid = ribbonsPanel ? ribbonsPanel.querySelector('.ribbons-mega__grid') : null;
 
     // ============================================
+    // DOM ELEMENTS — Categories panel
+    // ============================================
+    const categoriesTrigger = document.querySelector('.nav-categories-toggle');
+    const categoriesPanel = document.getElementById('categories-mega');
+    const categoriesGrid = categoriesPanel ? categoriesPanel.querySelector('.categories-mega__grid') : null;
+
+    // ============================================
     // DATA — Ink/Toner Brands
     // ============================================
     const BRANDS = [
@@ -35,60 +50,60 @@
           categories: [
               { label: 'Ink Cartridges', param: 'ink' },
               { label: 'Toner Cartridges', param: 'toner' },
-              { label: 'Drums & Supplies', param: 'consumable' },
-              { label: 'Label Tape', param: 'label_tape' },
+              { label: 'Drums & Supplies', param: 'drums' },
+              { label: 'Label Tape', param: 'label' },
               { label: 'Paper', param: 'paper' }
           ]},
         { slug: 'canon', name: 'Canon', logo: '/assets/brands/canon.png',
           categories: [
               { label: 'Ink Cartridges', param: 'ink' },
               { label: 'Toner Cartridges', param: 'toner' },
-              { label: 'Drums & Supplies', param: 'consumable' },
+              { label: 'Drums & Supplies', param: 'drums' },
               { label: 'Paper', param: 'paper' }
           ]},
         { slug: 'epson', name: 'Epson', logo: '/assets/brands/epson.png',
           categories: [
               { label: 'Ink Cartridges', param: 'ink' },
-              { label: 'Drums & Supplies', param: 'consumable' },
+              { label: 'Drums & Supplies', param: 'drums' },
               { label: 'Paper', param: 'paper' }
           ]},
         { slug: 'hp', name: 'HP', logo: '/assets/brands/hp.png',
           categories: [
               { label: 'Ink Cartridges', param: 'ink' },
               { label: 'Toner Cartridges', param: 'toner' },
-              { label: 'Drums & Supplies', param: 'consumable' },
+              { label: 'Drums & Supplies', param: 'drums' },
               { label: 'Paper', param: 'paper' }
           ]},
         { slug: 'samsung', name: 'Samsung', logo: '/assets/brands/samsung.svg',
           categories: [
               { label: 'Toner Cartridges', param: 'toner' },
-              { label: 'Drums & Supplies', param: 'consumable' }
+              { label: 'Drums & Supplies', param: 'drums' }
           ]},
         { slug: 'lexmark', name: 'Lexmark', logo: '/assets/brands/lexmark.png',
           categories: [
               { label: 'Ink Cartridges', param: 'ink' },
               { label: 'Toner Cartridges', param: 'toner' },
-              { label: 'Drums & Supplies', param: 'consumable' }
+              { label: 'Drums & Supplies', param: 'drums' }
           ]},
         { slug: 'oki', name: 'OKI', logo: '/assets/brands/oki.svg',
           categories: [
               { label: 'Toner Cartridges', param: 'toner' },
-              { label: 'Drums & Supplies', param: 'consumable' }
+              { label: 'Drums & Supplies', param: 'drums' }
           ]},
         { slug: 'fuji-xerox', name: 'Fuji Xerox', logo: '/assets/brands/fuji-xerox.png',
           categories: [
               { label: 'Ink Cartridges', param: 'ink' },
               { label: 'Toner Cartridges', param: 'toner' },
-              { label: 'Drums & Supplies', param: 'consumable' }
+              { label: 'Drums & Supplies', param: 'drums' }
           ]},
         { slug: 'kyocera', name: 'Kyocera', logo: '/assets/brands/kyocera.svg',
           categories: [
               { label: 'Toner Cartridges', param: 'toner' },
-              { label: 'Drums & Supplies', param: 'consumable' }
+              { label: 'Drums & Supplies', param: 'drums' }
           ]},
         { slug: 'dymo', name: 'Dymo', logo: 'https://lmdlgldjgcanknsjrcxh.supabase.co/storage/v1/object/public/public-assets/logos/dymo.png',
           categories: [
-              { label: 'Label Tape', param: 'label_tape' }
+              { label: 'Label Tape', param: 'label' }
           ]}
     ];
 
@@ -101,6 +116,7 @@
     // ============================================
     let brandsOpen = false;
     let ribbonsOpen = false;
+    let categoriesOpen = false;
 
     // Remember each panel's original DOM location so we can restore it when
     // leaving mobile / closing. On mobile we relocate the panel inside the
@@ -132,18 +148,22 @@
     }
     rememberOrigin(brandsPanel);
     if (ribbonsPanel) rememberOrigin(ribbonsPanel);
+    if (categoriesPanel) rememberOrigin(categoriesPanel);
 
     // ============================================
     // RENDER BRAND CARDS (Ink/Toner)
     // ============================================
-    function renderBrands() {
-        brandsCardsContainer.innerHTML = BRANDS.map(brand => {
+    function renderBrands(list = BRANDS) {
+        brandsCardsContainer.innerHTML = list.map(brand => {
             const brandUrl = `/shop?brand=${Security.escapeAttr(brand.slug)}`;
+            const logoHtml = brand.logo
+                ? `<img src="${Security.escapeAttr(Security.sanitizeUrl(brand.logo))}" alt="${Security.escapeAttr(brand.name)}" class="brands-mega__brand-logo brands-mega__brand-logo--${Security.escapeAttr(brand.slug)}" loading="lazy">`
+                : Security.escapeHtml(brand.name);
             return `
             <div class="brands-mega__card">
                 <div class="brands-mega__logo-wrap">
                     <a href="${brandUrl}" class="brands-mega__logo-link">
-                        <img src="${Security.escapeAttr(brand.logo)}" alt="${Security.escapeAttr(brand.name)}" class="brands-mega__brand-logo brands-mega__brand-logo--${Security.escapeAttr(brand.slug)}">
+                        ${logoHtml}
                     </a>
                 </div>
                 <div class="brands-mega__card-links">
@@ -153,6 +173,57 @@
                 </div>
             </div>`;
         }).join('');
+    }
+
+    // ============================================
+    // HYDRATE FROM /api/site/nav (fail-open)
+    // ============================================
+
+    // Per-brand category links stay a FE concern (the feed carries brands and
+    // categories separately); lifted from the hardcoded BRANDS so hydrated
+    // cards keep their deep links. Feed-only brands render a name/logo card.
+    const CATEGORY_LINKS_BY_BRAND = {};
+    BRANDS.forEach(b => { CATEGORY_LINKS_BY_BRAND[b.slug] = b.categories; });
+    const LOCAL_LOGO_BY_BRAND = {};
+    BRANDS.forEach(b => { LOCAL_LOGO_BY_BRAND[b.slug] = b.logo; });
+
+    // The brands grid caps at the top 12 feed brands (feed is pre-ordered by
+    // product_count); the long tail stays reachable via "View All Brands".
+    const BRANDS_MEGA_LIMIT = 12;
+
+    async function hydrateFromSiteNav() {
+        try {
+            const res = await API.getSiteNav();
+            const data = res?.data;
+
+            if (Array.isArray(data?.brands) && data.brands.length) {
+                renderBrands(data.brands.slice(0, BRANDS_MEGA_LIMIT).map(b => ({
+                    slug: b.slug,
+                    name: b.name,
+                    // Prefer the local asset (crisper, no extra request);
+                    // feed-only brands go through the image-optimizer URL.
+                    logo: LOCAL_LOGO_BY_BRAND[b.slug]
+                        || (b.logo_path ? storageUrl(b.logo_path) : null),
+                    categories: CATEGORY_LINKS_BY_BRAND[b.slug] || []
+                })));
+            }
+
+            if (Array.isArray(data?.categories) && data.categories.length && categoriesGrid) {
+                const links = data.categories
+                    // Only same-origin paths; and /genuine-vs-compatible is a
+                    // known-dead route (404s on both origins) — filtered until
+                    // the backend ships the page. Applies to data.links too if
+                    // those are ever rendered.
+                    .filter(c => c && c.label && typeof c.path === 'string'
+                        && c.path.startsWith('/')
+                        && c.path !== '/genuine-vs-compatible')
+                    .map(c => `<a href="${Security.escapeAttr(c.path)}" class="categories-mega__link" data-category-slug="${Security.escapeAttr(c.slug || '')}">${Security.escapeHtml(c.label)}</a>`);
+                if (links.length) categoriesGrid.innerHTML = links.join('\n                    ');
+            }
+        } catch (e) {
+            // fail-open: the static categories markup and hardcoded BRANDS
+            // fallback already rendered — backend nav is an enhancement.
+        }
     }
 
     // ============================================
@@ -198,6 +269,7 @@
     // ============================================
     function openBrands() {
         closeRibbons();
+        closeCategories();
         if (isMobile()) moveIntoNav(brandsPanel, brandsTrigger);
         else restoreOrigin(brandsPanel);
         brandsPanel.hidden = false;
@@ -226,6 +298,7 @@
     function openRibbons() {
         if (!ribbonsPanel || !ribbonsTrigger) return;
         closeBrands();
+        closeCategories();
         if (isMobile()) moveIntoNav(ribbonsPanel, ribbonsTrigger);
         else restoreOrigin(ribbonsPanel);
         ribbonsPanel.hidden = false;
@@ -250,6 +323,36 @@
     }
 
     // ============================================
+    // OPEN / CLOSE — Categories
+    // ============================================
+    function openCategories() {
+        if (!categoriesPanel || !categoriesTrigger) return;
+        closeBrands();
+        closeRibbons();
+        if (isMobile()) moveIntoNav(categoriesPanel, categoriesTrigger);
+        else restoreOrigin(categoriesPanel);
+        categoriesPanel.hidden = false;
+        categoriesTrigger.setAttribute('aria-expanded', 'true');
+        categoriesOpen = true;
+    }
+
+    function closeCategories() {
+        if (!categoriesPanel || !categoriesTrigger) return;
+        categoriesPanel.hidden = true;
+        categoriesTrigger.setAttribute('aria-expanded', 'false');
+        categoriesOpen = false;
+        restoreOrigin(categoriesPanel);
+    }
+
+    function toggleCategories() {
+        if (categoriesOpen) {
+            closeCategories();
+        } else {
+            openCategories();
+        }
+    }
+
+    // ============================================
     // EVENT LISTENERS
     // ============================================
 
@@ -267,6 +370,14 @@
         });
     }
 
+    // Toggle categories panel
+    if (categoriesTrigger) {
+        categoriesTrigger.addEventListener('click', (e) => {
+            e.stopPropagation();
+            toggleCategories();
+        });
+    }
+
     // Close on click outside
     document.addEventListener('click', (e) => {
         if (brandsOpen && !brandsPanel.contains(e.target) && !brandsTrigger.contains(e.target)) {
@@ -274,6 +385,9 @@
         }
         if (ribbonsOpen && ribbonsPanel && ribbonsTrigger && !ribbonsPanel.contains(e.target) && !ribbonsTrigger.contains(e.target)) {
             closeRibbons();
+        }
+        if (categoriesOpen && categoriesPanel && categoriesTrigger && !categoriesPanel.contains(e.target) && !categoriesTrigger.contains(e.target)) {
+            closeCategories();
         }
     });
 
@@ -287,6 +401,10 @@
             if (ribbonsOpen && ribbonsTrigger) {
                 closeRibbons();
                 ribbonsTrigger.focus();
+            }
+            if (categoriesOpen && categoriesTrigger) {
+                closeCategories();
+                categoriesTrigger.focus();
             }
         }
     });
@@ -302,6 +420,10 @@
             if (isMobile()) moveIntoNav(ribbonsPanel, ribbonsTrigger);
             else restoreOrigin(ribbonsPanel);
         }
+        if (categoriesOpen && categoriesPanel && categoriesTrigger) {
+            if (isMobile()) moveIntoNav(categoriesPanel, categoriesTrigger);
+            else restoreOrigin(categoriesPanel);
+        }
     });
 
     // ============================================
@@ -309,5 +431,6 @@
     // ============================================
     renderBrands();
     loadAndRenderRibbons();
+    hydrateFromSiteNav();
 
 })();

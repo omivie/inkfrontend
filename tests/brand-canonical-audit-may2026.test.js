@@ -304,8 +304,10 @@ test('shop-page.js parseURLState seeds category from /ink-cartridges path (item 
         'parseURLState must detect /ink-cartridges in pathname and seed category=ink');
     assert.match(SHOP_JS, /\?\s*['"]toner['"]\s*\n?\s*:\s*null/,
         'parseURLState must detect /toner-cartridges in pathname and seed category=toner');
-    assert.match(SHOP_JS, /this\.state\.category\s*=\s*params\.get\(\s*['"]category['"]\s*\)\s*\|\|\s*pathCategory/,
-        '?category= query param must win over pathname (so /shop?category=ink still works)');
+    // IA reorg Jul 2026: the raw ?category= param is canonicalized then mapped
+    // to the internal tab id before it wins over the pathname seed.
+    assert.match(SHOP_JS, /this\.state\.category\s*=\s*_canonCategory\s*\n?\s*\?\s*\(this\.CATEGORY_INTERNAL_BY_CANONICAL\[_canonCategory\]\s*\|\|\s*_canonCategory\)\s*\n?\s*:\s*pathCategory/,
+        '?category= query param (canonicalized) must win over pathname (so /shop?category=ink still works)');
 });
 
 test('shop-page.js updateURL emits /ink-cartridges for category-only state (item 5)', () => {

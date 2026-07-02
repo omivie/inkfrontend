@@ -1477,6 +1477,34 @@ const SeriesCodes = (function () {
 
 if (typeof window !== 'undefined') window.SeriesCodes = SeriesCodes;
 
+// ---------------------------------------------------------------------------
+// Category slug canonicalization (IA reorg, Jul 2026)
+//
+// The backend's canonical category slugs are: ink, toner, ribbon, drums,
+// label, paper (its CATEGORY_TAXONOMY), and its redirect layer 301-normalizes
+// everything else. This helper is the FE mirror used at every URL boundary
+// (mega-nav links, shop-page URL state, PDP breadcrumbs) so the storefront
+// never emits a non-canonical slug.
+//
+// Returns the canonical slug, or null when the input has no canonical
+// equivalent ('cartridge', unknowns) — callers strip the param in that case.
+function canonicalizeCategory(raw) {
+    if (raw === null || raw === undefined) return null;
+    const v = String(raw).trim().toLowerCase();
+    const CANONICAL = ['ink', 'toner', 'ribbon', 'drums', 'label', 'paper'];
+    if (CANONICAL.includes(v)) return v;
+    const ALIASES = {
+        consumable: 'drums',     // legacy FE mega-nav param
+        drum: 'drums',           // PDP info.category (singular)
+        label_tape: 'label',     // legacy FE mega-nav param
+        ribbons: 'ribbon',
+        'ink-cartridges': 'ink'
+    };
+    if (Object.prototype.hasOwnProperty.call(ALIASES, v)) return ALIASES[v];
+    return null;
+}
+if (typeof window !== 'undefined') window.canonicalizeCategory = canonicalizeCategory;
+
 // Export for module use (if needed in future)
 if (typeof module !== 'undefined' && module.exports) {
     module.exports = {
@@ -1488,6 +1516,7 @@ if (typeof module !== 'undefined' && module.exports) {
         buildPrinterUrl,
         ProductColors,
         ProductSort,
-        SeriesCodes
+        SeriesCodes,
+        canonicalizeCategory
     };
 }

@@ -390,11 +390,15 @@
                                  info.category === 'toner' ? 'Toner Cartridges' :
                                  info.category === 'drum' ? 'Drums' : 'Ink Cartridges';
             const brandSlug = info.brandName.toLowerCase().replace(/\s+/g, '-');
+            // Emit the backend's canonical category slug in breadcrumb links
+            // (IA reorg Jul 2026): the product payload's `category` can be the
+            // singular 'drum', which the /shop redirect layer would strip.
+            const canonCategory = (typeof canonicalizeCategory === 'function' && canonicalizeCategory(info.category)) || info.category;
             if (isRibbon) {
                 document.getElementById('breadcrumb-category').innerHTML = `<a href="/ribbons">${Security.escapeHtml(categoryName)}</a>`;
                 document.getElementById('breadcrumb-brand').innerHTML = `<a href="/ribbons?printer_brand=${Security.escapeAttr(info.brandName.toLowerCase())}">${Security.escapeHtml(info.brandName)}</a>`;
             } else {
-                document.getElementById('breadcrumb-category').innerHTML = `<a href="/shop?brand=${Security.escapeAttr(brandSlug)}&category=${Security.escapeAttr(info.category)}">${Security.escapeHtml(categoryName)}</a>`;
+                document.getElementById('breadcrumb-category').innerHTML = `<a href="/shop?brand=${Security.escapeAttr(brandSlug)}&category=${Security.escapeAttr(canonCategory)}">${Security.escapeHtml(categoryName)}</a>`;
                 document.getElementById('breadcrumb-brand').innerHTML = `<a href="/shop?brand=${Security.escapeAttr(brandSlug)}">${Security.escapeHtml(info.brandName)}</a>`;
             }
 
@@ -403,7 +407,7 @@
                 const productCode = this.extractProductCode(info);
                 const breadcrumbCode = document.getElementById('breadcrumb-code');
                 if (productCode && breadcrumbCode) {
-                    breadcrumbCode.innerHTML = `<a href="/shop?brand=${Security.escapeAttr(brandSlug)}&category=${Security.escapeAttr(info.category)}&code=${Security.escapeAttr(productCode)}">${Security.escapeHtml(productCode)}</a>`;
+                    breadcrumbCode.innerHTML = `<a href="/shop?brand=${Security.escapeAttr(brandSlug)}&category=${Security.escapeAttr(canonCategory)}&code=${Security.escapeAttr(productCode)}">${Security.escapeHtml(productCode)}</a>`;
                     breadcrumbCode.hidden = false;
                 }
             }
@@ -444,6 +448,11 @@
             // these fields, so we fall back to the locked copy from the spec
             // rather than rendering a blank row.
             this.renderBuyBoxDeliveryAndReturns(info);
+
+            // Value-pack upsell from the backend's pack_suggestion field
+            // (IA reorg Jul 2026). Fail-soft: stays hidden unless the payload
+            // carries a complete, sane suggestion.
+            this.renderPackSuggestion(info);
 
             // Compare price & savings — prefer backend-derived original_price/discount_percent;
             // fall back to local compare_price math for legacy responses.
@@ -737,6 +746,52 @@
                     + ` <span class="buy-box__sep" aria-hidden="true">·</span> `
                     + `<a class="buy-box__returns-link" href="${Security.escapeAttr(rUrl)}">Policy <span aria-hidden="true">›</span></a>`;
             }
+        },
+
+        /**
+         * Value-pack upsell (IA reorg Jul 2026). The backend's product payload
+         * carries `pack_suggestion` — the multipack of the SKU being viewed —
+         * with sku/slug/name/retail_price/image_url/individual_total/
+         * savings_amount(/savings_percent). Fail-soft: the #pack-upsell
+         * container ships hidden and stays hidden unless the suggestion is
+         * complete and sane. Savings render as DOLLARS ONLY — packs never show
+         * a percent (value-pack convention, May 2026).
+         */
+        renderPackSuggestion(info) {
+            const el = document.getElementById('pack-upsell');
+            if (!el) return;
+            const ps = info && info.pack_suggestion;
+            const price = ps ? parseFloat(ps.retail_price) : NaN;
+            const savings = ps ? parseFloat(ps.savings_amount) : NaN;
+            if (!ps || typeof ps !== 'object' || !ps.sku || !ps.slug
+                || !Number.isFinite(price) || price <= 0
+                || !Number.isFinite(savings) || savings <= 0) {
+                el.hidden = true;
+                return;
+            }
+            const href = `/products/${encodeURIComponent(ps.slug)}/${encodeURIComponent(ps.sku)}`;
+            const individualTotal = parseFloat(ps.individual_total);
+            const compareHtml = (Number.isFinite(individualTotal) && individualTotal > price)
+                ? ` <s class="pack-upsell__compare">${Security.escapeHtml(formatPrice(individualTotal))}</s>`
+                : '';
+            const imgSrc = ps.image_url
+                ? Security.sanitizeUrl(typeof storageUrl === 'function' ? storageUrl(ps.image_url) : ps.image_url)
+                : null;
+            const imgHtml = imgSrc && imgSrc !== '#'
+                ? `<img class="pack-upsell__thumb" src="${Security.escapeAttr(imgSrc)}" alt="" loading="lazy">`
+                : '';
+            el.innerHTML =
+                `<div class="pack-upsell__eyebrow">Buying more than one?</div>`
+                + `<a href="${Security.escapeAttr(href)}" class="pack-upsell__body" data-track="cta_click" data-track-cta="pack_upsell" data-track-location="product_page">`
+                +     imgHtml
+                +     `<span class="pack-upsell__copy">`
+                +         `<span class="pack-upsell__name">${Security.escapeHtml(ps.name || ps.sku)}</span>`
+                +         `<span class="pack-upsell__price">${Security.escapeHtml(formatPrice(price))}${compareHtml}</span>`
+                +         `<span class="pack-upsell__savings">Save ${Security.escapeHtml(formatPrice(savings))} vs buying singles</span>`
+                +     `</span>`
+                +     `<span class="pack-upsell__arrow" aria-hidden="true">›</span>`
+                + `</a>`;
+            el.hidden = false;
         },
 
         /**

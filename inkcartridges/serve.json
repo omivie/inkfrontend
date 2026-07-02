@@ -5,6 +5,8 @@
     { "source": "product/**", "destination": "/html/product/index.html" },
     { "source": "p/**", "destination": "/html/product/index.html" },
     { "source": "shop", "destination": "/html/shop.html" },
+    { "source": "ink-cartridges", "destination": "/html/shop.html" },
+    { "source": "toner-cartridges", "destination": "/html/shop.html" },
     { "source": "search", "destination": "/html/shop.html" },
     { "source": "cart", "destination": "/html/cart.html" },
     { "source": "checkout", "destination": "/html/checkout.html" },

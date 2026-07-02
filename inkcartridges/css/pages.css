@@ -3405,6 +3405,92 @@
     padding: var(--spacing-2xl, 3rem) 0;
 }
 
+/* Value-pack upsell card on the PDP buy column (IA reorg Jul 2026).
+   Ships hidden; product-detail-page.js renderPackSuggestion() fills and
+   reveals it only when the backend sends a complete pack_suggestion. */
+.pack-upsell {
+    margin-top: var(--spacing-lg);
+    border: 1.5px solid var(--color-border);
+    border-left: 4px solid var(--cyan-primary);
+    border-radius: var(--radius-md);
+    background: var(--color-background-alt);
+    padding: var(--spacing-md);
+}
+
+.pack-upsell[hidden] {
+    display: none;
+}
+
+.pack-upsell__eyebrow {
+    font-size: var(--font-size-xs, 0.75rem);
+    font-weight: var(--font-weight-semibold, 600);
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--steel-500, var(--color-text-light));
+    margin-bottom: var(--spacing-xs);
+}
+
+.pack-upsell__body {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-md);
+    text-decoration: none;
+    color: inherit;
+}
+
+.pack-upsell__body:hover .pack-upsell__name {
+    color: var(--cyan-primary);
+    text-decoration: underline;
+}
+
+.pack-upsell__thumb {
+    width: 56px;
+    height: 56px;
+    object-fit: contain;
+    background: #fff;
+    border-radius: var(--radius-sm);
+    flex-shrink: 0;
+}
+
+.pack-upsell__copy {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+}
+
+.pack-upsell__name {
+    font-size: var(--font-size-sm);
+    font-weight: var(--font-weight-semibold, 600);
+    color: var(--color-text-heading);
+}
+
+.pack-upsell__price {
+    font-size: var(--font-size-md, 1rem);
+    font-weight: var(--font-weight-bold, 700);
+    color: var(--color-text-heading);
+}
+
+.pack-upsell__compare {
+    font-size: var(--font-size-sm);
+    font-weight: var(--font-weight-normal, 400);
+    color: var(--color-text-light);
+    margin-left: var(--spacing-xs);
+}
+
+.pack-upsell__savings {
+    font-size: var(--font-size-sm);
+    font-weight: var(--font-weight-semibold, 600);
+    color: var(--green-600, #15803d);
+}
+
+.pack-upsell__arrow {
+    margin-left: auto;
+    font-size: 1.5rem;
+    color: var(--color-text-light);
+    flex-shrink: 0;
+}
+
 .bought-together__title {
     font-size: var(--font-size-xl, 1.25rem);
     font-weight: var(--font-weight-semibold, 600);

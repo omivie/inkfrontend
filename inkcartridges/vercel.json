@@ -51,6 +51,9 @@
     { "source": "/brands/:slug", "destination": "/shop?brand=:slug", "permanent": true },
     { "source": "/html/:path*", "destination": "/:path*", "permanent": true },
 
+    { "source": "/ink", "destination": "/ink-cartridges", "permanent": true },
+    { "source": "/toner", "destination": "/toner-cartridges", "permanent": true },
+
     { "source": "/panasonic-kxr190-191-193-194-195-196-200-210-250-300-typewriter-ribbon-lift-off-tape", "destination": "/ribbons", "permanent": true },
     { "source": "/brother-typewriter-model-listing-for-ribbons", "destination": "/ribbons", "permanent": true },
     { "source": "/typewriter-ribbons-and-cassettes", "destination": "/ribbons", "permanent": true },

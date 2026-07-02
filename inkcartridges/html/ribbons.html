@@ -121,6 +121,12 @@
                     <li class="nav-menu__item">
                         <a href="/shop" class="nav-menu__link" data-nav-match="/shop,/search,/product,/products">Shop</a>
                     </li>
+                    <li class="nav-menu__item nav-menu__item--mega">
+                        <button class="nav-menu__link nav-categories-toggle" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="categories-mega" data-nav-match="/ink-cartridges,/toner-cartridges">
+                            Shop by Category
+                            <svg class="nav-menu__arrow" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+                        </button>
+                    </li>
                     <li class="nav-menu__item">
                         <a href="/?scroll=ink-finder" class="nav-menu__link">Printer Models</a>
                     </li>
@@ -147,6 +153,23 @@
                 </form>
             </div>
         </nav>
+
+        <div class="categories-mega" id="categories-mega" hidden role="region" aria-label="Browse categories">
+            <div class="container">
+                <div class="categories-mega__grid">
+                    <a href="/ink-cartridges" class="categories-mega__link" data-category-slug="ink">Ink Cartridges</a>
+                    <a href="/toner-cartridges" class="categories-mega__link" data-category-slug="toner">Toner Cartridges</a>
+                    <a href="/ribbons" class="categories-mega__link" data-category-slug="ribbon">Ribbons</a>
+                    <a href="/shop?category=drums" class="categories-mega__link" data-category-slug="drums">Drums &amp; Supplies</a>
+                    <a href="/shop?category=label" class="categories-mega__link" data-category-slug="label">Label Tape</a>
+                    <a href="/shop?category=paper" class="categories-mega__link" data-category-slug="paper">Photo Paper</a>
+                </div>
+                <a href="/shop" class="categories-mega__view-all">
+                    Shop All
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
+                </a>
+            </div>
+        </div>
 
         <div class="brands-mega" id="brands-mega" hidden role="region" aria-label="Browse brands">
             <div class="container">
@@ -262,10 +285,10 @@
     <script defer src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.98.0" integrity="sha384-Sm2s7OXxsAMTyJ4iIyRBgVpeGUvMPk2lRQnnZhE78Wej7oggIoolKt+SCt0XJbUB" crossorigin="anonymous"></script>
     <script defer src="/js/config.js?v=d58abcf9"></script>
     <script defer src="/js/security.js?v=08acac61"></script>
-    <script defer src="/js/api.js?v=product-codes-may2026"></script>
+    <script defer src="/js/api.js?v=ia-reorg-jul2026"></script>
     <script defer src="/js/seo-meta.js?v=seo-meta-rewrite-may2026"></script>
     <script defer src="/js/schema.js?v=1"></script>
-    <script defer src="/js/utils.js?v=search-grouping-jun2026"></script>
+    <script defer src="/js/utils.js?v=ia-reorg-jul2026"></script>
     <script defer src="/js/auth.js?v=42a58e72"></script>
     <script defer src="/js/cart.js?v=err-extract-may2026"></script>
     <script defer src="/js/favourites.js?v=34e40b9a"></script>
@@ -273,7 +296,7 @@
     <script defer src="/js/search.js?v=085298ce"></script>
     <script defer src="/js/main.js?v=mobile-parity-may2026"></script>
     <script defer src="/js/footer.js?v=newsletter-copy-fix-jun2026"></script>
-    <script defer src="/js/mega-nav.js?v=2d5bc155"></script>
+    <script defer src="/js/mega-nav.js?v=ia-reorg-jul2026"></script>
     <script defer src="/js/modern-effects.js?v=ad8bff1e"></script>
     <script defer src="/js/analytics.js?v=8c9ee196"></script>
     <script defer src="/js/site-guard.js?v=2e596146"></script>

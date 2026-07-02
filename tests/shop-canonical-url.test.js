@@ -61,8 +61,11 @@ test('shop-page.js lowercases brand/category/printer_slug in canonical', () => {
         'shop-page.js must define an lc() lowercaser for canonical params');
     assert.match(SHOP_JS, /params\.set\(\s*['"]brand['"]\s*,\s*lc\(brand\)\s*\)/,
         'canonical brand param must be lowercased');
-    assert.match(SHOP_JS, /params\.set\(\s*['"]category['"]\s*,\s*lc\(category\)\s*\)/,
-        'canonical category param must be lowercased');
+    // IA reorg Jul 2026: the canonical category is translated from the
+    // internal tab id to the backend's canonical slug (consumable→drums etc.)
+    // before being lowercased.
+    assert.match(SHOP_JS, /params\.set\(\s*['"]category['"]\s*,\s*lc\(this\.CATEGORY_CANONICAL_BY_INTERNAL\[category\]\s*\|\|\s*category\)\s*\)/,
+        'canonical category param must be canonicalized then lowercased');
     assert.match(SHOP_JS, /params\.set\(\s*['"]printer_slug['"]\s*,\s*lc\(this\.state\.printer\)\s*\)/,
         'canonical printer_slug must be lowercased');
 });
@@ -84,11 +87,18 @@ test('shop-page.js preserves user search query "q" verbatim in canonical', () =>
 });
 
 test('shop-page.js canonical at brands level (no filters) is the bare /shop', () => {
-    // The default branch of the switch — when no brand/category/code/printer/q
-    // is set — must emit just /shop without any query string. Otherwise the
-    // landing page competes with itself across query orderings.
-    assert.match(SHOP_JS, /canonical\s*=\s*`\$\{BASE\}\/shop`/,
-        'brands-level (default) canonical must be the bare BASE/shop URL');
+    // When no brand/category/code/printer/q is set the params builder yields
+    // an empty query string, so the canonical is the bare /shop. The switch
+    // default must NOT overwrite the computed canonical any more — that
+    // hardcoded `${BASE}/shop` stomped the category-only landings
+    // (/ink-cartridges, /shop?category=drums), which also run at the brands
+    // level via the S0.3 brand picker (IA reorg Jul 2026).
+    assert.match(SHOP_JS, /canonical\s*=\s*`\$\{BASE\}\/shop\$\{qs\}`/,
+        'canonical must come from the single params builder');
+    const defaultBranch = SHOP_JS.match(/default: \/\/ brands level([\s\S]*?)\n {12}\}/);
+    assert.ok(defaultBranch, 'updateSEO switch must keep the brands-level default branch');
+    assert.doesNotMatch(defaultBranch[1], /canonical\s*=/,
+        'brands-level default must not overwrite the computed canonical');
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -169,11 +169,11 @@ const SeoMeta = {
     /**
      * Map a location to the prerender endpoint a bot would be served. MUST match
      * inkcartridges/middleware.js (the routing real crawlers hit) — including the
-     * printer brand/slug shape and the fact that the brand prerender is
-     * category-agnostic (middleware does NOT forward ?category). Returns null for
-     * any surface that has no prerender (search / code / deep filters /
-     * category-only /shop) so reconcile() is a no-op and the page's own copy
-     * stands.
+     * printer brand/slug shape, the fact that the brand prerender is
+     * category-agnostic (middleware does NOT forward ?category), and the
+     * sole-filter category routing added by the IA reorg (Jul 2026). Returns
+     * null for any surface that has no prerender (search / code / deep
+     * filters) so reconcile() is a no-op and the page's own copy stands.
      */
     prerenderPathForLocation(loc) {
         const path = (loc && loc.pathname) || '/';
@@ -185,18 +185,29 @@ const SeoMeta = {
         if (path === '/shop' || path === '/shop/') {
             const brand = params.get('brand');
             const printer = params.get('printer_slug') || params.get('printer');
-            // Mirror middleware EXACTLY: it routes /shop to a prerender ONLY when
-            // a brand is present (printer, the narrower intent, wins when both
-            // are). Bare /shop, category-only, search, code-filtered and
-            // bare-printer URLs are all left to the SPA shell (ai-search
-            // readiness §4) — there is no prerender to reconcile against, so the
-            // crawler's SPA-shell render and the human's render run the same
-            // code and already match. `code`/`category` do NOT change the
-            // routing: a brand hit always yields the brand prerender.
+            // Mirror middleware EXACTLY: brand present → brand prerender
+            // (printer, the narrower intent, wins when both are). Since the IA
+            // reorg (Jul 2026) a canonical category as the SOLE filter also
+            // routes to its category prerender — Drums/Label/Paper have no
+            // dedicated landing route, so /shop?category=<slug> IS their
+            // landing and the backend ships prerenders for all six slugs. The
+            // excluded-param list below must stay byte-identical to
+            // middleware.js (SPA/bot parity — pinned by
+            // tests/ia-reorg-jul2026.test.js). Bare /shop, search, code and
+            // bare-printer URLs stay on the SPA shell: no prerender to
+            // reconcile against, so crawler and human render the same code.
             if (brand && printer) {
                 return `/api/prerender/printer/${encodeURIComponent(brand)}/${encodeURIComponent(printer)}`;
             }
             if (brand) return `/api/prerender/brand/${encodeURIComponent(brand)}`;
+            const cat = params.get('category');
+            const CANON = ['ink', 'toner', 'ribbon', 'drums', 'label', 'paper'];
+            if (cat && CANON.includes(cat)
+                && !params.get('code') && !params.get('q')
+                && !params.get('search') && !params.get('type')
+                && !params.get('printer_model')) {
+                return `/api/prerender/category/${cat}`;
+            }
             return null;
         }
         return null;
@@ -215,10 +226,21 @@ const SeoMeta = {
             const printer = params.get('printer_slug') || params.get('printer');
             if (brand && printer) return 'printer';
             if (brand) return 'brand';
+            // Sole-filter canonical category → its category surface (IA reorg
+            // Jul 2026; same condition as prerenderPathForLocation). `ribbon`
+            // maps onto the existing `category-ribbons` surface name.
+            const cat = params.get('category');
+            const CANON = ['ink', 'toner', 'ribbon', 'drums', 'label', 'paper'];
+            if (cat && CANON.includes(cat)
+                && !params.get('code') && !params.get('q')
+                && !params.get('search') && !params.get('type')
+                && !params.get('printer_model')) {
+                return `category-${cat === 'ribbon' ? 'ribbons' : cat}`;
+            }
             // Truly-bare /shop gets the new shop-landing builder copy (there is
             // no bot prerender for it, so this is what both the SPA-shell crawl
-            // and the human see). Any other param shape (category-only, search,
-            // code) keeps the page's own, more specific copy.
+            // and the human see). Any other param shape (search, code) keeps
+            // the page's own, more specific copy.
             if (Array.from(params.keys()).length === 0) return 'shop-landing';
             return null;
         }
@@ -412,6 +434,9 @@ const SeoMeta = {
             case 'category-ink':     return this._buildCategory(ctx, 'Ink Cartridges NZ', 'ink cartridges');
             case 'category-toner':   return this._buildCategory(ctx, 'Toner Cartridges NZ', 'toner cartridges');
             case 'category-ribbons': return this._buildCategory(ctx, 'Printer Ribbons NZ', 'printer ribbons');
+            case 'category-drums':   return this._buildCategory(ctx, 'Printer Drums & Supplies NZ', 'drum units & supplies');
+            case 'category-label':   return this._buildCategory(ctx, 'Label Tape NZ', 'label tapes');
+            case 'category-paper':   return this._buildCategory(ctx, 'Photo Paper NZ', 'photo paper');
             case 'brand':            return this._buildBrand(ctx);
             case 'printer':          return this._buildPrinter(ctx);
             default:                 return null;
