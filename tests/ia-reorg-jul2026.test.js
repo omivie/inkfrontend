@@ -186,6 +186,16 @@ test('§4 mega-nav hydrates from the feed inside try/catch (fail-open)', () => {
     assert.match(MEGA_NAV_JS, /hydrateFromSiteNav\(\);/, 'hydration must run at init');
 });
 
+test('§4 brands mega renders curated brands only (owner decision, 2026-07-02)', () => {
+    // Feed-only tail brands (Universal, Citizen, Star, IBM, …) have no local
+    // logo or category deep links and rendered as bare text cards — the
+    // hydration must filter to the curated BRANDS set before slicing.
+    assert.match(MEGA_NAV_JS, /\.filter\(b => b && LOCAL_LOGO_BY_BRAND\[b\.slug\]\)/,
+        'hydrated brands must be filtered to the curated set');
+    assert.ok(!stripComments(MEGA_NAV_JS).includes('storageUrl(b.logo_path)'),
+        'feed logo_path rendering was removed with the feed-only brands');
+});
+
 // ─────────────────────────────────────────────────────────────────────────────
 // §5 — NO footer Categories column (owner decision, 2026-07-02)
 //

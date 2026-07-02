@@ -180,8 +180,12 @@
     const LOCAL_LOGO_BY_BRAND = {};
     BRANDS.forEach(b => { LOCAL_LOGO_BY_BRAND[b.slug] = b.logo; });
 
-    // The brands grid caps at the top 12 feed brands (feed is pre-ordered by
-    // product_count); the long tail stays reachable via "View All Brands".
+    // The mega renders ONLY the curated brands (the ones in BRANDS, with a
+    // local logo + category deep links) — feed-only tail brands (Universal,
+    // Citizen, Star, IBM, …) rendered as bare text cards and were removed at
+    // the owner's request (2026-07-02). The feed still drives ORDER (it's
+    // pre-sorted by product_count) and drops curated brands that vanish from
+    // the catalog; the long tail stays reachable via "View All Brands".
     const BRANDS_MEGA_LIMIT = 12;
 
     async function hydrateFromSiteNav() {
@@ -190,15 +194,16 @@
             const data = res?.data;
 
             if (Array.isArray(data?.brands) && data.brands.length) {
-                renderBrands(data.brands.slice(0, BRANDS_MEGA_LIMIT).map(b => ({
-                    slug: b.slug,
-                    name: b.name,
-                    // Prefer the local asset (crisper, no extra request);
-                    // feed-only brands go through the image-optimizer URL.
-                    logo: LOCAL_LOGO_BY_BRAND[b.slug]
-                        || (b.logo_path ? storageUrl(b.logo_path) : null),
-                    categories: CATEGORY_LINKS_BY_BRAND[b.slug] || []
-                })));
+                const curated = data.brands
+                    .filter(b => b && LOCAL_LOGO_BY_BRAND[b.slug])
+                    .slice(0, BRANDS_MEGA_LIMIT)
+                    .map(b => ({
+                        slug: b.slug,
+                        name: b.name,
+                        logo: LOCAL_LOGO_BY_BRAND[b.slug],
+                        categories: CATEGORY_LINKS_BY_BRAND[b.slug] || []
+                    }));
+                if (curated.length) renderBrands(curated);
             }
 
             // (data.categories is deliberately unrendered here — the nav's
