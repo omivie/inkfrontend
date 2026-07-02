@@ -1,7 +1,7 @@
 /**
  * Admin SPA — Entry point, router, shell
  */
-const APP_VERSION = '2026.07.01-invoice-ordernum-email';
+const APP_VERSION = '2026.07.02-invoice-pdf-cleanup';
 
 import { AdminAuth } from './auth.js';
 import { FilterState } from './filters.js';

@@ -67,6 +67,26 @@ function orderDateShort(iso) {
   return `${ordinal(d)} ${MONTHS[m]}`;
 }
 
+// The "Date order placed" line always shows on the invoice. Until the operator
+// enters a date it displays a dashed placeholder with the current year pre-filled
+// (the real date — including a different year — is set via the Order date field,
+// which is required before the invoice can be saved/downloaded/emailed).
+function orderPlacedDisplay(d) {
+  if (d && d.order_date) return formatInvoiceDate(d.order_date);
+  return `—/—/${new Date().getFullYear()}`;
+}
+
+// Payment terms: due the 20th of the month AFTER the order was placed.
+// Any day in July -> "2026-08-20". '' if the order date is unparseable.
+function paymentDueDate(iso) {
+  const p = String(iso || '').split('-');
+  if (p.length !== 3) return '';
+  let y = +p[0], m = +p[1];               // m is 1..12
+  if (isNaN(y) || isNaN(m) || m < 1 || m > 12) return '';
+  m += 1; if (m > 12) { m = 1; y += 1; }  // roll Dec -> Jan next year
+  return `${y}-${String(m).padStart(2, '0')}-20`;
+}
+
 // Greeting name for the email — the person we address ("Hi Felix,"). Prefer the
 // contact (Attn), fall back to the invoice-to name, then a neutral "there".
 function firstName(d) {
@@ -127,7 +147,7 @@ function freshDraft() {
     invoice_number: '',
     status: 'unpaid',
     date: todayInputValue(),
-    order_date: todayInputValue(),
+    order_date: '',           // blank + compulsory — operator must enter the real order date
     source_order_id: null,
     seller: {
       name: L.legalEntity || 'Office Consumables Ltd',
@@ -199,7 +219,7 @@ const hasDelivery = (d) => !!(d.delivery
 // The header meta (right side of the title band): label/value pairs.
 function invoiceMeta(d) {
   const rows = [['Invoice No', d.invoice_number || '—'], ['Date', formatInvoiceDate(d.date)]];
-  if (d.order_date) rows.push(['Order date', formatInvoiceDate(d.order_date)]);
+  rows.push(['Date order placed', orderPlacedDisplay(d)]);
   if (d.seller.gst) rows.push(['GST No', d.seller.gst]);
   // NB: paid/unpaid status is deliberately NOT rendered on the customer-facing
   // invoice — it's an internal field only (see the list's Paid toggle).
@@ -608,6 +628,8 @@ function validateInvoice(d) {
     errs.push({ field: 'customer.name', msg: 'Customer name is required' });
   if (!lines(d.customer.address).length)
     errs.push({ field: 'customer.address', msg: 'Bill To address is required' });
+  if (!(d.order_date || '').trim())
+    errs.push({ field: 'order_date', msg: 'Order date is required' });
 
   const started = (d.lines || [])
     .map((l, i) => ({ l, i }))
@@ -782,8 +804,8 @@ function editorBodyHtml(d) {
         <div class="inv-grid-2">
           ${numberLine}
           ${field('Date', 'date', d.date, { type: 'date' })}
-          <label class="inv-field"><span class="inv-field__label">Order date <span class="inv-field__hint">(used in the email)</span></span>
-            <input class="admin-input" type="date" data-field="order_date" value="${escA(d.order_date)}"></label>
+          <label class="inv-field"><span class="inv-field__label">Order date * <span class="inv-field__hint">(required — sets the payment due date)</span></span>
+            <input class="admin-input" type="date" data-field="order_date" value="${escA(d.order_date)}" required></label>
           <label class="inv-field"><span class="inv-field__label">Paid status <span class="inv-field__hint">(internal — not shown to the customer)</span></span>
             <select class="admin-select" data-field="status">
               ${['unpaid', 'paid'].map((s) => `<option value="${s}"${d.status === s ? ' selected' : ''}>${STATUS_META[s].label}</option>`).join('')}
@@ -1091,6 +1113,7 @@ function renderPreview(d) {
     </table>
 
     <div class="inv-doc__pay">
+      ${paymentDueDate(d.order_date) ? `<div class="inv-doc__pay-due">Payment due by <strong>${esc(formatInvoiceDate(paymentDueDate(d.order_date)))}</strong></div>` : ''}
       <div class="inv-doc__pay-title">Please make payment to:</div>
       <table>
         <tr><td>a/c Name:</td><td><strong>${esc(d.footer.bankName)}</strong></td></tr>
@@ -1201,15 +1224,33 @@ function buildInvoiceDoc(d) {
   const rows = (d.lines || [])
     .filter((l) => l.code || l.description || num(l.qty) || num(l.unitCost))
     .map((l) => [l.code || '', l.description || '', String(num(l.qty)), money(num(l.qty) * num(l.unitCost))]);
+  // Fixed column widths keep the layout stable regardless of content length: a
+  // long product code or description wraps inside its own column instead of
+  // stealing width from the others (which used to squeeze "Description" so hard
+  // the header itself broke onto two lines). Left/right padding is zeroed on the
+  // edge columns so the code aligns under "FROM" and Cost aligns with the totals.
+  const padY = { top: 5, bottom: 5 };
   doc.autoTable({
     startY,
     head: [['Product Code', 'Description', 'Number', 'Cost']],
     body: rows.length ? rows : [['', '', '', '']],
     theme: 'plain',
-    styles: { fontSize: 11, cellPadding: 4.5 },
-    headStyles: { fontStyle: 'bold', halign: 'left' },
-    columnStyles: { 2: { halign: 'center' }, 3: { halign: 'right' } },
+    styles: { fontSize: 10.5, cellPadding: { ...padY, left: 0, right: 8 }, overflow: 'linebreak', valign: 'top', textColor: 35 },
+    headStyles: { fontStyle: 'bold', textColor: 90, fontSize: 9.5 },
+    columnStyles: {
+      0: { cellWidth: 116 },
+      1: { cellWidth: 'auto' },
+      2: { cellWidth: 52, halign: 'center', cellPadding: { ...padY, left: 6, right: 6 } },
+      3: { cellWidth: 72, halign: 'right', cellPadding: { ...padY, left: 6, right: 0 } },
+    },
     margin: { left: M, right: M },
+    // A single hairline rule under the header row (drawn per head cell so it spans
+    // the full table width) — cleaner than a boxed grid.
+    didDrawCell: (data) => {
+      if (data.section !== 'head') return;
+      doc.setDrawColor(30); doc.setLineWidth(0.8);
+      doc.line(data.cell.x, data.cell.y + data.cell.height, data.cell.x + data.cell.width, data.cell.y + data.cell.height);
+    },
   });
 
   // --- Totals (right aligned) ---
@@ -1233,6 +1274,8 @@ function buildInvoiceDoc(d) {
 
   // --- Payment block ---
   let py = ty + 24;
+  const due = paymentDueDate(d.order_date);
+  if (due) { doc.setFont('helvetica', 'bold'); doc.setFontSize(11); text(`Payment due by ${formatInvoiceDate(due)}`, M, py); py += 19; }
   doc.setFont('helvetica', 'bold'); doc.setFontSize(11);
   text('Please make payment to:', M, py); py += 19;
   doc.setFont('helvetica', 'normal');
