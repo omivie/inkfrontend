@@ -2,16 +2,18 @@
  * MEGA-NAV.JS
  * ===========
  * Mega dropdowns for the top navigation.
- * - "Shop by Category" panel: canonical category links (static markup shipped
- *   in the header for bots/no-JS; hydrated from GET /api/site/nav)
  * - "Cartridge Brands" panel: brand cards with category links (hardcoded
- *   BRANDS fallback; hydrated from the same feed, ordered by product_count)
+ *   BRANDS fallback; hydrated from GET /api/site/nav, ordered by
+ *   product_count)
  * - "Ribbons" panel: typewriter/printer ribbon brand buttons
  *
- * IA reorg Jul 2026: the nav is sourced from the backend's one taxonomy
- * (/api/site/nav) so it can never drift from what /api/shop accepts. All
+ * IA reorg Jul 2026: brands are sourced from the backend's one taxonomy
+ * (/api/site/nav) so the mega can't drift from what /api/shop accepts. All
  * category params are canonical slugs (ink, toner, ribbon, drums, label,
  * paper) — never the retired consumable/label_tape/cartridge values.
+ * (A "Shop by Category" nav mega shipped briefly on 2026-07-02 and was
+ * removed the same day at the owner's request — category links live in the
+ * footer's Categories column instead. Don't reintroduce a nav dropdown.)
  */
 
 'use strict';
@@ -34,13 +36,6 @@
     const ribbonsTrigger = document.querySelector('.nav-ribbons-toggle');
     const ribbonsPanel = document.getElementById('ribbons-mega');
     const ribbonsGrid = ribbonsPanel ? ribbonsPanel.querySelector('.ribbons-mega__grid') : null;
-
-    // ============================================
-    // DOM ELEMENTS — Categories panel
-    // ============================================
-    const categoriesTrigger = document.querySelector('.nav-categories-toggle');
-    const categoriesPanel = document.getElementById('categories-mega');
-    const categoriesGrid = categoriesPanel ? categoriesPanel.querySelector('.categories-mega__grid') : null;
 
     // ============================================
     // DATA — Ink/Toner Brands
@@ -116,7 +111,6 @@
     // ============================================
     let brandsOpen = false;
     let ribbonsOpen = false;
-    let categoriesOpen = false;
 
     // Remember each panel's original DOM location so we can restore it when
     // leaving mobile / closing. On mobile we relocate the panel inside the
@@ -148,7 +142,6 @@
     }
     rememberOrigin(brandsPanel);
     if (ribbonsPanel) rememberOrigin(ribbonsPanel);
-    if (categoriesPanel) rememberOrigin(categoriesPanel);
 
     // ============================================
     // RENDER BRAND CARDS (Ink/Toner)
@@ -208,18 +201,10 @@
                 })));
             }
 
-            if (Array.isArray(data?.categories) && data.categories.length && categoriesGrid) {
-                const links = data.categories
-                    // Only same-origin paths; and /genuine-vs-compatible is a
-                    // known-dead route (404s on both origins) — filtered until
-                    // the backend ships the page. Applies to data.links too if
-                    // those are ever rendered.
-                    .filter(c => c && c.label && typeof c.path === 'string'
-                        && c.path.startsWith('/')
-                        && c.path !== '/genuine-vs-compatible')
-                    .map(c => `<a href="${Security.escapeAttr(c.path)}" class="categories-mega__link" data-category-slug="${Security.escapeAttr(c.slug || '')}">${Security.escapeHtml(c.label)}</a>`);
-                if (links.length) categoriesGrid.innerHTML = links.join('\n                    ');
-            }
+            // (data.categories is deliberately unrendered here — the nav's
+            // "Shop by Category" mega was removed 2026-07-02; the feed's
+            // category links render in footer.js instead. If they ever come
+            // back, filter path !== '/genuine-vs-compatible' — dead route.)
         } catch (e) {
             // fail-open: the static categories markup and hardcoded BRANDS
             // fallback already rendered — backend nav is an enhancement.
@@ -269,7 +254,6 @@
     // ============================================
     function openBrands() {
         closeRibbons();
-        closeCategories();
         if (isMobile()) moveIntoNav(brandsPanel, brandsTrigger);
         else restoreOrigin(brandsPanel);
         brandsPanel.hidden = false;
@@ -298,7 +282,6 @@
     function openRibbons() {
         if (!ribbonsPanel || !ribbonsTrigger) return;
         closeBrands();
-        closeCategories();
         if (isMobile()) moveIntoNav(ribbonsPanel, ribbonsTrigger);
         else restoreOrigin(ribbonsPanel);
         ribbonsPanel.hidden = false;
@@ -323,36 +306,6 @@
     }
 
     // ============================================
-    // OPEN / CLOSE — Categories
-    // ============================================
-    function openCategories() {
-        if (!categoriesPanel || !categoriesTrigger) return;
-        closeBrands();
-        closeRibbons();
-        if (isMobile()) moveIntoNav(categoriesPanel, categoriesTrigger);
-        else restoreOrigin(categoriesPanel);
-        categoriesPanel.hidden = false;
-        categoriesTrigger.setAttribute('aria-expanded', 'true');
-        categoriesOpen = true;
-    }
-
-    function closeCategories() {
-        if (!categoriesPanel || !categoriesTrigger) return;
-        categoriesPanel.hidden = true;
-        categoriesTrigger.setAttribute('aria-expanded', 'false');
-        categoriesOpen = false;
-        restoreOrigin(categoriesPanel);
-    }
-
-    function toggleCategories() {
-        if (categoriesOpen) {
-            closeCategories();
-        } else {
-            openCategories();
-        }
-    }
-
-    // ============================================
     // EVENT LISTENERS
     // ============================================
 
@@ -370,14 +323,6 @@
         });
     }
 
-    // Toggle categories panel
-    if (categoriesTrigger) {
-        categoriesTrigger.addEventListener('click', (e) => {
-            e.stopPropagation();
-            toggleCategories();
-        });
-    }
-
     // Close on click outside
     document.addEventListener('click', (e) => {
         if (brandsOpen && !brandsPanel.contains(e.target) && !brandsTrigger.contains(e.target)) {
@@ -385,9 +330,6 @@
         }
         if (ribbonsOpen && ribbonsPanel && ribbonsTrigger && !ribbonsPanel.contains(e.target) && !ribbonsTrigger.contains(e.target)) {
             closeRibbons();
-        }
-        if (categoriesOpen && categoriesPanel && categoriesTrigger && !categoriesPanel.contains(e.target) && !categoriesTrigger.contains(e.target)) {
-            closeCategories();
         }
     });
 
@@ -402,10 +344,6 @@
                 closeRibbons();
                 ribbonsTrigger.focus();
             }
-            if (categoriesOpen && categoriesTrigger) {
-                closeCategories();
-                categoriesTrigger.focus();
-            }
         }
     });
 
@@ -419,10 +357,6 @@
         if (ribbonsOpen && ribbonsPanel && ribbonsTrigger) {
             if (isMobile()) moveIntoNav(ribbonsPanel, ribbonsTrigger);
             else restoreOrigin(ribbonsPanel);
-        }
-        if (categoriesOpen && categoriesPanel && categoriesTrigger) {
-            if (isMobile()) moveIntoNav(categoriesPanel, categoriesTrigger);
-            else restoreOrigin(categoriesPanel);
         }
     });
 

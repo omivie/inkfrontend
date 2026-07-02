@@ -87,42 +87,35 @@ const hash = (s) => crypto.createHash('sha256').update(s).digest('hex');
 const ALL_HTML = walkHtml(INK);
 
 // ─────────────────────────────────────────────────────────────────────────────
-// §1 — Shop by Category mega panel in the shared header (26 pages, one hash)
+// §1 — NO "Shop by Category" nav mega (owner decision, 2026-07-02)
+//
+// The panel shipped briefly with the IA reorg and was removed the same day at
+// the owner's request. Category discovery lives in the footer's Categories
+// column (§5) instead. This pins the removal so a future codemod doesn't
+// resurrect it, and keeps the 26 shared headers byte-identical without it.
 // ─────────────────────────────────────────────────────────────────────────────
 
 const PAGES_WITH_NAV = ALL_HTML
     .map((file) => ({ file, html: fs.readFileSync(file, 'utf8') }))
-    .filter(({ html }) => html.includes('nav-categories-toggle'));
+    .filter(({ html }) => html.includes('nav-menu__item'));
 
-test('§1 categories mega ships on all 26 full-header pages, byte-identical', () => {
+test('§1 no categories-mega anywhere; 26 shared headers stay byte-identical', () => {
+    for (const { file, html } of ALL_HTML.map((f) => ({ file: f, html: fs.readFileSync(f, 'utf8') }))) {
+        assert.ok(!html.includes('categories-mega') && !html.includes('nav-categories-toggle'),
+            `${file} must not ship the removed Shop by Category mega`);
+    }
+    assert.ok(!MEGA_NAV_JS.includes('categoriesTrigger') && !MEGA_NAV_JS.includes('openCategories'),
+        'mega-nav.js must not wire the removed categories panel');
+    assert.ok(!LAYOUT_CSS.includes('.categories-mega'),
+        'layout.css must not style the removed categories mega');
     assert.equal(PAGES_WITH_NAV.length, 26,
-        `expected 26 pages with the categories toggle, got ${PAGES_WITH_NAV.length}`);
+        `expected 26 pages with the shared nav, got ${PAGES_WITH_NAV.length}`);
     const hashes = new Set(PAGES_WITH_NAV.map(({ file, html }) => {
         const header = extractSiteHeader(html);
-        assert.ok(header, `${file} has the toggle but no site-header block`);
+        assert.ok(header, `${file} has a nav but no site-header block`);
         return hash(header);
     }));
     assert.equal(hashes.size, 1, 'header blocks diverged across pages');
-});
-
-test('§1 categories mega markup: toggle + panel + 6 canonical static links', () => {
-    const header = extractSiteHeader(PAGES_WITH_NAV[0].html);
-    assert.match(header, /class="nav-menu__link nav-categories-toggle"/);
-    assert.match(header, /aria-controls="categories-mega"/);
-    assert.match(header, /<div class="categories-mega" id="categories-mega" hidden/);
-    // Static fallback links use today's live feed paths verbatim — landing
-    // routes for ink/toner/ribbon, /shop?category= for the rest.
-    for (const href of [
-        '/ink-cartridges', '/toner-cartridges', '/ribbons',
-        '/shop?category=drums', '/shop?category=label', '/shop?category=paper',
-    ]) {
-        assert.ok(header.includes(`href="${href}" class="categories-mega__link"`),
-            `categories mega must statically link ${href}`);
-    }
-    for (const slug of ['ink', 'toner', 'ribbon', 'drums', 'label', 'paper']) {
-        assert.ok(header.includes(`data-category-slug="${slug}"`),
-            `categories mega must tag slug ${slug}`);
-    }
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -193,15 +186,14 @@ test('§4 mega-nav hydrates from the feed inside try/catch (fail-open)', () => {
     assert.match(MEGA_NAV_JS, /hydrateFromSiteNav\(\);/, 'hydration must run at init');
 });
 
-test('§4 hydrated nav content filters the dead /genuine-vs-compatible path', () => {
-    assert.match(MEGA_NAV_JS, /c\.path !== '\/genuine-vs-compatible'/);
+test('§4 footer hydration filters the dead /genuine-vs-compatible path', () => {
+    // The nav mega no longer renders feed categories (removed 2026-07-02) —
+    // the footer is the only feed-category surface and must keep the filter.
     assert.match(FOOTER_JS, /c\.path !== '\/genuine-vs-compatible'/);
 });
 
-test('§4 hydrated links are escaped and same-origin only', () => {
-    assert.match(MEGA_NAV_JS, /c\.path\.startsWith\('\/'\)/);
+test('§4 hydrated footer links are escaped and same-origin only', () => {
     assert.match(FOOTER_JS, /c\.path\.startsWith\('\/'\)/);
-    assert.match(MEGA_NAV_JS, /Security\.escapeAttr\(c\.path\)/);
     assert.match(FOOTER_JS, /Security\.escapeAttr\(c\.path\)/);
 });
 
@@ -390,15 +382,8 @@ test('§11 every non-admin html page carries hreflang en-NZ + x-default', () => 
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// §12 — categories-mega CSS + cache tokens
+// §12 — cache tokens
 // ─────────────────────────────────────────────────────────────────────────────
-
-test('§12 categories-mega styles exist with the mobile in-nav reset', () => {
-    assert.match(LAYOUT_CSS, /\.categories-mega\s*\{/);
-    assert.match(LAYOUT_CSS, /\.categories-mega\[hidden\]\s*\{\s*display:\s*none;/);
-    assert.match(LAYOUT_CSS, /\.nav-menu\.is-open > \.categories-mega\s*\{/);
-    assert.match(LAYOUT_CSS, /\.nav-menu\.is-open > \.categories-mega > \.container/);
-});
 
 test('§12 touched JS ships under the ia-reorg-jul2026 cache token', () => {
     const home = read('html', 'index.html');
