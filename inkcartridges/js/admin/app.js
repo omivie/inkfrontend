@@ -1,11 +1,11 @@
 /**
  * Admin SPA — Entry point, router, shell
  */
-const APP_VERSION = '2026.06.29-contacts-owner-gate';
+const APP_VERSION = '2026.07.01-invoice-ordernum-email';
 
 import { AdminAuth } from './auth.js';
 import { FilterState } from './filters.js';
-import { AdminAPI } from './api.js?v=invoices-paid-jun2026';
+import { AdminAPI } from './api.js?v=invoices-ordernum-jul2026';
 
 const esc = (s) => Security.escapeHtml(String(s));
 

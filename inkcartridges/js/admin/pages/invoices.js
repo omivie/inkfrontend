@@ -58,6 +58,38 @@ function formatInvoiceDate(iso) {
 const lines = (s) => String(s || '').split('\n').map((x) => x.trim()).filter(Boolean);
 const joinLines = (a) => (Array.isArray(a) ? a.filter(Boolean).join('\n') : (a || ''));
 
+// "2026-03-23" -> "23rd March" (no year) for the email sentence. '' if unparseable.
+function orderDateShort(iso) {
+  const parts = String(iso || '').split('-');
+  if (parts.length !== 3) return '';
+  const m = +parts[1] - 1, d = +parts[2];
+  if (isNaN(d) || isNaN(m) || m < 0 || m > 11) return '';
+  return `${ordinal(d)} ${MONTHS[m]}`;
+}
+
+// Greeting name for the email — the person we address ("Hi Felix,"). Prefer the
+// contact (Attn), fall back to the invoice-to name, then a neutral "there".
+function firstName(d) {
+  const src = (d.customer?.attn || '').trim() || (d.customer?.name || '').trim();
+  const first = src.split(/\s+/)[0];
+  return first || 'there';
+}
+
+// Default subject + message for the invoice email (operator can edit before send).
+function emailDefaults(d) {
+  const when = orderDateShort(d.order_date || d.date);
+  const contact = (d.seller?.contact || '').trim() || 'Trevor Walker';
+  const subject = `Your InkCartridges.co.nz invoice${d.invoice_number ? ' #' + d.invoice_number : ''}`;
+  const body = [
+    `Hi ${firstName(d)},`,
+    `Thank you for your order${when ? ' on the ' + when : ''}. Please find your invoice attached.`,
+    'Regards,',
+    contact,
+    'InkCartridges.co.nz',
+  ].join('\n');
+  return { subject, body };
+}
+
 // Internal-only states. Status is NEVER shown on the customer-facing invoice
 // (preview/PDF) — operators track paid/unpaid here; void is a records-keeping
 // state set by the Void row-action.
@@ -95,6 +127,7 @@ function freshDraft() {
     invoice_number: '',
     status: 'unpaid',
     date: todayInputValue(),
+    order_date: todayInputValue(),
     source_order_id: null,
     seller: {
       name: L.legalEntity || 'Office Consumables Ltd',
@@ -125,6 +158,7 @@ function draftFromInvoice(rec) {
   d.invoice_number = rec.invoice_number ?? '';
   d.status = rec.status ?? 'unpaid';
   d.date = (rec.issue_date || rec.date || '').slice(0, 10) || d.date;
+  d.order_date = (rec.order_date || '').slice(0, 10) || d.order_date;
   d.source_order_id = rec.source_order_id ?? null;
   if (rec.seller) d.seller = { ...d.seller, ...rec.seller, address: Array.isArray(rec.seller.address) ? rec.seller.address.join('\n') : (rec.seller.address ?? d.seller.address) };
   if (rec.customer) d.customer = { ...d.customer, ...rec.customer, address: Array.isArray(rec.customer.address) ? rec.customer.address.join('\n') : (rec.customer.address ?? '') };
@@ -165,6 +199,7 @@ const hasDelivery = (d) => !!(d.delivery
 // The header meta (right side of the title band): label/value pairs.
 function invoiceMeta(d) {
   const rows = [['Invoice No', d.invoice_number || '—'], ['Date', formatInvoiceDate(d.date)]];
+  if (d.order_date) rows.push(['Order date', formatInvoiceDate(d.order_date)]);
   if (d.seller.gst) rows.push(['GST No', d.seller.gst]);
   // NB: paid/unpaid status is deliberately NOT rendered on the customer-facing
   // invoice — it's an internal field only (see the list's Paid toggle).
@@ -206,6 +241,7 @@ function buildPayload(d) {
     invoice_number: d.invoice_number || null,   // null => backend assigns next in series
     status: d.status,
     issue_date: d.date,
+    order_date: d.order_date || null,
     source_order_id: d.source_order_id || null,
     seller: { ...d.seller, address: lines(d.seller.address) },
     customer: { ...d.customer, address: lines(d.customer.address) },
@@ -362,8 +398,10 @@ async function onRowAction(e) {
     if (rec) downloadPdf(draftFromInvoice(rec));
     else Toast.error('Could not load invoice to download.');
   } else if (action === 'email') {
-    try { await AdminAPI.emailInvoice(id); Toast.success('Invoice emailed to customer.'); }
-    catch (err) { Toast.error(err.message || 'Email failed (backend pending).'); }
+    // Pull the full record so the composer can prefill the customer name + order date.
+    const rec = await AdminAPI.getInvoice(id);
+    if (rec) openEmailDialog(draftFromInvoice(rec));
+    else Toast.error('Could not load invoice to email.');
   } else if (action === 'void') {
     Modal.confirm({
       title: 'Void this invoice?',
@@ -424,6 +462,20 @@ function openEditor(draft) {
 
   drawer.footer.addEventListener('click', onEditorFooterClick);
   bindEditorBody(drawer);
+
+  // Suggest the next number for a brand-new invoice — auto-filled but editable.
+  // Best-effort: if the lookup fails or the operator already typed one, leave it.
+  if (!draft.id && !draft.invoice_number) prefillNextNumber(token);
+}
+
+async function prefillNextNumber(token) {
+  const next = await AdminAPI.nextInvoiceNumber();
+  if (next == null || !editorAlive(token)) return;
+  if (_draft.invoice_number) return;   // operator typed one while we were fetching
+  _draft.invoice_number = String(next);
+  const input = _editorRefs?.drawer.body.querySelector('[data-field="invoice_number"]');
+  if (input) input.value = _draft.invoice_number;
+  refreshPreview();   // preview header shows the suggested number
 }
 
 function bindEditorBody(drawer) {
@@ -490,10 +542,58 @@ async function onEditorFooterClick(e) {
   if (act === 'download') { downloadPdf(_draft); return; }
   if (act === 'save') { await saveInvoice(); return; }
   if (act === 'email') {
-    if (!_draft.id) { Toast.warning('Save the invoice before emailing it.'); return; }
-    try { await AdminAPI.emailInvoice(_draft.id); Toast.success('Invoice emailed to customer.'); }
-    catch (err) { Toast.error(err.message || 'Email failed (backend pending).'); }
+    // Need a saved invoice (id + assigned number) before we can email its PDF.
+    if (!_draft.id) {
+      if (!ensureInvoiceValid()) return;
+      const btn = e.target.closest('[data-ed-action="email"]');
+      if (btn) btn.disabled = true;
+      try { await persistDraft(); rebuildEditor(); loadData(); }
+      catch (err) { Toast.error(err.message || 'Save the invoice before emailing it.'); return; }
+      finally { if (btn) btn.disabled = false; }
+      if (!_draft.id) return;   // save didn't produce an id
+    }
+    openEmailDialog(_draft);
   }
+}
+
+// Editable email composer — prefilled to match the exemplar; the operator can
+// tweak the subject/message before it goes out. Sends { subject, body } to the
+// backend, which attaches the stored invoice PDF.
+function openEmailDialog(d) {
+  const { subject, body } = emailDefaults(d);
+  const modal = Modal.open({
+    title: `Email invoice ${d.invoice_number || ''}`.trim(),
+    className: 'admin-modal--invoice-email',
+    body: `
+      <label class="inv-field"><span class="inv-field__label">To</span>
+        <input class="admin-input" id="inv-email-to" type="email" value="${escA(d.customer?.email || '')}" placeholder="customer@example.com"></label>
+      <label class="inv-field" style="margin-top:12px"><span class="inv-field__label">Subject</span>
+        <input class="admin-input" id="inv-email-subject" type="text" value="${escA(subject)}"></label>
+      <label class="inv-field" style="margin-top:12px"><span class="inv-field__label">Message</span>
+        <textarea class="admin-input inv-textarea" id="inv-email-body" rows="7">${esc(body)}</textarea></label>
+      <p class="inv-field__hint" style="margin:8px 0 0">The invoice PDF is attached automatically.</p>`,
+    footer: `
+      <button class="admin-btn admin-btn--ghost" data-action="cancel">Cancel</button>
+      <button class="admin-btn admin-btn--primary" data-action="send">${icon('mail', 14, 14)} Send email</button>`,
+  });
+  if (!modal) return;
+  modal.footer.querySelector('[data-action="cancel"]').addEventListener('click', () => Modal.close());
+  modal.footer.querySelector('[data-action="send"]').addEventListener('click', async () => {
+    const to = modal.body.querySelector('#inv-email-to').value.trim();
+    const subj = modal.body.querySelector('#inv-email-subject').value.trim();
+    const msg = modal.body.querySelector('#inv-email-body').value;
+    if (!to) { Toast.warning('Enter a recipient email address.'); return; }
+    const sendBtn = modal.footer.querySelector('[data-action="send"]');
+    sendBtn.disabled = true;
+    try {
+      await AdminAPI.emailInvoice(d.id, { to, subject: subj, body: msg });
+      Toast.success('Invoice emailed to customer.');
+      Modal.close();
+    } catch (err) {
+      Toast.error(err.message || 'Email failed (backend pending).');
+      sendBtn.disabled = false;
+    }
+  });
 }
 
 // Required-field validation. Returns an array of error targets (empty = valid):
@@ -657,9 +757,8 @@ function fillChipHtml() {
 }
 
 function editorBodyHtml(d) {
-  const numberLine = d.id || d.invoice_number
-    ? `<div class="inv-field"><span class="inv-field__label">Invoice No</span><div class="inv-readonly">${esc(d.invoice_number || '—')}</div></div>`
-    : `<div class="inv-field"><span class="inv-field__label">Invoice No</span><div class="inv-readonly inv-readonly--muted">Auto — assigned on save</div></div>`;
+  const numberLine = `<label class="inv-field"><span class="inv-field__label">Invoice No <span class="inv-field__hint">(auto-filled — edit to override)</span></span>`
+    + `<input class="admin-input" type="text" inputmode="numeric" data-field="invoice_number" value="${escA(d.invoice_number)}" placeholder="Auto"></label>`;
 
   return `
   <div class="invoice-editor">
@@ -680,9 +779,11 @@ function editorBodyHtml(d) {
 
       <section class="inv-section">
         <div class="inv-section__title">Invoice details</div>
-        <div class="inv-grid-3">
+        <div class="inv-grid-2">
           ${numberLine}
           ${field('Date', 'date', d.date, { type: 'date' })}
+          <label class="inv-field"><span class="inv-field__label">Order date <span class="inv-field__hint">(used in the email)</span></span>
+            <input class="admin-input" type="date" data-field="order_date" value="${escA(d.order_date)}"></label>
           <label class="inv-field"><span class="inv-field__label">Paid status <span class="inv-field__hint">(internal — not shown to the customer)</span></span>
             <select class="admin-select" data-field="status">
               ${['unpaid', 'paid'].map((s) => `<option value="${s}"${d.status === s ? ' selected' : ''}>${STATUS_META[s].label}</option>`).join('')}
@@ -829,6 +930,8 @@ async function loadFromOrder(orderId) {
 
   const addr = order.shipping_address || {};
   _draft.source_order_id = order.id || orderId;
+  // Order date reflects when the order was actually placed (used in the email line).
+  _draft.order_date = (order.created_at || order.placed_at || '').slice(0, 10) || _draft.order_date;
   _draft.customer = {
     attn: order.customer_name || addr.recipient_name || '',
     name: order.customer_name || addr.recipient_name || '',

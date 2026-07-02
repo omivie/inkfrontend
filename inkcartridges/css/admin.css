@@ -2475,6 +2475,9 @@ button.admin-active-dot--clickable:hover::after { opacity: 1; }
 }
 
 .admin-modal--wide { max-width: 900px; width: 95vw; }
+/* Invoice email composer — a touch wider than the default modal, with a roomy message box. */
+.admin-modal--invoice-email { max-width: 560px; }
+.admin-modal--invoice-email .inv-textarea { resize: vertical; min-height: 150px; line-height: 1.5; }
 
 .cc-import-cards {
   display: grid;

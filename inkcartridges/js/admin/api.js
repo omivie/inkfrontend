@@ -2452,6 +2452,24 @@ const AdminAPI = {
     }
   },
 
+  // Suggested next invoice number for a new draft (auto-filled but editable).
+  // Prefers a dedicated peek endpoint; falls back to max(invoice_number)+1 from
+  // the first list page. Read-soft: returns null if neither works (field left blank).
+  async nextInvoiceNumber() {
+    try {
+      const resp = await window.API.get('/api/admin/invoices/next-number');
+      const n = resp?.data?.next ?? resp?.data?.invoice_number ?? resp?.data;
+      if (n != null && Number.isFinite(Number(n))) return Number(n);
+    } catch (e) { adminApiWarn('Next invoice number lookup failed', e); }
+    try {
+      const data = await this.listInvoices({ sort: 'invoice_number', order: 'desc' }, 1, 1);
+      const rows = data?.invoices ?? data?.items ?? (Array.isArray(data) ? data : []);
+      const max = rows.reduce((m, r) => Math.max(m, Number(r?.invoice_number) || 0), 0);
+      if (max > 0) return max + 1;
+    } catch (e) { adminApiWarn('Next invoice number fallback failed', e); }
+    return null;
+  },
+
   // Backend assigns the next invoice_number in series and returns the
   // authoritative subtotal/gst/total on the saved record.
   async createInvoice(payload) {
@@ -2490,8 +2508,11 @@ const AdminAPI = {
     return resp?.data ?? null;
   },
 
-  async emailInvoice(invoiceId) {
-    const resp = await window.API.post(`/api/admin/invoices/${encodeURIComponent(invoiceId)}/email`, {});
+  // Email the invoice PDF to the customer. Optional message = { to, subject, body }
+  // from the composer; when omitted (empty {}) the backend uses its default template
+  // and the invoice's stored customer email (backward compatible).
+  async emailInvoice(invoiceId, message) {
+    const resp = await window.API.post(`/api/admin/invoices/${encodeURIComponent(invoiceId)}/email`, message || {});
     if (resp && resp.ok === false) throw invoiceError(resp, 'Email invoice failed');
     return resp?.data ?? null;
   },
