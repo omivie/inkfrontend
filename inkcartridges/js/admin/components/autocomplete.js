@@ -36,6 +36,7 @@ export function attachAutocomplete(input, opts) {
     minChars = 2,
     debounce = 250,
     emptyText = 'No matches',
+    menuClass = '',        // extra class(es) on the dropdown menu (e.g. a wider product variant)
   } = opts || {};
 
   // Ensure a positioned wrapper exists so the menu can anchor under the input.
@@ -56,6 +57,7 @@ export function attachAutocomplete(input, opts) {
     menu.setAttribute('role', 'listbox');
     wrap.appendChild(menu);
   }
+  if (menuClass) menu.classList.add(...String(menuClass).split(/\s+/).filter(Boolean));
 
   input.setAttribute('role', 'combobox');
   input.setAttribute('aria-autocomplete', 'list');

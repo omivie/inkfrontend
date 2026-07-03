@@ -57,6 +57,7 @@ const NAV_ITEMS = [
 
   { section: 'Sell' },
   { key: 'orders', label: 'Orders', icon: 'orders' },
+  { key: 'quick-order', label: 'Quick Order', icon: 'orders', ownerOnly: true },
   { key: 'tracking-requests', label: 'Tracking Requests', icon: 'fulfillment', badge: true },
   { key: 'products', label: 'Products', icon: 'products' },
   { key: 'customers', label: 'Customers', icon: 'customers' },
@@ -271,7 +272,7 @@ async function navigate(pageName) {
   `;
 
   // Owner-only page check
-  const ownerPages = ['settings', 'control-center', 'sync-report', 'invoices'];
+  const ownerPages = ['settings', 'control-center', 'sync-report', 'invoices', 'quick-order'];
   if (ownerPages.includes(pageName) && !AdminAuth.isOwner()) {
     content.innerHTML = `
       <div class="admin-stub">

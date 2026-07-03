@@ -152,7 +152,14 @@ function fmtBucket(v) {
     ? new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]), m[4] ? Number(m[4]) : 0)
     : new Date(s);
   if (isNaN(d.getTime())) return s;
-  if (g === 'month' || g === 'quarter') return d.toLocaleDateString('en-NZ', { month: 'short', year: '2-digit' });
+  if (g === 'week') {
+    // Show the week span, month-first, end at the next week's boundary: "Jul 2 – Jul 9".
+    const md = (x) => x.toLocaleDateString('en-NZ', { month: 'short' }) + ' ' + x.getDate();
+    const end = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 7);
+    return md(d) + ' – ' + md(end);
+  }
+  if (g === 'month') return d.toLocaleDateString('en-NZ', { month: 'long' });
+  if (g === 'quarter') return d.toLocaleDateString('en-NZ', { month: 'short', year: '2-digit' });
   return d.toLocaleDateString('en-NZ', { day: 'numeric', month: 'short' });
 }
 
@@ -557,20 +564,26 @@ function drawPerformanceOverview(d) {
   const canvasId = 'dash-c-overview';
   const revList = resolveList(d.sRevenue, ['series', 'data']) || [];
   const gpList  = resolveList(d.sGrossProfit, ['series', 'data']) || [];
+  const npList  = resolveList(d.sNetProfit, ['series', 'data']);
   const ordList = resolveList(d.sOrders, ['series', 'data']) || [];
 
-  const byBucket = new Map(); // bucket_start -> { revenue, gross_profit, orders }
+  // Prefer the real per-bucket net-profit series; fall back to the gross-profit series
+  // (relabeled) until the backend ships net_profit_series. See readfirst handoff.
+  const hasNet = Array.isArray(npList) && npList.length > 0;
+  const profitList = hasNet ? npList : gpList;
+
+  const byBucket = new Map(); // bucket_start -> { revenue, profit, orders }
   const order = [];
-  const merge = (list, srcKey, dstKey) => {
+  const merge = (list, valFn, dstKey) => {
     for (const r of list) {
       const b = r.bucket_start ?? r.date;
       if (!byBucket.has(b)) { byBucket.set(b, {}); order.push(b); }
-      byBucket.get(b)[dstKey] = Number(r[srcKey] || 0);
+      byBucket.get(b)[dstKey] = valFn(r);
     }
   };
-  merge(revList, 'revenue', 'revenue');
-  merge(gpList, 'gross_profit', 'gross_profit');
-  merge(ordList, 'orders', 'orders');
+  merge(revList, (r) => Number(r.revenue || 0), 'revenue');
+  merge(profitList, (r) => Number(r.net_profit ?? r.gross_profit ?? 0), 'profit');
+  merge(ordList, (r) => Number(r.orders || 0), 'orders');
   if (!order.length) { chartEmpty(canvasId, d.sRevenue == null ? AWAIT_MSG : EMPTY_MSG); return; }
   order.sort(); // "YYYY-MM-DD" sorts chronologically
 
@@ -579,8 +592,8 @@ function drawPerformanceOverview(d) {
   const plot = isCumulativeMode();
   const accum = (arr) => { if (!plot) return arr; let acc = 0; return arr.map(v => (acc += v)); };
   const revenue = accum(order.map(b => Number(byBucket.get(b)?.revenue || 0)));
-  const profit  = accum(order.map(b => Number(byBucket.get(b)?.gross_profit || 0)));
-  const orders  = order.map(b => Number(byBucket.get(b)?.orders || 0)); // never cumulative
+  const profit  = accum(order.map(b => Number(byBucket.get(b)?.profit || 0)));
+  const orders  = accum(order.map(b => Number(byBucket.get(b)?.orders || 0)));
 
   const drawType = plot ? 'line' : 'bar';
   const mkMoney = (label, data, color) => drawType === 'line'
@@ -591,7 +604,7 @@ function drawPerformanceOverview(d) {
 
   const datasets = [
     mkMoney('Revenue', revenue, c.success),
-    mkMoney('Gross profit', profit, c.cyan),
+    mkMoney('Net profit', profit, c.cyan),
     // Orders always a line on the right axis so it reads against the money bars/lines.
     { label: 'Orders', data: orders, yAxisID: 'y1', type: 'line',
       borderColor: c.yellow, backgroundColor: hexToRgba(c.yellow, 0.12),
@@ -680,6 +693,7 @@ function bundleToGraphs(b) {
   return {
     sRevenue:         b.revenue_series ?? null,
     sGrossProfit:     b.gross_profit_series ?? null,
+    sNetProfit:       b.net_profit_series ?? null,
     sOrders:          b.orders_series ?? null,
     sAov:             b.aov_series ?? null,
     sRefundRate:      b.refund_rate_series ?? null,
@@ -909,7 +923,7 @@ function renderOverviewSection() {
       <div class="admin-dash-row__label admin-dash-row__label--cyan">Performance <small>${esc(rangeLabel())}</small></div>
       <div class="admin-dash">
         <div class="admin-dash__cell--12 admin-card">
-          <div class="admin-card__title"><span>Performance overview <small>revenue · gross profit · orders — real values, not normalized</small></span></div>
+          <div class="admin-card__title"><span>Performance overview <small>revenue · net profit · orders — real values, not normalized</small></span></div>
           <div class="admin-chart-box admin-chart-box--tall"><canvas id="dash-c-overview"></canvas></div>
         </div>
       </div>

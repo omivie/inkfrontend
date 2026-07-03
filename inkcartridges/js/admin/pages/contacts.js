@@ -94,6 +94,14 @@ function editorBody(c) {
       ${area('Address (one line per row)', 'bill_to.address', linesToText(b.address))}
     </section>
     <section class="inv-section">
+      <div class="inv-section__title">Payment terms</div>
+      <label class="inv-field"><span class="inv-field__label">Invoice due date <span class="inv-field__hint">(pre-fills the due date on invoices for this contact)</span></span>
+        <select class="admin-select" data-cf="payment_due_pref">
+          ${[['10', '10th of the following month'], ['20', '20th of the following month'], ['30', '30th of the following month'], ['eom', 'End of the following month']]
+    .map(([v, l]) => `<option value="${v}"${(c.payment_due_pref || '20') === v ? ' selected' : ''}>${esc(l)}</option>`).join('')}
+        </select></label>
+    </section>
+    <section class="inv-section">
       <div class="inv-section__title">Deliver to (goods) — optional</div>
       <div class="inv-grid-2">
         ${field('Attn', 'deliver_to.attn', d.attn || '')}

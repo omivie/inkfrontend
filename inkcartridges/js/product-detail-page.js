@@ -593,6 +593,11 @@
             // Build srcset for responsive product detail images (400/600/800w)
             const detailSrcset = typeof imageSrcset === 'function' && info.image_url_raw ? imageSrcset(info.image_url_raw, [400, 600, 800]) : '';
             const detailSrcsetHtml = detailSrcset ? ` srcset="${Security.escapeAttr(detailSrcset)}" sizes="(max-width: 480px) 400px, (max-width: 768px) 600px, 800px"` : '';
+            // High-res source for the hover-magnify zoom state. Prefer the
+            // un-optimized raw URL (crisp when scaled up); fall back to the
+            // optimized URL. Swapped in lazily on first hover — see
+            // initProductImageZoom() below.
+            const zoomSrcHtml = ` data-zoom-src="${Security.escapeAttr(Security.sanitizeUrl(info.image_url_raw || info.image_url))}"`;
             // Stale-swatch fallback — if the product image is the legacy
             // per-SKU "color-swatch-vN.png" we hand-uploaded once, drop it
             // and render the canonical color block instead so admin color
@@ -604,12 +609,12 @@
                 if (colorStyle) {
                     // Image with color fallback on error
                     productImageEl.innerHTML = `
-                        <img src="${Security.escapeAttr(Security.sanitizeUrl(info.image_url))}" alt="${Security.escapeAttr(info.displayName)}"${detailSrcsetHtml} style="max-width: 100%; height: auto;"
+                        <img src="${Security.escapeAttr(Security.sanitizeUrl(info.image_url))}" alt="${Security.escapeAttr(info.displayName)}"${detailSrcsetHtml}${zoomSrcHtml} style="max-width: 100%; height: auto;"
                              data-fallback="color-block">
                         <div class="product-gallery__color-block" style="${colorStyle}; display: none;"></div>`;
                 } else {
                     // Image with placeholder fallback
-                    productImageEl.innerHTML = `<img src="${Security.escapeAttr(Security.sanitizeUrl(info.image_url))}" alt="${Security.escapeAttr(info.displayName)}"${detailSrcsetHtml} style="max-width: 100%; height: auto;"
+                    productImageEl.innerHTML = `<img src="${Security.escapeAttr(Security.sanitizeUrl(info.image_url))}" alt="${Security.escapeAttr(info.displayName)}"${detailSrcsetHtml}${zoomSrcHtml} style="max-width: 100%; height: auto;"
                         data-fallback="placeholder">`;
                 }
 
@@ -624,8 +629,15 @@
                             this.removeAttribute('data-fallback');
                             this.src = '/assets/images/placeholder-product.svg';
                         }
+                        // A failed image must not stay hover-zoomable — the
+                        // fallback tile/placeholder is not a photo to magnify.
+                        productImageEl.classList.remove('product-gallery__main--zoomable');
+                        this.style.transform = '';
                     }, { once: true });
                 });
+
+                // Hover-to-magnify: cursor-follow inner zoom on the main photo.
+                initProductImageZoom(productImageEl);
             } else {
                 // No image (or stale swatch image stripped above). Genuine-no-
                 // color-tile invariant: only compatible products may show a
@@ -1873,6 +1885,55 @@
             document.getElementById('breadcrumb-product').textContent = 'Error';
         }
     };
+
+    // ============================================
+    // HOVER-TO-MAGNIFY (cursor-follow inner zoom)
+    // ============================================
+    // Scales the main product photo inside its existing box and pans the
+    // enlarged image toward the cursor. The gallery box already sets
+    // `overflow: hidden` (css/pages.css), so the zoomed image is clipped to
+    // the frame — no layout change needed. Desktop hover only.
+    const ZOOM_SCALE = 2.2;
+    function initProductImageZoom(container) {
+        if (!container) return;
+        // No true hover on touch/coarse pointers — skip entirely.
+        if (typeof window.matchMedia === 'function' &&
+            !window.matchMedia('(hover: hover) and (pointer: fine)').matches) return;
+
+        const img = container.querySelector('img[data-fallback]');
+        if (!img) return; // only real photos are zoomable, never fallbacks
+
+        container.classList.add('product-gallery__main--zoomable');
+
+        const swapToHighRes = () => {
+            if (img.dataset.zoomed || !img.dataset.zoomSrc) return;
+            img.dataset.zoomed = '1';
+            const hi = new Image();
+            hi.onload = () => {
+                // Only swap once the crisp source is decoded, so there is no
+                // flash of a broken/blank image mid-hover.
+                img.removeAttribute('srcset');
+                img.src = img.dataset.zoomSrc;
+            };
+            hi.src = img.dataset.zoomSrc;
+        };
+
+        container.addEventListener('mouseenter', swapToHighRes);
+        container.addEventListener('mousemove', (e) => {
+            // Bail if the image errored out to a fallback after init.
+            if (!container.classList.contains('product-gallery__main--zoomable')) return;
+            const rect = container.getBoundingClientRect();
+            if (!rect.width || !rect.height) return;
+            const x = ((e.clientX - rect.left) / rect.width) * 100;
+            const y = ((e.clientY - rect.top) / rect.height) * 100;
+            img.style.transformOrigin = `${x}% ${y}%`;
+            img.style.transform = `scale(${ZOOM_SCALE})`;
+        });
+        container.addEventListener('mouseleave', () => {
+            img.style.transform = '';
+            img.style.transformOrigin = '';
+        });
+    }
 
     // Initialize when DOM is ready
     document.addEventListener('DOMContentLoaded', () => ProductPage.init());

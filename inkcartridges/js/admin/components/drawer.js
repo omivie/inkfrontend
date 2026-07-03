@@ -21,7 +21,9 @@ const Drawer = {
 
     const drawer = document.createElement('div');
     drawer.className = 'admin-drawer';
-    if (width) drawer.style.width = width;
+    // Drawers open full-page across the admin (owner request, Jul 2026). The
+    // legacy `width` arg is intentionally ignored — CSS pins .admin-drawer to the
+    // full viewport and centres the content in a comfortable column.
 
     drawer.innerHTML = `
       <div class="admin-drawer__header">

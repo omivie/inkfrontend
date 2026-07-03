@@ -2427,6 +2427,19 @@
     object-fit: contain;
 }
 
+/* Hover-to-magnify: cursor-follow inner zoom. The container's existing
+   `overflow: hidden` clips the scaled image to the frame; JS sets the
+   transform + transform-origin per cursor position. See initProductImageZoom
+   in js/product-detail-page.js. */
+.product-gallery__main--zoomable {
+    cursor: zoom-in;
+}
+
+.product-gallery__main--zoomable img {
+    transition: transform 0.12s ease-out;
+    will-change: transform;
+}
+
 .product-detail__layout--color-only {
     grid-template-columns: auto 1fr;
     gap: var(--spacing-xl);

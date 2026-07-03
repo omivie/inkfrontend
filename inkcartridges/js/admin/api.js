@@ -2527,6 +2527,57 @@ const AdminAPI = {
     return resp?.data ?? null;
   },
 
+  // =========================================================================
+  // Admin — Quick Orders (phone / walk-in order register)
+  // =========================================================================
+  // Deliberately separate from website Orders. Reads fail soft (return null so
+  // the page degrades to an empty list); writes throw so the editor can surface
+  // the backend message. All routes 404 until the backend ships them — contract
+  // in readfirst/quick-orders-backend-jul2026.md.
+  async listQuickOrders(filters = {}, page = 1, limit = 20) {
+    try {
+      const params = new URLSearchParams();
+      params.set('page', page);
+      params.set('limit', limit);
+      if (filters.search) params.set('search', filters.search);
+      if (filters.sort) params.set('sort', filters.sort);
+      if (filters.order) params.set('order', filters.order);
+      const resp = await window.API.get(`/api/admin/quick-orders?${params}`);
+      return resp?.data ?? null;
+    } catch (e) {
+      adminApiWarn('Failed to load quick orders', e);
+      return null;
+    }
+  },
+
+  async getQuickOrder(quickOrderId) {
+    try {
+      const resp = await window.API.get(`/api/admin/quick-orders/${encodeURIComponent(quickOrderId)}`);
+      return resp?.data?.quick_order ?? resp?.data ?? null;
+    } catch (e) {
+      adminApiWarn('Failed to load quick order', e);
+      return null;
+    }
+  },
+
+  async createQuickOrder(payload) {
+    const resp = await window.API.post('/api/admin/quick-orders', payload);
+    if (resp && resp.ok === false) throw new Error(resp.error?.message || resp.error || 'Create quick order failed');
+    return resp?.data?.quick_order ?? resp?.data ?? null;
+  },
+
+  async updateQuickOrder(quickOrderId, payload) {
+    const resp = await window.API.put(`/api/admin/quick-orders/${encodeURIComponent(quickOrderId)}`, payload);
+    if (resp && resp.ok === false) throw new Error(resp.error?.message || resp.error || 'Update quick order failed');
+    return resp?.data?.quick_order ?? resp?.data ?? null;
+  },
+
+  async deleteQuickOrder(quickOrderId) {
+    const resp = await window.API.delete(`/api/admin/quick-orders/${encodeURIComponent(quickOrderId)}`);
+    if (resp && resp.ok === false) throw new Error(resp.error?.message || resp.error || 'Delete quick order failed');
+    return resp?.data ?? null;
+  },
+
   // Backend-rendered PDF — returns a Blob object URL (mirrors
   // getInvoicePreviewUrl). The page falls back to client-side jsPDF when this
   // endpoint isn't available yet, so a 404/network error is expected pre-backend.

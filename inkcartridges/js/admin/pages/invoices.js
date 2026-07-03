@@ -23,6 +23,7 @@ import { Drawer } from '../components/drawer.js';
 import { Modal } from '../components/modal.js';
 import { Toast } from '../components/toast.js';
 import { attachAutocomplete } from '../components/autocomplete.js';
+import { attachProductAutocomplete } from '../components/product-search.js';
 
 const GST_RATE = 0.15;
 
@@ -76,15 +77,31 @@ function orderPlacedDisplay(d) {
   return `—/—/${new Date().getFullYear()}`;
 }
 
-// Payment terms: due the 20th of the month AFTER the order was placed.
-// Any day in July -> "2026-08-20". '' if the order date is unparseable.
-function paymentDueDate(iso) {
+// Number of days in month `m` (1-based) of year `y` — new Date(y, m, 0) is the
+// last day of month m (day 0 of the next month). Used to clamp the term day.
+function daysInMonth(y, m) { return new Date(y, m, 0).getDate(); }
+
+// Payment terms: due a chosen day of the month AFTER the order was placed.
+//   pref '10'|'20'|'30' -> that day (clamped to the month's length),
+//   pref 'eom'          -> the last day of that month.
+// Default term is the 20th. Any June date -> "2026-07-<day>". '' if unparseable.
+function paymentDueDate(iso, pref = '20') {
   const p = String(iso || '').split('-');
   if (p.length !== 3) return '';
   let y = +p[0], m = +p[1];               // m is 1..12
   if (isNaN(y) || isNaN(m) || m < 1 || m > 12) return '';
   m += 1; if (m > 12) { m = 1; y += 1; }  // roll Dec -> Jan next year
-  return `${y}-${String(m).padStart(2, '0')}-20`;
+  const last = daysInMonth(y, m);
+  let day;
+  if (pref === 'eom') day = last;
+  else { day = parseInt(pref, 10); if (!day || day < 1) day = 20; day = Math.min(day, last); }
+  return `${y}-${String(m).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+}
+
+// The due date shown/printed/saved: an explicit manual override wins, otherwise
+// it is derived from the order date + the saved payment term.
+function effectiveDueDate(d) {
+  return d.payment_due || paymentDueDate(d.order_date, d.payment_due_pref);
 }
 
 // Greeting name for the email — the person we address ("Hi Felix,"). Prefer the
@@ -148,6 +165,8 @@ function freshDraft() {
     status: 'unpaid',
     date: todayInputValue(),
     order_date: '',           // blank + compulsory — operator must enter the real order date
+    payment_due: '',          // blank = derive from order_date + term; set = manual override
+    payment_due_pref: '20',   // '10'|'20'|'30'|'eom' — carried from the contact when filled
     source_order_id: null,
     seller: {
       name: L.legalEntity || 'Office Consumables Ltd',
@@ -179,6 +198,8 @@ function draftFromInvoice(rec) {
   d.status = rec.status ?? 'unpaid';
   d.date = (rec.issue_date || rec.date || '').slice(0, 10) || d.date;
   d.order_date = (rec.order_date || '').slice(0, 10) || d.order_date;
+  d.payment_due = (rec.payment_due || '').slice(0, 10) || '';
+  d.payment_due_pref = rec.payment_due_pref || '20';
   d.source_order_id = rec.source_order_id ?? null;
   if (rec.seller) d.seller = { ...d.seller, ...rec.seller, address: Array.isArray(rec.seller.address) ? rec.seller.address.join('\n') : (rec.seller.address ?? d.seller.address) };
   if (rec.customer) d.customer = { ...d.customer, ...rec.customer, address: Array.isArray(rec.customer.address) ? rec.customer.address.join('\n') : (rec.customer.address ?? '') };
@@ -262,6 +283,8 @@ function buildPayload(d) {
     status: d.status,
     issue_date: d.date,
     order_date: d.order_date || null,
+    payment_due: effectiveDueDate(d) || null,   // resolved due date (override or derived)
+    payment_due_pref: d.payment_due_pref || null,
     source_order_id: d.source_order_id || null,
     seller: { ...d.seller, address: lines(d.seller.address) },
     customer: { ...d.customer, address: lines(d.customer.address) },
@@ -338,6 +361,11 @@ export default {
     container.querySelector('#inv-table').addEventListener('click', onRowAction);
 
     await loadData();
+
+    // Quick Order → Invoice bridge: if a quick order staged a prefill, open a new
+    // invoice editor pre-filled with its caller + product lines, then clear it so
+    // a manual revisit to #invoices starts blank.
+    maybeOpenFromQuickOrder();
   },
 
   destroy() {
@@ -457,6 +485,28 @@ async function openExisting(row) {
   openEditor(draftFromInvoice(rec));
 }
 
+// Quick Order hands off a staged prefill via sessionStorage['qo_invoice_prefill']
+// ({ order_date, customer{attn,name,company,address,phone,email}, lines[{code,
+// description,qty,unitCost}] }). Consume it once and open a new invoice editor.
+function maybeOpenFromQuickOrder() {
+  let raw;
+  try { raw = sessionStorage.getItem('qo_invoice_prefill'); } catch (_) { return; }
+  if (!raw) return;
+  try { sessionStorage.removeItem('qo_invoice_prefill'); } catch (_) { /* noop */ }
+  let pre;
+  try { pre = JSON.parse(raw); } catch (e) { warn('bad quick-order prefill', e); return; }
+  if (!pre || typeof pre !== 'object') return;
+  const d = freshDraft();
+  if (pre.order_date) d.order_date = String(pre.order_date).slice(0, 10);
+  if (pre.customer) d.customer = { ...d.customer, ...pre.customer };
+  if (Array.isArray(pre.lines) && pre.lines.length) {
+    d.lines = pre.lines.map((l) => ({
+      code: l.code || '', description: l.description || '', qty: num(l.qty ?? 1), unitCost: round2(num(l.unitCost ?? 0)),
+    }));
+  }
+  openEditor(d);
+}
+
 // =========================================================================
 //  Editor (Drawer)
 // =========================================================================
@@ -526,6 +576,11 @@ function onFormInput(e) {
   const t = e.target;
   if (t.dataset.field) {
     setPath(_draft, t.dataset.field, t.value);
+    // Keep the (non-overridden) due date live as the order date changes.
+    if (t.dataset.field === 'order_date' && !_draft.payment_due) {
+      const due = _editorRefs.drawer?.querySelector('#inv-due-date');
+      if (due) due.value = paymentDueDate(_draft.order_date, _draft.payment_due_pref) || '';
+    }
   } else if (t.dataset.line != null && t.dataset.lfield) {
     const i = +t.dataset.line;
     if (_draft.lines[i]) _draft.lines[i][t.dataset.lfield] = t.value;
@@ -806,6 +861,8 @@ function editorBodyHtml(d) {
           ${field('Date', 'date', d.date, { type: 'date' })}
           <label class="inv-field"><span class="inv-field__label">Order date * <span class="inv-field__hint">(required — sets the payment due date)</span></span>
             <input class="admin-input" type="date" data-field="order_date" value="${escA(d.order_date)}" required></label>
+          <label class="inv-field"><span class="inv-field__label">Payment due date <span class="inv-field__hint">(auto-filled from order date + terms — edit to override)</span></span>
+            <input class="admin-input" type="date" id="inv-due-date" data-field="payment_due" value="${escA(effectiveDueDate(d))}"></label>
           <label class="inv-field"><span class="inv-field__label">Paid status <span class="inv-field__hint">(internal — not shown to the customer)</span></span>
             <select class="admin-select" data-field="status">
               ${['unpaid', 'paid'].map((s) => `<option value="${s}"${d.status === s ? ' selected' : ''}>${STATUS_META[s].label}</option>`).join('')}
@@ -887,15 +944,11 @@ function renderLines() {
       <input class="admin-input" type="number" step="0.01" min="0" data-line="${i}" data-lfield="unitCost" value="${escA(l.unitCost)}">
       <button class="admin-btn admin-btn--ghost admin-btn--sm inv-line__rm" data-form-action="remove-line" title="Remove line">${icon('trash', 12, 12)}</button>
     </div>`).join('');
-  // Product autocomplete on both code + description inputs of every line.
+  // Product autocomplete (storefront-style, image dropdown) on both the code +
+  // description inputs of every line.
   host.querySelectorAll('.inv-line').forEach((row) => {
     const i = +row.dataset.line;
-    row.querySelectorAll('.inv-ac > input').forEach((input) => attachAutocomplete(input, {
-      fetch: async (q) => {
-        const data = await AdminAPI.getProducts({ search: q }, 1, 8);
-        return data?.products || data?.items || [];
-      },
-      render: (p) => `<span class="inv-ac__code">${esc(p.sku || '')}</span> ${esc(p.name || p.product_name || '')}`,
+    row.querySelectorAll('.inv-ac > input').forEach((input) => attachProductAutocomplete(input, {
       onPick: (p) => {
         const ex = p.retail_price != null ? round2(num(p.retail_price) / (1 + GST_RATE)) : num(p.sell_price ?? p.price ?? 0);
         _draft.lines[i] = { code: p.sku || '', description: p.name || p.product_name || '', qty: _draft.lines[i]?.qty || 1, unitCost: ex };
@@ -1001,6 +1054,10 @@ function loadFromContact(c) {
     phone: d.phone || '',
   };
   if (c.notes) _draft.notes = c.notes;
+  // Adopt the contact's saved payment term and re-derive the due date from it
+  // (drop any prior manual override so the new term takes effect).
+  _draft.payment_due_pref = c.payment_due_pref || '20';
+  _draft.payment_due = '';
   _fillSource = { type: 'contact', label: c.label || b.name || b.company || 'contact' };
   rebuildEditor();
   Toast.success(`Filled from contact ${_fillSource.label}`.trim());
@@ -1113,8 +1170,7 @@ function renderPreview(d) {
     </table>
 
     <div class="inv-doc__pay">
-      ${paymentDueDate(d.order_date) ? `<div class="inv-doc__pay-due">Payment due by <strong>${esc(formatInvoiceDate(paymentDueDate(d.order_date)))}</strong></div>` : ''}
-      <div class="inv-doc__pay-title">Please make payment to:</div>
+      <div class="inv-doc__pay-title">${effectiveDueDate(d) ? `Payment due by <strong>${esc(formatInvoiceDate(effectiveDueDate(d)))}</strong>, please make payment to:` : 'Please make payment to:'}</div>
       <table>
         <tr><td>a/c Name:</td><td><strong>${esc(d.footer.bankName)}</strong></td></tr>
         <tr><td>a/c Number:</td><td><strong>${esc(d.footer.bankAcct)}</strong></td></tr>
@@ -1274,10 +1330,10 @@ function buildInvoiceDoc(d) {
 
   // --- Payment block ---
   let py = ty + 24;
-  const due = paymentDueDate(d.order_date);
-  if (due) { doc.setFont('helvetica', 'bold'); doc.setFontSize(11); text(`Payment due by ${formatInvoiceDate(due)}`, M, py); py += 19; }
+  const due = effectiveDueDate(d);
   doc.setFont('helvetica', 'bold'); doc.setFontSize(11);
-  text('Please make payment to:', M, py); py += 19;
+  text(due ? `Payment due by ${formatInvoiceDate(due)}, please make payment to:` : 'Please make payment to:', M, py);
+  py += 19;
   doc.setFont('helvetica', 'normal');
   text(`a/c Name:`, M, py); doc.setFont('helvetica', 'bold'); text(d.footer.bankName || '', M + 76, py); py += 15;
   doc.setFont('helvetica', 'normal'); text('a/c Number:', M, py); doc.setFont('helvetica', 'bold'); text(d.footer.bankAcct || '', M + 76, py);
