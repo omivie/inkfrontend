@@ -104,6 +104,13 @@ function effectiveDueDate(d) {
   return d.payment_due || paymentDueDate(d.order_date, d.payment_due_pref);
 }
 
+// The due date to DISPLAY on the invoice — honours the "show payment due date"
+// toggle. effectiveDueDate() still drives the resolved value saved to the backend.
+// When off, both renderers fall through to the bare "Please make payment to:" line.
+function displayDueDate(d) {
+  return d.show_due_date === false ? '' : effectiveDueDate(d);
+}
+
 // Greeting name for the email — the person we address ("Hi Felix,"). Prefer the
 // contact (Attn), fall back to the invoice-to name, then a neutral "there".
 function firstName(d) {
@@ -167,6 +174,7 @@ function freshDraft() {
     order_date: '',           // blank + compulsory — operator must enter the real order date
     payment_due: '',          // blank = derive from order_date + term; set = manual override
     payment_due_pref: '20',   // '10'|'20'|'30'|'eom' — carried from the contact when filled
+    show_due_date: true,      // false = hide the "Payment due by …" line on the invoice
     source_order_id: null,
     seller: {
       name: L.legalEntity || 'Office Consumables Ltd',
@@ -200,6 +208,7 @@ function draftFromInvoice(rec) {
   d.order_date = (rec.order_date || '').slice(0, 10) || d.order_date;
   d.payment_due = (rec.payment_due || '').slice(0, 10) || '';
   d.payment_due_pref = rec.payment_due_pref || '20';
+  d.show_due_date = rec.show_due_date !== false;   // absent/true => keep showing the due date
   d.source_order_id = rec.source_order_id ?? null;
   if (rec.seller) d.seller = { ...d.seller, ...rec.seller, address: Array.isArray(rec.seller.address) ? rec.seller.address.join('\n') : (rec.seller.address ?? d.seller.address) };
   if (rec.customer) d.customer = { ...d.customer, ...rec.customer, address: Array.isArray(rec.customer.address) ? rec.customer.address.join('\n') : (rec.customer.address ?? '') };
@@ -283,8 +292,11 @@ function buildPayload(d) {
     status: d.status,
     issue_date: d.date,
     order_date: d.order_date || null,
-    payment_due: effectiveDueDate(d) || null,   // resolved due date (override or derived)
+    // Resolved due date (override or derived). Sent as null when the operator has
+    // hidden the due-date line so a server-rendered PDF omits it too.
+    payment_due: d.show_due_date === false ? null : (effectiveDueDate(d) || null),
     payment_due_pref: d.payment_due_pref || null,
+    show_due_date: d.show_due_date !== false,
     source_order_id: d.source_order_id || null,
     seller: { ...d.seller, address: lines(d.seller.address) },
     customer: { ...d.customer, address: lines(d.customer.address) },
@@ -575,7 +587,7 @@ function setPath(obj, path, val) {
 function onFormInput(e) {
   const t = e.target;
   if (t.dataset.field) {
-    setPath(_draft, t.dataset.field, t.value);
+    setPath(_draft, t.dataset.field, t.type === 'checkbox' ? t.checked : t.value);
     // Keep the (non-overridden) due date live as the order date changes.
     if (t.dataset.field === 'order_date' && !_draft.payment_due) {
       const due = _editorRefs.drawer?.querySelector('#inv-due-date');
@@ -867,6 +879,10 @@ function editorBodyHtml(d) {
             <select class="admin-select" data-field="status">
               ${['unpaid', 'paid'].map((s) => `<option value="${s}"${d.status === s ? ' selected' : ''}>${STATUS_META[s].label}</option>`).join('')}
             </select>
+          </label>
+          <label class="inv-field inv-field--check">
+            <input type="checkbox" data-field="show_due_date"${d.show_due_date === false ? '' : ' checked'}>
+            <span class="inv-field__label">Show payment due date <span class="inv-field__hint">(on the invoice — off leaves just “Please make payment to:”)</span></span>
           </label>
         </div>
       </section>
@@ -1170,7 +1186,7 @@ function renderPreview(d) {
     </table>
 
     <div class="inv-doc__pay">
-      <div class="inv-doc__pay-title">${effectiveDueDate(d) ? `Payment due by <strong>${esc(formatInvoiceDate(effectiveDueDate(d)))}</strong>, please make payment to:` : 'Please make payment to:'}</div>
+      <div class="inv-doc__pay-title">${displayDueDate(d) ? `Payment due by <strong>${esc(formatInvoiceDate(displayDueDate(d)))}</strong>, please make payment to:` : 'Please make payment to:'}</div>
       <table>
         <tr><td>a/c Name:</td><td><strong>${esc(d.footer.bankName)}</strong></td></tr>
         <tr><td>a/c Number:</td><td><strong>${esc(d.footer.bankAcct)}</strong></td></tr>
@@ -1330,7 +1346,7 @@ function buildInvoiceDoc(d) {
 
   // --- Payment block ---
   let py = ty + 24;
-  const due = effectiveDueDate(d);
+  const due = displayDueDate(d);
   doc.setFont('helvetica', 'bold'); doc.setFontSize(11);
   text(due ? `Payment due by ${formatInvoiceDate(due)}, please make payment to:` : 'Please make payment to:', M, py);
   py += 19;

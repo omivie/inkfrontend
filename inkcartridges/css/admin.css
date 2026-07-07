@@ -4544,6 +4544,11 @@ button.admin-active-dot--clickable:hover::after { opacity: 1; }
   box-shadow: 0 0 0 1px var(--danger);
 }
 .inv-field--error .inv-field__label { color: var(--danger); }
+/* Checkbox row (e.g. "Show payment due date") — lay the box beside its label,
+   vertically centred, and align to the input row of adjacent date/select fields. */
+.inv-field--check { flex-direction: row; align-items: center; gap: 8px; align-self: end; padding-bottom: 9px; cursor: pointer; }
+.inv-field--check input { width: 16px; height: 16px; margin: 0; flex: 0 0 auto; cursor: pointer; }
+.inv-field--check .inv-field__label { cursor: pointer; }
 .inv-textarea { resize: vertical; min-height: 64px; font-family: inherit; line-height: 1.5; }
 .inv-field--freight { margin-top: 12px; max-width: 320px; }
 .inv-readonly { padding: 6px 10px; border: 1px dashed var(--border); border-radius: var(--radius); font-size: 13px; }
