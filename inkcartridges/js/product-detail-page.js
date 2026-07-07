@@ -13,9 +13,20 @@
             return ProductColors.detectFromName(name);
         },
 
-        formatPageYield(value) {
+        // Smallest page-yield we treat as trustworthy. Real cartridge yields
+        // run from the low hundreds into the thousands; single/double-digit
+        // values (e.g. a stray "3") are almost always a data-entry error, so
+        // we suppress them rather than print a misleading spec. No data is
+        // faked — an unreliable value is simply not shown.
+        MIN_PLAUSIBLE_YIELD: 50,
+
+        // Returns a clean integer page-yield only when the value is a plausible
+        // cartridge yield; otherwise null (caller then renders nothing).
+        plausibleYield(value) {
             if (value == null) return null;
-            return String(value).replace(/\s*pages\b/gi, '').trim();
+            const n = parseInt(String(value).replace(/[,\s]/g, '').replace(/pages?/gi, ''), 10);
+            if (!Number.isFinite(n) || n < this.MIN_PLAUSIBLE_YIELD) return null;
+            return n;
         },
 
         async init() {
@@ -180,7 +191,9 @@
             // name format ("Compatible <Type> Cartridge Replacement for ...")
             // rather than disambiguating anything new.
             const isCompatible = !isRibbonProduct && p.source === 'compatible';
-            const displayName = name;
+            // De-double redundant compact code tokens in genuine names (display only;
+            // stored `name` stays raw for slug/identity). See ProductName in utils.js.
+            const displayName = (typeof ProductName !== 'undefined') ? ProductName.clean(p) : name;
             const brandName = p.brand?.name || (typeof p.brand === 'string' ? p.brand : null) || this.extractBrand(name) || 'Unknown';
             const pageYield = p.page_yield || p.yield || null;
 
@@ -331,7 +344,11 @@
             const canonicalUrl = info.canonical_url || seo.canonical || `https://www.inkcartridges.co.nz/products/${slug}/${info.sku}`;
 
             // Page title and meta description — prefer API seo fields, fall back to computed
-            const genuinePrefix = (info.category !== 'ribbon' && !info.isCompatible) ? 'Genuine ' : '';
+            // Only assert "Genuine" when the trusted `source` field explicitly
+            // says so — never from `!isCompatible`, which is also true for
+            // ribbons and unknown-source items (a false "Genuine …" claim in
+            // the indexed <title>). MC audit, Jul 2026.
+            const genuinePrefix = info.source === 'genuine' ? 'Genuine ' : '';
             const computedTitle = `${genuinePrefix}${info.displayName} NZ | InkCartridges.co.nz`;
             document.title = seo.title || computedTitle;
 
@@ -418,9 +435,30 @@
             // backend prerender layer owns it (marketing-audit-may-2026.md §4).
             // The visible breadcrumb nav above is the only client-side breadcrumb.
 
-            // Product badge — hidden; genuine/compatible is already in the title
+            // Product badge — a visible Genuine/Compatible status pill, keyed
+            // off the trusted `source` field (issue #8). We never assert a
+            // status we don't know: universal / unknown-source items (some
+            // ribbons) keep the badge hidden rather than guess.
             const badge = document.getElementById('product-badge');
-            badge.hidden = true;
+            if (info.source === 'genuine') {
+                badge.textContent = 'GENUINE';
+                badge.className = 'product-info__badge product-info__badge--genuine';
+                badge.hidden = false;
+            } else if (info.source === 'compatible') {
+                badge.textContent = 'COMPATIBLE';
+                badge.className = 'product-info__badge product-info__badge--compatible';
+                badge.hidden = false;
+            } else {
+                badge.hidden = true;
+            }
+            // Factual explainer link beside the badge (MC audit, Jul 2026) so a
+            // shopper can learn what genuine vs compatible means. Only shown when
+            // we actually have a source to explain.
+            if ((info.source === 'genuine' || info.source === 'compatible')
+                && badge.parentNode && !badge.parentNode.querySelector('.product-info__badge-help')) {
+                badge.insertAdjacentHTML('afterend',
+                    ' <a href="/genuine-vs-compatible" class="product-info__badge-help">What’s the difference?</a>');
+            }
             if (info.isCompatible) {
                 document.querySelector('.product-detail__layout').classList.add('product-detail__layout--compatible');
             }
@@ -428,6 +466,10 @@
             // Title and SKU
             document.getElementById('product-title').textContent = info.displayName;
             document.getElementById('product-sku').textContent = `SKU: ${info.sku}${info.manufacturer_part_number ? ' | Model: ' + info.manufacturer_part_number : ''}`;
+
+            // Quick-spec list (Colour · Page yield) — issue #8. Only real,
+            // reliable API values; suspicious yields are suppressed.
+            this.renderSpecs(info);
 
             // Price - use formatPrice() for consistent locale-aware currency display.
             // Also set the schema.org `content` attribute so the Offer microdata
@@ -448,6 +490,13 @@
             // these fields, so we fall back to the locked copy from the spec
             // rather than rendering a blank row.
             this.renderBuyBoxDeliveryAndReturns(info);
+
+            // Compatible-product compliance disclaimer (Google Ads re-appeal,
+            // Jul 2026). For source === 'compatible' only, render the vetted
+            // trademark / third-party / CGA panel directly under the buy box so
+            // the SPA mirrors the copy the backend already serves to bots
+            // (parity = no cloaking). Genuine / unknown-source render nothing.
+            this.renderComplianceDisclaimer(info);
 
             // Value-pack upsell from the backend's pack_suggestion field
             // (IA reorg Jul 2026). Fail-soft: stays hidden unless the payload
@@ -719,6 +768,29 @@
          * exact same strings the backend ships, so the SPA and prerender match
          * even on the legacy payload.
          */
+        // Quick-spec list: Colour and (reliable) Page yield. Rendered outside
+        // the pinned buy-box so it can't disturb SERP/prerender parity. Stays
+        // hidden unless at least one trustworthy spec exists.
+        renderSpecs(info) {
+            const el = document.getElementById('product-specs');
+            if (!el) return;
+            const rows = [];
+            if (info.color) {
+                rows.push(`<li class="product-info__spec"><span class="product-info__spec-label">Colour</span><span class="product-info__spec-value">${Security.escapeHtml(String(info.color))}</span></li>`);
+            }
+            const yieldN = this.plausibleYield(info.pageYield);
+            if (yieldN) {
+                rows.push(`<li class="product-info__spec"><span class="product-info__spec-label">Page yield</span><span class="product-info__spec-value">${yieldN.toLocaleString()} pages (approx.)</span></li>`);
+            }
+            if (rows.length) {
+                el.innerHTML = rows.join('');
+                el.hidden = false;
+            } else {
+                el.innerHTML = '';
+                el.hidden = true;
+            }
+        },
+
         renderBuyBoxDeliveryAndReturns(info) {
             const SPEC_DELIVERY_LABEL = '1–4 business days NZ-wide';
             const SPEC_DELIVERY_CUTOFF = '2pm';
@@ -758,6 +830,39 @@
                     + ` <span class="buy-box__sep" aria-hidden="true">·</span> `
                     + `<a class="buy-box__returns-link" href="${Security.escapeAttr(rUrl)}">Policy <span aria-hidden="true">›</span></a>`;
             }
+        },
+
+        /**
+         * Compatible-product compliance disclaimer (Google Ads re-appeal,
+         * Jul 2026). Renders the vetted trademark / third-party / Consumer
+         * Guarantees Act panel between the buy box and the description for
+         * COMPATIBLE products only. Keyed off the trusted `source` field, NOT
+         * `isCompatible` (which is force-false for ribbons, so a compatible
+         * ribbon must still get the disclaimer). Do NOT reword the copy — it is
+         * vetted legal phrasing, and it never asserts anything about the OEM's
+         * own warranty. Genuine / unknown-source products render nothing.
+         */
+        renderComplianceDisclaimer(info) {
+            if (!info || info.source !== 'compatible') return;
+            const pricingEl = document.querySelector('.product-info__pricing');
+            if (!pricingEl || document.getElementById('compat-disclaimer')) return;
+
+            // Human product-type label, lowercased — mirrors the map used by
+            // generateMetaDescription(); falls back to a generic noun.
+            const typeLabels = {
+                'ink': 'ink cartridge',
+                'toner': 'toner cartridge',
+                'drum': 'drum unit',
+                'ribbon': 'printer ribbon'
+            };
+            const type = typeLabels[info.category] || 'cartridge';
+            const oem = Security.escapeHtml(info.brandName || 'the printer manufacturer');
+
+            const html = `
+                <div class="compat-disclaimer" id="compat-disclaimer">
+                    This is a compatible (third-party) ${type} designed to work in the ${oem} printers listed on this page. It is not manufactured, endorsed, or sold by ${oem}. Supplied by Office Consumables Ltd, trading as InkCartridges.co.nz. 12-month replacement warranty on compatible cartridges. Your statutory rights under the New Zealand Consumer Guarantees Act 1993 are unaffected.
+                </div>`;
+            pricingEl.insertAdjacentHTML('afterend', html);
         },
 
         /**
@@ -912,7 +1017,10 @@
                 const models = Array.isArray(group.top_models) ? group.top_models.filter(m => m && m.full_name) : [];
                 const linked = models.map(m => {
                     const href = this._printerHubHref({ slug: m.slug, brand_slug: group.brand_slug, brand: group.brand, full_name: m.full_name });
-                    return `<a href="${Security.escapeAttr(href)}" class="printer-link">${Security.escapeHtml(m.full_name)}</a>`;
+                    const label = (typeof ProductName !== 'undefined' && ProductName.compatModel)
+                        ? (ProductName.compatModel(m.full_name, group.brand) || m.full_name)
+                        : m.full_name;
+                    return `<a href="${Security.escapeAttr(href)}" class="printer-link">${Security.escapeHtml(label)}</a>`;
                 }).join(', ');
                 const total = Number(group.total) || models.length;
                 const remaining = total - models.length;
@@ -963,8 +1071,11 @@
             if (!printers.length || !printers.some(p => p.slug)) return false;
 
             const links = printers.map(p => {
-                const label = p.full_name || p.name
+                let label = p.full_name || p.name
                     || (p.brand && p.model_name ? `${p.brand} ${p.model_name}` : p.model_name) || '';
+                if (typeof ProductName !== 'undefined' && ProductName.compatModel) {
+                    label = ProductName.compatModel(label, p.brand) || label;
+                }
                 const href = this._printerHubHref(p);
                 return `<a href="${Security.escapeAttr(href)}" class="printer-link">${Security.escapeHtml(label)}</a>`;
             }).join(', ');
@@ -1117,7 +1228,9 @@
 
                 list.innerHTML = printers.map(p => {
                     const slug = (p.name || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
-                    return `<li><a href="/shop?q=${encodeURIComponent(slug)}">${Security.escapeHtml(p.name)}</a></li>`;
+                    const label = (typeof ProductName !== 'undefined' && ProductName.compatModel)
+                        ? (ProductName.compatModel(p.name, p.brand) || p.name) : p.name;
+                    return `<li><a href="/shop?q=${encodeURIComponent(slug)}">${Security.escapeHtml(label)}</a></li>`;
                 }).join('');
 
                 tabBtn.hidden = false;
@@ -1141,14 +1254,13 @@
 
                 const deviceLinks = devices.map(d => {
                     const modelKey = d.model_name || d.model || d.device_model || '';
-                    const label = d.full_name
-                        ? Security.escapeHtml(d.full_name)
-                        : (() => {
-                            const brand = Security.escapeHtml(d.brand || d.device_brand || '');
-                            const model = Security.escapeHtml(modelKey);
-                            return brand && model ? `${brand} ${model}` : (brand || model);
-                        })();
-                    if (!label || !modelKey) return null;
+                    const deviceBrand = d.brand || d.device_brand || '';
+                    let raw = d.full_name || (deviceBrand && modelKey ? `${deviceBrand} ${modelKey}` : (deviceBrand || modelKey));
+                    if (typeof ProductName !== 'undefined' && ProductName.compatModel) {
+                        raw = ProductName.compatModel(raw, deviceBrand) || raw;
+                    }
+                    if (!raw || !modelKey) return null;
+                    const label = Security.escapeHtml(raw);
                     return `<a href="/ribbons?printer_model=${encodeURIComponent(modelKey)}" class="printer-link">${label}</a>`;
                 }).filter(Boolean);
 
@@ -1231,14 +1343,27 @@
                     const apiCategoryMap = { ink: 'ink', toner: 'toner', drum: 'drums', label_tape: 'label' };
                     const apiCategory = apiCategoryMap[info.category] || null;
                     if (brandSlug && apiCategory) {
-                        const seriesRes = await API.getShopData({ brand: brandSlug, category: apiCategory });
-                        const seriesList = seriesRes?.data?.series || [];
-                        const haystack = [(info.name || ''), (info.manufacturer_part_number || ''), (info.sku || '')]
-                            .join(' ').toUpperCase();
-                        const code = seriesList
-                            .map(s => s.code)
-                            .filter(c => c && haystack.includes(c.toUpperCase()))
-                            .sort((a, b) => b.length - a.length)[0];
+                        // Prefer the backend-authoritative code (trusts info.series_codes,
+                        // otherwise brand-regex with word boundaries). Only fall back to
+                        // matching the brand's series list when that returns nothing — and
+                        // then use a WHOLE-TOKEN test, never a bare substring, so a short
+                        // series code (e.g. "45") can't match inside a model number
+                        // (e.g. "C9452A") and divert Related Products to the wrong family.
+                        let code = this.extractProductCode(info);
+                        if (!code) {
+                            const seriesRes = await API.getShopData({ brand: brandSlug, category: apiCategory });
+                            const seriesList = seriesRes?.data?.series || [];
+                            const haystack = [(info.name || ''), (info.manufacturer_part_number || ''), (info.sku || '')]
+                                .join(' ').toUpperCase();
+                            code = seriesList
+                                .map(s => s.code)
+                                .filter(Boolean)
+                                .filter(c => {
+                                    const esc = c.toUpperCase().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                                    return new RegExp('(?:^|[^A-Z0-9])' + esc + '(?:[^A-Z0-9]|$)').test(haystack);
+                                })
+                                .sort((a, b) => b.length - a.length)[0];
+                        }
                         if (code) {
                             const res = await API.getShopData({ brand: brandSlug, category: apiCategory, code, limit: 200 });
                             if (res.ok && res.data?.products) {
@@ -1273,7 +1398,15 @@
                 // source of truth, the `source` field. If a row arrives without
                 // it, fall through to the current product's source as a tie-
                 // breaker rather than parsing the name.
-                const inferSource = (p) => p.source || info.source || 'genuine';
+                // Never invent a source. A related row with no `source` inherits
+                // the CURRENT product's source as a documented same-context tie-
+                // breaker, but we do NOT fall back to a hardcoded 'genuine' — that
+                // would badge unknown items GENUINE (a false claim). MC audit.
+                const inferSource = (p) => p.source || info.source;
+                // When the current product's own source is unknown, the whole
+                // genuine/compatible split is guesswork — suppress the source
+                // badges on related products rather than assert one.
+                const sourceKnown = info.source === 'genuine' || info.source === 'compatible';
 
                 const isCompatible = info.source === 'compatible';
                 // Apply the (familyKey → yieldTier → colorTier) override per
@@ -1303,9 +1436,10 @@
 
                 const buildSection = (products, type) => {
                     if (!products.length) return '';
-                    const badge = type === 'compatible'
-                        ? '<span class="badge badge-compatible">COMPATIBLE</span>'
-                        : '<span class="badge badge-genuine">GENUINE</span>';
+                    const badge = !sourceKnown ? ''
+                        : type === 'compatible'
+                            ? '<span class="badge badge-compatible">COMPATIBLE</span>'
+                            : '<span class="badge badge-genuine">GENUINE</span>';
                     const brandName = Security.escapeHtml((info.brandName || '').trim());
 
                     const ribbons = products.filter(p => inferProductType(p) === 'ribbon');
@@ -1333,7 +1467,7 @@
 
                         return `
                             <div class="related-products__type-group">
-                                <h3 class="related-products__group-heading">${badge} ${heading}</h3>
+                                <h3 class="related-products__group-heading">${[badge, heading].filter(Boolean).join(' ')}</h3>
                                 ${grids}
                             </div>
                         `;
@@ -1514,11 +1648,17 @@
         generateMetaDescription(info) {
             const parts = [];
 
-            // Product type
-            if (info.isCompatible) {
+            // Product type — key the genuine/compatible word off the trusted
+            // `source` field, NOT `isCompatible` (which is force-false for
+            // ribbons, so a compatible ribbon would otherwise be described as
+            // "Genuine …" — a false claim in indexed metadata). Universal /
+            // unknown-source items get no genuine/compatible qualifier at all.
+            if (info.source === 'genuine') {
+                parts.push(`Genuine ${info.brandName}`);
+            } else if (info.source === 'compatible') {
                 parts.push(`Compatible ${info.brandName}`);
             } else {
-                parts.push(`Genuine ${info.brandName}`);
+                parts.push(info.brandName);
             }
 
             // Category
@@ -1535,9 +1675,11 @@
                 parts.push(`- ${info.color}`);
             }
 
-            // Page yield if available
-            if (info.pageYield) {
-                parts.push(`- ${info.pageYield.toLocaleString()} page yield`);
+            // Page yield — only when it passes the plausibility guard, so the
+            // meta description can't advertise an implausible "3 page yield".
+            const metaYield = this.plausibleYield(info.pageYield);
+            if (metaYield) {
+                parts.push(`- ${metaYield.toLocaleString()} page yield`);
             }
 
             // Price

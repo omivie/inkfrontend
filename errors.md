@@ -4,6 +4,88 @@ Log every error encountered here. Before editing a file, scan for known issues. 
 
 ---
 
+## ERR-057 — Merchant audit LIVE pass reports 946/3004 feed "issues" — mostly auditor false-positives, not feed regressions (2026-07-07)
+
+**Symptom:** `node scripts/audit-merchant-center-readiness.mjs` prints
+`946/3004 feed items have at least one issue`: **901** "compatible title should START with a
+non-OEM term", **830** "duplicated brand token HP HP / OKI OKI / Epson Epson", **43** implausible
+yields, **3** ribbon page-yields — even though the backend shipped the feed remediation (a6f78ff)
+and its own 6-check table reports 0. NOT stale cache: the fresh cache-busted www feed
+(`x-vercel-cache: MISS`) reproduces the identical 946. The auditor and the shipped feed disagree.
+
+**Classification (verified per-SKU against the live feed):**
+1. **830 "duplicated brand token" = auditor FALSE POSITIVE.** The check runs on `title + " " + desc`.
+   Real items are fine — e.g. `C02BK`: title *"02 Black Compatible Ink Cartridge **for HP**"*,
+   desc *"**HP** Compatible Ink Cartridge…"*, `<g:brand>Office Consumables Ltd`. The "HP HP" only
+   exists at the title→description **join**; no field actually duplicates the brand. Fix belongs in
+   OUR script (check fields separately, or anchor the token check), not the feed.
+2. **901 "title should START with a non-OEM term" = rule-strictness disagreement.** Shipped titles
+   `{code} {color} Compatible {type} for {OEM}` are MC-compliant (labelled Compatible, seller
+   brand). The auditor's `COMPATIBLE_LEADS` regex insists the title *begin* with
+   Compatible/Third-party/Generic — MC does not require the prefix.
+3. **Non-page-rated products carrying a "N pages" yield = REAL defect (backend), ~125 items.** Not
+   just the 3 ribbons + 43 the auditor's min/max caught — gating on **product_type** (regex
+   `ribbon|label tape|photo paper|correction tape`) finds **122** more: label tapes (Dymo `S07*`/
+   `ZDY*`, Brother `TZE*`/`DK*`) with fabricated "12–1,564 pages", photo paper "N pages each". Many
+   sit *inside* the plausible 15–60000 range so a value-based check misses them — catch by type.
+   Root cause: feed builder emits the yield token without gating on category. Fix backend-side.
+4. **~15 high-capacity drums/fusers/waste-toner (65k–300k pages) = auditor FALSE POSITIVE.** The
+   auditor's `MAX_PLAUSIBLE_YIELD=60000` is too low for those categories (e.g. fuser 300k, drum
+   200k are correct). One genuinely corrupt: `G126ABK-2` "HP … 14 pages — Genuine Drum Unit". FE
+   should make the plausibility cap category-aware.
+
+**Rule:** STATIC pass is the blocking gate (exit 0 = release-ready); LIVE pass never fails the build
+and is advisory. Two live rules (dup-brand via title+desc concat; compatible-title-START) and the
+flat yield cap are stricter/blunter than GMC and over-report — confirm per-SKU, don't treat as
+regressions. Genuinely actionable backend item = strip the page-yield token from non-page-rated
+product types (~125 SKUs). Full dump + defect SKU list saved to scratchpad
+`mc-audit-full.json` / `defect-skus.txt`; handoff at `~/Downloads/backend-tasks-jul2026.md`.
+
+## ERR-056 — Product Codes save fails: "new row violates row-level security policy for table product_codes" (2026-07-06)
+
+**Symptom:** In the admin product drawer → **Product Codes** tab, toggling a second code and clicking
+**Save Changes** shows "Product updated" but then an error toast: *Product saved, but codes didn't:
+new row violates row-level security policy for table "product_codes"*. Codes never persist.
+
+**Root cause (NOT a frontend bug — verified live with Playwright as the owner):** `AdminAPI.setProductCodes`
+(`js/admin/api.js:1447`) writes codes **directly** to Supabase from the browser using the admin's
+authenticated session (delete-then-insert), the same working pattern as `product_ribbon_brands`.
+The session is valid, non-expired, **role=`authenticated`**; SELECT works; the table exists with RLS on.
+A probe INSERT returned Postgres **`42501`** and blocked *before* the CHECK constraint (fired even on a
+lowercase value that violates `code = upper(code)`) — proving there is **no INSERT policy granting
+`authenticated` write** on the live table. i.e. `inkcartridges/sql/product_codes.sql` (which defines
+`product_codes_insert_auth` / `_delete_auth` + grants) was **never fully applied** to live project
+`lmdlgldjgcanknsjrcxh` — only the table + `enable row level security` exist.
+
+**Fix:**
+1. **DB (the actual fix):** run `inkcartridges/sql/product_codes.sql` in Supabase → SQL Editor (idempotent;
+   `drop policy if exists` + `create policy`, no data touched). Takes effect immediately, no deploy.
+   The frontend cannot run DDL — only the anon key + a site-user `authenticated` JWT are available; no
+   service-role key or connection string exists in this repo.
+2. **Frontend hardening (this repo):** `describeCodesWriteError(err)` in `js/admin/pages/products.js`
+   maps `42501` / `/row-level security|permission denied/` to a plain-English, actionable toast
+   ("…the database is missing write permission for the product_codes table. Apply
+   inkcartridges/sql/product_codes.sql in Supabase…"). Wired into both `setProductCodes` failure surfaces
+   — the Save handler (~line 3260) and the brand-wide rename/delete via `applyBrandCodeChange` (~line 2135).
+   Verified: the friendly message renders end-to-end while the DB is still unpatched.
+
+**Rule:** These junction tables (`product_codes`, `product_ribbon_brands`) are written by direct
+**authenticated** Supabase inserts from the browser — their `.sql` migration (RLS policies + grants for
+`authenticated`) MUST be applied to live, or every admin write 42501s. A `42501` from an authenticated
+admin = missing/incomplete RLS policy on live, not a session problem.
+
+**RESOLVED (2026-07-07):** Backend applied the policies to live via migration
+`104_product_codes_admin_write_policies.sql` (documented in `Downloads/product-codes-admin-editing.md`) —
+same `to authenticated` INSERT/DELETE policies + grants as `inkcartridges/sql/product_codes.sql`. Admin
+code writes now persist. Frontend follow-up: `describeCodesWriteError` no longer tells the admin to run
+the SQL (stale advice) — a `42501` now maps to *"you don't have permission… make sure you're signed in as
+an admin,"* and `23514` (check) / `23503` (FK) / `23505` (duplicate → no-op) are mapped per the backend's
+error table. `setProductCodes` now swallows `23505` as a no-op. Cache-bust: `APP_VERSION`
+`2026.07.07-product-codes-rls` + `api.js?v=product-codes-rls-jul2026`. New assertions in
+`tests/product-codes.test.js` (40 pass).
+
+---
+
 ## ERR-051 — Admin Invoices: status leaked onto customer invoice; need inline paid/unpaid (2026-06-28)
 
 **Symptom (request, not a crash):** The invoice "Status" (draft/unpaid/paid/void) printed on the

@@ -25,12 +25,42 @@ document.addEventListener('DOMContentLoaded', function() {
     initActiveNavLink();
     initAdminHeaderLink();
     initSearch();
+    initStickyHeader();
     initCurrentYear();
     initDropdowns();
     initMegaPanels();
     initCartBadgeFromStorage();
     captureGclid();
 });
+
+/**
+ * Mobile sticky-header compaction (mobile-ux-audit-jul2026 §2a/§8.2).
+ *
+ * On mobile the whole `.site-header` is `position: sticky` (see layout.css) so
+ * the search box and cart stay reachable on long PDPs/listings — the audit's
+ * "search a different code" journey. Past a small scroll threshold we add
+ * `.site-header--scrolled`, which collapses the tap-to-call contact chip and
+ * the logo tagline so the pinned header slims toward `--header-h`. Pure
+ * class-toggle; the CSS does the visual work and only inside the mobile
+ * breakpoint, so desktop is untouched. Fail-soft when there's no header.
+ */
+function initStickyHeader() {
+    const header = document.querySelector('.site-header');
+    if (!header) return;
+    const THRESHOLD = 80;
+    let ticking = false;
+    const apply = function() {
+        ticking = false;
+        header.classList.toggle('site-header--scrolled', window.scrollY > THRESHOLD);
+    };
+    const onScroll = function() {
+        if (ticking) return;
+        ticking = true;
+        window.requestAnimationFrame(apply);
+    };
+    window.addEventListener('scroll', onScroll, { passive: true });
+    apply(); // set initial state (e.g. on a bfcache restore mid-page)
+}
 
 /**
  * Light up the nav item that matches the current URL.
@@ -68,16 +98,17 @@ function initActiveNavLink() {
 /**
  * Reveal the header "Admin" shortcut for verified admin accounts only.
  *
- * The link (`#header-admin-link`) ships in every page's header markup as
- * `hidden` so the navbar stays byte-identical across all 25 customer-facing
- * pages (project_navbar_parity_may2026). This function is the only thing
- * that unhides it.
+ * The Admin link is NO LONGER shipped in static page markup. It used to sit
+ * `hidden` in every page's header, but that exposed `href="/admin"` in the
+ * public HTML source of every customer-facing page — a Google Merchant Center
+ * "site quality" flag. It is now created and inserted into `.header-actions`
+ * by this function ONLY after the account is verified as admin, so guests and
+ * ordinary customers never receive the element at all (Jul 2026, MC audit).
  *
- * Security model: this is UI sugar, not an access gate. The /admin route
- * re-verifies the role server-side on every visit (see js/admin/auth.js),
- * so a wrongly-shown link grants nothing. The authoritative check here is
- * `API.verifyAdmin()` (GET /api/admin/verify), which validates the JWT and
- * role on the backend.
+ * Security model is unchanged: this is UI sugar, not an access gate. The
+ * /admin route re-verifies the role server-side on every visit (middleware +
+ * js/admin/auth.js), so a wrongly-shown link grants nothing. The authoritative
+ * check here is `API.verifyAdmin()` (GET /api/admin/verify).
  *
  * UX: a per-session sessionStorage hint (`ink_admin_header_hint`, keyed to
  * the user id) makes the link appear instantly on subsequent page loads so
@@ -89,10 +120,36 @@ function initActiveNavLink() {
  * the single verify call (guests skip even that).
  */
 function initAdminHeaderLink() {
-    var link = document.getElementById('header-admin-link');
-    if (!link || typeof Auth === 'undefined') return;
+    if (typeof Auth === 'undefined') return;
 
     var HINT_KEY = 'ink_admin_header_hint';
+
+    // Lazily build + insert the link the first time it's needed; return the
+    // existing node on subsequent calls. Kept out of static markup so the
+    // /admin route is never advertised in public page source.
+    function ensureLink() {
+        var existing = document.getElementById('header-admin-link');
+        if (existing) return existing;
+        var actions = document.querySelector('.header-actions');
+        if (!actions) return null;
+        var a = document.createElement('a');
+        a.href = '/admin';
+        a.className = 'header-actions__item header-actions__item--admin';
+        a.id = 'header-admin-link';
+        a.setAttribute('aria-label', 'Admin');
+        a.innerHTML = '<span class="header-actions__icon">' +
+            '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>' +
+            '</span><span>Admin</span>';
+        // Insert as the first action so it sits before Account, matching the
+        // previous markup order.
+        actions.insertBefore(a, actions.firstElementChild);
+        return a;
+    }
+
+    function removeLink() {
+        var el = document.getElementById('header-admin-link');
+        if (el && el.parentNode) el.parentNode.removeChild(el);
+    }
 
     function readHint() {
         try { return sessionStorage.getItem(HINT_KEY); } catch (e) { return null; }
@@ -110,7 +167,7 @@ function initAdminHeaderLink() {
         ready.then(function() {
             // Guests never see the link and never trigger a verify call.
             if (!Auth.isAuthenticated || !Auth.isAuthenticated()) {
-                link.hidden = true;
+                removeLink();
                 writeHint(null);
                 return;
             }
@@ -120,14 +177,15 @@ function initAdminHeaderLink() {
 
             // Instant-show from a verification earlier this session.
             if (userId && readHint() === userId) {
-                link.hidden = false;
+                ensureLink();
             }
 
             // Authoritative server-side role check.
             if (typeof API === 'undefined' || !API.verifyAdmin) return;
             API.verifyAdmin().then(function(res) {
                 var isAdmin = !!(res && res.ok && res.data);
-                link.hidden = !isAdmin;
+                if (isAdmin) ensureLink();
+                else removeLink();
                 writeHint(isAdmin && userId ? userId : null);
             }).catch(function() {
                 // Backend unreachable — keep whatever the hint decided.

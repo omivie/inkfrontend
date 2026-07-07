@@ -67,7 +67,9 @@ test('S0.1 every page header gives the icon-only action links an aria-label', ()
         '<a href="/account" class="header-actions__item" aria-label="Account">',
         '<a href="/account/favourites" class="header-actions__item" aria-label="Favourites">',
         '<a href="/cart" class="header-actions__item" aria-label="Cart">',
-        'id="header-admin-link" aria-label="Admin" hidden>',
+        // The Admin shortcut is no longer static markup — it is JS-injected for
+        // verified admins only (MC audit, Jul 2026), with its aria-label set in
+        // main.js#initAdminHeaderLink. See admin-header-link-may2026.test.js.
         '<button class="nav-toggle" aria-expanded="false" aria-controls="nav-menu" aria-label="Open navigation menu">',
     ];
     for (const file of HEADER_PAGES) {
@@ -94,14 +96,16 @@ test('S0.1 updateCartCount() syncs the cart link aria-label to "Cart, N items"',
         'main.js must set an aria-label like "Cart, N items"');
 });
 
-test('S0.1 layout.css enforces 44px touch targets for header action links, hamburger, search button', () => {
-    // Header action items: 44×44 min within a mobile media query.
-    assert.match(LAYOUT, /\.header-actions__item\s*\{[^}]*min-(width|height):\s*44px/s,
-        'header-actions__item needs a 44px min touch target');
-    // The hamburger was 40px; must now be 44.
-    assert.match(LAYOUT, /\.nav-toggle\s*\{[^}]*width:\s*44px;[^}]*height:\s*44px/s,
-        'nav-toggle must be 44×44');
-    assert.match(LAYOUT, /\.search-form--nav\s+\.search-form__button\s*\{[^}]*min-height:\s*44px/s,
+test('S0.1 layout.css enforces >=44px touch targets for header action links, hamburger, search button', () => {
+    // The Jul 2026 mobile-ux audit (§5b) raised these from the 44px Apple floor
+    // to the 48px WCAG AAA target via the --tap-min token. Accept the token
+    // (or a literal 44/48) so both eras pass. Effective size is pinned to 48px
+    // by mobile-ux-audit-jul2026.test.js.
+    assert.match(LAYOUT, /\.header-actions__item\s*\{[^}]*min-(width|height):\s*(var\(--tap-min\)|4[48]px)/s,
+        'header-actions__item needs a >=44px min touch target');
+    assert.match(LAYOUT, /\.nav-toggle\s*\{[^}]*width:\s*(var\(--tap-min\)|4[48]px);[^}]*height:\s*(var\(--tap-min\)|4[48]px)/s,
+        'nav-toggle must be a >=44px square');
+    assert.match(LAYOUT, /\.search-form--nav\s+\.search-form__button\s*\{[^}]*min-height:\s*(var\(--tap-min\)|4[48]px)/s,
         'nav search submit must be >=44px tall');
 });
 

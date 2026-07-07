@@ -15,6 +15,7 @@ const TILES = [
   { key: 'packs',   tab: 'packs',     label: 'Broken or inactive packs',   read: (d) => sumNullable(d?.packs?.broken_count, d?.packs?.inactive_count) },
   { key: 'compat',  tab: 'integrity', label: 'Orphan printers',            read: (d) => d?.compat?.orphan_printers ?? null },
   { key: 'seo',     tab: 'seo',       label: 'Products without slug',      read: (d) => d?.seo?.null_slug_products ?? null },
+  { key: 'links',   tab: 'links',     label: 'Broken links',               read: (d) => d?.links?.broken_count ?? null },
   { key: 'infra',   tab: 'infra',     label: 'Image audit pending',        read: (d) => d?.infra?.image_audit_pending ?? null },
 ];
 

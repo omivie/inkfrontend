@@ -280,6 +280,24 @@
     --z-modal: 500;
     --z-popover: 600;
     --z-tooltip: 700;
+
+    /* ==========================================
+       MOBILE ERGONOMICS (mobile-ux-audit-jul2026 §8.0)
+       Additive — do not replace the tokens above.
+       Accessibility target sizes + iOS-safe fluid type.
+       ========================================== */
+
+    --tap-min: 48px;                              /* min interactive target (WCAG 2.5.5) */
+    --tap-gap: 8px;                               /* min spacing between adjacent targets */
+    --safe-bottom: env(safe-area-inset-bottom, 0px);
+    --header-h: 56px;                             /* compact sticky header height on mobile */
+
+    /* Fluid type ramp — shrinks on 375px without media queries */
+    --step-body: clamp(1rem, 0.95rem + 0.3vw, 1.0625rem);   /* 16 → 17px (never below 16px) */
+    --step-h1:   clamp(1.5rem, 1.2rem + 2vw, 2rem);
+    --step-h2:   clamp(1.375rem, 1.15rem + 1.4vw, 1.5625rem);
+    --step-h3:   clamp(1.125rem, 1.05rem + 0.6vw, 1.3125rem);
+    --measure: 40ch;                              /* max line length for mobile body copy */
 }
 
 

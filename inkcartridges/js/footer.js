@@ -259,6 +259,7 @@
                             <li><a href="/contact">Contact Us</a></li>
                             <li><a href="/track-order">Track Order</a></li>
                             <li><a href="/faq">FAQ</a></li>
+                            <li><a href="/genuine-vs-compatible">Genuine vs Compatible</a></li>
                             <li><a href="/shop">Shop All</a></li>
                         </ul>
                     </details>
@@ -407,6 +408,10 @@
                             <circle cx="28" cy="15" r="7.5" fill="#F79E1B"/>
                             <path d="M24 9.4a7.49 7.49 0 0 0 0 11.2 7.49 7.49 0 0 0 0-11.2Z" fill="#FF5F00"/>
                         </svg>
+                        <svg class="pay-card" viewBox="0 0 48 30" role="img" aria-label="American Express">
+                            <rect width="48" height="30" rx="4" fill="#2E77BC"/>
+                            <text x="24" y="19.5" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="9" font-weight="700" letter-spacing="0.3" fill="#FFFFFF">AMEX</text>
+                        </svg>
                         <svg class="pay-card" viewBox="0 0 48 30" role="img" aria-label="PayPal">
                             <rect width="48" height="30" rx="4" fill="#FFFFFF" stroke="#E6E8EB"/>
                             <text x="24" y="19.5" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="11" font-weight="700" font-style="italic" letter-spacing="-0.2"><tspan fill="#003087">Pay</tspan><tspan fill="#009CDE">Pal</tspan></text>
@@ -432,6 +437,9 @@
                         </svg>
                     </div>
                 </div>
+                <p class="footer-disclaimer">
+                    All product, brand, and printer names (HP, Canon, Epson, Brother, and others) are trademarks of their respective owners and are used only to indicate compatibility. Compatible cartridges sold on this site are not manufactured, endorsed, or sold by those brand owners; they are supplied by ${TRUST.legalEntity}, trading as ${TRUST.tradingName}. Your statutory rights under the New Zealand Consumer Guarantees Act 1993 are unaffected.
+                </p>
             </div>
         </div>`;
 

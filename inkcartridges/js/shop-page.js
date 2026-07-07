@@ -165,8 +165,18 @@
             printer: null,      // For printer-based product lookup
             printerName: null,  // Display name for the printer
             type: null,         // 'genuine' or 'compatible' filter
+            // Mobile Filter & Sort sheet (mobile-ux-audit-jul2026 §2b). Both are
+            // client-side refinements applied at render time over the loaded
+            // rows — there is no backend facet endpoint (audit §7).
+            sort: 'recommended', // recommended | price_asc | price_desc | name_asc | name_desc
+            inStock: false,      // in-stock-only toggle
             page: 1             // Pagination — only meaningful on search-results level
         },
+
+        // Allowed values for the Filter & Sort sheet's sort control. Named
+        // to match the backend's /api/shop `sort` param vocabulary even though
+        // the sort itself is applied client-side (audit §2b/§7).
+        SORT_OPTIONS: ['recommended', 'price_asc', 'price_desc', 'name_asc', 'name_desc'],
 
         // Navigation version to prevent race conditions
         // Incremented on each navigation, checked before rendering
@@ -323,6 +333,9 @@
 
             // Set up search form to preserve current filters
             this.setupSearchForm();
+
+            // Mobile Filter & Sort sheet wiring (mobile-ux-audit-jul2026 §2b).
+            this.initFilterSort();
         },
 
         // Embed CollectionPage / BreadcrumbList JSON-LD for the current view.
@@ -458,6 +471,8 @@
                 printerModelDisplay: null,
                 search: null,
                 type: null,
+                sort: 'recommended',
+                inStock: false,
                 page: 1
             };
 
@@ -614,6 +629,10 @@
             this.state.printerBrand = params.get('printer_brand'); // Brand of printer (for display, not filtering)
             this.state.search = params.get('search') || params.get('q'); // Support both 'search' and 'q' params
             this.state.type = params.get('type'); // Support 'type' param for genuine/compatible filtering
+            // Filter & Sort refinements (mobile-ux-audit-jul2026 §2b).
+            const _rawSort = params.get('sort');
+            this.state.sort = this.SORT_OPTIONS.includes(_rawSort) ? _rawSort : 'recommended';
+            this.state.inStock = params.get('in_stock') === '1';
             // Pagination — `page` only applies on the search-results level, but
             // we parse it unconditionally so popstate restores the right page.
             const rawPage = parseInt(params.get('page'), 10);
@@ -694,6 +713,9 @@
             if (this.state.category && !categoryImpliedByPath) params.set('category', this.CATEGORY_CANONICAL_BY_INTERNAL[this.state.category] || this.state.category);
             if (this.state.code) params.set('code', this.state.code);
             if (this.state.type) params.set('type', this.state.type);
+            // Filter & Sort refinements — omit the defaults to keep URLs clean.
+            if (this.state.sort && this.state.sort !== 'recommended') params.set('sort', this.state.sort);
+            if (this.state.inStock) params.set('in_stock', '1');
             if (this.state.search) params.set('q', this.state.search);
             // `page` is meaningful only on search-results and only beyond p1;
             // omitting it on p1 keeps the canonical URL clean and the browser
@@ -710,6 +732,118 @@
         },
 
         // =========================================
+        // MOBILE FILTER & SORT SHEET (mobile-ux-audit-jul2026 §2b/§8.2)
+        // =========================================
+        // The list levels get a bottom "Filter & Sort" action bar (thumb zone)
+        // that opens a full-screen sheet. Sort is client-side over the loaded
+        // rows; Source reuses the existing `type` param; In-stock is a
+        // client-side toggle. Facet counts are NOT available from the backend
+        // (audit §7) so the bar shows an active-refinement count instead.
+        FILTER_SORT_LEVELS: ['products', 'printer-products', 'printer-model-products', 'search-results'],
+
+        // True when the current view is a product list with something rendered.
+        _isProductListLevel() {
+            return this.FILTER_SORT_LEVELS.includes(this.state.level)
+                && this.elements.levelProducts
+                && !this.elements.levelProducts.hidden;
+        },
+
+        // Number of non-default refinements currently applied (for the bar badge).
+        _activeRefinementCount() {
+            let n = 0;
+            if (this.state.sort && this.state.sort !== 'recommended') n++;
+            if (this.state.type) n++;
+            if (this.state.inStock) n++;
+            return n;
+        },
+
+        updateFilterSortBar() {
+            const bar = document.getElementById('filter-sort-bar');
+            if (!bar) return;
+            const show = this._isProductListLevel();
+            bar.hidden = !show;
+            const countEl = document.getElementById('filter-sort-count');
+            if (countEl) {
+                const n = this._activeRefinementCount();
+                countEl.textContent = n ? String(n) : '';
+                countEl.hidden = n === 0;
+            }
+        },
+
+        initFilterSort() {
+            const bar = document.getElementById('filter-sort-bar');
+            const sheet = document.getElementById('filter-sort-sheet');
+            if (!bar || !sheet) return; // fail-soft when markup absent
+
+            const openBtn = document.getElementById('filter-sort-open');
+            const closeEls = sheet.querySelectorAll('[data-filter-sort-close]');
+            const applyBtn = document.getElementById('filter-sort-apply');
+            const clearBtn = document.getElementById('filter-sort-clear');
+            let lastFocus = null;
+
+            // Reflect current state into the sheet controls before opening.
+            const syncControls = () => {
+                const sortInput = sheet.querySelector(`input[name="fs-sort"][value="${this.state.sort || 'recommended'}"]`);
+                if (sortInput) sortInput.checked = true;
+                const srcInput = sheet.querySelector(`input[name="fs-source"][value="${this.state.type || ''}"]`);
+                if (srcInput) srcInput.checked = true;
+                const stock = document.getElementById('fs-instock');
+                if (stock) stock.checked = !!this.state.inStock;
+            };
+
+            const openSheet = () => {
+                syncControls();
+                lastFocus = document.activeElement;
+                sheet.hidden = false;
+                document.body.classList.add('filter-sort-open');
+                const first = sheet.querySelector('input, button');
+                if (first) first.focus();
+                document.addEventListener('keydown', onKeydown);
+            };
+
+            const closeSheet = () => {
+                sheet.hidden = true;
+                document.body.classList.remove('filter-sort-open');
+                document.removeEventListener('keydown', onKeydown);
+                if (lastFocus && typeof lastFocus.focus === 'function') lastFocus.focus();
+            };
+
+            const onKeydown = (e) => {
+                if (e.key === 'Escape') { e.preventDefault(); closeSheet(); }
+            };
+
+            const applySheet = () => {
+                const sortVal = (sheet.querySelector('input[name="fs-sort"]:checked') || {}).value || 'recommended';
+                const srcVal = (sheet.querySelector('input[name="fs-source"]:checked') || {}).value || '';
+                const stockEl = document.getElementById('fs-instock');
+                this.state.sort = this.SORT_OPTIONS.includes(sortVal) ? sortVal : 'recommended';
+                this.state.type = (srcVal === 'genuine' || srcVal === 'compatible') ? srcVal : null;
+                this.state.inStock = !!(stockEl && stockEl.checked);
+                this.updateURL();
+                closeSheet();
+                // Re-run the current level so the type filter re-splits sections
+                // and the client-side sort/in-stock refinements re-render.
+                this.navigationVersion++;
+                this.loadCurrentLevel(this.navigationVersion);
+                this.renderActiveFilters();
+            };
+
+            const clearSheet = () => {
+                const rec = sheet.querySelector('input[name="fs-sort"][value="recommended"]');
+                if (rec) rec.checked = true;
+                const allSrc = sheet.querySelector('input[name="fs-source"][value=""]');
+                if (allSrc) allSrc.checked = true;
+                const stock = document.getElementById('fs-instock');
+                if (stock) stock.checked = false;
+            };
+
+            if (openBtn) openBtn.addEventListener('click', openSheet);
+            closeEls.forEach((el) => el.addEventListener('click', closeSheet));
+            if (applyBtn) applyBtn.addEventListener('click', applySheet);
+            if (clearBtn) clearBtn.addEventListener('click', clearSheet);
+        },
+
+        // =========================================
         // NAVIGATION METHODS
         // =========================================
         async navigateTo(level, data = {}) {
@@ -717,26 +851,28 @@
             this.navigationVersion++;
             const thisNavVersion = this.navigationVersion;
 
-            // Preserve type filter across navigation
+            // Preserve type filter + Filter & Sort refinements across navigation
             const currentType = this.state.type;
+            const currentSort = this.state.sort || 'recommended';
+            const currentInStock = !!this.state.inStock;
 
             // Update state
             switch (level) {
                 case 'brands':
-                    this.state = { level: 'brands', brand: null, category: null, code: null, type: currentType };
+                    this.state = { level: 'brands', brand: null, category: null, code: null, type: currentType, sort: currentSort, inStock: currentInStock };
                     break;
                 case 'categories':
-                    this.state = { level: 'categories', brand: data.brand, category: null, code: null, type: currentType };
+                    this.state = { level: 'categories', brand: data.brand, category: null, code: null, type: currentType, sort: currentSort, inStock: currentInStock };
                     break;
                 case 'codes':
                     // data.brand is supplied by the S0.3 category-picker path
                     // (brand was null until the user picked one); the normal
                     // categories→codes drilldown omits it and keeps the
                     // already-selected brand.
-                    this.state = { level: 'codes', brand: data.brand || this.state.brand, category: data.category, code: null, type: currentType };
+                    this.state = { level: 'codes', brand: data.brand || this.state.brand, category: data.category, code: null, type: currentType, sort: currentSort, inStock: currentInStock };
                     break;
                 case 'products':
-                    this.state = { level: 'products', brand: this.state.brand, category: this.state.category, code: data.code, type: currentType };
+                    this.state = { level: 'products', brand: this.state.brand, category: this.state.category, code: data.code, type: currentType, sort: currentSort, inStock: currentInStock };
                     break;
             }
 
@@ -781,6 +917,7 @@
                 this.updateBreadcrumb();
                 this.updateTitle();
                 this.updateSEO();
+                this.updateFilterSortBar();
             }
         },
 
@@ -3190,8 +3327,52 @@
         //
         // Spec: readfirst/code-yield-grouping-may2026.md
         // Pinned by tests/code-yield-grouping-may2026.test.js.
+        /**
+         * Client-side comparator for the Filter & Sort sheet. Never computes or
+         * mutates prices — it reads the backend's canonical `retail_price`
+         * (GST-inclusive) and `name` only. Missing prices sink to the bottom in
+         * both directions so a null price can't hijack the top of the list.
+         */
+        _sortProductsBy(list, mode) {
+            const arr = list.slice();
+            const priceOf = (p) => {
+                const n = parseFloat(p.retail_price);
+                return Number.isFinite(n) ? n : null;
+            };
+            const nameOf = (p) => (p.name || '').toLowerCase();
+            const byPrice = (dir) => (a, b) => {
+                const pa = priceOf(a); const pb = priceOf(b);
+                if (pa === null && pb === null) return 0;
+                if (pa === null) return 1;   // nulls last
+                if (pb === null) return -1;
+                return dir * (pa - pb);
+            };
+            switch (mode) {
+                case 'price_asc':  arr.sort(byPrice(1)); break;
+                case 'price_desc': arr.sort(byPrice(-1)); break;
+                case 'name_asc':   arr.sort((a, b) => nameOf(a).localeCompare(nameOf(b))); break;
+                case 'name_desc':  arr.sort((a, b) => nameOf(b).localeCompare(nameOf(a))); break;
+            }
+            return arr;
+        },
+
         renderProducts(products, container, section, isCompatible = false, _options = {}) {
             container.innerHTML = '';
+
+            // Mobile Filter & Sort refinements (mobile-ux-audit-jul2026 §2b).
+            // Applied here so EVERY product-list level (code drilldown, printer,
+            // printer-model, search results, paper) inherits it — they all funnel
+            // through renderProducts. 'recommended' preserves the server-canonical
+            // byCodeThenColor yield-grouping + row breaks; an explicit price/name
+            // sort flattens to a single sorted run (grouping no longer applies).
+            // The in-stock filter narrows `products` in place first so the
+            // byCodeThenColor(products) grouping below still sees the same array.
+            if (this.state.inStock) {
+                products = products.filter((p) => {
+                    const st = (typeof getStockStatus === 'function') ? getStockStatus(p) : null;
+                    return !st || st.class === 'in-stock';
+                });
+            }
 
             if (products.length === 0) {
                 section.hidden = true;
@@ -3200,12 +3381,20 @@
 
             section.hidden = false;
 
-            const sortedProducts = (typeof ProductSort !== 'undefined' && ProductSort.byCodeThenColor)
-                ? ProductSort.byCodeThenColor(products)
-                : products;
-            const breaks = (typeof ProductSort !== 'undefined' && ProductSort.rowBreakIndices)
-                ? new Set(ProductSort.rowBreakIndices(sortedProducts))
-                : new Set();
+            const sortMode = this.state.sort || 'recommended';
+            let sortedProducts;
+            let breaks;
+            if (sortMode !== 'recommended') {
+                sortedProducts = this._sortProductsBy(products, sortMode);
+                breaks = new Set(); // flat sorted run — no yield-group row breaks
+            } else {
+                sortedProducts = (typeof ProductSort !== 'undefined' && ProductSort.byCodeThenColor)
+                    ? ProductSort.byCodeThenColor(products)
+                    : products;
+                breaks = (typeof ProductSort !== 'undefined' && ProductSort.rowBreakIndices)
+                    ? new Set(ProductSort.rowBreakIndices(sortedProducts))
+                    : new Set();
+            }
 
             sortedProducts.forEach((product, i) => {
                 if (breaks.has(i)) {
@@ -3255,8 +3444,10 @@
             const brandName = product.brand?.name || '';
             const color = product.color || '';
 
-            // Keep full product name including "Compatible" prefix
-            const displayName = product.name || '';
+            // Keep full product name including "Compatible" prefix; de-double the
+            // redundant compact code token in genuine names (display only —
+            // stored name/slug untouched). See ProductName in utils.js.
+            const displayName = (typeof ProductName !== 'undefined') ? ProductName.clean(product) : (product.name || '');
 
             // Show product image if available, otherwise color block for compatible only, or placeholder for genuine
             const placeholderSvg = `<svg width="60" height="60" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1">
@@ -3264,8 +3455,13 @@
                         <path d="M9 6h6M9 10h6"/>
                     </svg>`;
             let imageContent;
-            const resolvedImageUrl = typeof storageUrl === 'function' ? storageUrl(product.image_url) : product.image_url;
-            const srcsetAttr = typeof imageSrcset === 'function' && product.image_url ? imageSrcset(product.image_url) : '';
+            // Prefer the backend's optimized image fields (mobile-ux-audit-jul2026
+            // §3a/§6), falling back to the hand-built /api/images/optimize URLs.
+            // Must stay in parity with Products.getProductImageHTML (products.js).
+            const resolvedImageUrl = product.image_thumbnail_url
+                || (typeof storageUrl === 'function' ? storageUrl(product.image_url) : product.image_url);
+            const srcsetAttr = product.image_srcset
+                || (typeof imageSrcset === 'function' && product.image_url ? imageSrcset(product.image_url) : '');
             const sizesAttr = '(max-width: 480px) 200px, (max-width: 768px) 300px, 400px';
             const colorStyle = ProductColors.getProductStyle(product);
             // Get raw (non-optimized) image URL for fallback when optimization endpoint fails (429/error)
@@ -3629,15 +3825,24 @@
             return li;
         },
 
-        // Get product type label based on category and type filter
-        getProductTypeLabel() {
+        // Base product-type label for the current category, WITHOUT any
+        // genuine/compatible prefix. The section headers add their own
+        // "Compatible"/"Original" word, so they must use this base to avoid
+        // "Compatible Compatible …" / "Original Original …" (MC audit, Jul 2026).
+        getBaseProductTypeLabel() {
             const typeMap = {
                 'ink': 'Inkjet Cartridges',
                 'toner': 'Toner Cartridges',
                 'consumable': 'Drums & Supplies',
                 'paper': 'Paper'
             };
-            let label = typeMap[this.state.category] || 'Cartridges';
+            return typeMap[this.state.category] || 'Cartridges';
+        },
+
+        // Product type label with the active type-filter prefix applied. Used by
+        // updateSEO (single-heading contexts), NOT by the two section headers.
+        getProductTypeLabel() {
+            let label = this.getBaseProductTypeLabel();
 
             // Add type filter prefix if specified
             if (this.state.type === 'genuine') {
@@ -3658,7 +3863,10 @@
             this.elements.yieldBanner.hidden = true;
 
             const brandName = this.brandInfo[this.state.brand]?.name || this.state.brand || '';
-            const productType = this.getProductTypeLabel();
+            // Base label only — each header adds its own "Compatible"/"Original"
+            // word, so using the prefixed label here produced "Brother Compatible
+            // Compatible Inkjet Cartridges" under ?type= filters (MC audit).
+            const productType = this.getBaseProductTypeLabel();
 
             this.elements.compatibleTitleText.textContent = `${brandName} Compatible ${productType}`;
             this.elements.genuineTitleText.textContent = `${brandName} Original ${productType}`;

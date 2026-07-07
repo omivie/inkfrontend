@@ -619,6 +619,22 @@ const AdminAPI = {
     return analyticsHttpGet(`/api/admin/analytics/search/zero-result?${analyticsQuery(filterParams, { result_limit: limit })}`, signal);
   },
 
+  // Product Demand Ranking — composite "what to stock for same-day shipping"
+  // score. This endpoint has its OWN query params (product_type/source/packs/
+  // window_days/limit) — it does NOT use the date/brand FilterState convention,
+  // so we build the query directly here instead of via analyticsQuery(). Returns
+  // the full `data` object ({ ranking, weights, signal_coverage, ... }) or null.
+  async getDemandRanking(opts = {}, signal) {
+    const q = new URLSearchParams();
+    const { product_type, source, packs, window_days, limit } = opts || {};
+    if (product_type) q.set('product_type', product_type);
+    if (source)       q.set('source', source);
+    if (packs)        q.set('packs', packs);
+    if (window_days)  q.set('window_days', window_days);
+    if (limit)        q.set('limit', String(limit));
+    return analyticsHttpGet(`/api/admin/analytics/demand-ranking?${q.toString()}`, signal);
+  },
+
   async getNewOrders24h(signal) {
     const to = new Date();
     const from = new Date(to.getTime() - 24 * 60 * 60 * 1000);
@@ -1457,7 +1473,10 @@ const AdminAPI = {
       if (clean.length) {
         const rows = clean.map(code => ({ product_id: productId, code }));
         const { error: insErr } = await sb.from('product_codes').insert(rows);
-        if (insErr) throw insErr;
+        // 23505 = duplicate (product_id, code) PK. Delete-then-insert on a
+        // de-duped Set means this should never fire, but per the backend
+        // contract an already-present code is a no-op, not a failure.
+        if (insErr && insErr.code !== '23505') throw insErr;
       }
       return clean;
     } catch (e) {
@@ -3003,6 +3022,59 @@ const AdminAPI = {
         const resp = await window.API.get('/api/admin/infra/image-pipeline');
         return resp?.data ?? null;
       } catch (e) { adminApiWarn('Load image pipeline health', e); return null; }
+    },
+
+    // ---- Link audit (broken-links crawler) ----
+    // Backend crawler (readfirst/link-audit-backend-handoff-jul2026.md) is
+    // pending; every route below fails soft (returns null / surfaces the
+    // message) so the Links tab renders a clean empty state until it ships.
+    async getLinkAuditSummary() {
+      try {
+        const resp = await window.API.get('/api/admin/link-audit/summary');
+        return resp?.data ?? null;
+      } catch (e) { adminApiWarn('Load link-audit summary', e); return null; }
+    },
+
+    async getLinkAudit({ bucket, type, page = 1, limit = 50, search } = {}) {
+      try {
+        const p = new URLSearchParams();
+        if (bucket) p.set('bucket', bucket);
+        if (type) p.set('type', type);
+        if (search) p.set('search', search);
+        p.set('page', String(page));
+        p.set('limit', String(Math.min(Number(limit) || 50, 200)));
+        const resp = await window.API.get(`/api/admin/link-audit/list?${p}`);
+        return resp ?? null; // keep envelope so caller sees pagination meta
+      } catch (e) { adminApiWarn('Load link-audit list', e); return null; }
+    },
+
+    async recheckLink(id) {
+      const resp = await window.API.post(`/api/admin/link-audit/${encodeURIComponent(id)}/recheck`, {});
+      if (resp && resp.ok === false) {
+        const err = new Error(resp.error?.message || resp.error || 'Re-check failed');
+        err.code = resp.error?.code; throw err;
+      }
+      return resp?.data ?? null;
+    },
+
+    async dismissLink(id, { reason } = {}) {
+      const resp = await window.API.post(`/api/admin/link-audit/${encodeURIComponent(id)}/dismiss`, {
+        ...(reason ? { reason } : {}),
+      });
+      if (resp && resp.ok === false) {
+        const err = new Error(resp.error?.message || resp.error || 'Dismiss failed');
+        err.code = resp.error?.code; throw err;
+      }
+      return resp?.data ?? null;
+    },
+
+    async triggerLinkScan() {
+      const resp = await window.API.post('/api/admin/link-audit/scan', {});
+      if (resp && resp.ok === false) {
+        const err = new Error(resp.error?.message || resp.error || 'Scan failed');
+        err.code = resp.error?.code; throw err;
+      }
+      return resp?.data ?? null;
     },
   },
 };

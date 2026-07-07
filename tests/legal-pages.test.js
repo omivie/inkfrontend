@@ -68,8 +68,10 @@ test('§1 every legal page declares its canonical URL', () => {
         'contact.html':  '/contact',
     };
     for (const [page, slug] of Object.entries(expectedSlug)) {
-        const re = new RegExp('rel="canonical"\\s+href="https://inkcartridges\\.co\\.nz' + slug + '"');
-        assert.match(SRC[page], re, `${page} must have canonical href to https://inkcartridges.co.nz${slug}`);
+        // Canonical host is www site-wide (2026-07 backend directive) — the
+        // static legal pages were migrated from apex to match.
+        const re = new RegExp('rel="canonical"\\s+href="https://www\\.inkcartridges\\.co\\.nz' + slug + '"');
+        assert.match(SRC[page], re, `${page} must have canonical href to https://www.inkcartridges.co.nz${slug}`);
     }
 });
 
@@ -228,7 +230,7 @@ test('§6 legal-config.js exposes every binding key used by the pages', () => {
         'policy-date', 'policy-version', 'privacy-officer', 'privacy-email',
         'handling-time',
         // Google Ads "Business Transparency" bindings (May 2026):
-        'nzbn', 'gst-number', 'disambiguation', 'copyright',
+        'nzbn', 'gst-number', 'company-number', 'disambiguation', 'copyright',
         'return-window-faulty', 'return-window-change',
         'compatible-warranty', 'dispatch-cutoff',
         'tax-line', 'payment-methods', 'carriers',

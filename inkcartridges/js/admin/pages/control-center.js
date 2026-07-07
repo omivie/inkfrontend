@@ -22,12 +22,13 @@ const TABS = [
   { id: 'packs',      label: 'Packs',     shortcut: 'k', module: './cc2-packs.js' },
   { id: 'integrity',  label: 'Integrity', shortcut: 'i', module: './cc2-integrity.js' },
   { id: 'seo',        label: 'SEO',       shortcut: 's', module: './cc2-seo-slug.js' },
+  { id: 'links',      label: 'Links',     shortcut: 'l', module: './cc2-links.js' },
   { id: 'infra',      label: 'Infra',     shortcut: 'f', module: './cc2-infra.js' },
 ];
 
 const COPY = {
   title: 'Control Center',
-  subtitle: 'Health, pricing, packs, integrity & SEO',
+  subtitle: 'Health, pricing, packs, integrity, SEO & links',
   keyboard_hint: 'Press ⌘K for commands · g + letter to navigate tabs',
 };
 
@@ -66,7 +67,7 @@ function writeTabToHash(tabId) {
 // Cache-buster for dynamic imports — matches the pattern in app.js
 // (`import('./pages/${name}.js?v=${APP_VERSION}')`) so a new deploy actually
 // reloads tab modules instead of serving the previous bundle from cache.
-const CC_VERSION = '2026.06.27a';
+const CC_VERSION = '2026.07.05a';
 
 async function loadTabModule(tabId) {
   if (_tabModules[tabId]) return _tabModules[tabId];

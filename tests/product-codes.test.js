@@ -198,6 +198,26 @@ test('save handler persists codes — gated on the load flag AND a baseline diff
   assert.match(save, /AdminAPI\.setProductCodes\(product\.id/, 'writes via setProductCodes');
 });
 
+test('describeCodesWriteError maps the RLS error codes to friendly copy', () => {
+  // Backend migration 104 applied the live insert/delete policies + grants, so
+  // 42501 now means "not a signed-in admin" — the message must NOT tell the
+  // admin to run the .sql migration any more.
+  const fn = extractFunction(PRODUCTS_SRC, 'function describeCodesWriteError(');
+  assert.doesNotMatch(fn, /Apply inkcartridges\/sql\/product_codes\.sql/,
+    '42501 copy must no longer point at the (now-applied) SQL migration');
+  assert.match(fn, /'42501'/, 'permission (42501) is mapped');
+  assert.match(fn, /signed in as an admin/i, '42501 copy names the admin-session cause');
+  assert.match(fn, /'23514'/, 'check_violation (23514) is mapped');
+  assert.match(fn, /'23503'/, 'foreign_key_violation (23503) is mapped');
+  assert.match(fn, /'23505'/, 'unique_violation (23505) is mapped');
+});
+
+test('setProductCodes treats a 23505 duplicate as a no-op, not a failure', () => {
+  const fn = extractFunction(ADMIN_API, 'async setProductCodes(');
+  assert.match(fn, /insErr\.code !== '23505'/,
+    'a duplicate (product_id, code) must not abort the write');
+});
+
 test('APP_VERSION is a valid dated build tag', () => {
   // APP_VERSION is a single moving cache key shared by every admin feature, so
   // pin only its SHAPE — not the slug of whichever feature bumped it last (it

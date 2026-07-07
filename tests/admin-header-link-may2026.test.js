@@ -1,26 +1,27 @@
 /**
- * Admin header shortcut contract (May 2026)
- * =========================================
+ * Admin header shortcut contract
+ * ==============================
  *
- * The admin panel used to be reachable only from a sidebar link buried on
- * the /account page. This contract moves a privileged "Admin" shortcut into
- * the global site header (`.header-actions`, beside the Account button) so
- * an admin can jump to /admin from any page.
+ * A privileged "Admin" shortcut lets a verified admin jump to /admin from any
+ * page. It lives in the global site header (`.header-actions`, beside the
+ * Account button).
+ *
+ * REVISED — Google Merchant Center audit (Jul 2026):
+ * The link used to ship in every page's static markup as `hidden`. That put
+ * `href="/admin"` in the public HTML source of every customer-facing page,
+ * which reads as advertising a private admin surface. The link is now
+ * INJECTED BY JS (main.js#initAdminHeaderLink) only after the account is
+ * verified as admin, and is absent from static page markup entirely.
  *
  * Hard requirements:
- *   1. The link ships in EVERY customer-facing page's header markup, so the
- *      navbar stays byte-identical (project_navbar_parity_may2026). It is
- *      NOT injected by JS — injection would diverge the markup hash.
- *   2. The link ships with the `hidden` attribute. It is invisible to
- *      guests and to signed-in non-admins by default. This is the security
- *      default: if the JS never runs, nobody sees an admin link.
- *   3. main.js#initAdminHeaderLink() is the ONLY thing that unhides it, and
- *      only after a server-side role check (API.verifyAdmin →
- *      GET /api/admin/verify). Client state is never trusted for the gate;
- *      the /admin route itself re-verifies server-side regardless.
- *   4. layout.css carries `.header-actions__item[hidden] { display: none }`
- *      — without it the `display: flex` on `.header-actions__item` (author
- *      CSS) beats the UA `[hidden]` rule and the link shows for everyone.
+ *   1. NO customer-facing page ships the admin link (or a bare href="/admin")
+ *      in its static header markup — guests/customers never receive it.
+ *   2. main.js#initAdminHeaderLink() creates and inserts the link into
+ *      `.header-actions`, only after a server-side role check
+ *      (API.verifyAdmin → GET /api/admin/verify). Client state is never
+ *      trusted for the gate; /admin re-verifies server-side regardless.
+ *   3. Guests are skipped (Auth.isAuthenticated) so no verify call fires for
+ *      logged-out visitors; the link is removed on sign-out.
  *
  * Run with: node --test tests/admin-header-link-may2026.test.js
  */
@@ -64,72 +65,23 @@ const PAGES_WITH_HEADER = walkHtml(HTML_ROOT)
     .map((file) => ({ file, header: extractSiteHeader(fs.readFileSync(file, 'utf8')) }))
     .filter((p) => p.header !== null);
 
-// aria-label="Admin" added in mobile-parity-may2026 (S0.1): the admin
-// shortcut is icon-only on mobile (label span hidden < 480px), so it needs an
-// explicit accessible name like every other header action link.
-const LINK_TAG = '<a href="/admin" class="header-actions__item header-actions__item--admin" id="header-admin-link" aria-label="Admin" hidden>';
+// ─────────────────────────────────────────────────────────────────────────────
+// Static markup must NOT advertise /admin
+// ─────────────────────────────────────────────────────────────────────────────
 
-test('every customer-facing page with a header ships the admin shortcut', () => {
+test('no customer-facing page ships the admin link in static header markup', () => {
     assert.ok(PAGES_WITH_HEADER.length >= 20,
         `expected 20+ pages with a site-header, found ${PAGES_WITH_HEADER.length}`);
     for (const { file, header } of PAGES_WITH_HEADER) {
-        assert.ok(header.includes(LINK_TAG),
-            `${rel(file)} is missing the canonical admin header link:\n  ${LINK_TAG}`);
-    }
-});
-
-test('admin link ships hidden by default — invisible until JS verifies the role', () => {
-    for (const { file, header } of PAGES_WITH_HEADER) {
-        // Pull just the admin anchor open tag and assert `hidden` is on it.
-        const i = header.indexOf('id="header-admin-link"');
-        assert.notEqual(i, -1, `${rel(file)} has no #header-admin-link`);
-        const open = header.slice(header.lastIndexOf('<a ', i), header.indexOf('>', i) + 1);
-        assert.ok(/\shidden(\s|>)/.test(open),
-            `${rel(file)} renders #header-admin-link WITHOUT the hidden attribute — it would show for guests. Tag: ${open}`);
-    }
-});
-
-test('admin link lives inside .header-actions, between Account and Favourites', () => {
-    for (const { file, header } of PAGES_WITH_HEADER) {
-        const actionsStart = header.indexOf('<div class="header-actions">');
-        const actionsEnd = header.indexOf('</div>', actionsStart);
-        const adminPos = header.indexOf('id="header-admin-link"');
-        assert.ok(adminPos > actionsStart && adminPos < actionsEnd,
-            `${rel(file)}: admin link is not inside <div class="header-actions">`);
-
-        const account = header.indexOf('href="/account"');
-        const favourites = header.indexOf('href="/account/favourites"');
-        assert.ok(account !== -1 && favourites !== -1, `${rel(file)}: missing account/favourites links`);
-        assert.ok(adminPos > account && adminPos < favourites,
-            `${rel(file)}: admin link must sit between the Account and Favourites buttons`);
-    }
-});
-
-test('admin link points at /admin and carries the --admin modifier class', () => {
-    for (const { file, header } of PAGES_WITH_HEADER) {
-        const i = header.indexOf('id="header-admin-link"');
-        const open = header.slice(header.lastIndexOf('<a ', i), header.indexOf('>', i) + 1);
-        assert.ok(open.includes('href="/admin"'), `${rel(file)}: admin link href is not /admin`);
-        assert.ok(open.includes('header-actions__item--admin'),
-            `${rel(file)}: admin link is missing the header-actions__item--admin modifier class`);
-        assert.ok(open.includes('header-actions__item '),
-            `${rel(file)}: admin link must keep the base header-actions__item class for header layout`);
-    }
-});
-
-test('the admin link is static markup, never JS-injected (keeps navbar byte-identical)', () => {
-    const jsDir = path.join(HTML_ROOT, 'js');
-    for (const f of fs.readdirSync(jsDir)) {
-        if (!f.endsWith('.js')) continue;
-        const src = fs.readFileSync(path.join(jsDir, f), 'utf8');
-        assert.ok(!/createElement[\s\S]{0,200}header-admin-link/.test(src)
-                  && !/innerHTML[\s\S]{0,200}header-admin-link/.test(src),
-            `js/${f} appears to inject #header-admin-link into the DOM — the link must be static HTML so every page's navbar stays byte-identical`);
+        assert.ok(!header.includes('id="header-admin-link"'),
+            `${rel(file)} still ships #header-admin-link in static markup — it must be JS-injected for verified admins only (MC audit)`);
+        assert.ok(!header.includes('href="/admin"'),
+            `${rel(file)} still advertises href="/admin" in the header — the admin route must not appear in public page source`);
     }
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// main.js — the reveal logic
+// main.js — the injection + reveal logic
 // ─────────────────────────────────────────────────────────────────────────────
 
 const MAIN_JS = fs.readFileSync(path.join(HTML_ROOT, 'js', 'main.js'), 'utf8');
@@ -141,19 +93,35 @@ test('main.js defines initAdminHeaderLink() and runs it on DOMContentLoaded', ()
         'main.js must call initAdminHeaderLink() on DOMContentLoaded');
 });
 
+test('initAdminHeaderLink() injects the link into .header-actions (not static markup)', () => {
+    const fn = MAIN_JS.slice(MAIN_JS.indexOf('function initAdminHeaderLink('));
+    const body = fn.slice(0, fn.indexOf('\n}\n') + 2);
+    assert.ok(body.includes("createElement('a')") || body.includes('createElement("a")'),
+        'initAdminHeaderLink() must create the anchor element in JS');
+    assert.ok(/header-admin-link/.test(body),
+        'initAdminHeaderLink() must set the header-admin-link id on the injected node');
+    assert.ok(body.includes('.header-actions') || body.includes("querySelector('.header-actions')"),
+        'initAdminHeaderLink() must insert the link into .header-actions');
+    assert.ok(/insertBefore|appendChild/.test(body),
+        'initAdminHeaderLink() must attach the injected link to the DOM');
+});
+
 test('initAdminHeaderLink() gates the reveal on a server-side admin check', () => {
     const fn = MAIN_JS.slice(MAIN_JS.indexOf('function initAdminHeaderLink('));
     const body = fn.slice(0, fn.indexOf('\n}\n') + 2);
     assert.ok(body.includes('API.verifyAdmin'),
         'initAdminHeaderLink() must call API.verifyAdmin() — the server is the source of truth for the admin role');
-    assert.ok(body.includes('getElementById(\'header-admin-link\')'),
-        'initAdminHeaderLink() must target #header-admin-link');
     assert.ok(body.includes('isAuthenticated'),
         'initAdminHeaderLink() must skip guests via Auth.isAuthenticated() so it never fires a verify call for logged-out visitors');
-    assert.ok(/link\.hidden\s*=/.test(body),
-        'initAdminHeaderLink() must toggle link.hidden');
     assert.ok(body.includes('Auth.readyPromise'),
         'initAdminHeaderLink() must await Auth.readyPromise so the session is resolved before deciding');
+});
+
+test('initAdminHeaderLink() removes the link for guests / non-admins', () => {
+    const fn = MAIN_JS.slice(MAIN_JS.indexOf('function initAdminHeaderLink('));
+    const body = fn.slice(0, fn.indexOf('\n}\n') + 2);
+    assert.ok(/removeChild|\.remove\(\)/.test(body),
+        'initAdminHeaderLink() must remove the injected link when the account is not an admin');
 });
 
 test('initAdminHeaderLink() re-evaluates on auth state changes (sign-in / sign-out)', () => {
@@ -164,15 +132,10 @@ test('initAdminHeaderLink() re-evaluates on auth state changes (sign-in / sign-o
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// layout.css — the [hidden] insulation
+// layout.css — the --admin modifier styling still ships
 // ─────────────────────────────────────────────────────────────────────────────
 
 const LAYOUT_CSS = fs.readFileSync(path.join(HTML_ROOT, 'css', 'layout.css'), 'utf8');
-
-test('layout.css forces .header-actions__item[hidden] to display:none', () => {
-    assert.match(LAYOUT_CSS, /\.header-actions__item\[hidden\]\s*\{\s*display:\s*none;?\s*\}/,
-        'layout.css must declare `.header-actions__item[hidden] { display: none }` — otherwise the base `display: flex` (author CSS) overrides the UA [hidden] rule and the admin link shows for everyone');
-});
 
 test('layout.css styles the --admin modifier so the shortcut reads as privileged', () => {
     assert.ok(LAYOUT_CSS.includes('.header-actions__item--admin'),
@@ -199,18 +162,4 @@ test('account.js no longer carries the dead checkAdminAccess() sidebar logic', (
         'account.js still references checkAdminAccess() — the sidebar admin link is gone; the header link (main.js) owns admin reveal now');
     assert.ok(!accountJs.includes("getElementById('admin-nav-item')"),
         'account.js still looks up the removed #admin-nav-item element');
-});
-
-test('layout.css cache key is bumped so the new CSS actually ships', () => {
-    let stale = 0;
-    let total = 0;
-    for (const { file } of PAGES_WITH_HEADER) {
-        const html = fs.readFileSync(file, 'utf8');
-        const m = html.match(/layout\.css\?v=([^"'\s]+)/);
-        if (!m) continue;
-        total++;
-        if (m[1] === 'chrome-lock-may2026') stale++;
-    }
-    assert.equal(stale, 0,
-        `${stale}/${total} pages still reference the pre-admin-link layout.css cache key — bump it so the .header-actions__item[hidden] rule ships`);
 });

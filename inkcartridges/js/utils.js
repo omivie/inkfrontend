@@ -1321,6 +1321,111 @@ const ProductSort = (function() {
 if (typeof window !== 'undefined') window.ProductSort = ProductSort;
 
 // ─────────────────────────────────────────────────────────────────────────────
+// ProductName — display-title normaliser.
+//
+// Backend genuine-cartridge / print-head `name` values embed a redundant compact
+// code token, e.g.
+//   "HP Genuine 70 130mlCY Ink Cartridge 70 130ml Cyan"
+//                └─ compact ─┘              └── readable ──┘
+// so "70 130ml" shows twice. clean() strips the compact token and re-emits the
+// title "colour last" → "HP Genuine 70 130ml Ink Cartridge Cyan".
+//
+// GUARDED: only rewrites when the compact token genuinely repeats the readable
+// half's leading (digit-bearing) code. Non-doubled names are returned verbatim —
+// Gloss Enhancer ("…Ink Cartridge Gloss Enhancer"), compatible names
+// ("Compatible … for HP 126A …"), Brother paper/labels, and already-clean names.
+// This is a PURE DISPLAY helper: it never mutates the stored `name` used for the
+// slug, identity, analytics or search-matching. Root cause is backend data —
+// see readfirst/product-name-doubling-backend-handoff-jul2026.md.
+// ─────────────────────────────────────────────────────────────────────────────
+const ProductName = (function () {
+    'use strict';
+
+    const TYPE_RE = /\b(Ink Print Head|Ink Cartridge|Toner Cartridge|Print Head|Ink Tank|Toner)\b/i;
+    const collapseWs = (s) => s.replace(/\s+/g, ' ').trim();
+
+    function clean(product) {
+        const raw = (product && product.name != null ? String(product.name) : '').trim();
+        if (!raw) return raw;
+
+        const tm = raw.match(TYPE_RE);
+        if (!tm) return raw;                                   // no product-type phrase
+
+        const type = tm[0];
+        const before = raw.slice(0, tm.index).trim();          // "HP Genuine 70 130mlCY"
+        const after = raw.slice(tm.index + type.length).trim(); // "70 130ml Cyan"
+        if (!before || !after) return raw;
+
+        // brandPrefix = "<Brand> Genuine" (or the leading brand word); compact = the rest.
+        const gm = before.match(/^(.*?\bGenuine)\b/i);
+        const brandPrefix = gm ? gm[1].trim() : (before.split(/\s+/)[0] || '');
+        const compact = before.slice(brandPrefix.length).trim();
+        if (!compact) return raw;                              // nothing redundant before the type
+
+        // Doubling guard: the readable half must lead with the same digit-bearing
+        // code that the compact token starts with (else it isn't a doubled name).
+        const leadCode = after.split(/\s+/)[0] || '';
+        if (!/\d/.test(leadCode)) return raw;
+        if (!compact.toUpperCase().startsWith(leadCode.toUpperCase())) return raw;
+
+        // Split the trailing colour off the readable half so we can re-emit it last.
+        const color = (product && product.color ? String(product.color) : '').trim();
+        let codeVol = after;
+        if (color) {
+            const tail = new RegExp('\\s*' + color.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\s*$', 'i');
+            if (tail.test(after)) codeVol = after.replace(tail, '').trim();
+        }
+
+        if (color && codeVol && codeVol !== after) {
+            return collapseWs(`${brandPrefix} ${codeVol} ${type} ${color}`);   // colour last
+        }
+        // Colour unknown / not trailing → drop only the compact token, keep readable order.
+        return collapseWs(`${brandPrefix} ${after} ${type}`);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // compatModel — sanitise a single printer-compatibility label before it is
+    // rendered. Some backend compatibility rows are corrupted, e.g.
+    //   "Brother Brother HL-2130"  (doubled brand)
+    //   "OKI 5%"                   (ISO yield-coverage token leaked in)
+    //   "OKI 100 (3 PAGES"         (page-yield fragment leaked in)
+    // Merchant Center reads these as inaccurate product data. This is a PURE
+    // DISPLAY guard — it never mutates stored data; the root-cause records are
+    // flagged for backend repair by scripts/audit-merchant-center-readiness.mjs.
+    // ─────────────────────────────────────────────────────────────────────
+    function compatModel(label, brand) {
+        let s = (label == null ? '' : String(label)).replace(/\s+/g, ' ').trim();
+        if (!s) return '';
+
+        // Drop yield / coverage artifacts: "5%", "(650", "PAGES", "pages)".
+        s = s.split(' ').filter(function (tok) {
+            if (/^\(?\d+(\.\d+)?%\)?$/.test(tok)) return false;   // pure percentage
+            if (/pages?/i.test(tok)) return false;                // page-yield word
+            return true;
+        }).join(' ');
+
+        // Remove orphaned bracket fragments left behind by a dropped "(N PAGES)".
+        s = s.replace(/\(\s*\d*\s*\)?/g, ' ').replace(/[()]/g, ' ');
+
+        // Collapse a leading printer brand that duplicates the group brand.
+        var b = (brand == null ? '' : String(brand)).trim();
+        if (b) {
+            var esc = b.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            s = s.replace(new RegExp('^(' + esc + ')\\s+\\1\\b', 'i'), '$1');
+        }
+
+        // Collapse any immediate repeated word ("HP HP", "OKI OKI"), repeatedly.
+        var prev;
+        do { prev = s; s = s.replace(/\b([A-Za-z][\w&.-]*)\s+\1\b/gi, '$1'); } while (s !== prev);
+
+        return s.replace(/\s+/g, ' ').trim();
+    }
+
+    return { clean, compatModel };
+})();
+if (typeof window !== 'undefined') window.ProductName = ProductName;
+
+// ─────────────────────────────────────────────────────────────────────────────
 // SeriesCodes — yield-suffix collapse for the /shop chip drilldown.
 //
 // One series, one chip. Yield variants (XL, XXL, XXXL) are the same family at
@@ -1516,6 +1621,7 @@ if (typeof module !== 'undefined' && module.exports) {
         buildPrinterUrl,
         ProductColors,
         ProductSort,
+        ProductName,
         SeriesCodes,
         canonicalizeCategory
     };

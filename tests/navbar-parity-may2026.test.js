@@ -121,7 +121,8 @@ test('canonical site-header keeps every load-bearing element', () => {
         'href="mailto:support@inkcartridges.co.nz"',
         '<div class="logo-block">',
         '<a href="/account"',
-        'id="header-admin-link"',
+        // The Admin shortcut is NOT in static markup — it is JS-injected for
+        // verified admins only (MC audit, Jul 2026). See admin-header-link test.
         '<a href="/account/favourites"',
         '<a href="/cart"',
         'id="cart-count"',

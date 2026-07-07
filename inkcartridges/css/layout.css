@@ -1459,6 +1459,17 @@
     font-size: var(--font-size-xs);
 }
 
+/* Trademark / Consumer Guarantees Act disclaimer (Google Ads re-appeal, Jul 2026).
+   Sits on its own full-width row beneath the copyright + payment cards. */
+.footer-disclaimer {
+    flex-basis: 100%;
+    width: 100%;
+    margin-top: var(--spacing-sm);
+    color: rgba(255, 255, 255, 0.4);
+    font-size: var(--font-size-xs);
+    line-height: 1.5;
+}
+
 .footer-legal {
     display: flex;
     flex-wrap: wrap;
@@ -1764,9 +1775,10 @@
         position: static;
         flex: 0 0 auto;
         transform: none;
-        /* 44×44 minimum touch target (mobile-parity-may2026 S0.1). */
-        width: 44px;
-        height: 44px;
+        /* 48×48 touch target: Apple floor 44 raised to WCAG AAA --tap-min
+           (mobile-parity-may2026 S0.1 → mobile-ux-audit-jul2026 §5b). */
+        width: var(--tap-min);
+        height: var(--tap-min);
         color: var(--white-primary);
     }
 
@@ -1901,19 +1913,21 @@
          display:none) — a tel: link is more useful on a phone than desktop.
    ========================================================================== */
 @media (max-width: 768px) {
-    /* S0.1 — grow the tap area to the Apple HIG 44×44 minimum. The icon
-       stays 24px; padding does the work. */
+    /* S0.1 — grow the tap area. The July mobile-ux audit (§5b) raised the
+       target from the 44px Apple floor to the 48px WCAG 2.5.5 AAA size we
+       standardised on (--tap-min). The icon stays 24px; padding does the work. */
     .header-actions__item {
-        min-width: 44px;
-        min-height: 44px;
+        min-width: var(--tap-min);
+        min-height: var(--tap-min);
         padding: var(--spacing-1);
+        gap: var(--tap-gap);
         justify-content: center;
     }
 
-    /* S0.1 — the nav search submit was ~30px tall; lift it to 44. */
+    /* S0.1 — the nav search submit was ~30px tall; lift it to --tap-min (48). */
     .search-form--nav .search-form__button {
-        min-width: 44px;
-        min-height: 44px;
+        min-width: var(--tap-min);
+        min-height: var(--tap-min);
     }
 
     /* S0.6 — re-show the utility bar but as a single tap-to-call chip.
@@ -1952,8 +1966,8 @@
     }
 
     .header-actions__item {
-        min-width: 44px;
-        min-height: 44px;
+        min-width: var(--tap-min);
+        min-height: var(--tap-min);
     }
 }
 
@@ -1995,5 +2009,60 @@ summary.footer-column__heading::-webkit-details-marker {
     }
     .footer-column[open] > summary.footer-column__heading::after {
         content: '\2212'; /* minus */
+    }
+}
+
+/* ==========================================================================
+   MOBILE UX AUDIT — Jul 2026 (§5a) — footer links as ≥44px tap rows.
+   Contact / tel: / mailto: / social links measured ~18px tall on the live
+   site. Padding (not font-size) makes each link a finger-sized line box so
+   the phone/email a mobile user reaches for are actually tappable. Desktop
+   is untouched — scoped inside the mobile breakpoint.
+   ========================================================================== */
+@media (max-width: 768px) {
+    .footer-links li {
+        margin-bottom: var(--tap-gap);
+    }
+    .footer-links a {
+        display: flex;
+        align-items: center;
+        min-height: 44px;
+        padding: var(--spacing-1) 0;
+    }
+}
+
+/* ==========================================================================
+   MOBILE UX AUDIT — Jul 2026 (§2a/§8.2) — sticky compact header on mobile.
+   The live audit measured the header scrolling entirely away on long pages,
+   stranding the search box + cart at the top. We pin the whole .site-header
+   on mobile (both the logo/actions row and the search/nav row stay in reach)
+   and, once the page is scrolled, collapse the tap-to-call chip + tagline so
+   the pinned footprint slims toward --header-h. Desktop is untouched — every
+   rule here lives inside the mobile breakpoint. JS toggles .site-header--
+   scrolled (main.js#initStickyHeader). Do NOT touch --container-max-width
+   here (navbar chrome-lock, see .site-header comment above).
+   ========================================================================== */
+@media (max-width: 768px) {
+    .site-header {
+        position: sticky;
+        top: 0;
+        /* z-index already var(--z-sticky) on the base rule. A subtle shadow
+           lifts the pinned header over scrolling content. */
+    }
+
+    .site-header--scrolled {
+        box-shadow: 0 2px 8px rgba(15, 23, 42, 0.12);
+    }
+
+    /* Collapse the low-value rows once scrolled to reclaim vertical space. */
+    .site-header--scrolled .header-contact {
+        display: none;
+    }
+    .site-header--scrolled .logo__tagline {
+        display: none;
+    }
+    .site-header--scrolled .header-main .container {
+        padding-top: var(--spacing-1);
+        padding-bottom: var(--spacing-1);
     }
 }

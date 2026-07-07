@@ -24,8 +24,16 @@ const Products = {
      */
     getProductImageHTML(product, { priority = false } = {}) {
         const colorStyle = ProductColors.getProductStyle(product);
-        const imageUrl = typeof storageUrl === 'function' ? storageUrl(product.image_url) : product.image_url;
-        const srcsetVal = typeof imageSrcset === 'function' && product.image_url ? imageSrcset(product.image_url) : '';
+        // Prefer the backend's optimized image fields (mobile-ux-audit-jul2026
+        // §3a/§6): `image_thumbnail_url` (200px WebP) and `image_srcset` keep the
+        // optimization params server-consistent. Fall back to the hand-built
+        // /api/images/optimize URLs when the backend omits them (older rows,
+        // /by-printer RPC path). Genuine swatch rows have image_url:null and so
+        // emit no thumbnail either way — the color-block branch below handles them.
+        const imageUrl = product.image_thumbnail_url
+            || (typeof storageUrl === 'function' ? storageUrl(product.image_url) : product.image_url);
+        const srcsetVal = product.image_srcset
+            || (typeof imageSrcset === 'function' && product.image_url ? imageSrcset(product.image_url) : '');
         const srcsetHtml = srcsetVal ? ` srcset="${Security.escapeAttr(srcsetVal)}" sizes="(max-width: 480px) 200px, (max-width: 768px) 300px, 400px"` : '';
         const loadAttrs = priority ? 'fetchpriority="high" decoding="async"' : 'loading="lazy" decoding="async"';
         // Raw (non-optimized) Supabase URL for the error-fallback retry. `src`
@@ -148,6 +156,21 @@ const Products = {
             ? `<div class="product-card__chip-stack">${fitsPrinterBadgeHTML}${discountBadgeHTML}</div>`
             : '';
 
+        // Brand eyebrow — suppressed when the product name already leads with
+        // the brand (most DB names do, e.g. "Brother 1030 Compatible…"), so the
+        // card doesn't read "Brother / Brother 1030…". Only shown when it adds
+        // information the title doesn't already carry.
+        const brandName = product.brand?.name || '';
+        const nameLeadsWithBrand = brandName
+            && (product.name || '').trim().toLowerCase().startsWith(brandName.trim().toLowerCase());
+        const brandEyebrowHTML = (brandName && !nameLeadsWithBrand)
+            ? `<p class="product-card__brand">${Security.escapeHtml(brandName)}</p>`
+            : '';
+
+        // De-double redundant compact code tokens in genuine names (display only;
+        // brand-eyebrow detection above still reads the raw name). See ProductName.
+        const displayTitle = (typeof ProductName !== 'undefined') ? ProductName.clean(product) : (product.name || '');
+
         return `
             <article class="product-card" data-product-id="${Security.escapeAttr(product.id)}" data-sku="${Security.escapeAttr(product.sku)}">
                 <a href="${Security.escapeAttr(cardHref)}" class="product-card__link">
@@ -156,8 +179,8 @@ const Products = {
                         ${chipStackHTML}
                     </div>
                     <div class="product-card__content">
-                        <p class="product-card__brand">${Security.escapeHtml(product.brand?.name || '')}</p>
-                        <h3 class="product-card__title" title="${Security.escapeAttr(product.name)}">${Security.escapeHtml(product.name)}</h3>
+                        ${brandEyebrowHTML}
+                        <h3 class="product-card__title" title="${Security.escapeAttr(displayTitle)}">${Security.escapeHtml(displayTitle)}</h3>
                         ${product.average_rating && product.review_count > 0 ? `<div class="product-card__rating">${this._miniStars(Math.round(parseFloat(product.average_rating)))} <span class="product-card__review-count">(${product.review_count})</span></div>` : ''}
                         ${qualifiesForFreeShipping(product) ? '<div class="product-card__info-row"><span class="product-card__free-shipping">Free Shipping</span></div>' : ''}
                         <div class="product-card__footer">

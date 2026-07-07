@@ -4448,6 +4448,39 @@ button.admin-active-dot--clickable:hover::after { opacity: 1; }
 .cc2-slug-rename__redirects summary { cursor: pointer; font-size: 11px; }
 .cc2-slug-rename__redirects ul { margin: 6px 0 0 0; padding-left: 18px; font-size: 11px; }
 
+/* Links (broken-link audit) ------------------------------------------- */
+.cc2-links-grid { grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); }
+.cc2-links-card { display: block; width: 100%; text-align: left; cursor: pointer; background: var(--surface, #fff); border: 1px solid var(--border); }
+.cc2-links-card:hover { border-color: var(--border-strong); }
+.cc2-links-card--active { outline: 2px solid var(--accent, var(--yellow)); outline-offset: -1px; }
+.cc2-links-card .cc2-slug-card__header { margin-bottom: 0; }
+.cc2-links-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin: 14px 0 8px; }
+.cc2-links-typefilter { display: flex; gap: 6px; }
+.cc2-links-search { max-width: 240px; }
+.cc2-links-tbl th, .cc2-links-tbl td { font-size: 12px; vertical-align: middle; }
+.cc2-links-url { display: inline-block; max-width: 360px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; }
+.cc2-links-when { color: var(--text-muted); white-space: nowrap; }
+.cc2-links-actions { display: flex; gap: 4px; justify-content: flex-end; }
+.cc2-links-type { display: inline-block; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; padding: 2px 6px; border-radius: 4px; }
+.cc2-links-type--internal { background: var(--yellow-dim); color: var(--yellow-text); }
+.cc2-links-type--external { background: rgba(0,0,0,0.06); color: var(--text-muted); }
+.cc2-links-empty { text-align: center; padding: 32px 16px; }
+.cc2-links-empty .admin-btn { margin-top: 14px; }
+/* Investigate drawer */
+.cc2-links-detail { display: flex; flex-direction: column; gap: 10px; }
+.cc2-links-detail__head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.cc2-links-detail__url { display: block; word-break: break-all; padding: 8px 10px; background: rgba(0,0,0,0.04); border-radius: 6px; font-size: 12px; }
+.cc2-links-detail__reason { font-size: 12px; color: #f87171; margin: 0; }
+.cc2-links-detail__hint { font-size: 12px; color: var(--text-muted); margin: 0; }
+.cc2-links-detail__hint code { font-family: var(--font-mono, monospace); padding: 1px 4px; background: rgba(0,0,0,0.08); border-radius: 3px; }
+.cc2-links-detail__subhead { font-size: 12px; font-weight: 700; margin: 6px 0 0; }
+.cc2-links-detail__actions { margin-top: 6px; }
+.cc2-links-sources { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.cc2-links-sources li { padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; display: flex; flex-direction: column; gap: 4px; }
+.cc2-links-source__page { font-size: 12px; font-weight: 600; }
+.cc2-links-source__url { font-size: 11px; color: var(--text-muted); word-break: break-all; }
+.cc2-links-sources li .admin-btn { align-self: flex-start; margin-top: 2px; }
+
 /* Infra --------------------------------------------------------------- */
 .cc2-infra-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(380px, 1fr)); gap: 12px; }
 .cc2-infra-card { padding: 14px 16px; }
@@ -4701,3 +4734,65 @@ button.admin-active-dot--clickable:hover::after { opacity: 1; }
 .inv-doc__pay table { border-collapse: collapse; }
 .inv-doc__pay td { padding: 1px 14px 1px 0; }
 .inv-doc__thanks { margin-top: 22px; font-weight: 700; font-size: 12px; }
+
+/* ===== Demand Ranking (pages/demand-ranking.js) =====
+   Ranked "what to stock for same-day" table. Reuses .admin-table,
+   .admin-traffic-row__bar (score track), .admin-chip, .source-badge,
+   .admin-badge--failed/--pending. Only page-specific bits live here. */
+.dr-subtitle { margin: 4px 0 0; font-size: 13px; color: var(--text-muted); }
+
+.dr-banner {
+  background: var(--yellow-dim); color: var(--yellow-text);
+  border-radius: 8px; padding: 10px 14px; font-size: 12.5px; line-height: 1.5;
+  margin-bottom: 14px;
+}
+.dr-banner strong { font-weight: 700; }
+
+.dr-caption {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
+  font-size: 11.5px; color: var(--text-muted); margin-bottom: 14px;
+}
+.dr-caption__sep { opacity: .5; }
+
+.dr-controls {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 14px;
+  margin-bottom: 16px;
+}
+.dr-controls__spacer { flex: 1 1 auto; }
+.dr-filter { display: inline-flex; align-items: center; gap: 8px; }
+.dr-filter__label { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .3px; color: var(--text-muted); }
+.dr-limit { padding: 3px 8px; font-size: 12px; width: auto; }
+.dr-toggle { display: inline-flex; align-items: center; gap: 7px; font-size: 12.5px; color: var(--text-secondary); cursor: pointer; user-select: none; }
+.dr-toggle input { cursor: pointer; }
+
+.dr-product { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.dr-product__meta { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.dr-product__name { font-size: 12.5px; color: var(--text); max-width: 320px; }
+.dr-product__sku { font-size: 11px; color: var(--text-muted); }
+
+.dr-demand { display: flex; align-items: center; gap: 10px; }
+.dr-demand__track { flex: 1 1 auto; min-width: 64px; }
+.dr-demand__score { font-size: 12px; min-width: 30px; text-align: right; }
+
+.dr-why { display: flex; flex-wrap: wrap; gap: 5px; }
+.dr-why-chip {
+  display: inline-flex; align-items: center; gap: 3px;
+  background: var(--surface-alt, rgba(0,0,0,.05)); color: var(--text-secondary);
+  border-radius: 999px; padding: 2px 8px; font-size: 11px; white-space: nowrap;
+}
+
+.dr-stock { display: inline-flex; align-items: center; gap: 7px; }
+.dr-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; display: inline-block; }
+.dr-dot--ok { background: var(--success, #16a34a); }
+.dr-dot--no { background: var(--text-muted); opacity: .5; }
+
+.dr-market { cursor: help; }
+.dr-weights { margin-top: 12px; font-size: 11px; color: var(--text-muted); }
+
+.dr-col-rank { width: 44px; }
+.dr-col-demand { width: 220px; }
+
+@media (max-width: 720px) {
+  .dr-product__name { max-width: 180px; }
+  .dr-controls { gap: 10px; }
+}

@@ -2570,6 +2570,67 @@
     margin-bottom: var(--spacing-sm);
 }
 
+/* Genuine / Compatible status pill (issue #8) */
+.product-info__badge {
+    display: inline-block;
+    font-family: var(--font-family-mono);
+    font-size: 11px;
+    font-weight: var(--font-weight-bold);
+    text-transform: uppercase;
+    letter-spacing: var(--letter-spacing-extra-wide);
+    padding: 3px 10px;
+    border-radius: 999px;
+    margin-bottom: var(--spacing-sm);
+    border: 1px solid transparent;
+}
+.product-info__badge--genuine {
+    color: #0a7d38;
+    background: rgba(16, 160, 76, 0.10);
+    border-color: rgba(16, 160, 76, 0.30);
+}
+.product-info__badge--compatible {
+    color: var(--cyan-primary);
+    background: rgba(0, 122, 140, 0.08);
+    border-color: rgba(0, 122, 140, 0.22);
+}
+/* "What's the difference?" link beside the genuine/compatible badge. */
+.product-info__badge-help {
+    font-size: 12px;
+    margin-left: 8px;
+    color: var(--color-text-muted);
+    text-decoration: underline;
+    white-space: nowrap;
+}
+.product-info__badge-help:hover {
+    color: var(--cyan-primary);
+}
+
+/* Quick-spec list: Colour · Page yield */
+.product-info__specs {
+    list-style: none;
+    margin: 0 0 var(--spacing-sm);
+    padding: 0;
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--spacing-xs) var(--spacing-lg);
+}
+.product-info__spec {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+.product-info__spec-label {
+    font-family: var(--font-family-mono);
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: var(--letter-spacing-extra-wide);
+    color: var(--steel-400);
+}
+.product-info__spec-value {
+    font-size: var(--font-size-sm);
+    font-weight: var(--font-weight-medium);
+}
+
 .product-info__pricing {
     display: flex;
     align-items: baseline;
@@ -2913,12 +2974,6 @@
 .btn--express:hover {
     border-color: var(--color-border-dark);
     background-color: var(--color-background);
-}
-
-.product-info__afterpay-info {
-    margin-top: var(--spacing-sm);
-    font-size: var(--font-size-sm);
-    color: var(--color-text-muted);
 }
 
 /* Feature List */
@@ -3615,12 +3670,158 @@
 
 .sticky-atc__btn {
     flex: 1;
+    /* mobile-ux-audit-jul2026 §3b: sticky-bar button measured 45px — lift it
+       to the 48px WCAG target so the primary thumb-zone CTA is finger-sized. */
+    min-height: var(--tap-min);
 }
 
 @media (max-width: 768px) {
     .sticky-atc {
         display: block;
     }
+}
+
+/* ==========================================================================
+   MOBILE FILTER & SORT (mobile-ux-audit-jul2026 §2b/§8.2)
+   Bottom thumb-zone action bar + full-screen sheet on shop list levels.
+   Bar is mobile-only (desktop can scan the whole list); the sheet overlays
+   full-screen. Reuses --tap-min / --tap-gap / --safe-bottom / --header-h and
+   the .btn system. shop-page.js#initFilterSort drives open/close + apply.
+   ========================================================================== */
+.filter-sort-bar {
+    display: none; /* revealed only inside the mobile breakpoint below */
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: var(--z-sticky);
+    padding: 8px 12px calc(8px + var(--safe-bottom));
+    background: var(--white-primary);
+    border-top: 1px solid var(--color-border-dark, #CBD5E1);
+    box-shadow: 0 -2px 10px rgba(15, 23, 42, 0.1);
+}
+.filter-sort-bar__btn {
+    width: 100%;
+    min-height: var(--tap-min);
+    gap: var(--tap-gap);
+}
+.filter-sort-bar__count {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 20px;
+    height: 20px;
+    padding: 0 6px;
+    border-radius: var(--radius-full, 999px);
+    background: var(--magenta-primary);
+    color: #fff;
+    font-size: var(--font-size-xs);
+    font-weight: var(--font-weight-bold);
+}
+
+.filter-sort-sheet {
+    position: fixed;
+    inset: 0;
+    z-index: var(--z-modal, 500);
+    display: flex;
+    align-items: flex-end;
+    justify-content: center;
+}
+.filter-sort-sheet[hidden] { display: none; }
+.filter-sort-sheet__backdrop {
+    position: absolute;
+    inset: 0;
+    background: rgba(15, 23, 42, 0.5);
+}
+.filter-sort-sheet__panel {
+    position: relative;
+    width: 100%;
+    max-width: 640px;
+    max-height: 92dvh;
+    display: flex;
+    flex-direction: column;
+    background: var(--color-background, #fff);
+    border-radius: var(--radius-2xl, 16px) var(--radius-2xl, 16px) 0 0;
+    box-shadow: 0 -8px 30px rgba(15, 23, 42, 0.25);
+    animation: filter-sort-rise 0.2s ease;
+}
+@keyframes filter-sort-rise {
+    from { transform: translateY(24px); opacity: 0.4; }
+    to   { transform: translateY(0); opacity: 1; }
+}
+.filter-sort-sheet__head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: var(--spacing-md);
+    border-bottom: 1px solid var(--color-border, #e2e8f0);
+}
+.filter-sort-sheet__title {
+    font-size: var(--step-h3);
+    margin: 0;
+}
+.filter-sort-sheet__close {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: var(--tap-min);
+    height: var(--tap-min);
+    border: none;
+    background: none;
+    color: var(--color-text, #334155);
+    cursor: pointer;
+}
+.filter-sort-sheet__body {
+    padding: var(--spacing-md);
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+}
+.filter-sort-group {
+    border: none;
+    margin: 0 0 var(--spacing-lg);
+    padding: 0;
+}
+.filter-sort-group__legend {
+    font-weight: var(--font-weight-semibold);
+    font-size: var(--font-size-sm);
+    color: var(--color-text-muted, #64748b);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-bottom: var(--spacing-2);
+    padding: 0;
+}
+.filter-sort-option {
+    display: flex;
+    align-items: center;
+    gap: var(--tap-gap);
+    min-height: var(--tap-min);
+    padding: var(--spacing-1) var(--spacing-2);
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    font-size: var(--step-body);
+}
+.filter-sort-option:active { background: var(--color-background-alt, #F8FAFC); }
+.filter-sort-option input { width: 20px; height: 20px; accent-color: var(--cyan-primary); }
+.filter-sort-sheet__foot {
+    display: flex;
+    gap: var(--tap-gap);
+    padding: var(--spacing-md);
+    padding-bottom: calc(var(--spacing-md) + var(--safe-bottom));
+    border-top: 1px solid var(--color-border, #e2e8f0);
+}
+.filter-sort-sheet__foot .btn {
+    flex: 1;
+    min-height: var(--tap-min);
+}
+/* Lock background scroll while the sheet is open. */
+body.filter-sort-open { overflow: hidden; }
+
+@media (max-width: 768px) {
+    .filter-sort-bar:not([hidden]) {
+        display: block;
+    }
+    /* Keep the PDP-style sticky bars from colliding: the listing never shows
+       .sticky-atc, so only one fixed bottom bar is ever present per page. */
 }
 
 /* Mobile product detail layout fixes (iPhone) */
@@ -4531,6 +4732,129 @@
 .cart-summary__shipping-message--progress {
     background-color: var(--color-info-bg);
     color: var(--color-info);
+}
+
+/* ==========================================================================
+   CART CONVERSION SIGNALS (mobile-ux-audit-jul2026 §4h/§6)
+   delivery estimate · trust badges · free-shipping unlock + add-ons ·
+   per-line value-pack swap · cart-saved-until nudge. Contrast-safe per §8.1
+   (magenta / dark-on-gold, never gold-on-white). All fail-soft (start hidden).
+   ========================================================================== */
+.cart-delivery {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-sm);
+    padding: var(--spacing-sm) var(--spacing-md);
+    margin-bottom: var(--spacing-md);
+    border-radius: var(--radius-md);
+    background: var(--color-background-alt, #F8FAFC);
+    border: 1px solid var(--color-border, #e2e8f0);
+    font-size: var(--font-size-sm);
+    font-weight: 500;
+    color: var(--color-heading, #0F172A);
+}
+.cart-delivery svg { flex-shrink: 0; color: var(--cyan-primary); }
+
+.cart-trust-signals {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--tap-gap);
+    margin-bottom: var(--spacing-md);
+}
+.cart-trust-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 10px;
+    border-radius: var(--radius-full, 999px);
+    background: var(--color-background-alt, #F8FAFC);
+    border: 1px solid var(--color-border, #e2e8f0);
+    font-size: var(--font-size-xs);
+    font-weight: 600;
+    color: var(--color-heading, #0F172A);
+}
+.cart-trust-badge svg { flex-shrink: 0; color: var(--color-success-green, #16a34a); }
+
+.cart-free-ship-unlock {
+    padding: var(--spacing-md);
+    margin-bottom: var(--spacing-md);
+    border-radius: var(--radius-md);
+    background: var(--yellow-light, #FFF1C2);
+    border: 1px solid var(--yellow-primary, #F4C430);
+}
+.cart-free-ship-unlock__lead {
+    margin: 0 0 var(--spacing-sm);
+    font-weight: 700;
+    font-size: var(--font-size-sm);
+    color: #111; /* dark on gold — 11.5:1, §8.1 */
+}
+.cart-addon-row {
+    display: flex;
+    gap: var(--tap-gap);
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+}
+.cart-addon {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    flex: 0 0 auto;
+    width: 84px;
+    padding: 6px;
+    border-radius: var(--radius-md);
+    background: var(--white-primary, #fff);
+    border: 1px solid var(--color-border, #e2e8f0);
+    text-decoration: none;
+    color: var(--color-text, #334155);
+}
+.cart-addon__img,
+.cart-addon__img--empty {
+    width: 40px;
+    height: 40px;
+    object-fit: contain;
+    background: var(--product-image-bg, #FFFFFF);
+    border-radius: var(--radius-sm);
+}
+.cart-addon__name {
+    font-size: 11px;
+    line-height: 1.2;
+    text-align: center;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+.cart-addon__price { font-size: 11px; font-weight: 700; color: var(--color-heading, #0F172A); }
+
+.cart-saved-until {
+    font-size: var(--font-size-xs);
+    color: var(--color-text-muted, #64748b);
+    margin-bottom: var(--spacing-md);
+}
+
+/* Per-line value-pack swap chip (magenta accent — 5.46:1 on white, §8.1). */
+.cart-line-pack {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: var(--spacing-2);
+    padding: 6px 10px;
+    min-height: 36px;
+    border-radius: var(--radius-full, 999px);
+    background: var(--magenta-light, #F6D6E4);
+    border: 1px solid var(--magenta-primary, #C71F6E);
+    color: var(--magenta-dark, #7E1244);
+    font-size: var(--font-size-xs);
+    font-weight: 600;
+    cursor: pointer;
+    text-align: left;
+}
+.cart-line-pack svg { flex-shrink: 0; color: var(--magenta-primary, #C71F6E); }
+.cart-line-pack:active { filter: brightness(0.97); }
+.cart-line-pack[disabled] { opacity: 0.6; cursor: default; }
+@media (max-width: 768px) {
+    .cart-line-pack { min-height: 44px; }
 }
 
 /* Loyalty message chip (earn nudge / applied summary) */
@@ -10436,6 +10760,19 @@
     margin-bottom: var(--spacing-md);
     line-height: 1.6;
     font-size: var(--font-size-sm);
+}
+
+/* Compatible-product compliance disclaimer, sits directly under the buy box
+   (Google Ads re-appeal, Jul 2026). Low-key fine-print panel. */
+.compat-disclaimer {
+    background: var(--color-bg-light, #f8f9fa);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    padding: var(--spacing-sm) var(--spacing-md);
+    margin: var(--spacing-md) 0;
+    line-height: 1.6;
+    font-size: var(--font-size-sm);
+    color: var(--color-text-muted, #6b7280);
 }
 
 .product-printers-banner strong {

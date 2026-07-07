@@ -42,7 +42,7 @@
     // window.location.pathname so local-dev / preview environments still
     // resolve. Returns one of: about, terms, privacy, returns, shipping,
     // faq, contact, or null when this file is loaded on a non-legal page.
-    var LEGAL_SLUGS = ['about', 'terms', 'privacy', 'returns', 'shipping', 'faq', 'contact'];
+    var LEGAL_SLUGS = ['about', 'terms', 'privacy', 'returns', 'shipping', 'faq', 'contact', 'genuine-vs-compatible'];
 
     function detectPageSlug() {
         var canonical = document.querySelector('link[rel="canonical"]');
@@ -204,6 +204,7 @@
             'legal-entity':           cfg.legalEntity,
             'nzbn':                   cfg.nzbn,
             'gst-number':             cfg.gstNumber,
+            'company-number':         cfg.companyNumber,
             'disambiguation':         cfg.disambiguationLine(),
             'copyright':              cfg.copyrightLine(),
             'address-line':           cfg.formatAddressOneLine(),

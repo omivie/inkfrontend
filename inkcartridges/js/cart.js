@@ -26,6 +26,12 @@ const Cart = {
     // This is the source of truth for all pricing display when available.
     serverSummary: null,
 
+    // Conversion signals from the cart response (mobile-ux-audit-jul2026 §6):
+    // { trust_signals, delivery_estimate, free_shipping_unlock, cart_saved_until }.
+    // Server-only — never persisted to localStorage, so guest carts restored
+    // offline simply render no signals. Populated when the cart response parses.
+    serverCartMeta: null,
+
     // Applied coupon (server-validated)
     appliedCoupon: null,
 
@@ -129,8 +135,11 @@ const Cart = {
         // for genuine items below.
         const rawColorStyle = ProductColors.getProductStyle(item, 'background-color: #e0e0e0;');
         const colorStyle = isCompatibleItem ? rawColorStyle : null;
-        const escapedName = Security.escapeHtml(item.name);
-        const imageUrl = typeof storageUrl === 'function' ? storageUrl(item.image) : item.image;
+        const escapedName = Security.escapeHtml((typeof ProductName !== 'undefined') ? ProductName.clean(item) : item.name);
+        // Prefer the backend-optimized thumbnail (mobile-ux-audit-jul2026 §6);
+        // fall back to the resolved `image` field for older rows.
+        const imageUrl = item.image_thumbnail_url
+            || (typeof storageUrl === 'function' ? storageUrl(item.image) : item.image);
         // Stale-swatch fallback — drop the per-SKU color-swatch placeholder
         // when the canonical color would no longer match (admin color edit
         // outran the static image upload). Render the color block instead.
@@ -258,6 +267,9 @@ const Cart = {
                 name: item.product.name,
                 price: item.product.retail_price,
                 image: typeof storageUrl === 'function' ? storageUrl(item.product.image_url) : (item.product.image_url || ''),
+                // Backend-optimized thumbnail preferred for the line image
+                // (mobile-ux-audit-jul2026 §6); falls back to `image` above.
+                image_thumbnail_url: item.product.image_thumbnail_url || null,
                 sku: item.product.sku,
                 brand: item.product.brand?.name || '',
                 color: item.product.color || '',
@@ -271,7 +283,11 @@ const Cart = {
                 // cart reload, which is when the legacy name fallback
                 // (`/^compatible\b/`) would silently misfire on the May 2026
                 // "Compatible Ink Cartridge Replacement for …" rename.
-                product_source: item.product.source || null
+                product_source: item.product.source || null,
+                // Per-line value-pack upsell (mobile-ux-audit-jul2026 §3c/§6):
+                // present on single-colour lines that have a cheaper KCMY/CMY
+                // pack; absent otherwise. Render-only — never used for pricing.
+                pack_suggestion_for_line: item.pack_suggestion_for_line || null
             };
             parsed.key = self.cartItemKey(parsed);
             return parsed;
@@ -294,7 +310,18 @@ const Cart = {
         // Loyalty points block (null for guests or if loyalty service is down)
         const loyalty = responseData.loyalty || null;
 
-        return { items, summary, couponCode, discountAmount, loyalty };
+        // Conversion signals (mobile-ux-audit-jul2026 §4h/§6). All additive and
+        // best-effort — any may be absent. Stored as a side effect so the many
+        // `this.items = parsed.items` call sites don't each need updating; the
+        // cart response is always the authoritative current cart when parsed.
+        self.serverCartMeta = {
+            trust_signals: responseData.trust_signals || null,
+            delivery_estimate: responseData.delivery_estimate || null,
+            free_shipping_unlock: responseData.free_shipping_unlock || null,
+            cart_saved_until: responseData.cart_saved_until || null
+        };
+
+        return { items, summary, couponCode, discountAmount, loyalty, meta: self.serverCartMeta };
     },
 
     /**
@@ -1286,10 +1313,11 @@ const Cart = {
                     : `/p/${encodeURIComponent(p.sku || '')}`;
             })();
             const price = p.retail_price != null && typeof formatPrice === 'function' ? formatPrice(p.retail_price) : '';
+            const crosssellName = (typeof ProductName !== 'undefined') ? ProductName.clean(p) : (p.name || '');
             return `
                 <a class="crosssell-modal__card" href="${Security.escapeAttr(link)}">
-                    ${img ? `<img class="crosssell-modal__img" src="${Security.escapeAttr(img)}" alt="${Security.escapeAttr(p.name || '')}" loading="lazy">` : '<div class="crosssell-modal__img crosssell-modal__img--placeholder"></div>'}
-                    <div class="crosssell-modal__name">${Security.escapeHtml(p.name || '')}</div>
+                    ${img ? `<img class="crosssell-modal__img" src="${Security.escapeAttr(img)}" alt="${Security.escapeAttr(crosssellName)}" loading="lazy">` : '<div class="crosssell-modal__img crosssell-modal__img--placeholder"></div>'}
+                    <div class="crosssell-modal__name">${Security.escapeHtml(crosssellName)}</div>
                     <div class="crosssell-modal__price">${Security.escapeHtml(price)}</div>
                     ${p.in_stock === false
                         ? `<button type="button"
@@ -1691,7 +1719,7 @@ const Cart = {
             if (cartItems) {
                 const self = this;
                 cartItems.innerHTML = this.items.map(function(item) {
-                    const escapedName = Security.escapeHtml(item.name);
+                    const escapedName = Security.escapeHtml((typeof ProductName !== 'undefined') ? ProductName.clean(item) : item.name);
                     const escapedBrand = Security.escapeHtml(item.brand || '');
                     const escapedSku = Security.escapeHtml(item.sku || '');
                     const itemKey = item.key || self.cartItemKey(item);
@@ -1720,6 +1748,7 @@ const Cart = {
                             ' + (escapedSku ? '<p class="cart-item__sku">SKU: ' + escapedSku + '</p>' : '') + '\
                             \
                             <p class="cart-item__price-mobile">' + formatPrice(item.price) + '</p>\
+                            ' + self.renderLinePackSuggestion(item) + '\
                         </div>\
                         <div class="cart-item__price">\
                             ' + formatPrice(item.price) + '\
@@ -1891,6 +1920,249 @@ const Cart = {
                 checkoutBtn.title = '';
             }
         }
+
+        // Conversion signals (delivery estimate, trust badges, free-shipping
+        // unlock with add-ons, guest cart-saved nudge). Fail-soft; hides on an
+        // empty cart or when the backend omitted the fields.
+        this.renderCartSignals();
+    },
+
+    /**
+     * Per-line value-pack upsell chip (mobile-ux-audit-jul2026 §3c). Mirrors the
+     * PDP's renderPackSuggestion guards: only renders when the line carries a
+     * complete, sane `pack_suggestion_for_line` with a positive dollar saving.
+     * Savings render as DOLLARS ONLY (value-pack convention, May 2026). One tap
+     * on the swap button replaces the single line with the pack SKU (delegated
+     * handler in _initCartSignalHandlers). Returns '' when not applicable.
+     */
+    renderLinePackSuggestion: function(item) {
+        const ps = item && item.pack_suggestion_for_line;
+        const savings = ps ? parseFloat(ps.savings_amount) : NaN;
+        if (!ps || typeof ps !== 'object' || !ps.sku
+            || !Number.isFinite(savings) || savings <= 0) {
+            return '';
+        }
+        const label = 'Save ' + formatPrice(savings) + ' — switch to the value pack';
+        return '<button type="button" class="cart-line-pack" data-pack-sku="'
+            + Security.escapeAttr(ps.sku) + '" data-single-key="'
+            + Security.escapeAttr(item.key || this.cartItemKey(item))
+            + '" data-track="cta_click" data-track-cta="pack_swap" data-track-location="cart">'
+            + '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>'
+            + '<span>' + Security.escapeHtml(label) + '</span>'
+            + '</button>';
+    },
+
+    /**
+     * Render the cart conversion signals from this.serverCartMeta into their
+     * fail-soft containers (mobile-ux-audit-jul2026 §4h/§6). Every block hides
+     * itself when its data is absent or the cart is empty. Nothing here computes
+     * a price — all figures are backend-provided.
+     */
+    renderCartSignals: function() {
+        const meta = this.serverCartMeta || {};
+        const hasItems = this.items.length > 0;
+
+        // Delivery estimate — "Order by 2pm — arrives in X–Y days".
+        const deliveryEl = document.getElementById('cart-delivery');
+        if (deliveryEl) {
+            const d = hasItems ? meta.delivery_estimate : null;
+            const promise = d && (d.promise || d.label);
+            if (promise) {
+                deliveryEl.innerHTML =
+                    '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="1" y="3" width="15" height="13"/><polygon points="16 8 20 8 23 11 23 16 16 16 16 8"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/></svg>'
+                    + '<span>' + Security.escapeHtml(String(promise)) + '</span>';
+                deliveryEl.hidden = false;
+            } else {
+                deliveryEl.hidden = true;
+            }
+        }
+
+        // Trust signals — guarantee / returns / shipping badges.
+        const trustEl = document.getElementById('cart-trust-signals');
+        if (trustEl) {
+            const badges = hasItems ? this._trustBadgeList(meta.trust_signals) : [];
+            if (badges.length) {
+                trustEl.innerHTML = badges.map(function(text) {
+                    return '<span class="cart-trust-badge">'
+                        + '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 12l2 2 4-4"/><path d="M12 3l7 4v5c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V7z"/></svg>'
+                        + '<span>' + Security.escapeHtml(text) + '</span></span>';
+                }).join('');
+                trustEl.hidden = false;
+            } else {
+                trustEl.hidden = true;
+            }
+        }
+
+        // Free-shipping unlock — "Add $X for free shipping" + cheap in-stock
+        // add-ons that cross the gap. Supersedes the plain free-shipping nudge.
+        this._renderFreeShipUnlock(hasItems ? meta.free_shipping_unlock : null);
+
+        // Cart-saved-until nudge (guests, non-empty cart).
+        const savedEl = document.getElementById('cart-saved-until');
+        if (savedEl) {
+            const days = this._daysUntil(hasItems ? meta.cart_saved_until : null);
+            if (days && days > 0) {
+                const noun = days === 1 ? 'day' : 'days';
+                savedEl.textContent = 'Your cart is saved for ' + days + ' ' + noun + '.';
+                savedEl.hidden = false;
+            } else {
+                savedEl.hidden = true;
+            }
+        }
+
+        this._initCartSignalHandlers();
+    },
+
+    /**
+     * Normalise the backend trust_signals object into a short list of badge
+     * strings. Tolerant of shape: accepts {guarantee, returns, shipping, org}
+     * as strings or {label}/{text}/{promise} objects; ignores anything else.
+     * Caps at 3 to keep the mobile summary tidy.
+     */
+    _trustBadgeList: function(ts) {
+        if (!ts || typeof ts !== 'object') return [];
+        const pick = function(v) {
+            if (!v) return null;
+            if (typeof v === 'string') return v;
+            if (typeof v === 'object') return v.label || v.text || v.promise || v.title || null;
+            return null;
+        };
+        const out = [];
+        ['guarantee', 'returns', 'shipping', 'shipping_promise', 'org'].forEach(function(k) {
+            const s = pick(ts[k]);
+            if (s && out.indexOf(s) === -1) out.push(s);
+        });
+        return out.slice(0, 3);
+    },
+
+    _renderFreeShipUnlock: function(unlock) {
+        const el = document.getElementById('cart-free-ship-unlock');
+        if (!el) return;
+        const msgEl = document.getElementById('cart-shipping-message');
+        const barEl = document.getElementById('cart-shipping-bar');
+
+        const amountShort = unlock ? parseFloat(unlock.amount_short) : NaN;
+        const suggestions = (unlock && Array.isArray(unlock.suggested_products))
+            ? unlock.suggested_products.slice(0, 3) : [];
+
+        if (!unlock || unlock.qualifies || !Number.isFinite(amountShort) || amountShort <= 0) {
+            el.hidden = true;
+            el.innerHTML = '';
+            return; // leave the existing plain nudge in place
+        }
+
+        // Unlock supersedes the plain free-shipping message to avoid duplication.
+        if (msgEl) msgEl.hidden = true;
+        if (barEl) barEl.hidden = true;
+
+        const self = this;
+        const chips = suggestions.map(function(p) {
+            const href = self._suggestedProductHref(p);
+            const img = self._suggestedProductImage(p);
+            const price = (p.retail_price != null) ? formatPrice(parseFloat(p.retail_price)) : '';
+            return '<a class="cart-addon" href="' + Security.escapeAttr(href) + '" data-track="cta_click" data-track-cta="free_ship_addon" data-track-location="cart">'
+                + img
+                + '<span class="cart-addon__name">' + Security.escapeHtml(p.name || p.sku || '') + '</span>'
+                + (price ? '<span class="cart-addon__price">' + Security.escapeHtml(price) + '</span>' : '')
+                + '</a>';
+        }).join('');
+
+        el.innerHTML =
+            '<p class="cart-free-ship-unlock__lead">Add ' + Security.escapeHtml(formatPrice(amountShort)) + ' more for FREE shipping</p>'
+            + (chips ? '<div class="cart-addon-row">' + chips + '</div>' : '');
+        el.hidden = false;
+        this.bindImageFallbacks(el);
+    },
+
+    _suggestedProductHref: function(p) {
+        if (p.canonical_url) {
+            try { return new URL(p.canonical_url).pathname; } catch (_) { return p.canonical_url; }
+        }
+        if (p.slug) return '/products/' + encodeURIComponent(p.slug) + '/' + encodeURIComponent(p.sku || '');
+        return '/p/' + encodeURIComponent(p.sku || '');
+    },
+
+    _suggestedProductImage: function(p) {
+        // Prefer the backend's optimized thumbnail (mobile-ux-audit-jul2026 §6);
+        // fall back to a hand-built optimized URL, then the placeholder path.
+        let raw = p.image_thumbnail_url
+            || (p.image_url && typeof optimizedImageUrl === 'function' ? optimizedImageUrl(p.image_url, 96) : p.image_url)
+            || '';
+        if (!raw) return '<span class="cart-addon__img cart-addon__img--empty" aria-hidden="true"></span>';
+        const src = (typeof Security !== 'undefined' && Security.sanitizeUrl) ? Security.sanitizeUrl(raw) : raw;
+        const rawFallback = (typeof storageUrlRaw === 'function' && p.image_url) ? storageUrlRaw(p.image_url) : '';
+        return '<img class="cart-addon__img" src="' + Security.escapeAttr(src) + '"'
+            + (rawFallback ? ' data-raw-src="' + Security.escapeAttr(rawFallback) + '"' : '')
+            + ' alt="" width="40" height="40" loading="lazy" decoding="async">';
+    },
+
+    /** Whole days from now until an ISO date, or null if invalid/past. */
+    _daysUntil: function(iso) {
+        if (!iso) return null;
+        const then = new Date(iso).getTime();
+        if (!Number.isFinite(then)) return null;
+        const diff = then - Date.now();
+        if (diff <= 0) return null;
+        return Math.ceil(diff / (24 * 60 * 60 * 1000));
+    },
+
+    /**
+     * Delegated click handlers for the signal CTAs. Idempotent — bound once via
+     * a guard flag so repeated renderCartPage() calls don't stack listeners.
+     * The pack-swap removes the single line then adds the pack SKU (qty 1),
+     * reusing the existing Cart mutation methods so all server/localStorage
+     * plumbing and re-render happen normally.
+     */
+    _initCartSignalHandlers: function() {
+        if (this._cartSignalHandlersBound) return;
+        this._cartSignalHandlersBound = true;
+        const self = this;
+        const container = document.getElementById('cart-items');
+        if (!container) return;
+        container.addEventListener('click', function(e) {
+            const btn = e.target.closest('.cart-line-pack');
+            if (!btn) return;
+            e.preventDefault();
+            const packSku = btn.getAttribute('data-pack-sku');
+            const singleKey = btn.getAttribute('data-single-key');
+            if (!packSku) return;
+            btn.disabled = true;
+            self._swapLineForPack(singleKey, packSku).catch(function(err) {
+                DebugLog.error('Pack swap failed:', err);
+                btn.disabled = false;
+                if (typeof showToast === 'function') showToast('Could not switch to the value pack. Please try again.', 'error');
+            });
+        });
+    },
+
+    async _swapLineForPack(singleKey, packSku) {
+        // Resolve the pack product from its SKU, add it, then drop the single.
+        // Order matters: add first so a failed lookup leaves the cart intact.
+        if (typeof API === 'undefined' || typeof API.getProduct !== 'function') {
+            throw new Error('product lookup unavailable');
+        }
+        const res = await API.getProduct(packSku);
+        const product = (res && res.ok && res.data) ? res.data : null;
+        if (!product || !product.id) throw new Error('pack product not found');
+        await this.addItem({
+            id: product.id,
+            name: product.name,
+            price: product.retail_price,
+            sku: product.sku || packSku,
+            slug: product.slug || '',
+            brand: (product.brand && product.brand.name) || '',
+            color: product.color || '',
+            color_hex: product.color_hex || null,
+            image: (typeof storageUrl === 'function' ? storageUrl(product.image_url) : product.image_url) || '',
+            quantity: 1,
+            source: 'core',
+            product_source: product.source || null
+        });
+        const single = this.items.find(function(i) { return (i.key || '') === singleKey; });
+        if (single) {
+            await this.removeItem(single.key || this.cartItemKey(single));
+        }
+        if (typeof showToast === 'function') showToast('Switched to the value pack.', 'success');
     }
 };
 

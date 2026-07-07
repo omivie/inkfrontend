@@ -30,6 +30,7 @@
         legalEntity: 'Office Consumables Ltd',          // NZ-registered limited company
         gstNumber:   '94-509-459',                      // formatted with dashes — IRD form
         nzbn:        '9429033934204',                   // New Zealand Business Number
+        companyNumber: '1853414',                       // NZ Companies Office registration number
         nzOwned:     true,                              // controls "100% NZ Owned" framing
 
         // ─── Contact ──────────────────────────────────────────────────────
@@ -92,12 +93,14 @@
         // ─── Returns ──────────────────────────────────────────────────────
         // Two windows mirror the backend trustSignals.js contract:
         //   - returnWindowDaysFaulty  — faulty/damaged/incorrect (30 days)
-        //   - returnWindowDaysChange  — change-of-mind, unopened (14 days)
+        //   - returnWindowDaysChange  — change-of-mind, unopened (30 days)
         // `returnWindowDays` is preserved as the faulty-default for any
         // historical `[data-legal-bind="return-window"]` binding.
+        // Change-of-mind aligned to 30 days (backend SITE_CHANGE_OF_MIND_DAYS,
+        // 2026-07-07) so /api/site/trust.returns.change_of_mind_days matches.
         returnWindowDays:        30,
         returnWindowDaysFaulty:  30,
-        returnWindowDaysChange:  14,
+        returnWindowDaysChange:  30,
         compatibleWarrantyMonths: 12,
         dispatchCutoffDisplay:   '2pm NZT, Auckland metro, business days',
         returnsAddressSameAsBusiness: true,
@@ -123,7 +126,7 @@
         },
 
         // ─── Operations ───────────────────────────────────────────────────
-        paymentMethods: ['Visa', 'Mastercard', 'American Express', 'PayPal', 'Apple Pay', 'Google Pay'],
+        paymentMethods: ['Visa', 'Mastercard', 'American Express', 'PayPal', 'Apple Pay', 'Google Pay', 'Klarna'],
         // Effective / last-updated date for all policy pages. Bumped on
         // any substantive policy change. Read by legal-page.js to render
         // the "Last updated" stamp.

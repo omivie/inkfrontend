@@ -3,6 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <meta name="theme-color" content="#267FB5">
+    <meta name="color-scheme" content="light">
     <meta id="meta-description" name="description" content="Browse all printing supplies - ink cartridges, toner, printers, drums and accessories. Filter by brand, type, and compatibility.">
     <meta name="robots" content="index, follow">
 
@@ -26,19 +28,19 @@
     <title>Shop Ink Cartridges & Toner NZ | InkCartridges.co.nz</title>
 
     <script async src="https://www.googletagmanager.com/gtag/js?id=G-SDQELG0FGD"></script>
-    <script src="/js/gtag.js?v=cee7c501"></script>
+    <script src="/js/gtag.js?v=c9909b01"></script>
 
     <link rel="preconnect" href="https://api.inkcartridges.co.nz">
     <link rel="preconnect" href="https://www.ds.co.nz">
     <link rel="dns-prefetch" href="https://www.ds.co.nz">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link rel="stylesheet" href="/css/base.css?v=white-cards-may2026">
-    <link rel="stylesheet" href="/css/layout.css?v=newsletter-feedback-jun2026">
-    <link rel="stylesheet" href="/css/components.css?v=track-lookup-inline-jun2026">
-    <link rel="stylesheet" href="/css/modern-effects.css?v=ade3173d">
-    <link rel="stylesheet" href="/css/pages.css?v=track-lookup-inline-jun2026">
-    <link rel="stylesheet" href="/css/search.css?v=track-lookup-inline-jun2026">
+    <link rel="stylesheet" href="/css/base.css?v=244762aa">
+    <link rel="stylesheet" href="/css/layout.css?v=757faa4e">
+    <link rel="stylesheet" href="/css/components.css?v=2bfaadcc">
+    <link rel="stylesheet" href="/css/modern-effects.css?v=afe20f45">
+    <link rel="stylesheet" href="/css/pages.css?v=d6866dff">
+    <link rel="stylesheet" href="/css/search.css?v=a9484fb5">
 
     <script type="application/ld+json" id="shop-schema">
     {
@@ -87,12 +89,6 @@
                             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
                         </span>
                         <span>Account</span>
-                    </a>
-                    <a href="/admin" class="header-actions__item header-actions__item--admin" id="header-admin-link" aria-label="Admin" hidden>
-                        <span class="header-actions__icon">
-                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
-                        </span>
-                        <span>Admin</span>
                     </a>
                     <a href="/account/favourites" class="header-actions__item" aria-label="Favourites">
                         <span class="header-actions__icon">
@@ -371,29 +367,78 @@
                 </div>
             </div>
         </section>
+
+        <!-- Mobile Filter & Sort (mobile-ux-audit-jul2026 §2b/§8.2). Bottom
+             thumb-zone action bar + full-screen sheet. Hidden by default;
+             shop-page.js reveals the bar on product-list levels only and the
+             CSS shows it inside the mobile breakpoint. Sort is client-side,
+             Source reuses ?type=, In-stock is a client-side toggle. -->
+        <div class="filter-sort-bar" id="filter-sort-bar" hidden>
+            <button type="button" class="filter-sort-bar__btn btn btn--primary" id="filter-sort-open" aria-haspopup="dialog" aria-controls="filter-sort-sheet">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></svg>
+                Filter &amp; Sort
+                <span class="filter-sort-bar__count" id="filter-sort-count" aria-hidden="true" hidden></span>
+            </button>
+        </div>
+
+        <div class="filter-sort-sheet" id="filter-sort-sheet" hidden role="dialog" aria-modal="true" aria-labelledby="filter-sort-heading">
+            <div class="filter-sort-sheet__backdrop" data-filter-sort-close></div>
+            <div class="filter-sort-sheet__panel">
+                <div class="filter-sort-sheet__head">
+                    <h2 class="filter-sort-sheet__title" id="filter-sort-heading">Filter &amp; Sort</h2>
+                    <button type="button" class="filter-sort-sheet__close" id="filter-sort-close" data-filter-sort-close aria-label="Close filter and sort">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                    </button>
+                </div>
+                <div class="filter-sort-sheet__body">
+                    <fieldset class="filter-sort-group">
+                        <legend class="filter-sort-group__legend">Sort by</legend>
+                        <label class="filter-sort-option"><input type="radio" name="fs-sort" value="recommended" checked> <span>Recommended</span></label>
+                        <label class="filter-sort-option"><input type="radio" name="fs-sort" value="price_asc"> <span>Price: Low to High</span></label>
+                        <label class="filter-sort-option"><input type="radio" name="fs-sort" value="price_desc"> <span>Price: High to Low</span></label>
+                        <label class="filter-sort-option"><input type="radio" name="fs-sort" value="name_asc"> <span>Name: A–Z</span></label>
+                        <label class="filter-sort-option"><input type="radio" name="fs-sort" value="name_desc"> <span>Name: Z–A</span></label>
+                    </fieldset>
+                    <fieldset class="filter-sort-group">
+                        <legend class="filter-sort-group__legend">Type</legend>
+                        <label class="filter-sort-option"><input type="radio" name="fs-source" value="" checked> <span>All</span></label>
+                        <label class="filter-sort-option"><input type="radio" name="fs-source" value="genuine"> <span>Genuine</span></label>
+                        <label class="filter-sort-option"><input type="radio" name="fs-source" value="compatible"> <span>Compatible</span></label>
+                    </fieldset>
+                    <fieldset class="filter-sort-group">
+                        <legend class="filter-sort-group__legend">Availability</legend>
+                        <label class="filter-sort-option filter-sort-option--toggle"><input type="checkbox" id="fs-instock"> <span>In stock only</span></label>
+                    </fieldset>
+                </div>
+                <div class="filter-sort-sheet__foot">
+                    <button type="button" class="btn btn--ghost" id="filter-sort-clear">Clear</button>
+                    <button type="button" class="btn btn--primary" id="filter-sort-apply">Apply</button>
+                </div>
+            </div>
+        </div>
     </main>
 
-    <script defer src="/js/shop-page.js?v=ia-reorg-jul2026"></script>
+    <script defer src="/js/shop-page.js?v=58cf3d7f"></script>
 
     <footer class="site-footer"><noscript><p>InkCartridges.co.nz is operated by Office Consumables Ltd (NZBN 9429033934204, GST 94-509-459). Phone <a href="tel:0274740115">027 474 0115</a> &mdash; Email <a href="mailto:support@inkcartridges.co.nz">support@inkcartridges.co.nz</a> &mdash; 37A Archibald Road, Kelston, Auckland 0602, New Zealand.</p></noscript></footer>
 
     <script defer src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.98.0" integrity="sha384-Sm2s7OXxsAMTyJ4iIyRBgVpeGUvMPk2lRQnnZhE78Wej7oggIoolKt+SCt0XJbUB" crossorigin="anonymous"></script>
-    <script defer src="/js/config.js?v=d58abcf9"></script>
-    <script defer src="/js/security.js?v=08acac61"></script>
-    <script defer src="/js/api.js?v=ia-reorg-jul2026"></script>
-    <script defer src="/js/seo-meta.js?v=seo-meta-rewrite-may2026"></script>
-    <script defer src="/js/schema.js?v=1"></script>
-    <script defer src="/js/utils.js?v=ia-reorg-jul2026"></script>
-    <script defer src="/js/auth.js?v=42a58e72"></script>
-    <script defer src="/js/cart.js?v=err-extract-may2026"></script>
-    <script defer src="/js/favourites.js?v=34e40b9a"></script>
-    <script defer src="/js/products.js?v=28bbbea5"></script>
-    <script defer src="/js/search.js?v=085298ce"></script>
-    <script defer src="/js/main.js?v=mobile-parity-may2026"></script>
-    <script defer src="/js/footer.js?v=newsletter-copy-fix-jun2026"></script>
-    <script defer src="/js/mega-nav.js?v=ia-reorg-jul2026"></script>
+    <script defer src="/js/config.js?v=84df721a"></script>
+    <script defer src="/js/security.js?v=790f00f3"></script>
+    <script defer src="/js/api.js?v=389b9a84"></script>
+    <script defer src="/js/seo-meta.js?v=754f09df"></script>
+    <script defer src="/js/schema.js?v=dd78df4e"></script>
+    <script defer src="/js/utils.js?v=d8d73fc4"></script>
+    <script defer src="/js/auth.js?v=d8e7f6f2"></script>
+    <script defer src="/js/cart.js?v=34fb5bfe"></script>
+    <script defer src="/js/favourites.js?v=cb9c5483"></script>
+    <script defer src="/js/products.js?v=f32abaec"></script>
+    <script defer src="/js/search.js?v=775e6e5b"></script>
+    <script defer src="/js/main.js?v=e0c9d845"></script>
+    <script defer src="/js/footer.js?v=1ea50877"></script>
+    <script defer src="/js/mega-nav.js?v=4684e7c1"></script>
     <script defer src="/js/modern-effects.js?v=ad8bff1e"></script>
     <script defer src="/js/analytics.js?v=8c9ee196"></script>
-    <script defer src="/js/site-guard.js?v=2e596146"></script>
+    <script defer src="/js/site-guard.js?v=e0b0e4ba"></script>
 </body>
 </html>

@@ -1,11 +1,11 @@
 /**
  * Admin SPA — Entry point, router, shell
  */
-const APP_VERSION = '2026.07.02-invoice-pdf-cleanup';
+const APP_VERSION = '2026.07.07-product-codes-rls';
 
 import { AdminAuth } from './auth.js';
 import { FilterState } from './filters.js';
-import { AdminAPI } from './api.js?v=invoices-ordernum-jul2026';
+import { AdminAPI } from './api.js?v=product-codes-rls-jul2026';
 
 const esc = (s) => Security.escapeHtml(String(s));
 
@@ -40,6 +40,7 @@ const I = {
   calendar: '<rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>',
   image: '<rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/>',
   check: '<polyline points="20 6 9 17 4 12"/>',
+  refresh: '<polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/>',
 };
 
 function icon(name, w = 18, h = 18) {
@@ -66,6 +67,7 @@ const NAV_ITEMS = [
 
   { section: 'Analytics' },
   { key: 'analytics', label: 'Finance', icon: 'finance', ownerOnly: true },
+  { key: 'demand-ranking', label: 'Demand Ranking', icon: 'analytics', ownerOnly: true },
 
   { section: 'Catalog & Data Ops' },
   { key: 'control-center', label: 'Control Center', icon: 'lab', ownerOnly: true },
@@ -272,7 +274,7 @@ async function navigate(pageName) {
   `;
 
   // Owner-only page check
-  const ownerPages = ['settings', 'control-center', 'sync-report', 'invoices', 'quick-order'];
+  const ownerPages = ['settings', 'control-center', 'sync-report', 'invoices', 'quick-order', 'demand-ranking'];
   if (ownerPages.includes(pageName) && !AdminAuth.isOwner()) {
     content.innerHTML = `
       <div class="admin-stub">

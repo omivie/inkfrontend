@@ -361,7 +361,13 @@ const RibbonsPage = {
         } else if (ribbon.image_url && !ribbon.image_url.startsWith('http') && typeof storageUrl === 'function') {
             ribbon.image_url = storageUrl(ribbon.image_url);
         }
-        ribbon.in_stock = true;
+        // Respect real stock signals so out-of-stock / contact-only ribbons are
+        // not falsely shown as buyable (MC audit, Jul 2026). Only default to
+        // in-stock when the API gives us NOTHING to go on, so we don't regress
+        // every ribbon to "Contact us" if the feed omits stock fields entirely.
+        if (ribbon.stock_status == null && ribbon.in_stock == null && ribbon.stock_quantity == null) {
+            ribbon.in_stock = true;
+        }
         if (ribbon.retail_price == null && ribbon.sale_price != null) {
             ribbon.retail_price = ribbon.sale_price;
         }
@@ -508,7 +514,10 @@ const RibbonsPage = {
         }
 
         const price = ribbon.sale_price || ribbon.retail_price || 0;
-        const inStock = true;
+        // Drive the buy/contact button off the SAME status the stock pill shows
+        // (getStockStatus), instead of a hardcoded true, so an out-of-stock or
+        // contact-only ribbon shows "Contact us" like every other surface.
+        const inStock = getStockStatus(ribbon).class === 'in-stock';
         const brandName = ribbon._brandName || '';
         const color = ribbon.color || '';
         const displayName = ribbon.name || '';

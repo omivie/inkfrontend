@@ -14,10 +14,16 @@ const esc = (s) => Security.escapeHtml(String(s ?? ''));
 // ---- Constants ----
 
 const OWNERS = ['general', 'vieland', 'jackson'];
+// Owner columns are identified by display name only. Personal email
+// addresses were removed from this constant — /js/admin/*.js is served as a
+// static asset (no auth gate), so anything hard-coded here is publicly
+// downloadable. Self-detection now matches the signed-in admin's display name
+// / email local-part (see resolveMyOwner), and assignee email is entered by
+// the admin rather than pre-baked into shipped source.
 const OWNER_META = {
-  general: { label: 'General / Company', accent: '#6b7280', email: null,                       name: null       },
-  vieland: { label: 'Vieland',           accent: '#267FB5', email: 'vielandvnnz@gmail.com',    name: 'Vieland'  },
-  jackson: { label: 'Jackson',           accent: '#f59e0b', email: 'junjackson0915@gmail.com', name: 'Jackson'  },
+  general: { label: 'General / Company', accent: '#6b7280', email: null, name: null       },
+  vieland: { label: 'Vieland',           accent: '#267FB5', email: null, name: 'Vieland'  },
+  jackson: { label: 'Jackson',           accent: '#f59e0b', email: null, name: 'Jackson'  },
 };
 
 const CATEGORIES = {
@@ -187,10 +193,14 @@ function splitTodayUpcoming(list) {
 }
 
 function resolveMyOwner() {
-  const me = (AdminAuth.user?.email || '').toLowerCase();
+  // Match the signed-in admin to an owner column by display name (or email
+  // local-part) so no personal email needs to live in shipped source.
+  const user = AdminAuth.user || {};
+  const myName  = (user.user_metadata?.full_name || user.user_metadata?.name || '').trim().toLowerCase();
+  const myLocal = (user.email || '').split('@')[0].toLowerCase();
   for (const k of OWNERS) {
-    const email = OWNER_META[k].email;
-    if (email && email.toLowerCase() === me) return k;
+    const name = (OWNER_META[k].name || '').toLowerCase();
+    if (name && (name === myName || name === myLocal)) return k;
   }
   return null;
 }

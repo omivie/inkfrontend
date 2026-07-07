@@ -53,7 +53,12 @@ html {
 }
 
 body {
-    overflow-x: hidden;
+    /* `clip` (not `hidden`) still prevents horizontal scroll but does NOT make
+       <body> a scroll container, so `position: sticky` descendants — the mobile
+       sticky header (mobile-ux-audit-jul2026 §2a) — stick to the viewport
+       instead of scrolling away. `overflow-x: clip` leaves overflow-y visible
+       (no phantom body scrollbar). */
+    overflow-x: clip;
 }
 
 /* =============================================

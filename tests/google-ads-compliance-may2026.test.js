@@ -219,8 +219,10 @@ test('legal-config.js sets email = support@inkcartridges.co.nz', () => {
 test('legal-config.js sets privacyOfficerEmail = support@inkcartridges.co.nz', () => {
     assert.match(LEGAL_CFG_SRC, /privacyOfficerEmail:\s*['"]support@inkcartridges\.co\.nz['"]/);
 });
-test('legal-config.js carries a 14-day change-of-mind returnWindowDaysChange', () => {
-    assert.match(LEGAL_CFG_SRC, /returnWindowDaysChange:\s*14/);
+test('legal-config.js carries a 30-day change-of-mind returnWindowDaysChange', () => {
+    // Aligned to 30 days on 2026-07-07 to match backend SITE_CHANGE_OF_MIND_DAYS
+    // (owner decision) so /api/site/trust.returns.change_of_mind_days agrees.
+    assert.match(LEGAL_CFG_SRC, /returnWindowDaysChange:\s*30/);
 });
 test('legal-config.js carries a 30-day faulty-goods returnWindowDaysFaulty', () => {
     assert.match(LEGAL_CFG_SRC, /returnWindowDaysFaulty:\s*30/);
@@ -353,11 +355,11 @@ test('/about references the 12-month compatible warranty', () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────
-// §8. /returns — change-of-mind window is 14 days, faulty is 30 days.
+// §8. /returns — change-of-mind window is 30 days, faulty is 30 days.
 // ─────────────────────────────────────────────────────────────────────────
 const RETURNS_SRC = READ(HTML('html/returns.html'));
 
-test('/returns binds the 14-day change-of-mind window', () => {
+test('/returns binds the change-of-mind window', () => {
     assert.match(RETURNS_SRC, /data-legal-bind="return-window-change"/);
 });
 test('/returns binds the 30-day faulty window', () => {

@@ -20,6 +20,7 @@
     { "source": "shipping", "destination": "/html/shipping.html" },
     { "source": "about", "destination": "/html/about.html" },
     { "source": "faq", "destination": "/html/faq.html" },
+    { "source": "genuine-vs-compatible", "destination": "/html/genuine-vs-compatible.html" },
     { "source": "ribbons", "destination": "/html/ribbons.html" },
     { "source": "account", "destination": "/html/account/index.html" },
     { "source": "account/addresses", "destination": "/html/account/addresses.html" },

@@ -17,8 +17,9 @@
  *      (mirror of the backend redirect layer) and routes bots on sole-filter
  *      canonical categories to /api/prerender/category/<slug>. Its
  *      excluded-param list is byte-mirrored in seo-meta.js (SPA/bot parity).
- *   4. /genuine-vs-compatible is a known-dead route (404s on both origins) —
- *      filtered out of hydrated nav content until the backend ships it.
+ *   4. /genuine-vs-compatible now resolves to a real on-site explainer page
+ *      (Merchant Center reinstatement, Jul 2026): rewritten to
+ *      /html/genuine-vs-compatible and linked from the footer.
  *   5. PDP renders the backend's pack_suggestion as a value-pack upsell —
  *      dollar savings only, never savings_percent (value-pack convention).
  *   6. Every non-admin page carries static hreflang en-NZ + x-default.
@@ -99,7 +100,7 @@ const PAGES_WITH_NAV = ALL_HTML
     .map((file) => ({ file, html: fs.readFileSync(file, 'utf8') }))
     .filter(({ html }) => html.includes('nav-menu__item'));
 
-test('§1 no categories-mega anywhere; 26 shared headers stay byte-identical', () => {
+test('§1 no categories-mega anywhere; shared headers stay byte-identical', () => {
     for (const { file, html } of ALL_HTML.map((f) => ({ file: f, html: fs.readFileSync(f, 'utf8') }))) {
         assert.ok(!html.includes('categories-mega') && !html.includes('nav-categories-toggle'),
             `${file} must not ship the removed Shop by Category mega`);
@@ -108,8 +109,10 @@ test('§1 no categories-mega anywhere; 26 shared headers stay byte-identical', (
         'mega-nav.js must not wire the removed categories panel');
     assert.ok(!LAYOUT_CSS.includes('.categories-mega'),
         'layout.css must not style the removed categories mega');
-    assert.equal(PAGES_WITH_NAV.length, 26,
-        `expected 26 pages with the shared nav, got ${PAGES_WITH_NAV.length}`);
+    // 27 since Jul 2026: the /genuine-vs-compatible explainer page was added
+    // for Merchant Center reinstatement and ships the same shared header.
+    assert.equal(PAGES_WITH_NAV.length, 27,
+        `expected 27 pages with the shared nav, got ${PAGES_WITH_NAV.length}`);
     const hashes = new Set(PAGES_WITH_NAV.map(({ file, html }) => {
         const header = extractSiteHeader(html);
         assert.ok(header, `${file} has a nav but no site-header block`);
@@ -359,9 +362,14 @@ test('§10 /ink and /toner 301 to the category landing routes', () => {
     assert.ok(ink && ink.destination === '/ink-cartridges' && ink.permanent === true,
         '/ink must 301 to /ink-cartridges (backend prerender canonical still points at /ink)');
     assert.ok(toner && toner.destination === '/toner-cartridges' && toner.permanent === true);
-    // The dead-page redirect stays until the backend ships the page.
-    const gvc = r.find(x => x.source === '/genuine-vs-compatible');
-    assert.ok(gvc && gvc.destination === '/', '/genuine-vs-compatible redirect must be retained');
+    // /genuine-vs-compatible now resolves to a real explainer page (Merchant
+    // Center reinstatement, Jul 2026) — it must NOT redirect to the homepage
+    // any more, and must rewrite to the real page.
+    const gvcRedirect = r.find(x => x.source === '/genuine-vs-compatible');
+    assert.ok(!gvcRedirect, '/genuine-vs-compatible must no longer redirect to the homepage');
+    const gvcRewrite = VERCEL.rewrites.find(x => x.source === '/genuine-vs-compatible');
+    assert.ok(gvcRewrite && gvcRewrite.destination === '/html/genuine-vs-compatible',
+        '/genuine-vs-compatible must rewrite to /html/genuine-vs-compatible');
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

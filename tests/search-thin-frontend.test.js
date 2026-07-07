@@ -306,6 +306,13 @@ test('main.js — slimmed (initBasicAutocomplete deletion takes ~210 lines)', ()
     // submit button (~5 lines) lifting it to 640. If main.js grows past this,
     // audit before bumping — the spirit of this test is "don't re-grow the
     // deleted autocomplete logic".
-    assert.ok(lines <= 640,
-        `main.js is ${lines} lines; expected ≤640. If you've added a load-bearing feature, document it; if you've re-introduced deleted search logic, see readfirst/SEARCH_AUDIT.md.`);
+    // The MC audit (Jul 2026) rewrote initAdminHeaderLink to CREATE + inject the
+    // admin link for verified admins (ensureLink/removeLink builders) instead of
+    // un-hiding static markup, so /admin is never in public page source — ~27
+    // lines, lifting the ceiling to 690.
+    // The mobile-ux audit (Jul 2026, mobile-ux-audit-jul2026.md §2a) added
+    // initStickyHeader — an rAF-throttled scroll toggle that pins the mobile
+    // header — ~35 lines incl. doc comment, lifting the ceiling to 725.
+    assert.ok(lines <= 725,
+        `main.js is ${lines} lines; expected ≤725. If you've added a load-bearing feature, document it; if you've re-introduced deleted search logic, see readfirst/SEARCH_AUDIT.md.`);
 });
