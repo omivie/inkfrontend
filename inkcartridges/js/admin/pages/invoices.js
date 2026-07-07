@@ -966,6 +966,11 @@ function renderLines() {
     const i = +row.dataset.line;
     row.querySelectorAll('.inv-ac > input').forEach((input) => attachProductAutocomplete(input, {
       onPick: (p) => {
+        // Blur the field FIRST so its pending `change` (carrying the typed query,
+        // e.g. "lc") flushes now and can't clobber the picked product afterwards:
+        // renderLines() below destroys the focused input, which would otherwise fire
+        // that stale change and overwrite _draft.lines[i].code back to the query.
+        input.blur();
         const ex = p.retail_price != null ? round2(num(p.retail_price) / (1 + GST_RATE)) : num(p.sell_price ?? p.price ?? 0);
         _draft.lines[i] = { code: p.sku || '', description: p.name || p.product_name || '', qty: _draft.lines[i]?.qty || 1, unitCost: ex };
         renderLines(); refreshPreview();
@@ -1186,7 +1191,7 @@ function renderPreview(d) {
     </table>
 
     <div class="inv-doc__pay">
-      <div class="inv-doc__pay-title">${displayDueDate(d) ? `<div>Payment due by <strong>${esc(formatInvoiceDate(displayDueDate(d)))}</strong></div>` : ''}<div>Please make payment to:</div></div>
+      <div class="inv-doc__pay-title">${displayDueDate(d) ? `<div>Payment due by <strong>${esc(formatInvoiceDate(displayDueDate(d)))}</strong></div>` : ''}<div>Please make payment to.</div></div>
       <table>
         <tr><td>a/c Name:</td><td><strong>${esc(d.footer.bankName)}</strong></td></tr>
         <tr><td>a/c Number:</td><td><strong>${esc(d.footer.bankAcct)}</strong></td></tr>
@@ -1248,13 +1253,13 @@ function buildInvoiceDoc(d) {
   const text = (s, x, y) => doc.text(String(s ?? ''), x, y);
 
   // --- Header band: title (left) + meta key/values (right) ---
-  doc.setFont('helvetica', 'bold'); doc.setFontSize(24); doc.setTextColor(25);
+  doc.setFont('times', 'bold'); doc.setFontSize(24); doc.setTextColor(25);
   doc.text('TAX INVOICE', M, 72);
   let my = 56;
   invoiceMeta(d).forEach(([k, v]) => {
-    doc.setFont('helvetica', 'normal'); doc.setFontSize(9); doc.setTextColor(140);
+    doc.setFont('times', 'normal'); doc.setFontSize(9); doc.setTextColor(140);
     doc.text(k.toUpperCase(), pageW - M - 100, my, { align: 'right' });
-    doc.setFont('helvetica', 'bold'); doc.setFontSize(11); doc.setTextColor(25);
+    doc.setFont('times', 'bold'); doc.setFontSize(11); doc.setTextColor(25);
     doc.text(String(v ?? ''), pageW - M, my, { align: 'right' });
     my += 16;
   });
@@ -1272,12 +1277,12 @@ function buildInvoiceDoc(d) {
   // Draw one party block at (x, top); returns the y just below it.
   const drawParty = (p, x, top) => {
     if (!p) return top;
-    doc.setFont('helvetica', 'bold'); doc.setFontSize(9); doc.setTextColor(140);
+    doc.setFont('times', 'bold'); doc.setFontSize(9); doc.setTextColor(140);
     doc.text(p.label.toUpperCase(), x, top);
-    doc.setFont('helvetica', 'bold'); doc.setFontSize(13); doc.setTextColor(25);
+    doc.setFont('times', 'bold'); doc.setFontSize(13); doc.setTextColor(25);
     let yy = top + 17;
     doc.splitTextToSize(p.name || '', colW).forEach((w) => { doc.text(w, x, yy); yy += 15; });
-    doc.setFont('helvetica', 'normal'); doc.setFontSize(11); doc.setTextColor(45);
+    doc.setFont('times', 'normal'); doc.setFontSize(11); doc.setTextColor(45);
     yy += 2;
     p.lines.forEach((l) => {
       doc.splitTextToSize(String(l), colW).forEach((w) => { doc.text(w, x, yy); yy += 13.5; });
@@ -1307,8 +1312,8 @@ function buildInvoiceDoc(d) {
     head: [['Product Code', 'Description', 'Number', 'Cost']],
     body: rows.length ? rows : [['', '', '', '']],
     theme: 'plain',
-    styles: { fontSize: 10.5, cellPadding: { ...padY, left: 0, right: 8 }, overflow: 'linebreak', valign: 'top', textColor: 35 },
-    headStyles: { fontStyle: 'bold', textColor: 90, fontSize: 9.5 },
+    styles: { font: 'times', fontSize: 11, cellPadding: { ...padY, left: 0, right: 8 }, overflow: 'linebreak', valign: 'top', textColor: 35 },
+    headStyles: { font: 'times', fontStyle: 'bold', textColor: 90, fontSize: 10 },
     columnStyles: {
       0: { cellWidth: 116 },
       1: { cellWidth: 'auto' },
@@ -1331,7 +1336,7 @@ function buildInvoiceDoc(d) {
   const valX = pageW - M;
   doc.setTextColor(20);
   const totRow = (label, val, opts = {}) => {
-    doc.setFont('helvetica', opts.bold ? 'bold' : 'normal');
+    doc.setFont('times', opts.bold ? 'bold' : 'normal');
     doc.setFontSize(opts.size || 11);
     doc.text(label, labelX, ty);
     doc.text(String(val), valX, ty, { align: 'right' });
@@ -1347,14 +1352,14 @@ function buildInvoiceDoc(d) {
   // --- Payment block ---
   let py = ty + 24;
   const due = displayDueDate(d);
-  doc.setFont('helvetica', 'bold'); doc.setFontSize(11);
-  if (due) { text(`Payment due by ${formatInvoiceDate(due)}`, M, py); py += 15; }
-  text('Please make payment to:', M, py);
-  py += 19;
-  doc.setFont('helvetica', 'normal');
-  text(`a/c Name:`, M, py); doc.setFont('helvetica', 'bold'); text(d.footer.bankName || '', M + 76, py); py += 15;
-  doc.setFont('helvetica', 'normal'); text('a/c Number:', M, py); doc.setFont('helvetica', 'bold'); text(d.footer.bankAcct || '', M + 76, py);
-  if (d.footer.thankYou) { py += 30; doc.setFont('helvetica', 'bold'); doc.setFontSize(10); doc.text(doc.splitTextToSize(d.footer.thankYou, pageW - 2 * M), M, py); }
+  doc.setFont('times', 'bold'); doc.setFontSize(12.5);
+  if (due) { text(`Payment due by ${formatInvoiceDate(due)}`, M, py); py += 16; }
+  text('Please make payment to.', M, py);
+  py += 20;
+  doc.setFont('times', 'normal');
+  text(`a/c Name:`, M, py); doc.setFont('times', 'bold'); text(d.footer.bankName || '', M + 76, py); py += 15;
+  doc.setFont('times', 'normal'); text('a/c Number:', M, py); doc.setFont('times', 'bold'); text(d.footer.bankAcct || '', M + 76, py);
+  if (d.footer.thankYou) { py += 30; doc.setFont('times', 'bold'); doc.setFontSize(10); doc.text(doc.splitTextToSize(d.footer.thankYou, pageW - 2 * M), M, py); }
 
   return doc;
 }
