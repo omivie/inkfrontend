@@ -590,7 +590,7 @@ function onFormInput(e) {
     setPath(_draft, t.dataset.field, t.type === 'checkbox' ? t.checked : t.value);
     // Keep the (non-overridden) due date live as the order date changes.
     if (t.dataset.field === 'order_date' && !_draft.payment_due) {
-      const due = _editorRefs.drawer?.querySelector('#inv-due-date');
+      const due = _editorRefs.drawer?.body?.querySelector('#inv-due-date');
       if (due) due.value = paymentDueDate(_draft.order_date, _draft.payment_due_pref) || '';
     }
   } else if (t.dataset.line != null && t.dataset.lfield) {
@@ -696,7 +696,7 @@ function validateInvoice(d) {
   if (!lines(d.customer.address).length)
     errs.push({ field: 'customer.address', msg: 'Bill To address is required' });
   if (!(d.order_date || '').trim())
-    errs.push({ field: 'order_date', msg: 'Order date is required' });
+    errs.push({ field: 'order_date', msg: 'Date order placed is required' });
 
   const started = (d.lines || [])
     .map((l, i) => ({ l, i }))
@@ -871,7 +871,7 @@ function editorBodyHtml(d) {
         <div class="inv-grid-2">
           ${numberLine}
           ${field('Date', 'date', d.date, { type: 'date' })}
-          <label class="inv-field"><span class="inv-field__label">Order date * <span class="inv-field__hint">(required — sets the payment due date)</span></span>
+          <label class="inv-field"><span class="inv-field__label">Date order placed * <span class="inv-field__hint">(required — sets the payment due date)</span></span>
             <input class="admin-input" type="date" data-field="order_date" value="${escA(d.order_date)}" required></label>
           <label class="inv-field"><span class="inv-field__label">Payment due date <span class="inv-field__hint">(auto-filled from order date + terms — edit to override)</span></span>
             <input class="admin-input" type="date" id="inv-due-date" data-field="payment_due" value="${escA(effectiveDueDate(d))}"></label>

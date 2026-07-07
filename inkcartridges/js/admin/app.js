@@ -1,7 +1,7 @@
 /**
  * Admin SPA — Entry point, router, shell
  */
-const APP_VERSION = '2026.07.08-invoice-due-toggle';
+const APP_VERSION = '2026.07.08-invoice-order-date-fix';
 
 import { AdminAuth } from './auth.js';
 import { FilterState } from './filters.js';
