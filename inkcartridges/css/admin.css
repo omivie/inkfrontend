@@ -4514,6 +4514,45 @@ button.admin-active-dot--clickable:hover::after { opacity: 1; }
 .invoice-editor__preview { position: sticky; top: 0; min-width: 0; }
 .inv-preview-note { font-size: 11px; color: var(--text-muted); margin-bottom: 8px; }
 
+/* Two-column invoice editor: give the fill-out form and the live invoice preview
+   their own scrollbars so each scrolls independently instead of the whole drawer
+   body scrolling as one. Desktop only (the 1-column layout keeps a single scroll);
+   excludes the single-column Quick Order editor (.invoice-editor--single). */
+@media (min-width: 1001px) {
+  .admin-drawer__body:has(.invoice-editor:not(.invoice-editor--single)) {
+    overflow: hidden;                 /* the body itself no longer scrolls… */
+    padding-top: 0;
+    padding-bottom: 0;
+  }
+  .invoice-editor:not(.invoice-editor--single) {
+    height: 100%;
+    min-height: 0;
+    align-items: stretch;             /* let both panes fill the full height */
+  }
+  .invoice-editor:not(.invoice-editor--single) > .invoice-editor__form,
+  .invoice-editor:not(.invoice-editor--single) > .invoice-editor__preview {
+    min-height: 0;
+    max-height: 100%;
+    overflow-y: auto;                 /* …each pane scrolls on its own */
+    padding: 24px 12px 24px 0;        /* restore vertical breathing room + scrollbar gutter */
+  }
+  .invoice-editor:not(.invoice-editor--single) > .invoice-editor__preview {
+    position: static;                 /* was sticky — now its own scroller */
+    top: auto;
+  }
+  /* Always-visible, consistent scrollbars on both panes */
+  .invoice-editor:not(.invoice-editor--single) > .invoice-editor__form::-webkit-scrollbar,
+  .invoice-editor:not(.invoice-editor--single) > .invoice-editor__preview::-webkit-scrollbar { width: 12px; }
+  .invoice-editor:not(.invoice-editor--single) > .invoice-editor__form::-webkit-scrollbar-thumb,
+  .invoice-editor:not(.invoice-editor--single) > .invoice-editor__preview::-webkit-scrollbar-thumb {
+    background: var(--border); border-radius: 6px; border: 3px solid transparent; background-clip: content-box;
+  }
+  .invoice-editor:not(.invoice-editor--single) > .invoice-editor__form::-webkit-scrollbar-thumb:hover,
+  .invoice-editor:not(.invoice-editor--single) > .invoice-editor__preview::-webkit-scrollbar-thumb:hover {
+    background: var(--text-muted); background-clip: content-box; border: 3px solid transparent;
+  }
+}
+
 .inv-section { border: 1px solid var(--border); border-radius: var(--radius); padding: 14px; background: var(--surface); }
 .inv-section--source { background: var(--input-bg); }
 .inv-section__title { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-muted); margin-bottom: 12px; }
