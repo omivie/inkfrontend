@@ -1,11 +1,11 @@
 /**
  * Admin SPA — Entry point, router, shell
  */
-const APP_VERSION = '2026.07.08-invoice-pay-twoline';
+const APP_VERSION = '2026.07.08-invoice-nextnum';
 
 import { AdminAuth } from './auth.js';
 import { FilterState } from './filters.js';
-import { AdminAPI } from './api.js?v=product-codes-rls-jul2026';
+import { AdminAPI } from './api.js?v=invoice-nextnum-jul2026';
 
 const esc = (s) => Security.escapeHtml(String(s));
 

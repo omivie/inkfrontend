@@ -2472,20 +2472,25 @@ const AdminAPI = {
   },
 
   // Suggested next invoice number for a new draft (auto-filled but editable).
-  // Prefers a dedicated peek endpoint; falls back to max(invoice_number)+1 from
-  // the first list page. Read-soft: returns null if neither works (field left blank).
+  // Uses max(existing invoice_number) + 1 so deleting the most recent invoice
+  // frees its number for reuse (owner preference — the backend's /next-number
+  // counter is monotonic and does NOT roll back on delete). Falls back to that
+  // peek endpoint only if the list can't be read. Read-soft: null => left blank.
   async nextInvoiceNumber() {
+    try {
+      const data = await this.listInvoices({ sort: 'invoice_number', order: 'desc' }, 1, 50);
+      const rows = data?.invoices ?? data?.items ?? (Array.isArray(data) ? data : []);
+      if (rows.length) {
+        const max = rows.reduce((m, r) => Math.max(m, Number(r?.invoice_number) || 0), 0);
+        if (max > 0) return max + 1;
+      }
+      // No invoices yet — let the backend supply the series start below.
+    } catch (e) { adminApiWarn('Next invoice number (max+1) failed', e); }
     try {
       const resp = await window.API.get('/api/admin/invoices/next-number');
       const n = resp?.data?.next ?? resp?.data?.invoice_number ?? resp?.data;
       if (n != null && Number.isFinite(Number(n))) return Number(n);
     } catch (e) { adminApiWarn('Next invoice number lookup failed', e); }
-    try {
-      const data = await this.listInvoices({ sort: 'invoice_number', order: 'desc' }, 1, 1);
-      const rows = data?.invoices ?? data?.items ?? (Array.isArray(data) ? data : []);
-      const max = rows.reduce((m, r) => Math.max(m, Number(r?.invoice_number) || 0), 0);
-      if (max > 0) return max + 1;
-    } catch (e) { adminApiWarn('Next invoice number fallback failed', e); }
     return null;
   },
 
