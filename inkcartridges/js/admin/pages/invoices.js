@@ -1179,7 +1179,7 @@ function renderPreview(d) {
     </div>
 
     <table class="inv-doc__items">
-      <thead><tr><th>Product Code</th><th>Description</th><th class="inv-doc__num">Number</th><th class="inv-doc__cost">Cost</th></tr></thead>
+      <thead><tr><th>Product Code</th><th>Description</th><th class="inv-doc__num">Number</th><th class="inv-doc__cost">Cost<span class="inv-doc__cost-note">(excl. GST)</span></th></tr></thead>
       <tbody>${rows}</tbody>
     </table>
 
@@ -1309,7 +1309,7 @@ function buildInvoiceDoc(d) {
   const padY = { top: 5, bottom: 5 };
   doc.autoTable({
     startY,
-    head: [['Product Code', 'Description', 'Number', 'Cost']],
+    head: [['Product Code', 'Description', 'Number', 'Cost\n(excl. GST)']],
     body: rows.length ? rows : [['', '', '', '']],
     theme: 'plain',
     styles: { font: 'times', fontSize: 11, cellPadding: { ...padY, left: 0, right: 8 }, overflow: 'linebreak', valign: 'top', textColor: 35 },

@@ -4766,6 +4766,7 @@ button.admin-active-dot--clickable:hover::after { opacity: 1; }
 .inv-doc__items th:nth-child(4), .inv-doc__items td:nth-child(4) { width: 15%; padding-right: 0; }
 .inv-doc__items .inv-doc__num, .inv-doc__items th.inv-doc__num { text-align: center; }
 .inv-doc__items .inv-doc__cost, .inv-doc__items th.inv-doc__cost { text-align: right; white-space: nowrap; }
+.inv-doc__cost-note { display: block; font-weight: 400; font-size: 0.82em; opacity: 0.7; }
 .inv-doc__empty { color: #999; font-style: italic; }
 
 .inv-doc__totals { margin-left: auto; border-collapse: collapse; min-width: 230px; margin-bottom: 22px; }
