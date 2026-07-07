@@ -1186,7 +1186,7 @@ function renderPreview(d) {
     </table>
 
     <div class="inv-doc__pay">
-      <div class="inv-doc__pay-title">${displayDueDate(d) ? `Payment due by <strong>${esc(formatInvoiceDate(displayDueDate(d)))}</strong>, please make payment to:` : 'Please make payment to:'}</div>
+      <div class="inv-doc__pay-title">${displayDueDate(d) ? `<div>Payment due by <strong>${esc(formatInvoiceDate(displayDueDate(d)))}</strong></div>` : ''}<div>Please make payment to:</div></div>
       <table>
         <tr><td>a/c Name:</td><td><strong>${esc(d.footer.bankName)}</strong></td></tr>
         <tr><td>a/c Number:</td><td><strong>${esc(d.footer.bankAcct)}</strong></td></tr>
@@ -1348,7 +1348,8 @@ function buildInvoiceDoc(d) {
   let py = ty + 24;
   const due = displayDueDate(d);
   doc.setFont('helvetica', 'bold'); doc.setFontSize(11);
-  text(due ? `Payment due by ${formatInvoiceDate(due)}, please make payment to:` : 'Please make payment to:', M, py);
+  if (due) { text(`Payment due by ${formatInvoiceDate(due)}`, M, py); py += 15; }
+  text('Please make payment to:', M, py);
   py += 19;
   doc.setFont('helvetica', 'normal');
   text(`a/c Name:`, M, py); doc.setFont('helvetica', 'bold'); text(d.footer.bankName || '', M + 76, py); py += 15;

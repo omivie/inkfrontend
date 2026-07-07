@@ -1,7 +1,7 @@
 /**
  * Admin SPA — Entry point, router, shell
  */
-const APP_VERSION = '2026.07.08-invoice-order-date-fix';
+const APP_VERSION = '2026.07.08-invoice-pay-twoline';
 
 import { AdminAuth } from './auth.js';
 import { FilterState } from './filters.js';
