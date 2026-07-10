@@ -68,6 +68,59 @@ function orderDateShort(iso) {
   return `${ordinal(d)} ${MONTHS[m]}`;
 }
 
+// ---- "emailed" record ---------------------------------------------------
+// The backend owns last_emailed_at / last_emailed_to / email_count. Until those
+// fields ship, a successful send is recorded here so the list can still show a
+// Sent marker. A local record is per-browser: it says a send was recorded on
+// THIS machine, not that no send happened on another one.
+const SENT_KEY = 'inv_emailed_v1';
+const SENT_CAP = 200;
+
+function readSentMap() {
+  try {
+    const m = JSON.parse(localStorage.getItem(SENT_KEY));
+    return (m && typeof m === 'object') ? m : {};
+  } catch { return {}; }
+}
+
+function writeSent(id, to) {
+  if (!id) return;
+  try {
+    const map = readSentMap();
+    map[id] = { at: new Date().toISOString(), to: to || '', count: (map[id]?.count || 0) + 1 };
+    const keys = Object.keys(map);
+    if (keys.length > SENT_CAP) {
+      keys.sort((a, b) => String(map[a].at).localeCompare(String(map[b].at)))
+        .slice(0, keys.length - SENT_CAP)
+        .forEach((k) => { delete map[k]; });
+    }
+    localStorage.setItem(SENT_KEY, JSON.stringify(map));
+  } catch (err) { warn('could not record the send locally', err); }
+}
+
+// Server wins when present, so the local cache retires itself the moment the
+// backend starts returning last_emailed_at. null = never emailed, as far as we know.
+function sentInfo(rec) {
+  if (!rec) return null;
+  if (rec.last_emailed_at) {
+    return { at: rec.last_emailed_at, to: rec.last_emailed_to || '', count: num(rec.email_count) || 1 };
+  }
+  const local = readSentMap()[rec.id];
+  return local?.at ? local : null;
+}
+
+const MONTHS_SHORT = MONTHS.map((m) => m.slice(0, 3));
+// ISO timestamp -> "8 Jul" for the Sent cell. '' if unparseable.
+function sentShort(iso) {
+  const d = new Date(iso);
+  return isNaN(d.getTime()) ? '' : `${d.getDate()} ${MONTHS_SHORT[d.getMonth()]}`;
+}
+function sentTitle(info) {
+  const who = info.to ? ` to ${info.to}` : '';
+  const times = info.count > 1 ? ` · sent ${info.count} times` : '';
+  return `Emailed${who} on ${formatInvoiceDate(String(info.at).slice(0, 10))}${times}`;
+}
+
 // The "Date order placed" line always shows on the invoice. Until the operator
 // enters a date it displays a dashed placeholder with the current year pre-filled
 // (the real date — including a different year — is set via the Order date field,
@@ -210,6 +263,10 @@ function draftFromInvoice(rec) {
   d.payment_due_pref = rec.payment_due_pref || '20';
   d.show_due_date = rec.show_due_date !== false;   // absent/true => keep showing the due date
   d.source_order_id = rec.source_order_id ?? null;
+  // Server-owned send history — read-only, deliberately absent from buildPayload().
+  d.last_emailed_at = rec.last_emailed_at ?? null;
+  d.last_emailed_to = rec.last_emailed_to ?? null;
+  d.email_count = rec.email_count ?? 0;
   if (rec.seller) d.seller = { ...d.seller, ...rec.seller, address: Array.isArray(rec.seller.address) ? rec.seller.address.join('\n') : (rec.seller.address ?? d.seller.address) };
   if (rec.customer) d.customer = { ...d.customer, ...rec.customer, address: Array.isArray(rec.customer.address) ? rec.customer.address.join('\n') : (rec.customer.address ?? '') };
   if (rec.delivery) d.delivery = { ...d.delivery, ...rec.delivery, address: Array.isArray(rec.delivery.address) ? rec.delivery.address.join('\n') : (rec.delivery.address ?? '') };
@@ -412,6 +469,17 @@ const COLUMNS = [
          </span>`,
   },
   {
+    key: 'sent', label: 'Sent', align: 'center',
+    // Has the PDF been emailed to the customer? Voided invoices are not special-cased —
+    // a void invoice may well have gone out before it was voided.
+    render: (r) => {
+      const info = sentInfo(r);
+      return info
+        ? `<span class="inv-sent" title="${escA(sentTitle(info))}">${icon('check', 13, 13)}${esc(sentShort(info.at))}</span>`
+        : `<span class="inv-sent__none" title="Not emailed yet">—</span>`;
+    },
+  },
+  {
     key: 'actions', label: '', align: 'right',
     render: (r) => `
       <button class="admin-btn admin-btn--ghost admin-btn--sm" data-row-action="download" data-id="${escA(r.id)}" title="Download PDF">${icon('download', 13, 13)}</button>
@@ -527,6 +595,7 @@ function openEditor(draft) {
   _fillSource = null;
   const token = ++_editorToken;
   const footer = `
+    <span class="inv-sent-hint" id="inv-sent-hint">${sentHintHtml(draft)}</span>
     <button class="admin-btn admin-btn--ghost" data-ed-action="cancel">Cancel</button>
     <button class="admin-btn admin-btn--ghost" data-ed-action="download">${icon('download', 14, 14)} Download PDF</button>
     <button class="admin-btn admin-btn--ghost" data-ed-action="email">${icon('mail', 14, 14)} Email</button>
@@ -548,6 +617,22 @@ function openEditor(draft) {
   // Suggest the next number for a brand-new invoice — auto-filled but editable.
   // Best-effort: if the lookup fails or the operator already typed one, leave it.
   if (!draft.id && !draft.invoice_number) prefillNextNumber(token);
+}
+
+// "Last emailed 8th July 2026 to itc@mcgrath.co.nz" — '' for a draft that has
+// never been sent (or has never been saved, so it has no id to look up).
+function sentHintHtml(d) {
+  const info = (d && d.id) ? sentInfo(d) : null;
+  if (!info) return '';
+  const who = info.to ? ` to ${info.to}` : '';
+  return esc(`Last emailed ${formatInvoiceDate(String(info.at).slice(0, 10))}${who}`);
+}
+
+// The drawer footer is built once in openEditor() and survives rebuildEditor(),
+// so the hint is patched in place after a send.
+function refreshSentHint() {
+  const el = _editorRefs?.drawer.footer.querySelector('#inv-sent-hint');
+  if (el) el.innerHTML = sentHintHtml(_draft);
 }
 
 async function prefillNextNumber(token) {
@@ -674,8 +759,11 @@ function openEmailDialog(d) {
     sendBtn.disabled = true;
     try {
       await AdminAPI.emailInvoice(d.id, { to, subject: subj, body: msg });
+      writeSent(d.id, to);          // only on success — a failed send leaves the row unmarked
       Toast.success('Invoice emailed to customer.');
       Modal.close();
+      refreshSentHint();            // editor footer, when the drawer is open behind the modal
+      if (_table) loadData();       // repaint the Sent cell (picks up the server value once it ships)
     } catch (err) {
       Toast.error(err.message || 'Email failed (backend pending).');
       sendBtn.disabled = false;

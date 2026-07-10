@@ -4576,6 +4576,16 @@ button.admin-active-dot--clickable:hover::after { opacity: 1; }
 .inv-paid input:checked + .inv-paid__slider::before { transform: translateX(18px); }
 .inv-paid input:disabled { cursor: progress; }
 .inv-paid__void { color: var(--text-muted); font-size: 12px; }
+
+/* "Sent" column — has this invoice's PDF been emailed to the customer? */
+.inv-sent { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; font-weight: 600; color: var(--success); white-space: nowrap; }
+.inv-sent__none { color: var(--text-muted); font-size: 12px; }
+/* --success is tuned for the dark deck; it under-contrasts on the light surface. */
+.admin[data-theme="light"] .inv-sent { color: #15803d; }
+/* Drawer footer note, pushed left of the action buttons. */
+.inv-sent-hint { margin-right: auto; align-self: center; font-size: 12px; color: var(--text-muted); }
+.inv-sent-hint:empty { display: none; }
+
 /* Required-field validation cue (invoice editor) */
 .admin-input--error,
 .admin-select--error {
