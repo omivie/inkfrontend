@@ -1,7 +1,7 @@
 /**
  * Admin SPA — Entry point, router, shell
  */
-const APP_VERSION = '2026.07.10-invoice-sent-indicator';
+const APP_VERSION = '2026.07.10-router-hashchange';
 
 import { AdminAuth } from './auth.js';
 import { FilterState } from './filters.js';
@@ -276,6 +276,7 @@ async function navigate(pageName) {
   // Owner-only page check
   const ownerPages = ['settings', 'control-center', 'sync-report', 'invoices', 'quick-order', 'demand-ranking'];
   if (ownerPages.includes(pageName) && !AdminAuth.isOwner()) {
+    if (myToken !== _navToken) return; // superseded — don't stomp the newer page's state
     content.innerHTML = `
       <div class="admin-stub">
         <div class="admin-stub__title">Access Restricted</div>
@@ -564,17 +565,25 @@ async function boot() {
     // Populate the pending tracking-requests badge (non-blocking).
     refreshTrackingRequestsBadge();
 
-    // Initial route
-    const route = getRouteFromHash();
-    await navigate(route);
-
-    // Hash change listener
+    // Hash change listener. Must be attached BEFORE the initial navigate(): the shell is
+    // already visible, so a nav link clicked while the first page is still awaiting its
+    // init() fires a hashchange that would otherwise land with no listener and be dropped.
+    // The hash then already matches the target, so re-clicking fires nothing and the router
+    // stays wedged on the old page. navigate()'s _navToken guard covers the re-entry.
     window.addEventListener('hashchange', () => {
       const newRoute = getRouteFromHash();
       if (newRoute !== _currentPageName) {
         navigate(newRoute);
       }
     });
+
+    // Initial route
+    const route = getRouteFromHash();
+    await navigate(route);
+
+    // Reconcile: if the hash moved on while the initial navigate() was in flight, catch up.
+    const settled = getRouteFromHash();
+    if (settled !== _currentPageName) await navigate(settled);
 
   } catch (e) {
     DebugLog.error('[Admin] Boot failed:', e);
