@@ -4,6 +4,66 @@ Log every error encountered here. Before editing a file, scan for known issues. 
 
 ---
 
+## ERR-061 — Cost of $0 vs cost UNKNOWN: `Number('')` is `0`, which reports a 100% margin (2026-07-12)
+
+**Symptom (designed out, not observed):** while adding an internal supplier-cost
+field to invoices, the obvious wiring — `_draft.lines[i][field] = t.value` then
+`num(l.supplierCost)` — silently turns an **empty** cost box into **`$0`**. A $0
+cost is not "unknown", it is "free", and it reports a **100% margin**. Every
+un-costed invoice line would have masqueraded as pure profit, and the Dashboard's
+Gross Profit would have been inflated by the entire invoiced channel.
+
+**Root cause:** `Number('') === 0` and `Number(null) === 0`. The generic line
+handler stringifies (`t.value`), so a cleared number input arrives as `''`.
+
+**Fix:** every read of a supplier cost goes through `costOrNull()` in
+`js/admin/utils/invoice-math.js` — `'' → null`, `0 → 0`, `'abc' → null`,
+`-1 → null`. `null` means UNKNOWN and **poisons the whole invoice's profit to
+`null`**, which the UI renders as `—  (N lines missing a cost)`. A deliberate
+typed `0` is honoured as a known zero. `profitability.js:computeLineProfits`
+already made this distinction ("Number(null) is 0, which would lie") — the same
+rule now holds end to end.
+
+**Rule:** In this codebase an absent cost is **`null`, never `0`**. That applies
+to the frontend, to `buildPayload` (which sends `null` so the backend snapshots
+`products.cost_price` itself), and to the backend's own P&L — a period containing
+an un-costed line must return `cogs`/`gross_profit`/`net_profit` as `null`, not
+`0`. Same family as ERR-028 (COGS honesty) and ERR-039.
+
+**Pinned by:** `tests/admin-invoice-cost-math.test.js` (`costOrNull('')` is `null`
+but `costOrNull(0)` is `0`; one un-costed line ⇒ `computeInvoiceProfit === null`).
+
+---
+
+## ERR-062 — `stripEsm` test harness silently fails on `export async function` (2026-07-12)
+
+**Symptom:** `tests/admin-invoice-overlay.test.js` died with `SyntaxError:
+Unexpected token 'export'` inside `vm.runInContext`, even though the same harness
+works for every other util module.
+
+**Root cause:** the shared `stripEsm()` helper (copied across the admin util test
+files) matches `export\s+(const|let|var|function|class)`. `invoice-overlay.js`
+exports `export **async** function fetchCountableInvoices()`. The `async` keyword
+sits between `export` and `function`, so the pattern doesn't match, the `export`
+is left in the source, and the vm — which has no module semantics — rejects it.
+
+**Fix:** allow the modifier, and re-emit it:
+```js
+src.replace(/export\s+(async\s+)?(const|let|var|function|class)\s+([A-Za-z0-9_$]+)/gm,
+  (_m, asyncKw, kw, id) => { exposed.add(id); return `${asyncKw || ''}${kw} ${id}`; });
+```
+Also strip `import … from '…'` lines when the module under test has dependencies,
+and load the dependency's source into the **same** vm context first (see
+`tests/admin-invoice-cost-math.test.js`, which concatenates `profitability.js`
+then `invoice-math.js`).
+
+**Rule:** when sandboxing a new admin util, check its export forms first. The
+sibling gotcha is already logged: values built inside the vm realm carry that
+realm's prototypes, so `assert.deepEqual` fails with "same structure but not
+reference-equal" — round-trip through `JSON.parse(JSON.stringify(x))` first.
+
+---
+
 ## ERR-057 — Merchant audit LIVE pass reports 946/3004 feed "issues" — mostly auditor false-positives, not feed regressions (2026-07-07)
 
 **Symptom:** `node scripts/audit-merchant-center-readiness.mjs` prints

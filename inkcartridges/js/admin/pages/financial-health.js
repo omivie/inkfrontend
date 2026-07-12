@@ -3,6 +3,10 @@
  */
 import { AdminAPI, FilterState, esc } from '../app.js';
 import { Charts } from '../components/charts.js';
+import { normalizeCategory, categoryKind, gstDefaultFor } from '../utils/expense-categories.js';
+import { RECURRENCE_TYPES, expandExpenseOccurrences, deriveStatus, isRecurring } from '../utils/expense-recurrence.js';
+import { computeExpenseKpis } from '../utils/expense-math.js';
+import { fetchCountableInvoices, aggregateInvoices, backendCountsInvoices } from '../utils/invoice-overlay.js';
 
 const formatPrice = (v) => window.formatPrice ? window.formatPrice(v) : `$${Number(v).toFixed(2)}`;
 
@@ -28,10 +32,122 @@ async function load() {
     AdminAPI.getAdminAnalyticsCashflow(12),
     AdminAPI.getAdminAnalyticsDailyRevenue(372),
     AdminAPI.getAdminAnalyticsPnL(days),
-    AdminAPI.getAdminAnalyticsExpenses(20),
+    AdminAPI.expenses.list({ limit: 1000 }),
   ]);
-  _state = { overview, burnRunway, forecasts, cashflow, daily, pnl, expenses };
+  // Invoiced sales are real sales the backend's P&L doesn't know about. Fetch them
+  // once here and fold them into the P&L rows (see renderPnLTable). Self-disables
+  // once the backend counts them itself. TEMPORARY — see utils/invoice-overlay.js.
+  const invoices = backendCountsInvoices(pnl) ? null : await fetchCountableInvoices();
+  _state = { overview, burnRunway, forecasts, cashflow, daily, pnl, invoices, expenses: expenses?.items || [] };
   render();
+}
+
+/**
+ * The date window a P&L period covers, or null if we can't tell.
+ *
+ * We only overlay invoices onto a period whose window we can pin down exactly —
+ * adding a month of invoices to the wrong month is worse than adding none. The
+ * backend's period shape isn't contractually fixed, so probe the plausible ones
+ * and give up honestly when none match.
+ */
+function pnlPeriodWindow(p) {
+  if (!p) return null;
+  const start = pick(p, 'start_date', 'period_start', 'from');
+  const end = pick(p, 'end_date', 'period_end', 'to');
+  if (start && end) return { from: String(start).slice(0, 10), to: String(end).slice(0, 10) };
+  // Monthly bucket, e.g. "2026-07".
+  const label = pick(p, 'period', 'month', 'bucket', 'date');
+  const m = /^(\d{4})-(\d{2})/.exec(String(label || ''));
+  if (!m) return null;
+  const y = +m[1], mo = +m[2];
+  const lastDay = new Date(Date.UTC(y, mo, 0)).getUTCDate();
+  return { from: `${m[1]}-${m[2]}-01`, to: `${m[1]}-${m[2]}-${String(lastDay).padStart(2, '0')}` };
+}
+
+/**
+ * Add a window's invoiced sales into one P&L period.
+ *
+ * pnl.revenue is EX-GST (it feeds the gross-profit row), so this uses
+ * revenueExGst — NOT the incl-GST figure the Dashboard's revenue tile wants.
+ * stripe_fees is deliberately untouched: an invoiced sale settles by bank
+ * transfer and carries no card fee. That's the point, not an omission.
+ */
+function pnlWithInvoices(period, rows) {
+  if (!period || !rows || !rows.length) return period;
+  const w = pnlPeriodWindow(period);
+  if (!w) return period;                       // window unknown → overlay nothing
+  const d = aggregateInvoices(rows, w);
+  if (!d || !d.count) return period;
+  const out = { ...period, _invoiceCount: d.count };
+  const bump = (k, v) => { if (out[k] != null && v != null) out[k] = num(out[k]) + num(v); };
+  bump('revenue', d.revenueExGst);
+  bump('order_count', d.orders);
+  if (d.costsKnown) {
+    bump('cogs', d.cogsExGst);
+    bump('gross_profit', d.grossProfit);
+    bump('net_profit', d.netProfit);
+  } else {
+    out._costsUnknown = true;
+  }
+  return out;
+}
+
+// ── Expense summary (the full management UI now lives at Finance → Expenses) ──
+const MS_DAY_FH = 86400000;
+function todayUtcFH() { const d = new Date(); return Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()); }
+function monthStartFH(ms) { const d = new Date(ms); return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1); }
+function monthEndFH(ms) { const d = new Date(ms); return Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0); }
+
+function computeExpenseSummary() {
+  const rows = Array.isArray(_state.expenses) ? _state.expenses : [];
+  const today = todayUtcFH();
+  const mStart = monthStartFH(today), mEnd = monthEndFH(today);
+  const from = Math.min(mStart, today - 90 * MS_DAY_FH), to = today + 30 * MS_DAY_FH;
+  const enrich = (o) => {
+    const category = normalizeCategory(o.category);
+    const ed = (o.expense_date || o.date || '').slice(0, 10);
+    const status = deriveStatus({ due_date: o.due_date, date: ed, paid_date: o.paid_date, paid: o.paid, status: o.status }, today);
+    return {
+      ...o, category, kind: categoryKind(category), amount: num(pick(o, 'amount', 'total')),
+      gst_claimable: o.gst_claimable !== undefined ? !!o.gst_claimable : gstDefaultFor(category),
+      status, paid: status === 'paid', expense_date: ed, due_date: (o.due_date || ed || '').slice(0, 10),
+    };
+  };
+  const occ = [];
+  for (const raw of rows) {
+    const recurrence = RECURRENCE_TYPES.includes(raw.recurrence) ? raw.recurrence : 'none';
+    const base = { ...raw, recurrence, series_state: raw.series_state || 'active' };
+    if (isRecurring(base) && base.series_state === 'active') {
+      for (const o of expandExpenseOccurrences(base, from, to)) occ.push(enrich(o));
+    } else if (!isRecurring(base)) {
+      occ.push(enrich(base));
+    }
+  }
+  return computeExpenseKpis(occ, {
+    monthStart: mStart, monthEnd: mEnd, prevStart: 0, prevEnd: 0,
+    next30Start: today, next30End: to, revenueThisMonth: null, recurringTemplates: [],
+  });
+}
+
+function renderExpenseSummaryCard() {
+  const k = computeExpenseSummary();
+  const tile = (label, value, tone) => `
+    <div class="exp-kpi exp-kpi--${tone || 'plain'}" style="padding:12px 14px">
+      <div class="exp-kpi__label">${esc(label)}</div>
+      <div class="exp-kpi__value" style="font-size:19px">${esc(formatPrice(value || 0))}</div>
+    </div>`;
+  return `
+    <div class="admin-card admin-mb-lg">
+      <div class="admin-card__title" style="display:flex;justify-content:space-between;align-items:center">
+        <span>Expenses <small>operating spend &amp; upcoming cash</small></span>
+        <button class="admin-btn admin-btn--primary admin-btn--sm" id="fh-open-expenses">Open Expense Management →</button>
+      </div>
+      <div class="exp-kpi-grid" style="grid-template-columns:repeat(3,1fr);margin-bottom:0">
+        ${tile('This month', k.thisMonth, '')}
+        ${tile('Upcoming (30d)', k.upcoming30, '')}
+        ${tile('Overdue', k.overdue, k.overdue > 0 ? 'bad' : 'good')}
+      </div>
+    </div>`;
 }
 
 function render() {
@@ -135,21 +251,18 @@ function render() {
       <div style="overflow-x:auto">${renderPnLTable()}</div>
     </div>
 
-    <div class="admin-card admin-mb-lg">
-      <div class="admin-card__title" style="display:flex;justify-content:space-between;align-items:center">
-        <span>Recent Expenses</span>
-        <button class="admin-btn admin-btn--primary admin-btn--sm" id="fh-add-expense-btn">+ Add Expense</button>
-      </div>
-      <div id="fh-expense-form" style="display:none;padding:14px;border:1px solid var(--border);border-radius:8px;margin-bottom:14px">
-        ${renderExpenseForm()}
-      </div>
-      <div style="overflow-x:auto">${renderExpensesTable()}</div>
-    </div>
+    ${renderExpenseSummaryCard()}
   `;
 
   renderCashflowChart();
   renderProfitChart();
-  bindExpenseForm();
+  bindExpenseSummary();
+}
+
+function bindExpenseSummary() {
+  _container?.querySelector('#fh-open-expenses')?.addEventListener('click', () => {
+    window.location.hash = 'expenses';
+  });
 }
 
 function renderPnLOrdersSummary() {
@@ -171,16 +284,26 @@ function renderPnLOrdersSummary() {
 function renderPnLTable() {
   const pnl = _state.pnl || {};
   const periods = Array.isArray(pnl.periods) ? pnl.periods : [];
-  const cur = periods[periods.length - 1] || pnl.totals || {};
-  const prev = periods.length >= 2 ? periods[periods.length - 2] : {};
+  const inv = _state.invoices;
+  // Overlay BOTH periods, not just the current one — bumping current alone would
+  // compare invoices-included against website-only and invent a jump in "Change".
+  const cur = pnlWithInvoices(periods[periods.length - 1] || pnl.totals || {}, inv);
+  const prev = pnlWithInvoices(periods.length >= 2 ? periods[periods.length - 2] : {}, inv);
   const rows = [
     ['Revenue', cur.revenue, prev.revenue],
     ['Cost of Goods Sold', cur.cogs, prev.cogs, true],
     ['Gross Profit', cur.gross_profit, prev.gross_profit],
+    // Untouched by the overlay on purpose: invoiced sales settle by bank transfer,
+    // so they contribute exactly $0 of card fees.
     ['Stripe Fees', cur.stripe_fees, prev.stripe_fees, true],
     ['Operating Expenses', cur.operating_expenses, prev.operating_expenses, true],
     ['Net Profit', cur.net_profit, prev.net_profit, false, true],
   ];
+  const invCount = cur._invoiceCount || 0;
+  const note = invCount
+    ? `Includes ${invCount} invoiced sale${invCount === 1 ? '' : 's'} added client-side, pending backend support.${
+      cur._costsUnknown ? ' Their cost of goods isn’t recorded, so only Revenue is adjusted — profit rows are website-only.' : ''}`
+    : '';
 
   const fmt = (v, neg) => {
     const n = num(v);
@@ -206,125 +329,8 @@ function renderPnLTable() {
     </tr>`;
   }
   html += '</tbody></table>';
+  if (note) html += `<p class="fh-pnl-note">${esc(note)}</p>`;
   return html;
-}
-
-function renderExpenseForm() {
-  return `
-    <form id="fh-expense-form-el" style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px">
-      <select class="admin-input" id="fh-exp-category" required>
-        <option value="">Category…</option>
-        <option value="cogs">Cost of Goods Sold</option>
-        <option value="shipping">Shipping</option>
-        <option value="marketing">Marketing</option>
-        <option value="platform">Platform Fees</option>
-        <option value="rent">Rent & Utilities</option>
-        <option value="salaries">Salaries</option>
-        <option value="software">Software</option>
-        <option value="other">Other</option>
-      </select>
-      <input class="admin-input" type="number" step="0.01" min="0" id="fh-exp-amount" placeholder="Amount (NZD)" required>
-      <input class="admin-input" type="date" id="fh-exp-date" required title="One-off: date of expense. Recurring: first occurrence (start date).">
-      <input class="admin-input" type="text" id="fh-exp-vendor" placeholder="Vendor / description">
-
-      <select class="admin-input" id="fh-exp-recurrence">
-        <option value="none">One-off (no repeat)</option>
-        <option value="weekly">Repeats weekly</option>
-        <option value="monthly">Repeats monthly</option>
-        <option value="yearly">Repeats yearly</option>
-        <option value="custom">Repeats every N days</option>
-      </select>
-
-      <div id="fh-exp-rec-weekly" style="display:none">
-        <select class="admin-input" id="fh-exp-dow">
-          <option value="0">Sunday</option><option value="1">Monday</option>
-          <option value="2">Tuesday</option><option value="3" selected>Wednesday</option>
-          <option value="4">Thursday</option><option value="5">Friday</option>
-          <option value="6">Saturday</option>
-        </select>
-      </div>
-
-      <div id="fh-exp-rec-monthly" style="display:none">
-        <input class="admin-input" type="number" min="1" max="31" id="fh-exp-dom"
-          placeholder="Day of month (1-31)"
-          title="31 falls back to the last day of shorter months (Feb 28/29, Apr 30, etc.)">
-      </div>
-
-      <div id="fh-exp-rec-yearly" style="display:none;grid-column:span 2;gap:12px;grid-template-columns:1fr 1fr">
-        <select class="admin-input" id="fh-exp-month">
-          <option value="1">January</option><option value="2">February</option>
-          <option value="3">March</option><option value="4">April</option>
-          <option value="5">May</option><option value="6">June</option>
-          <option value="7">July</option><option value="8">August</option>
-          <option value="9">September</option><option value="10">October</option>
-          <option value="11">November</option><option value="12">December</option>
-        </select>
-        <input class="admin-input" type="number" min="1" max="31" id="fh-exp-yearly-dom"
-          placeholder="Day of month (1-31)">
-      </div>
-
-      <div id="fh-exp-rec-custom" style="display:none">
-        <input class="admin-input" type="number" min="1" id="fh-exp-interval"
-          placeholder="Every N days">
-      </div>
-
-      <div id="fh-exp-rec-end" style="display:none">
-        <input class="admin-input" type="date" id="fh-exp-end"
-          title="Optional. Leave blank if the subscription is still active.">
-      </div>
-
-      <div style="grid-column:span 4;display:flex;gap:8px;justify-content:flex-end">
-        <button type="button" class="admin-btn admin-btn--ghost admin-btn--sm" id="fh-exp-cancel">Cancel</button>
-        <button type="submit" class="admin-btn admin-btn--primary admin-btn--sm">Save Expense</button>
-      </div>
-    </form>
-  `;
-}
-
-function renderExpensesTable() {
-  const data = _state.expenses;
-  const rows = Array.isArray(data) ? data : (data?.expenses || []);
-  if (!rows.length) {
-    return '<div style="padding:24px;text-align:center;color:var(--text-muted)">No expenses recorded yet.</div>';
-  }
-  let html = '<table class="admin-table" style="margin:0;width:100%"><thead><tr><th>Date</th><th>Category</th><th>Vendor</th><th style="text-align:right">Amount</th></tr></thead><tbody>';
-  for (const r of rows) {
-    const date = pick(r, 'date', 'expense_date', 'created_at') || '';
-    const dateStr = date ? new Date(date).toLocaleDateString('en-NZ') : '';
-    const cat = pick(r, 'category', 'category_name') || '';
-    const vendor = pick(r, 'vendor', 'description') || '';
-    const amount = num(pick(r, 'amount', 'total'));
-    const recSuffix = recurrenceSummary(r);
-    const vendorCell = recSuffix
-      ? `${esc(vendor)} <span style="color:var(--text-muted);font-size:11px">· ${esc(recSuffix)}</span>`
-      : esc(vendor);
-    html += `<tr><td>${esc(dateStr)}</td><td>${esc(cat)}</td><td>${vendorCell}</td><td style="text-align:right;color:var(--magenta, #C71F6E)">-${esc(formatPrice(amount))}</td></tr>`;
-  }
-  html += '</tbody></table>';
-  return html;
-}
-
-const DOW_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-const MONTH_NAMES = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-function recurrenceSummary(r) {
-  const v = r?.recurrence;
-  if (!v || v === 'none') return '';
-  const end = r.recurrence_end ? ` until ${new Date(r.recurrence_end).toLocaleDateString('en-NZ')}` : '';
-  if (v === 'weekly') {
-    const d = Number(r.recurrence_day_of_week);
-    return `Every ${DOW_NAMES[d] || '?'}${end}`;
-  }
-  if (v === 'monthly') {
-    return `Monthly · day ${r.recurrence_day_of_month ?? '?'}${end}`;
-  }
-  if (v === 'yearly') {
-    const m = Number(r.recurrence_month);
-    return `Yearly · ${MONTH_NAMES[m - 1] || '?'} ${r.recurrence_day_of_month ?? '?'}${end}`;
-  }
-  if (v === 'custom') {
-    return `Every ${r.recurrence_interval_days ?? '?'} days${end}`;
-  }
-  return '';
 }
 
 async function renderCashflowChart() {
@@ -395,101 +401,6 @@ async function renderProfitChart() {
         },
       },
     },
-  });
-}
-
-function bindExpenseForm() {
-  const addBtn = _container.querySelector('#fh-add-expense-btn');
-  const formWrap = _container.querySelector('#fh-expense-form');
-  const cancelBtn = _container.querySelector('#fh-exp-cancel');
-  const formEl = _container.querySelector('#fh-expense-form-el');
-  const dateInput = _container.querySelector('#fh-exp-date');
-  const recSel = _container.querySelector('#fh-exp-recurrence');
-
-  // Conditional sub-panels keyed by recurrence value. Yearly uses inline-grid
-  // to spread its two inputs (month + day-of-month); the rest are single inputs.
-  const panels = {
-    weekly:  { el: _container.querySelector('#fh-exp-rec-weekly'),  display: 'block' },
-    monthly: { el: _container.querySelector('#fh-exp-rec-monthly'), display: 'block' },
-    yearly:  { el: _container.querySelector('#fh-exp-rec-yearly'),  display: 'grid'  },
-    custom:  { el: _container.querySelector('#fh-exp-rec-custom'),  display: 'block' },
-  };
-  const endPanel = _container.querySelector('#fh-exp-rec-end');
-
-  function syncRecurrenceUi() {
-    const v = recSel?.value || 'none';
-    for (const [key, p] of Object.entries(panels)) {
-      if (p.el) p.el.style.display = (key === v) ? p.display : 'none';
-    }
-    if (endPanel) endPanel.style.display = (v === 'none') ? 'none' : 'block';
-    // Tweak the date input's placeholder semantics for clarity.
-    if (dateInput) {
-      dateInput.title = (v === 'none')
-        ? 'Date the expense was paid'
-        : 'First occurrence (start date)';
-    }
-  }
-  recSel?.addEventListener('change', syncRecurrenceUi);
-
-  addBtn?.addEventListener('click', () => {
-    formWrap.style.display = 'block';
-    if (dateInput && !dateInput.value) dateInput.valueAsDate = new Date();
-    syncRecurrenceUi();
-  });
-  cancelBtn?.addEventListener('click', () => {
-    formWrap.style.display = 'none';
-    formEl?.reset();
-    syncRecurrenceUi();
-  });
-  formEl?.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const recurrence = recSel?.value || 'none';
-    const payload = {
-      category: _container.querySelector('#fh-exp-category').value,
-      amount: parseFloat(_container.querySelector('#fh-exp-amount').value),
-      date: _container.querySelector('#fh-exp-date').value,
-      vendor: _container.querySelector('#fh-exp-vendor').value,
-    };
-    if (recurrence !== 'none') {
-      payload.recurrence = recurrence;
-      const endVal = _container.querySelector('#fh-exp-end')?.value || '';
-      if (endVal) payload.recurrence_end = endVal;
-      if (recurrence === 'weekly') {
-        payload.recurrence_day_of_week = parseInt(_container.querySelector('#fh-exp-dow').value, 10);
-      } else if (recurrence === 'monthly') {
-        const dom = parseInt(_container.querySelector('#fh-exp-dom').value, 10);
-        if (!Number.isInteger(dom) || dom < 1 || dom > 31) {
-          alert('Day of month must be between 1 and 31.');
-          return;
-        }
-        payload.recurrence_day_of_month = dom;
-      } else if (recurrence === 'yearly') {
-        const dom = parseInt(_container.querySelector('#fh-exp-yearly-dom').value, 10);
-        const mo  = parseInt(_container.querySelector('#fh-exp-month').value, 10);
-        if (!Number.isInteger(dom) || dom < 1 || dom > 31) {
-          alert('Day of month must be between 1 and 31.');
-          return;
-        }
-        payload.recurrence_month = mo;
-        payload.recurrence_day_of_month = dom;
-      } else if (recurrence === 'custom') {
-        const n = parseInt(_container.querySelector('#fh-exp-interval').value, 10);
-        if (!Number.isInteger(n) || n < 1) {
-          alert('Interval must be a whole number of days, ≥ 1.');
-          return;
-        }
-        payload.recurrence_interval_days = n;
-      }
-    }
-    try {
-      await AdminAPI.addAdminAnalyticsExpense(payload);
-      formWrap.style.display = 'none';
-      formEl.reset();
-      syncRecurrenceUi();
-      await load();
-    } catch (err) {
-      alert('Failed to save expense: ' + (err.message || 'Please try again.'));
-    }
   });
 }
 

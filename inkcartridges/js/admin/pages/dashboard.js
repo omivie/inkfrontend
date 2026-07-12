@@ -16,6 +16,7 @@
  */
 import { AdminAuth, FilterState, AdminAPI, esc } from '../app.js';
 import { Charts } from '../components/charts.js';
+import { fetchInvoiceDelta, backendCountsInvoices, overlayNote } from '../utils/invoice-overlay.js';
 
 const formatPrice = (v) => window.formatPrice ? window.formatPrice(v) : `$${Number(v || 0).toFixed(2)}`;
 const MISSING = '—';
@@ -794,14 +795,23 @@ async function loadDashboard() {
     return pcts.length > 0 && Math.max(...pcts) < LOW_MARGIN_PCT;
   });
 
+  // Invoiced sales (phone / walk-in / B2B) are real orders the backend doesn't
+  // know about yet, so the KPI band would understate the business. Add them
+  // client-side — SCALAR TILES ONLY, never the charts. Self-disables the moment
+  // the backend starts including them. See utils/invoice-overlay.js.
+  const kpis = val(1);
+  const invoiceDelta = backendCountsInvoices(kpis) ? null : await fetchInvoiceDelta({ from, to });
+  if (mySeq !== _loadSeq || !_container) return;   // the await above is a new race window
+
   const payload = {
     isOwner: true,
+    invoiceDelta,
     // The grain the bundle ACTUALLY served at (getDashboardBundle may have escalated past
     // a backend bucket-cap rejection). Carried in the payload — not just a module var — so
     // a stale-while-revalidate cache repaint labels its x-axis to match its own bars.
     _effectiveGranularity: (bundle && bundle._granularity) || g,
     _loadedAt: new Date().toISOString(),   // drives the "Updated …" stamp in the header
-    kpis: val(1), custStats: val(2), refunds: val(3), outOfStock: val(4),
+    kpis, custStats: val(2), refunds: val(3), outOfStock: val(4),
     recentOrders: val(5), topProducts: val(6),
     trackingReq: val(7), trackingOrders: val(8),
     worstMarginSkus: worstMargin, worstMarginTruncated,
@@ -1043,8 +1053,13 @@ function renderKpiTile(t, extraClass = '', noDelta = false) {
   h += `<div class="admin-kpi__label"${tipAttr}>${esc(t.label)}</div>`;
   if (t.value != null) {
     h += `<div class="admin-kpi__value">${esc(t.value)}</div>`;
+    // t.note flags a tile whose value we adjusted client-side (invoiced sales) —
+    // the number must never be quietly different from what the backend returned.
+    if (t.note) h += `<div class="admin-kpi__note">${esc(t.note)}</div>`;
     // In all-time view every "previous" is 0, so deltas read "↑ new" everywhere — noise.
-    if (!noDelta) h += deltaBadge(t.raw, t.prev, t.deltaOpts || {});
+    // A tile can also opt out individually (t.noDelta) when its current value is
+    // overlaid but its previous value isn't — comparing the two would invent growth.
+    if (!noDelta && !t.noDelta) h += deltaBadge(t.raw, t.prev, t.deltaOpts || {});
   } else {
     h += missingValue(t.tooltip || 'Data unavailable');
   }
@@ -1062,11 +1077,49 @@ function fmtPct(v) {
   return `${n.toFixed(1)}%`;
 }
 
+/**
+ * Fold invoiced sales into the backend's current-period KPIs.
+ *
+ * Bumps the COMPONENTS (revenue, orders, gross/net profit) and then DELETES the
+ * derived fields (aov, gross_margin, net_margin) so renderKpiStrip's existing
+ * "derive from components when the backend omits them" fallbacks recompute them
+ * from the new totals. Leaving the backend's derived values in place would show
+ * a margin computed against website-only revenue — right numerator, wrong
+ * denominator.
+ *
+ * Profit is only bumped when the delta knows every invoice's cost. Otherwise the
+ * profit tiles keep the backend's website-only figure: understated, but honest.
+ * Revenue and Orders always bump — we know those regardless of cost.
+ */
+function withInvoices(cur, delta) {
+  if (!delta || !delta.count) return cur;
+  const out = { ...cur };
+  const bump = (k, v) => { if (out[k] != null && v != null) out[k] = Number(out[k]) + Number(v); };
+  bump('revenue', delta.revenueInclGst);   // kpi-summary.revenue is INCL-GST
+  bump('orders', delta.orders);
+  if (delta.costsKnown) {
+    bump('gross_profit', delta.grossProfit);
+    bump('net_profit', delta.netProfit);
+  }
+  delete out.aov;
+  delete out.gross_margin;
+  delete out.net_margin;
+  return out;
+}
+
 function renderKpiStrip(d) {
-  const cur  = d.kpis?.current ?? {};
+  const delta = d.invoiceDelta;
+  const overlaid = !!(delta && delta.count);
+  const cur  = withInvoices(d.kpis?.current ?? {}, delta);
+  // The previous period is NOT overlaid (that would need a second fetch), so a
+  // delta badge would compare invoices-included against website-only and invent a
+  // jump. Suppress the badge on the tiles we touched rather than lie about growth.
   const prev = d.kpis?.previous ?? {};
   const cc   = d.custStats?.current  ?? {};
   const cp   = d.custStats?.previous ?? {};
+  const note = overlaid ? overlayNote(delta) : '';
+  const invTile = (extra = {}) => overlaid ? { note: 'incl. invoiced sales', noDelta: true, ...extra } : {};
+  const profitOverlaid = overlaid && delta.costsKnown;
 
   const aov     = cur.aov ?? safeDiv(cur.revenue, cur.orders);
   const aovPrev = prev.aov ?? safeDiv(prev.revenue, prev.orders);
@@ -1093,30 +1146,40 @@ function renderKpiStrip(d) {
 
   const tiles = [
     { label: 'Revenue', value: cur.revenue != null ? formatPrice(cur.revenue) : null, raw: cur.revenue, prev: prev.revenue,
-      tooltip: 'Total sales (incl. GST) for the selected range.' },
+      tooltip: `Total sales (incl. GST) for the selected range.${note}`, ...invTile() },
     {
       label: 'Gross Profit', value: cur.gross_profit != null ? formatPrice(cur.gross_profit) : null,
       raw: cur.gross_profit, prev: prev.gross_profit, stackNext: true,
-      tooltip: 'Revenue (ex-GST) − COGS, computed by the backend.',
+      tooltip: profitOverlaid
+        ? `Revenue (ex-GST) − COGS.${note}`
+        : (overlaid
+          ? 'Revenue (ex-GST) − COGS, computed by the backend. Website orders only — invoiced sales are excluded until their cost of goods is recorded.'
+          : 'Revenue (ex-GST) − COGS, computed by the backend.'),
+      ...(profitOverlaid ? invTile() : {}),
     },
     {
       label: 'Gross Margin', value: fmtPct(grossMarginPct), raw: grossMarginPct, prev: grossMarginPctPrev,
       tooltip: 'Gross profit ÷ revenue. Profit quality, not size.',
+      ...(profitOverlaid ? { noDelta: true } : {}),
     },
     {
       label: 'Net Profit', value: netProfit != null ? formatPrice(netProfit) : null,
       raw: netProfit, prev: prev.net_profit, alert: netProfit != null && netProfit < 0, stackNext: true,
-      tooltip: 'Revenue − COGS − fees − GST − Opex, computed by the backend.',
+      tooltip: profitOverlaid
+        ? `Revenue − COGS − fees − GST − Opex. Invoiced sales carry no card fee (bank transfer).${note}`
+        : 'Revenue − COGS − fees − GST − Opex, computed by the backend.',
+      ...(profitOverlaid ? invTile() : {}),
     },
     {
       label: 'Net Margin', value: fmtPct(netMarginPct), raw: netMarginPct, prev: netMarginPctPrev,
       alert: netMarginPct != null && netMarginPct < 0,
       tooltip: 'Net profit ÷ revenue. What you actually keep.',
+      ...(profitOverlaid ? { noDelta: true } : {}),
     },
     { label: 'Orders', value: cur.orders != null ? String(cur.orders) : null, raw: cur.orders, prev: prev.orders,
-      tooltip: 'Paid orders placed in the selected range.' },
+      tooltip: `Paid orders placed in the selected range.${note}`, ...invTile() },
     { label: 'Avg Order Value', value: aov != null ? formatPrice(aov) : null, raw: aov, prev: aovPrev,
-      tooltip: 'Revenue ÷ orders.' },
+      tooltip: 'Revenue ÷ orders.', ...(overlaid ? { noDelta: true } : {}) },
     { label: 'New Customers', value: newCustomers != null ? String(newCustomers) : null, raw: newCustomers, prev: newCustomersPrev,
       tooltip: 'First-time buyers in the range.' },
     {

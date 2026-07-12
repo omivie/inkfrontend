@@ -28,6 +28,15 @@ export const STRIPE_RATE = 0.0265;      // NZ domestic card: 2.65% (verified str
 export const STRIPE_FIXED = 0.30;       // NZ domestic card: $0.30 per transaction
 const MISSING = '—';
 
+/**
+ * Spread into computeOrderProfit / computeProfitBreakdown opts for a sale that
+ * never touched a card processor — an invoiced or phone/walk-in order settled by
+ * direct credit to the bank account printed on the invoice. There is no Stripe
+ * charge on those, so the fee is 0, not "small". Invoiced sales therefore net
+ * more than an identical website order, which is the truth, not a bug.
+ */
+export const NO_PAYMENT_FEES = { stripeRate: 0, stripeFixed: 0 };
+
 export function computeProfitability(row, gstRate = GST_RATE) {
   const retail = Number(row?.retail_price);
   const cost = Number(row?.cost_price);
@@ -53,11 +62,17 @@ export function computeProfitability(row, gstRate = GST_RATE) {
  *                         shipping + GST).
  *   opts.shippingExGst  — fallback when customerPaidInclGst is absent:
  *                         feeBase = (revenueExGst + shippingExGst) × 1.15.
+ *   opts.stripeRate / opts.stripeFixed — override the processor fee. Spread
+ *                         NO_PAYMENT_FEES for a bank-transfer sale (invoiced /
+ *                         phone order): no card, so no fee.
  *
- * Stripe fee is feeBase × STRIPE_RATE + STRIPE_FIXED, deducted ex-GST.
+ * Stripe fee is feeBase × stripeRate + stripeFixed, deducted ex-GST.
  */
 export function computeOrderProfit(revenueExGst, totalCostExGst, opts = {}) {
-  const { shippingExGst = 0, customerPaidInclGst = null, gstRate = GST_RATE } = (opts && typeof opts === 'object') ? opts : {};
+  const {
+    shippingExGst = 0, customerPaidInclGst = null, gstRate = GST_RATE,
+    stripeRate = STRIPE_RATE, stripeFixed = STRIPE_FIXED,
+  } = (opts && typeof opts === 'object') ? opts : {};
   const rev = Number(revenueExGst);
   const costExGst = Number(totalCostExGst);
   if (!Number.isFinite(rev) || !Number.isFinite(costExGst) || rev <= 0) return null;
@@ -66,7 +81,7 @@ export function computeOrderProfit(revenueExGst, totalCostExGst, opts = {}) {
   const feeBase = Number.isFinite(paid) && paid > 0
     ? paid
     : (rev + (Number.isFinite(ship) ? ship : 0)) * (1 + gstRate);
-  const stripeFee = feeBase * STRIPE_RATE + STRIPE_FIXED;
+  const stripeFee = feeBase * stripeRate + stripeFixed;
   return rev - costExGst - stripeFee;
 }
 
@@ -130,8 +145,10 @@ export function computeLineProfits(lines, opts = {}) {
  * Returns null when inputs are unusable (same guard as computeOrderProfit).
  */
 export function computeProfitBreakdown(revenueExGst, totalCostExGst, opts = {}) {
-  const { shippingExGst = 0, customerPaidInclGst = null, gstRate = GST_RATE } =
-    (opts && typeof opts === 'object') ? opts : {};
+  const {
+    shippingExGst = 0, customerPaidInclGst = null, gstRate = GST_RATE,
+    stripeRate = STRIPE_RATE, stripeFixed = STRIPE_FIXED,
+  } = (opts && typeof opts === 'object') ? opts : {};
   const rev = Number(revenueExGst);
   const costExGst = Number(totalCostExGst);
   if (!Number.isFinite(rev) || !Number.isFinite(costExGst) || rev <= 0) return null;
@@ -140,9 +157,11 @@ export function computeProfitBreakdown(revenueExGst, totalCostExGst, opts = {}) 
   const customerPaid = Number.isFinite(paid) && paid > 0
     ? paid
     : (rev + (Number.isFinite(ship) ? ship : 0)) * (1 + gstRate);
-  // Stripe fee — billed on the full incl-GST charge.
-  const stripeRateFee = customerPaid * STRIPE_RATE;  // 2.65%
-  const stripeFixedFee = STRIPE_FIXED;               // $0.30 per transaction
+  // Processor fee — billed on the full incl-GST charge. Zero for a bank-transfer
+  // sale (NO_PAYMENT_FEES), in which case the waterfall still foots: with no fee
+  // there is no fee GST to reclaim, so gstRemittedToIrd simply absorbs it.
+  const stripeRateFee = customerPaid * stripeRate;   // 2.65% on card, 0 on bank transfer
+  const stripeFixedFee = stripeFixed;                // $0.30 per card transaction
   const stripeFeeExGst = stripeRateFee + stripeFixedFee;
   const stripeFeeGst = stripeFeeExGst * gstRate;     // 15% GST Stripe adds
   const stripeFeeInclGst = stripeFeeExGst + stripeFeeGst;

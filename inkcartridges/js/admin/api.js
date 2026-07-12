@@ -2903,6 +2903,135 @@ const AdminAPI = {
   },
 
   // =========================================================================
+  // Admin — Expense Management (Jul 2026). Dedicated Finance → Expenses page.
+  //
+  // The dedicated CRUD/status surface lives at /api/admin/expenses/* (see the
+  // backend spec: Desktop/expense-management-backend-spec.md). Until the backend
+  // dev ships those routes they 404 — window.API returns { ok:false,
+  // code:'NOT_FOUND' } for a 404 rather than throwing — so:
+  //   - reads FAIL-SOFT (return null; page renders empty/error, never crashes),
+  //     and `list`/`create` transparently fall back to the legacy
+  //     /api/admin/analytics/expenses endpoint that already works today.
+  //   - writes THROW an Error carrying `.code`; the page maps code==='NOT_FOUND'
+  //     to a clear "this action needs the expense API update" toast — NEVER a
+  //     fake success. No browser storage is ever used as a persistence layer.
+  // =========================================================================
+  expenses: {
+    _q(params = {}) {
+      const p = new URLSearchParams();
+      for (const [k, v] of Object.entries(params)) {
+        if (v === undefined || v === null || v === '') continue;
+        p.set(k, String(v));
+      }
+      const s = p.toString();
+      return s ? `?${s}` : '';
+    },
+    _notFound(resp) {
+      return resp && resp.ok === false && (resp.code === 'NOT_FOUND' || resp.error?.code === 'NOT_FOUND');
+    },
+    _writeCheck(resp, fallback) {
+      if (resp && resp.ok === false) throw invoiceError(resp, fallback);
+      return resp?.data ?? null;
+    },
+    _normalizeList(data) {
+      if (!data) return { items: [], pagination: null, summary: null };
+      const items = Array.isArray(data) ? data
+        : (Array.isArray(data.items) ? data.items
+        : (Array.isArray(data.expenses) ? data.expenses : []));
+      return { items, pagination: data.pagination || null, summary: data.summary || null };
+    },
+
+    // ---- Reads (fail-soft → null) ----
+    async list(params = {}) {
+      try {
+        const resp = await window.API.get(`/api/admin/expenses${this._q(params)}`);
+        if (this._notFound(resp)) {
+          // Legacy endpoint: flat list + total; no server filters/paging.
+          const legacy = await window.API.get(`/api/admin/analytics/expenses?limit=${params.limit || 500}`);
+          if (!legacy || legacy.ok === false) return { items: [], pagination: null, summary: null, _legacy: true };
+          return { ...this._normalizeList(legacy.data), _legacy: true };
+        }
+        if (!resp || resp.ok === false) return null;
+        return this._normalizeList(resp.data);
+      } catch (e) { adminApiWarn('expenses/list', e); return null; }
+    },
+    async occurrences({ from, to } = {}) {
+      try {
+        const resp = await window.API.get(`/api/admin/expenses/occurrences${this._q({ from, to })}`);
+        if (this._notFound(resp) || !resp || resp.ok === false) return null; // page projects client-side
+        const d = resp.data;
+        return Array.isArray(d) ? d : (Array.isArray(d?.occurrences) ? d.occurrences : []);
+      } catch (e) { adminApiWarn('expenses/occurrences', e); return null; }
+    },
+    async get(id) {
+      try {
+        const resp = await window.API.get(`/api/admin/expenses/${encodeURIComponent(id)}`);
+        if (this._notFound(resp) || !resp || resp.ok === false) return null;
+        return resp.data?.expense ?? resp.data ?? null;
+      } catch (e) { adminApiWarn('expenses/get', e); return null; }
+    },
+    async summary({ from, to } = {}) {
+      try {
+        const resp = await window.API.get(`/api/admin/expenses/summary${this._q({ from, to })}`);
+        if (this._notFound(resp) || !resp || resp.ok === false) return null; // page derives client-side
+        return resp.data ?? null;
+      } catch (e) { adminApiWarn('expenses/summary', e); return null; }
+    },
+    async categories() {
+      try {
+        const resp = await window.API.get('/api/admin/expense-categories');
+        if (this._notFound(resp) || !resp || resp.ok === false) return null; // page uses local registry
+        const d = resp.data;
+        return Array.isArray(d) ? d : (Array.isArray(d?.categories) ? d.categories : null);
+      } catch (e) { adminApiWarn('expenses/categories', e); return null; }
+    },
+
+    // ---- Writes (throw with .code; NOT_FOUND ⇒ "backend pending") ----
+    async create(payload) {
+      const resp = await window.API.post('/api/admin/expenses', payload);
+      if (this._notFound(resp)) {
+        // Fall back to the legacy create so one-off + basic recurring save today.
+        const legacy = await window.API.post('/api/admin/analytics/expenses', payload);
+        if (legacy && legacy.ok === false) throw invoiceError(legacy, 'Could not save expense');
+        return legacy?.data ?? null;
+      }
+      return this._writeCheck(resp, 'Could not save expense');
+    },
+    async update(id, payload) {
+      const resp = await window.API.put(`/api/admin/expenses/${encodeURIComponent(id)}`, payload);
+      return this._writeCheck(resp, 'Could not update expense');
+    },
+    async remove(id) {
+      const resp = await window.API.delete(`/api/admin/expenses/${encodeURIComponent(id)}`);
+      return this._writeCheck(resp, 'Could not delete expense');
+    },
+    async pay(id, { paid_date, amount } = {}) {
+      const resp = await window.API.post(`/api/admin/expenses/${encodeURIComponent(id)}/pay`, { paid_date, amount });
+      return this._writeCheck(resp, 'Could not mark expense paid');
+    },
+    async unpay(id) {
+      const resp = await window.API.post(`/api/admin/expenses/${encodeURIComponent(id)}/unpay`, {});
+      return this._writeCheck(resp, 'Could not mark expense unpaid');
+    },
+    async skipOccurrence(id, occurrence_date) {
+      const resp = await window.API.post(`/api/admin/expenses/${encodeURIComponent(id)}/skip`, { occurrence_date });
+      return this._writeCheck(resp, 'Could not skip occurrence');
+    },
+    async pause(id) {
+      const resp = await window.API.post(`/api/admin/expenses/${encodeURIComponent(id)}/pause`, {});
+      return this._writeCheck(resp, 'Could not pause series');
+    },
+    async resume(id) {
+      const resp = await window.API.post(`/api/admin/expenses/${encodeURIComponent(id)}/resume`, {});
+      return this._writeCheck(resp, 'Could not resume series');
+    },
+    async end(id, { end_date } = {}) {
+      const resp = await window.API.post(`/api/admin/expenses/${encodeURIComponent(id)}/end`, { end_date });
+      return this._writeCheck(resp, 'Could not end series');
+    },
+  },
+
+  // =========================================================================
   // Admin — Control Center (May 2026 spec, src/routes/adminControlCenter.js)
   // 11 endpoints: super_admin only. See readfirst/control-center-may2026.md.
   //

@@ -1,7 +1,7 @@
 /**
  * Admin SPA — Entry point, router, shell
  */
-const APP_VERSION = '2026.07.10-router-hashchange';
+const APP_VERSION = '2026.07.12-invoice-cogs';
 
 import { AdminAuth } from './auth.js';
 import { FilterState } from './filters.js';
@@ -67,6 +67,7 @@ const NAV_ITEMS = [
 
   { section: 'Analytics' },
   { key: 'analytics', label: 'Finance', icon: 'finance', ownerOnly: true },
+  { key: 'expenses', label: 'Expenses', icon: 'invoice', ownerOnly: true },
   { key: 'demand-ranking', label: 'Demand Ranking', icon: 'analytics', ownerOnly: true },
 
   { section: 'Catalog & Data Ops' },
@@ -274,7 +275,7 @@ async function navigate(pageName) {
   `;
 
   // Owner-only page check
-  const ownerPages = ['settings', 'control-center', 'sync-report', 'invoices', 'quick-order', 'demand-ranking'];
+  const ownerPages = ['settings', 'control-center', 'sync-report', 'invoices', 'quick-order', 'demand-ranking', 'expenses'];
   if (ownerPages.includes(pageName) && !AdminAuth.isOwner()) {
     if (myToken !== _navToken) return; // superseded — don't stomp the newer page's state
     content.innerHTML = `

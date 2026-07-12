@@ -24,10 +24,14 @@ import { Drawer } from '../components/drawer.js';
 import { Modal } from '../components/modal.js';
 import { Toast } from '../components/toast.js';
 import { attachAutocomplete } from '../components/autocomplete.js';
-import { attachProductAutocomplete } from '../components/product-search.js';
+import { attachProductAutocomplete, productCostExGst } from '../components/product-search.js';
+import { costOrNull } from '../utils/invoice-math.js';
 
 const GST_RATE = 0.15;
 const MISSING = '—';
+
+// Supplier cost is owner-only (the route already is; gate the field too).
+const canSeeCost = () => (typeof AdminAuth !== 'undefined' && AdminAuth?.isOwner) ? AdminAuth.isOwner() : false;
 
 // ---- small helpers (self-contained copies of the invoice-page primitives) ----
 const escA = (s) => (window.Security?.escapeAttr ? Security.escapeAttr(String(s ?? '')) : String(s ?? '').replace(/"/g, '&quot;'));
@@ -74,7 +78,12 @@ const editorAlive = (token) => token === _editorToken && _editorRefs != null;
 // =========================================================================
 //  Draft model
 // =========================================================================
-const blankLine = () => ({ code: '', description: '', qty: 1, unitPrice: 0 });
+// unitPrice     — ex-GST SELL price (what the customer is charged).
+// supplierCost  — ex-GST price WE paid. INTERNAL. null = unknown, NOT 0.
+// costSource    — 'auto' (from products.cost_price) | 'manual' (typed over).
+// Kept in lockstep with the Invoices editor: the two share the .inv-line grid AND
+// the sessionStorage bridge in createInvoiceFrom().
+const blankLine = () => ({ code: '', description: '', qty: 1, unitPrice: 0, supplierCost: null, costSource: 'auto' });
 
 function freshDraft() {
   return {
@@ -110,6 +119,8 @@ function draftFromRecord(rec) {
     description: l.description ?? '',
     qty: num(l.quantity ?? l.qty ?? 1),
     unitPrice: num(l.unit_price_excl_gst ?? l.unitPrice ?? 0),
+    supplierCost: costOrNull(l.supplier_cost_excl_gst ?? l.supplierCost),
+    costSource: l.cost_source || l.costSource || 'auto',
   })) : [blankLine()];
   d.notes = rec.notes ?? '';
   return d;
@@ -138,6 +149,9 @@ function buildPayload(d) {
     bill_to: { name: c.name, company: c.company, phone: c.phone, email: c.email, address: toLines(c.address) },
     line_items: realLines(d).map((l) => ({
       product_code: l.code, description: l.description, quantity: num(l.qty), unit_price_excl_gst: round2(num(l.unitPrice)),
+      // OUR cost — internal. null tells the backend to snapshot products.cost_price itself.
+      supplier_cost_excl_gst: costOrNull(l.supplierCost),
+      cost_source: l.costSource || 'auto',
     })),
     notes: d.notes,
     // Client preview only — backend recomputes authoritatively and ignores these.
@@ -226,7 +240,15 @@ function createInvoiceFrom(rec) {
   const prefill = {
     order_date: d.order_date || '',
     customer: { attn: c.name || '', name: c.name || '', company: c.company || '', address: c.address || '', phone: c.phone || '', email: c.email || '' },
-    lines: (d.lines || []).map((l) => ({ code: l.code || '', description: l.description || '', qty: num(l.qty) || 1, unitCost: round2(num(l.unitPrice)) })),
+    // unitPrice (sell) maps to the invoice's unitCost (also sell — see the naming
+    // note in utils/invoice-math.js). supplierCost keeps its name across the bridge
+    // because it means the same thing on both sides: what WE paid.
+    lines: (d.lines || []).map((l) => ({
+      code: l.code || '', description: l.description || '', qty: num(l.qty) || 1,
+      unitCost: round2(num(l.unitPrice)),
+      supplierCost: costOrNull(l.supplierCost),
+      costSource: l.costSource || 'auto',
+    })),
   };
   try { sessionStorage.setItem('qo_invoice_prefill', JSON.stringify(prefill)); }
   catch (err) { warn('could not stage invoice prefill', err); }
@@ -299,7 +321,13 @@ function onFormInput(e) {
     setPath(_draft, t.dataset.field, t.value);
   } else if (t.dataset.line != null && t.dataset.lfield) {
     const i = +t.dataset.line;
-    if (_draft.lines[i]) _draft.lines[i][t.dataset.lfield] = t.value;
+    const f = t.dataset.lfield;
+    if (_draft.lines[i]) {
+      _draft.lines[i][f] = t.value;
+      // Typing a cost promotes the line to a manual override; clearing it reverts
+      // to auto (and to "unknown" — '' is not 0).
+      if (f === 'supplierCost') _draft.lines[i].costSource = t.value === '' ? 'auto' : 'manual';
+    }
     refreshTotals();
   } else { return; }
   t.classList.remove('admin-input--error', 'admin-select--error');
@@ -385,10 +413,11 @@ function editorBodyHtml(d) {
 
       <section class="inv-section">
         <div class="inv-section__title">Products</div>
-        <div class="inv-lines-head qo-lines-head">
-          <span>Product Code</span><span>Description</span><span>Qty</span><span>Unit Price (excl. GST)</span><span></span>
+        <div class="inv-lines-head qo-lines-head${canSeeCost() ? '' : ' inv-line--nocost'}">
+          <span>Product Code</span><span>Description</span><span>Qty</span><span>Unit Price (excl. GST)</span>${canSeeCost() ? '<span>Our Cost (excl. GST)</span>' : ''}<span></span>
         </div>
         <div id="qo-lines"></div>
+        ${canSeeCost() ? `<p class="inv-section__hint">“Our Cost” is internal — it auto-fills from the product’s cost price and can be typed over. It never appears on the invoice this order becomes.</p>` : ''}
         <button class="admin-btn admin-btn--ghost admin-btn--sm" data-form-action="add-line">${icon('plus', 13, 13)} Add line</button>
         <div id="qo-totals" class="qo-totals"></div>
       </section>
@@ -404,22 +433,47 @@ function editorBodyHtml(d) {
 function renderLines() {
   const host = _editorRefs?.drawer.body.querySelector('#qo-lines');
   if (!host) return;
-  host.innerHTML = (_draft.lines || []).map((l, i) => `
-    <div class="inv-line" data-line="${i}">
+  const showCost = canSeeCost();
+  host.innerHTML = (_draft.lines || []).map((l, i) => {
+    const manual = l.costSource === 'manual';
+    const costCell = showCost ? `
+      <input class="admin-input inv-line__cost${manual ? ' inv-line__cost--manual' : ''}"
+             type="number" step="0.01" min="0" data-line="${i}" data-lfield="supplierCost"
+             value="${escA(l.supplierCost ?? '')}" placeholder="auto"
+             title="${manual ? 'Manual override' : 'Auto-filled from the product’s cost'} — internal only, never shown to the customer">` : '';
+    return `
+    <div class="inv-line${showCost ? '' : ' inv-line--nocost'}" data-line="${i}">
       <div class="inv-ac"><input class="admin-input" data-line="${i}" data-lfield="code" value="${escA(l.code)}" placeholder="SKU / code" autocomplete="off"></div>
       <div class="inv-ac"><input class="admin-input" data-line="${i}" data-lfield="description" value="${escA(l.description)}" placeholder="Product description" autocomplete="off"></div>
       <input class="admin-input" type="number" step="1" min="0" data-line="${i}" data-lfield="qty" value="${escA(l.qty)}">
       <input class="admin-input" type="number" step="0.01" min="0" data-line="${i}" data-lfield="unitPrice" value="${escA(l.unitPrice)}">
+      ${costCell}
       <button class="admin-btn admin-btn--ghost admin-btn--sm inv-line__rm" data-form-action="remove-line" title="Remove line">${icon('trash', 12, 12)}</button>
-    </div>`).join('');
+    </div>`;
+  }).join('');
   // Product autocomplete on both code + description inputs of every line.
   host.querySelectorAll('.inv-line').forEach((row) => {
     const i = +row.dataset.line;
     row.querySelectorAll('.inv-ac > input').forEach((input) => {
       const h = attachProductAutocomplete(input, {
         onPick: (p) => {
+          const prev = _draft.lines[i] || {};
+          const sku = p.sku || '';
           const ex = p.retail_price != null ? round2(num(p.retail_price) / (1 + GST_RATE)) : num(p.sell_price ?? p.price ?? 0);
-          _draft.lines[i] = { code: p.sku || '', description: p.name || p.product_name || '', qty: _draft.lines[i]?.qty || 1, unitPrice: ex };
+          // Same anti-clobber rule as the Invoices editor: a manual override
+          // survives a re-pick of the SAME product, but a different product
+          // resets to that product's own cost.
+          const keepManual = prev.costSource === 'manual'
+            && costOrNull(prev.supplierCost) != null
+            && prev.code === sku;
+          _draft.lines[i] = {
+            code: sku,
+            description: p.name || p.product_name || '',
+            qty: prev.qty || 1,
+            unitPrice: ex,
+            supplierCost: keepManual ? prev.supplierCost : productCostExGst(p),
+            costSource: keepManual ? 'manual' : 'auto',
+          };
           renderLines(); refreshTotals();
         },
       });

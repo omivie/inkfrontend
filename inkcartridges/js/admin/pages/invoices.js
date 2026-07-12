@@ -23,9 +23,19 @@ import { Drawer } from '../components/drawer.js';
 import { Modal } from '../components/modal.js';
 import { Toast } from '../components/toast.js';
 import { attachAutocomplete } from '../components/autocomplete.js';
-import { attachProductAutocomplete } from '../components/product-search.js';
+import { attachProductAutocomplete, productCostExGst } from '../components/product-search.js';
+import {
+  costOrNull, computeInvoiceTotals, computeInvoiceCogs, computeInvoiceProfit,
+  normalizeInvoice, invoiceDocRows,
+} from '../utils/invoice-math.js';
+import { marginBadge, formatProfitDollars } from '../utils/profitability.js';
 
 const GST_RATE = 0.15;
+
+// Supplier cost is an owner-only figure. The route itself is already owner-gated
+// (app.js ownerPages), but gate the field too — cheap, and it keeps the intent
+// legible next to the input that must never be printed.
+const canSeeCost = () => (typeof AdminAuth !== 'undefined' && AdminAuth?.isOwner) ? AdminAuth.isOwner() : false;
 
 // ---- small helpers ------------------------------------------------------
 const escA = (s) => (window.Security?.escapeAttr ? Security.escapeAttr(String(s ?? '')) : String(s ?? '').replace(/"/g, '&quot;'));
@@ -213,7 +223,15 @@ const editorAlive = (token) => token === _editorToken && _editorRefs != null;
 // =========================================================================
 //  Draft model
 // =========================================================================
-const blankLine = () => ({ code: '', description: '', qty: 1, unitCost: 0 });
+// unitCost      — ex-GST SELL price. PRINTED on the invoice (the "Cost (excl.
+//                 GST)" column). Named from the customer's point of view.
+// supplierCost  — ex-GST price WE paid. INTERNAL ONLY: never printed, never
+//                 emailed. null = unknown (NOT 0 — a $0 cost would report a 100%
+//                 margin). See costOrNull in utils/invoice-math.js.
+// costSource    — 'auto'   = mirrored from products.cost_price by the picker
+//                 'manual' = the operator typed over it; survives a re-pick of
+//                            the same SKU.
+const blankLine = () => ({ code: '', description: '', qty: 1, unitCost: 0, supplierCost: null, costSource: 'auto' });
 
 function freshDraft() {
   const L = window.LegalConfig || {};
@@ -276,6 +294,9 @@ function draftFromInvoice(rec) {
     description: l.description ?? '',
     qty: num(l.quantity ?? l.qty ?? 1),
     unitCost: num(l.unit_cost_excl_gst ?? l.unitCost ?? 0),
+    // Absent (backend hasn't shipped the column yet) => unknown, not 0.
+    supplierCost: costOrNull(l.supplier_cost_excl_gst ?? l.supplierCost),
+    costSource: l.cost_source || l.costSource || 'auto',
   })) : [blankLine()];
   d.freight = num(rec.freight_excl_gst ?? rec.freight ?? 0);
   if (rec.footer) d.footer = { ...d.footer, ...rec.footer };
@@ -283,13 +304,9 @@ function draftFromInvoice(rec) {
   return d;
 }
 
-function computeTotals(d) {
-  const subtotal = round2((d.lines || []).reduce((s, l) => s + num(l.qty) * num(l.unitCost), 0));
-  const freight = round2(num(d.freight));
-  const gst = round2((subtotal + freight) * GST_RATE);
-  const total = round2(subtotal + freight + gst);
-  return { subtotal, freight, gst, total };
-}
+// Delegates to utils/invoice-math.js so the editor, the analytics overlay and
+// the tests can never disagree about what an invoice is worth.
+const computeTotals = (d) => computeInvoiceTotals(d);
 
 // A line counts only if it has a product code or description. A content-less
 // default row (just qty=1) is dropped so we never POST a phantom blank line —
@@ -360,8 +377,17 @@ function buildPayload(d) {
     // Sent only when filled; backend ignores unknown keys (cf. preview_totals) until
     // it persists/renders this on the server-side PDF.
     delivery: hasDelivery(d) ? { ...d.delivery, address: lines(d.delivery.address) } : null,
-    line_items: realLines(d)
-      .map((l) => ({ product_code: l.code, description: l.description, quantity: num(l.qty), unit_cost_excl_gst: round2(num(l.unitCost)) })),
+    line_items: realLines(d).map((l) => ({
+      product_code: l.code,
+      description: l.description,
+      quantity: num(l.qty),
+      unit_cost_excl_gst: round2(num(l.unitCost)),          // SELL price — printed on the invoice
+      // OUR cost — internal, never printed. null tells the backend to snapshot
+      // products.cost_price itself at save time, so COGS stays right even when
+      // the client never saw a cost.
+      supplier_cost_excl_gst: costOrNull(l.supplierCost),
+      cost_source: l.costSource || 'auto',
+    })),
     freight_excl_gst: round2(num(d.freight)),
     footer: d.footer,
     notes: d.notes,
@@ -407,7 +433,7 @@ export default {
     `;
 
     _table = new DataTable(container.querySelector('#inv-table'), {
-      columns: COLUMNS,
+      columns: COLUMNS.filter((c) => !c.ownerOnly || canSeeCost()),
       rowKey: 'id',
       emptyMessage: 'No invoices yet',
       emptyIcon: icon('invoice', 28, 28),
@@ -455,6 +481,20 @@ const COLUMNS = [
   { key: 'issue_date', label: 'Date', sortable: true, render: (r) => esc(formatInvoiceDate((r.issue_date || r.date || '').slice(0, 10))) },
   { key: 'customer', label: 'Customer', render: (r) => esc(r.customer_name || r.customer?.name || '—') },
   { key: 'total', label: 'Total (incl GST)', align: 'right', sortable: true, render: (r) => money(r.total_incl_gst ?? r.total ?? 0) },
+  {
+    key: 'profit', label: 'Profit', align: 'right', ownerOnly: true,
+    // Internal. Renders "—" whenever any line's cost is unknown — including the
+    // whole period before the backend persists supplier_cost_excl_gst at all, when
+    // every saved invoice will read as unknown. That is the honest answer, not a bug.
+    render: (r) => {
+      const n = normalizeInvoice(r);
+      if (r.status === 'void' || !n.allCostsKnown || n.profit == null) {
+        return `<span class="inv-profit__none" title="Cost of goods not recorded on this invoice">—</span>`;
+      }
+      const pct = n.revenueExGst > 0 ? (n.profit / n.revenueExGst) * 100 : null;
+      return `<span class="inv-profit" title="Ex-GST revenue minus ex-GST cost. Bank transfer, so no card fee.">${esc(formatProfitDollars(n.profit))} ${marginBadge(pct)}</span>`;
+    },
+  },
   {
     key: 'paid', label: 'Paid', align: 'center',
     // Voided invoices are kept for records — show a muted label, no toggle.
@@ -567,7 +607,12 @@ async function openExisting(row) {
 
 // Quick Order hands off a staged prefill via sessionStorage['qo_invoice_prefill']
 // ({ order_date, customer{attn,name,company,address,phone,email}, lines[{code,
-// description,qty,unitCost}] }). Consume it once and open a new invoice editor.
+// description,qty,unitCost,supplierCost,costSource}] }). Consume it once and open
+// a new invoice editor.
+//
+// Reads defensively: a prefill staged by the PREVIOUS build can still be sitting
+// in a user's sessionStorage across a deploy, and it has no cost fields. Absent
+// cost => unknown (null), never 0.
 function maybeOpenFromQuickOrder() {
   let raw;
   try { raw = sessionStorage.getItem('qo_invoice_prefill'); } catch (_) { return; }
@@ -582,6 +627,8 @@ function maybeOpenFromQuickOrder() {
   if (Array.isArray(pre.lines) && pre.lines.length) {
     d.lines = pre.lines.map((l) => ({
       code: l.code || '', description: l.description || '', qty: num(l.qty ?? 1), unitCost: round2(num(l.unitCost ?? 0)),
+      supplierCost: costOrNull(l.supplierCost),
+      costSource: l.costSource || 'auto',
     }));
   }
   openEditor(d);
@@ -680,7 +727,15 @@ function onFormInput(e) {
     }
   } else if (t.dataset.line != null && t.dataset.lfield) {
     const i = +t.dataset.line;
-    if (_draft.lines[i]) _draft.lines[i][t.dataset.lfield] = t.value;
+    const f = t.dataset.lfield;
+    if (_draft.lines[i]) {
+      _draft.lines[i][f] = t.value;
+      // Typing a cost promotes the line to a manual override; clearing the box
+      // hands it back to auto (and back to "unknown" until a product is picked).
+      // NB t.value is the raw string — costOrNull downstream is what turns '' into
+      // null rather than the 0 that Number('') would give us.
+      if (f === 'supplierCost') _draft.lines[i].costSource = t.value === '' ? 'auto' : 'manual';
+    }
   } else { return; }
   // Clear the error highlight on the field as soon as the user edits it.
   t.classList.remove('admin-input--error', 'admin-select--error');
@@ -1010,10 +1065,12 @@ function editorBodyHtml(d) {
 
       <section class="inv-section">
         <div class="inv-section__title">Line items</div>
-        <div class="inv-lines-head">
-          <span>Product Code</span><span>Description</span><span>Number</span><span>Unit Cost (excl. GST)</span><span></span>
+        <div class="inv-lines-head${canSeeCost() ? '' : ' inv-line--nocost'}">
+          <span>Product Code</span><span>Description</span><span>Number</span><span>Unit Price (excl. GST)</span>${canSeeCost() ? '<span>Our Cost (excl. GST)</span>' : ''}<span></span>
         </div>
         <div id="inv-lines"></div>
+        ${canSeeCost() ? `<p class="inv-section__hint">“Our Cost” is internal — it auto-fills from the product’s cost price, can be typed over, and <strong>never appears on the invoice, the preview, the PDF or the customer’s email</strong>. It exists so invoiced sales carry a real COGS into your profit figures.</p>` : ''}
+        <div id="inv-cogs"></div>
         <button class="admin-btn admin-btn--ghost admin-btn--sm" data-form-action="add-line">${icon('plus', 13, 13)} Add line</button>
         <label class="inv-field inv-field--freight"><span class="inv-field__label">Freight (excl. GST — 0 shows as “Free”)</span>
           <input class="admin-input" type="number" step="0.01" min="0" data-field="freight" value="${escA(d.freight)}">
@@ -1040,14 +1097,25 @@ function editorBodyHtml(d) {
 function renderLines() {
   const host = _editorRefs?.drawer.body.querySelector('#inv-lines');
   if (!host) return;
-  host.innerHTML = (_draft.lines || []).map((l, i) => `
-    <div class="inv-line" data-line="${i}">
+  const showCost = canSeeCost();
+  host.innerHTML = (_draft.lines || []).map((l, i) => {
+    const manual = l.costSource === 'manual';
+    // Empty value + "auto" placeholder is how "we don't know this cost" reads.
+    const costCell = showCost ? `
+      <input class="admin-input inv-line__cost${manual ? ' inv-line__cost--manual' : ''}"
+             type="number" step="0.01" min="0" data-line="${i}" data-lfield="supplierCost"
+             value="${escA(l.supplierCost ?? '')}" placeholder="auto"
+             title="${manual ? 'Manual override' : 'Auto-filled from the product’s cost'} — internal only, never printed on the invoice">` : '';
+    return `
+    <div class="inv-line${showCost ? '' : ' inv-line--nocost'}" data-line="${i}">
       <div class="inv-ac"><input class="admin-input" data-line="${i}" data-lfield="code" value="${escA(l.code)}" placeholder="SKU / code" autocomplete="off"></div>
       <div class="inv-ac"><input class="admin-input" data-line="${i}" data-lfield="description" value="${escA(l.description)}" placeholder="Product description" autocomplete="off"></div>
       <input class="admin-input" type="number" step="1" min="0" data-line="${i}" data-lfield="qty" value="${escA(l.qty)}">
       <input class="admin-input" type="number" step="0.01" min="0" data-line="${i}" data-lfield="unitCost" value="${escA(l.unitCost)}">
+      ${costCell}
       <button class="admin-btn admin-btn--ghost admin-btn--sm inv-line__rm" data-form-action="remove-line" title="Remove line">${icon('trash', 12, 12)}</button>
-    </div>`).join('');
+    </div>`;
+  }).join('');
   // Product autocomplete (storefront-style, image dropdown) on both the code +
   // description inputs of every line.
   host.querySelectorAll('.inv-line').forEach((row) => {
@@ -1059,12 +1127,62 @@ function renderLines() {
         // renderLines() below destroys the focused input, which would otherwise fire
         // that stale change and overwrite _draft.lines[i].code back to the query.
         input.blur();
+        const prev = _draft.lines[i] || {};
+        const sku = p.sku || '';
         const ex = p.retail_price != null ? round2(num(p.retail_price) / (1 + GST_RATE)) : num(p.sell_price ?? p.price ?? 0);
-        _draft.lines[i] = { code: p.sku || '', description: p.name || p.product_name || '', qty: _draft.lines[i]?.qty || 1, unitCost: ex };
+        // A manual cost override survives a re-pick of the SAME product (the
+        // operator meant it). Picking a DIFFERENT product resets to that
+        // product's own cost — the override was scoped to the old SKU, and
+        // silently carrying it across would quietly misprice the new line.
+        const keepManual = prev.costSource === 'manual'
+          && costOrNull(prev.supplierCost) != null
+          && prev.code === sku;
+        _draft.lines[i] = {
+          code: sku,
+          description: p.name || p.product_name || '',
+          qty: prev.qty || 1,
+          unitCost: ex,
+          supplierCost: keepManual ? prev.supplierCost : productCostExGst(p),
+          costSource: keepManual ? 'manual' : 'auto',
+        };
         renderLines(); refreshPreview();
       },
     }));
   });
+  renderCogsPanel();
+}
+
+/**
+ * Internal margin readout under the line items. Owner-only, on the FORM side of
+ * the editor — deliberately not in the preview, which is what the customer sees.
+ *
+ * When any line's cost is unknown the figures would be a floor, not a fact, so
+ * we print "—" and say how many lines are missing a cost rather than quietly
+ * reporting an inflated margin.
+ */
+function renderCogsPanel() {
+  const host = _editorRefs?.drawer.body.querySelector('#inv-cogs');
+  if (!host) return;
+  if (!canSeeCost()) { host.innerHTML = ''; return; }
+  const { costExGst, unknownLines, allKnown } = computeInvoiceCogs(_draft);
+  const profit = computeInvoiceProfit(_draft);
+  const t = computeTotals(_draft);
+  const marginPct = (profit != null && t.subtotal > 0) ? (profit / t.subtotal) * 100 : null;
+  if (!allKnown) {
+    const n = unknownLines;
+    host.innerHTML = `<div class="inv-cogs inv-cogs--unknown">
+      <span class="inv-cogs__label">Internal margin</span>
+      <span class="inv-cogs__val">—</span>
+      <span class="inv-cogs__note">${n ? `${n} line${n === 1 ? '' : 's'} missing a cost` : 'add a line item'}</span>
+    </div>`;
+    return;
+  }
+  host.innerHTML = `<div class="inv-cogs">
+    <span class="inv-cogs__label">Internal margin</span>
+    <span class="inv-cogs__val">Cost of goods ${esc(money(costExGst))} · Gross profit ${esc(formatProfitDollars(profit))}</span>
+    ${marginBadge(marginPct)}
+    <span class="inv-cogs__note">Bank transfer — no card fee. Never shown to the customer.</span>
+  </div>`;
 }
 
 function attachTopAutocompletes() {
@@ -1131,6 +1249,11 @@ async function loadFromOrder(orderId) {
     description: it.product_name || it.name || it.description || '',
     qty: num(it.qty ?? it.quantity ?? 1),
     unitCost: round2(num(it.sell_price ?? it.unit_price ?? it.price ?? 0)),
+    // The order already carries the cost we actually paid at the time it shipped.
+    // Reuse that snapshot rather than re-deriving from today's products.cost_price
+    // — the supplier's price may have moved since.
+    supplierCost: costOrNull(it.supplier_cost_snapshot ?? it.cost_price),
+    costSource: 'auto',
   }));
   if (!_draft.lines.length) _draft.lines = [blankLine()];
   // Order shipping_fee is GST-INCLUSIVE — convert to ex-GST for the freight field.
@@ -1221,6 +1344,9 @@ async function loadFromCustomer(c) {
 //  Live preview
 // =========================================================================
 function refreshPreview() {
+  // The internal margin readout depends on qty, price, cost AND freight, so it
+  // refreshes wherever the preview does rather than enumerating fields.
+  renderCogsPanel();
   const host = _editorRefs?.drawer.body.querySelector('#inv-preview');
   if (!host) return;
   host.innerHTML = renderPreview(_draft);
@@ -1230,13 +1356,15 @@ function renderPreview(d) {
   const t = computeTotals(d);
   const meta = invoiceMeta(d);
   const parties = invoiceParties(d);
-  const rows = (d.lines || [])
-    .filter((l) => l.code || l.description || num(l.qty) || num(l.unitCost))
-    .map((l) => `<tr>
-      <td class="inv-doc__code">${esc(l.code)}</td>
-      <td>${esc(l.description)}</td>
-      <td class="inv-doc__num">${esc(num(l.qty))}</td>
-      <td class="inv-doc__cost">${money(num(l.qty) * num(l.unitCost))}</td>
+  // invoiceDocRows yields exactly [code, description, qty, lineTotal] — the ONLY
+  // projection the customer-facing document may use. The supplier cost cannot
+  // leak here because this renderer no longer touches the line objects at all.
+  const rows = invoiceDocRows(d, { money })
+    .map(([code, description, qty, lineTotal]) => `<tr>
+      <td class="inv-doc__code">${esc(code)}</td>
+      <td>${esc(description)}</td>
+      <td class="inv-doc__num">${esc(qty)}</td>
+      <td class="inv-doc__cost">${esc(lineTotal)}</td>
     </tr>`).join('') || `<tr><td colspan="4" class="inv-doc__empty">Add a line item…</td></tr>`;
 
   const freightCell = t.freight > 0 ? money(t.freight) : 'Free';
@@ -1386,9 +1514,9 @@ function buildInvoiceDoc(d) {
 
   // --- Items table ---
   const startY = Math.max(partyBottom + 18, 250);
-  const rows = (d.lines || [])
-    .filter((l) => l.code || l.description || num(l.qty) || num(l.unitCost))
-    .map((l) => [l.code || '', l.description || '', String(num(l.qty)), money(num(l.qty) * num(l.unitCost))]);
+  // Same four-column projection as the live preview — see renderPreview. The
+  // supplier cost is structurally unable to reach the PDF: it is not in the tuple.
+  const rows = invoiceDocRows(d, { money });
   // Fixed column widths keep the layout stable regardless of content length: a
   // long product code or description wraps inside its own column instead of
   // stealing width from the others (which used to squeeze "Description" so hard

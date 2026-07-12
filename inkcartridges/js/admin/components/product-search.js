@@ -12,6 +12,7 @@
  */
 import { attachAutocomplete } from './autocomplete.js';
 import { AdminAPI } from '../app.js';
+import { costOrNull } from '../utils/invoice-math.js';
 
 const PLACEHOLDER_IMG = '/assets/images/placeholder-product.svg';
 const escH = (s) => (window.Security?.escapeHtml ? Security.escapeHtml(String(s ?? '')) : String(s ?? ''));
@@ -30,14 +31,65 @@ function resolveImg(p) {
   return (typeof window.storageUrl === 'function') ? window.storageUrl(raw) : raw;
 }
 
+/**
+ * Our ex-GST supplier cost for a product, or null when we don't know it.
+ *
+ * products.cost_price is ex-GST (same column utils/profitability.js deducts
+ * as-is). Shared by the Invoices and Quick Order pickers so both resolve the
+ * field identically and neither has to guess the backend's spelling.
+ *
+ * null means UNKNOWN, never $0 — see costOrNull in utils/invoice-math.js.
+ */
+export function productCostExGst(p) {
+  return costOrNull(p?.cost_price ?? p?.supplier_cost ?? p?.cost ?? null);
+}
+
+// PostgREST's .or() filter is comma/paren-delimited, so those characters in a
+// raw search term would corrupt the expression. The picker takes free text, so
+// strip them rather than trust the input.
+const sbSafe = (s) => String(s ?? '').replace(/[,()]/g, ' ').trim();
+
+/**
+ * Search products for the picker.
+ *
+ * Supabase first — not just because it's faster (it skips the Render hop, same
+ * reasoning as pages/products.js:722), but because cost_price is the whole point
+ * of this picker now and there is NO evidence /api/admin/products returns it:
+ * the Products page reads cost_price from a direct Supabase select, and only
+ * falls back to HTTP for margin/image/stock filters. Selecting the column
+ * explicitly here is what guarantees it reaches onPick.
+ *
+ * The HTTP path remains as a fallback so the picker still works (minus the cost
+ * auto-fill) when Supabase is unavailable. And even then COGS stays correct: the
+ * backend snapshots products.cost_price at save time when the client sends none.
+ */
+async function searchProducts(q) {
+  const sb = (typeof Auth !== 'undefined' && Auth?.supabase) ? Auth.supabase : null;
+  const term = sbSafe(q);
+  if (sb && term) {
+    try {
+      const { data, error } = await sb
+        .from('products')
+        .select('id, sku, name, retail_price, cost_price, image_url, product_images(path, is_primary, sort_order)')
+        .or(`name.ilike.%${term}%,sku.ilike.%${term}%`)
+        .limit(12);
+      if (!error && Array.isArray(data) && data.length) return data;
+    } catch (err) {
+      window.DebugLog?.warn?.('[ProductSearch] Supabase lookup failed, falling back to HTTP', err?.message || err);
+    }
+  }
+  const data = await AdminAPI.getProducts({ search: q }, 1, 12);
+  return data?.products || data?.items || [];
+}
+
 export function attachProductAutocomplete(input, { onPick } = {}) {
   return attachAutocomplete(input, {
     minChars: 2,
     menuClass: 'admin-ac__menu--product',
-    fetch: async (q) => {
-      const data = await AdminAPI.getProducts({ search: q }, 1, 12);
-      return data?.products || data?.items || [];
-    },
+    // NB: the picked row is handed to onPick whole, cost_price included. The cost
+    // is never RENDERED in the dropdown — it's an internal figure, and the
+    // dropdown is the one part of this surface an operator might show a customer.
+    fetch: searchProducts,
     render: (p) => {
       const src = resolveImg(p);
       const code = p.sku || '';
