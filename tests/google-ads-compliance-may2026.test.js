@@ -33,6 +33,13 @@ const JS = (rel) => path.join(INK, 'js', rel);
 const CSS = (rel) => path.join(INK, 'css', rel);
 const READ = (abs) => fs.readFileSync(abs, 'utf8');
 
+// legal-config.js is an IIFE that assigns to `window` OR `globalThis`, so
+// requiring it here executes it and exposes the real shipped LegalConfig —
+// the same object the browser gets. The banned-claim list is therefore
+// literally shared between the runtime guard and this scanner, not copied.
+require(path.join(INK, 'js', 'legal-config.js'));
+const { BANNED_CLAIM_PATTERNS } = globalThis.LegalConfig;
+
 // ─────────────────────────────────────────────────────────────────────────
 // Canonical business-fact table — mirrors backend trustSignals.js exactly.
 // Every value below MUST be present in legal-config.js and the static
@@ -84,7 +91,10 @@ const FORBIDDEN = [
     // §5/§6 marketing claims
     /identical to genuine/i,
     /same as genuine/i,
-    /\bwon['’]?t void (your|the|my)? ?(printer )?warranty\b/i,
+    // NOTE: OEM-warranty assertions ("does not void", "refuse to honour", …)
+    // are NOT listed here. They come from LegalConfig.BANNED_CLAIM_PATTERNS
+    // and are merged in below, so the browser runtime guard (legal-page.js)
+    // and this scanner can never disagree about what is banned.
 
     // §7/§8 urgency
     /\blimited[- ]time offer\b/i,
@@ -108,40 +118,46 @@ const FORBIDDEN = [
     /inkandtoner@windowslive\.com/i,
     /\b2 Queen Street\b/i,
     /09[ -]?813[ -]?3?882?/,
+
+    // ─── OEM-warranty assertions — the claim class that suspended the ads
+    // account. Sourced from LegalConfig so the browser-side CMS guard in
+    // legal-page.js and this scanner share ONE definition.
+    ...BANNED_CLAIM_PATTERNS,
 ];
 
+// ─────────────────────────────────────────────────────────────────────────
+// Files to scan — AUTO-DISCOVERED, deliberately.
+//
+// This list used to be hand-maintained, and `html/genuine-vs-compatible.html`
+// was never on it. The banned "does not void your printer's warranty"
+// paragraph therefore survived two separate "fixed" reports (Jul 7 and Jul 12
+// 2026): the compliance suite was green because it was structurally incapable
+// of reading the file that contained the violation.
+//
+// Never reintroduce an allowlist here. Every customer-facing HTML page is
+// discovered by walking the tree, so a new page is covered the moment it is
+// created rather than the moment someone remembers to register it.
+// ─────────────────────────────────────────────────────────────────────────
+const SCAN_EXCLUDED_DIRS = new Set(['admin', 'node_modules']);
+
+function walkHtml(dir) {
+    const out = [];
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+        const abs = path.join(dir, entry.name);
+        if (entry.isDirectory()) {
+            // html/admin/** is the internal admin console: it legitimately
+            // contains the invoice "Void" status and is never crawled.
+            if (SCAN_EXCLUDED_DIRS.has(entry.name)) continue;
+            out.push(...walkHtml(abs));
+        } else if (entry.isFile() && entry.name.endsWith('.html')) {
+            out.push(abs);
+        }
+    }
+    return out;
+}
+
 const FILES_TO_SCAN = [
-    HTML('index.html'),
-    HTML('404.html'),
-    HTML('html/index.html'),
-    HTML('html/about.html'),
-    HTML('html/returns.html'),
-    HTML('html/contact.html'),
-    HTML('html/privacy.html'),
-    HTML('html/terms.html'),
-    HTML('html/shipping.html'),
-    HTML('html/faq.html'),
-    HTML('html/shop.html'),
-    HTML('html/ribbons.html'),
-    HTML('html/cart.html'),
-    HTML('html/checkout.html'),
-    HTML('html/payment.html'),
-    HTML('html/order-confirmation.html'),
-    HTML('html/account/login.html'),
-    HTML('html/account/forgot-password.html'),
-    HTML('html/account/reset-password.html'),
-    HTML('html/account/index.html'),
-    HTML('html/account/orders.html'),
-    HTML('html/account/order-detail.html'),
-    HTML('html/account/addresses.html'),
-    HTML('html/account/personal-details.html'),
-    HTML('html/account/printers.html'),
-    HTML('html/account/favourites.html'),
-    HTML('html/account/loyalty.html'),
-    HTML('html/account/track-order.html'),
-    HTML('html/account/settings.html'),
-    HTML('html/account/verify-email.html'),
-    HTML('html/product/index.html'),
+    ...walkHtml(INK),
     JS('footer.js'),
     JS('legal-config.js'),
     JS('legal-page.js'),
@@ -163,6 +179,10 @@ const FILES_TO_SCAN = [
 function stripComments(src, ext) {
     let s = src;
     if (ext === '.js' || ext === '.css') {
+        // The banned-claim list in legal-config.js is a declaration OF the
+        // forbidden phrases, not an utterance of them — without this it
+        // matches itself and legal-config.js can never pass its own sweep.
+        s = s.replace(/BANNED_CLAIM_PATTERNS:\s*\[[\s\S]*?\n\s*\],/, '');
         // Block comments first, then line comments. Naive but sufficient
         // — we're scanning static repo source, not preserving semantics.
         s = s.replace(/\/\*[\s\S]*?\*\//g, '');

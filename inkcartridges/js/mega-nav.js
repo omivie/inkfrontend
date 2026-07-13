@@ -208,8 +208,10 @@
 
             // (data.categories is deliberately unrendered here — the nav's
             // "Shop by Category" mega was removed 2026-07-02; the feed's
-            // category links render in footer.js instead. If they ever come
-            // back, filter path !== '/genuine-vs-compatible' — dead route.)
+            // category links render in footer.js instead.)
+            // NB: /genuine-vs-compatible is NOT a dead route — it is live,
+            // rewritten in vercel.json, linked from the footer + every PDP,
+            // and Google requires it to stay crawlable. Do not filter it out.
         } catch (e) {
             // fail-open: the static categories markup and hardcoded BRANDS
             // fallback already rendered — backend nav is an enhancement.

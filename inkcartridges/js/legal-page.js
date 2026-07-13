@@ -107,6 +107,42 @@
         return document.querySelector('.legal-page__hero, .about-hero, .contact-page__header');
     }
 
+    /**
+     * True if a CMS override asserts something about the printer
+     * MANUFACTURER's warranty — the claim class that suspended the Google
+     * Ads account.
+     *
+     * These rows are written by admins through the legal-content CMS and
+     * land in the DOM via innerHTML below, i.e. they are visible to a
+     * browser (and to AdsBot, which executes JS) but invisible to a curl of
+     * the static HTML. Without this check, a single CMS row could silently
+     * reintroduce banned copy while every static-source test stayed green.
+     *
+     * Fail-safe: a rejected override falls back to the vetted static copy
+     * already in the HTML. Worst case is stale content, never illegal
+     * content.
+     */
+    function violatesBannedClaims(value) {
+        var patterns = (typeof LegalConfig !== 'undefined' && LegalConfig.BANNED_CLAIM_PATTERNS) || [];
+        for (var i = 0; i < patterns.length; i++) {
+            if (patterns[i].test(value)) return patterns[i];
+        }
+        return null;
+    }
+
+    function rejectIfBanned(key, value) {
+        var hit = violatesBannedClaims(value);
+        if (!hit) return false;
+        if (typeof DebugLog !== 'undefined' && DebugLog.warn) {
+            DebugLog.warn(
+                '[legal-page] CMS override "' + key + '" REJECTED — it asserts a claim about the '
+                + 'printer manufacturer\'s warranty (matched ' + hit + '). Serving the vetted '
+                + 'static copy instead. See LegalConfig.BANNED_CLAIM_PATTERNS.'
+            );
+        }
+        return true;
+    }
+
     function pageContentApply(slug, rows) {
         if (!slug) return;
         var heroPrefix = slug + '.hero';
@@ -118,14 +154,14 @@
 
             if (key === heroPrefix) {
                 var hero = findHeroEl();
-                if (hero && value !== '') hero.innerHTML = value;
+                if (hero && value !== '' && !rejectIfBanned(key, value)) hero.innerHTML = value;
                 return;
             }
             if (key.indexOf(sectionPrefix) === 0) {
                 var sectionId = key.slice(sectionPrefix.length);
                 if (!sectionId) return;
                 var sec = document.querySelector('.policy-section[id="' + cssEscape(sectionId) + '"]');
-                if (sec && value !== '') sec.innerHTML = value;
+                if (sec && value !== '' && !rejectIfBanned(key, value)) sec.innerHTML = value;
             }
         });
     }

@@ -33,6 +33,36 @@
         companyNumber: '1853414',                       // NZ Companies Office registration number
         nzOwned:     true,                              // controls "100% NZ Owned" framing
 
+        // ─── Banned claims ────────────────────────────────────────────────
+        // Assertions about the PRINTER MANUFACTURER's warranty. This claim
+        // class is what suspended the Google Ads account (Google
+        // "Unacceptable Business Practices" / "Misrepresentation"): we may
+        // describe OUR OWN guarantee and the statutory CGA rights, but we
+        // may never characterise what an OEM will or won't honour.
+        //
+        // Consumed by TWO callers, deliberately:
+        //   1. legal-page.js — refuses any legal_content_overrides CMS row
+        //      matching these, so a browser can never be shown copy that a
+        //      curl of the static HTML wouldn't reveal.
+        //   2. tests/google-ads-compliance-may2026.test.js — scans the
+        //      shipped source. One list, so the two can never drift.
+        //
+        // Patterns are ASSERTION-shaped, never a bare `warranty` or `void`:
+        // "genuine cartridges carry the manufacturer's own warranty" and
+        // "check the manufacturer's warranty terms" are both legitimate, and
+        // the admin invoice "Void" status must not trip this.
+        BANNED_CLAIM_PATTERNS: [
+            /does\s+not\s+void/i,
+            /won['’]?t\s+void/i,
+            /will\s+not\s+void/i,
+            /voids?\s+(your|the|my)\s+(printer\s+)?warranty/i,
+            /refuse\s+to\s+honou?r/i,
+            /cannot\s+refuse/i,
+            /cannot\s+require\s+you\s+to\s+use/i,
+            /warranty\s+(is|remains)\s+(unaffected|intact|valid)/i,
+            /warranty\s+stays\s+(intact|valid)/i,
+        ],
+
         // ─── Contact ──────────────────────────────────────────────────────
         address: {
             street:     '37A Archibald Road',
@@ -119,7 +149,8 @@
         // block + footer remain editable per-invoice on the page.
         invoice: {
             contactName:    'Trevor Walker',
-            phone:          '09 813 3882',          // invoice contact line (differs from storefront phoneDisplay)
+            phone:          '027 474 0115',         // must match phoneDisplay — the retired 09 813 3882 landline
+                                                    // was still printing on customer invoices (ERR-064)
             bankAcctName:   'Office Consumables Ltd',
             bankAcctNumber: '01 0186 0335027 00',
             thankYou:       'Thank you very much for your business and for checking out InkCartridges.co.nz.',

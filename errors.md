@@ -4,6 +4,94 @@ Log every error encountered here. Before editing a file, scan for known issues. 
 
 ---
 
+## ERR-063 — A compliance guard that scans a hand-maintained file list is not a guard (2026-07-14)
+
+**Symptom:** the banned Google-Ads claim *"Using a quality compatible cartridge **does not
+void** your printer's warranty… a manufacturer **cannot refuse to honour**…"* was reported
+**fixed twice** (Jul 7, Jul 12) and was **still live** on `/genuine-vs-compatible` on Jul 13.
+The test suite was green each time.
+
+**Root cause — two independent blind spots, one shared shape:**
+1. `tests/google-ads-compliance-may2026.test.js` banned `/won['’]?t void/` but **not
+   `does not void`** — the phrase that was actually shipped.
+2. That same suite's `FILES_TO_SCAN` was a **hand-written allowlist of ~40 paths**, and
+   `html/genuine-vs-compatible.html` **was never on it**. The page had never once been scanned.
+3. `tests/reappeal-disclaimers-jul2026.test.js:98` had the *correct* assertion
+   (`doesNotMatch(/does not void your/i)`) but pointed it at **`js/product-detail-page.js`
+   only** — not at either HTML file that contained the phrase.
+
+A second, identical claim was also live in `html/index.html`'s FAQ. Nobody found it, because
+nothing was looking.
+
+**Fix (all three, or it comes back):**
+- `FILES_TO_SCAN` is now **auto-discovered** by walking `inkcartridges/**/*.html` (excluding
+  `html/admin/**`). **Never reintroduce an allowlist.** A new page is covered the moment it
+  exists, not the moment someone remembers to register it.
+- Banned phrases live in **one** place — `LegalConfig.BANNED_CLAIM_PATTERNS`
+  (`js/legal-config.js`) — consumed by both the test suite and the browser runtime guard, so
+  they cannot drift.
+- Patterns are **assertion-shaped** (`does not void`, `refuse to honou?r`, `cannot require you
+  to use`…), never a bare `warranty`/`void` — the admin invoice **"Void"** status and
+  `landing.js`'s `void content.offsetHeight` are legitimate and must not trip.
+
+**Gotcha:** `legal-config.js` now *contains* the forbidden phrases (as regex literals), so it
+matched its own sweep. `stripComments()` strips the `BANNED_CLAIM_PATTERNS:[…]` array literal
+before scanning.
+
+**Pinned by:** `tests/genuine-vs-compatible-warranty.test.js` — including §3 "the patterns
+actually catch the copy that shipped" and §3 "the patterns do NOT ban legitimate warranty
+language", so the guard can neither rot nor be over-broadened into deletion.
+
+---
+
+## ERR-064 — The retired 09 813 3882 landline was still printing on customer invoices (2026-07-14)
+
+**Symptom:** `tests/google-ads-compliance-may2026.test.js` was **already red at HEAD** —
+forbidden pattern `/09[ -]?813[ -]?3?882?/` matched `js/legal-config.js`. This is why nobody
+noticed ERR-063: **the compliance suite was never green, so its output was noise.**
+
+**Cause:** `LegalConfig.invoice.phone` was hardcoded to `09 813 3882` — the *retired* landline,
+listed in `FORBIDDEN` alongside the old `inkandtoner@windowslive.com` address (both long
+removed elsewhere). It printed on every customer invoice while the storefront advertised
+`027 474 0115`.
+
+**Fix:** `invoice.phone` → `027 474 0115` (matches `phoneDisplay`). Owner confirmed the landline
+is dead.
+
+**Lesson:** a permanently-red test is worse than no test — it launders real failures into
+expected noise. If the suite is red, that is the emergency, before anything else.
+
+---
+
+## ERR-065 — The legal-content CMS has never worked: `const Config` is not `window.Config` (2026-07-14)
+
+**Symptom:** 5 rows exist in Supabase `legal_content_overrides` (About hero/story/brands, Terms
+stock/returns). **None has ever rendered on the live site.** Admin edits vanish silently.
+
+**Cause:** `js/config.js` declares `const Config = {…}` at top level. A top-level `const` creates
+a *script global* but — unlike `var` — is **NOT a property of `window`**. `js/legal-page.js`
+`getSupabaseConfig()` tests `typeof window.Config !== 'undefined' && window.Config.SUPABASE_URL`
+→ always false → returns `null` → `fetchOverrides()` short-circuits to `Promise.resolve([])`.
+Bare `Config.SUPABASE_URL` works; `window.Config` is `undefined`. Verified in-browser.
+
+**DO NOT "just fix" this.** Making overrides apply would render SPA copy the **backend
+prerender does not serve** → bot HTML ≠ browser HTML on `/terms` + `/about` → that is
+**cloaking**, the exact charge being appealed. Repairing it requires backend prerender parity
+first. Deliberately left inert during the appeal window (owner's call, 2026-07-14). See
+`.claude/memory/todos.md`.
+
+**Mitigation already shipped:** `legal-page.js` now screens every override against
+`LegalConfig.BANNED_CLAIM_PATTERNS` before the `innerHTML` write, so whenever the CMS *is*
+repaired it cannot reintroduce a banned claim. Proven end-to-end in Chromium: a malicious
+override carrying the banned paragraph is rejected and the vetted static copy survives, while a
+benign edit still applies.
+
+**Wider lesson:** a `curl`-based compliance check cannot see SPA-injected copy. Any "prove it's
+fixed" grep must be run against the **rendered DOM**, not just the served HTML — AdsBot executes
+JavaScript.
+
+---
+
 ## ERR-061 — Cost of $0 vs cost UNKNOWN: `Number('')` is `0`, which reports a 100% margin (2026-07-12)
 
 **Symptom (designed out, not observed):** while adding an internal supplier-cost
