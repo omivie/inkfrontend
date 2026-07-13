@@ -146,22 +146,17 @@ test('§4 the standalone .shipping-info-bar still keeps its 12px/20px margin', (
 // §6  Cache-bust
 // ─────────────────────────────────────────────────────────────────────────────
 
-test('§6 shop.html pages.css link uses the current cache key', () => {
-    // The cache key rides forward with every CSS rollout — it was
-    // shipping-inline-may2026 when the inline bar shipped; the 4-line
-    // title clamp release bumped it; stock-enquiry-may2026 bumped it
-    // again; mobile-parity-may2026 bumped it for the mobile-parity audit;
-    // buybox-may2026 bumped it when the four-row PDP buy-box landed;
-    // loading-spinner-jun2026 bumped it for the loading-state rework;
-    // loyalty-points-jun2026 bumped it when the loyalty points styles landed;
-    // track-lookup-inline-jun2026 bumped it for the inline order-tracking rework.
-    // The guarantee is that shop.html requests the *current* pages.css
-    // build so deployed clients refetch.
-    assert.match(
-        SHOP_HTML,
-        /pages\.css\?v=track-lookup-inline-jun2026/,
-        'shop.html must cache-bust pages.css with the current key so deployed clients pull the new rules'
-    );
+// This test used to pin the literal token, and its comment had grown into an
+// eight-release changelog of everything that bumped it. A token whose purpose is to
+// change cannot be asserted to have stopped changing — the pin only ever means "this
+// test fails the next time anyone edits pages.css".
+//
+// Token consistency across pages, coverage, and freshness-on-commit are enforced for
+// EVERY asset in tests/asset-cache-tokens.test.js. Here we assert only what this
+// feature cares about: shop.html loads pages.css and it is cache-busted.
+test('§6 shop.html loads pages.css, cache-busted', () => {
+    assert.match(SHOP_HTML, /pages\.css\?v=[^"]+/,
+        'shop.html must cache-bust pages.css so deployed clients pull the new rules');
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

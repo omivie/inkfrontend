@@ -28,8 +28,8 @@ const apiJs = read(path.join(ADMIN, 'api.js'));
 const indexHtml = read(path.join(ROOT, 'inkcartridges', 'html', 'admin', 'index.html'));
 const fhJs = read(path.join(ADMIN, 'pages', 'financial-health.js'));
 
-test('the page module + three utils exist', () => {
-  for (const f of ['pages/expenses.js', 'utils/expense-categories.js', 'utils/expense-recurrence.js', 'utils/expense-math.js']) {
+test('the page module + four utils exist', () => {
+  for (const f of ['pages/expenses.js', 'utils/expense-categories.js', 'utils/expense-recurrence.js', 'utils/expense-math.js', 'utils/expense-presets.js']) {
     assert.ok(fs.existsSync(path.join(ADMIN, f)), `${f} must exist`);
   }
 });
@@ -90,6 +90,49 @@ test('no financial value is persisted to browser storage as the source of truth'
   const page = read(path.join(ADMIN, 'pages', 'expenses.js'));
   // The page may read window/session for UI prefs, but must never write expense
   // records there. Guard against the anti-pattern the brief explicitly forbids.
-  assert.doesNotMatch(page, /localStorage\.setItem\(['"`]?exp/i, 'expenses must not be stored in localStorage');
-  assert.doesNotMatch(page, /sessionStorage\.setItem\(['"`]?exp/i, 'expenses must not be stored in sessionStorage');
+  assert.doesNotMatch(page, /localStorage\.setItem/i, 'expenses must not be stored in localStorage');
+  assert.doesNotMatch(page, /sessionStorage\.setItem/i, 'expenses must not be stored in sessionStorage');
+});
+
+// ─── Presets (Jul 2026) ──────────────────────────────────────────────────────
+test('presets persist in the admin_ui_prefs DB table, not browser storage', () => {
+  const page = read(path.join(ADMIN, 'pages', 'expenses.js'));
+  // The durable write goes through AdminAPI (Supabase admin_ui_prefs, RLS-locked to
+  // the admin). The page itself must never reach for browser storage.
+  assert.match(page, /AdminAPI\.setUiPref\(\s*PRESET_KEY/, 'presets must be written via AdminAPI.setUiPref');
+  assert.match(page, /AdminAPI\.getUiPrefs\(\)/, 'presets must be read via AdminAPI.getUiPrefs');
+  assert.match(page, /from '\.\.\/utils\/expense-presets\.js'/, 'presets logic lives in the shared util');
+});
+
+test('a preset can never carry a date (cash-basis safety)', () => {
+  const util = read(path.join(ADMIN, 'utils', 'expense-presets.js'));
+  const fields = /export const PRESET_FIELDS = \[([\s\S]*?)\];/.exec(util);
+  assert.ok(fields, 'PRESET_FIELDS must exist');
+  for (const banned of ['expense_date', 'due_date', 'paid_date', 'recurrence_end']) {
+    assert.ok(!fields[1].includes(`'${banned}'`), `PRESET_FIELDS must not include ${banned} — re-dating an old bill would book money in the wrong month`);
+  }
+  // And they're explicitly scrubbed on the way out too.
+  assert.match(util, /export const PRESET_BLOCKED_FIELDS/);
+});
+
+// ─── Live backend wire-up (Jul 2026) ─────────────────────────────────────────
+test('pay/unpay send an explicit occurrence_date so the backend never guesses', () => {
+  assert.match(apiJs, /async pay\(id, \{ paid_date, amount, occurrence_date \}/, 'pay must accept occurrence_date');
+  assert.match(apiJs, /async unpay\(id, \{ occurrence_date \}/, 'unpay must accept occurrence_date');
+});
+
+test('the stale "backend pending" copy is gone (the API is live)', () => {
+  const page = read(path.join(ADMIN, 'pages', 'expenses.js'));
+  assert.doesNotMatch(page, /backend pending/i, 'the expense API shipped — this messaging is stale');
+  assert.doesNotMatch(page, /needs the expense API update/i);
+});
+
+test('a recurring series stores its FIRST occurrence as the start date (backend parity)', () => {
+  const page = read(path.join(ADMIN, 'pages', 'expenses.js'));
+  // The backend anchors stepping on expense_date and ignores dow/dom. Snapping the
+  // start to the first real fire is what keeps the two projections identical.
+  assert.match(page, /firstOccurrence/, 'collectPayload must snap the start date');
+  assert.match(page, /payload\.expense_date = first/, 'the snapped date must be what we persist');
+  const rec = read(path.join(ADMIN, 'utils', 'expense-recurrence.js'));
+  assert.match(rec, /export function firstOccurrence/);
 });

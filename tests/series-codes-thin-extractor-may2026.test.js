@@ -172,27 +172,31 @@ test('extractProductCodes still feeds chips through SeriesCodes.collapseChipList
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 4. Cache versioning — v8 active, legacy read-side fallback intact
+// 4. Cache versioning — v9 active, legacy read-side fallback intact
+//
+// Bumped v8 → v9 in Jul 2026 by the truncated-code repair (Canon bare-CL):
+// chip counts and the `products` payload both change shape, so a v8 cache would
+// still serve the split CL51/CL64 tiles. See tests/shop-canon-code-repair.test.js.
 // ─────────────────────────────────────────────────────────────────────────────
 
-test('chip cache write key is v8', () => {
+test('chip cache write key is v9', () => {
     // The loadProductCodes write-side cache key
-    assert.match(SHOP_CODE, /\$\{this\.state\.brand\}-\$\{categoryId\}-\$\{typeKey\}-codes-v8\b/,
-        'loadProductCodes must write the v8 cache key');
+    assert.match(SHOP_CODE, /\$\{this\.state\.brand\}-\$\{categoryId\}-\$\{typeKey\}-codes-v9\b/,
+        'loadProductCodes must write the v9 cache key');
 });
 
-test('chip cache read ladder is v8 → v7 → v6 → v5 → v4', () => {
-    // The two read-side fallback ladders in loadProducts must both list v8 first.
+test('chip cache read ladder leads with v9', () => {
+    // The two read-side fallback ladders in loadProducts must both list v9 first.
     // Match each ladder independently so failures point at the right block.
-    const ladder = /codesCacheKey8[\s\S]{0,200}codesCacheKey7[\s\S]{0,200}codesCacheKey6[\s\S]{0,200}codesCacheKey5[\s\S]{0,200}codesCacheKey4/;
+    const ladder = /codesCacheKey9[\s\S]{0,200}codesCacheKey7[\s\S]{0,200}codesCacheKey6[\s\S]{0,200}codesCacheKey5[\s\S]{0,200}codesCacheKey4/;
     const matches = SHOP_CODE.match(new RegExp(ladder, 'g')) || [];
     assert.ok(matches.length >= 2,
-        `loadProducts must reference the v8→v4 ladder at least twice (primary + post-loadProductCodes refresh); found ${matches.length}`);
+        `loadProducts must reference the v9→v4 ladder at least twice (primary + post-loadProductCodes refresh); found ${matches.length}`);
 });
 
-test('_codeAliasesFor consults v8 chip cache', () => {
+test('_codeAliasesFor consults v9 chip cache', () => {
     // The collapsed-code → aliases lookup that powers loadProducts fan-out
-    // must point at the new v8 key, otherwise click-through still hits v7.
-    assert.match(SHOP_CODE, /_codeAliasesFor\s*\([\s\S]{0,600}codes-v8-final/,
-        '_codeAliasesFor must read codes-v8-final');
+    // must point at the new v9 key, otherwise click-through still hits v8.
+    assert.match(SHOP_CODE, /_codeAliasesFor\s*\([\s\S]{0,600}codes-v9-final/,
+        '_codeAliasesFor must read codes-v9-final');
 });

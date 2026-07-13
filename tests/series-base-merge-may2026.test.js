@@ -269,16 +269,16 @@ test('collapseChipList survives malformed / missing-code input', () => {
 // 4. shop-page.js wiring — chip cache version + collapse application
 // ─────────────────────────────────────────────────────────────────────────────
 
-test('shop-page.js bumps chip cache to v8 (invalidates v7 phantom-combo chips)', () => {
-    // The active cache key written in loadProductCodes — bumped from v7 → v8
-    // when backend commit 5c99462 made /api/products series_codes-authoritative
-    // and the client-side fallback ladder was deleted. v8 invalidates any
-    // in-memory v7 entries that still carry phantoms like LC37LC57 / IB3757.
-    assert.match(SHOP_CODE, /codes-v8['`]/,
-        'shop-page.js must write the v8 cache key after collapsing chips');
-    // Read-side fallback chain: v8 first, then v7/v6/v5/v4 for backward compat
-    assert.match(SHOP_CODE, /codes-v8-final[\s\S]*codes-v7-final[\s\S]*codes-v6-final[\s\S]*codes-v5-final[\s\S]*codes-v4-final/,
-        'loadProducts must read v8 cache first, fall through to legacy versions');
+test('shop-page.js bumps the chip cache to v9 (invalidates split CL51/CL64 tiles)', () => {
+    // The active cache key written in loadProductCodes. v8 (May 2026) made
+    // /api/products series_codes-authoritative; v9 (Jul 2026) is the Canon
+    // truncated-code repair, which changes both chip counts and the `products`
+    // payload — a v8 entry would still serve the split CL51/CL64 tiles.
+    assert.match(SHOP_CODE, /codes-v9['`]/,
+        'shop-page.js must write the v9 cache key after collapsing chips');
+    // Read-side fallback chain: v9 first, then the legacy versions for backward compat
+    assert.match(SHOP_CODE, /codes-v9-final[\s\S]*codes-v7-final[\s\S]*codes-v6-final[\s\S]*codes-v5-final[\s\S]*codes-v4-final/,
+        'loadProducts must read the v9 cache first, fall through to legacy versions');
 });
 
 test('shop-page.js feeds the chip list through SeriesCodes.collapseChipList', () => {

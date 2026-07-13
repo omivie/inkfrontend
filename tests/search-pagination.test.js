@@ -176,18 +176,15 @@ test('search.css responsive collapse hides Prev/Next labels under 640px', () => 
 // HTML — the cache key is bumped so the new CSS lands for returning visitors
 // ─────────────────────────────────────────────────────────────────────────────
 
-test('shop.html bumps the search.css cache key so the pager CSS lands', () => {
+// Was: pin search.css to this feature's era token. The comment had grown into an
+// eight-release changelog of everything that bumped it since — which is the proof
+// that pinning a deliberately-moving value cannot work. See
+// tests/asset-cache-tokens.test.js for the durable invariant (one token per asset
+// sitewide, every asset versioned, staged changes must bump).
+test('shop.html loads search.css, cache-busted, and not on the original pager key', () => {
     const shopHtml = fs.readFileSync(path.join(ROOT, 'inkcartridges', 'html', 'shop.html'), 'utf8');
-    // The cache key rides forward with every CSS rollout. It was
-    // search-pagination-may2026 when the pager shipped; the 4-line title
-    // clamp release bumped it; the out-of-stock pill copy release
-    // (stock-enquiry-may2026) bumped it; the mobile-parity audit bumped it
-    // again (mobile-parity-may2026); the four-row buy-box release
-    // (buybox-may2026) bumped it; the loading-state rework (loading-spinner-jun2026)
-    // bumped it again; the loyalty points styles (loyalty-points-jun2026) bumped it
-    // again. The inline order-tracking rework (track-lookup-inline-jun2026)
-    // bumped it again. The guarantee here is simply that shop.html requests the
-    // *current* search.css build.
-    assert.match(shopHtml, /search\.css\?v=track-lookup-inline-jun2026/);
+    assert.match(shopHtml, /search\.css\?v=[^"]+/,
+        'shop.html must cache-bust search.css so deployed clients pull the pager CSS');
+    // Still worth asserting: it must have moved on from the token that predates the pager.
     assert.doesNotMatch(shopHtml, /search\.css\?v=search-pagination-may2026/);
 });

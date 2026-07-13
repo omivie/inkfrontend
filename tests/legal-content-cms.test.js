@@ -113,17 +113,39 @@ test('§2 legal-page.js detectPageSlug recognises every legal slug', () => {
 // §3 — Admin nav and router wire the legal-content route
 // ─────────────────────────────────────────────────────────────────────────────
 
-test('§3 admin app.js registers Legal Content in NAV_ITEMS as owner-only', () => {
-    assert.match(ADMIN_APP, /key:\s*'legal-content'/,                                     'NAV_ITEMS must include legal-content');
-    assert.match(ADMIN_APP, /key:\s*'legal-content'[\s\S]{0,120}ownerOnly:\s*true/,       'legal-content must be ownerOnly');
-    assert.match(ADMIN_APP, /key:\s*'legal-content'[\s\S]{0,120}label:\s*'Legal Content'/, 'legal-content label must be "Legal Content"');
+// The June 2026 IA overhaul folded Legal Content out of the top-level sidebar and into
+// the Settings hub (`#settings?tab=legal`), with a redirect so old bookmarks still land
+// on the right tab. These two tests used to assert the OLD shape — a top-level NAV_ITEMS
+// entry and a 'legal-content' entry in the ownerPages allowlist — and had been red ever
+// since, even though the security property they protect is fully intact.
+//
+// The property is what matters, not the shape: **Legal Content must be reachable only by
+// an owner.** Assert it against the architecture that actually ships, so this test can
+// fail for a real reason instead of failing forever for a stale one.
+test('§3 Legal Content is reachable only through the owner-gated Settings hub', () => {
+    // 1. Old #legal-content bookmarks route into the Settings hub's legal tab.
+    assert.match(ADMIN_APP, /'legal-content':\s*'settings\?tab=legal'/,
+        'app.js must redirect the legacy legal-content route to settings?tab=legal');
+
+    // 2. The Settings hub itself is owner-only in the sidebar…
+    assert.match(ADMIN_APP, /key:\s*'settings'[\s\S]{0,120}ownerOnly:\s*true/,
+        'the Settings NAV item must be ownerOnly');
+
+    // 3. …and the Settings panel registers Legal Content as one of its tabs.
+    const SETTINGS = READ(JS('admin/pages/settings.js'));
+    assert.match(SETTINGS, /id:\s*'legal'[\s\S]{0,80}module:\s*'\.\/legal-content\.js'/,
+        'settings.js must mount legal-content.js as its "legal" tab');
+    // Belt-and-braces: settings.js re-checks owner even if the hash leaks past the router.
+    assert.match(SETTINGS, /isOwner\(\)/,
+        'settings.js must re-assert the owner gate itself, not trust the router alone');
 });
 
-test('§3 admin router gates legal-content behind ownerPages allowlist', () => {
+test('§3 admin router gates the Settings hub behind the ownerPages allowlist', () => {
     const m = /ownerPages\s*=\s*\[([^\]]+)\]/.exec(ADMIN_APP);
     assert.ok(m, 'admin app.js must declare ownerPages array');
-    assert.ok(/'legal-content'/.test(m[1]),
-        `ownerPages must list 'legal-content', got: ${m[1]}`);
+    // Post-IA-overhaul the gated route is 'settings' — legal-content lives inside it.
+    assert.ok(/'settings'/.test(m[1]),
+        `ownerPages must list 'settings' (which hosts Legal Content), got: ${m[1]}`);
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -249,11 +271,15 @@ test('§4 dirty tracker shows when editor diverges from initial value', () => {
 // §5 — Cache-bust pin: every legal page loads the new legal-page.js version
 // ─────────────────────────────────────────────────────────────────────────────
 
-test('§5 every legal page loads legal-page.js with the legal-cms-may2026 cache-bust', () => {
+// Was pinned to `v=legal-cms-may2026`. The token is a content hash — it moves every
+// time legal-page.js is edited (most recently for the banned-claim CMS guard), so the
+// literal could only ever go stale. Sitewide token consistency + freshness live in
+// tests/asset-cache-tokens.test.js; here we assert the script is loaded and busted.
+test('§5 every legal page loads legal-page.js, cache-busted', () => {
     for (const p of LEGAL_PAGES) {
         const src = READ(HTML(p));
-        assert.match(src, /\/js\/legal-page\.js\?v=legal-cms-may2026/,
-            `${p} must load legal-page.js?v=legal-cms-may2026 (cache-bust for the override-fetch addition)`);
+        assert.match(src, /\/js\/legal-page\.js\?v=[^"]+/,
+            `${p} must load legal-page.js with a cache token`);
     }
 });
 

@@ -166,3 +166,97 @@ test('describeRecurrence produces readable summaries', () => {
   assert.match(sandbox.describeRecurrence({ recurrence: 'monthly', recurrence_day_of_month: 15 }), /Monthly · day 15/);
   assert.match(sandbox.describeRecurrence({ recurrence: 'custom', recurrence_interval_days: 45 }), /Every 45 days/);
 });
+
+// ─── firstOccurrence + the FE↔backend parity guarantee ───────────────────────
+//
+// The backend anchors every frequency on `expense_date` and does NOT re-anchor on
+// recurrence_day_of_week / _day_of_month (it stores them for the UI only). We DO
+// re-anchor, because that's what the form promises ("Monthly · day 20"). Left alone
+// the two projectors drift and a backend-materialised occurrence never lines up with
+// a projected one.
+//
+// The fix: SNAP the stored `expense_date` to firstOccurrence() on save. These tests
+// pin that the snap makes the two projections IDENTICAL — the whole reason we can
+// leave the backend's stepping alone.
+
+test('firstOccurrence resolves where a series really begins', () => {
+  // Typed Mon 6 Jul, but the rule says Wednesdays → first fire is Wed 8 Jul.
+  assert.equal(sandbox.firstOccurrence({ recurrence: 'weekly', recurrence_day_of_week: 3, expense_date: '2026-07-06' }), '2026-07-08');
+  // Typed 5 Jul, but billed on the 20th.
+  assert.equal(sandbox.firstOccurrence({ recurrence: 'monthly', recurrence_day_of_month: 20, expense_date: '2026-07-05' }), '2026-07-20');
+  // Month-end clamp applies to the first fire too.
+  assert.equal(sandbox.firstOccurrence({ recurrence: 'monthly', recurrence_day_of_month: 31, expense_date: '2026-02-05' }), '2026-02-28');
+  // Yearly pins the month, so the first fire can be months after the typed start.
+  assert.equal(sandbox.firstOccurrence({ recurrence: 'yearly', recurrence_month: 3, recurrence_day_of_month: 3, expense_date: '2025-11-20' }), '2026-03-03');
+  // Custom + one-off already anchor on the start date — nothing to move.
+  assert.equal(sandbox.firstOccurrence({ recurrence: 'custom', recurrence_interval_days: 45, expense_date: '2026-07-01' }), '2026-07-01');
+  assert.equal(sandbox.firstOccurrence({ recurrence: 'none', expense_date: '2026-07-01' }), '2026-07-01');
+  assert.equal(sandbox.firstOccurrence({ recurrence: 'monthly', expense_date: 'garbage' }), null);
+  assert.equal(sandbox.firstOccurrence(null), null);
+});
+
+/**
+ * Reproduces the BACKEND's stepping: anchor purely on expense_date, ignore the
+ * dow/dom fields entirely. If this ever stops matching our projector on a snapped
+ * template, the two systems have drifted and paid occurrences will land on dates the
+ * UI never showed.
+ */
+function backendFires(t, fromMs, toMs) {
+  const start = D(t.expense_date);
+  const out = [];
+  const kind = t.recurrence;
+  if (kind === 'none') { if (start >= fromMs && start <= toMs) out.push(sandbox.isoFromMs(start)); return out; }
+  if (kind === 'weekly' || kind === 'fortnightly' || kind === 'custom') {
+    const days = kind === 'weekly' ? 7 : kind === 'fortnightly' ? 14 : t.recurrence_interval_days;
+    for (let ms = start, i = 0; ms <= toMs && i < 5000; ms += days * 86400000, i++) {
+      if (ms >= fromMs) out.push(sandbox.isoFromMs(ms));
+    }
+    return out;
+  }
+  const mstep = kind === 'monthly' ? 1 : kind === 'quarterly' ? 3 : 12;
+  const sd = new Date(start);
+  const anchorDom = sd.getUTCDate();
+  let y = sd.getUTCFullYear(), m = sd.getUTCMonth();
+  for (let i = 0; i < 600; i++) {
+    const dim = new Date(Date.UTC(y, m + 1, 0)).getUTCDate();
+    const ms = Date.UTC(y, m, Math.min(anchorDom, dim));
+    if (ms > toMs) break;
+    if (ms >= start && ms >= fromMs) out.push(sandbox.isoFromMs(ms));
+    m += mstep; while (m > 11) { m -= 12; y++; }
+  }
+  return out;
+}
+
+test('PARITY: a snapped start makes our series identical to the backend stepping', () => {
+  const cases = [
+    ['weekly on Wed, typed Mon',      { recurrence: 'weekly', recurrence_day_of_week: 3, expense_date: '2026-07-06' }],
+    ['fortnightly on Fri, typed Mon', { recurrence: 'fortnightly', recurrence_day_of_week: 5, expense_date: '2026-07-06' }],
+    ['monthly day 20, typed the 5th', { recurrence: 'monthly', recurrence_day_of_month: 20, expense_date: '2026-07-05' }],
+    ['monthly day 31 (month-end)',    { recurrence: 'monthly', recurrence_day_of_month: 31, expense_date: '2026-01-05' }],
+    ['quarterly day 15',              { recurrence: 'quarterly', recurrence_day_of_month: 15, expense_date: '2026-02-02' }],
+    ['yearly Mar 3',                  { recurrence: 'yearly', recurrence_month: 3, recurrence_day_of_month: 3, expense_date: '2025-11-20' }],
+    ['yearly Feb 29 (leap)',          { recurrence: 'yearly', recurrence_month: 2, recurrence_day_of_month: 29, expense_date: '2024-01-01' }],
+    ['custom every 45 days',          { recurrence: 'custom', recurrence_interval_days: 45, expense_date: '2026-07-01' }],
+  ];
+  const from = D('2024-01-01'), to = D('2029-01-01');
+  for (const [label, t] of cases) {
+    const snapped = sandbox.firstOccurrence(t);
+    const t2 = { ...t, expense_date: snapped };
+    const ours = dates(sandbox.expandExpenseOccurrences(t2, from, to));
+    const theirs = backendFires(t2, from, to);
+    assert.ok(ours.length > 0, `${label}: expected occurrences`);
+    assert.deepEqual(ours, theirs, `${label}: FE and backend series must be identical after snapping`);
+  }
+});
+
+test('PARITY: without the snap the two projectors genuinely DO diverge (guards the fix)', () => {
+  // This is the bug the snap exists to prevent — if this ever stops diverging the
+  // backend has changed its anchoring and the snap can be revisited.
+  const t = { recurrence: 'weekly', recurrence_day_of_week: 3, expense_date: '2026-07-06' }; // Mon start, Wed rule
+  const from = D('2026-07-01'), to = D('2026-07-31');
+  const ours = dates(sandbox.expandExpenseOccurrences(t, from, to));
+  const theirs = backendFires(t, from, to);
+  assert.notDeepEqual(ours, theirs, 'un-snapped, FE (Wed) and backend (Mon) must differ');
+  assert.equal(ours[0], '2026-07-08');
+  assert.equal(theirs[0], '2026-07-06');
+});

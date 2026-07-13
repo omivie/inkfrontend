@@ -214,26 +214,26 @@ test('§5 LegalConfig.address.street is unchanged (37A Archibald Road)', () => {
 //        prior dropship disclosure cannot persist on a returning browser.
 // ─────────────────────────────────────────────────────────────────────────────
 
-test('§6 every footer-linked page loads footer.js with the current cache key', () => {
-    // The cache key rides forward with every footer.js change. retail-may2026
-    // shipped the retail-wording rewrite; mobile-parity-may2026 bumped it when
-    // the footer link columns became <details> accordions (S0.5);
-    // newsletter-feedback-jun2026 bumped it when the footer Subscribe form gained
-    // an inline aria-live confirmation (ERR-052); newsletter-copy-fix-jun2026
-    // bumped it again when the false "welcome code" promise was dropped from the
-    // footer copy and the success fallback. The retail wording itself is still
-    // asserted by the §1 content scan above regardless of the cache key —
-    // the key only guarantees deployed clients refetch.
+// The comment this test used to carry was a five-entry changelog of every release
+// that bumped the token — retail-may2026, then mobile-parity, then
+// newsletter-feedback, then newsletter-copy-fix… That list IS the argument against
+// pinning the literal: the token is a content hash whose whole job is to change, so
+// every pin is a bet that no one will ever touch footer.js again.
+//
+// The retail WORDING is what this file is about, and §1's content scan asserts it
+// regardless of the token. Token consistency + freshness across every asset is owned
+// by tests/asset-cache-tokens.test.js.
+test('§6 every footer-linked page loads footer.js, cache-busted', () => {
     for (const page of FOOTER_LINKED_PAGES) {
-        assert.match(SRC[page], /\/js\/footer\.js\?v=newsletter-copy-fix-jun2026/,
-            `${page}: must load footer.js with v=newsletter-copy-fix-jun2026 (bumped from newsletter-feedback-jun2026)`);
+        assert.match(SRC[page], /\/js\/footer\.js\?v=[^"]+/,
+            `${page}: must load footer.js with a cache token`);
     }
 });
 
-test('§6 every legal-binding page loads legal-config.js with v=retail-may2026', () => {
+test('§6 every legal-binding page loads legal-config.js, cache-busted', () => {
     for (const page of FOOTER_LINKED_PAGES) {
-        assert.match(SRC[page], /\/js\/legal-config\.js\?v=retail-may2026/,
-            `${page}: must load legal-config.js with v=retail-may2026`);
+        assert.match(SRC[page], /\/js\/legal-config\.js\?v=[^"]+/,
+            `${page}: must load legal-config.js with a cache token`);
     }
 });
 

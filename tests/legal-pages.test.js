@@ -426,9 +426,20 @@ test('§9 pages.css implements every styled hook used by the legal pages', () =>
         '.faq-item', '.faq-list',
         '.about-hero', '.about-values', '.about-value',
         '.legal-map', '.legal-map__frame',
-        '.footer-legal-nav',
     ];
     for (const h of hooks) {
         assert.ok(PAGES_CSS.indexOf(h) !== -1, `pages.css must declare ${h}`);
+    }
+});
+
+// `.footer-legal-nav` is a FOOTER hook, not a legal-page hook — it renders on
+// every page, not just /terms & co. It lives in layout.css beside every other
+// `.footer-*` rule. It was previously asserted against pages.css, which is why
+// restoring it there would have meant styling the footer from the wrong
+// stylesheet. Assert it where it actually belongs.
+test('§9 layout.css styles the footer legal nav + business-transparency line', () => {
+    const LAYOUT_CSS = fs.readFileSync(path.join(ROOT, 'inkcartridges', 'css', 'layout.css'), 'utf8');
+    for (const h of ['.footer-legal-nav', '.footer-legal-nav__sep', '.footer-legal-line']) {
+        assert.ok(LAYOUT_CSS.indexOf(h) !== -1, `layout.css must declare ${h}`);
     }
 });

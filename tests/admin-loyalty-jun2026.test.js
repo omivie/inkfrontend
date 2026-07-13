@@ -88,13 +88,23 @@ test('customers.js: imports the Modal component', () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Backend handoff doc
+// Endpoint contract
+//
+// This used to assert that `admin-loyalty-endpoints-jun2026.md` existed in the repo
+// root. That file was deliberately deleted (2026-05-11) along with every other backend
+// handoff doc: the repo is kept .md-free and `tests/no-ghost-files.test.js` actively
+// forbids those paths from reappearing. So the test was demanding a file the repo's own
+// policy bans — permanently red, and unfixable without breaking the other test.
+//
+// The durable home for the contract is the code that calls it. Assert it there.
 // ─────────────────────────────────────────────────────────────────────────────
 
-test('handoff doc exists and documents both endpoints + error codes', () => {
-  const doc = REPO('admin-loyalty-endpoints-jun2026.md');
-  assert.match(doc, /GET \/api\/admin\/customers\/:id\/loyalty/, 'documents the read endpoint');
-  assert.match(doc, /POST \/api\/admin\/customers\/:id\/loyalty\/adjust/, 'documents the adjust endpoint');
-  assert.match(doc, /INSUFFICIENT_BALANCE/, 'documents the insufficient-balance error');
-  assert.match(doc, /owner/i, 'notes the owner gate on adjust');
+test('the loyalty endpoint contract is wired in admin/api.js', () => {
+  const API_SRC = JS('admin/api.js');
+  assert.match(API_SRC, /\/api\/admin\/customers\/\$\{customerId\}\/loyalty`/,
+    'the read endpoint GET /api/admin/customers/:id/loyalty must be called');
+  assert.match(API_SRC, /\/api\/admin\/customers\/\$\{customerId\}\/loyalty\/adjust`/,
+    'the adjust endpoint POST /api/admin/customers/:id/loyalty/adjust must be called');
+  assert.match(API_SRC, /\{\s*points,\s*reason,\s*type\s*\}/,
+    'adjust must send { points, reason, type }');
 });

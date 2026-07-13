@@ -163,10 +163,15 @@ test('both mounts drop the "we\'ll email you" copy and use the inline button lab
   }
 });
 
-test('both mounts cache-bust the controller + pages.css to the inline-lookup token', () => {
+// Was pinned to `v=track-lookup-inline-jun2026`. Cache tokens are content hashes that
+// move with every edit, so an era literal guarantees this test breaks on the next
+// unrelated CSS release. The real invariants — one token per asset sitewide, every
+// asset versioned, staged changes bumped — are in tests/asset-cache-tokens.test.js.
+// What this feature needs is simply that BOTH mounts load the controller, cache-busted.
+test('both mounts load the controller + pages.css, cache-busted', () => {
   for (const [name, html] of [['public', PUB_HTML], ['account', ACC_HTML]]) {
-    assert.match(html, /track-order-page\.js\?v=track-lookup-inline-jun2026/, `${name}: controller must be cache-busted`);
-    assert.match(html, /pages\.css\?v=track-lookup-inline-jun2026/, `${name}: pages.css must be cache-busted`);
+    assert.match(html, /track-order-page\.js\?v=[^"]+/, `${name}: controller must be cache-busted`);
+    assert.match(html, /pages\.css\?v=[^"]+/, `${name}: pages.css must be cache-busted`);
   }
 });
 

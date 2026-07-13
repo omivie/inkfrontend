@@ -388,13 +388,21 @@ test('§11 every non-admin html page carries hreflang en-NZ + x-default', () => 
 // §12 — cache tokens
 // ─────────────────────────────────────────────────────────────────────────────
 
-test('§12 touched JS ships under the ia-reorg-jul2026 cache token', () => {
+// §12 previously pinned every touched file to `?v=ia-reorg-jul2026`. That token has
+// since been bumped by later features (as it must be — it is a content hash), so the
+// pin could only ever go stale. Asserting that a cache-busting token has STOPPED
+// changing is asserting the opposite of what it is for.
+//
+// What actually matters — one token per asset sitewide, every asset versioned, and a
+// changed file's token bumped before it ships — is enforced for ALL assets, not just
+// this feature's, by tests/asset-cache-tokens.test.js. Here we only assert the files
+// are referenced and cache-busted at all.
+test('§12 touched JS is loaded and cache-busted on the pages that use it', () => {
     const home = read('html', 'index.html');
     for (const f of ['mega-nav.js', 'utils.js', 'api.js']) {
-        assert.ok(home.includes(`${f}?v=ia-reorg-jul2026`),
-            `html/index.html must reference ${f}?v=ia-reorg-jul2026`);
+        assert.match(home, new RegExp(`${f.replace('.', '\\.')}\\?v=[^"]+`),
+            `html/index.html must load ${f} with a cache token`);
     }
-    const shop = read('html', 'shop.html');
-    assert.ok(shop.includes('shop-page.js?v=ia-reorg-jul2026'));
-    assert.ok(PDP_HTML.includes('product-detail-page.js?v=ia-reorg-jul2026'));
+    assert.match(read('html', 'shop.html'), /shop-page\.js\?v=[^"]+/);
+    assert.match(PDP_HTML, /product-detail-page\.js\?v=[^"]+/);
 });

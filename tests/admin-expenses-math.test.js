@@ -77,29 +77,61 @@ test('categoryBreakdown (operatingOnly) excludes order-linked categories', () =>
     { category: 'inventory', kind: 'order_linked', amount: 500 },
     { category: 'software', kind: 'operating', amount: 20 },
   ];
-  const bd = plain(sandbox.categoryBreakdown(list, { operatingOnly: true }));
+  const bd = plain(sandbox.categoryBreakdown(list, { operatingOnly: true, paidOnly: false, netted: false }));
   assert.deepEqual(bd, [{ key: 'software', total: 50 }]);
 });
 
-test('bucketExpenses excludes order-linked and buckets by cash date', () => {
+// ─── CASH BASIS (Jul 2026) ───────────────────────────────────────────────────
+// The backend's /pnl only books an expense once it's PAID, on its paid_date. These
+// pin that we do the same, so the Expenses page and Finance can never disagree.
+
+test('cashMs: an UNPAID expense has no cash date (never falls back to incurred)', () => {
+  assert.ok(Number.isNaN(sandbox.cashMs({ expense_date: '2026-07-05' })), 'unpaid → NaN');
+  assert.ok(Number.isNaN(sandbox.cashMs({ status: 'overdue', expense_date: '2026-07-05', due_date: '2026-07-06' })));
+  assert.equal(sandbox.cashMs({ status: 'paid', paid_date: '2026-07-09', expense_date: '2026-07-05' }), Date.UTC(2026, 6, 9));
+});
+
+test('categoryBreakdown is cash-basis by default: unpaid excluded, GST netted', () => {
   const list = [
-    { kind: 'operating', amount: 10, expense_date: '2026-07-05', paid: true, paid_date: '2026-07-05' },
-    { kind: 'order_linked', amount: 999, expense_date: '2026-07-05' }, // must not appear
-    { kind: 'operating', amount: 5, expense_date: '2026-07-20' },
+    { category: 'software', kind: 'operating', amount: 115, gst_claimable: true, status: 'paid', paid_date: '2026-07-05' },
+    { category: 'rent', kind: 'operating', amount: 999, gst_claimable: false, status: 'overdue' }, // unpaid → out
+    { category: 'inventory', kind: 'order_linked', amount: 500, status: 'paid', paid_date: '2026-07-05' }, // order-linked → out
   ];
-  const b = sandbox.bucketExpenses(list, Date.UTC(2026, 6, 1), Date.UTC(2026, 6, 31), 'month');
-  assert.equal(b.length, 1);
-  approx(b[0].total, 15);
+  const bd = plain(sandbox.categoryBreakdown(list));
+  assert.equal(bd.length, 1);
+  assert.equal(bd[0].key, 'software');
+  approx(bd[0].total, 100); // 115 GST-netted
+});
+
+test('bucketExpenses buckets on PAID DATE, excludes unpaid + order-linked, nets GST', () => {
+  const list = [
+    // Incurred in June but PAID in July → must land in July, not June.
+    { kind: 'operating', amount: 115, gst_claimable: true, expense_date: '2026-06-28', status: 'paid', paid_date: '2026-07-05' },
+    { kind: 'order_linked', amount: 999, status: 'paid', paid_date: '2026-07-05' },   // never
+    { kind: 'operating', amount: 500, status: 'overdue', expense_date: '2026-07-02' }, // unpaid → never
+  ];
+  const july = sandbox.bucketExpenses(list, Date.UTC(2026, 6, 1), Date.UTC(2026, 6, 31), 'month');
+  assert.equal(july.length, 1);
+  assert.equal(july[0].key, '2026-07');
+  approx(july[0].total, 100); // GST-netted
+
+  const june = sandbox.bucketExpenses(list, Date.UTC(2026, 5, 1), Date.UTC(2026, 5, 30), 'month');
+  assert.equal(june.length, 0, 'the June-incurred expense must NOT appear in June — it was paid in July');
 });
 
 // ─── the full KPI bundle ─────────────────────────────────────────────────────
-test('computeExpenseKpis: order-linked excluded, GST netted, statuses correct', () => {
+test('computeExpenseKpis (cash basis): only PAID counts, on paid_date, GST-netted', () => {
   const list = [
-    { category: 'software', kind: 'operating', amount: 115, gst_claimable: true, expense_date: '2026-07-05', due_date: '2026-07-05', status: 'paid', paid: true },
+    // PAID in July, claimable → 115 gross, 100 net. This is the backend's worked example.
+    { category: 'software', kind: 'operating', amount: 115, gst_claimable: true, expense_date: '2026-07-05', due_date: '2026-07-05', status: 'paid', paid: true, paid_date: '2026-07-05' },
+    // UNPAID → excluded from spend, but drives overdue/due/upcoming.
     { category: 'rent', kind: 'operating', amount: 200, gst_claimable: false, expense_date: '2026-07-02', due_date: '2026-07-04', status: 'overdue' },
     { category: 'marketing', kind: 'operating', amount: 50, gst_claimable: false, expense_date: '2026-07-11', due_date: '2026-07-11', status: 'due' },
-    { category: 'software', kind: 'operating', amount: 80, gst_claimable: false, expense_date: '2026-06-15', due_date: '2026-06-15', status: 'paid', paid: true },
-    { category: 'inventory', kind: 'order_linked', amount: 500, gst_claimable: true, expense_date: '2026-07-08', status: 'paid', paid: true },
+    // PAID in June → last month.
+    { category: 'software', kind: 'operating', amount: 80, gst_claimable: false, expense_date: '2026-06-15', due_date: '2026-06-15', status: 'paid', paid: true, paid_date: '2026-06-15' },
+    // Order-linked → reported separately, NEVER in the P&L figure.
+    { category: 'inventory', kind: 'order_linked', amount: 500, gst_claimable: true, expense_date: '2026-07-08', status: 'paid', paid: true, paid_date: '2026-07-08' },
+    // Projected + unpaid → upcoming only.
     { category: 'utilities', kind: 'operating', amount: 90, gst_claimable: false, expense_date: '2026-07-21', due_date: '2026-07-21', status: 'scheduled', projected: true },
   ];
   const today = Date.UTC(2026, 6, 11);
@@ -111,25 +143,42 @@ test('computeExpenseKpis: order-linked excluded, GST netted, statuses correct', 
     recurringTemplates: [{ recurrence: 'monthly', amount: 100, series_state: 'active' }],
   });
 
-  approx(k.thisMonth, 455);        // operating in July: 115+200+50+90 (inventory 500 EXCLUDED)
-  approx(k.lastMonth, 80);         // June software
-  approx(k.pctChange, 468.75);
+  // Backend's stated worked example: a $115 claimable operating expense →
+  // operating_expenses = 100.00; a $500 inventory expense is excluded.
+  approx(k.thisMonth, 100);        // ← === backend summary.operating_paid / pnl.operating_expenses
+  approx(k.thisMonthGross, 115);   // what actually left the bank
+  approx(k.lastMonth, 80);         // paid in June
+  approx(k.pctChange, 25);         // (100 − 80) / 80
+
+  // Unpaid work is reported, but NEVER inside a spend total.
   approx(k.overdue, 200);
-  approx(k.unpaid, 250);           // overdue 200 + due 50
-  approx(k.upcoming30, 140);       // due today 50 + scheduled 07-21 90 (overdue 07-04 out of window)
-  approx(k.operating, 535);        // all operating amounts
-  approx(k.operatingPnl, 520);     // 100 (115 GST-netted) + 200 + 50 + 80 + 90
-  approx(k.gstReclaim, 15);        // only the claimable software line
-  approx(k.orderLinked, 500);      // reported separately, never in operating
-  approx(k.expenseToRevenuePct, 45.5);
+  approx(k.due, 50);
+  approx(k.unpaid, 250);
+  approx(k.upcoming30, 140);       // due 07-11 (50) + due 07-21 (90); overdue 07-04 is before today
+
+  approx(k.gstReclaim, 15);        // 3/23 of the paid claimable line
+  approx(k.orderLinked, 500);      // separate, excluded from thisMonth
+  approx(k.expenseToRevenuePct, 10); // 100 / 1000
   approx(k.recurringMonthly, 100);
-  assert.equal(k.largestCategory.key, 'rent');
-  approx(k.largestCategory.total, 200);
+  assert.equal(k.largestCategory.key, 'software', 'largest category is over PAID spend');
+  approx(k.largestCategory.total, 100);
+});
+
+test('an expense incurred last month but paid this month lands in THIS month', () => {
+  const k = sandbox.computeExpenseKpis([
+    { category: 'rent', kind: 'operating', amount: 300, gst_claimable: false, expense_date: '2026-06-28', status: 'paid', paid: true, paid_date: '2026-07-03' },
+  ], {
+    monthStart: Date.UTC(2026, 6, 1), monthEnd: Date.UTC(2026, 6, 31),
+    prevStart: Date.UTC(2026, 5, 1), prevEnd: Date.UTC(2026, 5, 30),
+    next30Start: Date.UTC(2026, 6, 11), next30End: Date.UTC(2026, 6, 11) + 30 * 86400000,
+  });
+  approx(k.thisMonth, 300, 0.01);
+  approx(k.lastMonth, 0, 0.01);
 });
 
 test('computeExpenseKpis: no prior-month baseline → pctChange null, empty safe', () => {
   const k = sandbox.computeExpenseKpis([
-    { category: 'software', kind: 'operating', amount: 60, gst_claimable: false, expense_date: '2026-07-05', status: 'paid', paid: true },
+    { category: 'software', kind: 'operating', amount: 60, gst_claimable: false, expense_date: '2026-07-05', status: 'paid', paid: true, paid_date: '2026-07-05' },
   ], {
     monthStart: Date.UTC(2026, 6, 1), monthEnd: Date.UTC(2026, 6, 31),
     prevStart: Date.UTC(2026, 5, 1), prevEnd: Date.UTC(2026, 5, 30),
@@ -139,5 +188,5 @@ test('computeExpenseKpis: no prior-month baseline → pctChange null, empty safe
   assert.equal(k.expenseToRevenuePct, null); // no revenue provided
   const empty = sandbox.computeExpenseKpis([], {});
   approx(empty.thisMonth, 0);
-  approx(empty.operating, 0);
+  approx(empty.orderLinked, 0);
 });

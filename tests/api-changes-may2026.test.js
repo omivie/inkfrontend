@@ -210,17 +210,17 @@ test('§2 Card renderers expose data-product-source', () => {
 // §4 Series chip cache — v6 invalidates stale Epson chip counts
 // ─────────────────────────────────────────────────────────────────────────────
 
-test('§4 series chip-grid cache key is bumped to v8 (series_codes-only extractor)', () => {
-    // v6 was the May 2026 Epson chip change; v7 the yield-collapse; v8 (May 2026
-    // series-codes-thin-extractor, backend commit 5c99462) makes
-    // /api/products series_codes-authoritative and lets us delete the
-    // client-side fallback ladder. The active write key is v8; the read
-    // ladder falls through v8→v7→v6→v5→v4 so in-flight SPA sessions don't
-    // lose pre-warmed entries when this code first deploys.
-    assert.match(SHOP_CODE, /codes-v8/,
-        'shop-page must use codes-v8 cache key (May 2026 series-codes-thin-extractor)');
-    assert.match(SHOP_CODE, /codesCacheKey8.*codesCacheKey7.*codesCacheKey6.*codesCacheKey5.*codesCacheKey4/,
-        'lookup loop must try v8 before v7 before v6 before v5 before v4');
+test('§4 series chip-grid cache key is bumped to v9 (truncated-code repair)', () => {
+    // v6 was the May 2026 Epson chip change; v7 the yield-collapse; v8 the
+    // series-codes-thin-extractor; v9 (Jul 2026) the Canon truncated-code repair,
+    // which re-homes CL511/CL513 onto their pair chips and so changes both chip
+    // counts and the `products` payload. The active write key is v9; the read
+    // ladder still falls through to the legacy keys so in-flight SPA sessions
+    // don't lose pre-warmed entries when this code first deploys.
+    assert.match(SHOP_CODE, /codes-v9/,
+        'shop-page must use the codes-v9 cache key (Jul 2026 truncated-code repair)');
+    assert.match(SHOP_CODE, /codesCacheKey9.*codesCacheKey7.*codesCacheKey6.*codesCacheKey5.*codesCacheKey4/,
+        'lookup loop must try v9 before the legacy keys');
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

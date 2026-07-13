@@ -169,9 +169,7 @@ test('no .product-card / .product-box / .smart-ac selector still clamps below 4 
 // product-card skeletons (pages.css) and normalised all three card CSS files.
 // track-lookup-inline-jun2026 superseded it when the inline order-tracking
 // rework added the .tracking-detail/.tracking-note display rules to pages.css.
-const CARD_CSS_TOKEN = 'track-lookup-inline-jun2026';
-
-test(`all HTML pages cache-bust the three card CSS files to v=${CARD_CSS_TOKEN}`, () => {
+test('all HTML pages agree on ONE cache token for the three card CSS files', () => {
     const htmlRoot = path.join(ROOT, 'inkcartridges');
     const htmlFiles = [];
     (function walk(dir) {
@@ -186,18 +184,33 @@ test(`all HTML pages cache-bust the three card CSS files to v=${CARD_CSS_TOKEN}`
         }
     })(htmlRoot);
 
-    const stale = [];
+    // The real invariant is that the three card CSS files resolve to ONE token across
+    // all pages — not that the token still equals this feature's era literal
+    // (CARD_CSS_TOKEN), which every later CSS release necessarily invalidates.
+    // Derive the expected token from the pages themselves: whatever the majority use,
+    // every page must agree with. (Sitewide, for every asset: asset-cache-tokens §1.)
+    const seen = {};
     for (const file of htmlFiles) {
         const html = fs.readFileSync(file, 'utf8');
         for (const cssName of ['components.css', 'pages.css', 'search.css']) {
             const re = new RegExp(`${cssName}\\?v=([a-zA-Z0-9-]+)`, 'g');
             let m;
             while ((m = re.exec(html)) !== null) {
-                if (m[1] !== CARD_CSS_TOKEN) {
-                    stale.push(`${path.relative(ROOT, file)} → ${cssName}?v=${m[1]}`);
-                }
+                (seen[cssName] ||= {});
+                (seen[cssName][m[1]] ||= []).push(path.relative(ROOT, file));
             }
         }
     }
-    assert.deepEqual(stale, [], `stale CSS cache-bust tokens:\n${stale.join('\n')}`);
+
+    const stale = [];
+    for (const [cssName, byTok] of Object.entries(seen)) {
+        const toks = Object.entries(byTok).sort((a, b) => b[1].length - a[1].length);
+        const [canonical] = toks[0];
+        for (const [tok, files] of toks.slice(1)) {
+            for (const f of files) stale.push(`${f} → ${cssName}?v=${tok} (rest of the site is on v=${canonical})`);
+        }
+    }
+    assert.deepEqual(stale, [],
+        `These pages disagree with the rest of the site on a CSS cache token — someone bumped\n`
+        + `some references and missed these, so they will serve stale CSS:\n${stale.join('\n')}`);
 });

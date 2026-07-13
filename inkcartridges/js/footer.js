@@ -392,8 +392,41 @@
 
         <div class="footer-bottom">
             <div class="container">
+                <!-- Single-line legal nav: an ads reviewer scans the footer before
+                     they open any policy page, so every compliance surface must be
+                     reachable in one glance. Dropped during the 2026-07-02 IA reorg
+                     and restored 2026-07-14 — do not remove again. -->
+                <nav class="footer-legal-nav" aria-label="Policies and information">
+                    <ul>
+                        <li><a href="/terms">Terms of Service</a></li>
+                        <li class="footer-legal-nav__sep" aria-hidden="true">&middot;</li>
+                        <li><a href="/privacy">Privacy Policy</a></li>
+                        <li class="footer-legal-nav__sep" aria-hidden="true">&middot;</li>
+                        <li><a href="/returns">Refunds &amp; Returns</a></li>
+                        <li class="footer-legal-nav__sep" aria-hidden="true">&middot;</li>
+                        <li><a href="/shipping">Shipping &amp; Delivery</a></li>
+                        <li class="footer-legal-nav__sep" aria-hidden="true">&middot;</li>
+                        <li><a href="/genuine-vs-compatible">Genuine vs Compatible</a></li>
+                        <li class="footer-legal-nav__sep" aria-hidden="true">&middot;</li>
+                        <li><a href="/about">About Us</a></li>
+                        <li class="footer-legal-nav__sep" aria-hidden="true">&middot;</li>
+                        <li><a href="/faq">FAQ</a></li>
+                        <li class="footer-legal-nav__sep" aria-hidden="true">&middot;</li>
+                        <li><a href="/contact">Contact</a></li>
+                    </ul>
+                </nav>
                 <p class="footer-copyright" data-legal-bind="copyright">
                     ${TRUST.copyright}
+                </p>
+                <!-- Google Ads "Business Transparency": the trading name appears
+                     prominently in this footer, so the legal entity + NZBN + GST must
+                     appear with it. legal-config.js disambiguationLine() is the single
+                     source of truth and mirrors backend trustSignals.js — a drift here
+                     reads as cloaking. This line was silently lost in the IA reorg and
+                     was missing from the rendered footer sitewide until 2026-07-14. -->
+                <p class="footer-legal-line">
+                    <span data-legal-bind="disambiguation">${TRUST.disambig}</span>
+                    Prices in NZD, GST inclusive. No card surcharges.
                 </p>
                 <div class="footer-payment">
                     <span class="footer-payment__label">We accept:</span>

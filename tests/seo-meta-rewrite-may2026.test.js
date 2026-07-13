@@ -590,8 +590,12 @@ const RIBBONS_CODE = stripComments(fs.readFileSync(RIBBONS_JS_PATH, 'utf8'));
 const SEO_CODE     = stripComments(SEO_SRC);
 
 test('§13 seo-meta.js is loaded on the home, shop and ribbons pages', () => {
+    // Assert the script is LOADED and cache-busted — not that its token still equals
+    // this feature's era literal. The token rides forward with every seo-meta.js edit,
+    // so pinning the literal here just guarantees this test breaks on the next bump.
+    // Token correctness (consistency + freshness) is owned by tests/asset-cache-tokens.test.js.
     for (const [name, html] of [['index', INDEX_HTML], ['shop', SHOP_HTML], ['ribbons', RIBBONS_HTML]]) {
-        assert.match(html, /<script[^>]+src="\/js\/seo-meta\.js\?v=seo-meta-rewrite-may2026"/, `${name} must load seo-meta.js`);
+        assert.match(html, /<script[^>]+src="\/js\/seo-meta\.js\?v=[^"]+"/, `${name} must load seo-meta.js (cache-busted)`);
     }
 });
 test('§13 shop-page.updateSEO delegates to SeoMeta.render with brand/printer hints', () => {

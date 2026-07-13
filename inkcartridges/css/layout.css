@@ -1454,9 +1454,55 @@
     gap: var(--spacing-md);
 }
 
+/* Single-line legal nav — every compliance surface reachable in one glance,
+   above the copyright row. Its own full-width row so it never competes with
+   the payment cards. */
+.footer-legal-nav {
+    flex-basis: 100%;
+    width: 100%;
+}
+
+.footer-legal-nav ul {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: center;
+    gap: var(--spacing-xs);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.footer-legal-nav a {
+    color: rgba(255, 255, 255, 0.55);
+    font-size: var(--font-size-xs);
+    text-decoration: none;
+}
+
+.footer-legal-nav a:hover,
+.footer-legal-nav a:focus-visible {
+    color: #FFFFFF;
+    text-decoration: underline;
+}
+
+.footer-legal-nav__sep {
+    color: rgba(255, 255, 255, 0.25);
+    font-size: var(--font-size-xs);
+}
+
 .footer-copyright {
     color: rgba(255, 255, 255, 0.4);
     font-size: var(--font-size-xs);
+}
+
+/* Google Ads "Business Transparency" — legal entity + NZBN + GST, shown wherever
+   the trading name appears prominently. Full-width so it can't be truncated. */
+.footer-legal-line {
+    flex-basis: 100%;
+    width: 100%;
+    color: rgba(255, 255, 255, 0.4);
+    font-size: var(--font-size-xs);
+    line-height: 1.5;
 }
 
 /* Trademark / Consumer Guarantees Act disclaimer (Google Ads re-appeal, Jul 2026).
