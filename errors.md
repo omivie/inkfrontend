@@ -4,6 +4,72 @@ Log every error encountered here. Before editing a file, scan for known issues. 
 
 ---
 
+## ERR-066 — The footer's Google-Ads "Business Transparency" line was silently dropped (2026-07-14)
+
+**Symptom:** the rendered footer, sitewide, was missing the legal-entity line —
+*"InkCartridges.co.nz is operated by Office Consumables Ltd (NZBN 9429033934204, GST
+94-509-459)"* — plus the single-line legal nav and the "No card surcharges" line.
+`legal-config.js` itself documents that sentence as **required by Google Ads "Business
+Transparency", surfaced on every page the trading name appears prominently.**
+
+**Cause:** the 2026-07-02 IA reorg rebuilt `footer.js` and dropped `.footer-legal-nav`,
+the disambiguation line, and the surcharge line. `TRUST.disambig` was still *computed* at
+`footer.js:33` and never rendered. `.footer-legal-nav` was deleted from the CSS entirely.
+
+**Why nobody caught it:** three tests DID pin these surfaces
+(`legal-pages` §2 ×2, `google-ads-compliance` "footer.js renders the disambiguation line
+element") — and all three had been **red since the reorg**, indistinguishable from the 16
+other red tests. Confirmed live in Chromium *before* the fix: `hasDisambiguation: false`.
+The static `<noscript>` footer still carried the line, so a `curl` looked fine — only a
+JS-rendering browser (i.e. AdsBot) saw it missing.
+
+**Fix:** restored all three in `js/footer.js` (`.footer-legal-nav`, `.footer-legal-line`
+with `data-legal-bind="disambiguation"`, "No card surcharges") + `css/layout.css`.
+Verified rendered on live production under an AdsBot UA.
+
+**Lesson:** "verified rendered on Jul 12" checked the trademark disclaimer and stopped.
+When auditing compliance surfaces, enumerate them from `legal-config.js` — don't spot-check.
+
+---
+
+## ERR-067 — Pinning a cache-busting token to a literal makes a test that can only ever break (2026-07-14)
+
+**Symptom:** 19 tests red at HEAD. Nine of them were cache-token pins, each asserting a
+shared token still equalled *its own release's literal*:
+
+    retail-wording      →  footer.js must be v=retail-may2026
+    newsletter-jun2026  →  footer.js must be v=newsletter-copy-fix-jun2026
+    ia-reorg-jul2026    →  footer.js must be v=ia-reorg-jul2026
+
+**Cause:** the token is `md5(file contents)[:8]` — a value whose entire purpose is to
+change. Pinning it asserts it has *stopped* changing. Every new feature that touches the
+file invalidates every older pin, so they are mutually contradictory and permanently red.
+Their comments had degenerated into changelogs ("…then stock-enquiry bumped it; then
+mobile-parity bumped it; then buybox bumped it…") — the code was documenting its own
+unmaintainability.
+
+**Fix — `tests/asset-cache-tokens.test.js`,** asserting what actually protects users:
+1. **Consistency** — an asset resolves to ONE token across every page. *This is the real
+   bug*: it immediately caught `admin.css` bumped on `admin/index.html` while
+   `customers/orders/products.html` were left behind, i.e. 3 of 4 admin pages serving
+   stale CSS. No era-literal ever caught that.
+2. **Coverage** — every local js/css ref is versioned at all.
+3. **Freshness** — a **staged** asset change must also bump its token. Caught this very
+   branch shipping `legal-page.js` (the new CMS guard) without a bump — it would have been
+   invisible to every returning visitor. *Unstaged* edits are ignored on purpose: nagging
+   about work-in-progress is what makes a suite permanently red, and that numbness is the
+   disease (ERR-063), not the cure.
+
+**Bump recipe:** `md5(content)[:8]` — e.g.
+`python3 -c "import hashlib;print(hashlib.md5(open('inkcartridges/js/footer.js','rb').read()).hexdigest()[:8])"`
+then update every `?v=` for that asset.
+
+**Lesson:** a test that cannot be green is worse than no test. It launders real failures
+(ERR-066 hid in that noise for 12 days) into expected background. If the suite is red,
+that is the emergency.
+
+---
+
 ## ERR-063 — A compliance guard that scans a hand-maintained file list is not a guard (2026-07-14)
 
 **Symptom:** the banned Google-Ads claim *"Using a quality compatible cartridge **does not
