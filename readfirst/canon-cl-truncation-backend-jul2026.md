@@ -1,8 +1,23 @@
 # Backend: `series_codes` extractor truncates Canon's 3-digit `CL` codes
 
-**Status:** open (backend) · **Raised:** 2026-07-14 · **Frontend:** mitigated, no coordination needed to deploy
-**Severity:** customer-visible — 4 product-code chips on `/shop` ship only half their products, and 4 more chips merge unrelated series.
+**Status:** ✅ **RESOLVED (backend) — verified live 2026-07-14** · **Raised:** 2026-07-14
+**Severity (was):** customer-visible — 4 product-code chips on `/shop` shipped only half their products, and 4 more merged unrelated series.
 **Storefront ticket:** ERR-061
+
+> **Verification (live, 2026-07-14, after the backend fix):**
+> ```bash
+> B=https://ink-backend-zaeq.onrender.com/api
+> curl -sG "$B/shop" -d brand=canon -d category=ink --data-urlencode "code=PG510/CL511"
+> #   → 4 products: CCL511CLR ["CL511"], GCL511 ["CL511"], GPG510BK ["PG510"], CPG510BK ["PG510"]
+> ```
+> `series_codes` now yields the full 3-digit `CL511` instead of the truncated `CL51`; the pair chip
+> delivers **both** halves; and the spurious truncated chips (`CL51`, `CL64`, `CL58`, `CL66`) are gone.
+>
+> **Frontend:** the `_finalizeShopData` repair in `js/api.js` was built to be **self-disabling** — it
+> no-ops once the backend emits untruncated codes, so no FE change is required. It can be deleted as
+> housekeeping whenever convenient, but it is inert and harmless as-is.
+>
+> Everything below is retained as the historical record of the defect.
 
 ---
 
