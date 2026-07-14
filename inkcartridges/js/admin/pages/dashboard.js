@@ -16,12 +16,29 @@
  */
 import { AdminAuth, FilterState, AdminAPI, esc } from '../app.js';
 import { Charts } from '../components/charts.js';
-import { fetchInvoiceDelta, backendCountsInvoices, overlayNote } from '../utils/invoice-overlay.js';
 
 const formatPrice = (v) => window.formatPrice ? window.formatPrice(v) : `$${Number(v || 0).toFixed(2)}`;
 const MISSING = '—';
 const AWAIT_MSG = 'Awaiting data — backend endpoint pending';
 const EMPTY_MSG = 'No data for this range';
+
+/**
+ * Null-honest numeric read — use this for anything COGS-derived.
+ *
+ * The backend returns gross_profit / net_profit / cogs / margin_pct as **null**,
+ * never 0, when a sale in the bucket has an un-costed line (COGS honesty, ERR-028).
+ * `Number(null)` is `0`, and `null || 0` is `0` — so the naive read draws a
+ * confident $0 bar or a 0% margin, which the owner reads as a catastrophic loss
+ * rather than "we don't know". Chart.js renders `null` as a GAP (spanGaps defaults
+ * to false), which is the truthful picture.
+ *
+ * Revenue and order counts are always real numbers and don't need this.
+ */
+const numOrNull = (v) => {
+  if (v == null || v === '') return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+};
 
 let _container = null;
 // Race-guard for loadDashboard — see the same pattern in pages/website-traffic.js.
@@ -281,7 +298,9 @@ function computeZeroSearchAlert(searchZero) {
 // `capped` is set when every fetched row is under threshold (so there may be more than shown).
 function computeLowMarginAlert(worstMarginSkus, marginBrand, truncated = false) {
   if (Array.isArray(worstMarginSkus) && worstMarginSkus.length) {
-    const low = worstMarginSkus.filter(r => r._marginPct < LOW_MARGIN_PCT);
+    // An UNKNOWN margin is not a low margin. numOrNull keeps null out of the compare
+    // (null < 10 would be true — null coerces to 0).
+    const low = worstMarginSkus.filter(r => numOrNull(r._marginPct) != null && r._marginPct < LOW_MARGIN_PCT);
     return {
       count: low.length, capped: !!truncated, grain: 'sku',
       items: low.map(r => ({ label: r._label, badge: `${Number(r._marginPct).toFixed(1)}%`, badgeCls: 'admin-badge--failed', href: `products?search=${encodeURIComponent(r.sku || r._label)}` })),
@@ -289,8 +308,12 @@ function computeLowMarginAlert(worstMarginSkus, marginBrand, truncated = false) 
   }
   const brands = firstArray(marginBrand, ['brands', 'data']);
   const low = brands
-    .map(b => ({ label: b.brand || MISSING, pct: Number(b.margin_pct) }))
-    .filter(b => Number.isFinite(b.pct) && b.pct < LOW_MARGIN_PCT)
+    // Number(null) === 0, and Number.isFinite(0) is true — so an unknown-margin brand
+    // used to sail through this filter and get reported as a CRITICAL "0.0% — reprice
+    // or drop" recommendation. Telling the owner to drop a brand on the strength of a
+    // number that doesn't exist is worse than showing them nothing.
+    .map(b => ({ label: b.brand || MISSING, pct: numOrNull(b.margin_pct) }))
+    .filter(b => b.pct != null && b.pct < LOW_MARGIN_PCT)
     .sort((a, b) => a.pct - b.pct);
   return {
     count: low.length, capped: false, grain: 'brand',
@@ -349,10 +372,18 @@ function drawSeries(canvasId, payload, opts) {
   const plot = isCumulativeMode();
   const cumulative = plot && additive;
   const seriesData = (key) => {
-    const raw = list.map(r => Number(r[key] || 0));
+    // null (unknown COGS) stays null → Chart.js draws a gap. In cumulative mode an
+    // unknown bucket can't be added to the running total, so the total is unknowable
+    // from there on — carry the gap rather than silently treating it as +0.
+    const raw = list.map(r => numOrNull(r[key]));
     if (!cumulative) return raw;
     let acc = 0;
-    return raw.map(v => (acc += v));
+    let broken = false;
+    return raw.map(v => {
+      if (v == null) { broken = true; return null; }
+      if (broken) return null;
+      return (acc += v);
+    });
   };
   const drawType = plot ? 'line' : type;
 
@@ -405,13 +436,25 @@ function drawRanked(canvasId, payload, opts) {
   if (!hasData(canvasId, payload, list)) return;
 
   let rows = list.slice();
-  if (sort) rows.sort((a, b) => Number(b[valueKey] || 0) - Number(a[valueKey] || 0));
+  // A row whose value is unknown (null COGS) must not sort as if it earned $0 — that
+  // would dump it to the bottom of the ranking as the "worst" performer. Sort the
+  // known rows, then park the unknowns at the end where they read as unknown.
+  if (sort) {
+    rows.sort((a, b) => {
+      const av = numOrNull(a[valueKey]), bv = numOrNull(b[valueKey]);
+      if (av == null && bv == null) return 0;
+      if (av == null) return 1;
+      if (bv == null) return -1;
+      return bv - av;
+    });
+  }
   rows = rows.slice(0, limit);
 
   const c = Charts.getThemeColors();
   const labels = rows.map(r => String(r[labelKey] ?? MISSING));
-  const data = rows.map(r => Number(r[valueKey] || 0));
-  const valFmt = (v) => isMoney ? formatPrice(v) : isPercent ? `${Number(v).toFixed(1)}%` : String(v);
+  const data = rows.map(r => numOrNull(r[valueKey]));   // null → no bar, not a $0 bar
+  const valFmt = (v) => v == null ? MISSING
+    : isMoney ? formatPrice(v) : isPercent ? `${Number(v).toFixed(1)}%` : String(v);
   const valueAxis = horizontal ? 'x' : 'y';
 
   guardDraw(Charts.bar(canvasId, {
@@ -425,7 +468,7 @@ function drawRanked(canvasId, payload, opts) {
       indexAxis: horizontal ? 'y' : 'x',
       plugins: {
         legend: { display: false },
-        tooltip: { callbacks: { label: (ctx) => `${ctx.label}: ${valFmt(ctx.raw || 0)}` } },
+        tooltip: { callbacks: { label: (ctx) => `${ctx.label}: ${valFmt(ctx.raw ?? null)}` } },
       },
       scales: { [valueAxis]: { beginAtZero: true, ticks: { callback: (v) => valFmt(v) } } },
     },
@@ -472,7 +515,7 @@ function drawRevenueProfit(d) {
     for (const r of list) {
       const b = r.bucket_start ?? r.date;
       if (!byBucket.has(b)) { byBucket.set(b, {}); order.push(b); }
-      byBucket.get(b)[dstKey] = Number(r[srcKey] || 0);
+      byBucket.get(b)[dstKey] = numOrNull(r[srcKey]);
     }
   };
   merge(revList, 'revenue', 'revenue');
@@ -483,9 +526,21 @@ function drawRevenueProfit(d) {
   const c = Charts.getThemeColors();
   const labels = order.map(fmtBucket);
   const plot = isCumulativeMode();
-  const accum = (arr) => { if (!plot) return arr; let acc = 0; return arr.map(v => (acc += v)); };
-  const revenue = accum(order.map(b => Number(byBucket.get(b)?.revenue || 0)));
-  const profit  = accum(order.map(b => Number(byBucket.get(b)?.gross_profit || 0)));
+  // Two distinct nulls collapse here: a bucket the series never mentioned, and a
+  // bucket whose COGS is unknown. Both mean "no profit figure for this bucket", and
+  // both must draw a GAP — a 0 would put a confident $0 profit bar next to a healthy
+  // revenue bar and read as "we sold $4k and made nothing".
+  const accum = (arr) => {
+    if (!plot) return arr;
+    let acc = 0, broken = false;
+    return arr.map(v => {
+      if (v == null) { broken = true; return null; }
+      if (broken) return null;   // a running total past an unknown bucket is unknowable
+      return (acc += v);
+    });
+  };
+  const revenue = accum(order.map(b => numOrNull(byBucket.get(b)?.revenue)));
+  const profit  = accum(order.map(b => numOrNull(byBucket.get(b)?.gross_profit)));
 
   const drawType = plot ? 'line' : 'bar';
   const mk = (label, data, color, axis) => drawType === 'line'
@@ -582,19 +637,30 @@ function drawPerformanceOverview(d) {
       byBucket.get(b)[dstKey] = valFn(r);
     }
   };
-  merge(revList, (r) => Number(r.revenue || 0), 'revenue');
-  merge(profitList, (r) => Number(r.net_profit ?? r.gross_profit ?? 0), 'profit');
-  merge(ordList, (r) => Number(r.orders || 0), 'orders');
+  merge(revList, (r) => numOrNull(r.revenue), 'revenue');
+  // The ?? chain LOOKS null-safe but used to terminate in `?? 0` — so when BOTH
+  // net_profit and gross_profit were null (exactly the unknown-COGS case) it yielded
+  // a confident 0. Prefer net, fall back to gross, and if both are unknown say so.
+  merge(profitList, (r) => numOrNull(r.net_profit) ?? numOrNull(r.gross_profit), 'profit');
+  merge(ordList, (r) => numOrNull(r.orders), 'orders');
   if (!order.length) { chartEmpty(canvasId, d.sRevenue == null ? AWAIT_MSG : EMPTY_MSG); return; }
   order.sort(); // "YYYY-MM-DD" sorts chronologically
 
   const c = Charts.getThemeColors();
   const labels = order.map(fmtBucket);
   const plot = isCumulativeMode();
-  const accum = (arr) => { if (!plot) return arr; let acc = 0; return arr.map(v => (acc += v)); };
-  const revenue = accum(order.map(b => Number(byBucket.get(b)?.revenue || 0)));
-  const profit  = accum(order.map(b => Number(byBucket.get(b)?.profit || 0)));
-  const orders  = accum(order.map(b => Number(byBucket.get(b)?.orders || 0)));
+  const accum = (arr) => {
+    if (!plot) return arr;
+    let acc = 0, broken = false;
+    return arr.map(v => {
+      if (v == null) { broken = true; return null; }
+      if (broken) return null;   // can't keep a running total across an unknown bucket
+      return (acc += v);
+    });
+  };
+  const revenue = accum(order.map(b => numOrNull(byBucket.get(b)?.revenue)));
+  const profit  = accum(order.map(b => numOrNull(byBucket.get(b)?.profit)));
+  const orders  = accum(order.map(b => numOrNull(byBucket.get(b)?.orders)));
 
   const drawType = plot ? 'line' : 'bar';
   const mkMoney = (label, data, color) => drawType === 'line'
@@ -773,6 +839,18 @@ async function loadDashboard() {
   // Race guard — bail if a newer loadDashboard() started or the page was destroyed.
   if (mySeq !== _loadSeq || !_container) return;
 
+  // Which sales are stopping the backend computing profit? Reuses the paid/processing
+  // orders already fetched above (index 8) — invoiced sales land there too (status
+  // 'paid'), so this costs no extra list call, only a bounded fan-out of detail calls
+  // for the invoice-channel rows. Never blocks the render: it fails soft to null.
+  let missingCost = null;
+  try {
+    missingCost = await computeMissingCostAlert(val(8), val(1));
+  } catch (err) {
+    window.DebugLog?.warn?.('[Dashboard] missing-cost alert failed', err?.message || err);
+  }
+  if (mySeq !== _loadSeq || !_container) return;   // the await above is a fresh race window
+
   // Graphs come solely from the resilient bundle (per-chart isolation server-side;
   // a failed sub-chart → null key → that one tile's empty state). We deliberately
   // do NOT fan out to the per-chart endpoints on a bundle miss: that fan-out is
@@ -795,24 +873,15 @@ async function loadDashboard() {
     return pcts.length > 0 && Math.max(...pcts) < LOW_MARGIN_PCT;
   });
 
-  // Invoiced sales (phone / walk-in / B2B) are real orders the backend doesn't
-  // know about yet, so the KPI band would understate the business. Add them
-  // client-side — SCALAR TILES ONLY, never the charts. Self-disables the moment
-  // the backend starts including them. See utils/invoice-overlay.js.
-  const kpis = val(1);
-  const invoiceDelta = backendCountsInvoices(kpis) ? null : await fetchInvoiceDelta({ from, to });
-  if (mySeq !== _loadSeq || !_container) return;   // the await above is a new race window
-
   const payload = {
     isOwner: true,
-    invoiceDelta,
     // The grain the bundle ACTUALLY served at (getDashboardBundle may have escalated past
     // a backend bucket-cap rejection). Carried in the payload — not just a module var — so
     // a stale-while-revalidate cache repaint labels its x-axis to match its own bars.
     _effectiveGranularity: (bundle && bundle._granularity) || g,
     _loadedAt: new Date().toISOString(),   // drives the "Updated …" stamp in the header
-    kpis, custStats: val(2), refunds: val(3), outOfStock: val(4),
-    recentOrders: val(5), topProducts: val(6),
+    kpis: val(1), custStats: val(2), refunds: val(3), outOfStock: val(4),
+    recentOrders: val(5), topProducts: val(6), missingCost,
     trackingReq: val(7), trackingOrders: val(8),
     worstMarginSkus: worstMargin, worstMarginTruncated,
     ...graphs,
@@ -948,7 +1017,7 @@ function renderOverviewSection() {
 // and expands to the full list on demand (wireAlertToggles).
 const ALERT_PREVIEW = 5;
 
-function alertCard(title, count, why, items, sev, emptyMsg) {
+function alertCard(title, count, why, items, sev, emptyMsg, span = 4) {
   const rows = items.length
     ? items.map(it => {
         const badge = it.badge != null
@@ -961,7 +1030,7 @@ function alertCard(title, count, why, items, sev, emptyMsg) {
     ? `<button type="button" class="admin-alert-card__toggle" data-alert-toggle>Show all ${items.length}</button>`
     : '';
   return `
-    <div class="admin-dash__cell--4 admin-card admin-alert-card${sev ? ' admin-alert-card--' + sev : ''}">
+    <div class="admin-dash__cell--${span} admin-card admin-alert-card${sev ? ' admin-alert-card--' + sev : ''}">
       <div class="admin-card__title"><span>${esc(title)}</span></div>
       <div class="admin-alert-card__count">${esc(String(count))}</div>
       <div class="admin-alert-card__why">${esc(why)}</div>
@@ -975,19 +1044,118 @@ function renderAlertsSection(d) {
   const tracking = computeTrackingAlert(d.trackingReq, d.trackingOrders);
   const zero = computeZeroSearchAlert(d.searchZero);
   const lowMargin = computeLowMarginAlert(d.worstMarginSkus, d.marginBrand, d.worstMarginTruncated);
+  const missingCost = d.missingCost;   // computed in loadDashboard (needs order detail)
 
   const lowUnit = lowMargin.grain === 'brand' ? 'brands' : 'SKUs';
   const lowWhy = `${lowUnit} under ${LOW_MARGIN_PCT}% net margin — reprice or drop`;
   const lowCount = `${lowMargin.count}${lowMargin.capped ? '+' : ''}`;
 
-  return rowN('Action needed', 'danger', [
+  // The missing-cost card only earns its place when it has something to say. Without
+  // it, a Dashboard full of "—" profit tiles is a dead end: the owner can see that
+  // something is wrong but not what, or how to fix it.
+  const showMissing = !!(missingCost && (missingCost.count > 0 || missingCost.cogsUnknown));
+  const span = showMissing ? 3 : 4;
+
+  const cards = [
     alertCard('Orders needing tracking', tracking.count,
-      'paid/processing orders awaiting tracking', tracking.items, tracking.count > 0 ? 'danger' : null, 'All caught up'),
+      'paid/processing orders awaiting tracking', tracking.items, tracking.count > 0 ? 'danger' : null, 'All caught up', span),
     alertCard('Zero-result searches', zero.count,
-      `searches with ≥${ZERO_SEARCH_MIN} hits returning nothing — add products/synonyms`, zero.items, zero.count > 0 ? 'warning' : null, 'No high-volume misses'),
+      `searches with ≥${ZERO_SEARCH_MIN} hits returning nothing — add products/synonyms`, zero.items, zero.count > 0 ? 'warning' : null, 'No high-volume misses', span),
     alertCard('Low-margin products', lowCount,
-      lowWhy, lowMargin.items, lowMargin.count > 0 ? 'warning' : null, 'None under threshold'),
-  ]);
+      lowWhy, lowMargin.items, lowMargin.count > 0 ? 'warning' : null, 'None under threshold', span),
+  ];
+
+  if (showMissing) {
+    cards.push(alertCard(
+      'Sales missing a cost', missingCost.count,
+      'gross & net profit can’t be calculated for ANY period until every sale has a cost of goods — add one to bring your profit figures back',
+      missingCost.items,
+      'danger',
+      // count is 0 but the backend still won't give us a COGS → something outside the
+      // fetched window. Say so rather than claim everything is fine.
+      'A sale outside this range has no cost recorded',
+      span,
+    ));
+  }
+
+  return rowN('Action needed', 'danger', cards);
+}
+
+/**
+ * Find the sales that are stopping the backend from computing profit.
+ *
+ * The backend returns gross_profit / net_profit as null for the WHOLE period when
+ * any single sale in it has an un-costed line (COGS honesty). That's correct, but on
+ * its own it's baffling: every profit tile reads "—" and nothing says why. This names
+ * the culprits and links straight to the fix.
+ *
+ * Two ways a sale can be un-costed:
+ *   1. It has items, and one of them has no supplier_cost_snapshot.
+ *   2. It has a total but ZERO items. This is the live case: when a saved invoice's
+ *      product_code doesn't resolve in the catalogue, the backend materialises the
+ *      shadow order with revenue but drops the line entirely — so there is nothing to
+ *      attach a cost to. (Reported to the backend; the FE still has to explain it.)
+ *
+ * Bounded on purpose: the orders LIST omits supplier_cost_snapshot (ERR-039), so
+ * knowing case 1 needs a detail call per order. We only pay that for invoice-channel
+ * orders — website orders get their cost snapshotted at checkout and, empirically,
+ * don't miss it. Case 2 is free (visible on the list row).
+ */
+const MISSING_COST_DETAIL_CAP = 25;
+
+async function computeMissingCostAlert(orders, kpis) {
+  const cogsUnknown = kpis?.current ? kpis.current.gross_profit == null : false;
+  const list = firstArray(orders, ['orders', 'data', 'items']);
+  if (!list.length) return { count: 0, items: [], cogsUnknown };
+
+  const isInvoice = (o) => String(o.payment_method || '').toLowerCase() === 'invoice'
+    || /^INV-/i.test(String(o.order_number || ''));
+  const itemCount = (o) => (Array.isArray(o.items) ? o.items.length
+    : Array.isArray(o.order_items) ? o.order_items.length
+      : (o.items_count ?? o.item_count ?? null));
+  const totalOf = (o) => Number(o.total_amount ?? o.total ?? 0) || 0;
+
+  const culprits = [];
+  const needDetail = [];
+
+  for (const o of list) {
+    const n = itemCount(o);
+    if (n === 0 && totalOf(o) > 0) {
+      culprits.push({ order: o, reason: 'no items recorded' });   // case 2 — free to detect
+    } else if (isInvoice(o)) {
+      needDetail.push(o);                                          // case 1 — needs a detail call
+    }
+  }
+
+  const budget = needDetail.slice(0, MISSING_COST_DETAIL_CAP);
+  const results = await Promise.allSettled(budget.map(o => AdminAPI.getOrder(o.id)));
+  results.forEach((res, i) => {
+    if (res.status !== 'fulfilled' || !res.value) return;
+    const det = res.value;
+    const items = det.items || det.order_items || [];
+    if (!items.length && totalOf(budget[i]) > 0) {
+      culprits.push({ order: budget[i], reason: 'no items recorded' });
+      return;
+    }
+    const un = items.filter(it => it.supplier_cost_snapshot == null);
+    if (un.length) {
+      const skus = un.map(it => it.sku).filter(Boolean).slice(0, 2).join(', ');
+      culprits.push({ order: budget[i], reason: skus ? `no cost: ${skus}` : 'no cost recorded' });
+    }
+  });
+
+  return {
+    cogsUnknown,
+    count: culprits.length,
+    items: culprits.map(({ order, reason }) => ({
+      label: `${order.order_number || String(order.id).slice(0, 8)} · ${formatPrice(totalOf(order))}`,
+      badge: reason,
+      badgeCls: 'admin-badge--failed',
+      // Invoiced sales are fixed in the invoice editor ("Our Cost"); a website order's
+      // cost lives on the product.
+      href: isInvoice(order) ? 'invoices' : `orders?search=${encodeURIComponent(order.order_number || '')}`,
+    })),
+  };
 }
 
 // Expand/collapse the alert item lists (show all ↔ show first ALERT_PREVIEW).
@@ -1053,13 +1221,8 @@ function renderKpiTile(t, extraClass = '', noDelta = false) {
   h += `<div class="admin-kpi__label"${tipAttr}>${esc(t.label)}</div>`;
   if (t.value != null) {
     h += `<div class="admin-kpi__value">${esc(t.value)}</div>`;
-    // t.note flags a tile whose value we adjusted client-side (invoiced sales) —
-    // the number must never be quietly different from what the backend returned.
-    if (t.note) h += `<div class="admin-kpi__note">${esc(t.note)}</div>`;
     // In all-time view every "previous" is 0, so deltas read "↑ new" everywhere — noise.
-    // A tile can also opt out individually (t.noDelta) when its current value is
-    // overlaid but its previous value isn't — comparing the two would invent growth.
-    if (!noDelta && !t.noDelta) h += deltaBadge(t.raw, t.prev, t.deltaOpts || {});
+    if (!noDelta) h += deltaBadge(t.raw, t.prev, t.deltaOpts || {});
   } else {
     h += missingValue(t.tooltip || 'Data unavailable');
   }
@@ -1077,49 +1240,13 @@ function fmtPct(v) {
   return `${n.toFixed(1)}%`;
 }
 
-/**
- * Fold invoiced sales into the backend's current-period KPIs.
- *
- * Bumps the COMPONENTS (revenue, orders, gross/net profit) and then DELETES the
- * derived fields (aov, gross_margin, net_margin) so renderKpiStrip's existing
- * "derive from components when the backend omits them" fallbacks recompute them
- * from the new totals. Leaving the backend's derived values in place would show
- * a margin computed against website-only revenue — right numerator, wrong
- * denominator.
- *
- * Profit is only bumped when the delta knows every invoice's cost. Otherwise the
- * profit tiles keep the backend's website-only figure: understated, but honest.
- * Revenue and Orders always bump — we know those regardless of cost.
- */
-function withInvoices(cur, delta) {
-  if (!delta || !delta.count) return cur;
-  const out = { ...cur };
-  const bump = (k, v) => { if (out[k] != null && v != null) out[k] = Number(out[k]) + Number(v); };
-  bump('revenue', delta.revenueInclGst);   // kpi-summary.revenue is INCL-GST
-  bump('orders', delta.orders);
-  if (delta.costsKnown) {
-    bump('gross_profit', delta.grossProfit);
-    bump('net_profit', delta.netProfit);
-  }
-  delete out.aov;
-  delete out.gross_margin;
-  delete out.net_margin;
-  return out;
-}
-
 function renderKpiStrip(d) {
-  const delta = d.invoiceDelta;
-  const overlaid = !!(delta && delta.count);
-  const cur  = withInvoices(d.kpis?.current ?? {}, delta);
-  // The previous period is NOT overlaid (that would need a second fetch), so a
-  // delta badge would compare invoices-included against website-only and invent a
-  // jump. Suppress the badge on the tiles we touched rather than lie about growth.
+  // Invoiced sales are counted by the BACKEND (kpi-summary carries
+  // includes_invoices: true). The frontend does not aggregate — it renders.
+  const cur  = d.kpis?.current ?? {};
   const prev = d.kpis?.previous ?? {};
   const cc   = d.custStats?.current  ?? {};
   const cp   = d.custStats?.previous ?? {};
-  const note = overlaid ? overlayNote(delta) : '';
-  const invTile = (extra = {}) => overlaid ? { note: 'incl. invoiced sales', noDelta: true, ...extra } : {};
-  const profitOverlaid = overlaid && delta.costsKnown;
 
   const aov     = cur.aov ?? safeDiv(cur.revenue, cur.orders);
   const aovPrev = prev.aov ?? safeDiv(prev.revenue, prev.orders);
@@ -1144,42 +1271,36 @@ function renderKpiStrip(d) {
   const netMarginPct       = cur.net_margin    != null ? Number(cur.net_margin)    : marginOf(netProfit, cur.revenue);
   const netMarginPctPrev   = prev.net_margin   != null ? Number(prev.net_margin)   : marginOf(prev.net_profit, prev.revenue);
 
+  // "—" on a profit tile is the honest answer when the backend can't compute COGS
+  // (a sale with an un-costed line). The Action-needed panel names the offenders.
+  const COGS_UNKNOWN = ' Shows "—" when any sale in the range has no cost of goods recorded — see "Sales missing a cost" under Action needed.';
+
   const tiles = [
     { label: 'Revenue', value: cur.revenue != null ? formatPrice(cur.revenue) : null, raw: cur.revenue, prev: prev.revenue,
-      tooltip: `Total sales (incl. GST) for the selected range.${note}`, ...invTile() },
+      tooltip: 'Total sales (incl. GST) for the selected range. Includes invoiced (phone / walk-in / B2B) sales.' },
     {
       label: 'Gross Profit', value: cur.gross_profit != null ? formatPrice(cur.gross_profit) : null,
       raw: cur.gross_profit, prev: prev.gross_profit, stackNext: true,
-      tooltip: profitOverlaid
-        ? `Revenue (ex-GST) − COGS.${note}`
-        : (overlaid
-          ? 'Revenue (ex-GST) − COGS, computed by the backend. Website orders only — invoiced sales are excluded until their cost of goods is recorded.'
-          : 'Revenue (ex-GST) − COGS, computed by the backend.'),
-      ...(profitOverlaid ? invTile() : {}),
+      tooltip: `Revenue (ex-GST) − COGS, computed by the backend.${COGS_UNKNOWN}`,
     },
     {
       label: 'Gross Margin', value: fmtPct(grossMarginPct), raw: grossMarginPct, prev: grossMarginPctPrev,
       tooltip: 'Gross profit ÷ revenue. Profit quality, not size.',
-      ...(profitOverlaid ? { noDelta: true } : {}),
     },
     {
       label: 'Net Profit', value: netProfit != null ? formatPrice(netProfit) : null,
       raw: netProfit, prev: prev.net_profit, alert: netProfit != null && netProfit < 0, stackNext: true,
-      tooltip: profitOverlaid
-        ? `Revenue − COGS − fees − GST − Opex. Invoiced sales carry no card fee (bank transfer).${note}`
-        : 'Revenue − COGS − fees − GST − Opex, computed by the backend.',
-      ...(profitOverlaid ? invTile() : {}),
+      tooltip: `Revenue − COGS − fees − GST − Opex, computed by the backend. Invoiced sales carry no card fee (bank transfer).${COGS_UNKNOWN}`,
     },
     {
       label: 'Net Margin', value: fmtPct(netMarginPct), raw: netMarginPct, prev: netMarginPctPrev,
       alert: netMarginPct != null && netMarginPct < 0,
       tooltip: 'Net profit ÷ revenue. What you actually keep.',
-      ...(profitOverlaid ? { noDelta: true } : {}),
     },
     { label: 'Orders', value: cur.orders != null ? String(cur.orders) : null, raw: cur.orders, prev: prev.orders,
-      tooltip: `Paid orders placed in the selected range.${note}`, ...invTile() },
+      tooltip: 'Paid orders placed in the selected range. Includes invoiced sales.' },
     { label: 'Avg Order Value', value: aov != null ? formatPrice(aov) : null, raw: aov, prev: aovPrev,
-      tooltip: 'Revenue ÷ orders.', ...(overlaid ? { noDelta: true } : {}) },
+      tooltip: 'Revenue ÷ orders.' },
     { label: 'New Customers', value: newCustomers != null ? String(newCustomers) : null, raw: newCustomers, prev: newCustomersPrev,
       tooltip: 'First-time buyers in the range.' },
     {

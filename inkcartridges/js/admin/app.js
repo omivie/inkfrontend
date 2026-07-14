@@ -1,7 +1,7 @@
 /**
  * Admin SPA — Entry point, router, shell
  */
-const APP_VERSION = '2026.07.14-expense-presets';
+const APP_VERSION = '2026.07.14-invoice-orders-cogs-b';
 
 import { AdminAuth } from './auth.js';
 import { FilterState } from './filters.js';

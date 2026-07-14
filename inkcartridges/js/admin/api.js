@@ -159,6 +159,12 @@ function normalizeKpiSummary(data) {
   const FLAT_KEYS = [
     'new_customers', 'returning_rate', 'returning_pct', 'runway_months',
     'total_customers', 'avg_ltv', 'churn_rate', 'nps_score', 'cash_balance',
+    // Invoiced-sales provenance. This branch rebuilds `current` from a fixed key
+    // list, so anything not named here is SILENTLY DROPPED. These three say whether
+    // the backend has already counted invoiced (phone / walk-in / B2B) sales in the
+    // numbers above — losing them means a caller can't tell, and any future
+    // client-side top-up would double-count the revenue. Carry them through.
+    'includes_invoices', 'invoice_revenue', 'invoice_orders',
   ];
   for (const k of FLAT_KEYS) {
     if (data[k] != null) current[k] = data[k];
@@ -547,7 +553,16 @@ const AdminAPI = {
           return null;
         }
         const data = resp?.data ?? null;
-        if (data && typeof data === 'object') data._granularity = g;
+        if (data && typeof data === 'object') {
+          data._granularity = g;
+          // The bundle's provenance (includes_invoices, invoice_revenue, approximate_keys,
+          // partial_failures…) rides in the ENVELOPE's `meta`, which the shared client
+          // blindly copies onto `data.pagination` (see js/api.js — envelope meta is
+          // assumed to be pagination). Re-expose it under an honest name so callers
+          // don't have to know about that rename to find it.
+          const meta = resp?.meta ?? data.pagination ?? null;
+          if (meta && typeof meta === 'object') data._meta = meta;
+        }
         return data;
       } catch (e) {
         if (e?.name === 'AbortError') return null;

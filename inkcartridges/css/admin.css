@@ -483,14 +483,24 @@
   font-variant-numeric: tabular-nums;
 }
 .admin-kpi__value--missing { color: var(--text-muted); font-size: 22px; }
-/* Flags a tile whose value we adjusted client-side (invoiced sales folded in).
-   A number that silently differs from what the backend returned is a trap. */
-.admin-kpi__note {
-  font-size: 10px; font-weight: 500; line-height: 1.3;
-  color: var(--text-muted); margin-top: -2px;
-}
-/* Same disclosure under the Finance P&L table. */
+/* Under the Finance P&L: says WHY a row reads "—" (a sale with no cost of goods
+   makes the period's profit genuinely unknown) and links to the fix. */
 .fh-pnl-note { margin: 10px 0 0; font-size: 11.5px; line-height: 1.5; color: var(--text-muted); }
+.fh-pnl-note a { color: var(--cyan-text, #0e7490); text-decoration: underline; }
+
+/* Quick Order: its sales are NOT yet in analytics (backend deferred). Stated up
+   front — an under-reported revenue figure the owner doesn't know about is worse
+   than an ugly banner. */
+.qo-notice {
+  display: flex; gap: 8px; align-items: flex-start;
+  margin: 0 0 var(--spacing-3);
+  padding: 10px 12px;
+  border: 1px solid var(--yellow-dim, rgba(234,179,8,0.3));
+  background: var(--yellow-dim, rgba(234,179,8,0.10));
+  border-radius: 8px;
+  font-size: 12.5px; line-height: 1.55; color: var(--text);
+}
+.qo-notice strong { font-weight: 700; }
 .admin-kpi__delta {
   font-size: 11px; font-weight: 500;
   display: inline-flex; align-items: center; gap: 3px;
@@ -632,6 +642,11 @@
 .admin-badge--admin { background: var(--yellow-dim); color: var(--yellow-text); }
 .admin-badge--fulfilled { background: var(--success-dim); color: var(--success); }
 .admin-badge--dismissed { background: var(--danger-dim); color: #f87171; }
+/* Order channel. An invoiced sale (phone / walk-in / B2B) now sits in the Orders
+   list next to website orders — it needs to be tellable at a glance, because it
+   behaves differently: bank transfer, so no card fee on its profit. */
+.admin-badge--invoice { background: var(--cyan-dim); color: var(--cyan-text); }
+.admin-badge--web { background: var(--surface-3, rgba(148,163,184,0.14)); color: var(--text-muted); }
 
 /* ---- Drawer ---- */
 .admin-drawer-backdrop {

@@ -158,6 +158,55 @@ JavaScript.
 
 ---
 
+## ERR-068 — Backend started returning `null` COGS; the frontend rendered it as `$0.00` (2026-07-14)
+
+**Symptom (LIVE, on the owner's screen):** after the backend shipped the invoiced-
+sales integration it began honouring COGS honesty — `cogs` / `gross_profit` /
+`net_profit` come back as **`null`** (not `0`) for any period containing an
+un-costed sale. The Finance P&L promptly rendered **"Cost of Goods Sold $0.00 /
+Gross Profit $0.00 / Net Profit $0.00"** and the profit chart drew a flat line
+along the axis. The Dashboard KPI tiles were fine (they were already null-honest);
+everything else was not.
+
+**Root cause:** the same coercion family as ERR-061, on the read side.
+`Number(null) === 0`, `null || 0 === 0`, and `financial-health.js`'s local
+`num(v, d = 0)` returns `0` for null. Eight sites fabricated a zero:
+
+| Site | Effect |
+|---|---|
+| `financial-health.js` `fmt()` | `$0.00` for an unknown COGS |
+| `financial-health.js` `change()` | `0%` ("profit was flat") / `+∞` |
+| `financial-health.js` `renderProfitChart()` | line plotted down to the axis |
+| `dashboard.js` `drawRanked()` ×3 (data, sort, tooltip) | $0 bars; unknown SKUs sorted as the *worst* |
+| `dashboard.js` `drawRevenueProfit()` | a $0 profit bar beside a healthy revenue bar |
+| `dashboard.js` `drawPerformanceOverview()` | `Number(net ?? gross ?? 0)` — the `??` chain *looks* null-safe but terminates in `0` |
+| `dashboard.js` `drawSeries()` | latent, same shape |
+| **`dashboard.js` low-margin ALERT** | **the worst one — see below** |
+
+**The dangerous one.** `computeLowMarginAlert` did
+`pct: Number(b.margin_pct)` → `.filter(b => Number.isFinite(b.pct) && b.pct < 10)`.
+`Number(null)` is `0`, and `Number.isFinite(0)` is `true`, and `0 < 10` — so every
+brand with an *unknown* margin was reported as a **critical "0.0% — reprice or
+drop"** recommendation. Not a cosmetic bug: an actionable instruction to drop a
+brand, built on a number that does not exist.
+
+**Fix:** `numOrNull()` in `dashboard.js` (null/''/NaN → `null`, real `0` → `0`) and
+a `known()` guard in `financial-health.js`. Unknown renders `—`; charts push `null`,
+which Chart.js draws as a **gap** (`spanGaps` defaults `false`). A cumulative
+running total *carries the gap forward* — a total past an unknown bucket is itself
+unknowable, so it must not silently treat the gap as `+0`.
+
+**Rule:** unknown is not zero, on the way **out** (ERR-061) *or* the way **in**.
+Anything COGS-derived — `cogs`, `gross_profit`, `net_profit`, `*_margin_pct` — is
+nullable by contract. Never `Number(x)`, never `x || 0`, never `?? 0`. And never
+let a *derived alert* fire on a null: a fabricated 0 that reaches a recommendation
+is worse than one that reaches a chart.
+
+**Pinned by:** `tests/admin-cogs-honesty.test.js` (12 tests, incl. a sanity check
+that the naive filter really *did* flag an unknown-margin brand at 0.0%).
+
+---
+
 ## ERR-061 — Cost of $0 vs cost UNKNOWN: `Number('')` is `0`, which reports a 100% margin (2026-07-12)
 
 **Symptom (designed out, not observed):** while adding an internal supplier-cost

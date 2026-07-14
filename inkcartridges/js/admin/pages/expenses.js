@@ -42,7 +42,6 @@ import {
   PRESET_KEY, MAX_PRESETS, toPreset, applyPresetToDraft, upsertPreset, removePreset,
   normalizePresetList, validatePreset, presetNameExists,
 } from '../utils/expense-presets.js';
-import { fetchCountableInvoices, aggregateInvoices, backendCountsInvoices } from '../utils/invoice-overlay.js';
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 const escA = (s) => (window.Security?.escapeAttr ? Security.escapeAttr(String(s ?? '')) : String(s ?? '').replace(/"/g, '&quot;'));
@@ -64,13 +63,6 @@ function fmtDate(iso) {
 function monthStartMs(ms) { const d = new Date(ms); return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1); }
 function monthEndMs(ms) { const d = new Date(ms); return Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0); }
 function addMonthsMs(ms, n) { const d = new Date(ms); return Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + n, d.getUTCDate()); }
-// The current calendar month as an ISO {from,to} — matches the window the P&L's
-// latest period covers, so invoiced sales land in the same month as the revenue
-// we're adding them to.
-function thisMonthWindow() {
-  const now = todayUtcMs();
-  return { from: isoFromMs(monthStartMs(now)), to: isoFromMs(monthEndMs(now)) };
-}
 
 const PERIODS = [
   { key: '30d', label: 'Last 30 days', days: 30 },
@@ -225,14 +217,10 @@ async function loadData() {
   const mStart = monthStartMs(today), mEnd = monthEndMs(today);
   const pm = addMonthsMs(mStart, -1);
 
-  const [listRes, matRes, pnl, invoices, sumThis, sumPrev] = await Promise.all([
+  const [listRes, matRes, pnl, sumThis, sumPrev] = await Promise.all([
     AdminAPI.expenses.list({ limit: 1000 }),
     AdminAPI.expenses.occurrences(rangeForOccurrences()),
     AdminAPI.getAdminAnalyticsPnL(31),
-    // Invoiced sales are revenue too. Without them the expense-to-revenue ratio
-    // divides by a website-only denominator and overstates how much of the month's
-    // income is going out. TEMPORARY — see utils/invoice-overlay.js.
-    fetchCountableInvoices(),
     // Server-computed, cash-basis KPI bundle — the SAME numbers /pnl uses. We treat
     // it as authoritative and cross-check our client math against it (below), so the
     // page can never quietly drift from Finance.
@@ -250,17 +238,12 @@ async function loadData() {
   _rows = items.map((r, i) => enrichRecord(r, i));
   _serverSummary = { thisMonth: summaryOf(sumThis), lastMonth: summaryOf(sumPrev) };
 
-  // Revenue this month for the expense-to-revenue ratio (fail-soft).
+  // Revenue this month for the expense-to-revenue ratio (fail-soft). The backend's
+  // P&L revenue already includes invoiced (phone / walk-in / B2B) sales.
   try {
     const periods = Array.isArray(pnl?.periods) ? pnl.periods : [];
     const cur = periods[periods.length - 1] || pnl?.totals;
     _revenueThisMonth = cur && cur.revenue != null ? num(cur.revenue) : null;
-    // Fold in this month's invoiced sales, unless the backend already counts them.
-    // pnl.revenue is EX-GST, so add the ex-GST figure — not the incl-GST one.
-    if (_revenueThisMonth != null && invoices && !backendCountsInvoices(pnl)) {
-      const d = aggregateInvoices(invoices, thisMonthWindow());
-      if (d && d.count) _revenueThisMonth += d.revenueExGst;
-    }
   } catch (_) { _revenueThisMonth = null; }
 
   computeAndRender(matRes || []);

@@ -6,10 +6,35 @@ import { DataTable } from '../components/table.js';
 import { Drawer } from '../components/drawer.js';
 import { Toast } from '../components/toast.js';
 import { Modal } from '../components/modal.js';
-import { computeLineProfits, computeProfitBreakdown } from '../utils/profitability.js';
+import { computeLineProfits, computeProfitBreakdown, NO_PAYMENT_FEES } from '../utils/profitability.js';
 
 const formatPrice = (v) => window.formatPrice ? window.formatPrice(v) : `$${Number(v).toFixed(2)}`;
 const MISSING = '\u2014';
+
+/**
+ * Is this order an invoiced sale (phone / walk-in / B2B) rather than a website order?
+ *
+ * The backend materialises a saved invoice as a shadow `orders` row. It sets
+ * `payment_method: 'invoice'` and numbers it `INV-<n>`. NB it does NOT expose the
+ * `orders.channel` column on the API (the spec asked for it; it isn't there), so
+ * payment_method is the contract and the order-number prefix is the belt-and-braces
+ * fallback. If `channel` ever appears, it wins.
+ *
+ * This matters for money: an invoiced sale is paid by bank transfer, so it carries
+ * NO card processing fee. Charging it the Stripe 2.65% + $0.30 understates its profit.
+ */
+export function isInvoiceOrder(o) {
+  if (!o) return false;
+  if (o.channel) return String(o.channel).toLowerCase() === 'invoice';
+  if (o.payment_method) return String(o.payment_method).toLowerCase() === 'invoice';
+  return /^INV-/i.test(String(o.order_number || ''));
+}
+
+function channelBadge(o) {
+  return isInvoiceOrder(o)
+    ? `<span class="admin-badge admin-badge--invoice" title="Invoiced sale \u2014 phone, walk-in or B2B. Paid by bank transfer, so no card fee.">Invoice</span>`
+    : `<span class="admin-badge admin-badge--web" title="Placed through the website checkout.">Website</span>`;
+}
 
 let _container = null;
 let _table = null;
@@ -66,6 +91,12 @@ const COLUMNS = [
   {
     key: 'status', label: 'Status', sortable: true,
     render: (r) => statusBadge(r.status),
+  },
+  {
+    // Invoiced sales now sit in this list alongside website orders. Without this
+    // column they're indistinguishable, and they behave differently (no card fee).
+    key: 'channel', label: 'Channel',
+    render: (r) => channelBadge(r),
   },
   {
     key: 'items', label: 'Items',
@@ -328,6 +359,7 @@ function buildOrderModalContent(modal, o, events, breakdown) {
   // Items section
   let itemsHtml = '';
   let orderProfitBreakdown = null;  // populated below; consumed by the Profit Breakdown section
+  let profitFootTip = '';           // fee wording differs for an invoiced (bank-transfer) sale
   if (o.items?.length) {
     itemsHtml += `<table class="admin-order-items"><thead><tr>`;
     itemsHtml += `<th>Product</th><th>SKU</th><th>Qty</th><th>Price <span class="admin-text-muted" style="font-weight:400">(excl. GST)</span></th>`;
@@ -355,19 +387,29 @@ function buildOrderModalContent(modal, o, events, breakdown) {
       itemRows.push({ item, itemPrice, qty, lineRevenue, hasCost, itemHref });
     }
     const customerPaidInclGst = breakdown?.total_incl_gst ?? o.total_amount ?? o.total ?? null;
-    // Per-line net profit — order Stripe fee (incl. fixed $0.30) is allocated
-    // across lines by revenue share, so the line column sums to the foot total.
+    // An invoiced sale is settled by bank transfer — there is no card processor, so
+    // NO fee. Charging it Stripe's 2.65% + $0.30 (the website default) understates
+    // its profit and invents a payment it never made.
+    const feeOpts = isInvoiceOrder(o)
+      ? { customerPaidInclGst, ...NO_PAYMENT_FEES }
+      : { customerPaidInclGst };
+    // Per-line net profit — the order's payment fee (incl. the fixed $0.30, where one
+    // applies) is allocated across lines by revenue share, so the line column sums to
+    // the foot total exactly.
     const { lineProfits, totalProfit: profit } = computeLineProfits(
       itemRows.map(({ lineRevenue, hasCost, item, qty }) => ({
         revenueExGst: lineRevenue,
         costExGst: hasCost ? item.supplier_cost_snapshot * qty : null,
       })),
-      { customerPaidInclGst },
+      feeOpts,
     );
     // Itemised order-level waterfall (revenue → every deduction → net profit).
     if (showCost) {
-      orderProfitBreakdown = computeProfitBreakdown(totalPrice, totalCost, { customerPaidInclGst });
+      orderProfitBreakdown = computeProfitBreakdown(totalPrice, totalCost, feeOpts);
     }
+    profitFootTip = isInvoiceOrder(o)
+      ? 'Net profit (GST-neutral): ex-GST revenue minus ex-GST supplier cost. This is an invoiced sale paid by bank transfer, so there is no card fee. GST is a pass-through — see the Profit Breakdown section.'
+      : 'Net profit (GST-neutral): ex-GST revenue minus ex-GST supplier cost minus Stripe fee (2.65% + $0.30) on the full charged amount. GST is a pass-through — see the Profit Breakdown section.';
     itemRows.forEach(({ item, itemPrice, hasCost, itemHref }, idx) => {
       const profitCell = showCost
         ? `<td class="mono" style="color:var(--success-text,#15803d)">${lineProfits[idx] != null ? formatPrice(lineProfits[idx]) : MISSING}</td>`
@@ -383,7 +425,7 @@ function buildOrderModalContent(modal, o, events, breakdown) {
     itemsHtml += `</tbody><tfoot><tr class="admin-order-items__total">
       <td colspan="3"></td>
       <td class="mono"><strong>${formatPrice(totalPrice)}</strong></td>
-      ${showCost ? `<td class="mono"><strong>${formatPrice(totalCost)}</strong></td><td class="mono" style="color:var(--success-text,#15803d)" title="Net profit (GST-neutral): ex-GST revenue minus ex-GST supplier cost minus Stripe fee (2.65% + $0.30) on the full charged amount. GST is a pass-through — see the Profit Breakdown section."><strong>${profit != null ? formatPrice(profit) : MISSING}</strong></td>` : ''}
+      ${showCost ? `<td class="mono"><strong>${formatPrice(totalCost)}</strong></td><td class="mono" style="color:var(--success-text,#15803d)" title="${esc(profitFootTip)}"><strong>${profit != null ? formatPrice(profit) : MISSING}</strong></td>` : ''}
     </tr></tfoot></table>`;
   } else {
     itemsHtml += `<p class="admin-text-muted">${MISSING} No items</p>`;
@@ -402,7 +444,14 @@ function buildOrderModalContent(modal, o, events, breakdown) {
     profitBreakdownInner += `<div class="om-meta-addr-label">Profit breakdown</div>`;
     profitBreakdownInner += pbRow(`Customer paid ${muted('(incl. GST)')}`, formatPrice(b.customerPaidInclGst));
     profitBreakdownInner += pbRow(`Paid to supplier ${muted(`(incl. ${formatPrice(b.supplierCostGst)} GST)`)}`, neg(b.supplierCostInclGst));
-    profitBreakdownInner += pbRow(`Paid to Stripe ${muted(`(2.65% + $0.30, incl. ${formatPrice(b.stripeFeeGst)} GST)`)}`, neg(b.stripeFeeInclGst));
+    // An invoiced sale never touched a card processor. Rendering a "Paid to Stripe −$0.00"
+    // row would imply a fee was charged and rounded away; the honest thing is to say
+    // there wasn't one. (b.stripeFeeInclGst is exactly 0 here — see NO_PAYMENT_FEES.)
+    if (isInvoiceOrder(o)) {
+      profitBreakdownInner += pbRow(`Card fee ${muted('(bank transfer — none)')}`, formatPrice(0));
+    } else {
+      profitBreakdownInner += pbRow(`Paid to Stripe ${muted(`(2.65% + $0.30, incl. ${formatPrice(b.stripeFeeGst)} GST)`)}`, neg(b.stripeFeeInclGst));
+    }
     profitBreakdownInner += pbRow(
       `<span title="GST you collected from the customer (${formatPrice(b.gstCollected)}) minus the GST you already paid out to your supplier and Stripe — those are reclaimable, so only the remainder goes to IRD.">GST remitted to IRD ${muted('(after credits) ⓘ')}</span>`,
       neg(b.gstRemittedToIrd));

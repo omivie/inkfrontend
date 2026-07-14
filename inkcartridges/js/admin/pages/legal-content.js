@@ -853,7 +853,11 @@ export default {
   async init(container) {
     FilterState.showBar(false);
     _container = container;
-    if (typeof AdminAuth !== 'undefined' && !AdminAuth.isOwner()) {
+    // AdminAuth is imported above — no typeof guard. Written as
+    // `typeof AdminAuth !== 'undefined' && !AdminAuth.isOwner()`, this access check
+    // would fail OPEN if the import were ever dropped: the && short-circuits, the
+    // deny branch never runs, and a non-owner walks straight in.
+    if (!AdminAuth.isOwner()) {
       _container.innerHTML = `
         <div class="admin-stub">
           <div class="admin-stub__title">Access Restricted</div>

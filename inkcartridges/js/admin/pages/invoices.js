@@ -17,13 +17,13 @@
  * authoritative subtotal/GST/total. PDF is backend-generated when available;
  * until then we fall back to client-side jsPDF (already loaded in the shell).
  */
-import { AdminAPI, icon, esc } from '../app.js';
+import { AdminAuth, AdminAPI, icon, esc } from '../app.js';
 import { DataTable } from '../components/table.js';
 import { Drawer } from '../components/drawer.js';
 import { Modal } from '../components/modal.js';
 import { Toast } from '../components/toast.js';
 import { attachAutocomplete } from '../components/autocomplete.js';
-import { attachProductAutocomplete, productCostExGst } from '../components/product-search.js';
+import { attachProductAutocomplete, productCostExGst, fetchProductCosts } from '../components/product-search.js';
 import {
   costOrNull, computeInvoiceTotals, computeInvoiceCogs, computeInvoiceProfit,
   normalizeInvoice, invoiceDocRows,
@@ -35,7 +35,13 @@ const GST_RATE = 0.15;
 // Supplier cost is an owner-only figure. The route itself is already owner-gated
 // (app.js ownerPages), but gate the field too — cheap, and it keeps the intent
 // legible next to the input that must never be printed.
-const canSeeCost = () => (typeof AdminAuth !== 'undefined' && AdminAuth?.isOwner) ? AdminAuth.isOwner() : false;
+//
+// NB AdminAuth is an ES-module export, NOT a global. This used to be written as
+// `typeof AdminAuth !== 'undefined' ? … : false` without importing it — so it
+// silently evaluated to false and the entire "Our Cost" column never rendered for
+// anyone. A defensive typeof guard around a missing import doesn't harden the
+// feature, it deletes it. Import the thing and let it throw if it's absent.
+const canSeeCost = () => AdminAuth.isOwner();
 
 // ---- small helpers ------------------------------------------------------
 const escA = (s) => (window.Security?.escapeAttr ? Security.escapeAttr(String(s ?? '')) : String(s ?? '').replace(/"/g, '&quot;'));
@@ -602,7 +608,41 @@ async function onRowAction(e) {
 
 async function openExisting(row) {
   const rec = await AdminAPI.getInvoice(row.id) || row;
-  openEditor(draftFromInvoice(rec));
+  const draft = draftFromInvoice(rec);
+  await backfillCostsFromCatalogue(draft);
+  openEditor(draft);
+}
+
+/**
+ * Fill in any line cost the backend didn't give us, from the product catalogue.
+ *
+ * The backend accepts supplier_cost_excl_gst but does NOT echo it back on
+ * GET /invoices/:id — it snapshots the cost onto the shadow order and leaves the
+ * invoice line null. So without this, reopening a saved invoice shows an empty
+ * "Our Cost" box even for a product whose cost we know, and the invoice's Profit
+ * column is stuck on "—" forever.
+ *
+ * Rules:
+ *   - Only fills lines that have NO cost. A manual override is never touched.
+ *   - Only fills from a resolvable product_code. An unresolvable / free-text line
+ *     stays UNKNOWN (null) — the operator types it, or it stays honest.
+ *   - Marks what it fills as 'auto', because that's exactly what it is.
+ *
+ * Fail-soft: no Supabase, no catalogue hit, any error → costs simply stay unknown.
+ */
+async function backfillCostsFromCatalogue(d) {
+  const need = (d.lines || []).filter(l => costOrNull(l.supplierCost) == null && (l.code || '').trim());
+  if (!need.length) return;
+  try {
+    const costs = await fetchProductCosts(need.map(l => l.code));
+    if (!costs.size) return;
+    for (const l of need) {
+      const c = costs.get((l.code || '').trim());
+      if (c != null) { l.supplierCost = c; l.costSource = 'auto'; }
+    }
+  } catch (err) {
+    warn('cost back-fill from catalogue failed', err);
+  }
 }
 
 // Quick Order hands off a staged prefill via sessionStorage['qo_invoice_prefill']

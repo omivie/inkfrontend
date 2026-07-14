@@ -18,7 +18,7 @@
  * to an empty list, writes surface a clean toast (mirrors invoices / contacts).
  * Backend contract: readfirst/quick-orders-backend-jul2026.md.
  */
-import { AdminAPI, icon, esc } from '../app.js';
+import { AdminAuth, AdminAPI, icon, esc } from '../app.js';
 import { DataTable } from '../components/table.js';
 import { Drawer } from '../components/drawer.js';
 import { Modal } from '../components/modal.js';
@@ -31,7 +31,9 @@ const GST_RATE = 0.15;
 const MISSING = '—';
 
 // Supplier cost is owner-only (the route already is; gate the field too).
-const canSeeCost = () => (typeof AdminAuth !== 'undefined' && AdminAuth?.isOwner) ? AdminAuth.isOwner() : false;
+// AdminAuth is a module export, not a global — see the note in pages/invoices.js.
+// A `typeof AdminAuth !== 'undefined'` guard here silently hid the column entirely.
+const canSeeCost = () => AdminAuth.isOwner();
 
 // ---- small helpers (self-contained copies of the invoice-page primitives) ----
 const escA = (s) => (window.Security?.escapeAttr ? Security.escapeAttr(String(s ?? '')) : String(s ?? '').replace(/"/g, '&quot;'));
@@ -659,6 +661,17 @@ export default {
           <div class="admin-page-header__actions">
             <button class="admin-btn admin-btn--primary" id="qo-new">${icon('plus', 14, 14)} New quick order</button>
           </div>
+        </div>
+        <!-- Invoiced sales ARE counted in analytics (the backend materialises each saved
+             invoice as an order). Quick orders are NOT — that half of the backend work is
+             still pending. Say so plainly rather than let the owner assume these totals are
+             in their revenue: silently under-reporting sales is exactly the problem this
+             whole feature set exists to fix. -->
+        <div class="qo-notice">
+          <span><strong>Quick orders aren’t in your sales figures yet.</strong>
+          They’re a register only — the Dashboard, Finance and Demand Ranking don’t see them.
+          Hit <strong>Create invoice</strong> on a row and the sale gets counted (invoiced sales
+          <em>are</em> included, cost of goods and all).</span>
         </div>
         <div class="admin-filters" style="display:flex;gap:var(--spacing-2);margin-bottom:var(--spacing-3);flex-wrap:wrap">
           <div class="admin-search" style="flex:1;min-width:240px">

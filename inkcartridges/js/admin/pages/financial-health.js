@@ -6,9 +6,9 @@ import { Charts } from '../components/charts.js';
 import { normalizeCategory, categoryKind, gstDefaultFor } from '../utils/expense-categories.js';
 import { RECURRENCE_TYPES, expandExpenseOccurrences, deriveStatus, isRecurring } from '../utils/expense-recurrence.js';
 import { computeExpenseKpis } from '../utils/expense-math.js';
-import { fetchCountableInvoices, aggregateInvoices, backendCountsInvoices } from '../utils/invoice-overlay.js';
 
 const formatPrice = (v) => window.formatPrice ? window.formatPrice(v) : `$${Number(v).toFixed(2)}`;
+const MISSING = '—';
 
 const pick = (obj, ...keys) => {
   if (!obj) return undefined;
@@ -34,62 +34,10 @@ async function load() {
     AdminAPI.getAdminAnalyticsPnL(days),
     AdminAPI.expenses.list({ limit: 1000 }),
   ]);
-  // Invoiced sales are real sales the backend's P&L doesn't know about. Fetch them
-  // once here and fold them into the P&L rows (see renderPnLTable). Self-disables
-  // once the backend counts them itself. TEMPORARY — see utils/invoice-overlay.js.
-  const invoices = backendCountsInvoices(pnl) ? null : await fetchCountableInvoices();
-  _state = { overview, burnRunway, forecasts, cashflow, daily, pnl, invoices, expenses: expenses?.items || [] };
+  // NB the backend's P&L already includes invoiced (phone / walk-in / B2B) sales —
+  // it returns includes_invoices: true. The frontend renders; it does not aggregate.
+  _state = { overview, burnRunway, forecasts, cashflow, daily, pnl, expenses: expenses?.items || [] };
   render();
-}
-
-/**
- * The date window a P&L period covers, or null if we can't tell.
- *
- * We only overlay invoices onto a period whose window we can pin down exactly —
- * adding a month of invoices to the wrong month is worse than adding none. The
- * backend's period shape isn't contractually fixed, so probe the plausible ones
- * and give up honestly when none match.
- */
-function pnlPeriodWindow(p) {
-  if (!p) return null;
-  const start = pick(p, 'start_date', 'period_start', 'from');
-  const end = pick(p, 'end_date', 'period_end', 'to');
-  if (start && end) return { from: String(start).slice(0, 10), to: String(end).slice(0, 10) };
-  // Monthly bucket, e.g. "2026-07".
-  const label = pick(p, 'period', 'month', 'bucket', 'date');
-  const m = /^(\d{4})-(\d{2})/.exec(String(label || ''));
-  if (!m) return null;
-  const y = +m[1], mo = +m[2];
-  const lastDay = new Date(Date.UTC(y, mo, 0)).getUTCDate();
-  return { from: `${m[1]}-${m[2]}-01`, to: `${m[1]}-${m[2]}-${String(lastDay).padStart(2, '0')}` };
-}
-
-/**
- * Add a window's invoiced sales into one P&L period.
- *
- * pnl.revenue is EX-GST (it feeds the gross-profit row), so this uses
- * revenueExGst — NOT the incl-GST figure the Dashboard's revenue tile wants.
- * stripe_fees is deliberately untouched: an invoiced sale settles by bank
- * transfer and carries no card fee. That's the point, not an omission.
- */
-function pnlWithInvoices(period, rows) {
-  if (!period || !rows || !rows.length) return period;
-  const w = pnlPeriodWindow(period);
-  if (!w) return period;                       // window unknown → overlay nothing
-  const d = aggregateInvoices(rows, w);
-  if (!d || !d.count) return period;
-  const out = { ...period, _invoiceCount: d.count };
-  const bump = (k, v) => { if (out[k] != null && v != null) out[k] = num(out[k]) + num(v); };
-  bump('revenue', d.revenueExGst);
-  bump('order_count', d.orders);
-  if (d.costsKnown) {
-    bump('cogs', d.cogsExGst);
-    bump('gross_profit', d.grossProfit);
-    bump('net_profit', d.netProfit);
-  } else {
-    out._costsUnknown = true;
-  }
-  return out;
 }
 
 // ── Expense summary (the full management UI now lives at Finance → Expenses) ──
@@ -284,52 +232,58 @@ function renderPnLOrdersSummary() {
 function renderPnLTable() {
   const pnl = _state.pnl || {};
   const periods = Array.isArray(pnl.periods) ? pnl.periods : [];
-  const inv = _state.invoices;
-  // Overlay BOTH periods, not just the current one — bumping current alone would
-  // compare invoices-included against website-only and invent a jump in "Change".
-  const cur = pnlWithInvoices(periods[periods.length - 1] || pnl.totals || {}, inv);
-  const prev = pnlWithInvoices(periods.length >= 2 ? periods[periods.length - 2] : {}, inv);
+  const cur = periods[periods.length - 1] || pnl.totals || {};
+  const prev = periods.length >= 2 ? periods[periods.length - 2] : {};
   const rows = [
     ['Revenue', cur.revenue, prev.revenue],
     ['Cost of Goods Sold', cur.cogs, prev.cogs, true],
     ['Gross Profit', cur.gross_profit, prev.gross_profit],
-    // Untouched by the overlay on purpose: invoiced sales settle by bank transfer,
-    // so they contribute exactly $0 of card fees.
+    // Invoiced sales settle by bank transfer, so they add exactly $0 of card fees.
     ['Stripe Fees', cur.stripe_fees, prev.stripe_fees, true],
     ['Operating Expenses', cur.operating_expenses, prev.operating_expenses, true],
     ['Net Profit', cur.net_profit, prev.net_profit, false, true],
   ];
-  const invCount = cur._invoiceCount || 0;
-  const note = invCount
-    ? `Includes ${invCount} invoiced sale${invCount === 1 ? '' : 's'} added client-side, pending backend support.${
-      cur._costsUnknown ? ' Their cost of goods isn’t recorded, so only Revenue is adjusted — profit rows are website-only.' : ''}`
-    : '';
 
+  // COGS HONESTY (ERR-028 / ERR-063). The backend returns cogs / gross_profit /
+  // net_profit as NULL — never 0 — when any sale in the period has an un-costed
+  // line. Do NOT route those through num(v, 0): that renders "$0.00", which reads
+  // as "we made nothing" when the truth is "we don't know". Unknown is "—".
+  const known = (v) => v != null && Number.isFinite(typeof v === 'string' ? parseFloat(v) : v);
   const fmt = (v, neg) => {
+    if (!known(v)) return MISSING;
     const n = num(v);
     return (neg && n > 0 ? '-' : '') + formatPrice(Math.abs(n));
   };
-  const change = (cur, prev) => {
-    const c = num(cur), p = num(prev);
+  const change = (c0, p0) => {
+    // A change against an unknown value is itself unknown — not "0%" (which claims
+    // it was flat) and not "+∞" (which claims it appeared from nothing).
+    if (!known(c0) || !known(p0)) return MISSING;
+    const c = num(c0), p = num(p0);
     if (!p) return c > 0 ? '+∞' : '0%';
     const pct = ((c - p) / Math.abs(p)) * 100;
     return (pct >= 0 ? '+' : '') + pct.toFixed(1) + '%';
   };
 
+  const unknownRows = rows.filter(([, c]) => !known(c)).map(([label]) => label);
+
   let html = `<table class="admin-table" style="margin:0;width:100%">
     <thead><tr><th>Line</th><th style="text-align:right">Current</th><th style="text-align:right">Previous</th><th style="text-align:right">Change</th></tr></thead><tbody>`;
-  for (const [label, cur, prev, neg, bold] of rows) {
+  for (const [label, c, p, neg, bold] of rows) {
     const style = bold ? 'font-weight:700;border-top:2px solid var(--border)' : '';
-    const negClass = neg ? 'style="color:var(--magenta, #C71F6E);"' : '';
+    const negClass = neg && known(c) ? 'style="color:var(--magenta, #C71F6E);"' : '';
     html += `<tr style="${style}">
       <td>${esc(label)}</td>
-      <td style="text-align:right" ${negClass}>${esc(fmt(cur, neg))}</td>
-      <td style="text-align:right" ${negClass}>${esc(fmt(prev, neg))}</td>
-      <td style="text-align:right">${esc(change(cur, prev))}</td>
+      <td style="text-align:right" ${negClass}>${esc(fmt(c, neg))}</td>
+      <td style="text-align:right" ${negClass}>${esc(fmt(p, neg))}</td>
+      <td style="text-align:right">${esc(change(c, p))}</td>
     </tr>`;
   }
   html += '</tbody></table>';
-  if (note) html += `<p class="fh-pnl-note">${esc(note)}</p>`;
+  if (unknownRows.length) {
+    html += `<p class="fh-pnl-note">${esc(unknownRows.join(', '))} ${unknownRows.length === 1 ? 'is' : 'are'} unavailable —
+      at least one sale in this period has no cost of goods recorded, so profit can’t be calculated.
+      <a href="#dashboard">See which sales</a> to fix it.</p>`;
+  }
   return html;
 }
 
@@ -374,8 +328,11 @@ async function renderProfitChart() {
       ? new Date(Number(y), Number(m) - 1, 1).toLocaleDateString('en-NZ', { month: 'short', year: '2-digit' })
       : ym;
     labels.push(label);
-    gross.push(num(p.gross_profit));
-    net.push(num(p.net_profit));
+    // null = unknown COGS for that month. Push null, NOT 0 — Chart.js draws a gap
+    // (spanGaps defaults false), which is the truth. A 0 would draw the line down
+    // to the axis and read as "we made no profit that month".
+    gross.push(p.gross_profit != null ? num(p.gross_profit) : null);
+    net.push(p.net_profit != null ? num(p.net_profit) : null);
     orders.push(p.order_count != null ? num(p.order_count) : null);
   }
 

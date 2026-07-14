@@ -50,6 +50,35 @@ export function productCostExGst(p) {
 const sbSafe = (s) => String(s ?? '').replace(/[,()]/g, ' ').trim();
 
 /**
+ * Look up the ex-GST cost of many SKUs at once → Map<sku, cost|null>.
+ *
+ * Why this exists: the backend does NOT echo supplier_cost_excl_gst back on a
+ * saved invoice (it snapshots the cost into the shadow order but leaves the
+ * invoice line null). So reopening an invoice shows an empty "Our Cost" box even
+ * for a product we know the cost of, and the invoice's Profit column can never
+ * read anything but "—". Back-filling from the catalogue on open closes that loop:
+ * the operator just hits Save and the cost persists.
+ *
+ * A SKU with no catalogue row, or a row with no cost_price, maps to null — that is
+ * UNKNOWN, and it stays unknown. Never 0.
+ */
+export async function fetchProductCosts(skus) {
+  const want = [...new Set((skus || []).map(s => String(s || '').trim()).filter(Boolean))];
+  const out = new Map();
+  if (!want.length) return out;
+  const sb = (typeof Auth !== 'undefined' && Auth?.supabase) ? Auth.supabase : null;
+  if (!sb) return out;                       // no Supabase → no back-fill; costs stay unknown
+  try {
+    const { data, error } = await sb.from('products').select('sku, cost_price').in('sku', want);
+    if (error || !Array.isArray(data)) return out;
+    for (const row of data) out.set(row.sku, productCostExGst(row));
+  } catch (err) {
+    window.DebugLog?.warn?.('[ProductSearch] cost back-fill failed', err?.message || err);
+  }
+  return out;
+}
+
+/**
  * Search products for the picker.
  *
  * Supabase first — not just because it's faster (it skips the Render hop, same
