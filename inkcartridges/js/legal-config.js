@@ -40,12 +40,19 @@
         // describe OUR OWN guarantee and the statutory CGA rights, but we
         // may never characterise what an OEM will or won't honour.
         //
-        // Consumed by TWO callers, deliberately:
-        //   1. legal-page.js — refuses any legal_content_overrides CMS row
-        //      matching these, so a browser can never be shown copy that a
-        //      curl of the static HTML wouldn't reveal.
-        //   2. tests/google-ads-compliance-may2026.test.js — scans the
-        //      shipped source. One list, so the two can never drift.
+        // Consumed by the compliance test sweep — tests/google-ads-compliance-may2026.test.js
+        // and tests/genuine-vs-compatible-warranty.test.js — which scan every
+        // shipped source file for copy matching these. ONE list, so the sweep and
+        // the ban can never drift apart.
+        //
+        // NEVER reintroduce a hand-maintained FILES_TO_SCAN allowlist in front of
+        // that sweep: an allowlist that forgot a file is exactly why banned copy
+        // shipped through two "fixed" reports (ERR-063). The sweep walks the tree.
+        //
+        // There used to be a second consumer — legal-page.js screened CMS override
+        // rows against this list before writing them to the DOM. That CMS was
+        // retired on 2026-07-14 (ERR-069); there is no longer any runtime path that
+        // injects remote copy into a legal page, so there is nothing to screen.
         //
         // Patterns are ASSERTION-shaped, never a bare `warranty` or `void`:
         // "genuine cartridges carry the manufacturer's own warranty" and

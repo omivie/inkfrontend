@@ -1,12 +1,20 @@
 /**
  * Settings — consolidated owner-only configuration hub (June 2026 IA overhaul).
  *
- * Four tabs, each a lazy ES module reused as a panel (same contract as the
+ * Three tabs, each a lazy ES module reused as a panel (same contract as the
  * Control Center / Finance hubs: `default { init(container), destroy?() }`):
  *   Notifications  → contact-emails.js   (was the standalone "Settings" page)
  *   Shipping Rates → shipping-rates.js
- *   Legal Content  → legal-content.js
  *   Site Lock      → site-lock.js
+ *
+ * There was a fourth tab, "Legal Content" — a CMS for the copy on /about /terms
+ * /privacy /returns /shipping /faq /contact. It was retired on 2026-07-14 and its
+ * module deleted. It had never worked: its edits were saved to a table the
+ * storefront could not read (ERR-065). Repairing it would have let legal copy drift
+ * between the bot prerender and the browser, which is cloaking — the exact charge
+ * under appeal with Google Ads. Legal copy now has exactly one source: the page
+ * HTML, plus legal-config.js for the facts. Do not add the tab back; see ERR-069
+ * and tests/legal-cms-retired-jul2026.test.js, which fails if you do.
  *
  * The active tab persists to the URL hash query (#settings?tab=shipping) so
  * deep links and browser back/forward work. Owner-only — navigate() in app.js
@@ -22,7 +30,6 @@ const SETTINGS_VERSION = '2026.06.25a';
 const TABS = [
   { id: 'notifications', label: 'Notifications', module: './contact-emails.js' },
   { id: 'shipping',      label: 'Shipping Rates', module: './shipping-rates.js' },
-  { id: 'legal',         label: 'Legal Content',  module: './legal-content.js' },
   { id: 'site-lock',     label: 'Site Lock',      module: './site-lock.js' },
 ];
 

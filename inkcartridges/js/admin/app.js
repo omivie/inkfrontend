@@ -1,7 +1,7 @@
 /**
  * Admin SPA — Entry point, router, shell
  */
-const APP_VERSION = '2026.07.14-invoice-orders-cogs-b';
+const APP_VERSION = '2026.07.14-legal-cms-retired';
 
 import { AdminAuth } from './auth.js';
 import { FilterState } from './filters.js';
@@ -103,7 +103,11 @@ const ROUTE_REDIRECTS = {
   'image-audit': 'genuine-image-audit',         // legacy image audit retired
   'contact-emails': 'settings?tab=notifications', // now a Settings hub tab
   'shipping-rates': 'settings?tab=shipping',
-  'legal-content': 'settings?tab=legal',
+  // Legal Content CMS retired 2026-07-14 (ERR-069) — module and Settings tab both
+  // deleted. Kept as a redirect (not removed) so an old bookmark lands on the
+  // Settings hub instead of "Error Loading Page"; it points at the hub itself
+  // rather than ?tab=legal, because that tab no longer exists.
+  'legal-content': 'settings',
   'site-lock': 'settings?tab=site-lock',
 };
 

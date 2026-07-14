@@ -258,8 +258,18 @@ test('APP_VERSION advanced so the edited invoices.js module is re-fetched', () =
 test('the shell busts BOTH the admin.css and admin/app.js tokens', () => {
   // Bumping only one leaves cached browsers on a stale half of the pair —
   // the classic "works locally, broken live" failure for this SPA.
+  //
+  // Assert the PAIR is versioned and has moved off the known-stale values. Do NOT assert
+  // the token's shape. This test used to require /admin\.css\?v=2026-07-\d{2}[a-z]/ — an
+  // era-literal pin of exactly the kind ERR-067 is about, and it was doubly wrong here:
+  // `scripts/stamp-versions.js` runs as Vercel's buildCommand and rewrites every ?v= to
+  // md5(content)[:8], so the hand-written `2026-07-14c` form this pattern demanded is not
+  // what production has ever served. It pinned a value that only exists in git.
+  //
+  // Sitewide token consistency and staged-change freshness are owned by
+  // tests/asset-cache-tokens.test.js. Here we only assert the pair-wise property.
   assert.doesNotMatch(SHELL_SRC, /admin\.css\?v=2026-07-08e/, 'admin.css token must be bumped');
   assert.doesNotMatch(SHELL_SRC, /admin\/app\.js\?v=2026-07-08f/, 'admin/app.js token must be bumped');
-  assert.match(SHELL_SRC, /admin\.css\?v=2026-07-\d{2}[a-z]/);
-  assert.match(SHELL_SRC, /admin\/app\.js\?v=2026-07-\d{2}[a-z]/);
+  assert.match(SHELL_SRC, /admin\.css\?v=[^"']+/, 'admin.css must carry a cache token');
+  assert.match(SHELL_SRC, /admin\/app\.js\?v=[^"']+/, 'admin/app.js must carry a cache token');
 });

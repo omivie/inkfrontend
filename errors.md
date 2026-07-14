@@ -4,6 +4,70 @@ Log every error encountered here. Before editing a file, scan for known issues. 
 
 ---
 
+## ERR-069 — Retiring a feature's READ path while leaving its WRITE path live (2026-07-14)
+
+**Symptom:** the backend retired the legal-content CMS and asked the frontend for one surgical
+change — strip the dead override fetch out of `js/legal-page.js`. Doing exactly and only that
+would have left `js/admin/pages/legal-content.js` (881 lines) mounted at Settings → Legal
+Content, still `upsert`-ing into `legal_content_overrides` and still telling the owner
+**"Saved. Live on next page-load."**
+
+That sentence has never been true (ERR-065), and once the read path is deleted it can never
+*become* true. The half-retirement would have preserved the exact silent-vanish trap ERR-065
+was about, and left a live write path into a table the backend is about to drop.
+
+**Cause (the general one):** a feature is a loop — writer → store → reader → surface. A handoff
+naturally describes the half the author can see. The reader was the half that was *visible* to
+the backend (it's the part that greps), so that's the half the handoff named. Nobody was lying;
+the write path was simply out of frame.
+
+**Fix:** retire all four corners at once.
+- reader: the override fetch/apply path in `js/legal-page.js` (the file now performs **zero**
+  network I/O — that is the invariant, not merely "this one table is unreachable")
+- writer: `js/admin/pages/legal-content.js`, deleted, along with the inline
+  `CREATE TABLE legal_content_overrides` DDL it carried
+- route: the Settings tab in `settings.js`. The legacy `#legal-content` hash was deliberately
+  **kept** as a redirect — pointed at the bare `settings` hub, not the deleted `?tab=legal` —
+  so an old bookmark lands somewhere sane instead of "Error Loading Page"
+- spec: the stale doc references, and the now-false `legal-config.js` comment claiming
+  `BANNED_CLAIM_PATTERNS` still feeds a CMS guard
+
+`LegalConfig.BANNED_CLAIM_PATTERNS` itself **stays** — the CMS guard was only one of its
+consumers; the compliance source sweep still imports it. Deleting it as "CMS collateral" would
+have silently disarmed the banned-copy sweep. That is the ERR-063 failure mode wearing a
+cleanup costume.
+
+**Guard:** `tests/legal-cms-retired-jul2026.test.js` (21 tests) replaces the 25-test
+`legal-content-cms.test.js`, which asserted the CMS *existed*. It runs the backend's own
+acceptance grep in CI (must be 0 — **including comments**, so the file may not even *name* the
+mechanism), asserts zero network I/O, asserts the writer/tab/route are gone, sweeps the WHOLE
+tree for the table name (never an allowlist — ERR-063), and pins the half we KEPT so a future
+cleanup can't take the `data-legal-bind` trust signals down with it.
+
+**Verified in the rendered DOM, not by curl** (the ERR-065 lesson): all 8 legal pages in
+Chromium — zero reads of the retired table, `window.LegalContent` gone, all 8–22 `data-legal-bind`
+values still resolving, TOC building, FAQ accordions toggling, policy copy intact, no uncaught
+exceptions. Admin: Settings now shows `["Notifications","Shipping Rates","Site Lock"]`, and
+`#legal-content` redirects to `#settings` without an error screen.
+
+**Also caught, and NOT acted on:** the handoff offered an optional "byte-parity" nicety —
+add `NZ Company Number 1853414` to the SPA footer line, because *"the backend's own footer line
+additionally includes"* it. Fetched live under a Googlebot UA: **zero** occurrences in the
+served footer of `/terms`, `/about`, `/privacy`, `/returns`. The only occurrence anywhere is in
+the `/terms` **body**, which is our own static HTML. Adding it to `disambiguationLine()` would
+have made our footer assert something the backend's footer does not — *creating* the bot/browser
+divergence we are trying to eliminate, and touching 33 hardcoded `<noscript>` footers, `404.html`
+and 4 compliance pins to do it, mid-appeal. Flagged back to the backend instead.
+
+**Lessons:**
+1. When you kill a feature, kill the **writer, the reader, the route, and the spec**. A UI that
+   still reports success into a store nothing reads is worse than the bug you were fixing.
+2. A "remove X" handoff describes the half the author can see. Grep for the *other* half before
+   you call it done.
+3. Do not act on a claim about a surface you can fetch. Fetch it.
+
+---
+
 ## ERR-066 — The footer's Google-Ads "Business Transparency" line was silently dropped (2026-07-14)
 
 **Symptom:** the rendered footer, sitewide, was missing the legal-entity line —
@@ -143,14 +207,19 @@ Bare `Config.SUPABASE_URL` works; `window.Config` is `undefined`. Verified in-br
 **DO NOT "just fix" this.** Making overrides apply would render SPA copy the **backend
 prerender does not serve** → bot HTML ≠ browser HTML on `/terms` + `/about` → that is
 **cloaking**, the exact charge being appealed. Repairing it requires backend prerender parity
-first. Deliberately left inert during the appeal window (owner's call, 2026-07-14). See
-`.claude/memory/todos.md`.
+first.
 
-**Mitigation already shipped:** `legal-page.js` now screens every override against
-`LegalConfig.BANNED_CLAIM_PATTERNS` before the `innerHTML` write, so whenever the CMS *is*
-repaired it cannot reintroduce a banned claim. Proven end-to-end in Chromium: a malicious
-override carrying the banned paragraph is rejected and the vetted static copy survives, while a
-benign edit still applies.
+**RESOLVED 2026-07-14 — by RETIREMENT, not repair.** The owner chose to kill the CMS rather
+than fix the binding. The backend purged all 5 override rows; the frontend deleted the read
+path (`legal-page.js`) *and* the write path (the admin editor). Legal copy now has exactly one
+source per page: the page's HTML, plus `legal-config.js` for the facts. The interim
+banned-claim runtime guard (`rejectIfBanned`) went with it — there are no overrides left to
+screen, and a removed mechanism beats a guarded one. Full write-up: **ERR-069**.
+
+Runtime proof of this diagnosis, captured during the retirement: rendering `/terms` at the
+pre-retirement commit in Chromium produced **zero** requests to `legal_content_overrides` while
+`window.LegalContent` was present — i.e. the CMS surface existed and the fetch never fired,
+exactly as the `window.Config` analysis predicted.
 
 **Wider lesson:** a `curl`-based compliance check cannot see SPA-injected copy. Any "prove it's
 fixed" grep must be run against the **rendered DOM**, not just the served HTML — AdsBot executes

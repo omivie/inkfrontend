@@ -176,52 +176,50 @@ test('§3 the patterns do NOT ban legitimate warranty language', () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────
-// §4. The CMS bypass.
+// §4. The CMS bypass — now closed by REMOVAL, not by a guard.
 //
-// legal-page.js overwrites .policy-section innerHTML from the Supabase
+// legal-page.js used to overwrite .policy-section innerHTML from the Supabase
 // `legal_content_overrides` table. A row keyed
-// `genuine-vs-compatible.section.warranty` renders in a BROWSER (and to
-// AdsBot, which executes JS) while a curl of the static HTML shows clean.
-// The backend's acceptance grep structurally cannot see this. Guard it.
+// `genuine-vs-compatible.section.warranty` would render in a BROWSER (and to
+// AdsBot, which executes JS) while a curl of the static HTML showed clean —
+// a hole the backend's acceptance grep structurally could not see.
+//
+// This section used to assert a runtime guard (`rejectIfBanned`) screened every
+// such row. On 2026-07-14 the owner RETIRED the CMS outright, so the guard was
+// deleted along with the fetch path it protected: there are no override rows to
+// screen, and no code path that injects remote copy into a legal page at all.
+// A removed mechanism beats a guarded one — there is nothing left to get wrong.
+//
+// The structural proof that the path is gone (and stays gone) lives in
+// tests/legal-cms-retired-jul2026.test.js. What stays HERE is the claim that
+// actually concerns this page: the banned-claim list must still recognise the
+// exact paragraph that suspended the Ads account, wherever it might reappear.
+// See ERR-065 → ERR-069.
 // ─────────────────────────────────────────────────────────────────────────
-test('§4 legal-page.js screens CMS overrides against the banned-claim list', () => {
+test('§4 legal-page.js can no longer inject remote copy into a legal page', () => {
     const src = READ('js/legal-page.js');
-
-    assert.match(src, /LegalConfig\.BANNED_CLAIM_PATTERNS/,
-        'the guard must read the shared list, not a private copy that can drift');
-    assert.match(src, /function\s+rejectIfBanned/);
-
-    // Both innerHTML sinks (hero + section) must be gated.
-    const apply = src.slice(src.indexOf('function pageContentApply'), src.indexOf('function cssEscape'));
-    const sinks = apply.match(/\.innerHTML\s*=\s*value/g) || [];
-    assert.ok(sinks.length >= 2, 'expected the hero + section innerHTML sinks');
-
-    const gated = apply.match(/!rejectIfBanned\(key, value\)\)\s*\w+\.innerHTML\s*=\s*value/g) || [];
-    assert.equal(gated.length, sinks.length,
-        'EVERY innerHTML sink in pageContentApply must be gated by rejectIfBanned — '
-        + 'an ungated one is a hole a CMS row can walk straight through');
+    assert.ok(!/\bfetch\s*\(/.test(src) && !/legal_content_overrides/i.test(src),
+        'legal-page.js must have no remote-content path at all. The banned-claim runtime guard '
+        + 'was removed with it — if a fetch ever comes back, the guard does NOT, and this page '
+        + 'is once again cloakable. Keep the mechanism deleted; see ERR-069.');
 });
 
-test('§4 the guard rejects a malicious override and keeps the vetted copy', () => {
-    // Behavioural, not textual: rebuild the guard's decision path exactly as
-    // legal-page.js runs it, and prove the banned row is refused.
+test('§4 the banned-claim list still recognises the exact paragraph that shipped', () => {
+    // Behavioural, not textual. This is the copy that suspended the Google Ads account. It must
+    // stay recognisable no matter which surface it turns up on, while a legitimate statement
+    // about OUR OWN warranty must not trip the list.
     const violates = (value) => BANNED_CLAIM_PATTERNS.some((rx) => rx.test(value));
 
-    const maliciousRow = {
-        key: 'genuine-vs-compatible.section.warranty',
-        value: '<h2>5. Warranty</h2><p>Using a quality compatible cartridge does not void your '
-            + "printer's warranty in New Zealand.</p>",
-    };
-    assert.ok(violates(maliciousRow.value),
-        'a CMS row reintroducing the banned paragraph must be refused');
+    const bannedCopy = '<h2>5. Warranty</h2><p>Using a quality compatible cartridge does not void '
+        + "your printer's warranty in New Zealand.</p>";
+    assert.ok(violates(bannedCopy),
+        'the banned OEM-warranty paragraph must still be caught by BANNED_CLAIM_PATTERNS');
 
-    const benignRow = {
-        key: 'genuine-vs-compatible.section.warranty',
-        value: '<h2>5. Warranty</h2><p>Compatible cartridges from us are covered by our own '
-            + '12-month replacement warranty.</p>',
-    };
-    assert.ok(!violates(benignRow.value),
-        'a legitimate CMS edit must still be allowed through — the guard is a filter, not a lock');
+    const legitimateCopy = '<h2>5. Warranty</h2><p>Compatible cartridges from us are covered by '
+        + 'our own 12-month replacement warranty.</p>';
+    assert.ok(!violates(legitimateCopy),
+        'a claim about OUR OWN guarantee is legitimate and must not be flagged — the list is a '
+        + 'filter on OEM-warranty assertions, not a ban on the word "warranty"');
 });
 
 // ─────────────────────────────────────────────────────────────────────────
