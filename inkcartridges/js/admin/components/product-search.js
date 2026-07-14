@@ -79,6 +79,45 @@ export async function fetchProductCosts(skus) {
 }
 
 /**
+ * Verify line codes against the catalogue → Map<lowercased code, canonical sku>.
+ *
+ * The gate that keeps a non-SKU out of an invoice's product_code (ERR-071). A code
+ * that matches no product is simply ABSENT from the returned map — absent means
+ * "not a SKU", and utils/line-codes.js turns that into a blocking error rather
+ * than guessing which product was meant.
+ *
+ * Returns null — NOT an empty map — when the catalogue itself is unreachable.
+ * The distinction is the whole point: an empty map says "nothing matched, block
+ * the save"; null says "we couldn't ask", and a save must never be blocked by our
+ * own outage. Same UNKNOWN-≠-zero discipline as costOrNull, applied to lookups.
+ *
+ * Matching is exact but case-insensitive. We do that by ALSO querying the
+ * uppercased form (canonical SKUs are uppercase) rather than with ilike, so a `%`
+ * or `_` in a typed code can never be read as a wildcard and silently match some
+ * other product.
+ */
+export async function resolveSkus(codes) {
+  const want = [...new Set((codes || []).map((c) => sbSafe(c)).filter(Boolean))];
+  const out = new Map();
+  if (!want.length) return out;
+  const sb = (typeof Auth !== 'undefined' && Auth?.supabase) ? Auth.supabase : null;
+  if (!sb) return null;                        // can't ask → caller must not block
+  try {
+    const probes = [...new Set([...want, ...want.map((c) => c.toUpperCase())])];
+    const { data, error } = await sb.from('products').select('sku').in('sku', probes);
+    if (error || !Array.isArray(data)) return null;
+    for (const row of data) {
+      const sku = String(row.sku ?? '');
+      if (sku) out.set(sku.toLowerCase(), sku);
+    }
+    return out;
+  } catch (err) {
+    window.DebugLog?.warn?.('[ProductSearch] SKU verification failed', err?.message || err);
+    return null;
+  }
+}
+
+/**
  * Search products for the picker.
  *
  * Supabase first — not just because it's faster (it skips the Render hop, same

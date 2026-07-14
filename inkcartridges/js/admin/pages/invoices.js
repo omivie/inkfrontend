@@ -23,7 +23,8 @@ import { Drawer } from '../components/drawer.js';
 import { Modal } from '../components/modal.js';
 import { Toast } from '../components/toast.js';
 import { attachAutocomplete } from '../components/autocomplete.js';
-import { attachProductAutocomplete, productCostExGst, fetchProductCosts } from '../components/product-search.js';
+import { attachProductAutocomplete, productCostExGst, fetchProductCosts, resolveSkus } from '../components/product-search.js';
+import { codesToVerify, applyResolvedCodes } from '../utils/line-codes.js';
 import {
   costOrNull, computeInvoiceTotals, computeInvoiceCogs, computeInvoiceProfit,
   normalizeInvoice, invoiceDocRows,
@@ -968,7 +969,40 @@ async function syncStoredPdf() {
   await AdminAPI.uploadInvoicePdf(_draft.id, base64, `Invoice-${_draft.invoice_number || _draft.id}.pdf`);
 }
 
+/**
+ * Every line code must be a real products.sku before anything is written.
+ *
+ * The backend matches an invoice's line items to the catalogue BY SKU when it
+ * materialises the shadow order, so a series/base code typed off the box (`CTN258`
+ * instead of `CTN258XLKCMY`) drops the line and leaves a paid order with nothing in
+ * it — ERR-071, invoices #3263/#3264. The picker never causes this (it stores
+ * product.sku verbatim); a code TYPED into the free-text box does.
+ *
+ * Resolvable codes are canonicalised in place, so this also fixes casing before the
+ * payload is built. Unresolvable ones are highlighted and the save is aborted —
+ * throwing is what stops it, because all three persisting paths (save, email,
+ * download) funnel through here and each already surfaces err.message as a toast.
+ *
+ * Fail-soft: resolveSkus returns null when the catalogue is unreachable, and an
+ * outage of OURS must never be the reason an operator can't invoice a customer.
+ */
+async function verifyLineCodes() {
+  const token = _editorToken;
+  const lines = _draft?.lines || [];
+  const resolved = await resolveSkus(codesToVerify(lines));
+  if (!resolved) { warn('SKU verification skipped — catalogue unreachable'); return; }
+  const errs = applyResolvedCodes(lines, resolved);
+  if (!errs.length) return;
+  // The editor can be closed while the lookup is in flight (ERR-045). Still abort
+  // the write — an unresolvable code must never be persisted — but only paint the
+  // form when it's still the form we validated.
+  const first = editorAlive(token) ? markInvoiceErrors(errs) : null;
+  if (first) { first.scrollIntoView({ behavior: 'smooth', block: 'center' }); first.focus({ preventScroll: true }); }
+  throw new Error(errs.length === 1 ? errs[0].msg : `${errs.length} lines have a code that isn’t a product SKU — pick each product from the list.`);
+}
+
 async function persistDraft() {
+  await verifyLineCodes();
   const payload = buildPayload(_draft);
   const saved = _draft.id
     ? await AdminAPI.updateInvoice(_draft.id, payload)

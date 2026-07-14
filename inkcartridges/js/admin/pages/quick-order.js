@@ -24,8 +24,9 @@ import { Drawer } from '../components/drawer.js';
 import { Modal } from '../components/modal.js';
 import { Toast } from '../components/toast.js';
 import { attachAutocomplete } from '../components/autocomplete.js';
-import { attachProductAutocomplete, productCostExGst } from '../components/product-search.js';
+import { attachProductAutocomplete, productCostExGst, resolveSkus } from '../components/product-search.js';
 import { costOrNull } from '../utils/invoice-math.js';
+import { codesToVerify, applyResolvedCodes } from '../utils/line-codes.js';
 
 const GST_RATE = 0.15;
 const MISSING = '—';
@@ -600,12 +601,37 @@ function ensureValid() {
   return false;
 }
 
+/**
+ * Every line code must be a real products.sku before the order is written.
+ *
+ * Same gate as the Invoices editor (ERR-071), and if anything the more urgent of
+ * the two: a quick order becomes a REAL order, not a shadow one, and it also seeds
+ * the invoice editor through the qo_invoice_prefill bridge — so a series/base code
+ * typed here (`CTN258` for `CTN258XLKCMY`) reaches an invoice anyway.
+ *
+ * Resolvable codes are canonicalised in place; unresolvable ones are highlighted
+ * and the save is refused. A catalogue we can't reach (null) never blocks a save.
+ * Returns true when it's safe to write.
+ */
+async function verifyLineCodes(token) {
+  const resolved = await resolveSkus(codesToVerify(_draft?.lines || []));
+  if (!editorAlive(token)) return false;              // closed mid-lookup (ERR-045)
+  if (!resolved) { warn('SKU verification skipped — catalogue unreachable'); return true; }
+  const errs = applyResolvedCodes(_draft.lines, resolved);
+  if (!errs.length) return true;
+  const first = markErrors(errs);
+  if (first) { first.scrollIntoView({ behavior: 'smooth', block: 'center' }); first.focus({ preventScroll: true }); }
+  Toast.warning(errs.length === 1 ? errs[0].msg : `${errs.length} lines have a code that isn’t a product SKU — pick each product from the list.`);
+  return false;
+}
+
 async function saveQuickOrder() {
   if (!ensureValid()) return;
   const token = _editorToken;
   const btn = _editorRefs?.drawer.footer.querySelector('[data-ed-action="save"]');
   if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
   try {
+    if (!(await verifyLineCodes(token))) return;
     // Optionally mint a reusable contact from a brand-new caller's details.
     if (_draft.save_contact && !_draft.contact_id) {
       const c = _draft.customer;
