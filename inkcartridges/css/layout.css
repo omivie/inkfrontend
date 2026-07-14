@@ -1559,48 +1559,11 @@
     min-width: 0;
 }
 
-/* Single-line legal nav — every compliance surface reachable in one glance.
-   An ads reviewer scans the footer before they open any policy page. Dropped
-   in the 2026-07-02 IA reorg, restored 2026-07-14, and deliberately KEPT
-   through the Jul 2026 redesign (the handoff spec proposed deleting it as a
-   duplicate of the column grid — it is a duplicate, and that is the point).
-   Its own full-width row above the copyright so it never competes with the
-   payment chips. */
-.footer-legal-nav {
-    width: 100%;
-    padding-bottom: var(--spacing-md);
-    margin-bottom: var(--spacing-md);
-    border-bottom: 1px solid var(--footer-line);
-}
-
-.footer-legal-nav ul {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    justify-content: center;
-    gap: var(--spacing-xs);
-    margin: 0;
-    padding: 0;
-    list-style: none;
-}
-
-.footer-legal-nav a {
-    color: var(--footer-dim);
-    font-size: var(--font-size-xs);
-    text-decoration: none;
-}
-
-.footer-legal-nav a:hover,
-.footer-legal-nav a:focus-visible {
-    color: var(--footer-text);
-    text-decoration: underline;
-}
-
-.footer-legal-nav__sep {
-    color: rgba(255, 255, 255, 0.25);
-    font-size: var(--font-size-xs);
-}
-
+/* The single-line legal nav (.footer-legal-nav) that used to sit here was removed
+   2026-07-14: every link in it is already reachable from the Help + Company
+   columns, so it was a duplicate row. Don't re-add the styles without re-adding
+   the markup — dead footer CSS is what made the last two footer regressions hard
+   to read. */
 .footer-copyright {
     color: var(--footer-dim);
     font-size: var(--font-size-xs);

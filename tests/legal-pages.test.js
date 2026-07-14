@@ -107,19 +107,19 @@ test('§2 footer.js cross-links every required policy', () => {
     }
 });
 
-test('§2 footer renders the policy links in the column grid AND in a single-line legal nav', () => {
+test('§2 the footer column grid is the ONLY place policy links live, and it carries all of them', () => {
     // Was: assert.match(FOOTER_JS, /Policies/). The Jul 2026 redesign renamed the
     // columns to Shop / Help / Company, and that old assertion would have kept
     // passing anyway — off the "Policies and information" aria-label, not off a
-    // column. Assert the thing we actually care about: every policy page is
-    // reachable from the column grid, and again from the one-glance legal row.
+    // column. Then a duplicate single-line legal row was added and removed again
+    // (2026-07-14). The grid is now the sole carrier, so it has to carry the FULL
+    // set — a link dropped from a column is a compliance surface lost outright,
+    // with no second row to fall back on.
     const grid = FOOTER_JS.slice(FOOTER_JS.indexOf('class="footer-grid"'), FOOTER_JS.indexOf('class="footer-trust"'));
-    for (const href of ['/shipping', '/returns', '/terms', '/privacy']) {
+    for (const href of ['/shipping', '/returns', '/faq', '/contact', '/about', '/genuine-vs-compatible', '/terms', '/privacy']) {
         assert.match(grid, new RegExp('href="' + href + '"'),
             `the footer column grid must link to ${href}`);
     }
-    assert.match(FOOTER_JS, /class="footer-legal-nav"/,
-        'footer.js must render a single-line legal nav for at-a-glance compliance review');
 });
 
 test('§2 footer copyright reaffirms no card surcharges', () => {
@@ -445,14 +445,19 @@ test('§9 pages.css implements every styled hook used by the legal pages', () =>
     }
 });
 
-// `.footer-legal-nav` is a FOOTER hook, not a legal-page hook — it renders on
+// `.footer-legal-line` is a FOOTER hook, not a legal-page hook — it renders on
 // every page, not just /terms & co. It lives in layout.css beside every other
 // `.footer-*` rule. It was previously asserted against pages.css, which is why
 // restoring it there would have meant styling the footer from the wrong
 // stylesheet. Assert it where it actually belongs.
-test('§9 layout.css styles the footer legal nav + business-transparency line', () => {
+//
+// `.footer-legal-nav` used to be asserted here too. That row was removed on
+// 2026-07-14 (its links all live in the footer columns), so the rule now runs
+// the other way: the markup is gone, therefore the CSS must be gone too. Dead
+// footer CSS is what made the last two footer regressions hard to read.
+test('§9 layout.css styles the business-transparency line and carries no dead legal-nav CSS', () => {
     const LAYOUT_CSS = fs.readFileSync(path.join(ROOT, 'inkcartridges', 'css', 'layout.css'), 'utf8');
-    for (const h of ['.footer-legal-nav', '.footer-legal-nav__sep', '.footer-legal-line']) {
-        assert.ok(LAYOUT_CSS.indexOf(h) !== -1, `layout.css must declare ${h}`);
-    }
+    assert.ok(LAYOUT_CSS.indexOf('.footer-legal-line') !== -1, 'layout.css must declare .footer-legal-line');
+    assert.ok(LAYOUT_CSS.indexOf('.footer-legal-nav {') === -1,
+        'layout.css must not style .footer-legal-nav — the markup was removed');
 });

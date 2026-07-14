@@ -67,10 +67,17 @@ in Jun 2026; the footer ships no widget host, so no token is ever sent, and
 if a `[data-newsletter-turnstile]` host is ever added. Nothing to change — just don't re-gate the
 endpoint without telling us, or every footer subscribe on the site starts 403ing.
 
-**"Every nav link appears twice … Removed the duplicate row."** — Kept, on the owner's call. That row
-(`.footer-legal-nav`) *is* a duplicate of the column grid, deliberately: it was dropped in the
-2026-07-02 IA reorg, that loss went unnoticed, and it was restored on 2026-07-14 specifically so an
-ads reviewer can reach every compliance surface in one glance. It stays.
+**"Every nav link appears twice … Removed the duplicate row."** — The spec was right, and the row is
+now gone (2026-07-14, owner's call, reversing the same-day decision to keep it). Sequence: the row
+(`.footer-legal-nav`) was dropped in the 2026-07-02 IA reorg, that loss went unnoticed, it was
+restored on 2026-07-14 for at-a-glance ads review, then removed again once we confirmed the thing it
+was protecting is already satisfied without it — all eight of its hrefs (`/terms`, `/privacy`,
+`/returns`, `/shipping`, `/genuine-vs-compatible`, `/about`, `/faq`, `/contact`) sit in the Help +
+Company columns, one click from any page's footer.
+
+The compliance invariant is **"every policy surface is reachable from the footer"**, not "there is a
+legal row" — the columns are now its sole carrier, and the tests assert the full eight against the
+column grid. Drop a link from a column and it is gone outright; there is no second row to catch it.
 
 ---
 

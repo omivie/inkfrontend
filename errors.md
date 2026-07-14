@@ -4,6 +4,39 @@ Log every error encountered here. Before editing a file, scan for known issues. 
 
 ---
 
+## ERR-073 — A test pinned the *implementation* of a compliance rule, not the rule (2026-07-14)
+
+**Symptom:** the owner asked to delete the footer's single-line legal row
+(`.footer-legal-nav` — Terms · Privacy · Returns · Shipping · Genuine vs Compatible · About · FAQ ·
+Contact). Three separate places said not to: a `do not remove again` comment in `js/footer.js`, a
+`KEPT here on the owner's explicit call` comment in `tests/footer-redesign-jul2026.test.js`, and a
+test asserting the row exists by class name.
+
+**Cause:** the row was restored earlier the same day (ERR-066 era) for a real reason — an ads
+reviewer must be able to reach every compliance surface from the footer — but the guard I wrote
+asserted **the row**, not **the reason**. Those are not the same claim. Every one of the eight hrefs
+is *already* in the Help + Company columns of the same footer, so the reason was satisfied with or
+without the row; the row was duplication. A guard pinned to one implementation of an invariant
+blocks a legitimate change and, worse, teaches you to distrust the guard.
+
+Same failure shape as ERR-067 (a cache-token test pinned to a literal, which could only ever go red).
+A test that says "this exact markup exists" is a snapshot. A test that says "a user can reach
+`/privacy` from the footer" is an invariant.
+
+**Fix:** removed the row from `js/footer.js`, its dead rules from `css/layout.css`, and rewrote both
+guards to assert the invariant instead — the footer column grid must carry **all eight** policy
+hrefs (`tests/legal-pages.test.js` §2), and the duplicate row must not return
+(`tests/footer-redesign-jul2026.test.js` §3). Deleting a policy link from a column now goes red even
+though the row is gone. Bumped the `?v=` tokens for `footer.js` (`d7f4ba89`) and `layout.css`
+(`4a20d4a1`) across all 34 pages, since both files' content changed. Verified headless: zero
+`.footer-legal-nav` nodes rendered, all eight hrefs still present in the footer, none duplicated.
+
+**Rule:** when you guard a compliance decision, assert the user-visible outcome ("every policy page
+is reachable from the footer"), never the markup that happens to deliver it today. If you catch
+yourself writing `do not remove again` next to a class name, you are pinning a snapshot.
+
+---
+
 ## ERR-069 — Retiring a feature's READ path while leaving its WRITE path live (2026-07-14)
 
 **Symptom:** the backend retired the legal-content CMS and asked the frontend for one surgical

@@ -225,17 +225,19 @@ test('§3 the Shop column is STATIC — footer.js never fetches the nav feed', (
     assert.ok(!FOOTER_JS.includes('footer-categories-links'));
 });
 
-test('§3 the single-line legal nav survives the redesign', () => {
-    // The handoff spec proposed deleting this row as a duplicate of the column
-    // grid. It IS a duplicate — deliberately. An ads reviewer scans the footer
-    // before they open any policy page, so every compliance surface has to be
-    // reachable in one glance. Dropped in the 2026-07-02 IA reorg, restored
-    // 2026-07-14, KEPT here on the owner's explicit call. Do not remove again.
-    const nav = BOTTOM.slice(BOTTOM.indexOf('<nav class="footer-legal-nav"'), BOTTOM.indexOf('</nav>'));
+test('§3 the duplicate single-line legal nav is gone, and the columns still carry every policy link', () => {
+    // The row was restored on 2026-07-14 and removed again the same day on the
+    // owner's call: every href in it was already one click away in the Help +
+    // Company columns, so it was duplication, not coverage. The compliance
+    // invariant was never "there is a legal row" — it is "an ads reviewer can
+    // reach every policy surface from the footer". Assert THAT, so deleting a
+    // column link goes red even though the row is gone.
+    assert.ok(!FOOTER_JS.includes('footer-legal-nav'),
+        'the duplicate legal-nav row must not come back — the columns already cover it');
     for (const href of ['/terms', '/privacy', '/returns', '/shipping', '/genuine-vs-compatible', '/about', '/faq', '/contact']) {
-        assert.match(nav, new RegExp(`href="${href}"`), `the legal nav must link to ${href}`);
+        assert.match(FOOTER_JS, new RegExp(`href="${href}"`),
+            `the footer must still link to ${href} from a column`);
     }
-    assert.match(nav, /aria-label="Policies and information"/);
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

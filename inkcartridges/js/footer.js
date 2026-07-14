@@ -437,29 +437,13 @@
 
         <div class="footer-bottom">
             <div class="container">
-                <!-- Single-line legal nav: an ads reviewer scans the footer before
-                     they open any policy page, so every compliance surface must be
-                     reachable in one glance. Dropped during the 2026-07-02 IA reorg
-                     and restored 2026-07-14 — do not remove again. -->
-                <nav class="footer-legal-nav" aria-label="Policies and information">
-                    <ul>
-                        <li><a href="/terms">Terms of Service</a></li>
-                        <li class="footer-legal-nav__sep" aria-hidden="true">&middot;</li>
-                        <li><a href="/privacy">Privacy Policy</a></li>
-                        <li class="footer-legal-nav__sep" aria-hidden="true">&middot;</li>
-                        <li><a href="/returns">Refunds &amp; Returns</a></li>
-                        <li class="footer-legal-nav__sep" aria-hidden="true">&middot;</li>
-                        <li><a href="/shipping">Shipping &amp; Delivery</a></li>
-                        <li class="footer-legal-nav__sep" aria-hidden="true">&middot;</li>
-                        <li><a href="/genuine-vs-compatible">Genuine vs Compatible</a></li>
-                        <li class="footer-legal-nav__sep" aria-hidden="true">&middot;</li>
-                        <li><a href="/about">About Us</a></li>
-                        <li class="footer-legal-nav__sep" aria-hidden="true">&middot;</li>
-                        <li><a href="/faq">FAQ</a></li>
-                        <li class="footer-legal-nav__sep" aria-hidden="true">&middot;</li>
-                        <li><a href="/contact">Contact</a></li>
-                    </ul>
-                </nav>
+                <!-- No single-line legal nav here. Every policy surface an ads
+                     reviewer looks for (/terms, /privacy, /returns, /shipping,
+                     /genuine-vs-compatible, /about, /faq, /contact) is already one
+                     click away in the Help + Company columns above, so the row was
+                     pure duplication. Removed 2026-07-14 on the owner's call — if
+                     you ever drop one of those links from a column, it has to
+                     reappear somewhere in the footer, not vanish. -->
                 <div class="footer-bottom__row">
                 <div class="footer-bottom__legal">
                 <p class="footer-copyright" data-legal-bind="copyright">
