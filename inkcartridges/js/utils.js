@@ -1571,11 +1571,63 @@ const SeriesCodes = (function () {
         });
     }
 
+    /**
+     * Split a merged pair chip into its halves. The backend labels a
+     * black+colour pair as one chip ("PG510/CL511") but files each product
+     * under its own single code, so callers need both halves to reconcile.
+     *
+     * @param {string} code
+     * @returns {string[]} halves, or [] when the code carries no '/'.
+     */
+    function pairHalves(code) {
+        const upper = normalize(code);
+        if (!upper || upper.indexOf('/') === -1) return [];
+        return upper.split('/').map(s => s.trim()).filter(Boolean);
+    }
+
+    /**
+     * Un-truncate a series code the backend's extractor cut short, using the
+     * product's SKU as the source of truth.
+     *
+     * The backend caps Canon's bare-`CL` prefix at two digits, so CL511 and
+     * CL513 both land as "CL51" and CL641/CL646 both land as "CL64" — which
+     * strands the colour half of every PGxxx/CLxxx pair chip and jams two
+     * unrelated series into one tile.
+     *
+     * Deliberately self-disabling: the SKU code only wins when it *strictly
+     * extends* the backend code with extra digits (CL51 → CL511). Once the
+     * backend emits CL511 itself the derived code merely equals it, nothing
+     * is overridden, and this becomes a no-op. Genuine two-digit codes
+     * (CL38, CL41) are never touched because their SKUs yield no longer code.
+     *
+     * @param {string} sku
+     * @param {string} backendCode - the code the backend extracted.
+     * @returns {string} the repaired code, or `backendCode` unchanged.
+     */
+    function trueCodeFromSku(sku, backendCode) {
+        const base = normalize(backendCode);
+        const skuUpper = normalize(sku);
+        if (!base || !skuUpper) return base;
+
+        // Drop the leading genuine/compatible marker (GCL511, CCL513CLR).
+        const body = skuUpper.replace(/^[GC]/, '');
+        const match = body.match(/^([A-Z]+\d+)/);
+        if (!match) return base;
+
+        const derived = match[1];
+        if (derived === base || !derived.startsWith(base)) return base;
+        // Only extra *digits* count as truncation — a letter tail (a colour or
+        // yield marker) is not a longer code.
+        return /^\d+$/.test(derived.slice(base.length)) ? derived : base;
+    }
+
     return {
         collapseYieldSuffix,
         hasYieldSuffix,
         collapseList,
         collapseChipList,
+        pairHalves,
+        trueCodeFromSku,
         YIELD_SUFFIX_PATTERN: YIELD_SUFFIX
     };
 })();

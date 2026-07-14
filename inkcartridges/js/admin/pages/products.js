@@ -8,6 +8,7 @@ import { Toast } from '../components/toast.js';
 import { Modal } from '../components/modal.js';
 import { RichTextEditor } from '../components/rich-text-editor.js?v=rich-text-persist-may2026';
 import { computeProfitability, marginBadge, formatProfitDollars } from '../utils/profitability.js';
+import { PRODUCT_TYPE_TO_SHOP_CATEGORY, describeCodesWriteError } from '../utils/product-codes.js';
 
 const formatPrice = (v) => window.formatPrice ? window.formatPrice(v) : `$${Number(v).toFixed(2)}`;
 const MISSING = '\u2014';
@@ -33,13 +34,6 @@ const PRODUCT_TYPE_LABELS = {
   fax_film_refill: 'Fax Film Refills', printer_ribbon: 'Printer Ribbons',
   typewriter_ribbon: 'Typewriter Ribbons', correction_tape: 'Correction Tape',
   label_tape: 'Label Tape', photo_paper: 'Photo Paper', printer: 'Printers',
-};
-const PRODUCT_TYPE_TO_SHOP_CATEGORY = {
-  ink_cartridge: 'ink', ink_bottle: 'ink', toner_cartridge: 'toner',
-  drum_unit: 'drums', waste_toner: 'drums', belt_unit: 'drums',
-  fuser_kit: 'drums', maintenance_kit: 'drums',
-  label_tape: 'label', photo_paper: 'paper',
-  printer_ribbon: 'ribbons', typewriter_ribbon: 'ribbons', correction_tape: 'ribbons',
 };
 
 /** Open a large full-screen preview of a product image. */
@@ -1838,32 +1832,6 @@ async function wireRibbonBrandsSection(modal, full) {
  * Safety: modal._productCodesLoaded is set true ONLY after a clean load, so a
  * failed load can never be mistaken for "no codes" and wipe assignments.
  */
-
-/**
- * Turn a product_codes write failure into a plain-English message, mapping the
- * Postgres error codes the RLS layer can raise (backend migration 104 applies
- * the insert/delete policies + grants — see product-codes-admin-editing.md).
- * The client normalises codes before writing, so 23514/23505/23503 are
- * defensive; 42501 means the session isn't a signed-in admin. Any other error
- * keeps its own message.
- */
-function describeCodesWriteError(err) {
-  const msg = (err && err.message) || 'unknown error';
-  const code = err && err.code;
-  if (code === '42501' || /row-level security|permission denied/i.test(msg)) {
-    return 'you don’t have permission to edit product codes — make sure you’re signed in as an admin.';
-  }
-  if (code === '23514' || /check constraint|violates check/i.test(msg)) {
-    return 'codes must be 2–24 letters or numbers (A–Z, 0–9).';
-  }
-  if (code === '23503' || /foreign key/i.test(msg)) {
-    return 'that product no longer exists — refresh and try again.';
-  }
-  if (code === '23505' || /duplicate key|unique constraint/i.test(msg)) {
-    return 'that code is already on the product.';
-  }
-  return msg;
-}
 
 async function wireProductCodesSection(modal, full) {
   const group = modal.querySelector('#product-codes-group');

@@ -1433,9 +1433,24 @@ const AdminAPI = {
   // series_codes fully replaced on the storefront; a product with none is
   // untouched.
 
-  /** Normalise a raw code: uppercase, strip everything but A-Z/0-9. */
+  /**
+   * Normalise a raw code: uppercase, strip everything but A-Z/0-9 and "/".
+   *
+   * "/" survives because the backend emits merged PAIR codes for cartridges sold
+   * as a black+colour set — PG40/CL41, PGI5/CLI8 — and those land verbatim as
+   * /shop chips. Stripping the slash (as this did until Jul 2026) turned
+   * "PG40/CL41" into "PG40CL41", which matches no product: renaming or deleting
+   * such a chip silently touched 0 products while reporting success.
+   *
+   * Slashes are collapsed and trimmed so the result can never violate the
+   * table's CHECK — see sql/product_codes.sql. A bare "/" normalises to "".
+   */
   normalizeProductCode(raw) {
-    return String(raw == null ? '' : raw).toUpperCase().replace(/[^A-Z0-9]/g, '');
+    return String(raw == null ? '' : raw)
+      .toUpperCase()
+      .replace(/[^A-Z0-9/]/g, '')
+      .replace(/\/{2,}/g, '/')
+      .replace(/^\/+|\/+$/g, '');
   },
 
   /** Codes assigned to one product, ascending. Returns null on error. */
@@ -1505,6 +1520,125 @@ const AdminAPI = {
   },
 
   /**
+   * Walk a brand+category's /shop products, optionally filtered to one code.
+   *
+   * getShopData already merges the manual override layer and rewrites
+   * `series_codes` to the EFFECTIVE set, so what comes back is authoritative:
+   * it is exactly what the customer sees. Every write path below starts from
+   * these codes — never from an empty list — because product_codes is an
+   * override table with "manual replaces auto" semantics, so persisting a
+   * partial set would silently erase a product's other chips.
+   *
+   * @returns {Map<string, {id, name, sku, image, codes: string[]}>} keyed by id
+   */
+  async _walkShopProducts({ brandSlug, category, code = null }) {
+    if (!brandSlug || !category || typeof window === 'undefined'
+        || !window.API || typeof window.API.getShopData !== 'function') {
+      throw new Error('Cannot resolve the brand’s products');
+    }
+    const want = code ? this.normalizeProductCode(code) : null;
+    const out = new Map();
+    for (let page = 1; page <= 30; page++) {
+      let resp;
+      try {
+        const q = { brand: brandSlug, category, page, limit: 200 };
+        if (want) q.code = want;
+        resp = await window.API.getShopData(q);
+      } catch (e) {
+        throw new Error('Couldn’t load the affected products: ' + e.message);
+      }
+      const products = (resp && resp.ok && resp.data && Array.isArray(resp.data.products))
+        ? resp.data.products : [];
+      for (const p of products) {
+        if (!p || !p.id || out.has(p.id)) continue;
+        const codes = [...new Set((p.series_codes || [])
+          .map(c => this.normalizeProductCode(c)).filter(c => c.length >= 2))];
+        // The code filter is the backend's; re-check against the effective set
+        // so a product the filter matched loosely can't slip through.
+        if (want && !codes.includes(want)) continue;
+        out.set(p.id, {
+          id: p.id,
+          name: p.name || '',
+          sku: p.sku || '',
+          image: p.image_thumbnail_url || p.image_url || '',
+          codes,
+        });
+      }
+      if (products.length < 200) break;
+    }
+    return out;
+  },
+
+  /** Products in brandSlug+category whose effective codes include `code`. */
+  async listProductsForCode({ brandSlug, category, code }) {
+    const want = this.normalizeProductCode(code);
+    if (want.length < 2) return [];
+    const map = await this._walkShopProducts({ brandSlug, category, code: want });
+    return [...map.values()];
+  },
+
+  /** Every product in brandSlug+category — the candidate pool for a code. */
+  async listBrandCategoryProducts({ brandSlug, category }) {
+    const map = await this._walkShopProducts({ brandSlug, category });
+    return [...map.values()];
+  },
+
+  /** The storefront's manual-code cache is stale after any write. */
+  _clearStorefrontCodeCache() {
+    try {
+      if (typeof window !== 'undefined' && window.API
+          && window.API._manualCodeCache && window.API._manualCodeCache.clear) {
+        window.API._manualCodeCache.clear();
+      }
+    } catch (_) { /* non-fatal */ }
+  },
+
+  /**
+   * Add/remove a single code across specific products, leaving each product's
+   * OTHER codes intact. Backs both the membership editor and "+ Add code" (an
+   * add-only call on a code no product carries yet).
+   *
+   * Ticking a product in materialises its full override set (its auto-derived
+   * codes plus this one) — that's inherent to the override layer, not a quirk
+   * of this method, and the UI says so.
+   *
+   * @returns {{ changed:number, failed:number }}
+   */
+  async setCodeMembership({ brandSlug, category, code, add = [], remove = [] }) {
+    const c = this.normalizeProductCode(code);
+    if (c.length < 2 || c.length > 24) {
+      throw new Error('The code must be 2–24 letters, numbers or “/”');
+    }
+    const addSet = new Set(add.filter(Boolean).map(String));
+    const removeSet = new Set(remove.filter(Boolean).map(String));
+    if (!addSet.size && !removeSet.size) return { changed: 0, failed: 0 };
+
+    // Re-read effective codes at write time rather than trusting ids the UI has
+    // been holding — a concurrent edit elsewhere must not be clobbered.
+    const pool = await this._walkShopProducts({ brandSlug, category });
+
+    let changed = 0, failed = 0;
+    for (const id of new Set([...addSet, ...removeSet])) {
+      const entry = pool.get(id);
+      if (!entry) { failed++; continue; }
+      const next = entry.codes.filter(x => x !== c);
+      if (addSet.has(id)) next.push(c);
+      // Nothing to do — the product already reflects the desired state.
+      if (next.length === entry.codes.length
+          && next.every(x => entry.codes.includes(x))) continue;
+      try {
+        await this.setProductCodes(id, next);
+        changed++;
+      } catch (e) {
+        failed++;
+        DebugLog.warn('[AdminAPI] setCodeMembership row failed:', id, e.message);
+      }
+    }
+    this._clearStorefrontCodeCache();
+    return { changed, failed };
+  },
+
+  /**
    * Brand-wide code edit: delete `fromCode`, or rename it to `toCode`, across
    * EVERY product in brandSlug+category whose effective codes include it.
    *
@@ -1522,38 +1656,14 @@ const AdminAPI = {
     if (from.length < 2) throw new Error('No code to change');
     const to = toCode == null ? null : this.normalizeProductCode(toCode);
     if (toCode != null && (to.length < 2 || to.length > 24)) {
-      throw new Error('The new code must be 2–24 letters or numbers');
+      throw new Error('The new code must be 2–24 letters, numbers or “/”');
     }
     if (to === from) return { changed: 0, failed: 0, products: 0 };
-    if (!brandSlug || !category || typeof window === 'undefined'
-        || !window.API || typeof window.API.getShopData !== 'function') {
-      throw new Error('Cannot resolve the brand’s products');
-    }
 
-    // Gather every product whose EFFECTIVE codes include `from`. getShopData's
-    // code filter already folds in manually-assigned codes and overrides
-    // series_codes to the effective set, so p.series_codes is authoritative.
-    const affected = new Map(); // productId → effective codes[]
-    for (let page = 1; page <= 30; page++) {
-      let resp;
-      try {
-        resp = await window.API.getShopData({ brand: brandSlug, category, code: from, page, limit: 200 });
-      } catch (e) {
-        throw new Error('Couldn’t load the affected products: ' + e.message);
-      }
-      const products = (resp && resp.ok && resp.data && Array.isArray(resp.data.products))
-        ? resp.data.products : [];
-      for (const p of products) {
-        if (!p || !p.id || affected.has(p.id)) continue;
-        const codes = [...new Set((p.series_codes || [])
-          .map(c => this.normalizeProductCode(c)).filter(c => c.length >= 2))];
-        if (codes.includes(from)) affected.set(p.id, codes);
-      }
-      if (products.length < 200) break;
-    }
+    const affected = await this._walkShopProducts({ brandSlug, category, code: from });
 
     let changed = 0, failed = 0;
-    for (const [id, codes] of affected) {
+    for (const { id, codes } of affected.values()) {
       const next = codes.filter(c => c !== from);
       if (to && !next.includes(to)) next.push(to);
       try {
@@ -1564,12 +1674,7 @@ const AdminAPI = {
         DebugLog.warn('[AdminAPI] applyBrandCodeChange row failed:', id, e.message);
       }
     }
-    // The storefront's manual-code cache is now stale for this brand.
-    try {
-      if (window.API && window.API._manualCodeCache && window.API._manualCodeCache.clear) {
-        window.API._manualCodeCache.clear();
-      }
-    } catch (_) { /* non-fatal */ }
+    this._clearStorefrontCodeCache();
     return { changed, failed, products: affected.size };
   },
 
@@ -2905,16 +3010,20 @@ const AdminAPI = {
   // =========================================================================
   // Admin — Expense Management (Jul 2026). Dedicated Finance → Expenses page.
   //
-  // The dedicated CRUD/status surface lives at /api/admin/expenses/* (see the
-  // backend spec: Desktop/expense-management-backend-spec.md). Until the backend
-  // dev ships those routes they 404 — window.API returns { ok:false,
-  // code:'NOT_FOUND' } for a 404 rather than throwing — so:
-  //   - reads FAIL-SOFT (return null; page renders empty/error, never crashes),
-  //     and `list`/`create` transparently fall back to the legacy
-  //     /api/admin/analytics/expenses endpoint that already works today.
-  //   - writes THROW an Error carrying `.code`; the page maps code==='NOT_FOUND'
-  //     to a clear "this action needs the expense API update" toast — NEVER a
-  //     fake success. No browser storage is ever used as a persistence layer.
+  // The CRUD/status surface at /api/admin/expenses/* is LIVE (backend shipped
+  // Jul 2026: full CRUD + pay/unpay/skip/pause/resume/end + occurrences +
+  // summary; owner-only; 30/min reads, 10/min writes).
+  //
+  // Conventions:
+  //   - reads FAIL-SOFT (return null; the page renders an empty/error state and
+  //     never crashes). `list`/`create` keep a transparent fallback to the legacy
+  //     /api/admin/analytics/expenses endpoint purely as a safety net — if the new
+  //     routes ever 404 again, listing and one-off create keep working.
+  //   - writes THROW an Error carrying `.code` (+ `.details` for VALIDATION_FAILED,
+  //     which the editor maps to inline per-field errors). Never a fake success.
+  //   - No browser storage is ever used as a persistence layer for expense records.
+  //     (Expense *presets* — a UI convenience, not a financial record — live in the
+  //     admin_ui_prefs Supabase table via getUiPrefs/setUiPref.)
   // =========================================================================
   expenses: {
     _q(params = {}) {
@@ -3005,12 +3114,15 @@ const AdminAPI = {
       const resp = await window.API.delete(`/api/admin/expenses/${encodeURIComponent(id)}`);
       return this._writeCheck(resp, 'Could not delete expense');
     },
-    async pay(id, { paid_date, amount } = {}) {
-      const resp = await window.API.post(`/api/admin/expenses/${encodeURIComponent(id)}/pay`, { paid_date, amount });
+    // `occurrence_date` is ALWAYS sent for a recurring series (the exact date the UI
+    // displayed). Without it the backend has to guess which occurrence you meant —
+    // "the current due one" — which can disagree with what the operator clicked.
+    async pay(id, { paid_date, amount, occurrence_date } = {}) {
+      const resp = await window.API.post(`/api/admin/expenses/${encodeURIComponent(id)}/pay`, { paid_date, amount, occurrence_date });
       return this._writeCheck(resp, 'Could not mark expense paid');
     },
-    async unpay(id) {
-      const resp = await window.API.post(`/api/admin/expenses/${encodeURIComponent(id)}/unpay`, {});
+    async unpay(id, { occurrence_date } = {}) {
+      const resp = await window.API.post(`/api/admin/expenses/${encodeURIComponent(id)}/unpay`, { occurrence_date });
       return this._writeCheck(resp, 'Could not mark expense unpaid');
     },
     async skipOccurrence(id, occurrence_date) {

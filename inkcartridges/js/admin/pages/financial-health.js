@@ -139,11 +139,11 @@ function renderExpenseSummaryCard() {
   return `
     <div class="admin-card admin-mb-lg">
       <div class="admin-card__title" style="display:flex;justify-content:space-between;align-items:center">
-        <span>Expenses <small>operating spend &amp; upcoming cash</small></span>
+        <span>Expenses <small>cash basis — paid operating spend &amp; upcoming cash</small></span>
         <button class="admin-btn admin-btn--primary admin-btn--sm" id="fh-open-expenses">Open Expense Management →</button>
       </div>
       <div class="exp-kpi-grid" style="grid-template-columns:repeat(3,1fr);margin-bottom:0">
-        ${tile('This month', k.thisMonth, '')}
+        ${tile('Paid this month', k.thisMonth, '')}
         ${tile('Upcoming (30d)', k.upcoming30, '')}
         ${tile('Overdue', k.overdue, k.overdue > 0 ? 'bad' : 'good')}
       </div>

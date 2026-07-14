@@ -230,6 +230,35 @@ export function expandExpenseOccurrences(template, windowStartMs, windowEndMs) {
 }
 
 /**
+ * The FIRST occurrence a template will ever fire, as an ISO date — i.e. where the
+ * series really begins once the day-of-week / day-of-month rule is applied.
+ *
+ * BACKEND PARITY (Jul 2026). The backend anchors every frequency on `expense_date`
+ * and does NOT re-anchor on `recurrence_day_of_week` / `_day_of_month` — it stores
+ * them for the UI but steps straight from the start date. We DO re-anchor, because
+ * that is what the form promises ("Monthly · day 20", "Every Wed"). Left alone the
+ * two projectors would drift apart (start Mon 6 Jul + "every Wed" → we say Wed 8th,
+ * they say Mon 13th) and a backend-materialised occurrence would never line up with
+ * a projected one.
+ *
+ * The fix is to SNAP the stored `expense_date` to this value on save. Once the start
+ * date IS the first occurrence, an `expense_date`-anchored stepping and a
+ * dow/dom-anchored stepping produce the IDENTICAL series — so both projectors agree
+ * by construction, with no backend change. Pinned by tests.
+ *
+ * Returns null for a template with no valid start date.
+ */
+export function firstOccurrence(template) {
+  if (!template) return null;
+  const startMs = startMsOf(template);
+  if (!Number.isFinite(startMs)) return null;
+  // A horizon of ~2 years covers the widest gap any rule can open between the
+  // typed start and its first real fire (yearly, month pinned 11 months back).
+  const fires = generateFires(template, startMs + 800 * MS_DAY);
+  return fires.length ? isoFromMs(fires[0].ms) : null;
+}
+
+/**
  * The next scheduled fire date on/after `fromMs` (default: caller passes today).
  * Returns an ISO date string, or null if the series has ended before then.
  * Searches a bounded horizon so a paused/ended series can't loop.
@@ -289,8 +318,8 @@ try {
   if (typeof window !== 'undefined') {
     window.ExpenseRecurrence = {
       MS_DAY, RECURRENCE_TYPES, parseUtcDate, isoFromMs, daysInMonth, clampDom,
-      generateFires, expandExpenseOccurrences, nextOccurrence, deriveStatus,
-      describeRecurrence, isRecurring,
+      generateFires, expandExpenseOccurrences, firstOccurrence, nextOccurrence,
+      deriveStatus, describeRecurrence, isRecurring,
     };
   }
 } catch (_) { /* non-fatal */ }

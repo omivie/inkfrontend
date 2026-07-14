@@ -18,6 +18,17 @@
  *      profit at full face value. GST fraction of a GST-inclusive gross amount is
  *      3/23 (never × 0.15). See reference_shipping_gst_convention.
  *
+ *   3. CASH BASIS (Jul 2026 — matches the backend). An expense counts toward
+ *      spend / profit ONLY once it is marked PAID, and lands in the period of its
+ *      `paid_date` — never its incurred date. This mirrors the backend's
+ *      /api/admin/analytics/pnl `operating_expenses`, so the Expenses page, the
+ *      Financial-Health card and Finance → P&L all report the same figure for the
+ *      same month. Unpaid work (overdue / due / upcoming) is reported SEPARATELY
+ *      off the DUE date and is never mixed into a spend total.
+ *
+ *      headline `thisMonth` === backend `summary.operating_paid`
+ *                            === backend `pnl.operating_expenses`
+ *
  * Occurrences passed in are ENRICHED objects (the page stamps these once):
  *   { amount:Number, category:String, kind:'operating'|'order_linked',
  *     status:String, paid:Boolean,
@@ -51,11 +62,21 @@ function amt(o) {
 const isOperating = (o) => o && o.kind !== 'order_linked';
 const inRange = (ms, a, b) => Number.isFinite(ms) && ms >= a && ms <= b;
 
-/** Cash date used for cash-basis placement: paid date if paid, else the expense date. */
-function cashMs(o) {
-  const paid = toMs(o.paid_date);
-  if (o.paid && Number.isFinite(paid)) return paid;
-  return toMs(o.expense_date ?? o.date);
+/** Has this expense actually been paid? (Stored status wins; `paid` flag is a mirror.) */
+export function isPaid(o) {
+  return !!o && (o.status === 'paid' || o.paid === true);
+}
+
+/**
+ * CASH-BASIS placement date: the day the money actually left the bank.
+ * An UNPAID expense has no cash date (NaN) and is therefore excluded from every
+ * spend/profit total — that is the whole point of the cash basis. Falling back to
+ * the incurred date here would silently re-introduce accrual accounting and put us
+ * back out of step with the backend's P&L.
+ */
+export function cashMs(o) {
+  if (!isPaid(o)) return NaN;
+  return toMs(o.paid_date);
 }
 
 /**
@@ -107,15 +128,19 @@ export function recurringMonthlyCommitment(templates) {
 }
 
 /**
- * Category breakdown (largest first). Operating-only by default so it feeds the
- * "where is our money going" chart without the double-counted order-linked lines.
+ * Category breakdown (largest first) — "where did the money actually go".
+ * Cash-basis by default: PAID operating expenses only, GST-netted, so the doughnut
+ * sums to the headline KPI and to Finance → P&L. Pass { paidOnly:false } for an
+ * accrual view (nothing ships that today).
  */
-export function categoryBreakdown(list, { operatingOnly = true } = {}) {
+export function categoryBreakdown(list, { operatingOnly = true, paidOnly = true, netted = true } = {}) {
   const totals = new Map();
   for (const o of (list || [])) {
     if (operatingOnly && !isOperating(o)) continue;
+    if (paidOnly && !isPaid(o)) continue;
     const key = o.category || 'other';
-    totals.set(key, (totals.get(key) || 0) + amt(o));
+    const v = netted ? pnlCost(amt(o), !!o.gst_claimable) : amt(o);
+    totals.set(key, (totals.get(key) || 0) + v);
   }
   return [...totals.entries()]
     .map(([key, total]) => ({ key, total }))
@@ -123,11 +148,13 @@ export function categoryBreakdown(list, { operatingOnly = true } = {}) {
 }
 
 /**
- * Bucket operating-expense amounts over time for the trend chart. grain is
- * 'day' | 'week' | 'month'. Buckets are keyed by cash date (cash-basis). Returns
- * ordered [{ key, startMs, total }] covering [fromMs, toMs].
+ * Bucket operating-expense spend over time for the trend chart. grain is
+ * 'day' | 'week' | 'month'. CASH BASIS: only PAID expenses, bucketed on their
+ * `paid_date`, GST-netted — so the bars reconcile with the headline KPI and the
+ * P&L. Unpaid/projected spend belongs in the "upcoming" surfaces, never here.
+ * Returns ordered [{ key, total }] covering [fromMs, toMs].
  */
-export function bucketExpenses(list, fromMs, toMs, grain = 'month') {
+export function bucketExpenses(list, fromMs, toMs, grain = 'month', { netted = true } = {}) {
   const buckets = new Map();
   const keyOf = (ms) => {
     const d = new Date(ms);
@@ -141,10 +168,11 @@ export function bucketExpenses(list, fromMs, toMs, grain = 'month') {
   };
   for (const o of (list || [])) {
     if (!isOperating(o)) continue;
-    const ms = cashMs(o);
+    const ms = cashMs(o);            // NaN for unpaid → excluded
     if (!inRange(ms, fromMs, toMs)) continue;
     const k = keyOf(ms);
-    buckets.set(k, (buckets.get(k) || 0) + amt(o));
+    const v = netted ? pnlCost(amt(o), !!o.gst_claimable) : amt(o);
+    buckets.set(k, (buckets.get(k) || 0) + v);
   }
   return [...buckets.entries()]
     .map(([key, total]) => ({ key, total }))
@@ -157,13 +185,21 @@ function isoDay(ms) {
 }
 
 /**
- * The headline KPI bundle. All operating-only where it concerns profit / spend;
- * order-linked is reported separately so it's visible but never double-counted.
+ * The headline KPI bundle — CASH BASIS (see rule 3 in the header).
+ *
+ * Spend figures (`thisMonth`, `lastMonth`, `orderLinked`, `largestCategory`) count
+ * ONLY PAID expenses, placed on their `paid_date`, GST-netted and operating-only.
+ * `thisMonth` is therefore the same number the backend reports as
+ * `summary.operating_paid` / `pnl.operating_expenses`.
+ *
+ * Forward-looking figures (`overdue`, `due`, `unpaid`, `upcoming30`) count UNPAID
+ * work off the DUE date, at GROSS (that's the cash you must actually find). They
+ * are deliberately never added into a spend total.
  *
  * opts: {
  *   monthStart, monthEnd, prevStart, prevEnd,   // ms bounds (UTC)
  *   next30Start, next30End,                      // ms bounds for upcoming cash
- *   revenueThisMonth,                            // Number|null (ex/undefined → ratio null)
+ *   revenueThisMonth,                            // Number|null (ex-GST; null → ratio null)
  *   recurringTemplates,                          // Array<template> for commitment
  * }
  */
@@ -178,45 +214,48 @@ export function computeExpenseKpis(list, opts = {}) {
   const ol = rows.filter(o => !isOperating(o));
 
   const sum = (arr, f) => arr.reduce((s, o) => s + f(o), 0);
+  const net = (o) => pnlCost(amt(o), !!o.gst_claimable);
+  // Paid, and the money left the bank inside [a,b].
+  const paidIn = (arr, a, b) => arr.filter(o => inRange(cashMs(o), a, b));
 
-  // This-month vs last-month operating spend, by expense date (incurred).
-  const inMonth = (o, a, b) => inRange(toMs(o.expense_date ?? o.date), a, b);
-  const thisMonth = sum(op.filter(o => inMonth(o, monthStart, monthEnd)), amt);
-  const lastMonth = sum(op.filter(o => inMonth(o, prevStart, prevEnd)), amt);
+  // ── Cash-basis spend (reconciles with the backend P&L) ──
+  const opThis = paidIn(op, monthStart, monthEnd);
+  const opPrev = paidIn(op, prevStart, prevEnd);
+  const thisMonth      = sum(opThis, net);   // ← the headline; === backend operating_paid
+  const thisMonthGross = sum(opThis, amt);   // what actually left the bank (incl GST)
+  const lastMonth      = sum(opPrev, net);
   const pctChange = lastMonth > 0 ? ((thisMonth - lastMonth) / lastMonth) * 100
                   : (thisMonth > 0 ? null : 0); // null = "no prior baseline"
 
-  // Status-based totals across the loaded window.
-  const paid    = sum(op.filter(o => o.status === 'paid'), amt);
-  const overdue = sum(op.filter(o => o.status === 'overdue'), amt);
-  const unpaid  = sum(op.filter(o => o.status === 'overdue' || o.status === 'due'), amt);
+  // Order-linked cash out this month — shown separately, NEVER in the P&L figure.
+  const orderLinked = sum(paidIn(ol, monthStart, monthEnd), amt);
 
-  // Upcoming cash requirement — unpaid operating occurrences DUE in the next 30d
-  // (projected + real). Uses due date, never mixed with paid spend.
+  const gstReclaim = sum(opThis, o => gstCredit(amt(o), !!o.gst_claimable));
+
+  // ── Forward-looking, unpaid, off the DUE date, at gross ──
+  const isOpen = (o) => o.status !== 'paid' && o.status !== 'cancelled' && o.status !== 'skipped';
+  const overdue = sum(op.filter(o => o.status === 'overdue'), amt);
+  const due     = sum(op.filter(o => o.status === 'due'), amt);
+  const unpaid  = overdue + due;
   const upcoming30 = sum(
-    op.filter(o => o.status !== 'paid' && o.status !== 'cancelled' && o.status !== 'skipped'
-                   && inRange(toMs(o.due_date ?? o.date), next30Start, next30End)),
+    op.filter(o => isOpen(o) && inRange(toMs(o.due_date ?? o.date), next30Start, next30End)),
     amt
   );
 
-  const operating    = sum(op, amt);
-  const operatingPnl = sum(op, o => pnlCost(amt(o), !!o.gst_claimable));
-  const gstReclaim   = sum(op, o => gstCredit(amt(o), !!o.gst_claimable));
-  const orderLinked  = sum(ol, amt);
-
-  const breakdown = categoryBreakdown(op, { operatingOnly: true });
+  const breakdown = categoryBreakdown(opThis, { operatingOnly: true, paidOnly: true, netted: true });
   const largestCategory = breakdown.length ? breakdown[0] : null;
 
   const recurringMonthly = recurringMonthlyCommitment(recurringTemplates);
 
+  // Both sides ex-GST: pnl.revenue is ex-GST and `thisMonth` is GST-netted.
   const expenseToRevenuePct = (Number.isFinite(revenueThisMonth) && revenueThisMonth > 0)
     ? (thisMonth / revenueThisMonth) * 100
     : null;
 
   return {
-    thisMonth, lastMonth, pctChange,
-    paid, unpaid, overdue, upcoming30,
-    operating, operatingPnl, gstReclaim, orderLinked,
+    thisMonth, thisMonthGross, lastMonth, pctChange,
+    paid: thisMonth, unpaid, overdue, due, upcoming30,
+    gstReclaim, orderLinked,
     recurringMonthly, largestCategory, expenseToRevenuePct,
   };
 }
@@ -224,7 +263,7 @@ export function computeExpenseKpis(list, opts = {}) {
 try {
   if (typeof window !== 'undefined') {
     window.ExpenseMath = {
-      GST_FRACTION_OF_GROSS, pnlCost, gstCredit, monthlyCommitment,
+      GST_FRACTION_OF_GROSS, pnlCost, gstCredit, isPaid, cashMs, monthlyCommitment,
       recurringMonthlyCommitment, categoryBreakdown, bucketExpenses, computeExpenseKpis,
     };
   }

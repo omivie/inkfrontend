@@ -41,6 +41,7 @@ const READ = (rel) => fs.readFileSync(path.join(ROOT, rel), 'utf8');
 const SQL_SRC      = READ('inkcartridges/sql/product_codes.sql');
 const ADMIN_API    = READ('inkcartridges/js/admin/api.js');
 const PRODUCTS_SRC = READ('inkcartridges/js/admin/pages/products.js');
+const UTIL_SRC     = READ('inkcartridges/js/admin/utils/product-codes.js');
 const APP_SRC      = READ('inkcartridges/js/admin/app.js');
 const CSS_SRC      = READ('inkcartridges/css/admin.css');
 const API_JS       = path.join(ROOT, 'inkcartridges/js/api.js');
@@ -76,10 +77,38 @@ test('SQL: product_codes table — (product_id, code) PK, cascade delete', () =>
   assert.match(SQL_SRC, /primary key \(product_id, code\)/);
 });
 
-test('SQL: CHECK constraint enforces normalised UPPERCASE alphanumeric codes', () => {
+test('SQL: CHECK constraint enforces UPPERCASE codes, 2-24 chars, slash allowed', () => {
   assert.match(SQL_SRC, /constraint product_codes_code_format/);
   assert.match(SQL_SRC, /code = upper\(code\)/);
-  assert.match(SQL_SRC, /code ~ '\^\[A-Z0-9\]\{2,24\}\$'/);
+  assert.match(SQL_SRC, /char_length\(code\) between 2 and 24/);
+  // The segment regex admits the backend's merged pair codes (PG40/CL41) while
+  // still rejecting a bare "/", a trailing "PG40/", and a doubled "PG40//CL41".
+  assert.match(SQL_SRC, /code ~ '\^\[A-Z0-9\]\+\(\/\[A-Z0-9\]\+\)\*\$'/);
+  assert.doesNotMatch(SQL_SRC, /\^\[A-Z0-9\]\{2,24\}\$/,
+    'the old alphanumeric-only rule made slash codes unstorable — it must be gone');
+});
+
+test('SQL: the slash migration ALTERs the live table, not just CREATE TABLE', () => {
+  // product_codes already exists on live, so `create table if not exists` is a
+  // no-op there and its inline CHECK never applies. Without an explicit swap the
+  // migration would appear to run and change nothing.
+  assert.match(SQL_SRC, /alter table public\.product_codes\s+drop constraint if exists product_codes_code_format/);
+  assert.match(SQL_SRC, /alter table public\.product_codes\s+add constraint product_codes_code_format/);
+});
+
+test('SQL: the new CHECK regex accepts pair codes and rejects malformed ones', () => {
+  // Exercise the actual regex from the file, so the test can't drift from the DDL.
+  const m = SQL_SRC.match(/code ~ '(\^\[A-Z0-9\]\+\(\/\[A-Z0-9\]\+\)\*\$)'/);
+  assert.ok(m, 'CHECK regex not found in the SQL');
+  const re = new RegExp(m[1]);
+  const ok = (c) => re.test(c) && c.length >= 2 && c.length <= 24;
+
+  for (const good of ['CI3', 'PG40/CL41', 'PGI5/CLI8', 'PGI520/CLI521', 'CL511CLR']) {
+    assert.ok(ok(good), `${good} must be storable`);
+  }
+  for (const bad of ['/', 'PG40/', '/CL41', 'PG40//CL41', 'pg40', 'PG 40', 'P']) {
+    assert.ok(!ok(bad), `${bad} must be rejected`);
+  }
 });
 
 test('SQL: a reverse index on code backs the ?code= recovery + chip views', () => {
@@ -129,8 +158,8 @@ test('AdminAPI.applyBrandCodeChange gathers affected products then rewrites each
   const end = ADMIN_API.indexOf('// ---- Printer Models', start);
   assert.ok(start !== -1 && end !== -1 && end > start, 'applyBrandCodeChange span found');
   const fn = ADMIN_API.slice(start, end);
-  // Walks the /shop code drilldown to find every product carrying the code…
-  assert.match(fn, /window\.API\.getShopData\(\{ brand: brandSlug, category, code: from/);
+  // Finds every product carrying the code via the shared /shop walk…
+  assert.match(fn, /this\._walkShopProducts\(\{ brandSlug, category, code: from \}\)/);
   // …then writes a fresh override on each via setProductCodes.
   assert.match(fn, /this\.setProductCodes\(id, next\)/);
   // delete = drop the code; rename = swap it for `to`.
@@ -138,6 +167,50 @@ test('AdminAPI.applyBrandCodeChange gathers affected products then rewrites each
   assert.match(fn, /next\.push\(to\)/);
   // A new code must pass the same 2–24 char rule as the table constraint.
   assert.match(fn, /to\.length < 2 \|\| to\.length > 24/);
+});
+
+test('_walkShopProducts returns EFFECTIVE codes — the override trap', () => {
+  // product_codes is an override layer: persisting a partial set erases a
+  // product's other chips. Every write path starts from what getShopData says
+  // the product's codes effectively ARE, so the walk must carry them.
+  // Destructured-arg methods fool extractFunction's brace matching (ERR-PC3) —
+  // slice the span explicitly.
+  const start = ADMIN_API.indexOf('async _walkShopProducts(');
+  const end = ADMIN_API.indexOf('async listProductsForCode(', start);
+  assert.ok(start !== -1 && end > start, '_walkShopProducts span found');
+  const fn = ADMIN_API.slice(start, end);
+  assert.match(fn, /window\.API\.getShopData\(q\)/);
+  assert.match(fn, /p\.series_codes/, 'reads the effective code list off the product');
+  assert.match(fn, /codes,/, 'and returns it with each product');
+  assert.match(fn, /page <= 30/, 'pages the drilldown rather than taking page 1');
+});
+
+test('setCodeMembership adds/removes ONE code, preserving each product’s others', () => {
+  const start = ADMIN_API.indexOf('async setCodeMembership(');
+  const end = ADMIN_API.indexOf('async applyBrandCodeChange(', start);
+  assert.ok(start !== -1 && end > start, 'setCodeMembership span found');
+  const fn = ADMIN_API.slice(start, end);
+
+  // Re-reads effective codes at write time rather than trusting the UI's ids.
+  assert.match(fn, /this\._walkShopProducts\(\{ brandSlug, category \}\)/);
+  // Drops the code, then re-adds it only for the ticked products — everything
+  // else on the product survives.
+  assert.match(fn, /entry\.codes\.filter\(x => x !== c\)/);
+  assert.match(fn, /addSet\.has\(id\)/);
+  assert.match(fn, /this\.setProductCodes\(id, next\)/);
+  // Same 2–24 rule as the table.
+  assert.match(fn, /c\.length < 2 \|\| c\.length > 24/);
+});
+
+test('every write clears the storefront’s 60s manual-code cache', () => {
+  // js/api.js caches product_codes reads for 60s. Without a flush the admin
+  // saves, reloads /shop, and sees the old chips — and concludes it didn't work.
+  assert.match(ADMIN_API, /_clearStorefrontCodeCache\(\)\s*\{[\s\S]*?_manualCodeCache\.clear\(\)/);
+  for (const method of ['async setCodeMembership(', 'async applyBrandCodeChange(']) {
+    const start = ADMIN_API.indexOf(method);
+    const chunk = ADMIN_API.slice(start, start + 2600);
+    assert.match(chunk, /this\._clearStorefrontCodeCache\(\)/, `${method} must flush the cache`);
+  }
 });
 
 test('AdminAPI.setProductCodes replaces the set (delete-then-insert) on product_codes', () => {
@@ -154,10 +227,38 @@ test('AdminAPI.getProductCodes / getCodeCatalogue read the right relations', () 
   assert.match(extractFunction(ADMIN_API, 'async getCodeCatalogue('), /from\('product_code_catalogue'\)/);
 });
 
-test('AdminAPI.normalizeProductCode uppercases and strips non-alphanumerics', () => {
+test('AdminAPI.normalizeProductCode uppercases, strips junk, and KEEPS the slash', () => {
   const fn = extractFunction(ADMIN_API, 'normalizeProductCode(');
-  assert.match(fn, /toUpperCase\(\)/);
-  assert.match(fn, /replace\(\/\[\^A-Z0-9\]\/g, ''\)/);
+  const norm = vm.runInNewContext(`(${fn.replace(/^normalizeProductCode/, 'function')})`)
+    .bind({});
+
+  assert.equal(norm('ci3'), 'CI3', 'uppercases');
+  assert.equal(norm('lc-40'), 'LC40', 'strips hyphens');
+  assert.equal(norm('LC 40'), 'LC40', 'strips spaces');
+
+  // The Jul 2026 fix. The backend emits merged pair codes verbatim as /shop
+  // chips; stripping the slash turned PG40/CL41 into PG40CL41, which matches no
+  // product — so renaming or deleting such a chip silently touched 0 products.
+  assert.equal(norm('PG40/CL41'), 'PG40/CL41', 'a pair code survives intact');
+  assert.equal(norm('pg40 / cl41'), 'PG40/CL41', 'normalises around the slash');
+
+  // Slashes are collapsed and trimmed so the result can never trip the CHECK.
+  assert.equal(norm('//PG40//CL41//'), 'PG40/CL41');
+  assert.equal(norm('/'), '', 'a bare slash is not a code');
+  assert.equal(norm(null), '');
+});
+
+test('the customer API normalises codes the same way — or admin writes are unfindable', () => {
+  // AdminAPI writes the code; js/api.js looks it up. If the two normalisers
+  // disagree on "/", a code the admin saves can never be read back on /shop.
+  const fn = extractFunction(API_SRC, '_normManualCode(');
+  const norm = vm.runInNewContext(`(${fn.replace(/^_normManualCode/, 'function')})`);
+  assert.equal(norm('PG40/CL41'), 'PG40/CL41');
+  assert.equal(norm('pg40 / cl41'), 'PG40/CL41');
+  assert.equal(norm('/'), '');
+  // And no stale stripper is left behind at either call site.
+  assert.doesNotMatch(API_SRC, /replace\(\/\[\^A-Z0-9\]\/g, ''\)/,
+    'js/api.js must not strip slashes out of a code any more');
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -201,15 +302,41 @@ test('save handler persists codes — gated on the load flag AND a baseline diff
 test('describeCodesWriteError maps the RLS error codes to friendly copy', () => {
   // Backend migration 104 applied the live insert/delete policies + grants, so
   // 42501 now means "not a signed-in admin" — the message must NOT tell the
-  // admin to run the .sql migration any more.
-  const fn = extractFunction(PRODUCTS_SRC, 'function describeCodesWriteError(');
-  assert.doesNotMatch(fn, /Apply inkcartridges\/sql\/product_codes\.sql/,
-    '42501 copy must no longer point at the (now-applied) SQL migration');
+  // admin to run the .sql migration for THAT.
+  const fn = extractFunction(UTIL_SRC, 'export function describeCodesWriteError(');
   assert.match(fn, /'42501'/, 'permission (42501) is mapped');
   assert.match(fn, /signed in as an admin/i, '42501 copy names the admin-session cause');
   assert.match(fn, /'23514'/, 'check_violation (23514) is mapped');
   assert.match(fn, /'23503'/, 'foreign_key_violation (23503) is mapped');
   assert.match(fn, /'23505'/, 'unique_violation (23505) is mapped');
+
+  // 23514 IS the migration's error: it's what a slash code returns against a
+  // database still on the old A-Z0-9-only rule. That copy must name the fix,
+  // because deploying the frontend before running the SQL is the likely order.
+  const m = fn.match(/'23514'[\s\S]*?return '([^']+)'/);
+  assert.ok(m, '23514 branch returns a message');
+  assert.match(m[1], /product_codes\.sql/, '23514 copy points at the migration');
+});
+
+test('the shared util is the single source of truth — products.js does not fork it', () => {
+  // Both the drawer tab and the page write codes; a forked error map or category
+  // map is how the two surfaces drift.
+  assert.match(PRODUCTS_SRC,
+    /import \{[^}]*describeCodesWriteError[^}]*\} from '\.\.\/utils\/product-codes\.js'/,
+    'products.js imports the shared helpers');
+  assert.doesNotMatch(PRODUCTS_SRC, /^function describeCodesWriteError\(/m,
+    'no local copy left in products.js');
+  assert.doesNotMatch(PRODUCTS_SRC, /^const PRODUCT_TYPE_TO_SHOP_CATEGORY = \{/m,
+    'no local category map left in products.js');
+});
+
+test('isValidProductCode matches the DB CHECK exactly', () => {
+  const fn = extractFunction(UTIL_SRC, 'export function isValidProductCode(');
+  const valid = vm.runInNewContext(`(${fn.replace(/^export function isValidProductCode/, 'function')})`);
+  for (const good of ['CI3', 'PG40/CL41', 'PGI520/CLI521']) assert.ok(valid(good), good);
+  for (const bad of ['/', 'P', 'PG40/', 'PG40//CL41', 'pg40', 'A'.repeat(25)]) {
+    assert.ok(!valid(bad), bad);
+  }
 });
 
 test('setProductCodes treats a 23505 duplicate as a no-op, not a failure', () => {
@@ -590,15 +717,22 @@ test('_fetchProductIdsForCode normalises the code before the lookup', async () =
 // 6. getShopData integration
 // ─────────────────────────────────────────────────────────────────────────────
 
-test('getShopData routes BOTH return paths through _applyManualCodes', () => {
+test('getShopData routes BOTH return paths through _finalizeShopData', () => {
   // extractFunction is fooled by the `params = {}` default arg, so slice the
-  // method span explicitly: getShopData ends where the _manualCodeCache field
-  // (the first member of the manual-code block) begins.
+  // method span explicitly: getShopData ends where _finalizeShopData (the
+  // post-processing hook it delegates to) is declared.
   const start = API_SRC.indexOf('async getShopData(');
-  const end = API_SRC.indexOf('_manualCodeCache:', start);
+  const end = API_SRC.indexOf('async _finalizeShopData(', start);
   assert.ok(start !== -1 && end !== -1 && end > start);
   const fn = API_SRC.slice(start, end);
-  const hooks = fn.match(/_applyManualCodes\(primary, params\)/g) || [];
-  assert.equal(hooks.length, 2, 'the early-skip and the final return both apply manual codes');
+  // The compat-recovery skip and the merged return must BOTH post-process —
+  // the skip is the common path, so a hook only on the merged return would
+  // leave manual codes and truncated-chip repair off for most requests.
+  const hooks = fn.match(/_finalizeShopData\(primary, params\)/g) || [];
+  assert.equal(hooks.length, 2, 'the early-skip and the final return both post-process');
   assert.doesNotMatch(fn, /\n\s*return primary;/, 'no raw `return primary` bypasses the hook');
+
+  // And the hook itself still applies manual codes.
+  assert.match(API_SRC, /async _finalizeShopData\([\s\S]{0,400}_applyManualCodes\(primary, params/,
+    '_finalizeShopData must run the manual-code layer');
 });

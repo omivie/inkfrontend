@@ -724,7 +724,7 @@ const API = {
         if (!eligibleForRecovery
             || !primary || !primary.ok || !primary.data
             || !sidecar || !sidecar.ok || !sidecar.data || !Array.isArray(sidecar.data.products)) {
-            return this._applyManualCodes(primary, params);
+            return this._finalizeShopData(primary, params);
         }
 
         // Enrich + merge in a try/catch — if any merge step throws (malformed
@@ -835,7 +835,272 @@ const API = {
             }
         }
 
-        return this._applyManualCodes(primary, params);
+        return this._finalizeShopData(primary, params);
+    },
+
+    /**
+     * The post-processing every /api/shop response goes through, on BOTH of
+     * getShopData's return paths (the compat-recovery skip and the merged one).
+     *
+     * Truncated-code repair runs LAST so its series_codes rewrite wins over the
+     * manual override layer, but its chip detection is computed FIRST —
+     * synchronously, off the untouched backend series list — so the manual layer
+     * knows which codes it must not turn into duplicate tiles.
+     */
+    async _finalizeShopData(primary, params) {
+        const truncated = this._detectTruncatedChips(primary, params);
+        await this._applyManualCodes(primary, params, truncated);
+        return this._repairTruncatedSeries(primary, params, truncated);
+    },
+
+    // ─── Truncated series-code repair (Canon bare-CL, Jul 2026) ───────────────
+    // The backend's series_codes extractor caps Canon's bare `CL` prefix at two
+    // digits: CL511 and CL513 both land as "CL51", CL641 and CL646 both land as
+    // "CL64". Two things break as a result:
+    //
+    //   1. The backend still LABELS the merged pair chip "PG510/CL511", but it
+    //      FILES each product under its own extracted code. The colour half was
+    //      extracted as "CL51", so it never lands under the pair — clicking
+    //      PG510/CL511 returns only the PG510 blacks. (`?code=CL511` → 0 hits.)
+    //   2. The truncated code becomes its own chip that jams two unrelated
+    //      series together (CL51 = CL511 + CL513).
+    //
+    // The real fix is one regex in the backend extractor. Until then this layer
+    // re-derives the true code from the SKU and re-homes the products. It is
+    // deliberately self-disabling: detection only fires when the backend's OWN
+    // pair label proves a longer code exists, and SeriesCodes.trueCodeFromSku
+    // only overrides when the SKU strictly extends the backend code. Once the
+    // backend emits CL511, no suspects are found and nothing is rewritten.
+    // Fail-open throughout — /shop can never break because a repair fetch failed.
+
+    /** The SeriesCodes helper, in whichever scope we're running (page or test). */
+    _seriesCodes() {
+        if (typeof SeriesCodes !== 'undefined' && SeriesCodes) return SeriesCodes;
+        if (typeof window !== 'undefined' && window.SeriesCodes) return window.SeriesCodes;
+        return null;
+    },
+
+    /**
+     * Synchronously spot chips the backend truncated. No fetches, no mutation.
+     *
+     * @returns {{chipByHalf: Map<string,Object>, halves: string[], suspectCodes: Set<string>}}
+     */
+    _detectTruncatedChips(primary, params) {
+        const empty = { chipByHalf: new Map(), halves: [], suspectCodes: new Set() };
+        try {
+            const SC = this._seriesCodes();
+            if (!SC || typeof SC.pairHalves !== 'function') return empty;
+            if (!primary || !primary.ok || !primary.data) return empty;
+            if (params && params.code) return empty;   // drilldown responses only
+            const series = primary.data.series;
+            if (!Array.isArray(series) || !series.length) return empty;
+
+            // Every half of every merged pair chip → the chip that owns it.
+            const chipByHalf = new Map();
+            for (const chip of series) {
+                if (!chip || !chip.code) continue;
+                for (const half of SC.pairHalves(chip.code)) {
+                    if (!chipByHalf.has(half)) chipByHalf.set(half, chip);
+                }
+            }
+            if (!chipByHalf.size) return empty;
+            const halves = [...chipByHalf.keys()];
+
+            // A standalone chip whose code is a strict DIGIT-prefix of some pair
+            // half is a truncation of it — the backend's own pair label is what
+            // proves the longer code is real. "CL51" ⊂ "CL511"; "CL64" ⊂ "CL641".
+            const suspectCodes = new Set();
+            for (const chip of series) {
+                const code = chip && chip.code ? String(chip.code).toUpperCase() : '';
+                if (!code || code.indexOf('/') !== -1) continue;
+                if (chipByHalf.has(code)) continue;   // it IS a half, not a truncation
+                const isTruncation = halves.some(h =>
+                    h.length > code.length &&
+                    h.startsWith(code) &&
+                    /^\d+$/.test(h.slice(code.length)));
+                if (isTruncation) suspectCodes.add(code);
+            }
+            return { chipByHalf, halves, suspectCodes };
+        } catch (e) {
+            if (typeof DebugLog !== 'undefined' && DebugLog.warn) {
+                DebugLog.warn('[API._detectTruncatedChips] skipped', e);
+            }
+            return empty;
+        }
+    },
+
+    /** Fetch one code's products off /api/shop. Never throws. */
+    async _productsForCode(brand, category, code) {
+        const qs = new URLSearchParams();
+        qs.append('brand', brand);
+        qs.append('category', category);
+        qs.append('code', code);
+        qs.append('limit', '200');
+        const res = await this.getWithSWR(`/api/shop?${qs.toString()}`).catch(() => null);
+        return (res && res.ok && res.data && Array.isArray(res.data.products))
+            ? res.data.products
+            : [];
+    },
+
+    /**
+     * Re-home truncated products onto the pair chip that actually owns them.
+     * Handles both shapes of response:
+     *   - drilldown (no params.code): rebuild the chip list.
+     *   - code-filtered on a merged pair: recover the missing half's products,
+     *     which is the deep-link / hard-refresh path where no chip cache exists.
+     */
+    async _repairTruncatedSeries(primary, params, truncated) {
+        try {
+            const SC = this._seriesCodes();
+            if (!SC || typeof SC.trueCodeFromSku !== 'function') return primary;
+            if (!primary || !primary.ok || !primary.data) return primary;
+            if (!params || !params.brand || !params.category) return primary;
+
+            if (params.code) {
+                await this._repairPairCodeFilter(primary, params, SC);
+                return primary;
+            }
+
+            const { chipByHalf, suspectCodes } = truncated || {};
+            if (!suspectCodes || !suspectCodes.size) return primary;
+
+            const series = primary.data.series;
+            const suspects = series.filter(c =>
+                c && c.code && suspectCodes.has(String(c.code).toUpperCase()));
+
+            // Pass 1 — pull each suspect's products and sort them by the code
+            // their SKU says they really carry.
+            const fetched = await Promise.all(
+                suspects.map(c => this._productsForCode(params.brand, params.category, c.code)));
+
+            const rehomed = new Map();   // pair chip → products that belong to it
+            const drop = new Set();
+
+            suspects.forEach((chip, i) => {
+                const code = String(chip.code).toUpperCase();
+                const prods = fetched[i];
+                if (!prods.length) return;
+
+                const leftovers = [];
+                for (const p of prods) {
+                    const trueCode = SC.trueCodeFromSku(p && p.sku, code);
+                    const target = (trueCode !== code) ? chipByHalf.get(trueCode) : null;
+                    if (target) {
+                        p.series_codes = [trueCode];
+                        if (!rehomed.has(target)) rehomed.set(target, []);
+                        rehomed.get(target).push(p);
+                        continue;
+                    }
+                    // A product the SKU can't un-truncate is only stranded if no
+                    // OTHER code of its own already puts it under a pair chip. The
+                    // PG640/CL641 twin-packs are the case: SKU G-CAN-PG640-INK-2PK
+                    // yields nothing, but they carry PG640 and so already sit in
+                    // the pair — counting them as leftovers would keep the junk
+                    // CL64 tile alive as a duplicate of PG640/CL641.
+                    const homedElsewhere = ((p && p.series_codes) || []).some(c => {
+                        const other = String(c || '').toUpperCase();
+                        return other !== code && chipByHalf.has(other);
+                    });
+                    if (!homedElsewhere) leftovers.push(p);
+                }
+
+                // Only retire the suspect chip once every one of its products has
+                // a new home — never silently drop products on the floor.
+                if (!leftovers.length) {
+                    drop.add(code);
+                } else {
+                    chip.count = leftovers.length;
+                    chip.products = leftovers;
+                }
+            });
+
+            if (!rehomed.size) return primary;
+
+            // Pass 2 — a pair chip receiving products must end up holding its
+            // COMPLETE set, not just the recovered half: shop-page reads
+            // `chip.products` straight from the chip cache and skips its own
+            // fetch, so a partial array would hide the products the backend
+            // did file correctly (the PG510 blacks).
+            const targets = [...rehomed.keys()];
+            const owned = await Promise.all(
+                targets.map(c => this._productsForCode(params.brand, params.category, c.code)));
+
+            targets.forEach((chip, i) => {
+                const extra = rehomed.get(chip);
+                const base = owned[i];
+                if (!base.length) {
+                    // Couldn't confirm the chip's own products — bump the count so
+                    // the tile is honest, but leave `products` unset so shop-page
+                    // falls back to fetching rather than rendering a partial grid.
+                    chip.count = (Number(chip.count) || 0) + extra.length;
+                    return;
+                }
+                const merged = [];
+                const seen = new Set();
+                for (const p of base.concat(extra)) {
+                    const key = (p && (p.id || p.sku)) || null;
+                    if (key == null || seen.has(key)) continue;
+                    seen.add(key);
+                    merged.push(p);
+                }
+                chip.products = merged;
+                chip.count = merged.length;
+            });
+
+            if (drop.size) {
+                primary.data.series = series.filter(c =>
+                    !(c && c.code && drop.has(String(c.code).toUpperCase())));
+            }
+        } catch (e) {
+            if (typeof DebugLog !== 'undefined' && DebugLog.warn) {
+                DebugLog.warn('[API._repairTruncatedSeries] skipped — chips left as backend sent them', e);
+            }
+        }
+        return primary;
+    },
+
+    /**
+     * Deep-link path: `?code=PG510/CL511` returns only the PG510 blacks, because
+     * the CL511 products were filed under the truncated "CL51". For each half the
+     * response is missing, re-request the half with its trailing digit shaved off
+     * and keep only the products whose SKU proves they belong to this half (so
+     * CL513 stays out of the PG510/CL511 grid).
+     */
+    async _repairPairCodeFilter(primary, params, SC) {
+        const halves = SC.pairHalves(params.code);
+        if (halves.length < 2) return;
+
+        const products = Array.isArray(primary.data.products) ? primary.data.products : [];
+        const seen = new Set(products.map(p => (p && (p.id || p.sku)) || null).filter(Boolean));
+        const present = new Set();
+        for (const p of products) {
+            for (const c of (p && p.series_codes) || []) present.add(String(c).toUpperCase());
+        }
+
+        const recovered = [];
+        for (const half of halves) {
+            if (present.has(half)) continue;
+            // One truncation level — the observed backend bug drops a single digit.
+            const shaved = half.slice(0, -1);
+            if (shaved.length < 3 || !/\d$/.test(shaved)) continue;
+
+            const prods = await this._productsForCode(params.brand, params.category, shaved);
+            for (const p of prods) {
+                if (SC.trueCodeFromSku(p && p.sku, shaved) !== half) continue;
+                const key = (p && (p.id || p.sku)) || null;
+                if (key == null || seen.has(key)) continue;
+                seen.add(key);
+                p.series_codes = [half];
+                recovered.push(p);
+            }
+        }
+
+        if (recovered.length) {
+            primary.data.products = products.concat(recovered);
+            if (primary.meta && typeof primary.meta.total === 'number') {
+                primary.meta.total += recovered.length;
+            }
+        }
     },
 
     // ─── Manual product codes (the product_codes override table) ──────────────
@@ -942,9 +1207,24 @@ const API = {
         return [...byCode.entries()].map(([code, count]) => ({ code, count }));
     },
 
+    /**
+     * Normalise a code to the form stored in product_codes: uppercase, A-Z/0-9
+     * and "/", with slashes collapsed and trimmed. Mirrors AdminAPI's
+     * normalizeProductCode — the two must agree or a code the admin writes can't
+     * be looked up here. "/" is kept because the backend's merged pair chips
+     * (PG40/CL41) are real codes; stripping it made them unmatchable.
+     */
+    _normManualCode(code) {
+        return String(code || '')
+            .toUpperCase()
+            .replace(/[^A-Z0-9/]/g, '')
+            .replace(/\/{2,}/g, '/')
+            .replace(/^\/+|\/+$/g, '');
+    },
+
     /** Product IDs carrying a given manual code. */
     async _fetchProductIdsForCode(code) {
-        const c = String(code || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+        const c = this._normManualCode(code);
         if (c.length < 2) return [];
         const cacheKey = 'forcode:' + c;
         let rows = this._manualCodeCacheGet(cacheKey);
@@ -963,7 +1243,7 @@ const API = {
      * @param {Object} primary - the /api/shop response
      * @param {Object} params  - the original getShopData params
      */
-    async _applyManualCodes(primary, params) {
+    async _applyManualCodes(primary, params, truncated) {
         try {
             if (!primary || !primary.ok || !primary.data) return primary;
             const data = primary.data;
@@ -992,9 +1272,21 @@ const API = {
                         const have = new Set(data.series
                             .map(s => s && s.code && String(s.code).toUpperCase())
                             .filter(Boolean));
+                        // A merged pair chip ("PG510/CL511") never equals either of
+                        // its halves, so an exact-match `have` check lets a manual
+                        // "PG510" push a duplicate tile covering the same products.
+                        // Suppress anything the pair already speaks for: a half
+                        // itself ("CL511"), a suffixed variant of one ("CL511CLR"),
+                        // and the truncated code the repair pass is about to absorb
+                        // ("CL51").
+                        const halves = (truncated && truncated.halves) || [];
+                        const suspects = (truncated && truncated.suspectCodes) || new Set();
+                        const coveredByPair = code =>
+                            suspects.has(code) || halves.some(h => code === h || code.startsWith(h));
+
                         let added = false;
                         for (const { code, count } of manualChips) {
-                            if (!have.has(code)) {
+                            if (!have.has(code) && !coveredByPair(code)) {
                                 data.series.push({ code, count });
                                 have.add(code);
                                 added = true;
@@ -1025,7 +1317,7 @@ const API = {
                             ? pool.data.products : [];
                         // One batched read of every recoverable product's codes.
                         const ownCodes = await this._fetchManualCodesByProduct([...missing]);
-                        const fallbackCode = String(params.code).toUpperCase().replace(/[^A-Z0-9]/g, '');
+                        const fallbackCode = this._normManualCode(params.code);
                         const recovered = [];
                         for (const p of poolProducts) {
                             if (!p || !p.id || !missing.has(p.id)) continue;

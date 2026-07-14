@@ -1,11 +1,11 @@
 /**
  * Admin SPA — Entry point, router, shell
  */
-const APP_VERSION = '2026.07.12-invoice-cogs';
+const APP_VERSION = '2026.07.14-expense-presets';
 
 import { AdminAuth } from './auth.js';
 import { FilterState } from './filters.js';
-import { AdminAPI } from './api.js?v=invoice-nextnum-jul2026';
+import { AdminAPI } from './api.js?v=product-codes-page-jul2026';
 
 const esc = (s) => Security.escapeHtml(String(s));
 
@@ -77,6 +77,7 @@ const NAV_ITEMS = [
   { key: 'price-monitor', label: 'Price Monitor', icon: 'finance', ownerOnly: true },
   { key: 'genuine-image-audit', label: 'Image Audit', icon: 'image', ownerOnly: true },
   { key: 'ribbon-brands', label: 'Ribbon Brands', icon: 'products' },
+  { key: 'product-codes', label: 'Product Codes', icon: 'products', ownerOnly: true },
   { key: 'segments', label: 'Segments', icon: 'mail', ownerOnly: true },
 
   { section: 'System' },
@@ -275,7 +276,7 @@ async function navigate(pageName) {
   `;
 
   // Owner-only page check
-  const ownerPages = ['settings', 'control-center', 'sync-report', 'invoices', 'quick-order', 'demand-ranking', 'expenses'];
+  const ownerPages = ['settings', 'control-center', 'sync-report', 'invoices', 'quick-order', 'demand-ranking', 'expenses', 'product-codes'];
   if (ownerPages.includes(pageName) && !AdminAuth.isOwner()) {
     if (myToken !== _navToken) return; // superseded — don't stomp the newer page's state
     content.innerHTML = `

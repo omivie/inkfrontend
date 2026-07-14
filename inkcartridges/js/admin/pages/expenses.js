@@ -33,11 +33,15 @@ import {
 } from '../utils/expense-categories.js';
 import {
   RECURRENCE_TYPES, parseUtcDate, isoFromMs, expandExpenseOccurrences,
-  nextOccurrence, deriveStatus, describeRecurrence, isRecurring,
+  firstOccurrence, nextOccurrence, deriveStatus, describeRecurrence, isRecurring,
 } from '../utils/expense-recurrence.js';
 import {
   computeExpenseKpis, categoryBreakdown, bucketExpenses, recurringMonthlyCommitment,
 } from '../utils/expense-math.js';
+import {
+  PRESET_KEY, MAX_PRESETS, toPreset, applyPresetToDraft, upsertPreset, removePreset,
+  normalizePresetList, validatePreset, presetNameExists,
+} from '../utils/expense-presets.js';
 import { fetchCountableInvoices, aggregateInvoices, backendCountsInvoices } from '../utils/invoice-overlay.js';
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
@@ -119,6 +123,8 @@ let _searchDebounce = null;
 let _editorToken = 0;
 let _legacyMode = false;    // list came from the legacy endpoint (no server filters)
 let _revenueThisMonth = null;
+let _presets = [];          // saved form templates, from admin_ui_prefs (real DB)
+let _serverSummary = null;  // { thisMonth, lastMonth } from GET /expenses/summary
 
 // ─── data load + enrichment ──────────────────────────────────────────────────
 function enrichRecord(raw, idx) {
@@ -143,17 +149,21 @@ function enrichRecord(raw, idx) {
   };
   rec.recurring = isRecurring(rec);
   const today = todayUtcMs();
+  // The backend now ships `derived_status` computed on the same rule we use. Prefer
+  // it (one source of truth) and fall back to our own derivation when it's absent.
   rec._status = rec.recurring
     ? rec.series_state // active / paused / ended
-    : deriveStatus({ due_date: rec.due_date, date: rec.expense_date, paid_date: rec.paid_date, paid: rec.paid, status: rec.status }, today);
+    : (raw.derived_status
+       || deriveStatus({ due_date: rec.due_date, date: rec.expense_date, paid_date: rec.paid_date, paid: rec.paid, status: rec.status }, today));
   rec._next = rec.recurring && rec.series_state === 'active' ? nextOccurrence(rec, today) : null;
   return rec;
 }
 
 function enrichOccurrence(o, today) {
   const category = normalizeCategory(o.category);
-  const status = deriveStatus({ due_date: o.due_date, date: o.date || o.expense_date, paid_date: o.paid_date, paid: o.paid, status: o.status }, today);
-  const expense_date = (o.expense_date || o.date || '').slice(0, 10);
+  const status = o.derived_status
+    || deriveStatus({ due_date: o.due_date, date: o.date || o.expense_date, paid_date: o.paid_date, paid: o.paid, status: o.status }, today);
+  const expense_date = (o.expense_date || o.date || o.occurrence_date || '').slice(0, 10);
   return {
     ...o,
     category,
@@ -177,8 +187,12 @@ function buildOccurrences(records, materialised, fromMs, toMs) {
   const today = todayUtcMs();
   const matMap = new Map();
   for (const m of (materialised || [])) {
-    const e = enrichOccurrence(m, today);
-    matMap.set(occKey(m.series_id ?? m.template_id ?? m.id, e.expense_date), e);
+    // The backend keys an occurrence by (expense_id, occurrence_date); `series_id`
+    // is a convenience alias on the same row. Carry the parent id through as
+    // `series_id` so the merge + the detail drawer can find it.
+    const parentId = m.series_id ?? m.expense_id ?? m.template_id ?? m.id;
+    const e = enrichOccurrence({ ...m, series_id: parentId, projected: false }, today);
+    matMap.set(occKey(parentId, e.expense_date), e);
   }
   const out = [];
   for (const r of records) {
@@ -207,7 +221,11 @@ async function loadData() {
   if (_table) _table.setLoading(true);
   const myToken = ++_editorToken;
 
-  const [listRes, matRes, pnl, invoices] = await Promise.all([
+  const today = todayUtcMs();
+  const mStart = monthStartMs(today), mEnd = monthEndMs(today);
+  const pm = addMonthsMs(mStart, -1);
+
+  const [listRes, matRes, pnl, invoices, sumThis, sumPrev] = await Promise.all([
     AdminAPI.expenses.list({ limit: 1000 }),
     AdminAPI.expenses.occurrences(rangeForOccurrences()),
     AdminAPI.getAdminAnalyticsPnL(31),
@@ -215,6 +233,11 @@ async function loadData() {
     // divides by a website-only denominator and overstates how much of the month's
     // income is going out. TEMPORARY — see utils/invoice-overlay.js.
     fetchCountableInvoices(),
+    // Server-computed, cash-basis KPI bundle — the SAME numbers /pnl uses. We treat
+    // it as authoritative and cross-check our client math against it (below), so the
+    // page can never quietly drift from Finance.
+    AdminAPI.expenses.summary({ from: isoFromMs(mStart), to: isoFromMs(mEnd) }),
+    AdminAPI.expenses.summary({ from: isoFromMs(monthStartMs(pm)), to: isoFromMs(monthEndMs(pm)) }),
   ]);
   if (!_alive || myToken !== _editorToken) return;
 
@@ -225,6 +248,7 @@ async function loadData() {
   _legacyMode = !!listRes._legacy;
   const items = listRes.items || [];
   _rows = items.map((r, i) => enrichRecord(r, i));
+  _serverSummary = { thisMonth: summaryOf(sumThis), lastMonth: summaryOf(sumPrev) };
 
   // Revenue this month for the expense-to-revenue ratio (fail-soft).
   try {
@@ -240,6 +264,22 @@ async function loadData() {
   } catch (_) { _revenueThisMonth = null; }
 
   computeAndRender(matRes || []);
+}
+
+// Unwrap GET /api/admin/expenses/summary → the flat numbers we care about.
+// Fail-soft: a null/!ok response just means "no server figure", and the client
+// math stands in.
+function summaryOf(resp) {
+  const s = resp?.summary ?? resp;
+  if (!s || typeof s !== 'object') return null;
+  const pick = (k) => (s[k] != null ? num(s[k]) : null);
+  return {
+    operatingPaid: pick('operating_paid'),
+    orderLinkedPaid: pick('order_linked_paid'),
+    overdue: pick('overdue_amount'),
+    due: pick('due_amount'),
+    upcoming: pick('upcoming_amount'),
+  };
 }
 
 // The occurrence window must cover last-month → next-30-days AND the selected
@@ -267,8 +307,48 @@ function computeAndRender(materialised) {
     revenueThisMonth: _revenueThisMonth,
     recurringTemplates: _rows.filter(r => r.recurring),
   });
+  reconcileWithServer();
 
   render();
+}
+
+/**
+ * The server's /summary is the SAME cash-basis computation that feeds Finance →
+ * P&L, so it is the source of truth for the spend figures. Where it disagrees with
+ * our client math by more than a cent we take the server's number AND warn — a
+ * divergence means our projector and theirs have drifted, which is exactly the bug
+ * we most want to hear about rather than paper over.
+ *
+ * Figures the server doesn't return (recurring commitment, largest category,
+ * expense-vs-revenue) stay client-computed.
+ */
+function reconcileWithServer() {
+  const s = _serverSummary;
+  if (!s || !_kpis) return;
+  const take = (label, serverVal, clientVal, apply) => {
+    if (serverVal == null) return;
+    if (Math.abs(serverVal - (clientVal || 0)) > 0.01) {
+      warn(`${label}: server ${serverVal} vs client ${clientVal} — using server (P&L basis)`);
+    }
+    apply(serverVal);
+  };
+  if (s.thisMonth) {
+    take('operating_paid', s.thisMonth.operatingPaid, _kpis.thisMonth, v => { _kpis.thisMonth = v; _kpis.paid = v; });
+    take('order_linked_paid', s.thisMonth.orderLinkedPaid, _kpis.orderLinked, v => { _kpis.orderLinked = v; });
+    take('overdue', s.thisMonth.overdue, _kpis.overdue, v => { _kpis.overdue = v; });
+    take('due', s.thisMonth.due, _kpis.due, v => { _kpis.due = v; _kpis.unpaid = (_kpis.overdue || 0) + v; });
+    take('upcoming', s.thisMonth.upcoming, _kpis.upcoming30, v => { _kpis.upcoming30 = v; });
+  }
+  if (s.lastMonth && s.lastMonth.operatingPaid != null) {
+    _kpis.lastMonth = s.lastMonth.operatingPaid;
+  }
+  // Re-derive the two figures that depend on the (possibly corrected) totals.
+  const lm = _kpis.lastMonth;
+  _kpis.pctChange = lm > 0 ? ((_kpis.thisMonth - lm) / lm) * 100 : (_kpis.thisMonth > 0 ? null : 0);
+  _kpis.expenseToRevenuePct = (Number.isFinite(_revenueThisMonth) && _revenueThisMonth > 0)
+    ? (_kpis.thisMonth / _revenueThisMonth) * 100
+    : null;
+  _kpis._serverBacked = true;
 }
 
 // ─── render ──────────────────────────────────────────────────────────────────
@@ -300,7 +380,7 @@ function render() {
           <div id="exp-upcoming-body">${renderUpcoming()}</div>
         </div>
         <div class="admin-card exp-breakdown">
-          <div class="admin-card__title">Where the money goes <small>operating, selected period</small></div>
+          <div class="admin-card__title">Where the money goes <small>operating, paid, selected period</small></div>
           <div class="exp-doughnut-wrap"><canvas id="exp-doughnut"></canvas></div>
           <div id="exp-legend" class="exp-legend"></div>
         </div>
@@ -308,7 +388,7 @@ function render() {
 
       <div class="admin-card admin-mb-lg">
         <div class="admin-card__title" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
-          <span>Operating expenses over time</span>
+          <span>Operating expenses paid <small>cash basis — by paid date</small></span>
           <select class="admin-select" id="exp-period" style="min-width:150px">
             ${PERIODS.map(p => `<option value="${p.key}"${p.key === _period ? ' selected' : ''}>${esc(p.label)}</option>`).join('')}
           </select>
@@ -359,15 +439,24 @@ function renderKpis(k) {
     ? '<span class="exp-kpi__delta">no prior month</span>'
     : `<span class="exp-kpi__delta exp-kpi__delta--${pct <= 0 ? 'good' : 'bad'}">${pct >= 0 ? '↑' : '↓'} ${Math.abs(pct).toFixed(0)}% vs last month</span>`;
   const ratio = k.expenseToRevenuePct != null ? `${k.expenseToRevenuePct.toFixed(0)}% of revenue` : 'revenue n/a';
-  const largest = k.largestCategory ? `${categoryLabel(k.largestCategory.key)} · ${money(k.largestCategory.total)}` : '—';
+  const largest = k.largestCategory ? `${categoryLabel(k.largestCategory.key)} · ${money(k.largestCategory.total)}` : 'nothing paid yet';
+  // Gross = what actually left the bank; the headline is the GST-netted figure that
+  // Finance → P&L books, so the two can never disagree.
+  const grossSub = (k.thisMonthGross && Math.abs(k.thisMonthGross - k.thisMonth) > 0.01)
+    ? `${money(k.thisMonthGross)} gross cash out`
+    : 'GST-netted, matches P&L';
   const cards = [
-    { label: 'Operating expenses this month', value: money(k.thisMonth || 0), sub: pctHtml, tone: '' },
+    {
+      label: 'Paid this month', value: money(k.thisMonth || 0),
+      sub: `${pctHtml}<span class="exp-kpi__note" title="Cash basis: only expenses marked paid, on their paid date, GST-netted, operating only — the same figure Finance → P&amp;L books.">${esc(grossSub)}</span>`,
+      tone: '',
+    },
     { label: 'Overdue', value: money(k.overdue || 0), sub: k.overdue > 0 ? 'needs paying now' : 'all clear', tone: k.overdue > 0 ? 'bad' : 'good' },
     { label: 'Due (unpaid)', value: money(k.unpaid || 0), sub: 'awaiting payment', tone: k.unpaid > 0 ? 'warn' : '' },
     { label: 'Upcoming (next 30d)', value: money(k.upcoming30 || 0), sub: 'projected cash out', tone: '' },
     { label: 'Recurring commitment', value: money(k.recurringMonthly || 0), sub: 'per month, fixed', tone: '' },
     { label: 'Expenses vs revenue', value: money(k.thisMonth || 0), sub: ratio, tone: '' },
-    { label: 'Profit impact (GST-net)', value: money(k.operatingPnl || 0), sub: k.gstReclaim ? `${money(k.gstReclaim)} GST reclaimed` : 'no GST credit', tone: '' },
+    { label: 'Largest category', value: k.largestCategory ? money(k.largestCategory.total) : '—', sub: k.largestCategory ? esc(categoryLabel(k.largestCategory.key)) : esc(largest), tone: '' },
     { label: 'Order-linked (excluded)', value: money(k.orderLinked || 0), sub: 'already in order costs', tone: 'muted' },
   ];
   return `<div class="exp-kpi-grid">${cards.map(c => `
@@ -494,11 +583,11 @@ async function renderTrendChart() {
   const spanDays = (toMs - fromMs) / 86400000;
   const grain = spanDays <= 31 ? 'day' : (spanDays <= 120 ? 'week' : 'month');
   const buckets = bucketExpenses(_occurrences, fromMs, toMs, grain);
-  if (!buckets.length) { const c = _container?.querySelector('#exp-trend'); if (c) c.parentElement.innerHTML = '<div class="exp-empty-inline">No operating expenses in this period.</div>'; return; }
+  if (!buckets.length) { const c = _container?.querySelector('#exp-trend'); if (c) c.parentElement.innerHTML = '<div class="exp-empty-inline">No operating expenses <strong>paid</strong> in this period. Mark an expense paid and it lands here on its paid date.</div>'; return; }
   const colors = Charts.getThemeColors();
   await Charts.bar('exp-trend', {
     labels: buckets.map(b => b.key),
-    datasets: [{ label: 'Operating expenses', data: buckets.map(b => b.total), backgroundColor: colors.magenta, borderRadius: 4 }],
+    datasets: [{ label: 'Operating expenses paid', data: buckets.map(b => b.total), backgroundColor: colors.magenta, borderRadius: 4 }],
     options: { plugins: { tooltip: { callbacks: { label: (ctx) => `Expenses: ${money(ctx.parsed.y)}` } } } },
   });
 }
@@ -506,7 +595,7 @@ async function renderTrendChart() {
 async function renderDoughnut() {
   const breakdown = categoryBreakdown(_occurrences, { operatingOnly: true }).slice(0, 8);
   const legend = _container?.querySelector('#exp-legend');
-  if (!breakdown.length) { const c = _container?.querySelector('.exp-doughnut-wrap'); if (c) c.innerHTML = '<div class="exp-empty-inline">No operating spend to break down.</div>'; return; }
+  if (!breakdown.length) { const c = _container?.querySelector('.exp-doughnut-wrap'); if (c) c.innerHTML = '<div class="exp-empty-inline">No <strong>paid</strong> operating spend to break down yet.</div>'; return; }
   const palette = ['#267FB5', '#C71F6E', '#F4C430', '#34D399', '#8B5CF6', '#F97316', '#06B6D4', '#94A3B8'];
   await Charts.doughnut('exp-doughnut', {
     labels: breakdown.map(b => categoryLabel(b.key)),
@@ -587,8 +676,9 @@ async function onRowAction(e) {
   if (action === 'resume') return guardedWrite(() => AdminAPI.expenses.resume(id), 'Series resumed.');
 }
 
-// Run a write, surface success, and translate the "backend not built yet" 404
-// into an honest message instead of a fake success.
+// Run a write, surface success, reload. Errors are reported verbatim — we never
+// swallow one or fake a success. Now that the expense API is live, a NOT_FOUND
+// genuinely means the row is gone, so it reads as a stale-row message.
 async function guardedWrite(fn, successMsg) {
   try {
     await fn();
@@ -597,7 +687,10 @@ async function guardedWrite(fn, successMsg) {
     await loadData();
   } catch (err) {
     if (err?.code === 'NOT_FOUND') {
-      Toast.error('This action needs the expense API update (backend pending). See the backend spec — data was not changed.');
+      Toast.error('That expense no longer exists — it may have been deleted. Refreshing.');
+      await loadData();
+    } else if (err?.code === 'RATE_LIMITED') {
+      Toast.error('Too many changes at once. Wait a few seconds and try again.');
     } else {
       Toast.error(err?.message || 'Action failed. Please try again.');
     }
@@ -626,10 +719,34 @@ function openDetail(row) {
   let occHtml = '';
   if (row.recurring) {
     const today = todayUtcMs();
+    // Merge the materialised (server) occurrences over the projected ones so a
+    // paid/skipped instance shows its real state, then offer per-occurrence
+    // actions. Every action sends an explicit occurrence_date, so the backend acts
+    // on exactly the row the operator clicked instead of guessing "the current due".
+    const mat = _occurrences.filter(o => String(o.series_id) === String(row.id) && !o.projected);
+    const matByDate = new Map(mat.map(o => [o.expense_date, o]));
     const occs = expandExpenseOccurrences({ ...row }, today - 90 * 86400000, today + 120 * 86400000)
-      .map(o => enrichOccurrence(o, today));
+      .map(o => enrichOccurrence(o, today))
+      .map(o => matByDate.get(o.expense_date) || o);
+
     occHtml = `<div class="admin-card__title" style="margin-top:18px">Occurrences <small>−90 to +120 days</small></div>
-      <ul class="exp-occ-list">${occs.map(o => `<li class="exp-occ ${o._ms < today ? 'exp-occ--past' : 'exp-occ--future'}"><span>${esc(fmtDate(o.expense_date))}</span> ${statusBadge(o.status)} <span class="exp-occ__amt">${esc(money(o.amount))}</span></li>`).join('') || '<li class="exp-empty-inline">No occurrences in range.</li>'}</ul>`;
+      <ul class="exp-occ-list">${occs.map(o => {
+        const paid = o.status === 'paid';
+        const done = paid || o.status === 'skipped' || o.status === 'cancelled';
+        const acts = paid
+          ? `<button class="admin-btn admin-btn--ghost admin-btn--sm" data-occ-action="unpay" data-date="${escA(o.expense_date)}">Unpay</button>`
+          : (o.status === 'skipped' || o.status === 'cancelled')
+            ? ''
+            : `<button class="admin-btn admin-btn--ghost admin-btn--sm" data-occ-action="pay" data-date="${escA(o.expense_date)}" data-amount="${escA(o.amount)}" title="Mark this occurrence paid">${icon('check', 12, 12)}</button>
+               <button class="admin-btn admin-btn--ghost admin-btn--sm" data-occ-action="skip" data-date="${escA(o.expense_date)}" title="Skip this occurrence">Skip</button>`;
+        return `<li class="exp-occ ${o._ms < today ? 'exp-occ--past' : 'exp-occ--future'}${done ? ' exp-occ--done' : ''}">
+          <span>${esc(fmtDate(o.expense_date))}</span>
+          ${statusBadge(o.status)}
+          ${o.projected ? '<span class="exp-tag exp-tag--projected" title="Projected from the recurring rule — not yet a saved occurrence">projected</span>' : ''}
+          <span class="exp-occ__amt">${esc(money(o.amount))}</span>
+          <span class="exp-occ__acts">${acts}</span>
+        </li>`;
+      }).join('') || '<li class="exp-empty-inline">No occurrences in range.</li>'}</ul>`;
   }
 
   const d = Drawer.open({
@@ -640,6 +757,29 @@ function openDetail(row) {
   if (!d) return;
   d.footer.querySelector('[data-x="close"]').addEventListener('click', () => Drawer.close());
   d.footer.querySelector('[data-x="edit"]').addEventListener('click', () => { Drawer.close(); openEditor(row); });
+
+  // Per-occurrence actions (delegated). Each carries the exact occurrence_date the
+  // UI rendered, so the backend materialises that instance and nothing else.
+  d.body.addEventListener('click', async (e) => {
+    const btn = e.target.closest('[data-occ-action]');
+    if (!btn) return;
+    e.stopPropagation();
+    const date = btn.dataset.date;
+    const act = btn.dataset.occAction;
+    const label = `${row.name || categoryLabel(row.category)} · ${fmtDate(date)}`;
+    btn.disabled = true;
+    if (act === 'pay') {
+      await guardedWrite(
+        () => AdminAPI.expenses.pay(row.id, { paid_date: todayInputValue(), amount: num(btn.dataset.amount) || row.amount, occurrence_date: date }),
+        `Marked paid — ${label}.`,
+      );
+    } else if (act === 'unpay') {
+      await guardedWrite(() => AdminAPI.expenses.unpay(row.id, { occurrence_date: date }), `Marked unpaid — ${label}.`);
+    } else if (act === 'skip') {
+      await guardedWrite(() => AdminAPI.expenses.skipOccurrence(row.id, date), `Skipped — ${label}.`);
+    }
+    if (Drawer.isOpen()) Drawer.close();
+  });
 }
 
 // ─── add / edit editor ───────────────────────────────────────────────────────
@@ -665,12 +805,85 @@ function openEditor(model, isDuplicate = false) {
   bindEditor(d, m, isNew);
 }
 
+// ─── presets: persistence ────────────────────────────────────────────────────
+// Presets live in `admin_ui_prefs` — a per-admin Supabase KV table (RLS-locked to
+// auth.uid()), the same durable store the Products column-picker uses. They are a
+// UI convenience, NOT financial data, so this is the right home for them; no expense
+// record is ever written to browser storage.
+
+async function loadPresets() {
+  try {
+    const prefs = await AdminAPI.getUiPrefs();
+    _presets = normalizePresetList(prefs?.[PRESET_KEY]);
+  } catch (e) {
+    warn('loadPresets', e);
+    _presets = [];
+  }
+}
+
+/**
+ * Persist the preset list. `setUiPref` writes through to Supabase and returns FALSE
+ * when it could only reach the local cache — we surface that honestly rather than
+ * pretending the save stuck.
+ *
+ * The prefs blob is shared with other features and written read-modify-write, so we
+ * re-read immediately before writing to avoid clobbering a concurrent change (e.g. a
+ * column toggle in another tab).
+ */
+async function savePresets(next) {
+  _presets = normalizePresetList(next);
+  try {
+    await AdminAPI.getUiPrefs();               // refresh the cache we're about to merge into
+    return await AdminAPI.setUiPref(PRESET_KEY, _presets);
+  } catch (e) {
+    warn('savePresets', e);
+    return false;
+  }
+}
+
+/** Repaint just the chip row in an open editor (no full drawer rebuild). */
+function refreshPresetChips(root) {
+  const host = root?.querySelector('#e-presets');
+  if (!host) return;
+  const fresh = document.createElement('div');
+  fresh.innerHTML = presetsPanel();
+  const nextChips = fresh.querySelector('#e-preset-chips');
+  const curChips = host.querySelector('#e-preset-chips');
+  if (nextChips && curChips) curChips.innerHTML = nextChips.innerHTML;
+}
+
+/**
+ * The saved-presets panel that sits at the top of the editor. A preset is a named
+ * snapshot of this form (never dates — see utils/expense-presets.js), stored in the
+ * admin_ui_prefs Supabase table, so it follows the account across devices.
+ */
+function presetsPanel() {
+  const chips = _presets.map(p => `
+    <span class="exp-preset" data-preset-id="${escA(p.id)}">
+      <button type="button" class="exp-preset__load" data-preset-load="${escA(p.id)}" title="Fill the form from this preset">${esc(p.name)}</button>
+      <button type="button" class="exp-preset__del" data-preset-del="${escA(p.id)}" aria-label="Delete preset ${escA(p.name)}" title="Delete preset">${icon('close', 11, 11)}</button>
+    </span>`).join('');
+  return `
+    <div class="exp-recur exp-presets" id="e-presets">
+      <div class="exp-recur__title">Presets <span class="exp-hint" style="text-transform:none;font-weight:400">reuse a saved expense — dates always reset to today</span></div>
+      <div class="exp-preset-row" id="e-preset-chips">
+        ${chips || '<span class="exp-empty-inline" style="padding:4px 0">No presets yet. Fill this form in, then save it as a preset for one-click reuse.</span>'}
+      </div>
+      <div class="exp-preset-save" id="e-preset-save">
+        <input class="admin-input" id="e-preset-name" type="text" maxlength="40" placeholder="Name this preset (e.g. Netflix subscription)" autocomplete="off">
+        <button type="button" class="admin-btn admin-btn--ghost admin-btn--sm" id="e-preset-add">Save as preset</button>
+      </div>
+      <div class="exp-preset-err" id="e-preset-err" role="alert" aria-live="polite"></div>
+    </div>`;
+}
+
 function editorBody(m) {
   const catOptions = (kind) => EXPENSE_CATEGORIES.filter(c => c.kind === kind)
     .map(c => `<option value="${c.key}"${m.category === c.key ? ' selected' : ''}>${esc(c.label)}</option>`).join('');
   const gstChecked = (m.gst_claimable !== undefined ? m.gst_claimable : gstDefaultFor(m.category || 'other'));
   return `
     <form class="exp-form" id="exp-form" novalidate>
+      ${presetsPanel()}
       <div class="exp-form__seg" role="tablist" aria-label="Expense type">
         <button type="button" class="exp-seg ${m.recurrence === 'none' ? 'active' : ''}" data-type="none">One-off</button>
         <button type="button" class="exp-seg ${m.recurrence !== 'none' ? 'active' : ''}" data-type="repeat">Repeating</button>
@@ -697,7 +910,7 @@ function editorBody(m) {
       </div>
 
       <div class="exp-form__grid2">
-        <div class="exp-field"><label id="e-date-label">Expense date <span class="req">*</span></label><input class="admin-input" type="date" id="e-date" value="${escA(m.expense_date)}"></div>
+        <div class="exp-field"><label id="e-date-label">Expense date <span class="req">*</span></label><input class="admin-input" type="date" id="e-date" value="${escA(m.expense_date)}"><span class="exp-hint" id="e-first-occ"></span></div>
         <div class="exp-field"><label>Due date</label><input class="admin-input" type="date" id="e-due" value="${escA(m.due_date)}"><span class="exp-hint">When payment is owed (for cash-flow).</span></div>
       </div>
 
@@ -775,17 +988,136 @@ function bindEditor(d, model, isNew) {
     $('#e-end-on').classList.toggle('hidden', mode !== 'on');
     $('#e-end-after').classList.toggle('hidden', mode !== 'after');
   };
+  // Show where a repeating series will actually begin once its day-of-week /
+  // day-of-month rule is applied. That snapped date is what we STORE (see
+  // collectPayload), which is what keeps our projection and the backend's identical.
+  const syncFirstOcc = () => {
+    const hint = $('#e-first-occ');
+    if (!hint) return;
+    const type = root.querySelector('.exp-seg.active')?.dataset.type || 'none';
+    if (type === 'none') { hint.textContent = ''; return; }
+    const probe = collectPayload(root, { snap: false });
+    const first = firstOccurrence(probe);
+    hint.textContent = (first && first !== probe.expense_date)
+      ? `Starts on its first occurrence: ${fmtDate(first)}`
+      : '';
+  };
 
-  root.querySelectorAll('.exp-seg').forEach(b => b.addEventListener('click', () => setType(b.dataset.type)));
-  $('#e-freq')?.addEventListener('change', syncFreqFields);
+  root.querySelectorAll('.exp-seg').forEach(b => b.addEventListener('click', () => { setType(b.dataset.type); syncFirstOcc(); }));
+  $('#e-freq')?.addEventListener('change', () => { syncFreqFields(); syncFirstOcc(); });
   $('#e-category')?.addEventListener('change', syncLinkedNote);
   $('#e-gst')?.addEventListener('change', () => { $('#e-gst').dataset.touched = '1'; });
   $('#e-endmode')?.addEventListener('change', syncEndMode);
   $('#e-paid')?.addEventListener('change', () => $('#e-paid-wrap').classList.toggle('hidden', !$('#e-paid').checked));
+  for (const sel of ['#e-date', '#e-dow', '#e-dom', '#e-month', '#e-ydom', '#e-interval']) {
+    $(sel)?.addEventListener('change', syncFirstOcc);
+  }
+
+  // ── Presets ──
+  const presetErr = (msg) => { const el = $('#e-preset-err'); if (el) el.textContent = msg || ''; };
+
+  // Fill the live form from a preset, then re-run every sync so the conditional
+  // panels (recurrence fields, order-linked note, end-mode) match what we just wrote.
+  const applyPreset = (preset) => {
+    const patch = applyPresetToDraft(preset);
+    const set = (sel, v) => { const el = $(sel); if (el != null && v !== undefined) el.value = v; };
+    set('#e-name', patch.name ?? '');
+    set('#e-category', patch.category ?? '');
+    set('#e-payee', patch.payee ?? '');
+    set('#e-amount', patch.amount ?? '');
+    set('#e-method', patch.method ?? '');
+    set('#e-ref', patch.reference ?? '');
+    set('#e-notes', patch.notes ?? '');
+    if ($('#e-gst')) { $('#e-gst').checked = !!patch.gst_claimable; $('#e-gst').dataset.touched = '1'; }
+
+    const rec = patch.recurrence && patch.recurrence !== 'none' ? patch.recurrence : 'none';
+    if (rec !== 'none') {
+      set('#e-freq', rec);
+      if (patch.recurrence_day_of_week != null) set('#e-dow', patch.recurrence_day_of_week);
+      if (patch.recurrence_day_of_month != null) { set('#e-dom', patch.recurrence_day_of_month); set('#e-ydom', patch.recurrence_day_of_month); }
+      if (patch.recurrence_month != null) set('#e-month', patch.recurrence_month);
+      if (patch.recurrence_interval_days != null) set('#e-interval', patch.recurrence_interval_days);
+      if (patch.recurrence_count != null) { set('#e-endmode', 'after'); set('#e-end-count', patch.recurrence_count); }
+      else set('#e-endmode', 'never');
+    }
+    // Dates are never carried by a preset — always re-anchor on today.
+    set('#e-date', todayInputValue());
+    set('#e-due', '');
+    if ($('#e-paid')) { $('#e-paid').checked = false; $('#e-paid-wrap')?.classList.add('hidden'); }
+
+    setType(rec === 'none' ? 'none' : 'repeat');
+    syncLinkedNote();
+    syncEndMode();
+    syncFreqFields();
+    syncFirstOcc();
+    presetErr('');
+    Toast.info(`Loaded preset "${preset.name}".`);
+  };
+
+  root.querySelector('#e-preset-chips')?.addEventListener('click', async (e) => {
+    const loadBtn = e.target.closest('[data-preset-load]');
+    if (loadBtn) {
+      const p = _presets.find(x => x.id === loadBtn.dataset.presetLoad);
+      if (p) applyPreset(p);
+      return;
+    }
+    const delBtn = e.target.closest('[data-preset-del]');
+    if (delBtn) {
+      const p = _presets.find(x => x.id === delBtn.dataset.presetDel);
+      if (!p) return;
+      Modal.confirm({
+        title: 'Delete preset',
+        message: `Delete the preset "${p.name}"? This doesn't touch any saved expense.`,
+        confirmLabel: 'Delete preset',
+        onConfirm: async () => {
+          const ok = await savePresets(removePreset(_presets, p.id));
+          if (ok !== false) Toast.success(`Preset "${p.name}" deleted.`);
+          refreshPresetChips(root);
+        },
+      });
+    }
+  });
+
+  $('#e-preset-add')?.addEventListener('click', async () => {
+    const nameEl = $('#e-preset-name');
+    const name = (nameEl?.value || '').trim();
+    const overwrite = presetNameExists(_presets, name);
+    const err = validatePreset(name, _presets, { allowOverwrite: overwrite });
+    if (err) { presetErr(err); nameEl?.focus(); return; }
+    presetErr('');
+
+    const commit = async () => {
+      // A preset is a template, not an expense — no amount/date validation here.
+      const snapshot = collectPayload(root, { snap: false });
+      let next;
+      try { next = upsertPreset(_presets, toPreset(snapshot, name)); }
+      catch (e3) { presetErr(e3.message); return; }
+      const durable = await savePresets(next);
+      refreshPresetChips(root);
+      if (nameEl) nameEl.value = '';
+      if (durable === false) {
+        Toast.warning(`Preset "${name}" saved on this device only — it couldn't reach the server.`);
+      } else {
+        Toast.success(`Preset "${name}" saved.`);
+      }
+    };
+
+    if (overwrite) {
+      Modal.confirm({
+        title: 'Overwrite preset',
+        message: `A preset called "${name}" already exists. Replace it with the current form?`,
+        confirmLabel: 'Overwrite', confirmClass: 'admin-btn--primary',
+        onConfirm: commit,
+      });
+    } else {
+      await commit();
+    }
+  });
 
   setType(model.recurrence !== 'none' ? 'repeat' : 'none');
   syncLinkedNote();
   syncEndMode();
+  syncFirstOcc();
   setTimeout(() => $('#e-name')?.focus(), 60);
 
   d.footer.querySelector('[data-x="cancel"]').addEventListener('click', () => Drawer.close());
@@ -805,17 +1137,75 @@ function bindEditor(d, model, isNew) {
       await loadData();
     } catch (e2) {
       saveBtn.disabled = false; saveBtn.textContent = isNew ? 'Save expense' : 'Save changes';
-      if (e2?.code === 'NOT_FOUND') {
-        // update() has no legacy fallback; make the limitation explicit.
-        $('#e-err').textContent = 'Editing an existing expense needs the expense API update (backend pending). See the backend spec — nothing was changed.';
-      } else {
-        $('#e-err').textContent = e2?.message || 'Could not save. Please try again.';
-      }
+      showSaveError($, e2, isNew);
     }
   });
 }
 
-function collectPayload(root) {
+// Field id for each name the backend can cite in a VALIDATION_FAILED detail.
+const FIELD_TO_INPUT = {
+  name: '#e-name', category: '#e-category', payee: '#e-payee', amount: '#e-amount',
+  expense_date: '#e-date', due_date: '#e-due', paid_date: '#e-paid-date',
+  method: '#e-method', reference: '#e-ref', notes: '#e-notes',
+  recurrence: '#e-freq', recurrence_day_of_week: '#e-dow',
+  recurrence_day_of_month: '#e-dom', recurrence_month: '#e-month',
+  recurrence_interval_days: '#e-interval', recurrence_end: '#e-end-date',
+  recurrence_count: '#e-end-count',
+};
+
+/**
+ * Render a save failure. The backend returns VALIDATION_FAILED with
+ * `details: [{ field, message }]` — we pin each message to its own input rather than
+ * dumping one generic line, so the operator can see exactly what to fix.
+ */
+function showSaveError($, err, isNew) {
+  // Clear any previous inline marks.
+  for (const sel of Object.values(FIELD_TO_INPUT)) {
+    const el = $(sel);
+    if (el) el.classList.remove('exp-input--invalid');
+    el?.parentElement?.querySelector('.exp-field-err')?.remove();
+  }
+
+  const details = Array.isArray(err?.details) ? err.details : null;
+  if (err?.code === 'VALIDATION_FAILED' && details && details.length) {
+    let first = null;
+    for (const d of details) {
+      const sel = FIELD_TO_INPUT[d?.field];
+      const el = sel ? $(sel) : null;
+      if (!el) continue;
+      el.classList.add('exp-input--invalid');
+      const msg = document.createElement('span');
+      msg.className = 'exp-field-err';
+      msg.textContent = d.message || 'Invalid value.';
+      el.parentElement?.appendChild(msg);
+      if (!first) first = el;
+    }
+    $('#e-err').textContent = first ? 'Please fix the highlighted fields.' : (err.message || 'Validation failed.');
+    first?.focus();
+    return;
+  }
+
+  if (err?.code === 'RATE_LIMITED') {
+    $('#e-err').textContent = 'Too many saves at once. Wait a few seconds and try again.';
+    return;
+  }
+  if (err?.code === 'NOT_FOUND' && !isNew) {
+    $('#e-err').textContent = 'That expense no longer exists — it may have been deleted. Close and refresh.';
+    return;
+  }
+  $('#e-err').textContent = err?.message || 'Could not save. Please try again.';
+}
+
+/**
+ * Read the form into an API payload.
+ *
+ * `snap` (default true) pins a recurring series' `expense_date` to its FIRST real
+ * occurrence. This is what guarantees our projection and the backend's agree: the
+ * backend anchors stepping on `expense_date` and ignores the dow/dom fields, so once
+ * the start date IS the first occurrence, both produce the identical series. Pass
+ * { snap:false } for a preview/preset snapshot (nothing is being persisted).
+ */
+function collectPayload(root, { snap = true } = {}) {
   const $ = (s) => root.querySelector(s);
   const type = root.querySelector('.exp-seg.active')?.dataset.type || 'none';
   const category = $('#e-category').value;
@@ -847,6 +1237,11 @@ function collectPayload(root) {
     const mode = $('#e-endmode').value;
     if (mode === 'on') payload.recurrence_end = $('#e-end-date').value || null;
     if (mode === 'after') payload.recurrence_count = parseInt($('#e-end-count').value, 10);
+
+    if (snap) {
+      const first = firstOccurrence(payload);
+      if (first) { payload.expense_date = first; payload.date = first; }
+    }
   }
   return payload;
 }
@@ -913,7 +1308,8 @@ export default {
     FilterState?.showBar?.(false); // page has its own period control
     container.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;min-height:40vh"><div class="admin-loading__spinner"></div></div>`;
     try {
-      await loadData();
+      // Presets are a UI nicety — never let them block or break the page load.
+      await Promise.all([loadData(), loadPresets()]);
     } catch (e) {
       warn('init', e);
       if (_alive) renderError();
@@ -932,5 +1328,7 @@ export default {
     _rows = [];
     _occurrences = [];
     _kpis = null;
+    _presets = [];
+    _serverSummary = null;
   },
 };

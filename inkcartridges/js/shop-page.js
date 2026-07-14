@@ -1391,6 +1391,11 @@
                 const brandName = this.brandInfo[this.state.brand]?.name || this.state.brand;
 
                 // Include type filter in cache key to prevent stale results when switching genuine/compatible.
+                // v9 (Jul 2026 truncated-code repair): API._repairTruncatedSeries
+                // re-homes Canon's truncated colour codes (CL51 → CL511/CL513)
+                // onto the pair chip that owns them, so chip counts and the
+                // `products` payload both change shape. Bumping invalidates v8
+                // caches still carrying the split CL51/CL64 tiles.
                 // v8 (May 2026 series-codes-thin-extractor): backend commit 5c99462
                 // now projects `series_codes` on /api/products responses too, so
                 // PRIORITY 0 is authoritative and the legacy regex/IB-combo/B-code
@@ -1402,7 +1407,7 @@
                 // v5 (legacy): /api/shop endpoint for server-side series extraction.
                 const typeKey = this.state.type || 'all';
                 const categoryId = this.state.category;
-                const cacheKey = `${this.state.brand}-${categoryId}-${typeKey}-codes-v8`;
+                const cacheKey = `${this.state.brand}-${categoryId}-${typeKey}-codes-v9`;
                 const codesCacheKey = `${cacheKey}-final`;
 
                 // Check if we have cached codes with counts already
@@ -2031,7 +2036,7 @@
             const target = String(collapsedCode).trim().toUpperCase();
             const categoryId = this.state.category;
             const typeKey = this.state.type || 'all';
-            const cacheKey = `${this.state.brand}-${categoryId}-${typeKey}-codes-v8-final`;
+            const cacheKey = `${this.state.brand}-${categoryId}-${typeKey}-codes-v9-final`;
             const cached = this.cache.products[cacheKey];
             if (!Array.isArray(cached)) return null;
             const entry = cached.find(c => c && c.code && String(c.code).toUpperCase() === target);
@@ -2054,15 +2059,15 @@
 
                 if (mergedProducts.length === 0) {
                     // Try the codes cache, newest first
-                    // (v8 May 2026 series_codes-only extractor, v7 yield-collapse,
-                    //  v6 specialty collapse, v5 /api/shop legacy, v4 client-side legacy).
-                    const codesCacheKey8 = `${this.state.brand}-${categoryId}-${typeKey}-codes-v8-final`;
+                    // (v9 Jul 2026 truncated-code repair, v8 series_codes-only extractor,
+                    //  v7 yield-collapse, v6 specialty collapse, v5 /api/shop legacy).
+                    const codesCacheKey9 = `${this.state.brand}-${categoryId}-${typeKey}-codes-v9-final`;
                     const codesCacheKey7 = `${this.state.brand}-${categoryId}-${typeKey}-codes-v7-final`;
                     const codesCacheKey6 = `${this.state.brand}-${categoryId}-${typeKey}-codes-v6-final`;
                     const codesCacheKey5 = `${this.state.brand}-${categoryId}-${typeKey}-codes-v5-final`;
                     const codesCacheKey4 = `${this.state.brand}-${categoryId}-${typeKey}-codes-v4-final`;
 
-                    for (const cacheKey of [codesCacheKey8, codesCacheKey7, codesCacheKey6, codesCacheKey5, codesCacheKey4]) {
+                    for (const cacheKey of [codesCacheKey9, codesCacheKey7, codesCacheKey6, codesCacheKey5, codesCacheKey4]) {
                         if (this.cache.products[cacheKey]) {
                             const codeEntry = this.cache.products[cacheKey].find(c => c.code === code);
                             if (codeEntry?.products) {
@@ -2118,12 +2123,12 @@
                         this.elements.levelCodes.hidden = true;
                         if (navVersion !== undefined && this.navigationVersion !== navVersion) return;
 
-                        const codesCacheKey8 = `${this.state.brand}-${categoryId}-${typeKey}-codes-v8-final`;
+                        const codesCacheKey9 = `${this.state.brand}-${categoryId}-${typeKey}-codes-v9-final`;
                         const codesCacheKey7 = `${this.state.brand}-${categoryId}-${typeKey}-codes-v7-final`;
                         const codesCacheKey6 = `${this.state.brand}-${categoryId}-${typeKey}-codes-v6-final`;
                         const codesCacheKey5 = `${this.state.brand}-${categoryId}-${typeKey}-codes-v5-final`;
                         const codesCacheKey4 = `${this.state.brand}-${categoryId}-${typeKey}-codes-v4-final`;
-                        for (const cacheKey of [codesCacheKey8, codesCacheKey7, codesCacheKey6, codesCacheKey5, codesCacheKey4]) {
+                        for (const cacheKey of [codesCacheKey9, codesCacheKey7, codesCacheKey6, codesCacheKey5, codesCacheKey4]) {
                             if (this.cache.products[cacheKey]) {
                                 const codeEntry = this.cache.products[cacheKey].find(c => c.code === code);
                                 if (codeEntry?.products) {

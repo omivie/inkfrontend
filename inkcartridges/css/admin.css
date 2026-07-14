@@ -1745,6 +1745,49 @@
 }
 .admin-pc-seed-note[hidden] { display: none; }
 
+/* ---- Product Codes page (/admin#product-codes) ----------------------------
+   Reuses the chip grid + tile/action classes above, which the product drawer's
+   Product Codes tab already owns. Only the page shell and the membership drawer
+   are new. On the page a tile's primary click opens membership rather than
+   toggling assignment, so no .is-on state is ever set here. */
+.admin-pcp-lede { font-size: 13px; margin: -8px 0 16px; max-width: 70ch; }
+.admin-pcp-pickers { margin-bottom: 16px; }
+.admin-pcp-caveat {
+  font-size: 11px; font-style: italic; color: var(--text-muted);
+  margin: 16px 2px 0; max-width: 70ch;
+}
+.admin-pcp-note {
+  font-size: 12px; color: var(--text-secondary); margin: 0 0 12px; line-height: 1.5;
+}
+.admin-pcm-search { margin-bottom: 12px; }
+.admin-pcm-list { display: flex; flex-direction: column; gap: 4px; }
+.admin-pcm-row {
+  display: flex; align-items: center; gap: 10px; padding: 8px 10px;
+  border: 1px solid var(--border); border-radius: 8px; cursor: pointer;
+  background: var(--surface, var(--input-bg));
+  min-height: var(--tap-min, 48px);
+}
+.admin-pcm-row:hover { border-color: var(--cyan); }
+.admin-pcm-row.is-on {
+  border-color: var(--cyan, #06b6d4);
+  background: var(--cyan-soft, rgba(34, 211, 238, .10));
+}
+.admin-pcm-row input[type="checkbox"] { flex: none; width: 16px; height: 16px; cursor: pointer; }
+.admin-pcm-row__img {
+  flex: none; width: 34px; height: 34px; border-radius: 6px; object-fit: contain;
+  background: var(--product-image-bg, #fff); border: 1px solid var(--border);
+}
+.admin-pcm-row__img--none { background: var(--input-bg); }
+.admin-pcm-row__text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.admin-pcm-row__name {
+  font-size: 13px; font-weight: 600; color: var(--text);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.admin-pcm-row__meta {
+  font-size: 11px; color: var(--text-muted);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
 /* ---- Image Lightbox ---- */
 .admin-image-lightbox {
   position: fixed; inset: 0; z-index: 10000;
@@ -5013,3 +5056,38 @@ button.admin-active-dot--clickable:hover::after { opacity: 1; }
   .exp-kpi-grid { grid-template-columns: 1fr; }
   .exp-form__grid2, .exp-detail-grid { grid-template-columns: 1fr; }
 }
+
+/* ---- Expense presets (saved form templates, admin_ui_prefs) ---- */
+.exp-presets { padding-bottom: 12px; }
+.exp-preset-row { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+.exp-preset {
+  display: inline-flex; align-items: stretch; border: 1px solid var(--border);
+  border-radius: 999px; overflow: hidden; background: var(--surface);
+}
+.exp-preset:hover { border-color: var(--border-strong); }
+.exp-preset__load {
+  border: 0; background: transparent; color: var(--text); font-size: 12px; font-weight: 600;
+  padding: 5px 6px 5px 12px; cursor: pointer; max-width: 200px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.exp-preset__load:hover { color: var(--cyan-text, var(--cyan)); }
+.exp-preset__del {
+  border: 0; background: transparent; color: var(--text-muted); cursor: pointer;
+  padding: 0 8px 0 4px; display: flex; align-items: center;
+}
+.exp-preset__del:hover { color: var(--magenta-text, var(--magenta)); }
+.exp-preset-save { display: flex; gap: 8px; align-items: center; }
+.exp-preset-save .admin-input { flex: 1; min-width: 0; }
+.exp-preset-err { color: var(--magenta-text, var(--magenta)); font-size: 12px; min-height: 14px; margin-top: 4px; }
+
+/* Inline per-field validation (backend VALIDATION_FAILED details) */
+.exp-input--invalid { border-color: var(--magenta, #C71F6E) !important; }
+.exp-field-err { display: block; color: var(--magenta-text, var(--magenta)); font-size: 11px; margin-top: 3px; }
+
+/* KPI sub-note (e.g. gross cash-out beneath the GST-netted headline) */
+.exp-kpi__note { display: block; color: var(--text-muted); font-size: 11px; margin-top: 2px; }
+
+/* Per-occurrence actions in the detail drawer */
+.exp-occ { grid-template-columns: auto auto auto 1fr auto; }
+.exp-occ__acts { display: flex; gap: 4px; justify-content: flex-end; }
+.exp-occ--done .exp-occ__amt { opacity: 0.75; }
