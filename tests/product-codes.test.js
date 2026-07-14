@@ -397,7 +397,8 @@ function makeModal(ids) {
 function makeToast() {
   const calls = [];
   return { calls, success: (m) => calls.push(['success', m]),
-    error: (m) => calls.push(['error', m]), info: (m) => calls.push(['info', m]) };
+    error: (m) => calls.push(['error', m]), info: (m) => calls.push(['info', m]),
+    warning: (m) => calls.push(['warning', m]) };
 }
 
 // A fake `window` carrying the API surface wireProductCodesSection touches:
@@ -421,20 +422,43 @@ function keyEvent(key, target) {
   return { key, target, preventDefault() {} };
 }
 
+// The drawer's normaliser, verbatim from AdminAPI — it KEEPS "/" (ERR-061).
+const NORMALIZE = (raw) => String(raw == null ? '' : raw)
+  .toUpperCase().replace(/[^A-Z0-9/]/g, '')
+  .replace(/\/{2,}/g, '/').replace(/^\/+|\/+$/g, '');
+
+// The shared scope formatter (utils/product-codes.js), which the drawer imports.
+const CAT_LABELS = { ink: 'Ink', toner: 'Toner', ribbons: 'Ribbons' };
+const DESCRIBE_SCOPES = (scopes, brandName = (s) => s) => {
+  const parts = (scopes || []).map(s => `${brandName(s.brandSlug)} · ${CAT_LABELS[s.category] || s.category}`);
+  if (parts.length <= 1) return parts[0] || '';
+  return `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}`;
+};
+
 // Build a runnable copy of wireProductCodesSection with its free globals injected.
+// AdminAPI gets the two members every path needs, so a test only stubs what it
+// asserts on: normalizeProductCode (the drawer has no local norm any more) and
+// getCodeUniverse (the catalogue behind the "every other code" section — an empty
+// one by default, so a test about THIS product's chips isn't about the catalogue).
 function loadWire() {
   const src = extractFunction(PRODUCTS_SRC, 'async function wireProductCodesSection(');
   const factory = new Function(
     'AdminAPI', 'Toast', 'esc', 'DebugLog', 'window',
     'extractBrandName', '_brands', 'PRODUCT_TYPE_LABELS', 'PRODUCT_TYPE_TO_SHOP_CATEGORY',
+    'describeScopes', 'describeCodesWriteError',
     `${src}; return wireProductCodesSection;`);
   return (deps) => factory(
-    deps.AdminAPI, deps.Toast || makeToast(), esc, deps.DebugLog || { warn() {} },
+    { normalizeProductCode: NORMALIZE,
+      getCodeUniverse: async () => ({ codes: [], missed: [] }),
+      ...deps.AdminAPI },
+    deps.Toast || makeToast(), esc, deps.DebugLog || { warn() {} },
     deps.window || makeWindow(),
     deps.extractBrandName || ((p) => (p && p.brand && p.brand.name) || (p && p.brand_name) || ''),
-    deps._brands || [],
+    deps._brands || [{ id: 'b1', name: 'Brother', slug: 'brother' }],
     deps.PRODUCT_TYPE_LABELS || { ink_cartridge: 'Ink Cartridges', toner_cartridge: 'Toner Cartridges' },
-    deps.PRODUCT_TYPE_TO_SHOP_CATEGORY || { ink_cartridge: 'ink', toner_cartridge: 'toner' });
+    deps.PRODUCT_TYPE_TO_SHOP_CATEGORY || { ink_cartridge: 'ink', toner_cartridge: 'toner' },
+    DESCRIBE_SCOPES,
+    deps.describeCodesWriteError || ((e) => (e && e.message) || 'unknown error'));
 }
 
 // A representative Brother ink product.
@@ -456,6 +480,51 @@ test('header shows the product brand + type; grid renders the whole code univers
   }
   assert.match(grid, /data-code="LC40"[^>]*aria-pressed="true"/, 'the assigned code is marked on');
   assert.match(grid, /data-code="LC37"[^>]*aria-pressed="false"/, 'unassigned codes are off');
+});
+
+test('the whole catalogue is reachable — a code from another brand is offered, scope and all', async () => {
+  // The point of the Jul 2026 widening: before it, this drawer could only ever
+  // show Brother+ink's chips, so ~1,200 of the ~1,344 codes that exist were
+  // unassignable from here.
+  const modal = makeModal(CODE_IDS);
+  const AdminAPI = {
+    getProductCodes: async () => ['LC40'],
+    getCodeUniverse: async () => ({
+      codes: [
+        { code: 'LC40', count: 9, scopes: [{ brandSlug: 'brother', category: 'ink' }] },
+        { code: 'PG40/CL41', count: 4, scopes: [{ brandSlug: 'canon', category: 'ink' }] },
+      ],
+      missed: [],
+    }),
+  };
+  const win = makeWindow({ series: [{ code: 'LC40', count: 9 }] });
+  const brands = [{ id: 'b1', name: 'Brother', slug: 'brother' }, { id: 'b2', name: 'Canon', slug: 'canon' }];
+  await loadWire()({ AdminAPI, window: win, _brands: brands })(modal, PROD());
+
+  const grid = modal._els['product-codes-grid'].innerHTML;
+  assert.match(grid, /data-code="LC40"/, "the product's own chip is still there");
+  assert.match(grid, /data-code="PG40\/CL41"/,
+    'a code from another brand must be offered — with its slash intact (ERR-061)');
+  assert.match(grid, /Canon · Ink/, 'and labelled with the scope it belongs to');
+  assert.ok(!grid.includes('PG40CL41"'), 'the slash must never be stripped — PG40CL41 matches no product');
+});
+
+test('an incomplete catalogue says so instead of passing for the whole thing', async () => {
+  const modal = makeModal(CODE_IDS);
+  const AdminAPI = {
+    getProductCodes: async () => [],
+    getCodeUniverse: async () => ({
+      codes: [{ code: 'CI3', count: 2, scopes: [{ brandSlug: 'canon', category: 'ink' }] }],
+      missed: [{ brandSlug: 'canon', category: 'toner' }],
+    }),
+  };
+  const win = makeWindow({ series: [{ code: 'LC40', count: 9 }] });
+  const brands = [{ id: 'b2', name: 'Canon', slug: 'canon' }];
+  await loadWire()({ AdminAPI, window: win, _brands: brands })(modal, PROD());
+
+  const grid = modal._els['product-codes-grid'].innerHTML;
+  assert.match(grid, /Canon · Toner/, 'the scope that failed must be named');
+  assert.match(grid, /didn’t load/, 'and the gap admitted — a short list must not read as a complete one');
 });
 
 test('seed: a product with no saved codes is pre-selected from backend series_codes', async () => {

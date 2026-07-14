@@ -35,6 +35,30 @@ export const SHOP_CATEGORIES = [
   { value: 'paper', label: 'Paper' },
 ];
 
+/** A /shop category value → its display label. */
+export function categoryLabel(value) {
+  const hit = SHOP_CATEGORIES.find(c => c.value === value);
+  return (hit && hit.label) || value || '';
+}
+
+/**
+ * Human-readable scope list for a code — "Canon · Ink", or
+ * "HP · Ink and Brother · Toner" when a code spans several.
+ *
+ * A code label is NOT unique to one brand+category: 41 of the ~1,214 span more
+ * than one (HP's "410" ink and Brother's "410" toner are the same three
+ * characters). Anything that renames, deletes or lists a code has to say which
+ * scopes it means, or the admin can't tell what a click is about to change.
+ *
+ * @param {Array<{brandSlug:string, category:string}>} scopes
+ * @param {(slug:string) => string} brandName  slug → display name
+ */
+export function describeScopes(scopes, brandName = (s) => s) {
+  const parts = (scopes || []).map(s => `${brandName(s.brandSlug)} · ${categoryLabel(s.category)}`);
+  if (parts.length <= 1) return parts[0] || '';
+  return `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}`;
+}
+
 /** True if `code` is storable — matches the table's CHECK constraint exactly. */
 export function isValidProductCode(code) {
   const c = String(code || '');

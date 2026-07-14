@@ -111,15 +111,41 @@ test('a zero-product result is reported, not swallowed', () => {
   // This is the exact silent failure the slash fix addresses: before Jul 2026,
   // renaming PG40/CL41 normalised it to PG40CL41, matched nothing, and reported
   // success anyway. A walk that finds nobody must say so.
-  assert.match(pageJs, /if \(!res\.products\)/);
+  assert.match(pageJs, /if \(!products\)/);
   assert.match(pageJs, /nothing changed/i);
 });
 
-test('the page is scoped by brand + category, mirroring /shop', () => {
+test('the page lists EVERY code, and searches them', () => {
+  // Until Jul 2026 the page was hard-scoped to one brand+category, so ~1,200 of
+  // the ~1,214 codes that exist could not be seen or found from here.
+  assert.match(pageJs, /AdminAPI\.getCodeUniverse\(/,
+    'the grid is the whole catalogue, not one brand+category slice');
+  assert.match(pageJs, /id="pcp-filter"/, 'and a search box narrows it');
+  assert.match(pageJs, /SHOP_CATEGORIES/, 'categories come from the shared util');
+});
+
+test('the brand and type pickers are FILTERS, defaulting to All', () => {
   assert.match(pageJs, /id="pcp-brand"/);
   assert.match(pageJs, /id="pcp-category"/);
-  assert.match(pageJs, /brand: _brandSlug, category: _category/);
-  assert.match(pageJs, /SHOP_CATEGORIES/, 'categories come from the shared util');
+  assert.match(pageJs, /<option value="">All brands<\/option>/,
+    'brand must offer All — a code you cannot find reads as a code that does not exist');
+  assert.match(pageJs, /<option value="">All types<\/option>/, 'type must offer All');
+});
+
+test('a filter never survives the visit that set it', () => {
+  // _brandSlug/_category are module-level and outlive navigation. Left alone,
+  // last visit's narrowing silently carries over: you return, see a slice, and
+  // read it as the whole catalogue.
+  const destroyAt = pageJs.indexOf('\n  destroy() {');
+  const init = pageJs.slice(pageJs.indexOf('async init('), destroyAt);
+  assert.match(init, /_brandSlug = ''/, 'init must reset the brand filter');
+  assert.match(init, /_category = ''/, 'init must reset the type filter');
+
+  const destroy = pageJs.slice(destroyAt);
+  assert.match(destroy, /_brandSlug = ''/, 'destroy must reset it too');
+  assert.match(destroy, /_category = ''/, 'destroy must reset it too');
+
+  assert.ok(!/_category = 'ink'/.test(pageJs), 'no sticky Canon/ink default');
 });
 
 test('the override caveat is surfaced, not hidden', () => {

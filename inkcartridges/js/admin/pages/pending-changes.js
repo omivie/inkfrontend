@@ -10,6 +10,7 @@
  *   POST /api/admin/pending-changes/bulk-review
  */
 import { AdminAPI, FilterState, icon, esc } from '../app.js';
+import { typeFilterOptions, matchesTypeFilter } from '../utils/product-types.js';
 import { Toast } from '../components/toast.js';
 import { Modal } from '../components/modal.js';
 
@@ -665,19 +666,8 @@ function renderToolbar() {
       <option value="genuine"${sel(pf.source, 'genuine')}>Genuine</option>
       <option value="compatible"${sel(pf.source, 'compatible')}>Compatible</option>
       <option value="remanufactured"${sel(pf.source, 'remanufactured')}>Remanufactured</option>
-      <option value="ribbon"${sel(pf.source, 'ribbon')}>Ribbon</option>
     </select>
-    <select class="admin-select" id="pc-product-type">
-      <option value="">All Types</option>
-      <option value="ink_cartridge"${sel(pf.product_type, 'ink_cartridge')}>Ink Cartridge</option>
-      <option value="toner_cartridge"${sel(pf.product_type, 'toner_cartridge')}>Toner</option>
-      <option value="printer_ribbon"${sel(pf.product_type, 'printer_ribbon')}>Printer Ribbon</option>
-      <option value="typewriter_ribbon"${sel(pf.product_type, 'typewriter_ribbon')}>Typewriter Ribbon</option>
-      <option value="correction_tape"${sel(pf.product_type, 'correction_tape')}>Correction Tape</option>
-      <option value="drum"${sel(pf.product_type, 'drum')}>Drum</option>
-      <option value="maintenance_kit"${sel(pf.product_type, 'maintenance_kit')}>Maintenance Kit</option>
-      <option value="paper"${sel(pf.product_type, 'paper')}>Paper</option>
-    </select>
+    <select class="admin-select" id="pc-product-type">${typeFilterOptions(pf.product_type)}</select>
     <select class="admin-select" id="pc-stock">
       <option value="">All Stock</option>
       <option value="in_stock"${sel(pf.stock, 'in_stock')}>In Stock</option>
@@ -1205,7 +1195,8 @@ function applyClientFilters() {
       if (!cached || !!cached.is_active !== want) return false;
     }
     if (pf.source && (!cached || cached.source !== pf.source)) return false;
-    if (pf.product_type && (!cached || cached.product_type !== pf.product_type)) return false;
+    // A type value can name a group ("ribbons") as well as a single product_type.
+    if (pf.product_type && (!cached || !matchesTypeFilter(pf.product_type, cached.product_type))) return false;
     if (pf.images === 'has-images' && (!cached || !cached.image_url)) return false;
     if (pf.images === 'no-images' && cached && cached.image_url) return false;
     if (pf.stock) {

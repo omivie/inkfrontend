@@ -2,6 +2,7 @@
  * AdminAPI — Admin-specific API layer
  * Uses window.API for REST calls + Supabase RPC for analytics
  */
+import { PRODUCT_TYPE_TO_SHOP_CATEGORY } from './utils/product-codes.js';
 
 // Direct RPC via Supabase REST — avoids creating a second GoTrueClient
 async function rpc(fnName, params = {}, signal = null) {
@@ -1508,6 +1509,10 @@ const AdminAPI = {
         // contract an already-present code is a no-op, not a failure.
         if (insErr && insErr.code !== '23505') throw insErr;
       }
+      // Every code write funnels through here — including the product drawer's
+      // Save, which reaches setProductCodes directly. Invalidate at the choke
+      // point so no caller can forget to.
+      this._clearStorefrontCodeCache();
       return clean;
     } catch (e) {
       DebugLog.warn('[AdminAPI] setProductCodes failed:', e.message);
@@ -1532,6 +1537,196 @@ const AdminAPI = {
       adminApiWarn('Failed to load code catalogue', e);
       return null;
     }
+  },
+
+  /**
+   * EVERY code that exists, across every brand and category — the universe both
+   * code surfaces search (the Product Codes page and the product drawer's tab).
+   *
+   * WHY THE FAN-OUT. There is no endpoint for this and no table to read:
+   * `series_codes` is derived backend-side, not a column, and Supabase's
+   * `product_codes` holds only the manual OVERRIDE layer. The one authoritative
+   * source is `/api/shop?brand=&category=` → `series[]`, which the backend only
+   * returns when BOTH params are given. So we fan out across the brand+category
+   * pairs that actually have products (51 of the 27×6 possible) and union the
+   * result: ~1,214 codes, ~2s wall-clock through the CF-cached api subdomain.
+   *
+   * Do NOT be tempted to rebuild this from a /api/products walk instead. Products
+   * carry `series_codes`, but ZERO of them carry the merged PAIR codes — PG40/CL41,
+   * PGI5/CLI8, the 18 chips the backend synthesises at series[] aggregation time.
+   * Those are precisely the codes these surfaces exist to fix, and a product walk
+   * drops all of them silently.
+   *
+   * A code is not unique to one brand+category: 41 of them span several (HP's "410"
+   * ink and Brother's "410" toner are one chip label, two scopes). Every entry
+   * therefore carries its `scopes`, and every write walks THEM — a caller that
+   * assumes the current page's brand+category would edit the wrong products.
+   *
+   * A pair that won't load is REPORTED, never quietly skipped. The first cut of
+   * this passed `limit: 1` to make the fan-out cheap — series[] is an aggregate,
+   * so a page size of 1 still returns it in full. It did, for 50 of the 51 pairs.
+   * Canon+ink — the biggest scope, and the one whose merged pair codes this whole
+   * feature exists to fix — answered 504 through the CF edge on that URL, every
+   * time. The catalogue came back looking complete and simply had no Canon in it.
+   * So: the fan-out now sends the SAME shape the storefront sends (no `limit`),
+   * which is both already warm in CF and not a 504, and anything that still fails
+   * comes back in `missed` for the UI to own up to.
+   *
+   * @returns {Promise<{codes:Array<{code, count, scopes:Array<{brandSlug, category}>}>,
+   *                    missed:Array<{brandSlug, category}>}|null>}
+   *   null when nothing could be read at all — callers fall back to their own
+   *   single-scope lookup rather than showing an empty catalogue.
+   */
+  async getCodeUniverse({ force = false } = {}) {
+    if (!force) {
+      const cached = this._readCodeUniverseCache();
+      if (cached) return cached;
+    }
+    try {
+      const pairs = await this._codeUniverseScopes();
+      if (!pairs.length) return null;
+
+      // GENTLE, NOT FAST. The origin rate-limits bursts: fire a dozen uncached
+      // /api/shop requests at once and it starts answering 429, which cost this
+      // build 40 of its 51 pairs the first time it was measured. A CF HIT is free,
+      // but only the URLs real storefront traffic warms are hits — the rest go to
+      // the origin. So: a small pool, and a retry with backoff that actually waits
+      // out a 429 instead of hammering through it.
+      //
+      // Cost: ~2s when CF is warm, up to a couple of minutes cold. That is why the
+      // result is banked for 6h across tabs, and why the drawer merges it in the
+      // BACKGROUND rather than making the admin watch.
+      const CONCURRENCY = 3;
+      const ATTEMPTS = 4;
+      const backoff = (n) => new Promise(r => setTimeout(r, 400 * Math.pow(3, n)));
+
+      const byCode = new Map();   // code → { code, count, scopes[] }
+      const missed = [];
+      let ok = 0;
+      let next = 0;
+
+      const fetchSeries = async (brandSlug, category) => {
+        // No `limit`. The obvious optimisation — limit=1, since series[] is an
+        // aggregate and comes back whole regardless — is a trap: it mints a cache
+        // key nothing else uses, so it always misses CF, and for Canon+ink it
+        // answered 504 every single time. The storefront's own shape is the one
+        // that is already warm and actually works.
+        const resp = await window.API.getShopData({ brand: brandSlug, category });
+        return (resp && resp.ok && resp.data && Array.isArray(resp.data.series))
+          ? resp.data.series : null;
+      };
+
+      const worker = async () => {
+        while (next < pairs.length) {
+          const { brandSlug, category } = pairs[next++];
+          let series = null;
+          for (let attempt = 0; attempt < ATTEMPTS && !series; attempt++) {
+            if (attempt) await backoff(attempt - 1);
+            try { series = await fetchSeries(brandSlug, category); } catch (_) { series = null; }
+          }
+          if (!series) { missed.push({ brandSlug, category }); continue; }
+          ok++;
+          for (const s of series) {
+            const code = this.normalizeProductCode(s && s.code);
+            if (code.length < 2) continue;
+            let entry = byCode.get(code);
+            if (!entry) { entry = { code, count: 0, scopes: [] }; byCode.set(code, entry); }
+            entry.count += Number(s.count) || 0;
+            entry.scopes.push({ brandSlug, category });
+          }
+        }
+      };
+      await Promise.all(Array.from({ length: Math.min(CONCURRENCY, pairs.length) }, worker));
+      if (!ok) return null;
+
+      const codes = [...byCode.values()]
+        .sort((a, b) => a.code.localeCompare(b.code, 'en', { numeric: true, sensitivity: 'base' }));
+      const universe = { codes, missed };
+      // Only bank a COMPLETE catalogue. Caching a partial one would freeze a
+      // transient outage into the UI for hours.
+      if (!missed.length) this._writeCodeUniverseCache(universe);
+      return universe;
+    } catch (e) {
+      adminApiWarn('Failed to build the code universe', e);
+      return null;
+    }
+  },
+
+  /**
+   * The (brand, category) pairs that actually have products — the fan-out list.
+   * One ranged read of products(brand_id, product_type); PostgREST caps a page at
+   * 1000 rows, so it pages. Types with no /shop category (fax_film, printer) drill
+   * down nowhere and are skipped.
+   */
+  async _codeUniverseScopes() {
+    const sb = this._sb();
+    if (!sb || typeof window === 'undefined' || !window.API
+        || typeof window.API.getShopData !== 'function') return [];
+
+    const brands = await this.getBrands();
+    const slugById = new Map();
+    for (const b of (Array.isArray(brands) ? brands : [])) {
+      if (b && b.id && b.slug) slugById.set(String(b.id), String(b.slug));
+    }
+    if (!slugById.size) return [];
+
+    const PAGE = 1000;
+    const seen = new Set();
+    const pairs = [];
+    for (let from = 0; from < 20000; from += PAGE) {
+      const { data, error } = await sb.from('products')
+        .select('brand_id, product_type').range(from, from + PAGE - 1);
+      if (error) throw error;
+      const rows = data || [];
+      for (const r of rows) {
+        const brandSlug = slugById.get(String(r && r.brand_id));
+        const category = PRODUCT_TYPE_TO_SHOP_CATEGORY[r && r.product_type];
+        if (!brandSlug || !category) continue;
+        const key = `${brandSlug}|${category}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        pairs.push({ brandSlug, category });
+      }
+      if (rows.length < PAGE) break;
+    }
+    return pairs;
+  },
+
+  // The build is expensive when the CF cache is cold (~50s), so the snapshot is
+  // persisted in localStorage, not sessionStorage: a second tab, or tomorrow's
+  // first drawer, must not pay for it again.
+  //
+  // Staleness is bounded from both ends. Every admin code write clears it
+  // outright (see _clearStorefrontCodeCache), so an admin never sees their own
+  // edit go missing. The TTL only covers the other source of change — a backend
+  // product import re-deriving codes — which is additive and rare; a few hours of
+  // lag on a purely additive list is worth not re-paying 50s per tab.
+  _codeUniverseCache: null,
+  _CODE_UNIVERSE_KEY: 'admin_code_universe_v1',
+  _CODE_UNIVERSE_TTL: 21600000,   // 6 h
+
+  _readCodeUniverseCache() {
+    const fresh = (hit) => hit && (Date.now() - hit.at) < this._CODE_UNIVERSE_TTL
+      && Array.isArray(hit.value) && hit.value.length;
+    if (fresh(this._codeUniverseCache)) return this._codeUniverseCache.value;
+    try {
+      const raw = localStorage.getItem(this._CODE_UNIVERSE_KEY);
+      const hit = raw ? JSON.parse(raw) : null;
+      if (fresh(hit)) { this._codeUniverseCache = hit; return hit.value; }
+    } catch (_) { /* private mode / bad JSON — just rebuild */ }
+    return null;
+  },
+
+  _writeCodeUniverseCache(universe) {
+    const hit = { at: Date.now(), value: universe };
+    this._codeUniverseCache = hit;
+    try { localStorage.setItem(this._CODE_UNIVERSE_KEY, JSON.stringify(hit)); } catch (_) { /* quota */ }
+  },
+
+  /** Every code write changes the universe — drop it so the next read rebuilds. */
+  _clearCodeUniverseCache() {
+    this._codeUniverseCache = null;
+    try { localStorage.removeItem(this._CODE_UNIVERSE_KEY); } catch (_) { /* non-fatal */ }
   },
 
   /**
@@ -1598,7 +1793,11 @@ const AdminAPI = {
     return [...map.values()];
   },
 
-  /** The storefront's manual-code cache is stale after any write. */
+  /**
+   * Both code caches are stale after any write: the storefront's manual-code
+   * cache AND our own universe snapshot (a rename adds one code and drops
+   * another). Called from every write path below.
+   */
   _clearStorefrontCodeCache() {
     try {
       if (typeof window !== 'undefined' && window.API
@@ -1606,6 +1805,7 @@ const AdminAPI = {
         window.API._manualCodeCache.clear();
       }
     } catch (_) { /* non-fatal */ }
+    this._clearCodeUniverseCache();
   },
 
   /**

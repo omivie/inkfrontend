@@ -7,11 +7,18 @@
  * only other way in was the per-product drawer's Product Codes tab, which is
  * product-centric when the question ("this chip is wrong") is code-centric.
  *
- * SCOPE — brand + category, mirroring /shop. Not a UI preference: a code only
- * means anything inside a brand+category, and every write path resolves its
- * products through getShopData({brand, category, code}). Note a category can span
- * several product_types (ink = ink_cartridge + ink_bottle), so an edit here reaches
- * all of them — which is exactly the grain the customer's chip grid has.
+ * SHOWS EVERY CODE. The page lists the whole catalogue — ~1,214 codes across every
+ * brand and category (AdminAPI.getCodeUniverse) — and the search box narrows it.
+ * The brand and category <select>s are FILTERS on that list, not a scope you must
+ * pick first, and they always open on "All": a code you can't find is worse than a
+ * long list, and a filter that persisted from last visit made codes look missing.
+ *
+ * SCOPE STILL EXISTS, per code. A code only means something inside a brand+category
+ * (every write resolves its products through getShopData({brand, category, code})),
+ * and 41 codes span more than one — HP's "410" ink and Brother's "410" toner are the
+ * same three characters, not the same chip. So each entry carries its `scopes`, the
+ * tiles show them, and a rename or delete runs over ALL of them. Nothing here may
+ * assume the code's scope is whatever the pickers happen to say.
  *
  * THE OVERRIDE TRAP — `product_codes` is an override layer with "manual replaces
  * auto" semantics: a product with any row there has its backend-derived
@@ -31,6 +38,8 @@ import {
   SHOP_CATEGORIES,
   isValidProductCode,
   describeCodesWriteError,
+  describeScopes,
+  categoryLabel as catLabel,
 } from '../utils/product-codes.js';
 
 let _container = null;
@@ -38,50 +47,74 @@ let _alive = false;
 let _loadToken = 0;      // ERR-045: a reply from a superseded load must not render
 
 let _brands = [];
-let _brandSlug = '';
-let _category = 'ink';
-let _codes = [];         // [{ code, count }]
+let _brandSlug = '';     // '' = all brands. Reset on every open — see init/destroy.
+let _category = '';      // '' = all categories
+let _universe = [];      // [{ code, count, scopes: [{brandSlug, category}] }] — everything
+let _missed = [];        // scopes that wouldn't load — the page must SAY so, not imply completeness
 let _filter = '';
 let _menu = null;        // { code, mode: 'menu' | 'rename' | 'delete' }
 
 const KEBAB = `<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg>`;
 
-const norm = s => String(s || '').trim().toUpperCase();
+const norm = s => AdminAPI.normalizeProductCode(s);
 const plural = n => `${n} product${n === 1 ? '' : 's'}`;
-const categoryLabel = v => (SHOP_CATEGORIES.find(c => c.value === v) || {}).label || v;
 const brandLabel = slug => {
   const b = _brands.find(x => x && x.slug === slug);
   return (b && b.name) || slug;
 };
+/** "Canon · Ink", or every scope when a code spans several. */
+const scopesOf = c => describeScopes(c.scopes, brandLabel);
+
+/** What the brand/category pickers currently narrow to — for empty-state copy. */
+function viewLabel() {
+  if (!_brandSlug && !_category) return 'the catalogue';
+  return `${_brandSlug ? brandLabel(_brandSlug) : 'all brands'} · ${_category ? catLabel(_category) : 'all types'}`;
+}
+
+/** The codes the pickers admit: a code shows if ANY of its scopes matches. */
+function visibleCodes() {
+  const f = norm(_filter);
+  return _universe.filter(c => {
+    if (f && !c.code.includes(f)) return false;
+    if (!_brandSlug && !_category) return true;
+    return (c.scopes || []).some(s =>
+      (!_brandSlug || s.brandSlug === _brandSlug) && (!_category || s.category === _category));
+  });
+}
 
 // ---------------------------------------------------------------- data
 
-/** The chip universe for the current brand+category — literally what /shop shows. */
-async function loadCodes() {
+/** Every code that exists, from the shared universe. */
+async function loadCodes({ force = false } = {}) {
   const myToken = ++_loadToken;
   const grid = _container && _container.querySelector('#pcp-grid');
-  if (grid) grid.innerHTML = `<div class="admin-loader"><div class="admin-loading__spinner"></div></div>`;
+  // The catalogue is a fan-out across every brand+type, and a cold CF cache makes
+  // that slow (see AdminAPI.getCodeUniverse). Say so, rather than show a bare
+  // spinner that reads as a hang.
+  if (grid) {
+    grid.innerHTML = `<div class="admin-loader">
+        <div class="admin-loading__spinner"></div>
+        <div class="admin-pcp-note">Reading every code on /shop — the first load of the day can take a moment.</div>
+      </div>`;
+  }
 
-  let series = [];
-  let failed = false;
+  let universe = null;
   try {
-    const resp = await window.API.getShopData({ brand: _brandSlug, category: _category });
-    series = (resp && resp.ok && resp.data && Array.isArray(resp.data.series)) ? resp.data.series : [];
+    universe = await AdminAPI.getCodeUniverse({ force });
   } catch (e) {
-    failed = true;
+    universe = null;
   }
   if (!_alive || myToken !== _loadToken) return;
 
-  if (failed) {
-    _codes = [];
-    renderGrid(`Couldn’t load codes for ${esc(brandLabel(_brandSlug))} · ${esc(categoryLabel(_category))}.`);
+  if (!universe) {
+    _universe = [];
+    _missed = [];
+    renderGrid('The code catalogue is built from the live /shop chips, and it didn’t load.');
     return;
   }
 
-  _codes = series
-    .filter(s => s && s.code)
-    .map(s => ({ code: norm(s.code), count: Number(s.count) || 0 }))
-    .sort((a, b) => a.code.localeCompare(b.code, 'en', { numeric: true, sensitivity: 'base' }));
+  _universe = universe.codes;
+  _missed = universe.missed || [];
   renderGrid();
 }
 
@@ -108,16 +141,18 @@ function renderTile(c) {
       + `</div>`;
   }
   if (mode === 'delete') {
+    // Say which scopes it will reach — a code can live under several brands.
     return `<div class="admin-pc-code admin-pc-code--act admin-pc-code--confirm">`
-      + `<span class="admin-pc-code__label">Delete ${esc(c.code)} · ${esc(plural(c.count))}?</span>`
+      + `<span class="admin-pc-code__label">Delete ${esc(c.code)} from ${esc(scopesOf(c))} · ${esc(plural(c.count))}?</span>`
       + `<button type="button" class="admin-pc-act admin-pc-act--danger" data-act="delete-go" data-code="${esc(c.code)}">Delete</button>`
       + `<button type="button" class="admin-pc-act admin-pc-act--x" data-act="cancel" aria-label="Cancel">✕</button>`
       + `</div>`;
   }
 
   return `<div class="admin-pc-code">`
-    + `<button type="button" class="admin-pc-code__toggle" data-act="members" data-code="${esc(c.code)}" title="Edit which products carry ${esc(c.code)}">`
+    + `<button type="button" class="admin-pc-code__toggle" data-act="members" data-code="${esc(c.code)}" title="Edit which products carry ${esc(c.code)} in ${esc(scopesOf(c))}">`
     + `<span class="admin-pc-code__label">${esc(c.code)}</span>`
+    + `<span class="admin-pc-code__scope">${esc(scopesOf(c))}</span>`
     + (c.count ? `<span class="admin-pc-code__count">${c.count}</span>` : '')
     + `</button>`
     + `<button type="button" class="admin-pc-code__menu" data-act="menu" data-code="${esc(c.code)}" aria-label="Rename or delete ${esc(c.code)}">${KEBAB}</button>`
@@ -137,69 +172,115 @@ function renderGrid(errorMsg) {
     return;
   }
 
-  const f = norm(_filter);
-  const shown = f ? _codes.filter(c => c.code.includes(f)) : _codes;
+  const shown = visibleCodes();
 
   if (!shown.length) {
     grid.innerHTML = `<div class="admin-stub">
         <div class="admin-stub__text">${
-          _codes.length
-            ? `No code matches “${esc(_filter)}”.`
-            : `No codes for ${esc(brandLabel(_brandSlug))} · ${esc(categoryLabel(_category))} yet.`
+          _universe.length
+            ? (_filter
+                ? `No code matches “${esc(_filter)}” in ${esc(viewLabel())}.`
+                : `No codes in ${esc(viewLabel())} yet.`)
+            : 'No codes yet.'
         }</div>
       </div>`;
     return;
   }
 
-  grid.innerHTML = `<div class="admin-pc-grid">${shown.map(renderTile).join('')}</div>`;
+  // A catalogue that is missing a brand must never look like a complete one —
+  // that is precisely how Canon went missing while the grid looked healthy.
+  const warning = _missed.length
+    ? `<div class="admin-pcp-incomplete">
+         <strong>This list is incomplete.</strong> ${esc(describeScopes(_missed, brandLabel))}
+         ${_missed.length === 1 ? 'did not load' : 'did not load'}, so their codes are missing here.
+         <button type="button" class="admin-btn admin-btn--ghost admin-btn--sm" data-act="retry">Retry</button>
+       </div>`
+    : '';
+
+  grid.innerHTML = warning
+    + `<div class="admin-pc-grid admin-pc-grid--page">${shown.map(renderTile).join('')}</div>`;
+  renderTally(shown.length);
 
   const input = grid.querySelector('[data-rename-input]');
   if (input) { input.focus(); input.select(); }
 }
 
+/** "Showing 43 of 1,214 codes" — with 1,200+ tiles, a bare grid hides its own scale. */
+function renderTally(shownCount) {
+  const el = _container && _container.querySelector('#pcp-tally');
+  if (!el) return;
+  const total = _universe.length;
+  const n = v => v.toLocaleString('en-NZ');
+  el.textContent = shownCount === total
+    ? `${n(total)} code${total === 1 ? '' : 's'}`
+    : `Showing ${n(shownCount)} of ${n(total)} codes`;
+}
+
 // ---------------------------------------------------------------- rename / delete
 
 /**
- * Commit a brand-wide rename (toCode set) or delete (toCode null). Commits
- * immediately — there is no page-level Save.
+ * Commit a rename (toCode set) or delete (toCode null) across every scope the
+ * code lives in. Commits immediately — there is no page-level Save.
+ *
+ * The scopes come from the CODE, not from the pickers: with the pickers on All,
+ * there is no implied brand+category, and even with them set a code may span
+ * scopes the current view doesn't show. Editing only the visible scope would
+ * leave the same chip alive elsewhere under its old name.
  */
-async function applyCodeChange(fromCode, toCode) {
+async function applyCodeChange(entry, toCode) {
+  const fromCode = entry.code;
+  const scopes = entry.scopes || [];
+  const where = scopesOf(entry);
   const label = toCode ? `Renaming ${fromCode} → ${toCode}` : `Deleting ${fromCode}`;
-  Toast.info(`${label}…`);
+  Toast.info(`${label} in ${where}…`);
   try {
-    const res = await AdminAPI.applyBrandCodeChange({
-      brandSlug: _brandSlug, category: _category, fromCode, toCode,
-    });
+    let changed = 0, failed = 0, products = 0;
+    for (const s of scopes) {
+      const res = await AdminAPI.applyBrandCodeChange({
+        brandSlug: s.brandSlug, category: s.category, fromCode, toCode,
+      });
+      changed += res.changed; failed += res.failed; products += res.products;
+    }
     if (!_alive) return;
 
-    if (!res.products) {
+    if (!products) {
       // The walk found nobody carrying the code. Before Jul 2026 this was the
       // silent failure mode for every slash code (PG40/CL41 normalised to
       // PG40CL41 and matched nothing) — so say it loudly rather than pretend.
-      Toast.warning(`No products in ${brandLabel(_brandSlug)} · ${categoryLabel(_category)} carry ${fromCode} — nothing changed.`);
-    } else if (res.failed) {
-      Toast.warning(`${label}: ${res.changed} of ${res.products} products updated, ${res.failed} failed.`);
+      Toast.warning(`No products in ${where} carry ${fromCode} — nothing changed.`);
+    } else if (failed) {
+      Toast.warning(`${label}: ${changed} of ${products} products updated, ${failed} failed.`);
     } else {
       Toast.success(toCode
-        ? `Renamed ${fromCode} → ${toCode} across ${plural(res.changed)}.`
-        : `Deleted ${fromCode} from ${plural(res.changed)}.`);
+        ? `Renamed ${fromCode} → ${toCode} across ${plural(changed)}.`
+        : `Deleted ${fromCode} from ${plural(changed)}.`);
     }
   } catch (e) {
     if (!_alive) return;
     Toast.error(`Couldn’t ${toCode ? 'rename' : 'delete'} ${fromCode} — ${describeCodesWriteError(e)}`);
   }
   _menu = null;
-  if (_alive) await loadCodes();
+  // The write invalidated the universe cache; force a rebuild rather than
+  // re-reading the snapshot we just made stale.
+  if (_alive) await loadCodes({ force: true });
 }
 
 // ---------------------------------------------------------------- membership drawer
 
 /**
- * Edit which products carry `code`. Also the "+ Add code" path, where the code
- * doesn't exist yet and nothing starts ticked.
+ * Edit which products carry a code, across every scope it lives in. Also the
+ * "+ Add code" path, where the code doesn't exist yet and nothing starts ticked.
+ *
+ * The candidate pool is the union of each scope's products, and each product
+ * remembers which scope it came from — setCodeMembership re-walks a single
+ * brand+category, so the save has to hand each product back to its own scope.
+ *
+ * @param {{code:string, scopes:Array<{brandSlug,category}>}} entry
  */
-async function openMembership(code, { isNew = false } = {}) {
-  const ctx = `${brandLabel(_brandSlug)} · ${categoryLabel(_category)}`;
+async function openMembership(entry, { isNew = false } = {}) {
+  const code = entry.code;
+  const scopes = entry.scopes || [];
+  const ctx = describeScopes(scopes, brandLabel);
   const drawer = Drawer.open({
     title: isNew ? `New code: ${code}` : `Products with ${code}`,
     width: 620,
@@ -212,7 +293,10 @@ async function openMembership(code, { isNew = false } = {}) {
   const myToken = ++_loadToken;
   let pool = [];
   try {
-    pool = await AdminAPI.listBrandCategoryProducts({ brandSlug: _brandSlug, category: _category });
+    const perScope = await Promise.all(scopes.map(s =>
+      AdminAPI.listBrandCategoryProducts({ brandSlug: s.brandSlug, category: s.category })
+        .then(rows => rows.map(p => ({ ...p, scope: s })))));
+    pool = perScope.flat();
   } catch (e) {
     if (_alive && Drawer.isOpen()) {
       drawer.body.innerHTML = `<div class="admin-stub"><div class="admin-stub__text">Couldn’t load the products for ${esc(ctx)}.</div></div>`;
@@ -256,10 +340,15 @@ async function openMembership(code, { isNew = false } = {}) {
 
     const list = drawer.body.querySelector('#pcp-members');
     if (!list) return;
+    const multi = scopes.length > 1;
     list.innerHTML = sorted.length
       ? sorted.map(p => {
         const on = ticked.has(p.id);
         const others = p.codes.filter(c => c !== code);
+        // With several scopes in one pool, the SKU alone doesn't say which.
+        const scopeBit = multi
+          ? ` · ${brandLabel(p.scope.brandSlug)} ${catLabel(p.scope.category)}`
+          : '';
         return `<label class="admin-pcm-row${on ? ' is-on' : ''}">
             <input type="checkbox" data-pid="${esc(p.id)}"${on ? ' checked' : ''}>
             ${p.image
@@ -267,7 +356,7 @@ async function openMembership(code, { isNew = false } = {}) {
               : `<span class="admin-pcm-row__img admin-pcm-row__img--none" aria-hidden="true"></span>`}
             <span class="admin-pcm-row__text">
               <span class="admin-pcm-row__name">${esc(p.name)}</span>
-              <span class="admin-pcm-row__meta">${esc(p.sku)}${
+              <span class="admin-pcm-row__meta">${esc(p.sku)}${esc(scopeBit)}${
                 others.length ? ` · also ${esc(others.join(', '))}` : ''
               }</span>
             </span>
@@ -306,17 +395,37 @@ async function openMembership(code, { isNew = false } = {}) {
     saveBtn.disabled = true;
     saveBtn.textContent = 'Saving…';
     try {
-      const res = await AdminAPI.setCodeMembership({
-        brandSlug: _brandSlug, category: _category, code, add, remove,
-      });
+      // setCodeMembership re-walks ONE brand+category to re-read effective codes
+      // at write time, so each product must go back to the scope it came from.
+      const scopeOf = new Map(pool.map(p => [p.id, p.scope]));
+      const key = s => `${s.brandSlug}|${s.category}`;
+      const batches = new Map();   // scope key → { scope, add[], remove[] }
+      const bucket = (id, field) => {
+        const s = scopeOf.get(id);
+        if (!s) return;
+        const k = key(s);
+        if (!batches.has(k)) batches.set(k, { scope: s, add: [], remove: [] });
+        batches.get(k)[field].push(id);
+      };
+      add.forEach(id => bucket(id, 'add'));
+      remove.forEach(id => bucket(id, 'remove'));
+
+      let changed = 0, failed = 0;
+      for (const b of batches.values()) {
+        const res = await AdminAPI.setCodeMembership({
+          brandSlug: b.scope.brandSlug, category: b.scope.category,
+          code, add: b.add, remove: b.remove,
+        });
+        changed += res.changed; failed += res.failed;
+      }
       if (!_alive) return;
-      if (res.failed) {
-        Toast.warning(`${code}: ${plural(res.changed)} updated, ${res.failed} failed.`);
+      if (failed) {
+        Toast.warning(`${code}: ${plural(changed)} updated, ${failed} failed.`);
       } else {
         Toast.success(`${code} now on ${plural(ticked.size)}.`);
       }
       Drawer.close();
-      await loadCodes();
+      await loadCodes({ force: true });
     } catch (e) {
       if (!_alive) return;
       Toast.error(`Couldn’t save ${code} — ${describeCodesWriteError(e)}`);
@@ -325,14 +434,34 @@ async function openMembership(code, { isNew = false } = {}) {
   });
 }
 
-/** "+ Add code" — name it, then pick its products in the same membership drawer. */
+/**
+ * "+ Add code" — name it, pick the brand+category it belongs to, then choose its
+ * products in the same membership drawer.
+ *
+ * The scope has to be asked for: the pickers default to All, and even when they
+ * aren't, a code has to be BORN somewhere — a chip only exists inside one
+ * brand+category. The pickers seed the two <select>s when they're set.
+ */
 function promptNewCode() {
+  const brandOpts = _brands.map(b =>
+    `<option value="${esc(b.slug)}"${b.slug === _brandSlug ? ' selected' : ''}>${esc(b.name)}</option>`).join('');
+  const catOpts = SHOP_CATEGORIES.map(c =>
+    `<option value="${esc(c.value)}"${c.value === _category ? ' selected' : ''}>${esc(c.label)}</option>`).join('');
+
   const modal = Modal.open({
     title: 'Add a product code',
     body: `<div class="admin-form-group">
         <label for="pcp-new-code">Code</label>
         <input type="text" id="pcp-new-code" class="admin-input" maxlength="24" placeholder="e.g. PG40/CL41" autocomplete="off">
         <div class="admin-form-help">Letters, numbers and “/”, 2–24 characters. Use “/” only for a merged pair code, written the way the catalogue writes it.</div>
+      </div>
+      <div class="admin-form-group">
+        <label for="pcp-new-brand">Brand and type</label>
+        <div class="admin-pcp-pickers">
+          <select class="admin-select" id="pcp-new-brand" aria-label="Brand">${brandOpts}</select>
+          <select class="admin-select" id="pcp-new-category" aria-label="Type">${catOpts}</select>
+        </div>
+        <div class="admin-form-help">A code is a chip inside one brand and type — that’s where customers will drill into it.</div>
         <div class="admin-form-error" id="pcp-new-err"></div>
       </div>`,
     footer: `<button class="admin-btn admin-btn--ghost" data-act="cancel">Cancel</button>
@@ -341,6 +470,8 @@ function promptNewCode() {
   if (!modal) return;
 
   const input = modal.body.querySelector('#pcp-new-code');
+  const brandEl = modal.body.querySelector('#pcp-new-brand');
+  const catEl = modal.body.querySelector('#pcp-new-category');
   const err = modal.body.querySelector('#pcp-new-err');
   input.focus();
 
@@ -350,12 +481,17 @@ function promptNewCode() {
       err.textContent = 'That code isn’t valid — 2–24 letters, numbers or “/”.';
       return;
     }
-    if (_codes.some(c => c.code === code)) {
-      err.textContent = `${code} already exists — pick it from the grid to edit its products.`;
+    const scope = { brandSlug: brandEl.value, category: catEl.value };
+    const existing = _universe.find(c => c.code === code);
+    // Same code, same scope = the chip already exists. Same code, DIFFERENT scope
+    // is legitimate — "410" is HP ink and Brother toner — so only block the former.
+    if (existing && (existing.scopes || []).some(s =>
+      s.brandSlug === scope.brandSlug && s.category === scope.category)) {
+      err.textContent = `${code} already exists in ${brandLabel(scope.brandSlug)} · ${catLabel(scope.category)} — pick it from the grid to edit its products.`;
       return;
     }
     Modal.close();
-    openMembership(code, { isNew: true });
+    openMembership({ code, scopes: [scope] }, { isNew: true });
   };
 
   modal.footer.querySelector('[data-act="cancel"]').addEventListener('click', () => Modal.close());
@@ -366,9 +502,10 @@ function promptNewCode() {
 // ---------------------------------------------------------------- shell
 
 function renderShell(container) {
-  const brandOpts = _brands.map(b =>
+  // "All" leads both lists and is the default — see the note in init().
+  const brandOpts = `<option value="">All brands</option>` + _brands.map(b =>
     `<option value="${esc(b.slug)}"${b.slug === _brandSlug ? ' selected' : ''}>${esc(b.name)}</option>`).join('');
-  const catOpts = SHOP_CATEGORIES.map(c =>
+  const catOpts = `<option value="">All types</option>` + SHOP_CATEGORIES.map(c =>
     `<option value="${esc(c.value)}"${c.value === _category ? ' selected' : ''}>${esc(c.label)}</option>`).join('');
 
   container.innerHTML = `
@@ -377,18 +514,20 @@ function renderShell(container) {
     </div>
 
     <p class="admin-pcp-lede admin-text-muted">
-      The chips customers pick from on /shop. Renaming or deleting one changes it for
-      every product in the selected brand and category.
+      Every chip customers pick from on /shop. Search for one, or narrow by brand and type.
+      Renaming or deleting a code changes it for every product that carries it, in every
+      brand and type it appears under — the tile says which.
     </p>
 
     <div class="admin-toolbar admin-pcp-pickers">
       <select class="admin-select" id="pcp-brand" aria-label="Brand">${brandOpts}</select>
-      <select class="admin-select" id="pcp-category" aria-label="Category">${catOpts}</select>
+      <select class="admin-select" id="pcp-category" aria-label="Type">${catOpts}</select>
+      <span class="admin-pcp-tally admin-text-muted" id="pcp-tally"></span>
     </div>
 
     <div class="admin-pc-toolbar">
       <div class="admin-pc-filterwrap">
-        <input type="text" class="admin-pc-filter" id="pcp-filter" placeholder="Filter codes…" aria-label="Filter codes">
+        <input type="search" class="admin-pc-filter" id="pcp-filter" placeholder="Search every code…" aria-label="Search codes">
       </div>
       <button class="admin-btn admin-btn--primary" id="pcp-add">+ Add code</button>
     </div>
@@ -404,12 +543,12 @@ function renderShell(container) {
   container.querySelector('#pcp-brand').addEventListener('change', (e) => {
     _brandSlug = e.target.value;
     _menu = null;
-    loadCodes();
+    renderGrid();          // the universe is global — filtering is local
   });
   container.querySelector('#pcp-category').addEventListener('change', (e) => {
     _category = e.target.value;
     _menu = null;
-    loadCodes();
+    renderGrid();
   });
   container.querySelector('#pcp-filter').addEventListener('input', (e) => {
     _filter = e.target.value;
@@ -423,17 +562,20 @@ function renderShell(container) {
     if (!btn) return;
     const act = btn.getAttribute('data-act');
     const code = btn.getAttribute('data-code');
+    // Every write travels with the code's own scopes, so resolve the entry once.
+    const entry = code ? _universe.find(c => c.code === code) : null;
 
-    if (act === 'retry') { loadCodes(); return; }
-    if (act === 'members') { openMembership(code); return; }
+    if (act === 'retry') { loadCodes({ force: true }); return; }
+    if (!entry && act !== 'cancel') return;
+    if (act === 'members') { openMembership(entry); return; }
     if (act === 'menu') { _menu = { code, mode: 'menu' }; renderGrid(); return; }
     if (act === 'cancel') { _menu = null; renderGrid(); return; }
     if (act === 'rename') { _menu = { code, mode: 'rename' }; renderGrid(); return; }
     if (act === 'delete') { _menu = { code, mode: 'delete' }; renderGrid(); return; }
-    if (act === 'delete-go') { applyCodeChange(code, null); return; }
+    if (act === 'delete-go') { applyCodeChange(entry, null); return; }
     if (act === 'rename-go') {
       const input = e.target.closest('.admin-pc-code').querySelector('[data-rename-input]');
-      commitRename(code, input && input.value);
+      commitRename(entry, input && input.value);
     }
   });
 
@@ -443,7 +585,8 @@ function renderShell(container) {
       e.preventDefault();
       const tile = e.target.closest('.admin-pc-code');
       const go = tile && tile.querySelector('[data-act="rename-go"]');
-      commitRename(go && go.getAttribute('data-code'), e.target.value);
+      const code = go && go.getAttribute('data-code');
+      commitRename(code ? _universe.find(c => c.code === code) : null, e.target.value);
     } else if (e.key === 'Escape') {
       e.preventDefault();
       _menu = null;
@@ -452,15 +595,15 @@ function renderShell(container) {
   });
 }
 
-function commitRename(fromCode, rawTo) {
+function commitRename(entry, rawTo) {
+  if (!entry) return;
   const to = AdminAPI.normalizeProductCode(rawTo);
-  if (!fromCode) return;
   if (!isValidProductCode(to)) {
     Toast.error('The new code must be 2–24 letters, numbers or “/”.');
     return;
   }
-  if (to === fromCode) { _menu = null; renderGrid(); return; }
-  applyCodeChange(fromCode, to);
+  if (to === entry.code) { _menu = null; renderGrid(); return; }
+  applyCodeChange(entry, to);
 }
 
 export default {
@@ -469,6 +612,13 @@ export default {
   async init(container) {
     _container = container;
     _alive = true;
+    // The page ALWAYS opens on All brands / All types. These are module-level and
+    // survive navigation, so without this reset last visit's narrowing silently
+    // carries over — you come back, see a slice, and read it as the whole
+    // catalogue. Cleared here AND in destroy(): whichever runs, the next open is
+    // unfiltered.
+    _brandSlug = '';
+    _category = '';
     _filter = '';
     _menu = null;
     FilterState.showBar(false);   // the page ships its own brand/category pickers
@@ -490,11 +640,6 @@ export default {
       return;
     }
 
-    // Canon/ink is where the merged pair codes live, so it's the useful default.
-    if (!_brandSlug || !_brands.some(b => b.slug === _brandSlug)) {
-      _brandSlug = _brands.some(b => b.slug === 'canon') ? 'canon' : _brands[0].slug;
-    }
-
     renderShell(container);
     await loadCodes();
   },
@@ -504,8 +649,10 @@ export default {
     _loadToken++;
     if (Drawer.isOpen()) Drawer.close();
     _container = null;
-    _codes = [];
+    _universe = [];
     _menu = null;
     _filter = '';
+    _brandSlug = '';
+    _category = '';
   },
 };

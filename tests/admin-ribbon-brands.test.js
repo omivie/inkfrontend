@@ -71,10 +71,17 @@ function extractFunction(src, signature) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 test('RIBBON_PRODUCT_TYPES constant lists exactly the three ribbon-family types', () => {
-  const m = PRODUCTS_SRC.match(/const RIBBON_PRODUCT_TYPES\s*=\s*\[([^\]]+)\]/);
-  assert.ok(m, 'RIBBON_PRODUCT_TYPES constant must be declared');
+  // It lives in utils/product-types.js as of Jul 2026 — one vocabulary shared by
+  // the "All Ribbons" type filter, this drawer section, and pending-changes.
+  const TYPES_SRC = fs.readFileSync(
+    path.join(ROOT, 'inkcartridges/js/admin/utils/product-types.js'), 'utf8');
+  const m = TYPES_SRC.match(/export const RIBBON_PRODUCT_TYPES\s*=\s*\[([^\]]+)\]/);
+  assert.ok(m, 'RIBBON_PRODUCT_TYPES must be exported from utils/product-types.js');
   const types = m[1].split(',').map(s => s.trim().replace(/['"]/g, '')).filter(Boolean);
   assert.deepEqual(types.sort(), ['correction_tape', 'printer_ribbon', 'typewriter_ribbon']);
+
+  assert.match(PRODUCTS_SRC, /import \{[\s\S]*?RIBBON_PRODUCT_TYPES[\s\S]*?\} from '\.\.\/utils\/product-types\.js'/,
+    'products.js must import it rather than redeclare it');
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -8,33 +8,13 @@ import { Toast } from '../components/toast.js';
 import { Modal } from '../components/modal.js';
 import { RichTextEditor } from '../components/rich-text-editor.js?v=rich-text-persist-may2026';
 import { computeProfitability, marginBadge, formatProfitDollars } from '../utils/profitability.js';
-import { PRODUCT_TYPE_TO_SHOP_CATEGORY, describeCodesWriteError } from '../utils/product-codes.js';
+import { PRODUCT_TYPE_TO_SHOP_CATEGORY, describeCodesWriteError, describeScopes } from '../utils/product-codes.js';
+import {
+  PRODUCT_TYPE_LABELS, RIBBON_PRODUCT_TYPES, typeFilterGroup, typeFilterOptions,
+} from '../utils/product-types.js';
 
 const formatPrice = (v) => window.formatPrice ? window.formatPrice(v) : `$${Number(v).toFixed(2)}`;
 const MISSING = '\u2014';
-
-// Ribbon umbrella: the #source-filter dropdown surfaces a "Ribbon" option that
-// is conceptually a product_type, not a source. Legacy products carry source='ribbon'
-// (34 rows), but newer ribbons live under source='compatible'/'genuine' with
-// product_type IN these three values (116 rows total). Filtering by source='ribbon'
-// alone misses the 82 newer rows, so we expand the umbrella here.
-//
-// This same list also gates the edit drawer's "Ribbon Brands" assignment
-// section — ribbon-family products link to the ribbon_brands catalogue via the
-// product_ribbon_brands junction (see wireRibbonBrandsSection).
-const RIBBON_PRODUCT_TYPES = ['printer_ribbon', 'typewriter_ribbon', 'correction_tape'];
-
-// Product Codes tab — a human label per product_type, and the /shop drilldown
-// category each type belongs to (mirrors shop-page.js's category config).
-// These drive the tab's brand+type header and the code-universe lookup.
-const PRODUCT_TYPE_LABELS = {
-  ink_cartridge: 'Ink Cartridges', ink_bottle: 'Ink Bottles', toner_cartridge: 'Toner Cartridges',
-  drum_unit: 'Drum Units', waste_toner: 'Waste Toner', belt_unit: 'Belt Units',
-  fuser_kit: 'Fuser Kits', maintenance_kit: 'Maintenance Kits', fax_film: 'Fax Film',
-  fax_film_refill: 'Fax Film Refills', printer_ribbon: 'Printer Ribbons',
-  typewriter_ribbon: 'Typewriter Ribbons', correction_tape: 'Correction Tape',
-  label_tape: 'Label Tape', photo_paper: 'Photo Paper', printer: 'Printers',
-};
 
 /** Open a large full-screen preview of a product image. */
 function openImageLightbox(url, alt = '') {
@@ -686,14 +666,13 @@ async function loadProducts() {
   // they combine correctly with the brand filter (the backend ignores brand when
   // source is set).
   //
-  // Special case: when _sourceFilter==='ribbon' we MUST use the Supabase path because
-  // "Ribbon" is a product_type umbrella that the backend's source=ribbon filter does
-  // not honor (it only matches the 34 legacy rows where source='ribbon', missing the
-  // ~82 newer ribbons that carry source='compatible'/'genuine'). We compensate by
-  // applying image/stock filters and margin sort on the Supabase result below.
+  // Special case: a GROUPED type ("All Ribbons") MUST use the Supabase path, because
+  // the backend's product_type filter takes a single value — only `.in(…)` can span
+  // the three ribbon types at once. We compensate by applying the image/stock filters
+  // and the margin sort on the Supabase result below.
   const isMarginSort = _sort === 'margin_pct' || _sort === 'profit_ex_gst';
-  const ribbonUmbrella = _sourceFilter === 'ribbon';
-  const needsBackend = !ribbonUmbrella && (isMarginSort || !!_imageFilter || !!_stockFilter);
+  const typeGroup = typeFilterGroup(_typeFilter);
+  const needsBackend = !typeGroup && (isMarginSort || !!_imageFilter || !!_stockFilter);
   if (needsBackend) {
     const filters = { search: _search, sort: _sort, order: _sortDir };
     if (_brandFilter) filters.brand = _brandFilter;
@@ -729,34 +708,28 @@ async function loadProducts() {
       // Active filter
       if (_activeFilter !== '') query = query.eq('is_active', _activeFilter === 'true');
 
-      // Source filter (genuine / compatible / remanufactured / ribbon).
-      // "Ribbon" is a product_type umbrella, not a real source — see comment on
-      // RIBBON_PRODUCT_TYPES. An explicit _typeFilter (e.g. "Printer Ribbon")
-      // takes priority and narrows further.
-      if (_sourceFilter === 'ribbon') {
-        if (!_typeFilter) query = query.in('product_type', RIBBON_PRODUCT_TYPES);
-      } else if (_sourceFilter) {
-        query = query.eq('source', _sourceFilter);
-      }
+      // Source filter (genuine / compatible / remanufactured).
+      if (_sourceFilter) query = query.eq('source', _sourceFilter);
 
-      // Product type filter (ink_cartridge / toner_cartridge / etc.)
-      if (_typeFilter) query = query.eq('product_type', _typeFilter);
+      // Product type filter — one type, or a whole group ("All Ribbons").
+      if (typeGroup) query = query.in('product_type', typeGroup);
+      else if (_typeFilter) query = query.eq('product_type', _typeFilter);
 
-      // Image filter — only applied when we forced the ribbon umbrella through
+      // Image filter — only applied when a grouped type forced us through
       // Supabase. Approximation: products.image_url IS NOT NULL. (Backend has
       // a richer join-aware check; this covers the common case.)
-      if (ribbonUmbrella && _imageFilter === 'has-images') query = query.not('image_url', 'is', null);
-      else if (ribbonUmbrella && _imageFilter === 'no-images') query = query.is('image_url', null);
+      if (typeGroup && _imageFilter === 'has-images') query = query.not('image_url', 'is', null);
+      else if (typeGroup && _imageFilter === 'no-images') query = query.is('image_url', null);
 
       // Stock filter — products.stock_status is a direct column.
-      if (ribbonUmbrella && _stockFilter) query = query.eq('stock_status', _stockFilter);
+      if (typeGroup && _stockFilter) query = query.eq('stock_status', _stockFilter);
 
       // Sorting — map column keys to DB columns. Margin/markup/profit normally
-      // route to backend; for the ribbon umbrella path we sort client-side
-      // after the fetch (see below).
+      // route to backend; for the grouped-type path we sort client-side after
+      // the fetch (see below).
       const sortMap = { brand: 'brand_id' };
       const sortCol = sortMap[_sort] || _sort || 'name';
-      const dbSort = (ribbonUmbrella && isMarginSort) ? 'name' : sortCol;
+      const dbSort = (typeGroup && isMarginSort) ? 'name' : sortCol;
       query = query.order(dbSort, { ascending: _sortDir !== 'desc' });
 
       // Pagination
@@ -767,10 +740,10 @@ async function loadProducts() {
       if (!_table) return;
       if (error) throw error;
 
-      // Client-side margin/markup/profit sort for the ribbon umbrella path
+      // Client-side margin/markup/profit sort for the grouped-type path
       // (we couldn't push it to Supabase because it's a computed value).
       let sortedRows = rows || [];
-      if (ribbonUmbrella && isMarginSort) {
+      if (typeGroup && isMarginSort) {
         const dir = _sortDir === 'desc' ? -1 : 1;
         sortedRows = [...sortedRows].sort((a, b) => {
           const ap = computeProfitability(a);
@@ -1432,12 +1405,13 @@ function buildProductModalTabs(modal, full, isOwner) {
   `;
 
   // Product Codes panel — its own tab. Shows the product's brand + type, then
-  // a grid of EVERY code that exists for that brand+type; the admin clicks the
-  // tiles this product belongs to. wireProductCodesSection() fills it in.
+  // its own chips followed by every other code in the catalogue; the admin
+  // clicks the tiles this product belongs to. wireProductCodesSection() fills
+  // it in.
   const productCodesHtml = `
     <div class="admin-form-group" id="product-codes-group">
       <label>Product Codes <span class="admin-ribbon-brands__count" id="product-codes-count" hidden></span></label>
-      <p style="font-size:12px;color:var(--text-muted);margin:0 0 12px">The series codes this product is categorised under — the chips customers drill into on /shop. Click a code to toggle it; the product shows under every code you pick. Codes set here fully replace the auto-detected ones.</p>
+      <p style="font-size:12px;color:var(--text-muted);margin:0 0 12px">The series codes this product is categorised under — the chips customers drill into on /shop. Click a code to toggle it; the product shows under every code you pick. Its own brand and type come first, then every other code in the catalogue — search to find one. Codes set here fully replace the auto-detected ones.</p>
       <div class="admin-pc-context">
         <span class="admin-pc-context__item"><span class="admin-pc-context__label">Brand</span><span class="admin-pc-context__value" id="pc-brand">—</span></span>
         <span class="admin-pc-context__item"><span class="admin-pc-context__label">Type</span><span class="admin-pc-context__value" id="pc-type">—</span></span>
@@ -1445,7 +1419,7 @@ function buildProductModalTabs(modal, full, isOwner) {
       <div class="admin-pc-toolbar">
         <div class="admin-pc-filterwrap">
           <svg class="admin-pc-filter-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-          <input type="text" class="admin-pc-filter" id="pc-filter" placeholder="Filter codes, or type a new one…" autocomplete="off" maxlength="24" aria-label="Filter or add a product code">
+          <input type="text" class="admin-pc-filter" id="pc-filter" placeholder="Search every code, or type a new one…" autocomplete="off" maxlength="24" aria-label="Search or add a product code">
         </div>
         <button type="button" class="admin-btn admin-btn--primary admin-btn--sm" id="pc-add-btn" hidden>+ Add &ldquo;<span id="pc-add-label"></span>&rdquo;</button>
       </div>
@@ -1811,16 +1785,19 @@ async function wireRibbonBrandsSection(modal, full) {
  * product's codes are the /shop drilldown chips it appears under; assigning
  * several (LC40 + LC57) makes it show under each.
  *
- * The tab shows the product's brand + type, then a grid of EVERY code that
- * exists for that brand+type (the live /shop drilldown chips, fetched via
- * window.API.getShopData). The admin clicks a code tile to toggle it; a code
- * not already in the grid can be typed into the filter box and added.
+ * The grid is in TWO sections. First this product's own brand+category chips
+ * (its /shop drilldown, fetched via window.API.getShopData) — the fast path,
+ * one request, painted immediately. Then every OTHER code in the catalogue
+ * (~1,200 of them, AdminAPI.getCodeUniverse), each labelled with the scope it
+ * belongs to, merged in when the fan-out lands. The search box filters across
+ * both, so any code that exists anywhere is reachable; a code that exists
+ * nowhere can still be typed in and added.
  *
  * Storage: the product_codes override table (see sql/product_codes.sql),
  * written by AdminAPI.setProductCodes on save.
  *
- *   • This product's codes (AdminAPI.getProductCodes) + the brand+type code
- *     universe (API.getShopData series) load together.
+ *   • This product's codes (AdminAPI.getProductCodes) + its own code universe
+ *     (API.getShopData series) load together; the catalogue follows.
  *   • A product with no codes yet is pre-selected from its CURRENT codes —
  *     backend series_codes when present, else API._enrichSeriesCodes' derived
  *     codes — so the admin always edits from a correct "as it is now" start.
@@ -1828,6 +1805,13 @@ async function wireRibbonBrandsSection(modal, full) {
  *   • modal._productCodesBaseline records what the tab opened with; the save
  *     handler writes ONLY when the selection diverges, so a seeded but
  *     untouched product is never materialised into the override table.
+ *
+ * Codes normalise through AdminAPI.normalizeProductCode, which KEEPS "/". This
+ * tab used to strip it locally, which turned the backend's merged pair chips
+ * (PG40/CL41) into "PG40CL41" — a code no product carries, so toggling one wrote
+ * a dead override and renaming one silently touched nothing. That was ERR-061 on
+ * the page; the drawer kept the bug because pair codes never reached it. Now
+ * that the whole catalogue does, they do. Never reintroduce a local norm().
  *
  * Safety: modal._productCodesLoaded is set true ONLY after a clean load, so a
  * failed load can never be mistaken for "no codes" and wipe assignments.
@@ -1850,10 +1834,13 @@ async function wireProductCodesSection(modal, full) {
   modal._productCodesSelection = selection;
   modal._productCodesLoaded = false;
 
-  // Normalise a raw code the way the table's CHECK constraint expects:
-  // uppercase, A-Z/0-9 only. Mirrors AdminAPI.normalizeProductCode.
-  const norm = (raw) => String(raw == null ? '' : raw).toUpperCase().replace(/[^A-Z0-9]/g, '');
+  // The ONE normaliser. Keeps "/" — see the note on merged pair codes above.
+  const norm = (raw) => AdminAPI.normalizeProductCode(raw);
   const byCode = (a, b) => String(a).localeCompare(String(b), 'en', { numeric: true, sensitivity: 'base' });
+  const brandNameOf = (slug) => {
+    const hit = (Array.isArray(_brands) ? _brands : []).find(b => b && b.slug === slug);
+    return (hit && hit.name) || slug;
+  };
 
   // ── Resolve the product's brand + type ─────────────────────────────────
   const brandName = (typeof extractBrandName === 'function' ? extractBrandName(full) : '') || '';
@@ -1893,7 +1880,16 @@ async function wireProductCodesSection(modal, full) {
     return [...out];
   };
 
-  let universe = [];    // [{ code, count }] — every code for this brand+type
+  // Two tiers. `universe` is this product's own brand+category — its tiles are
+  // the section that paints first and are what Save is really about. `others`
+  // is the rest of the catalogue, merged in when the fan-out lands. Both hold
+  // { code, count, scopes[] }; a tile's WRITES follow its own scopes, never the
+  // product's, so renaming a foreign code from here edits the right products.
+  const ownScope = { brandSlug, category };
+  let universe = [];
+  let others = [];
+  let missedScopes = [];         // scopes the catalogue couldn't read — say so, don't imply completeness
+  let othersState = 'loading';   // loading | ready | failed
   let seeded = false;   // true when pre-selected from derivation (no saved codes)
   let loadFailed = false;
 
@@ -1935,8 +1931,9 @@ async function wireProductCodesSection(modal, full) {
     // Every currently-selected code must show as a tile even if the universe
     // lookup missed it (a manual code, a brand-slug mismatch, …).
     for (const c of selection.keys()) if (!seen.has(c)) seen.set(c, 0);
-    universe = [...seen.entries()].map(([code, count]) => ({ code, count }));
-    universe.sort((a, b) => byCode(a.code, b.code));
+    universe = [...seen.entries()]
+      .map(([code, count]) => ({ code, count, scopes: [ownScope] }))
+      .sort((a, b) => byCode(a.code, b.code));
 
     modal._productCodesLoaded = true;
   } catch (e) {
@@ -1975,6 +1972,12 @@ async function wireProductCodesSection(modal, full) {
   const TICK = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>`;
   const KEBAB = `<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg>`;
 
+  const isOwnScope = (c) => (c.scopes || []).length === 1
+    && c.scopes[0].brandSlug === brandSlug && c.scopes[0].category === category;
+  /** The tile for `code`, wherever it lives — its `scopes` drive every write. */
+  const findEntry = (code) => universe.find(c => c.code === code)
+    || others.find(c => c.code === code) || null;
+
   // Render one code tile — its normal toggle form, or the menu / rename /
   // delete-confirm form when it is the active tile.
   const renderTile = (c) => {
@@ -1999,41 +2002,86 @@ async function wireProductCodesSection(modal, full) {
     }
     if (mode === 'delete') {
       const n = Number(c.count) || 0;
+      // Name the scopes: a delete on a foreign or multi-scope code reaches
+      // products in brands this drawer isn't even showing.
+      const where = describeScopes(c.scopes, brandNameOf);
       return `<div class="admin-pc-code admin-pc-code--act admin-pc-code--confirm">`
-        + `<span class="admin-pc-code__label">Delete ${esc(c.code)}${n ? ` · ${n} product${n === 1 ? '' : 's'}` : ''}?</span>`
+        + `<span class="admin-pc-code__label">Delete ${esc(c.code)} from ${esc(where)}${n ? ` · ${n} product${n === 1 ? '' : 's'}` : ''}?</span>`
         + `<button type="button" class="admin-pc-act admin-pc-act--danger" data-act="delete-go" data-code="${esc(c.code)}">Delete</button>`
         + `<button type="button" class="admin-pc-act admin-pc-act--x" data-act="cancel" aria-label="Cancel">✕</button>`
         + `</div>`;
     }
-    return `<div class="admin-pc-code${on ? ' is-on' : ''}">`
+    // Foreign tiles carry their scope, so "212" from HP·Ink can't be mistaken
+    // for "212" from Brother·Toner.
+    const foreign = !isOwnScope(c);
+    const scopeLabel = foreign ? describeScopes(c.scopes, brandNameOf) : '';
+    return `<div class="admin-pc-code${on ? ' is-on' : ''}${foreign ? ' admin-pc-code--foreign' : ''}">`
       + `<button type="button" class="admin-pc-code__toggle" data-toggle data-code="${esc(c.code)}" aria-pressed="${on}" title="${on ? 'Assigned — click to remove' : 'Click to assign'}">`
       + `<span class="admin-pc-code__tick" aria-hidden="true">${on ? TICK : ''}</span>`
       + `<span class="admin-pc-code__label">${esc(c.code)}</span>`
+      + (scopeLabel ? `<span class="admin-pc-code__scope">${esc(scopeLabel)}</span>` : '')
       + (c.count ? `<span class="admin-pc-code__count">${c.count}</span>` : '')
       + `</button>`
       + `<button type="button" class="admin-pc-code__menu" data-act="menu" data-code="${esc(c.code)}" aria-label="Rename or delete ${esc(c.code)}">${KEBAB}</button>`
       + `</div>`;
   };
 
+  const sectionHead = (text) => `<div class="admin-pc-sectionhead">${esc(text)}</div>`;
+
   const renderGrid = () => {
     const f = norm(filterEl.value || '');
-    const matches = universe.filter(c => !f || c.code.includes(f));
-    if (!matches.length) {
+    const match = (c) => !f || c.code.includes(f);
+    const mine = universe.filter(match);
+    const rest = others.filter(match);
+
+    // Nothing anywhere — but say WHICH nothing, since the catalogue may still
+    // be loading and a "no such code" verdict would be premature.
+    if (!mine.length && !rest.length && othersState !== 'loading') {
       gridEl.innerHTML = `<span class="admin-pc-empty">`
-        + (universe.length
+        + (universe.length || others.length
             ? 'No code matches that filter — type a full code and press Add to create it.'
             : `No codes found for ${esc(brandName || 'this brand')} ${esc(typeLabel)} yet — type one above and press Add.`)
         + `</span>`;
       return;
     }
-    gridEl.innerHTML = matches.map(renderTile).join('');
+
+    let html = '';
+    html += sectionHead(`${brandName || 'This brand'} · ${typeLabel}`);
+    html += mine.length
+      ? mine.map(renderTile).join('')
+      : `<span class="admin-pc-empty">${f ? 'No match here.' : 'No codes yet.'}</span>`;
+
+    if (othersState === 'loading') {
+      html += sectionHead('Every other code');
+      html += `<span class="admin-pc-empty">Loading the full code list…</span>`;
+    } else if (othersState === 'failed') {
+      html += sectionHead('Every other code');
+      html += `<span class="admin-pc-empty admin-pc-empty--error">Couldn’t load the rest of the catalogue — reopen the product to retry. Codes above still work.</span>`;
+    } else if (rest.length) {
+      html += sectionHead(`Every other code · ${rest.length.toLocaleString('en-NZ')}`);
+      // Partial is not complete. Say which brands are missing rather than let the
+      // admin read a short list as the whole catalogue.
+      if (missedScopes.length) {
+        html += `<span class="admin-pc-empty admin-pc-empty--error">${
+          esc(describeScopes(missedScopes, brandNameOf))} didn’t load — codes from there are missing below.</span>`;
+      }
+      html += rest.map(renderTile).join('');
+    } else if (f) {
+      html += sectionHead('Every other code');
+      html += `<span class="admin-pc-empty">No match in the rest of the catalogue.</span>`;
+    }
+
+    gridEl.innerHTML = html;
     const input = gridEl.querySelector && gridEl.querySelector('[data-rename-input]');
     if (input && input.focus) { input.focus(); if (input.select) input.select(); }
   };
 
   const renderAdd = () => {
     const n = norm(filterEl.value || '');
-    const exists = universe.some(c => c.code === n);
+    // "Add" only offers a code that exists NOWHERE. While the catalogue is still
+    // loading we can't know that, so hold the button back rather than invite the
+    // admin to create a duplicate of a code they simply can't see yet.
+    const exists = !!findEntry(n) || othersState === 'loading';
     if (n.length >= 2 && n.length <= 24 && !exists) {
       addLabel.textContent = n;
       addBtn.hidden = false;
@@ -2058,8 +2106,9 @@ async function wireProductCodesSection(modal, full) {
     const code = norm(filterEl.value || '');
     if (code.length < 2) { Toast.error('Codes need at least 2 letters or numbers'); return; }
     if (code.length > 24) { Toast.error('That code is too long (24 characters max)'); return; }
-    if (!universe.some(c => c.code === code)) {
-      universe.push({ code, count: 0 });
+    // A brand-new code is born in THIS product's scope.
+    if (!findEntry(code)) {
+      universe.push({ code, count: 0, scopes: [ownScope] });
       universe.sort((a, b) => byCode(a.code, b.code));
     }
     selection.set(code, code);
@@ -2071,9 +2120,14 @@ async function wireProductCodesSection(modal, full) {
     renderGrid();
   };
 
-  // Brand-wide delete (toCode null) or rename of a code. Writes commit
+  // Catalogue-wide delete (toCode null) or rename of a code. Writes commit
   // IMMEDIATELY via AdminAPI.applyBrandCodeChange — independent of Save —
   // because they touch many other products, not just this one.
+  //
+  // The change runs over the CODE's scopes, not the product's. A tile in the
+  // "every other code" section belongs to some other brand+category entirely;
+  // passing this product's brandSlug would walk a scope the code isn't in, find
+  // nobody, and cheerfully report "0 products".
   const doBrandChange = async (fromCode, toCode) => {
     if (busy) return;
     const from = norm(fromCode);
@@ -2083,17 +2137,32 @@ async function wireProductCodesSection(modal, full) {
       if (to.length < 2) { Toast.error('The new code needs at least 2 letters or numbers'); return; }
       if (to === from) { menuState = null; renderGrid(); return; }   // no-op rename
     }
+    const entry = findEntry(from);
+    const scopes = (entry && entry.scopes && entry.scopes.length) ? entry.scopes : [ownScope];
+
     busy = true;
     menuState = null;
-    gridEl.innerHTML = `<span class="admin-pc-empty">${to ? 'Renaming' : 'Deleting'} ${esc(from)} across all products…</span>`;
+    const where = describeScopes(scopes, brandNameOf);
+    gridEl.innerHTML = `<span class="admin-pc-empty">${to ? 'Renaming' : 'Deleting'} ${esc(from)} across ${esc(where)}…</span>`;
     try {
-      const res = await AdminAPI.applyBrandCodeChange({ brandSlug, category, fromCode: from, toCode: to });
+      let changed = 0, failed = 0, products = 0;
+      for (const s of scopes) {
+        const res = await AdminAPI.applyBrandCodeChange({
+          brandSlug: s.brandSlug, category: s.category, fromCode: from, toCode: to,
+        });
+        changed += res.changed; failed += res.failed; products += res.products;
+      }
+
       const hadFrom = selection.has(from);
-      // Universe: drop `from`; fold in `to`.
+      // Both tiers: drop `from`; fold `to` into the same tier it came from.
+      const inOwn = universe.some(c => c.code === from);
       universe = universe.filter(c => c.code !== from);
-      if (to && !universe.some(c => c.code === to)) {
-        universe.push({ code: to, count: res.products || 0 });
+      others = others.filter(c => c.code !== from);
+      if (to && !findEntry(to)) {
+        const tile = { code: to, count: products, scopes };
+        if (inOwn) universe.push(tile); else others.push(tile);
         universe.sort((a, b) => byCode(a.code, b.code));
+        others.sort((a, b) => byCode(a.code, b.code));
       }
       // This product's own selection follows the same transform.
       if (selection.delete(from) && to) selection.set(to, to);
@@ -2102,12 +2171,15 @@ async function wireProductCodesSection(modal, full) {
       renderSeedNote();
       renderAdd();
       renderGrid();
-      if (res.failed) {
-        Toast.error(`${to ? 'Renamed' : 'Deleted'} on ${res.changed} product${res.changed === 1 ? '' : 's'}, but ${res.failed} failed — reopen to retry.`);
+      const n = (v) => `${v} product${v === 1 ? '' : 's'}`;
+      if (failed) {
+        Toast.error(`${to ? 'Renamed' : 'Deleted'} on ${n(changed)}, but ${failed} failed — reopen to retry.`);
+      } else if (!products) {
+        Toast.warning(`No product in ${where} carries ${from} — nothing changed.`);
       } else if (to) {
-        Toast.success(`Renamed ${from} → ${to} across ${res.changed} product${res.changed === 1 ? '' : 's'}.`);
+        Toast.success(`Renamed ${from} → ${to} across ${n(changed)}.`);
       } else {
-        Toast.success(`Deleted ${from} from ${res.changed} product${res.changed === 1 ? '' : 's'}.`);
+        Toast.success(`Deleted ${from} from ${n(changed)}.`);
       }
     } catch (e) {
       Toast.error(`Couldn’t update codes: ${describeCodesWriteError(e)}`);
@@ -2128,10 +2200,34 @@ async function wireProductCodesSection(modal, full) {
   };
 
   // ── Initial paint ──────────────────────────────────────────────────────
+  // This product's own chips are already in hand — paint now. The catalogue is
+  // a 51-request fan-out; making the tab wait on it would trade a working panel
+  // for a spinner.
   renderCount();
   renderSeedNote();
   renderAdd();
   renderGrid();
+
+  // ── The rest of the catalogue, in the background ───────────────────────
+  AdminAPI.getCodeUniverse().then((catalogue) => {
+    if (!modal.isConnected) return;
+    if (!catalogue) { othersState = 'failed'; renderGrid(); return; }
+    // Codes this product's own scope already speaks for stay in section one —
+    // one tile per code, and its scope is the one Save cares about.
+    const mine = new Set(universe.map(c => c.code));
+    others = (catalogue.codes || [])
+      .filter(c => !mine.has(c.code))
+      .sort((a, b) => byCode(a.code, b.code));
+    missedScopes = catalogue.missed || [];
+    othersState = 'ready';
+    filterEl.placeholder = `Search all ${(universe.length + others.length).toLocaleString('en-NZ')} codes, or type a new one…`;
+    renderAdd();
+    renderGrid();
+  }).catch(() => {
+    if (!modal.isConnected) return;
+    othersState = 'failed';
+    renderGrid();
+  });
 
   // ── Events ─────────────────────────────────────────────────────────────
   gridEl.addEventListener('click', (e) => {
@@ -2164,7 +2260,7 @@ async function wireProductCodesSection(modal, full) {
     e.preventDefault();
     const n = norm(filterEl.value || '');
     if (!n) return;
-    if (universe.some(c => c.code === n)) {
+    if (findEntry(n)) {
       toggle(n);
       filterEl.value = '';
       renderAdd();
@@ -3344,15 +3440,12 @@ function getProductExportParams() {
   if (_activeFilter !== '') p.set('active', _activeFilter);
   if (_imageFilter === 'has-images') p.set('has_images', 'true');
   else if (_imageFilter === 'no-images') p.set('has_images', 'false');
-  // Ribbon umbrella: source='ribbon' is a product_type filter — see RIBBON_PRODUCT_TYPES.
-  // Translate so the export endpoint returns the same 116 rows the table shows.
-  if (_sourceFilter === 'ribbon') {
-    if (_typeFilter) p.set('product_type', _typeFilter);
-    else p.set('product_type', RIBBON_PRODUCT_TYPES.join(','));
-  } else {
-    if (_sourceFilter) p.set('source', _sourceFilter);
-    if (_typeFilter) p.set('product_type', _typeFilter);
-  }
+  if (_sourceFilter) p.set('source', _sourceFilter);
+  // A grouped type ("All Ribbons") exports as the comma list of the types it
+  // spans, so the export returns the same rows the table shows.
+  const typeGroup = typeFilterGroup(_typeFilter);
+  if (typeGroup) p.set('product_type', typeGroup.join(','));
+  else if (_typeFilter) p.set('product_type', _typeFilter);
   if (_stockFilter) p.set('stock_status', _stockFilter);
   if (_sort) p.set('sort', _sort);
   if (_sortDir) p.set('order', _sortDir);
@@ -3862,19 +3955,8 @@ async function renderProductsContent(contentEl) {
           <option value="genuine">Genuine</option>
           <option value="compatible">Compatible</option>
           <option value="remanufactured">Remanufactured</option>
-          <option value="ribbon">Ribbon</option>
         </select>
-        <select class="admin-select" id="type-filter">
-          <option value="">All Types</option>
-          <option value="ink_cartridge">Ink Cartridge</option>
-          <option value="toner_cartridge">Toner</option>
-          <option value="printer_ribbon">Printer Ribbon</option>
-          <option value="typewriter_ribbon">Typewriter Ribbon</option>
-          <option value="correction_tape">Correction Tape</option>
-          <option value="drum">Drum</option>
-          <option value="maintenance_kit">Maintenance Kit</option>
-          <option value="paper">Paper</option>
-        </select>
+        <select class="admin-select" id="type-filter">${typeFilterOptions(_typeFilter)}</select>
         <select class="admin-select" id="stock-filter">
           <option value="">All Stock</option>
           <option value="in_stock">In Stock</option>
