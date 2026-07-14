@@ -16,11 +16,14 @@ live, send it and we'll reconcile — but the spec was complete enough that I do
 
 ---
 
-## 2. Three backend follow-ups (parity / anti-cloaking)
+## 2. Four backend follow-ups (parity / anti-cloaking)
 
 The spec's own §"Locked copy" says these strings must be byte-identical on both sides and are
 "checked for cloaking mismatch". Two of the three currently **aren't**. Verified against the live
 crawler render: `curl -A Googlebot https://www.inkcartridges.co.nz/`.
+
+**All four re-verified against the live prerender on 2026-07-14 (after the footer redesign shipped).
+None are fixed yet.**
 
 ### 2a. The legal-entity line is missing its second half on the backend
 
@@ -55,6 +58,28 @@ The redesign closes most of that: the new **Shop** column ships static links to 
 
 **Ask — pick one:** either drop Drum Units from the prerender footer, or tell us and we'll add it to
 the Shop column. Either is fine; the two footers just need to agree.
+
+### 2d. The bot footer omits FAQ and Shipping — and `/faq` is not linked from the bot homepage at all
+
+Found 2026-07-14 while re-verifying the above. The prerender's `<nav aria-label="Footer links">`
+carries six links — About · Contact Us · Returns Policy · Privacy Policy · Terms & Conditions ·
+Genuine vs Compatible. The human footer's Help column also carries **Shipping & Delivery** and
+**FAQ**. So:
+
+- `/shipping` appears on the bot homepage only inside a body sentence ("see our shipping page"),
+  never in the footer nav.
+- **`/faq` appears nowhere in the bot homepage — zero occurrences.**
+
+This is the *safe* direction of divergence (humans see more than bots, not less — it isn't cloaking),
+so nothing is on fire. But `/faq` carries our `FAQPage` structured data for rich results, and it has
+no internal link in the crawler render to be discovered from. That's a self-inflicted SEO loss.
+
+**Ask:** add `/faq` and `/shipping` to the prerender's footer-links nav, so the bot footer carries
+the same eight policy surfaces the human footer does.
+
+**Note on the human side:** we deleted the duplicate single-line legal row from the SPA footer today
+(§3 below). That removed **no links** — all eight still render, in the Help + Company columns. The bot
+footer was already missing two of them before that change; the two facts are unrelated.
 
 ---
 
