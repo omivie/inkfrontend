@@ -18,7 +18,15 @@
  */
 (function () {
   // ─── Canonical business facts ────────────────────────────────────────
-  const TRUST = (function () {
+  // Built lazily, inside initFooter() — NOT at IIFE-evaluation time. footer.js
+  // and legal-config.js are both `defer`, which executes in document order, so
+  // reading LegalConfig at load time found `undefined` on every page and fell
+  // through to the baked-in copies below. The "single source of truth" contract
+  // in the header comment was fiction for two months (ERR-070). By the time
+  // DOMContentLoaded fires, every deferred script has run and LegalConfig is
+  // really there. The fallbacks stay: a bot that fails to fetch legal-config.js
+  // must still get a complete, compliant footer.
+  function buildTrust() {
     const cfg = (typeof LegalConfig !== 'undefined' && LegalConfig) ? LegalConfig : null;
     return {
       tradingName : cfg ? cfg.tradingName : 'InkCartridges.co.nz',
@@ -35,7 +43,7 @@
       copyright   : cfg ? cfg.copyrightLine()
                         : '© ' + new Date().getFullYear() + ' Office Consumables Ltd. All rights reserved.',
     };
-  })();
+  }
 
   // ─── Newsletter subscribe — shared, idempotent binder ────────────────
   // One implementation, bound at most once per form (dataset guard), reused by
@@ -206,7 +214,11 @@
     const footer = document.querySelector('footer.site-footer');
     if (!footer) return;
 
+    const TRUST = buildTrust();
+
     footer.innerHTML = `
+        <div class="footer-stripe" aria-hidden="true"></div>
+
         <div class="footer-main">
             <div class="container">
                 <div class="footer-grid">
@@ -230,69 +242,102 @@
                         </div>
                     </div>
 
+                    <nav class="footer-column-nav" aria-label="Shop">
+                        <details class="footer-column" data-footer-accordion>
+                            <summary class="footer-column__heading">Shop</summary>
+                            <ul class="footer-links">
+                                <li><a href="/ink-cartridges">Ink Cartridges</a></li>
+                                <li><a href="/toner-cartridges">Toner Cartridges</a></li>
+                                <li><a href="/ribbons">Printer Ribbons</a></li>
+                                <li><a href="/shop">Shop All</a></li>
+                            </ul>
+                        </details>
+                    </nav>
+
+                    <nav class="footer-column-nav" aria-label="Help">
+                        <details class="footer-column" data-footer-accordion>
+                            <summary class="footer-column__heading">Help</summary>
+                            <ul class="footer-links">
+                                <li><a href="/track-order">Track Order</a></li>
+                                <li><a href="/shipping">Shipping &amp; Delivery</a></li>
+                                <li><a href="/returns">Refunds &amp; Returns</a></li>
+                                <li><a href="/faq">FAQ</a></li>
+                                <li><a href="/contact">Contact Us</a></li>
+                            </ul>
+                        </details>
+                    </nav>
+
+                    <nav class="footer-column-nav" aria-label="Company">
+                        <details class="footer-column" data-footer-accordion>
+                            <summary class="footer-column__heading">Company</summary>
+                            <ul class="footer-links">
+                                <li><a href="/about">About Us</a></li>
+                                <li><a href="/genuine-vs-compatible">Genuine vs Compatible</a></li>
+                                <li><a href="/terms">Terms of Service</a></li>
+                                <li><a href="/privacy">Privacy Policy</a></li>
+                            </ul>
+                        </details>
+                    </nav>
+
                     <details class="footer-column" data-footer-accordion open>
                         <summary class="footer-column__heading">Contact</summary>
-                        <ul class="footer-links">
-                            <li>
-                                <strong>Office:</strong><br>
-                                <span data-legal-bind="address-line">${TRUST.addressLine}</span>
-                            </li>
-                            <li>
-                                <strong>Phone:</strong><br>
-                                <a data-legal-bind="phone-href" href="tel:${TRUST.phoneE164}"><span data-legal-bind="phone-display">${TRUST.phoneDisp}</span></a>
-                            </li>
-                            <li>
-                                <strong>Email:</strong><br>
-                                <a data-legal-bind="email-href" href="mailto:${TRUST.email}"><span data-legal-bind="email">${TRUST.email}</span></a>
-                            </li>
-                            <li>
-                                <strong>Hours:</strong><br>
-                                Mon&ndash;Fri, 9am &ndash; 5pm
-                            </li>
-                        </ul>
-                    </details>
-
-                    <details class="footer-column" data-footer-accordion>
-                        <summary class="footer-column__heading">Information</summary>
-                        <ul class="footer-links">
-                            <li><a href="/about">About Us</a></li>
-                            <li><a href="/contact">Contact Us</a></li>
-                            <li><a href="/track-order">Track Order</a></li>
-                            <li><a href="/faq">FAQ</a></li>
-                            <li><a href="/genuine-vs-compatible">Genuine vs Compatible</a></li>
-                            <li><a href="/shop">Shop All</a></li>
-                        </ul>
-                    </details>
-
-                    <details class="footer-column" data-footer-accordion>
-                        <summary class="footer-column__heading">Policies</summary>
-                        <ul class="footer-links">
-                            <li><a href="/shipping">Shipping &amp; Delivery</a></li>
-                            <li><a href="/returns">Refunds &amp; Returns</a></li>
-                            <li><a href="/terms">Terms of Service</a></li>
-                            <li><a href="/privacy">Privacy Policy</a></li>
-                        </ul>
+                        <address class="footer-contact">
+                            <dl class="footer-contact__list">
+                                <div class="footer-contact__row">
+                                    <dt>Office</dt>
+                                    <dd data-legal-bind="address-line">${TRUST.addressLine}</dd>
+                                </div>
+                                <div class="footer-contact__row">
+                                    <dt>Phone</dt>
+                                    <dd><a class="footer-contact__digits" data-legal-bind="phone-href" href="tel:${TRUST.phoneE164}"><span data-legal-bind="phone-display">${TRUST.phoneDisp}</span></a></dd>
+                                </div>
+                                <div class="footer-contact__row">
+                                    <dt>Email</dt>
+                                    <dd><a data-legal-bind="email-href" href="mailto:${TRUST.email}"><span data-legal-bind="email">${TRUST.email}</span></a></dd>
+                                </div>
+                                <div class="footer-contact__row">
+                                    <dt>Hours</dt>
+                                    <dd>Mon&ndash;Fri, 9am &ndash; 5pm</dd>
+                                </div>
+                            </dl>
+                        </address>
                     </details>
                 </div>
+            </div>
+        </div>
 
-                <div class="footer-trust">
-                    <div class="footer-trust__item">
-                        <svg class="footer-trust__icon" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
-                        <span>NZ-based support</span>
-                    </div>
-                    <div class="footer-trust__item">
-                        <svg class="footer-trust__icon" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="1" y="3" width="15" height="13"/><polygon points="16 8 20 8 23 11 23 16 16 16 16 8"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/></svg>
-                        <span>Tracked NZ-wide delivery</span>
-                    </div>
-                    <div class="footer-trust__item">
-                        <svg class="footer-trust__icon" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
-                        <span>Secure checkout</span>
-                    </div>
-                    <div class="footer-trust__item">
-                        <svg class="footer-trust__icon" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>
-                        <span>15% GST included</span>
-                    </div>
-                </div>
+        <div class="footer-trust">
+            <div class="container">
+                <ul class="footer-trust__list">
+                    <li class="footer-trust__item">
+                        <svg class="footer-trust__icon" aria-hidden="true" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+                        <span class="footer-trust__copy">
+                            <span class="footer-trust__headline">NZ-based support</span>
+                            <span class="footer-trust__subline">Talk to a real person</span>
+                        </span>
+                    </li>
+                    <li class="footer-trust__item">
+                        <svg class="footer-trust__icon" aria-hidden="true" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="1" y="3" width="15" height="13"/><polygon points="16 8 20 8 23 11 23 16 16 16 16 8"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/></svg>
+                        <span class="footer-trust__copy">
+                            <span class="footer-trust__headline">Tracked NZ-wide delivery</span>
+                            <span class="footer-trust__subline">Every order, door to door</span>
+                        </span>
+                    </li>
+                    <li class="footer-trust__item">
+                        <svg class="footer-trust__icon" aria-hidden="true" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+                        <span class="footer-trust__copy">
+                            <span class="footer-trust__headline">Secure checkout</span>
+                            <span class="footer-trust__subline">Encrypted &amp; card-safe</span>
+                        </span>
+                    </li>
+                    <li class="footer-trust__item">
+                        <svg class="footer-trust__icon" aria-hidden="true" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M4 3h12l4 4v14H4z"/><path d="M8 9h8M8 13h8M8 17h5"/></svg>
+                        <span class="footer-trust__copy">
+                            <span class="footer-trust__headline">15% GST included</span>
+                            <span class="footer-trust__subline">Prices in NZD, no surprises</span>
+                        </span>
+                    </li>
+                </ul>
             </div>
         </div>
 
@@ -415,6 +460,8 @@
                         <li><a href="/contact">Contact</a></li>
                     </ul>
                 </nav>
+                <div class="footer-bottom__row">
+                <div class="footer-bottom__legal">
                 <p class="footer-copyright" data-legal-bind="copyright">
                     ${TRUST.copyright}
                 </p>
@@ -428,29 +475,31 @@
                     <span data-legal-bind="disambiguation">${TRUST.disambig}</span>
                     Prices in NZD, GST inclusive. No card surcharges.
                 </p>
+                </div>
                 <div class="footer-payment">
-                    <span class="footer-payment__label">We accept:</span>
+                    <span class="footer-payment__label">We accept</span>
                     <div class="footer-payment__cards">
                         <svg class="pay-card" viewBox="0 0 48 30" role="img" aria-label="Visa">
-                            <rect width="48" height="30" rx="4" fill="#FFFFFF" stroke="#E6E8EB"/>
+                            <rect width="48" height="30" rx="5" fill="#FFFFFF" stroke="#E6E8EB"/>
                             <text x="24" y="20.5" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="13" font-weight="700" font-style="italic" letter-spacing="0.6" fill="#1434CB">VISA</text>
                         </svg>
                         <svg class="pay-card" viewBox="0 0 48 30" role="img" aria-label="Mastercard">
-                            <rect width="48" height="30" rx="4" fill="#FFFFFF" stroke="#E6E8EB"/>
+                            <rect width="48" height="30" rx="5" fill="#FFFFFF" stroke="#E6E8EB"/>
                             <circle cx="20" cy="15" r="7.5" fill="#EB001B"/>
                             <circle cx="28" cy="15" r="7.5" fill="#F79E1B"/>
                             <path d="M24 9.4a7.49 7.49 0 0 0 0 11.2 7.49 7.49 0 0 0 0-11.2Z" fill="#FF5F00"/>
                         </svg>
                         <svg class="pay-card" viewBox="0 0 48 30" role="img" aria-label="American Express">
-                            <rect width="48" height="30" rx="4" fill="#2E77BC"/>
-                            <text x="24" y="19.5" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="9" font-weight="700" letter-spacing="0.3" fill="#FFFFFF">AMEX</text>
+                            <rect width="48" height="30" rx="5" fill="#FFFFFF" stroke="#E6E8EB"/>
+                            <rect x="7" y="9.5" width="34" height="11" rx="1.5" fill="#2E77BC"/>
+                            <text x="24" y="18" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="7.5" font-weight="700" letter-spacing="0.3" fill="#FFFFFF">AMEX</text>
                         </svg>
                         <svg class="pay-card" viewBox="0 0 48 30" role="img" aria-label="PayPal">
-                            <rect width="48" height="30" rx="4" fill="#FFFFFF" stroke="#E6E8EB"/>
+                            <rect width="48" height="30" rx="5" fill="#FFFFFF" stroke="#E6E8EB"/>
                             <text x="24" y="19.5" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="11" font-weight="700" font-style="italic" letter-spacing="-0.2"><tspan fill="#003087">Pay</tspan><tspan fill="#009CDE">Pal</tspan></text>
                         </svg>
                         <svg class="pay-card" viewBox="0 0 48 30" role="img" aria-label="Google Pay">
-                            <rect width="48" height="30" rx="4" fill="#FFFFFF" stroke="#E6E8EB"/>
+                            <rect width="48" height="30" rx="5" fill="#FFFFFF" stroke="#E6E8EB"/>
                             <g transform="translate(9 9.4) scale(0.0225)">
                                 <path fill="#4285F4" d="M533.5 278.4c0-18.5-1.5-37.1-4.7-55.3H272.1v104.8h147c-6.1 33.8-25.7 63.7-54.4 82.7v68h87.7c51.5-47.4 81.1-117.4 81.1-200.2z"/>
                                 <path fill="#34A853" d="M272.1 544.3c73.4 0 135.3-24.1 180.4-65.7l-87.7-68c-24.4 16.6-55.9 26-92.6 26-71 0-131.2-47.9-152.8-112.3H28.9v70.1c46.2 91.9 140.3 149.9 243.2 149.9z"/>
@@ -460,16 +509,23 @@
                             <text x="23" y="19.5" font-family="Arial, Helvetica, sans-serif" font-size="11" font-weight="500" fill="#5F6368">Pay</text>
                         </svg>
                         <svg class="pay-card" viewBox="0 0 48 30" role="img" aria-label="Apple Pay">
-                            <rect width="48" height="30" rx="4" fill="#FFFFFF" stroke="#E6E8EB"/>
+                            <rect width="48" height="30" rx="5" fill="#FFFFFF" stroke="#E6E8EB"/>
                             <path fill="#000000" transform="translate(11 7.6) scale(0.013)" d="M788.1 340.9c-5.8 4.5-108.2 62.2-108.2 190.5 0 148.4 130.3 200.9 134.2 202.2-.6 3.2-20.7 71.9-68.7 141.9-42.8 61.6-87.5 123.1-155.5 123.1s-85.5-39.5-164-39.5c-76.5 0-103.7 40.8-165.9 40.8s-105.6-57-155.5-127C46.7 790.7 0 663 0 541.8c0-194.4 126.4-297.5 250.8-297.5 66.1 0 121.2 43.4 162.7 43.4 39.5 0 101.1-46 176.3-46 28.5 0 130.9 2.6 198.3 99.2zm-234-181.5c31.1-36.9 53.1-88.1 53.1-139.3 0-7.1-.6-14.3-1.9-20.1-50.6 1.9-110.8 33.7-147.1 75.8-28.5 32.4-55.1 83.6-55.1 135.5 0 7.8 1.3 15.6 1.9 18.1 3.2.6 8.4 1.3 13.6 1.3 45.4 0 102.5-30.4 135.5-71.3z"/>
                             <text x="25" y="19.5" font-family="Arial, Helvetica, sans-serif" font-size="11" font-weight="600" fill="#000000">Pay</text>
                         </svg>
                         <svg class="pay-card" viewBox="0 0 48 30" role="img" aria-label="Klarna">
-                            <rect width="48" height="30" rx="4" fill="#FFB3C7"/>
-                            <text x="24" y="20" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="11" font-weight="700" fill="#0A0B09">Klarna</text>
+                            <rect width="48" height="30" rx="5" fill="#FFFFFF" stroke="#E6E8EB"/>
+                            <rect x="7" y="9.5" width="34" height="11" rx="1.5" fill="#FFB3C7"/>
+                            <text x="24" y="18" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="7.5" font-weight="700" fill="#0A0B09">Klarna</text>
                         </svg>
                     </div>
                 </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="footer-legal">
+            <div class="container">
                 <p class="footer-disclaimer">
                     All product, brand, and printer names (HP, Canon, Epson, Brother, and others) are trademarks of their respective owners and are used only to indicate compatibility. Compatible cartridges sold on this site are not manufactured, endorsed, or sold by those brand owners; they are supplied by ${TRUST.legalEntity}, trading as ${TRUST.tradingName}. Your statutory rights under the New Zealand Consumer Guarantees Act 1993 are unaffected.
                 </p>
@@ -485,10 +541,13 @@
 
     // Wire the newsletter form now that it's in the DOM (idempotent).
     bindNewsletterForm(footer.querySelector('.newsletter__form'), 'footer');
-    // (A feed-hydrated Categories column shipped here on 2026-07-02 and was
-    // removed the same day at the owner's request, right after the matching
-    // nav mega. Don't reintroduce footer/nav category sections; category
-    // entry points are the Shop drilldown and the brands mega deep links.)
+    // The Shop column's three category links are STATIC and hand-curated. The
+    // thing the owner killed on 2026-07-02 was the *feed-hydrated* Categories
+    // column (GET /api/site/nav), which rendered whatever the feed happened to
+    // return — that must not come back, and footer.js must never fetch. The
+    // static links were re-added 2026-07-14 because the backend's crawler
+    // footer lists these same categories to Googlebot, so humans were seeing
+    // fewer links than bots — the wrong side of a cloaking review to be on.
 
     // Google Customer Reviews - badge + opt-in survey loader
     (function () {
@@ -533,11 +592,18 @@
     const items = document.querySelectorAll('.site-footer [data-footer-accordion]');
     if (!items.length || !window.matchMedia) return;
     const mq = window.matchMedia('(max-width: 768px)');
+    // Which column stays open on mobile? The one the template shipped `open`
+    // (Contact — the details a phone user actually wants). Read it once, BEFORE
+    // the first apply() mutates .open, because the template no longer lists
+    // Contact first: the Jul 2026 redesign order is Shop · Help · Company ·
+    // Contact, so the old `i === 0` rule would have opened Shop instead.
+    let defaultOpen = 0;
+    items.forEach((d, i) => { if (d.open) defaultOpen = i; });
     const apply = () => {
       items.forEach((d, i) => {
-        // Desktop: every column expanded. Mobile: Contact (first) open, rest
-        // collapsed so the footer shrinks well under one viewport.
-        d.open = mq.matches ? i === 0 : true;
+        // Desktop: every column expanded. Mobile: only the default-open column,
+        // so the footer shrinks well under one viewport.
+        d.open = mq.matches ? i === defaultOpen : true;
       });
     };
     apply();

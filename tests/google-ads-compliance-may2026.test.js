@@ -447,10 +447,16 @@ for (const rel of NOSCRIPT_FILES) {
     });
 }
 
-test('inkcartridges/404.html static footer carries the disambiguation line + new copyright', () => {
+// Root 404.html used to hand-maintain its own copy of the footer, because it
+// was the one page that never loaded footer.js. Predictably, it drifted: by
+// Jul 2026 its copy had no legal nav and no trademark/CGA disclaimer at all,
+// so the single page a lost visitor lands on was the *least* compliant one.
+// The Jul 2026 redesign put it on the shared footer like every other page, and
+// the assertion below is what stops the hand-written copy coming back.
+test('inkcartridges/404.html shares the one footer — no hand-written copy to drift', () => {
     const src = READ(HTML('404.html'));
-    assert.match(src, /Office Consumables Ltd\. All rights reserved\./);
-    assert.match(src, /InkCartridges\.co\.nz is operated by Office Consumables Ltd \(NZBN 9429033934204, GST 94-509-459\)\./);
-    assert.match(src, /support@inkcartridges\.co\.nz/);
-    assert.match(src, /Kelston/);
+    assert.match(src, /<footer class="site-footer"><noscript>[\s\S]*?Office Consumables Ltd[\s\S]*?support@inkcartridges\.co\.nz[\s\S]*?Kelston[\s\S]*?<\/footer>/,
+        '404.html must carry the same noscript placeholder as every other page');
+    assert.match(src, /<script[^>]+src="\/js\/footer\.js/,
+        '404.html must load footer.js — it is where the compliant footer comes from');
 });

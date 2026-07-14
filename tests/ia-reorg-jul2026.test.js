@@ -207,14 +207,23 @@ test('§4 brands mega renders curated brands only (owner decision, 2026-07-02)',
 // 3-link-column footer grid.
 // ─────────────────────────────────────────────────────────────────────────────
 
-test('§5 footer ships no Categories column and no feed-category hydration', () => {
+test('§5 footer ships no FEED-HYDRATED Categories column', () => {
+    // What the owner killed on 2026-07-02 was the *feed-hydrated* column: it
+    // rendered whatever GET /api/site/nav happened to return. That must not come
+    // back, and footer.js must never fetch — these three assertions are the guard.
     assert.ok(!FOOTER_JS.includes('footer-categories-links'),
         'footer.js must not render the removed Categories column');
     assert.doesNotMatch(FOOTER_JS, /<summary class="footer-column__heading">Categories<\/summary>/);
     assert.ok(!stripComments(FOOTER_JS).includes('getSiteNav'),
         'footer.js must not fetch the nav feed any more');
-    assert.match(LAYOUT_CSS, /\.footer-grid\s*\{[^}]*grid-template-columns:\s*2fr repeat\(3, 1fr\)/s,
-        'footer grid must be back to 3 link columns');
+
+    // The three STATIC category links under "Shop" are a different thing and are
+    // deliberate (owner decision, 2026-07-14): the backend's crawler footer lists
+    // these same categories to Googlebot, so without them humans saw fewer links
+    // than bots — the wrong side of a cloaking review to be standing on.
+    // See tests/footer-redesign-jul2026.test.js for the full footer contract.
+    assert.match(LAYOUT_CSS, /\.footer-grid\s*\{[^}]*grid-template-columns:\s*2fr repeat\(3, 1fr\) 1\.3fr/s,
+        'footer grid is brand + 3 link columns + contact (Jul 2026 redesign)');
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -164,11 +164,15 @@ test('§3 no footer-linked page links to /shipping#dropship', () => {
 //        Auckland office; this is true and remains the only neutral label.
 // ─────────────────────────────────────────────────────────────────────────────
 
-test('§4 footer.js Contact column uses "Office:" not "Address:"', () => {
-    assert.match(FOOTER_JS, /<strong>Office:<\/strong>/,
-        'footer.js Contact column must label the address line "Office:"');
-    assert.ok(!/<strong>Address:<\/strong>/.test(FOOTER_JS),
-        'footer.js must not use the bare "Address:" label');
+test('§4 footer.js Contact column uses "Office" not "Address"', () => {
+    // The Jul 2026 redesign made the contact block a <dl> inside an <address>,
+    // so the label is a <dt> rather than a <strong>. The wording rule is
+    // unchanged and is what actually matters: we trade from an Auckland office,
+    // never a "warehouse", and "Address" is the label we don't use.
+    assert.match(FOOTER_JS, /<dt>Office<\/dt>/,
+        'footer.js Contact column must label the address line "Office"');
+    assert.ok(!/<dt>Address<\/dt>|<strong>Address:<\/strong>/.test(FOOTER_JS),
+        'footer.js must not use the bare "Address" label');
 });
 
 test('§4 about.html hero meta uses "Office:" label', () => {

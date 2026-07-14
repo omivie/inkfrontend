@@ -122,10 +122,14 @@ test('legal-config lists exactly the canonical accepted payment methods', () => 
 });
 
 test('footer, cart and 404 advertise the full canonical payment set', () => {
+    // 404.html used to hand-roll its own footer (and its own payment badges).
+    // Since the Jul 2026 redesign it renders the shared footer, so its badges
+    // ARE js/footer.js's badges — asserting them against 404.html's own source
+    // would now only ever test a copy that no longer exists. The 404 page's
+    // footer contract is pinned in google-ads-compliance §11 instead.
     const surfaces = {
         'js/footer.js': read('js/footer.js'),
         'html/cart.html': read('html/cart.html'),
-        '404.html': read('404.html'),
     };
     for (const [file, src] of Object.entries(surfaces)) {
         for (const method of CANONICAL_PAYMENTS) {

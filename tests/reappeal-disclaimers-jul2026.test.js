@@ -63,9 +63,16 @@ test('footer: trademark / Consumer Guarantees Act disclaimer, interpolated names
     assert.match(src, /\$\{TRUST\.tradingName\}/);
 });
 
-test('footer .footer-disclaimer has its own full-width style', () => {
+test('footer .footer-disclaimer has its own full-width band', () => {
     const css = READ('css/layout.css');
-    assert.match(css, /\.footer-disclaimer\s*\{[\s\S]*?flex-basis:\s*100%/);
+    // Was `flex-basis: 100%`, back when the disclaimer was one flex child of the
+    // bottom bar. The Jul 2026 redesign gives it its own zone (.footer-legal),
+    // so flex-basis would be a dead property kept alive only to satisfy a test.
+    // The intent is unchanged: the disclaimer spans the full width and is never
+    // squeezed into a column beside the payment chips.
+    assert.match(css, /\.footer-disclaimer\s*\{[\s\S]*?width:\s*100%/);
+    assert.match(css, /\.footer-legal\s*\{[\s\S]*?border-top:/,
+        'the disclaimer sits in its own band, separated by a hairline');
 });
 
 test('PDP: compatible-only compliance disclaimer, keyed off source', () => {

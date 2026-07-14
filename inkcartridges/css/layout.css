@@ -1234,29 +1234,71 @@
 
 
 /* ==========================================================================
-   FOOTER LAYOUT
+   FOOTER LAYOUT — redesigned Jul 2026 (footer-redesign-jul2026.md)
+
+   Five zones, top to bottom:
+     1. CMYK accent stripe   .footer-stripe
+     2. Main grid            .footer-main   → brand+newsletter · Shop · Help · Company · Contact
+     3. Trust strip          .footer-trust
+     4. Bottom bar           .footer-bottom → legal nav + copyright + payment chips
+     5. Legal                .footer-legal  → trademark / CGA disclaimer
+
+   PALETTE. The handoff spec shipped its own hexes (--ink-900 #0C1826,
+   --accent #F5C542, cyan #27AAE1, magenta #E6318C). Every one of them is a
+   near-miss of a token base.css already defines, so using them literally would
+   fork the palette — the footer's yellow would not be the site's yellow, and
+   the footer's CMYK stripe would not match the header's. The spec's *roles* are
+   mapped onto the brand tokens below instead, and the stripe reuses the very
+   same --accent-strip-gradient the header stripe draws.
    ========================================================================== */
 
 .site-footer {
+    /* Role tokens — the footer's local palette, all sourced from base.css. */
+    --footer-ground: var(--ink-wash);              /* #0C1222 — footer ground   */
+    --footer-raised: var(--ink-wash-light);        /* #162032 — trust band, inputs */
+    --footer-line: rgba(255, 255, 255, 0.10);      /* hairlines                 */
+    --footer-text: var(--white-primary);           /* primary                   */
+    --footer-muted: rgba(255, 255, 255, 0.72);     /* links, body               */
+    --footer-dim: rgba(255, 255, 255, 0.55);       /* labels, legal fine print  */
+    --footer-accent: var(--yellow-primary);        /* #F4C430 — Subscribe, focus */
+    --footer-accent-hover: color-mix(in srgb, var(--yellow-primary) 85%, #FFFFFF);
+    --footer-accent-ink: var(--ink-wash);          /* text on yellow            */
+
     margin-top: auto;
-    background-color: var(--ink-wash);
-    color: var(--white-primary);
+    background-color: var(--footer-ground);
+    color: var(--footer-text);
     position: relative;
 }
 
+/* --- Zone 1: CMYK accent stripe -------------------------------------------
+   They sell ink; the footer opens on cyan → magenta → yellow → slate. Same
+   token as the header strip, so the two bookend the page identically. */
+.footer-stripe {
+    height: 3px;
+    width: 100%;
+    background: var(--accent-strip-gradient);
+}
 
+/* --- Zone 2: main grid ---------------------------------------------------- */
 .footer-main {
     padding: var(--spacing-3xl) 0 var(--spacing-2xl);
 }
 
+/* The spec asked for brand 1.5fr. At this site's container width and gutter that
+   left the brand cell at ~263px — narrower than the logo lockup, which then
+   overhung the Shop column, and it crushed the email input to about 75px ("you@"
+   truncated). 2fr / 1.3fr keeps the spec's intent (brand widest, contact roomy)
+   at the width we actually render at. Measured, not guessed. */
 .footer-grid {
     display: grid;
-    grid-template-columns: 2fr repeat(3, 1fr);
-    gap: var(--spacing-3xl);
+    grid-template-columns: 2fr repeat(3, 1fr) 1.3fr;
+    gap: var(--spacing-xl);
+    align-items: start;
 }
 
 .footer-brand {
-    padding-right: var(--spacing-2xl);
+    padding-right: var(--spacing-xl);
+    min-width: 0;
 }
 
 .footer-brand__logo {
@@ -1264,19 +1306,21 @@
     align-items: center;
     gap: var(--spacing-3);
     text-decoration: none;
-    margin-bottom: var(--spacing-xl);
+    margin-bottom: var(--spacing-lg);
+    min-width: 0;
 }
 
 .footer-brand__logo .logo__icon {
-    height: 44px;
+    height: 40px;
     width: auto;
     border-radius: 6px;
     flex-shrink: 0;
 }
 
 .footer-brand__logo .logo__text {
-    color: var(--white-primary);
-    font-size: var(--font-size-2xl);
+    color: var(--footer-text);
+    font-size: var(--font-size-xl);
+    min-width: 0;
 }
 
 .footer-brand__logo .logo__text span {
@@ -1284,45 +1328,35 @@
 }
 
 .footer-brand__description {
-    color: rgba(255, 255, 255, 0.6);
+    color: var(--footer-muted);
     line-height: var(--line-height-relaxed);
     margin-bottom: var(--spacing-lg);
     font-size: var(--font-size-sm);
+    max-width: 38ch;
+    text-wrap: pretty;
 }
 
-.footer-brand__social {
-    display: flex;
-    gap: var(--spacing-md);
+/* Eyebrow labels — column headings, contact terms, payment label. 11px caps
+   with the wide tracking the spec asks for. */
+.footer-column__heading,
+.footer-contact__row dt,
+.footer-payment__label {
+    font-family: var(--font-family-heading);
+    font-size: 0.6875rem; /* 11px */
+    font-weight: var(--font-weight-bold);
+    text-transform: uppercase;
+    letter-spacing: 0.13em;
 }
 
-.footer-brand__social a {
-    width: 40px;
-    height: 40px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background-color: rgba(255, 255, 255, 0.1);
-    color: var(--color-text-inverse);
-    border-radius: var(--radius-full);
-    transition: all var(--transition-fast);
-}
-
-.footer-brand__social a:hover {
-    background-color: var(--color-primary);
-    color: var(--color-text-inverse);
-    text-decoration: none;
+.footer-column-nav {
+    min-width: 0;
 }
 
 .footer-column__heading {
-    color: var(--color-text-inverse);
-    font-family: var(--font-family-heading);
-    font-size: var(--font-size-xs);
-    font-weight: var(--font-weight-bold);
-    text-transform: uppercase;
-    letter-spacing: 0.15em;
-    margin-bottom: var(--spacing-xl);
+    color: var(--footer-text);
+    margin-bottom: var(--spacing-lg);
     padding-bottom: var(--spacing-sm);
-    border-bottom: 2px solid rgba(255, 255, 255, 0.1);
+    border-bottom: 1px solid var(--footer-line);
 }
 
 .footer-links li {
@@ -1330,19 +1364,55 @@
 }
 
 .footer-links a {
-    color: rgba(255, 255, 255, 0.6);
+    color: var(--footer-muted);
     transition: color var(--transition-fast);
     font-size: var(--font-size-sm);
 }
 
 .footer-links a:hover {
-    color: var(--white-primary);
+    color: var(--footer-text);
     text-decoration: none;
 }
 
-/* Footer newsletter */
+/* --- Contact block (labelled <dl> inside an <address>) --------------------- */
+.footer-contact {
+    font-style: normal;
+}
+
+.footer-contact__row {
+    margin-bottom: var(--spacing-md);
+}
+
+.footer-contact__row dt {
+    color: var(--footer-dim);
+    margin-bottom: 2px;
+}
+
+.footer-contact__row dd {
+    margin: 0;
+    color: var(--footer-muted);
+    font-size: var(--font-size-sm);
+    line-height: var(--line-height-relaxed);
+}
+
+.footer-contact__row dd a {
+    color: var(--footer-muted);
+    transition: color var(--transition-fast);
+}
+
+.footer-contact__row dd a:hover {
+    color: var(--footer-text);
+    text-decoration: none;
+}
+
+/* Phone numbers line up when the digits are tabular. */
+.footer-contact__digits {
+    font-variant-numeric: tabular-nums;
+}
+
+/* --- Newsletter ----------------------------------------------------------- */
 .footer-newsletter__text {
-    color: rgba(255, 255, 255, 0.7);
+    color: var(--footer-muted);
     margin-bottom: var(--spacing-md);
     font-size: var(--font-size-sm);
 }
@@ -1354,34 +1424,43 @@
 
 .footer-newsletter__input {
     flex: 1;
+    min-width: 0;
     padding: var(--spacing-3) var(--spacing-4);
-    background-color: rgba(255, 255, 255, 0.1);
-    border: 1px solid rgba(255, 255, 255, 0.2);
+    background-color: var(--footer-raised);
+    border: 1px solid var(--footer-line);
     border-radius: var(--radius-md);
-    color: var(--color-text-inverse);
+    color: var(--footer-text);
 }
 
 .footer-newsletter__input::placeholder {
-    color: rgba(255, 255, 255, 0.5);
-}
-
-.footer-newsletter__input:focus {
-    outline: none;
-    border-color: var(--color-primary);
+    color: rgba(255, 255, 255, 0.45);
 }
 
 .footer-newsletter__button {
-    padding: var(--spacing-3) var(--spacing-4);
-    background-color: var(--color-accent);
-    color: var(--color-text-inverse);
+    padding: var(--spacing-3) var(--spacing-5);
+    background-color: var(--footer-accent);
+    color: var(--footer-accent-ink);
     border: none;
     border-radius: var(--radius-md);
-    font-weight: var(--font-weight-medium);
+    font-weight: var(--font-weight-bold);
+    white-space: nowrap;
+    cursor: pointer;
     transition: background-color var(--transition-fast);
 }
 
 .footer-newsletter__button:hover {
-    background-color: var(--color-accent-dark);
+    background-color: var(--footer-accent-hover);
+}
+
+/* One visible focus ring for every interactive thing in the footer — links,
+   the email input, the Subscribe button, the accordion summaries. */
+.site-footer a:focus-visible,
+.site-footer button:focus-visible,
+.site-footer input:focus-visible,
+.site-footer summary:focus-visible {
+    outline: 2px solid var(--footer-accent);
+    outline-offset: 2px;
+    border-radius: 2px;
 }
 
 /* Newsletter inline confirmation (footer + landing). Mirrors the contact-form
@@ -1412,54 +1491,86 @@
     border: 1px solid #fecaca;
 }
 
-/* Footer trust badges */
+/* --- Zone 3: trust strip --------------------------------------------------
+   Four icon + two-line items on a slightly elevated band, hairlines top and
+   bottom. Replaces the old sparse single line of uppercase labels. */
 .footer-trust {
-    display: flex;
-    flex-wrap: wrap;
-    justify-content: center;
-    align-items: center;
-    gap: var(--spacing-2xl);
-    padding: var(--spacing-xl) 0;
-    margin-top: var(--spacing-2xl);
-    border-top: 1px solid rgba(255, 255, 255, 0.08);
+    background: var(--footer-raised);
+    border-top: 1px solid var(--footer-line);
+    border-bottom: 1px solid var(--footer-line);
+    padding: var(--spacing-lg) 0;
+}
+
+.footer-trust__list {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: var(--spacing-xl);
+    margin: 0;
+    padding: 0;
+    list-style: none;
 }
 
 .footer-trust__item {
     display: flex;
     align-items: center;
-    gap: var(--spacing-sm);
-    color: rgba(255, 255, 255, 0.5);
-    font-size: var(--font-size-xs);
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
+    gap: var(--spacing-3);
+    min-width: 0;
 }
 
 .footer-trust__icon {
-    font-size: var(--font-size-xl);
-    color: rgba(255, 255, 255, 0.4);
+    flex-shrink: 0;
+    color: var(--footer-accent);
 }
 
-/* Footer bottom */
+.footer-trust__copy {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+}
+
+.footer-trust__headline {
+    color: var(--footer-text);
+    font-size: var(--font-size-sm);
+    font-weight: var(--font-weight-bold);
+    line-height: 1.35;
+    text-wrap: balance;
+}
+
+.footer-trust__subline {
+    color: var(--footer-dim);
+    font-size: var(--font-size-xs);
+    line-height: 1.35;
+}
+
+/* --- Zone 4: bottom bar --------------------------------------------------- */
 .footer-bottom {
-    padding: var(--spacing-md) 0;
-    border-top: 1px solid rgba(255, 255, 255, 0.08);
-    background: rgba(0, 0, 0, 0.15);
+    padding: var(--spacing-lg) 0;
 }
 
-.footer-bottom .container {
+.footer-bottom__row {
     display: flex;
     flex-wrap: wrap;
     justify-content: space-between;
     align-items: center;
-    gap: var(--spacing-md);
+    gap: var(--spacing-lg);
 }
 
-/* Single-line legal nav — every compliance surface reachable in one glance,
-   above the copyright row. Its own full-width row so it never competes with
-   the payment cards. */
+.footer-bottom__legal {
+    min-width: 0;
+}
+
+/* Single-line legal nav — every compliance surface reachable in one glance.
+   An ads reviewer scans the footer before they open any policy page. Dropped
+   in the 2026-07-02 IA reorg, restored 2026-07-14, and deliberately KEPT
+   through the Jul 2026 redesign (the handoff spec proposed deleting it as a
+   duplicate of the column grid — it is a duplicate, and that is the point).
+   Its own full-width row above the copyright so it never competes with the
+   payment chips. */
 .footer-legal-nav {
-    flex-basis: 100%;
     width: 100%;
+    padding-bottom: var(--spacing-md);
+    margin-bottom: var(--spacing-md);
+    border-bottom: 1px solid var(--footer-line);
 }
 
 .footer-legal-nav ul {
@@ -1474,14 +1585,14 @@
 }
 
 .footer-legal-nav a {
-    color: rgba(255, 255, 255, 0.55);
+    color: var(--footer-dim);
     font-size: var(--font-size-xs);
     text-decoration: none;
 }
 
 .footer-legal-nav a:hover,
 .footer-legal-nav a:focus-visible {
-    color: #FFFFFF;
+    color: var(--footer-text);
     text-decoration: underline;
 }
 
@@ -1491,47 +1602,22 @@
 }
 
 .footer-copyright {
-    color: rgba(255, 255, 255, 0.4);
+    color: var(--footer-dim);
     font-size: var(--font-size-xs);
 }
 
 /* Google Ads "Business Transparency" — legal entity + NZBN + GST, shown wherever
-   the trading name appears prominently. Full-width so it can't be truncated. */
+   the trading name appears prominently. */
 .footer-legal-line {
-    flex-basis: 100%;
-    width: 100%;
-    color: rgba(255, 255, 255, 0.4);
+    color: var(--footer-dim);
     font-size: var(--font-size-xs);
     line-height: 1.5;
+    max-width: 68ch;
 }
 
-/* Trademark / Consumer Guarantees Act disclaimer (Google Ads re-appeal, Jul 2026).
-   Sits on its own full-width row beneath the copyright + payment cards. */
-.footer-disclaimer {
-    flex-basis: 100%;
-    width: 100%;
-    margin-top: var(--spacing-sm);
-    color: rgba(255, 255, 255, 0.4);
-    font-size: var(--font-size-xs);
-    line-height: 1.5;
-}
-
-.footer-legal {
-    display: flex;
-    flex-wrap: wrap;
-    gap: var(--spacing-lg);
-}
-
-.footer-legal a {
-    color: rgba(255, 255, 255, 0.4);
-    font-size: var(--font-size-xs);
-}
-
-.footer-legal a:hover {
-    color: var(--white-primary);
-    text-decoration: none;
-}
-
+/* --- Payment chips --------------------------------------------------------
+   Uniform white chips, same height / radius / border for every brand — the old
+   set mixed a blue Amex tile and a pink Klarna tile in among white cards. */
 .footer-payment {
     display: flex;
     align-items: center;
@@ -1539,12 +1625,13 @@
 }
 
 .footer-payment__label {
-    color: rgba(255, 255, 255, 0.4);
-    font-size: var(--font-size-xs);
+    color: var(--footer-dim);
+    white-space: nowrap;
 }
 
 .footer-payment__cards {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     gap: 8px;
 }
@@ -1553,13 +1640,78 @@
     height: 26px;
     width: auto;
     display: block;
-    border-radius: 4px;
-    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+    border-radius: 5px;
 }
 
-@media (max-width: 480px) {
-    .pay-card {
-        height: 30px;
+/* --- Zone 5: legal -------------------------------------------------------- */
+.footer-legal {
+    border-top: 1px solid var(--footer-line);
+    padding: var(--spacing-lg) 0;
+}
+
+/* Trademark / Consumer Guarantees Act disclaimer (Google Ads re-appeal, Jul 2026).
+   Its own full-width band beneath the bottom bar — never squeezed into a column. */
+.footer-disclaimer {
+    width: 100%;
+    margin: 0;
+    color: var(--footer-dim);
+    font-size: var(--font-size-xs);
+    line-height: 1.6;
+}
+
+/* Nobody's footer needs to animate. */
+@media (prefers-reduced-motion: reduce) {
+    .site-footer *,
+    .site-footer *::before,
+    .site-footer *::after {
+        transition: none !important;
+        animation: none !important;
+    }
+}
+
+/* --- Responsive ----------------------------------------------------------
+   ≥940px  5-column grid (brand · 3 nav · contact)
+   ≤940px  2-column; brand and contact span full width; trust strip 2-up
+   ≤560px  single column; trust strip 1-up; bottom bar stacks             */
+@media (max-width: 940px) {
+    .footer-grid {
+        grid-template-columns: repeat(2, 1fr);
+        gap: var(--spacing-xl);
+    }
+
+    .footer-brand,
+    .footer-grid > .footer-column {
+        grid-column: 1 / -1;
+        padding-right: 0;
+    }
+
+    .footer-trust__list {
+        grid-template-columns: repeat(2, 1fr);
+        gap: var(--spacing-lg);
+    }
+}
+
+@media (max-width: 560px) {
+    .footer-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .footer-trust__list {
+        grid-template-columns: 1fr;
+    }
+
+    .footer-bottom__row {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+
+    .footer-newsletter__form {
+        flex-wrap: wrap;
+    }
+
+    .footer-newsletter__input,
+    .footer-newsletter__button {
+        flex: 1 1 100%;
     }
 }
 
@@ -1747,18 +1899,8 @@
         order: -1;
     }
 
-    .footer-grid {
-        grid-template-columns: repeat(2, 1fr);
-        gap: var(--spacing-xl);
-    }
-
-    .footer-brand {
-        grid-column: span 2;
-        padding-right: 0;
-        padding-bottom: var(--spacing-lg);
-        border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-        margin-bottom: var(--spacing-lg);
-    }
+    /* (Footer responsive rules live with the footer, in the FOOTER LAYOUT
+       block above — the redesign's breakpoints are 940px and 560px.) */
 }
 
 @media (max-width: 768px) {
@@ -1876,22 +2018,9 @@
         grid-template-columns: 1fr;
     }
 
-    .footer-grid {
-        grid-template-columns: repeat(2, 1fr);
-    }
-
-    .footer-brand {
-        grid-column: span 2;
-    }
-
-    .footer-bottom .container {
-        flex-direction: column;
-        text-align: center;
-    }
-
-    .footer-payment {
-        flex-direction: column;
-    }
+    /* (Footer responsive rules live in the FOOTER LAYOUT block: 940px / 560px.
+       The old 768px rules stacked the payment chips into a vertical column,
+       which is exactly what the redesign's uniform chip row replaces.) */
 }
 
 @media (max-width: 480px) {
@@ -1935,14 +2064,6 @@
 
     .header-actions {
         gap: var(--spacing-3);
-    }
-
-    .footer-grid {
-        grid-template-columns: 1fr;
-    }
-
-    .footer-brand {
-        grid-column: span 1;
     }
 
     .product-grid--list .product-card {

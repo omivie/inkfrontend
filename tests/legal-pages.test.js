@@ -107,9 +107,19 @@ test('§2 footer.js cross-links every required policy', () => {
     }
 });
 
-test('§2 footer renders a Policies column AND a single-line legal nav', () => {
-    assert.match(FOOTER_JS, /Policies/,                'footer.js must label a column "Policies"');
-    assert.match(FOOTER_JS, /class="footer-legal-nav"/, 'footer.js must render a single-line legal nav for at-a-glance compliance review');
+test('§2 footer renders the policy links in the column grid AND in a single-line legal nav', () => {
+    // Was: assert.match(FOOTER_JS, /Policies/). The Jul 2026 redesign renamed the
+    // columns to Shop / Help / Company, and that old assertion would have kept
+    // passing anyway — off the "Policies and information" aria-label, not off a
+    // column. Assert the thing we actually care about: every policy page is
+    // reachable from the column grid, and again from the one-glance legal row.
+    const grid = FOOTER_JS.slice(FOOTER_JS.indexOf('class="footer-grid"'), FOOTER_JS.indexOf('class="footer-trust"'));
+    for (const href of ['/shipping', '/returns', '/terms', '/privacy']) {
+        assert.match(grid, new RegExp('href="' + href + '"'),
+            `the footer column grid must link to ${href}`);
+    }
+    assert.match(FOOTER_JS, /class="footer-legal-nav"/,
+        'footer.js must render a single-line legal nav for at-a-glance compliance review');
 });
 
 test('§2 footer copyright reaffirms no card surcharges', () => {
@@ -394,11 +404,14 @@ test('§10 no policy/about page contains the word "warehouse" — we don\'t have
     }
 });
 
-test('§10 footer.js labels the contact block "Office:" not "Address:"', () => {
-    assert.match(FOOTER_JS, /<strong>Office:<\/strong>/,
-        'footer.js Contact column must label the address line "Office:"');
-    assert.ok(!/<strong>Address:<\/strong>/.test(FOOTER_JS),
-        'footer.js must not use the bare "Address:" label');
+test('§10 footer.js labels the contact block "Office" not "Address"', () => {
+    // Redesigned Jul 2026: the contact block is a <dl> in an <address>, so the
+    // label is a <dt>. The wording contract is unchanged — "Office", never
+    // "Address" (and never "warehouse", asserted above).
+    assert.match(FOOTER_JS, /<dt>Office<\/dt>/,
+        'footer.js Contact column must label the address line "Office"');
+    assert.ok(!/<dt>Address<\/dt>|<strong>Address:<\/strong>/.test(FOOTER_JS),
+        'footer.js must not use the bare "Address" label');
 });
 
 test('§10 about.html hero meta uses "Office:" label', () => {
