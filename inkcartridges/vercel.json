@@ -46,6 +46,9 @@
   ],
   "redirects": [
     { "source": "/account/", "destination": "/account", "permanent": true },
+
+    { "source": "/orders/track", "destination": "/track-order", "permanent": true },
+
     { "source": "/brand/:slug", "destination": "/shop?brand=:slug", "permanent": true },
     { "source": "/brands/:slug/hub", "destination": "/shop?brand=:slug", "permanent": true },
     { "source": "/brands/:slug", "destination": "/shop?brand=:slug", "permanent": true },
