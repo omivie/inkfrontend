@@ -1,8 +1,28 @@
 # Backend: an invoice line that doesn't resolve must FAIL, not silently vanish
 
-**Status:** 🟡 **OPEN (backend)** · **Raised:** 2026-07-14
+**Status:** ✅ **RESOLVED** (backend shipped `c191d4a` + data repaired; FE wiring shipped 2026-07-15) · **Raised:** 2026-07-14
 **Severity:** silent data loss — a write that looks successful produces a **paid order with zero line items**.
-**Storefront ticket:** ERR-071 · **Frontend:** ✅ shipped (commit `c4017c2`)
+**Storefront ticket:** ERR-071 · **Frontend:** ✅ shipped (guard `c4017c2`; 400-backstop wiring 2026-07-15)
+
+> **Resolution (2026-07-15).** Backend response: `invoice-sku-integrity-backend-response-jul2026.md`.
+> All six asks delivered. FE side now wired:
+> - **§3.1 the 400 backstop is rendered LOUD.** The backend returns `400 VALIDATION_FAILED` with
+>   `error.details.unresolved: [{position, product_code}]` when the client guard fails soft (catalogue
+>   unreachable → the save is let through and the backend catches it). Both writers now map that payload
+>   back onto the offending line and pin it inline — highlighted, scrolled-to, focused — with the SAME
+>   sentence the client guard shows. New pure mapper `unresolvedLineErrors()` +
+>   `surfaceUnresolvedCodes()` in each page. Verified end-to-end in the running admin (the real
+>   `invoiceError` → mapper → `markInvoiceErrors` chain marks the code box and toasts).
+> - **Quick-order envelope gap closed.** `create/update/deleteQuickOrder` bypassed `invoiceError`, so
+>   they never carried `err.code`/`err.details` (and risked `[object Object]`). Now routed through it,
+>   matching the invoice writes.
+> - **§3.6 workaround retired.** Verified live that `GET /api/admin/invoices/:id` echoes
+>   `supplier_cost_excl_gst` (e.g. `139.8` on #3263, `cost_source:"auto"`). The
+>   `fetchProductCosts`/`backfillCostsFromCatalogue` workaround is deleted — cost is read straight from
+>   the record.
+>
+> Tests: `tests/admin-invoice-sku-integrity.test.js` extended (10 new `unresolvedLineErrors` cases).
+> Full suite green.
 
 ---
 
@@ -132,8 +152,9 @@ boundary — which is you.
 
 | File | Role |
 |---|---|
-| `js/admin/utils/line-codes.js` | pure gate — `codesToVerify()` + `applyResolvedCodes()` |
-| `js/admin/components/product-search.js` | `resolveSkus()` — one batched `products.sku` lookup |
-| `js/admin/pages/invoices.js` | guard in `persistDraft()` (covers save + email + download) |
-| `js/admin/pages/quick-order.js` | guard in `saveQuickOrder()` (writes REAL orders) |
-| `tests/admin-invoice-sku-integrity.test.js` | 9 tests pinning the rules above |
+| `js/admin/utils/line-codes.js` | pure gate — `codesToVerify()` + `applyResolvedCodes()`; `unresolvedLineErrors()` maps a backend 400 back onto lines; shared `skuLineMsg()` |
+| `js/admin/components/product-search.js` | `resolveSkus()` — one batched `products.sku` lookup (the `fetchProductCosts` workaround was removed) |
+| `js/admin/api.js` | `invoiceError()` envelope parser; the quick-order writes now route through it |
+| `js/admin/pages/invoices.js` | guard in `persistDraft()` (save + email + download) + `surfaceUnresolvedCodes()` in every catch |
+| `js/admin/pages/quick-order.js` | guard in `saveQuickOrder()` (writes REAL orders) + `surfaceUnresolvedCodes()` |
+| `tests/admin-invoice-sku-integrity.test.js` | 19 tests pinning the guard rules **and** the 400-backstop mapping |

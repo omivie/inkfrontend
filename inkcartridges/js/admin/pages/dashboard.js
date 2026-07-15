@@ -624,9 +624,13 @@ function drawPerformanceOverview(d) {
   const ordList = resolveList(d.sOrders, ['series', 'data']) || [];
 
   // Prefer the real per-bucket net-profit series; fall back to the gross-profit series
-  // (relabeled) until the backend ships net_profit_series. See readfirst handoff.
+  // until the backend ships net_profit_series. As of 2026-07-14 the bundle carries NO
+  // `net_profit_series` key at all, so the fallback is the ONLY path that ever runs — and
+  // the dataset used to be hard-labelled "Net profit" regardless, which meant the legend
+  // named a number the chart was not plotting. Label what we actually drew (ERR-074).
   const hasNet = Array.isArray(npList) && npList.length > 0;
   const profitList = hasNet ? npList : gpList;
+  const profitLabel = hasNet ? 'Net profit' : 'Gross profit';
 
   const byBucket = new Map(); // bucket_start -> { revenue, profit, orders }
   const order = [];
@@ -671,7 +675,7 @@ function drawPerformanceOverview(d) {
 
   const datasets = [
     mkMoney('Revenue', revenue, c.success),
-    mkMoney('Net profit', profit, c.cyan),
+    mkMoney(profitLabel, profit, c.cyan),
     // Orders always a line on the right axis so it reads against the money bars/lines.
     { label: 'Orders', data: orders, yAxisID: 'y1', type: 'line',
       borderColor: c.yellow, backgroundColor: hexToRgba(c.yellow, 0.12),
@@ -839,13 +843,13 @@ async function loadDashboard() {
   // Race guard — bail if a newer loadDashboard() started or the page was destroyed.
   if (mySeq !== _loadSeq || !_container) return;
 
-  // Which sales are stopping the backend computing profit? Reuses the paid/processing
-  // orders already fetched above (index 8) — invoiced sales land there too (status
-  // 'paid'), so this costs no extra list call, only a bounded fan-out of detail calls
-  // for the invoice-channel rows. Never blocks the render: it fails soft to null.
+  // Which sales are stopping the backend computing profit? This owns its own order fetch —
+  // it must see EVERY status, and index 8 is filtered to paid|processing for the tracking
+  // card. Reusing it is what made this scan blind (ERR-074). Never blocks the render: it
+  // fails soft to null.
   let missingCost = null;
   try {
-    missingCost = await computeMissingCostAlert(val(8), val(1));
+    missingCost = await computeMissingCostAlert({ from, to }, val(1), signal);
   } catch (err) {
     window.DebugLog?.warn?.('[Dashboard] missing-cost alert failed', err?.message || err);
   }
@@ -921,7 +925,7 @@ function render(d) {
       <span class="admin-dash__updated">Updated ${esc(timeAgo(d._loadedAt))}</span>
     </div>
     ${renderKpiStrip(d)}
-    ${renderOverviewSection()}
+    ${renderOverviewSection(d)}
     ${renderAlertsSection(d)}
     ${rowN('Products', 'cyan', [
       chartCard('Top SKUs by revenue', 'top 8', 'dash-c-sku-revenue', 4),
@@ -996,13 +1000,17 @@ function rowN(label, accent, cards) {
 
 // Full-width real-numbers performance overview (replaces the old normalized "All metrics"
 // chart). Just a tall canvas — drawPerformanceOverview fills it; no toolbar/legend wiring.
-function renderOverviewSection() {
+function renderOverviewSection(d) {
+  // Name the series the chart actually plots. `net_profit_series` is absent from the live
+  // bundle, so the profit dataset is really gross profit — see drawPerformanceOverview.
+  const npList = resolveList(d?.sNetProfit, ['series', 'data']);
+  const profitWord = (Array.isArray(npList) && npList.length > 0) ? 'net profit' : 'gross profit';
   return `
     <section class="admin-dash-row">
       <div class="admin-dash-row__label admin-dash-row__label--cyan">Performance <small>${esc(rangeLabel())}</small></div>
       <div class="admin-dash">
         <div class="admin-dash__cell--12 admin-card">
-          <div class="admin-card__title"><span>Performance overview <small>revenue · net profit · orders — real values, not normalized</small></span></div>
+          <div class="admin-card__title"><span>Performance overview <small>revenue · ${esc(profitWord)} · orders — real values, not normalized</small></span></div>
           <div class="admin-chart-box admin-chart-box--tall"><canvas id="dash-c-overview"></canvas></div>
         </div>
       </div>
@@ -1050,11 +1058,25 @@ function renderAlertsSection(d) {
   const lowWhy = `${lowUnit} under ${LOW_MARGIN_PCT}% net margin — reprice or drop`;
   const lowCount = `${lowMargin.count}${lowMargin.capped ? '+' : ''}`;
 
-  // The missing-cost card only earns its place when it has something to say. Without
-  // it, a Dashboard full of "—" profit tiles is a dead end: the owner can see that
-  // something is wrong but not what, or how to fix it.
-  const showMissing = !!(missingCost && (missingCost.count > 0 || missingCost.cogsUnknown));
-  const span = showMissing ? 3 : 4;
+  // The fourth card has TWO jobs, and conflating them is what made it lie (ERR-074):
+  //
+  //   • Culprits found → the owner can fix this: open the sale, add the cost. Actionable.
+  //   • No culprits, but the backend still won't hand over a profit → this is NOT the
+  //     owner's data. Telling them to "add a cost to every sale" when all 84 line items
+  //     already carry one sends them hunting for a problem that does not exist. That is
+  //     precisely what this card did, for as long as kpi-summary has been dropping profit
+  //     on ranges containing an invoiced sale.
+  //
+  // So the copy is chosen from what the scan actually FOUND, never from the mere fact that
+  // profit is missing. "Action needed" must mean the owner can act.
+  const cur = d.kpis?.current ?? {};
+  const recovered = recoverProfitFromSeries(cur, d.sGrossProfit);
+  const hasCulprits  = !!(missingCost && missingCost.count > 0);
+  // Only cry "degraded" when the tiles are actually blank — if the series rebuild worked,
+  // the dashboard is functional and the tile's own tooltip carries the provenance.
+  const showDegraded = !hasCulprits && cur.gross_profit == null && !recovered;
+  const showFourth   = hasCulprits || showDegraded;
+  const span = showFourth ? 3 : 4;
 
   const cards = [
     alertCard('Orders needing tracking', tracking.count,
@@ -1065,87 +1087,107 @@ function renderAlertsSection(d) {
       lowWhy, lowMargin.items, lowMargin.count > 0 ? 'warning' : null, 'None under threshold', span),
   ];
 
-  if (showMissing) {
+  if (hasCulprits) {
     cards.push(alertCard(
       'Sales missing a cost', missingCost.count,
-      'gross & net profit can’t be calculated for ANY period until every sale has a cost of goods — add one to bring your profit figures back',
-      missingCost.items,
-      'danger',
-      // count is 0 but the backend still won't give us a COGS → something outside the
-      // fetched window. Say so rather than claim everything is fine.
-      'A sale outside this range has no cost recorded',
-      span,
+      'these sales have no cost of goods recorded, so profit can’t be computed for any range that contains them — add a cost to bring the figures back',
+      missingCost.items, 'danger', 'All sales are costed', span,
     ));
+  } else if (showDegraded) {
+    // Every sale we could inspect is costed, yet profit is still missing. Name the real
+    // suspect instead of inventing a data problem, and say how far the scan actually got —
+    // a scan that couldn't finish must not be reported as a clean bill of health.
+    const scanned = missingCost?.scanned ?? 0;
+    const why = missingCost?.incomplete
+      ? `couldn’t check every sale (${scanned} scanned) — profit is unavailable and the cause is unconfirmed`
+      : `all ${scanned} sales in this range are costed, yet the backend still won’t return a profit — this is a kpi-summary defect, not your data (ERR-074)`;
+    cards.push(alertCard('Profit unavailable', '—', why, [], 'warning', '', span));
   }
 
   return rowN('Action needed', 'danger', cards);
 }
 
 /**
- * Find the sales that are stopping the backend from computing profit.
+ * Find the sales that are stopping the backend from computing profit — if there are any.
  *
- * The backend returns gross_profit / net_profit as null for the WHOLE period when
- * any single sale in it has an un-costed line (COGS honesty). That's correct, but on
- * its own it's baffling: every profit tile reads "—" and nothing says why. This names
- * the culprits and links straight to the fix.
+ * A sale is un-costed in one of two ways:
+ *   1. It has items, and one of them has no `supplier_cost_snapshot`.
+ *   2. It has a total but ZERO items — nothing to attach a cost to. (Historically caused by
+ *      an invoice whose product_code didn't resolve; the backend now repairs those.)
  *
- * Two ways a sale can be un-costed:
- *   1. It has items, and one of them has no supplier_cost_snapshot.
- *   2. It has a total but ZERO items. This is the live case: when a saved invoice's
- *      product_code doesn't resolve in the catalogue, the backend materialises the
- *      shadow order with revenue but drops the line entirely — so there is nothing to
- *      attach a cost to. (Reported to the backend; the FE still has to explain it.)
+ * ⚠ This scan used to be blind, and a blind scan is worse than no scan: it reported "0", the
+ * card printed "add a cost to every sale", and every sale already had one. Three holes, all
+ * of them in WHICH orders it looked at (ERR-074):
+ *   • it reused the *tracking* alert's order list — `statuses: ['paid','processing']` — so
+ *     `shipped` and `completed` sales, 10 of 59 on the live store, were never examined;
+ *   • page 1 / limit 50, against 59 revenue orders;
+ *   • only invoice-channel rows got the detail call, and the detail call is the ONLY place
+ *     `supplier_cost_snapshot` is visible (the list omits it, ERR-039) — so an un-costed
+ *     WEBSITE order was structurally undetectable.
  *
- * Bounded on purpose: the orders LIST omits supplier_cost_snapshot (ERR-039), so
- * knowing case 1 needs a detail call per order. We only pay that for invoice-channel
- * orders — website orders get their cost snapshotted at checkout and, empirically,
- * don't miss it. Case 2 is free (visible on the list row).
+ * So it now owns its fetch, takes every status, paginates, and details every order. The cost
+ * is a bounded fan-out of cheap cached GETs, paid once per dashboard load.
+ *
+ * Reports `scanned` and `incomplete` so the caller can never present a truncated or partly
+ * failed scan as a clean bill of health — that conflation is the whole bug.
  */
-const MISSING_COST_DETAIL_CAP = 25;
+const MISSING_COST_DETAIL_CAP = 120;   // ≫ the store's order count; a runaway backstop, not a filter
+const MISSING_COST_PAGE = 100;
+const MISSING_COST_MAX_PAGES = 3;
+const MISSING_COST_BATCH = 6;          // keep the detail fan-out under the 60/min limiter
 
-async function computeMissingCostAlert(orders, kpis) {
+const isInvoiceOrder = (o) => String(o?.payment_method || '').toLowerCase() === 'invoice'
+  || /^INV-/i.test(String(o?.order_number || ''));
+
+async function computeMissingCostAlert(range, kpis, signal) {
   const cogsUnknown = kpis?.current ? kpis.current.gross_profit == null : false;
-  const list = firstArray(orders, ['orders', 'data', 'items']);
-  if (!list.length) return { count: 0, items: [], cogsUnknown };
+  const base = { cogsUnknown, count: 0, items: [], scanned: 0, incomplete: false };
 
-  const isInvoice = (o) => String(o.payment_method || '').toLowerCase() === 'invoice'
-    || /^INV-/i.test(String(o.order_number || ''));
-  const itemCount = (o) => (Array.isArray(o.items) ? o.items.length
-    : Array.isArray(o.order_items) ? o.order_items.length
-      : (o.items_count ?? o.item_count ?? null));
+  // Every status, not just the two the tracking card cares about. Cancelled orders carry no
+  // revenue and the backend excludes them from COGS, so they're excluded here too — counting
+  // them would invent culprits the backend never looks at.
+  const list = [];
+  let incomplete = false;
+  for (let page = 1; page <= MISSING_COST_MAX_PAGES; page++) {
+    const resp = await AdminAPI.getOrders({ from: range.from, to: range.to }, page, MISSING_COST_PAGE, signal);
+    const rows = firstArray(resp, ['orders', 'data', 'items']);
+    list.push(...rows);
+    if (rows.length < MISSING_COST_PAGE) break;
+    if (page === MISSING_COST_MAX_PAGES) incomplete = true;   // more pages exist than we read
+  }
+  const revenueOrders = list.filter(o => String(o.status || '').toLowerCase() !== 'cancelled');
+  if (!revenueOrders.length) return base;
+
   const totalOf = (o) => Number(o.total_amount ?? o.total ?? 0) || 0;
 
+  const budget = revenueOrders.slice(0, MISSING_COST_DETAIL_CAP);
+  if (budget.length < revenueOrders.length) incomplete = true;
+
   const culprits = [];
-  const needDetail = [];
-
-  for (const o of list) {
-    const n = itemCount(o);
-    if (n === 0 && totalOf(o) > 0) {
-      culprits.push({ order: o, reason: 'no items recorded' });   // case 2 — free to detect
-    } else if (isInvoice(o)) {
-      needDetail.push(o);                                          // case 1 — needs a detail call
-    }
+  for (let i = 0; i < budget.length; i += MISSING_COST_BATCH) {
+    const batch = budget.slice(i, i + MISSING_COST_BATCH);
+    const results = await Promise.allSettled(batch.map(o => AdminAPI.getOrder(o.id)));
+    results.forEach((res, j) => {
+      const order = batch[j];
+      // A detail call we couldn't make is an order we did NOT clear. Say so, don't assume.
+      if (res.status !== 'fulfilled' || !res.value) { incomplete = true; return; }
+      const items = res.value.items || res.value.order_items || [];
+      if (!items.length && totalOf(order) > 0) {
+        culprits.push({ order, reason: 'no items recorded' });
+        return;
+      }
+      const un = items.filter(it => it.supplier_cost_snapshot == null);
+      if (un.length) {
+        const skus = un.map(it => it.sku || it.product_sku).filter(Boolean).slice(0, 2).join(', ');
+        culprits.push({ order, reason: skus ? `no cost: ${skus}` : 'no cost recorded' });
+      }
+    });
   }
-
-  const budget = needDetail.slice(0, MISSING_COST_DETAIL_CAP);
-  const results = await Promise.allSettled(budget.map(o => AdminAPI.getOrder(o.id)));
-  results.forEach((res, i) => {
-    if (res.status !== 'fulfilled' || !res.value) return;
-    const det = res.value;
-    const items = det.items || det.order_items || [];
-    if (!items.length && totalOf(budget[i]) > 0) {
-      culprits.push({ order: budget[i], reason: 'no items recorded' });
-      return;
-    }
-    const un = items.filter(it => it.supplier_cost_snapshot == null);
-    if (un.length) {
-      const skus = un.map(it => it.sku).filter(Boolean).slice(0, 2).join(', ');
-      culprits.push({ order: budget[i], reason: skus ? `no cost: ${skus}` : 'no cost recorded' });
-    }
-  });
 
   return {
     cogsUnknown,
+    incomplete,
+    scanned: budget.length,
     count: culprits.length,
     items: culprits.map(({ order, reason }) => ({
       label: `${order.order_number || String(order.id).slice(0, 8)} · ${formatPrice(totalOf(order))}`,
@@ -1153,7 +1195,7 @@ async function computeMissingCostAlert(orders, kpis) {
       badgeCls: 'admin-badge--failed',
       // Invoiced sales are fixed in the invoice editor ("Our Cost"); a website order's
       // cost lives on the product.
-      href: isInvoice(order) ? 'invoices' : `orders?search=${encodeURIComponent(order.order_number || '')}`,
+      href: isInvoiceOrder(order) ? 'invoices' : `orders?search=${encodeURIComponent(order.order_number || '')}`,
     })),
   };
 }
@@ -1240,6 +1282,58 @@ function fmtPct(v) {
   return `${n.toFixed(1)}%`;
 }
 
+/**
+ * Rebuild Gross/Net Profit from the backend's own per-bucket series when kpi-summary
+ * drops them.
+ *
+ * `kpi-summary` returns `gross_profit: null` (and `net_profit`, `margin_proxy`) for ANY
+ * range containing an invoiced sale — even though those sales' lines all carry a real
+ * `supplier_cost_snapshot`. Measured against live data 2026-07-14 by probing the endpoint
+ * one week at a time: 17 of 19 weeks returned a real gross profit; the only two that
+ * nulled were the two holding the three INV- shadow orders. All 84 line items across all
+ * 59 revenue orders are costed. Nothing is missing a cost — the summary endpoint is simply
+ * dropping the figure. Backend defect (ERR-074).
+ *
+ * The same backend computes a real gross profit for those very weeks in
+ * `gross_profit_series`. The number exists; only one endpoint loses it.
+ *
+ * This is NOT the frontend inventing COGS — that is banned (ERR-028) and stays banned.
+ * Every input below is a figure the backend published and vouches for:
+ *     gross = Σ gross_profit_series[].gross_profit   (the backend's own weekly figures)
+ *     net   = gross − stripe_fees − operating_expenses
+ * That net formula is kpi-summary's own, fed by its own still-non-null fields; it was
+ * verified to the cent against four un-poisoned weeks before being relied on here.
+ *
+ * Honesty gates — returns null (leaving the tiles at "—") unless ALL hold:
+ *   • kpi-summary genuinely nulled gross_profit — a real backend figure always wins
+ *   • the series exists and is non-empty
+ *   • EVERY bucket is non-null. One unknown bucket means COGS really is unknown somewhere
+ *     in the range, and then "—" is the honest answer. ERR-028 stands.
+ *   • stripe_fees / operating_expenses are themselves known, or `net` stays null on its own
+ *
+ * Self-disabling: skipped entirely the moment kpi-summary returns a real gross_profit, so
+ * the backend fix retires this with no coordination and no second deploy.
+ */
+function recoverProfitFromSeries(cur, grossProfitSeries) {
+  if (!cur || cur.gross_profit != null) return null;
+
+  const rows = resolveList(grossProfitSeries, ['series', 'data']);
+  if (!Array.isArray(rows) || rows.length === 0) return null;
+
+  let gross = 0;
+  for (const r of rows) {
+    const v = numOrNull(r.gross_profit);
+    if (v == null) return null;   // unknown bucket → unknown range. Don't guess.
+    gross += v;
+  }
+
+  const fees = numOrNull(cur.stripe_fees);
+  const opex = numOrNull(cur.operating_expenses);
+  const net  = (fees != null && opex != null) ? gross - fees - opex : null;
+
+  return { gross, net };
+}
+
 function renderKpiStrip(d) {
   // Invoiced sales are counted by the BACKEND (kpi-summary carries
   // includes_invoices: true). The frontend does not aggregate — it renders.
@@ -1259,14 +1353,21 @@ function renderKpiStrip(d) {
   const oosCount = outOfStockCount(d.outOfStock);
   const newCustomers     = cc.new_customers ?? cc.new ?? null;
   const newCustomersPrev = cp.new_customers ?? cp.new ?? null;
-  const netProfit = cur.net_profit ?? null;
   const noDelta = FilterState.get('period') === 'all';   // all-time → deltas are meaningless
+
+  // kpi-summary drops profit for any range holding an invoiced sale (ERR-074). When it does,
+  // rebuild both figures from the backend's own weekly gross-profit series. Null → the tiles
+  // stay "—", exactly as before. There is no previous-period series, so `prev` is left alone
+  // and the delta badges simply don't render — honest, rather than a delta against a guess.
+  const recovered  = recoverProfitFromSeries(cur, d.sGrossProfit);
+  const grossProfit = cur.gross_profit ?? recovered?.gross ?? null;
+  const netProfit   = cur.net_profit   ?? recovered?.net   ?? null;
 
   // Backend kpi-summary omits gross_margin/net_margin → derive from profit ÷ revenue (matches
   // how the headline tiles read). Uses each profit's own revenue base; null when revenue is 0.
   const marginOf = (profit, revenue) =>
     profit != null && revenue ? (profit / revenue) * 100 : null;
-  const grossMarginPct     = cur.gross_margin  != null ? Number(cur.gross_margin)  : marginOf(cur.gross_profit, cur.revenue);
+  const grossMarginPct     = cur.gross_margin  != null ? Number(cur.gross_margin)  : marginOf(grossProfit, cur.revenue);
   const grossMarginPctPrev = prev.gross_margin != null ? Number(prev.gross_margin) : marginOf(prev.gross_profit, prev.revenue);
   const netMarginPct       = cur.net_margin    != null ? Number(cur.net_margin)    : marginOf(netProfit, cur.revenue);
   const netMarginPctPrev   = prev.net_margin   != null ? Number(prev.net_margin)   : marginOf(prev.net_profit, prev.revenue);
@@ -1274,14 +1375,18 @@ function renderKpiStrip(d) {
   // "—" on a profit tile is the honest answer when the backend can't compute COGS
   // (a sale with an un-costed line). The Action-needed panel names the offenders.
   const COGS_UNKNOWN = ' Shows "—" when any sale in the range has no cost of goods recorded — see "Sales missing a cost" under Action needed.';
+  // …but when we rebuilt the figure, say so on the tile rather than passing it off as the
+  // summary endpoint's own number.
+  const REBUILT = ' Rebuilt by summing the backend’s own weekly gross-profit series: kpi-summary is currently dropping this figure for any range containing an invoiced sale (ERR-074).';
+  const profitNote = recovered ? REBUILT : COGS_UNKNOWN;
 
   const tiles = [
     { label: 'Revenue', value: cur.revenue != null ? formatPrice(cur.revenue) : null, raw: cur.revenue, prev: prev.revenue,
       tooltip: 'Total sales (incl. GST) for the selected range. Includes invoiced (phone / walk-in / B2B) sales.' },
     {
-      label: 'Gross Profit', value: cur.gross_profit != null ? formatPrice(cur.gross_profit) : null,
-      raw: cur.gross_profit, prev: prev.gross_profit, stackNext: true,
-      tooltip: `Revenue (ex-GST) − COGS, computed by the backend.${COGS_UNKNOWN}`,
+      label: 'Gross Profit', value: grossProfit != null ? formatPrice(grossProfit) : null,
+      raw: grossProfit, prev: prev.gross_profit, stackNext: true,
+      tooltip: `Revenue (ex-GST) − COGS, computed by the backend.${profitNote}`,
     },
     {
       label: 'Gross Margin', value: fmtPct(grossMarginPct), raw: grossMarginPct, prev: grossMarginPctPrev,
@@ -1290,7 +1395,7 @@ function renderKpiStrip(d) {
     {
       label: 'Net Profit', value: netProfit != null ? formatPrice(netProfit) : null,
       raw: netProfit, prev: prev.net_profit, alert: netProfit != null && netProfit < 0, stackNext: true,
-      tooltip: `Revenue − COGS − fees − GST − Opex, computed by the backend. Invoiced sales carry no card fee (bank transfer).${COGS_UNKNOWN}`,
+      tooltip: `Revenue − COGS − fees − GST − Opex, computed by the backend. Invoiced sales carry no card fee (bank transfer).${profitNote}`,
     },
     {
       label: 'Net Margin', value: fmtPct(netMarginPct), raw: netMarginPct, prev: netMarginPctPrev,

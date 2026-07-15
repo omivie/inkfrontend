@@ -109,10 +109,10 @@ test('§1 no categories-mega anywhere; shared headers stay byte-identical', () =
         'mega-nav.js must not wire the removed categories panel');
     assert.ok(!LAYOUT_CSS.includes('.categories-mega'),
         'layout.css must not style the removed categories mega');
-    // 27 since Jul 2026: the /genuine-vs-compatible explainer page was added
-    // for Merchant Center reinstatement and ships the same shared header.
-    assert.equal(PAGES_WITH_NAV.length, 27,
-        `expected 27 pages with the shared nav, got ${PAGES_WITH_NAV.length}`);
+    // 28 since Jul 2026: /genuine-vs-compatible (Merchant Center reinstatement)
+    // and the new /quote trade-quote landing page both ship the shared header.
+    assert.equal(PAGES_WITH_NAV.length, 28,
+        `expected 28 pages with the shared nav, got ${PAGES_WITH_NAV.length}`);
     const hashes = new Set(PAGES_WITH_NAV.map(({ file, html }) => {
         const header = extractSiteHeader(html);
         assert.ok(header, `${file} has a nav but no site-header block`);

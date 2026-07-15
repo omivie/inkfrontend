@@ -62,6 +62,12 @@ function invoiceError(resp, fallback) {
   // String-error envelopes (e.g. 404 "Endpoint not found") carry the machine
   // code at the top level — keep it so callers can branch (e.g. "backend pending").
   if (!err.code && resp?.code) err.code = resp.code;
+  // The shared client FLATTENS a VALIDATION_FAILED envelope to a string `error`
+  // plus a top-level `details` (js/api.js) — so `e` above is a string and the
+  // object branch never sets err.details. Carry the top-level details through, or
+  // surfaceUnresolvedCodes (invoices.js / quick-order.js) can't pin the offending
+  // line and the ERR-071 fail-soft net silently degrades to a generic toast.
+  if (err.details == null && resp?.details != null) err.details = resp.details;
   return err;
 }
 
@@ -2904,21 +2910,27 @@ const AdminAPI = {
     }
   },
 
+  // A quick order materialises a REAL order, and its line codes are validated
+  // against products.sku at the write boundary (ERR-071). So its writes must speak
+  // the same envelope as the invoice writes above: invoiceError() attaches err.code
+  // + err.details, which is what lets the page pin a 400 VALIDATION_FAILED's
+  // unresolved lines inline (and kills the [object Object] risk when resp.error is
+  // an object rather than a string).
   async createQuickOrder(payload) {
     const resp = await window.API.post('/api/admin/quick-orders', payload);
-    if (resp && resp.ok === false) throw new Error(resp.error?.message || resp.error || 'Create quick order failed');
+    if (resp && resp.ok === false) throw invoiceError(resp, 'Create quick order failed');
     return resp?.data?.quick_order ?? resp?.data ?? null;
   },
 
   async updateQuickOrder(quickOrderId, payload) {
     const resp = await window.API.put(`/api/admin/quick-orders/${encodeURIComponent(quickOrderId)}`, payload);
-    if (resp && resp.ok === false) throw new Error(resp.error?.message || resp.error || 'Update quick order failed');
+    if (resp && resp.ok === false) throw invoiceError(resp, 'Update quick order failed');
     return resp?.data?.quick_order ?? resp?.data ?? null;
   },
 
   async deleteQuickOrder(quickOrderId) {
     const resp = await window.API.delete(`/api/admin/quick-orders/${encodeURIComponent(quickOrderId)}`);
-    if (resp && resp.ok === false) throw new Error(resp.error?.message || resp.error || 'Delete quick order failed');
+    if (resp && resp.ok === false) throw invoiceError(resp, 'Delete quick order failed');
     return resp?.data ?? null;
   },
 

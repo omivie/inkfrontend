@@ -248,6 +248,7 @@
                             <ul class="footer-links">
                                 <li><a href="/ink-cartridges">Ink Cartridges</a></li>
                                 <li><a href="/toner-cartridges">Toner Cartridges</a></li>
+                                <li><a href="/shop?category=drums">Drum Units</a></li>
                                 <li><a href="/ribbons">Printer Ribbons</a></li>
                                 <li><a href="/shop">Shop All</a></li>
                             </ul>
@@ -525,13 +526,17 @@
 
     // Wire the newsletter form now that it's in the DOM (idempotent).
     bindNewsletterForm(footer.querySelector('.newsletter__form'), 'footer');
-    // The Shop column's three category links are STATIC and hand-curated. The
+    // The Shop column's four category links are STATIC and hand-curated. The
     // thing the owner killed on 2026-07-02 was the *feed-hydrated* Categories
     // column (GET /api/site/nav), which rendered whatever the feed happened to
     // return — that must not come back, and footer.js must never fetch. The
     // static links were re-added 2026-07-14 because the backend's crawler
     // footer lists these same categories to Googlebot, so humans were seeing
     // fewer links than bots — the wrong side of a cloaking review to be on.
+    // Drum Units (/shop?category=drums) was the last bot-only category; it was
+    // added here 2026-07-15 so the human Shop column lists the same four the bot
+    // does (Ink · Toner · Drum Units · Ribbons) — anti-cloaking §2c, closing the
+    // divergence in readfirst/footer-redesign-backend-jul2026.md.
 
     // Google Customer Reviews - badge + opt-in survey loader
     (function () {

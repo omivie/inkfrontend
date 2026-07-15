@@ -115,18 +115,25 @@ test('§2 no customer-facing HTML carries the retired compatible-warranty claim'
 // ─────────────────────────────────────────────────────────────────────────
 // §3. The compatible-PDP disclaimer mirrors the backend prerender.
 // ─────────────────────────────────────────────────────────────────────────
-test('§3 PDP disclaimer carries the 30-day + CGA sentence, not the retired claim', () => {
+test('§3 PDP disclaimer is the condensed lean form, not the retired claim', () => {
     const src = READ('js/product-detail-page.js');
     // Isolate the rendered template so we don't scan surrounding comments.
     const start = src.indexOf('id="compat-disclaimer"');
     const panel = src.slice(start, src.indexOf('</div>`', start));
     assert.ok(start !== -1 && panel, 'compat-disclaimer template must be present');
 
-    assert.match(panel, /Supplied by Office Consumables Ltd, trading as InkCartridges\.co\.nz\./);
-    assert.match(panel, /Compatible cartridges are covered by our 30-day satisfaction guarantee\./,
-        'the panel must state the true 30-day satisfaction guarantee');
-    assert.match(panel, /Your statutory rights under the New Zealand Consumer Guarantees Act 1993 are unaffected\./,
-        'the panel must carry the CGA-unaffected sentence (parity with the prerender)');
+    // Condensed 2026-07-15 (owner request) to the leanest compliant form:
+    // third-party / not-made-or-endorsed-by-OEM / named legal entity.
+    assert.match(panel, /Compatible \(third-party\) \$\{type\} for \$\{oem\} printers/);
+    assert.match(panel, /not made or endorsed by \$\{oem\}/);
+    assert.match(panel, /Sold by Office Consumables Ltd\./);
+    // The 30-day satisfaction-guarantee + CGA sentence was removed from the
+    // panel (CGA disclosure still ships site-wide in the footer). The panel is
+    // now shorter than the prerender — safe cloaking direction; §5b re-sync owed.
+    assert.doesNotMatch(panel, /30-day satisfaction guarantee/,
+        'the condensed panel no longer carries the 30-day satisfaction-guarantee sentence');
+    assert.doesNotMatch(panel, /Consumer Guarantees Act 1993 are unaffected/,
+        'the condensed panel no longer carries the CGA-unaffected sentence');
     assert.doesNotMatch(panel, /12[- ]month|replacement warranty/i,
         'the retired 12-month replacement-warranty claim must not reappear in the panel');
 });

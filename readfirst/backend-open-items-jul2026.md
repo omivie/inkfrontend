@@ -27,34 +27,91 @@ SITE=https://www.inkcartridges.co.nz
 
 ## P0 — Revenue reporting is broken
 
-### 1. Zero-item shadow orders null out ALL profit
+### 1. `kpi-summary` nulls ALL profit for any range containing an invoiced sale
 
-**Symptom.** When an invoice line's SKU doesn't resolve, the shadow order is created with
-**revenue but zero `order_items`**. COGS then computes as `null` for the **entire period**, so the
-owner sees **no gross or net profit at all** — not a wrong number, an absent one. One bad invoice
-poisons every dashboard aggregate.
+> **This supersedes the old "zero-item shadow orders" P0, which is now CLOSED — see below.**
+> The zero-item theory was wrong. We measured it. Please read the measurement before acting.
 
-**Why it's P0.** It is silent, it is total, and it scales: a single unresolvable line takes out the
-whole month.
+**Symptom.** On `/admin#dashboard?period=all`, Gross Profit, Net Profit, Gross Margin and Net Margin
+all render as "—". Revenue ($7,091.58), Orders (59), AOV and Stripe fees are all fine.
+`GET /api/admin/analytics/kpi-summary` returns:
 
-**What to change.** A shadow order must never be created with an empty item set. Pick one and be
-explicit about it:
-- **(a) Reject** the invoice→order sync when a line's SKU can't be resolved, and surface the error
-  (preferred — the FE already has a guard that forces the owner to pick a real SKU at save time, so
-  new invoices shouldn't produce these).
-- **(b) Create** the shadow order but mark it explicitly cost-unknown, and make the COGS aggregation
-  **skip** rather than **null** the period.
+```jsonc
+{ "revenue": 7091.58, "orders": 59, "aov": 120.2, "stripe_fees": 171.11, "operating_expenses": 0,
+  "invoice_orders": 3, "includes_invoices": true,
+  "gross_profit": null,   // ← the defect
+  "net_profit":   null,   // ← the defect
+  "margin_proxy": null }  // ← the defect
+```
 
-Whatever you choose: **an unknown cost must never propagate as `null` across unrelated orders**, and
-it must never be coerced to `0` (see ERR-068 — `Number(null) === 0` produced a false "0.0% margin,
-reprice-or-drop" alert on the owner's dashboard).
+**It is not COGS honesty. Nothing is missing a cost.** We pulled the detail for every order in the
+range: **59 revenue orders (of 73; 14 cancelled), 84 line items, and all 84 carry a non-null
+`supplier_cost_snapshot`.** No zero-item orders. Nothing to be honest *about*.
 
-**Acceptance.** With at least one unresolvable-SKU invoice in the period, `/api/admin/analytics/*`
-still returns a real gross/net profit for every *other* order in that period.
+**Repro — probe the endpoint one week at a time.** This is the whole diagnosis in one loop:
 
-**Also:** `GET /invoices/:id` snapshots `products.cost_price` into the shadow order but **never
-echoes `supplier_cost_excl_gst` back**, so the FE re-derives it on open (`backfillCostsFromCatalogue()`).
-Echoing it would let us delete that workaround. Nice-to-have, not blocking.
+```bash
+# 19 consecutive weeks, period=all. 17 return a real gross_profit.
+# The ONLY two that return null are the two containing invoiced sales.
+2026-06-15 → gross_profit 205.39   invoice_orders 0
+2026-06-22 → gross_profit NULL     invoice_orders 2   ← INV-3263, INV-3264
+2026-06-29 → gross_profit  53.97   invoice_orders 0
+2026-07-06 → gross_profit NULL     invoice_orders 1   ← INV-3265
+2026-07-13 → gross_profit  49.45   invoice_orders 0
+```
+
+**100% correlation with `invoice_orders > 0`.** Because `period=all` spans those weeks, one invoiced
+sale blanks the owner's entire dashboard.
+
+**And your own series endpoint gets it right.** `gross_profit_series` in the *same*
+`dashboard-bundle` response returns a real gross profit for **all 19 buckets — including the two
+that `kpi-summary` nulls** (2026-06-22 → $193.52, 2026-07-06 → $183.11). So the number exists and
+your code can compute it. Two code paths, one aggregate, different answers.
+
+**The three shadow orders are healthy.** INV-3263 / 3264 / 3265 each have one line item, a real SKU
+(`CTN258XLKCMY`, `CLC531XLKCMY`, `G206XKCMY`) and a real cost ($139.80 / $58.96 / $776.64). Your
+fallback resolver fixed them. They are being nulled anyway.
+
+**What to change.** Find why `kpi-summary`'s COGS aggregate goes NULL when an
+invoice-channel order (`payment_method = 'invoice'`) is in range while `gross_profit_series` does
+not. Likely a NULL-propagating join or a `SUM()` over a subquery that returns no row for the
+invoice channel — a `NULL` in an arithmetic expression makes the whole expression `NULL`, silently.
+Whatever the cause: **never coerce the fix to `0`** (ERR-068 — `Number(null) === 0` once produced a
+false "0.0% margin, reprice-or-drop" alert on the owner's dashboard).
+
+**Acceptance.** For `date_from=2026-06-22&date_to=2026-06-28`, `kpi-summary` returns a real
+`gross_profit` — and it agrees with what `gross_profit_series` already reports for that bucket.
+
+**Meanwhile, we've un-blanked the dashboard ourselves.** The frontend now rebuilds the headline
+figures by **summing your own `gross_profit_series` buckets** (`gross − stripe_fees −
+operating_expenses`, your own formula — we verified it reproduces your `net_profit` to the cent on
+four un-poisoned weeks). It is **self-disabling**: the moment `kpi-summary` returns a real
+`gross_profit`, we use yours and the workaround never runs. So this is no longer an emergency —
+but it is still your bug, and we'd like to delete our workaround.
+
+### 1b. `net_profit_series` does not exist
+
+The bundle has **no `net_profit_series` key at all** — only `gross_profit_series`. Our Performance
+chart has been falling back to gross profit and labelling it "Net profit" ever since (our bug, now
+fixed: the legend names what it actually plots). **Either ship `net_profit_series` or tell us it
+isn't coming** and we'll stop reserving the slot.
+
+### ~~1c. Zero-item shadow orders~~ — ✅ CLOSED, verified fixed
+
+The original P0 ("an invoice whose SKU doesn't resolve materialises a shadow order with revenue but
+zero `order_items`, nulling COGS for the whole period"). **Your fallback resolver fixed it.** All
+three shadow orders now carry costed line items; there are no zero-item orders anywhere in the
+range. We've also closed the hole at our end — invoice/quick-order line codes are validated against
+real `products.sku` at the save choke point (ERR-071), so a typed non-SKU can no longer be persisted.
+Nothing further needed.
+
+**Also — ✅ CLOSED (2026-07-15).** We thought `GET /invoices/:id` never echoed `supplier_cost_excl_gst`.
+It does (`serializeInvoice`) — verified live: #3263 comes back with `supplier_cost_excl_gst: 139.8`,
+`cost_source:"auto"`. The empty "Our Cost" box was the *stored* value being null on the truncated-code
+rows, now canonicalised + repaired. Our `fetchProductCosts`/`backfillCostsFromCatalogue()` workaround
+has been **deleted**. We also wired the §3.1 `400 VALIDATION_FAILED` backstop into both writers (the
+fail-soft net is now rendered per-line, not a generic toast). See
+`invoice-sku-integrity-backend-jul2026.md` → RESOLVED. Nothing further needed.
 
 ---
 
@@ -98,7 +155,7 @@ signal; free to fix.
 
 **Acceptance.** The grep returns only `37A Archibald Road`.
 
-### 4. The bot footer advertises a category humans can't see
+### 4. The bot footer advertises a category humans can't see — ✅ CLOSED (FE) 2026-07-15
 
 **Repro.**
 ```bash
@@ -117,6 +174,12 @@ Either is fine. The two footers just need to agree.
 
 **Acceptance.** The set of category links in the bot footer equals the set in the rendered footer.
 
+> **✅ RESOLVED (FE) 2026-07-15.** Backend confirmed it's keeping Drum Units in the bot footer (owner's
+> call), so the FE added **`Drum Units` → `/shop?category=drums`** to the human Shop column, ordered to
+> match the bot: **Ink Cartridges · Toner Cartridges · Drum Units · Printer Ribbons**. Both category
+> sets now agree. Static link only (no `getSiteNav` fetch). Pinned by
+> `tests/footer-redesign-jul2026.test.js` §3; verified live. **No backend action.**
+
 ### 5. ⚠️ Correction — do NOT "fix" the footer company number
 
 Your CMS handoff said:
@@ -134,6 +197,38 @@ done
 ```
 
 The **visible footer line carries no company number on either side.** They already agree.
+
+### 5b. PDP compatible-product disclaimer — condensed on the FE; prerender re-sync owed (2026-07-15)
+
+**Reopened.** The owner condensed the human-facing panel on **2026-07-15** to the leanest compliant
+form. This supersedes the earlier "both sides carry the 30-day + CGA sentence" parity target — the
+30-day satisfaction-guarantee + CGA sentence has been **removed from the panel** (CGA disclosure
+still ships site-wide in the footer, so nothing legally required is lost).
+
+**New parity target (both sides must serve this, verbatim; `{type}`/`{OEM}` dynamic):**
+
+> Compatible (third-party) {type} for {OEM} printers — not made or endorsed by {OEM}. Sold by
+> Office Consumables Ltd.
+
+**FE status (shipped 2026-07-15, FE-first):** the SPA panel (`#compat-disclaimer`,
+`renderComplianceDisclaimer()` in `js/product-detail-page.js`) now renders exactly the sentence
+above. The retired *12-month replacement warranty* claim stays gone. The panel is now **shorter than
+the prerender** — the **safe cloaking direction** (bots see more disclaimer than humans, not less),
+so this is a parity cleanup, not a live risk.
+
+**Backend action.** Update `prerender.js` / the compatible-PDP meta description to serve the
+condensed copy above, dropping BOTH the old `12-month replacement warranty…` line AND the
+`Compatible cartridges are covered by our 30-day satisfaction guarantee. Your statutory rights
+under the New Zealand Consumer Guarantees Act 1993 are unaffected.` sentence, so bot == human again.
+**Acceptance:**
+```bash
+curl -s -A "$BOT" "$SITE/products/oki-compatible-393-printer-ribbon-black/C-OKI-393-RIB-BK" \
+  | grep -c "12-month replacement warranty on compatible cartridges"      # → 0
+curl -s -A "$BOT" "$SITE/products/oki-compatible-393-printer-ribbon-black/C-OKI-393-RIB-BK" \
+  | grep -c "covered by our 30-day satisfaction guarantee"                # → 0
+curl -s -A "$BOT" "$SITE/products/oki-compatible-393-printer-ribbon-black/C-OKI-393-RIB-BK" \
+  | grep -c "not made or endorsed by"                                     # → ≥1
+```
 
 We found where the belief came from: on the home page `"NZ Company Number"` *does* appear twice —
 but both occurrences are inside **JSON-LD**, in the `identifier[]` array on `Organization` /
@@ -222,11 +317,14 @@ your own acceptance grep returns `0`). No coordination needed; drop it whenever 
 
 | # | Item | Priority | Verified live 2026-07-14 |
 |---|---|---|---|
-| 1 | Zero-item shadow orders null all profit | **P0** | from log (unverified — needs admin data) |
-| 2 | Prerender footer missing "No card surcharges" | P1 | ✅ reproduces |
-| 3 | Prerender address `Rd` → `Road` | P1 | ✅ reproduces |
-| 4 | Bot-only `Drum Units` footer link | P1 | ✅ reproduces |
+| 1 | `kpi-summary` nulls all profit when an invoiced sale is in range | **P0** | ✅ measured — 19-week probe, 100% correlation |
+| 1b | `net_profit_series` absent from the bundle | P1 | ✅ measured |
+| ~~1c~~ | ~~Zero-item shadow orders~~ | ~~P0~~ | ✅ **CLOSED — verified fixed, all 84 items costed** |
+| 2 | Prerender footer missing "No card surcharges" | P1 | ✅ **backend reports SHIPPED** (commit `2ab2e12`) — footer-redesign-backend-response |
+| 3 | Prerender address `Rd` → `Road` | P1 | ✅ **backend code done** — pending an Ops Render-env flip (`BUSINESS_STREET`) |
+| 4 | Bot-only `Drum Units` footer link | P1 | ✅ **CLOSED (FE) 2026-07-15** — added to human Shop column; sets now agree |
 | 5 | Footer company number — **no action; correction** | P1 | ✅ confirmed non-issue |
+| 5b | PDP compat disclaimer condensed to leanest form (drop 12-month warranty AND 30-day+CGA sentence); prerender/meta must match | P1 | FE shipped 2026-07-15; BE re-sync owed |
 | 6 | Feed: page-yield on non-page-rated types (~125) | P2 | from log |
 | 7 | Prerender category canonical → `/ink` | P3 | from log |
 | 8 | Cloudflare purge | P3 | from log |

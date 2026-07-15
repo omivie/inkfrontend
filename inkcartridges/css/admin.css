@@ -501,6 +501,13 @@
   font-size: 12.5px; line-height: 1.55; color: var(--text);
 }
 .qo-notice strong { font-weight: 700; }
+/* Informational tone — quick orders now COUNT in analytics, so the banner is
+   reassuring, not a caution. Cyan (the brand's info blue) instead of the base
+   yellow. Layout is inherited from .qo-notice. */
+.qo-notice--info {
+  border-color: var(--cyan-dim, rgba(38,127,181,0.3));
+  background: var(--cyan-dim, rgba(38,127,181,0.10));
+}
 .admin-kpi__delta {
   font-size: 11px; font-weight: 500;
   display: inline-flex; align-items: center; gap: 3px;

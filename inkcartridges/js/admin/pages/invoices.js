@@ -23,8 +23,9 @@ import { Drawer } from '../components/drawer.js';
 import { Modal } from '../components/modal.js';
 import { Toast } from '../components/toast.js';
 import { attachAutocomplete } from '../components/autocomplete.js';
-import { attachProductAutocomplete, productCostExGst, fetchProductCosts, resolveSkus } from '../components/product-search.js';
-import { codesToVerify, applyResolvedCodes } from '../utils/line-codes.js';
+import { attachProductAutocomplete, productCostExGst, resolveSkus } from '../components/product-search.js';
+import { codesToVerify, applyResolvedCodes, unresolvedLineErrors } from '../utils/line-codes.js';
+import { parseQuickOrderPrefill, flipTargetFrom } from '../utils/quick-order-bridge.js';
 import {
   costOrNull, computeInvoiceTotals, computeInvoiceCogs, computeInvoiceProfit,
   normalizeInvoice, invoiceDocRows,
@@ -607,71 +608,48 @@ async function onRowAction(e) {
   }
 }
 
+// The backend echoes supplier_cost_excl_gst on GET /invoices/:id (verified live,
+// ERR-071 Jul 2026), so "Our Cost" is read straight from the record in
+// draftFromInvoice — no catalogue back-fill needed. The old
+// backfillCostsFromCatalogue()/fetchProductCosts workaround (which existed because
+// the line was believed to come back null) has been removed.
 async function openExisting(row) {
   const rec = await AdminAPI.getInvoice(row.id) || row;
-  const draft = draftFromInvoice(rec);
-  await backfillCostsFromCatalogue(draft);
-  openEditor(draft);
-}
-
-/**
- * Fill in any line cost the backend didn't give us, from the product catalogue.
- *
- * The backend accepts supplier_cost_excl_gst but does NOT echo it back on
- * GET /invoices/:id — it snapshots the cost onto the shadow order and leaves the
- * invoice line null. So without this, reopening a saved invoice shows an empty
- * "Our Cost" box even for a product whose cost we know, and the invoice's Profit
- * column is stuck on "—" forever.
- *
- * Rules:
- *   - Only fills lines that have NO cost. A manual override is never touched.
- *   - Only fills from a resolvable product_code. An unresolvable / free-text line
- *     stays UNKNOWN (null) — the operator types it, or it stays honest.
- *   - Marks what it fills as 'auto', because that's exactly what it is.
- *
- * Fail-soft: no Supabase, no catalogue hit, any error → costs simply stay unknown.
- */
-async function backfillCostsFromCatalogue(d) {
-  const need = (d.lines || []).filter(l => costOrNull(l.supplierCost) == null && (l.code || '').trim());
-  if (!need.length) return;
-  try {
-    const costs = await fetchProductCosts(need.map(l => l.code));
-    if (!costs.size) return;
-    for (const l of need) {
-      const c = costs.get((l.code || '').trim());
-      if (c != null) { l.supplierCost = c; l.costSource = 'auto'; }
-    }
-  } catch (err) {
-    warn('cost back-fill from catalogue failed', err);
-  }
+  openEditor(draftFromInvoice(rec));
 }
 
 // Quick Order hands off a staged prefill via sessionStorage['qo_invoice_prefill']
-// ({ order_date, customer{attn,name,company,address,phone,email}, lines[{code,
-// description,qty,unitCost,supplierCost,costSource}] }). Consume it once and open
-// a new invoice editor.
+// ({ qo_id, order_date, customer{attn,name,company,address,phone,email},
+// lines[{code,description,qty,unitCost,supplierCost,costSource}] }). Consume it
+// once and open a new invoice editor.
 //
-// Reads defensively: a prefill staged by the PREVIOUS build can still be sitting
-// in a user's sessionStorage across a deploy, and it has no cost fields. Absent
-// cost => unknown (null), never 0.
+// Reads defensively via parseQuickOrderPrefill (utils/quick-order-bridge.js): a
+// prefill staged by a PREVIOUS build can still be sitting in a user's sessionStorage
+// across a deploy — an old one has no `qo_id` (source_quick_order_id => null, no
+// flip) and no cost fields (absent cost => unknown/null, never 0).
+//
+// `source_quick_order_id` is the link back to the originating quick order. It rides
+// ONLY on the live draft (not freshDraft/buildPayload) so it never leaks into the
+// invoice payload; persistDraft reads it to flip that quick order to
+// status='invoiced' after this invoice saves — the sole double-count guard.
 function maybeOpenFromQuickOrder() {
   let raw;
   try { raw = sessionStorage.getItem('qo_invoice_prefill'); } catch (_) { return; }
   if (!raw) return;
   try { sessionStorage.removeItem('qo_invoice_prefill'); } catch (_) { /* noop */ }
-  let pre;
-  try { pre = JSON.parse(raw); } catch (e) { warn('bad quick-order prefill', e); return; }
-  if (!pre || typeof pre !== 'object') return;
+  const pre = parseQuickOrderPrefill(raw);
+  if (!pre) { warn('bad quick-order prefill', raw); return; }
   const d = freshDraft();
   if (pre.order_date) d.order_date = String(pre.order_date).slice(0, 10);
   if (pre.customer) d.customer = { ...d.customer, ...pre.customer };
-  if (Array.isArray(pre.lines) && pre.lines.length) {
+  if (pre.lines && pre.lines.length) {
     d.lines = pre.lines.map((l) => ({
       code: l.code || '', description: l.description || '', qty: num(l.qty ?? 1), unitCost: round2(num(l.unitCost ?? 0)),
       supplierCost: costOrNull(l.supplierCost),
       costSource: l.costSource || 'auto',
     }));
   }
+  d.source_quick_order_id = pre.source_quick_order_id;
   openEditor(d);
 }
 
@@ -816,7 +794,10 @@ async function onEditorFooterClick(e) {
       const btn = e.target.closest('[data-ed-action="email"]');
       if (btn) btn.disabled = true;
       try { await persistDraft(); rebuildEditor(); loadData(); }
-      catch (err) { Toast.error(err.message || 'Save the invoice before emailing it.'); return; }
+      catch (err) {
+        if (surfaceUnresolvedCodes(err, _editorToken)) return;
+        Toast.error(err.message || 'Save the invoice before emailing it.'); return;
+      }
       finally { if (btn) btn.disabled = false; }
       if (!_draft.id) return;   // save didn't produce an id
     }
@@ -1015,13 +996,73 @@ async function persistDraft() {
     // Push the rendered PDF up so the backend serves/emails the same document.
     try { await syncStoredPdf(); }
     catch (err) { warn('stored-PDF sync skipped (backend endpoint pending?)', err); }
+    // Only now that the invoice truly exists: flip its source quick order (if any)
+    // to status='invoiced' so the sale isn't counted twice.
+    await flipSourceQuickOrder();
   }
   return saved;
+}
+
+/**
+ * Mark the originating quick order invoiced — the sole guard against a converted
+ * sale double-counting.
+ *
+ * Since backend migration 108 a saved quick order materialises its OWN shadow
+ * `orders` row, and this invoice materialises another. The backend keeps no
+ * invoice→quick-order link, so unless the FE flips the quick order to
+ * status='invoiced' (which cancels its shadow) the sale lands in analytics TWICE.
+ *
+ * Runs from persistDraft AFTER a successful save — never at "Create invoice" click
+ * time, because an invoice the operator then cancels would leave the quick order
+ * invoiced-but-uninvoiced and the sale would vanish from analytics entirely.
+ *
+ * Idempotent: on success it clears `source_quick_order_id`, so the email/download
+ * re-saves (which also call persistDraft) see flipTargetFrom() → null and skip.
+ *
+ * LOUD on failure (feedback_fail_soft_must_be_loud): the invoice is already saved,
+ * so a silent failure here means the sale quietly double-counts. We keep the link
+ * (so a later save retries) and tell the operator exactly what's wrong and how to
+ * fix it, rather than swallow it behind a healthy-looking "Invoice saved".
+ */
+async function flipSourceQuickOrder() {
+  const qoId = flipTargetFrom(_draft);
+  if (!qoId) return;
+  try {
+    await AdminAPI.updateQuickOrder(qoId, { status: 'invoiced' });
+    _draft.source_quick_order_id = null;   // flipped — don't re-PUT on email/download re-save
+  } catch (err) {
+    warn('quick-order status flip failed', err);
+    Toast.warning('Invoice saved, but the source quick order couldn’t be marked invoiced — '
+      + 'it may double-count in your sales until you delete that quick order.'
+      + (err.message ? ' (' + err.message + ')' : ''));
+  }
+}
+
+/**
+ * The backend's fail-soft net, rendered LOUD.
+ *
+ * verifyLineCodes lets a save through when the catalogue is unreachable (resolveSkus
+ * → null), so the backend is the backstop: it rejects any non-SKU product_code with
+ * 400 VALIDATION_FAILED + `error.details.unresolved` (ERR-071). Pin each offending
+ * line's code box exactly the way the client guard does, rather than a vague toast.
+ * Returns true when it handled the error (caller should stop).
+ */
+function surfaceUnresolvedCodes(err, token) {
+  if (err?.code !== 'VALIDATION_FAILED') return false;
+  if (!(err.details?.unresolved || Array.isArray(err.details))) return false;
+  const errs = unresolvedLineErrors(_draft?.lines, err.details?.unresolved ?? err.details);
+  if (!errs.length) return false;
+  const first = editorAlive(token) ? markInvoiceErrors(errs) : null;
+  if (first) { first.scrollIntoView({ behavior: 'smooth', block: 'center' }); first.focus({ preventScroll: true }); }
+  Toast.error(errs.length === 1 ? errs[0].msg
+    : `${errs.length} lines have a code that isn’t a product SKU — pick each product from the list.`);
+  return true;
 }
 
 async function saveInvoice() {
   // Block the save until all essentials are filled; highlight what's missing.
   if (!ensureInvoiceValid()) return;
+  const token = _editorToken;
   const btn = _editorRefs?.drawer.footer.querySelector('[data-ed-action="save"]');
   if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
   try {
@@ -1035,6 +1076,7 @@ async function saveInvoice() {
     }
   } catch (err) {
     warn('save failed', err);
+    if (surfaceUnresolvedCodes(err, token)) return;
     Toast.error(err.message || 'Could not save invoice — the invoicing backend may not be live yet.');
   } finally {
     if (btn) { btn.disabled = false; btn.textContent = 'Save invoice'; }
@@ -1515,6 +1557,7 @@ async function downloadPdf(d) {
         loadData();        // refresh the list behind the drawer
       } catch (err) {
         warn('auto-save before download failed', err);
+        if (surfaceUnresolvedCodes(err, _editorToken)) return;
         Toast.error(err.message || 'Could not save the invoice to assign a number.');
         return;
       } finally {

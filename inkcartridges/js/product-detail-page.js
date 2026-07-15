@@ -841,12 +841,17 @@
          * ribbon must still get the disclaimer). The copy is vetted legal
          * phrasing — keep the trademark / third-party / supplier attribution
          * exactly as written, and never assert anything about the OEM's own
-         * warranty. (The trailing sentence was briefly removed 2026-07-15, then
-         * restored as the 30-day satisfaction-guarantee wording —
-         * ERR-078 — so the human panel stays byte-identical with the backend
-         * prerender. The retired "12-month replacement warranty" claim must NOT
-         * return: compatibles carry the 30-day satisfaction guarantee, not a
-         * warranty.) Genuine / unknown-source products render nothing.
+         * warranty. (Condensed 2026-07-15, owner request: the panel is now the
+         * leanest compliant form — third-party / not-made-or-endorsed-by-OEM /
+         * named legal entity. The "30-day satisfaction guarantee. …Consumer
+         * Guarantees Act 1993 are unaffected." sentence was REMOVED here; CGA
+         * disclosure still ships site-wide in js/footer.js. This intentionally
+         * supersedes the ERR-078 parity restoration — the human panel is now
+         * SHORTER than the backend prerender, so the prerender/meta re-sync is
+         * owed backend-side, tracked as §5b in readfirst/backend-open-items-jul2026.md.
+         * That is the SAFE cloaking direction — bots see more disclaimer than
+         * humans, not less. The retired "12-month replacement warranty" claim
+         * must NOT return.) Genuine / unknown-source products render nothing.
          */
         renderComplianceDisclaimer(info) {
             if (!info || info.source !== 'compatible') return;
@@ -866,7 +871,7 @@
 
             const html = `
                 <div class="compat-disclaimer" id="compat-disclaimer">
-                    This is a compatible (third-party) ${type} designed to work in the ${oem} printers listed on this page. It is not manufactured, endorsed, or sold by ${oem}. Supplied by Office Consumables Ltd, trading as InkCartridges.co.nz. Compatible cartridges are covered by our 30-day satisfaction guarantee. Your statutory rights under the New Zealand Consumer Guarantees Act 1993 are unaffected.
+                    Compatible (third-party) ${type} for ${oem} printers — not made or endorsed by ${oem}. Sold by Office Consumables Ltd.
                 </div>`;
             pricingEl.insertAdjacentHTML('afterend', html);
         },

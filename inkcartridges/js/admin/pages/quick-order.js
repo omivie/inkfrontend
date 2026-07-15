@@ -26,7 +26,8 @@ import { Toast } from '../components/toast.js';
 import { attachAutocomplete } from '../components/autocomplete.js';
 import { attachProductAutocomplete, productCostExGst, resolveSkus } from '../components/product-search.js';
 import { costOrNull } from '../utils/invoice-math.js';
-import { codesToVerify, applyResolvedCodes } from '../utils/line-codes.js';
+import { codesToVerify, applyResolvedCodes, unresolvedLineErrors } from '../utils/line-codes.js';
+import { buildQuickOrderPrefill } from '../utils/quick-order-bridge.js';
 
 const GST_RATE = 0.15;
 const MISSING = '—';
@@ -237,22 +238,15 @@ async function openExisting(row) {
 
 // Hand the order off to the Invoices editor, pre-filled. The Invoices page reads
 // this key once on init (see invoices.js), opens its editor and clears it.
+//
+// The prefill carries the quick-order `id` (buildQuickOrderPrefill → qo_id) so the
+// invoice save can flip this order to status='invoiced' and stop the sale being
+// counted twice. A SAVED order carries its id; converting a brand-new unsaved draft
+// (id == null) carries qo_id: null — nothing was persisted, so there is no shadow
+// order to double-count and nothing to flip. See utils/quick-order-bridge.js.
 function createInvoiceFrom(rec) {
   const d = rec.id && rec.bill_to !== undefined ? draftFromRecord(rec) : (rec.customer ? rec : draftFromRecord(rec));
-  const c = d.customer || {};
-  const prefill = {
-    order_date: d.order_date || '',
-    customer: { attn: c.name || '', name: c.name || '', company: c.company || '', address: c.address || '', phone: c.phone || '', email: c.email || '' },
-    // unitPrice (sell) maps to the invoice's unitCost (also sell — see the naming
-    // note in utils/invoice-math.js). supplierCost keeps its name across the bridge
-    // because it means the same thing on both sides: what WE paid.
-    lines: (d.lines || []).map((l) => ({
-      code: l.code || '', description: l.description || '', qty: num(l.qty) || 1,
-      unitCost: round2(num(l.unitPrice)),
-      supplierCost: costOrNull(l.supplierCost),
-      costSource: l.costSource || 'auto',
-    })),
-  };
+  const prefill = buildQuickOrderPrefill(d);
   try { sessionStorage.setItem('qo_invoice_prefill', JSON.stringify(prefill)); }
   catch (err) { warn('could not stage invoice prefill', err); }
   window.location.hash = 'invoices';
@@ -625,6 +619,27 @@ async function verifyLineCodes(token) {
   return false;
 }
 
+/**
+ * The backend's fail-soft net, rendered LOUD.
+ *
+ * When the catalogue is unreachable our client guard lets the save through
+ * (verifyLineCodes returns true on a null resolve), and the backend rejects any
+ * non-SKU code with 400 VALIDATION_FAILED + `error.details.unresolved` (ERR-071).
+ * Rather than a vague toast, pin each offending line's code box exactly the way the
+ * client guard does. Returns true when it handled the error (caller should stop).
+ */
+function surfaceUnresolvedCodes(err, token) {
+  if (err?.code !== 'VALIDATION_FAILED') return false;
+  if (!(err.details?.unresolved || Array.isArray(err.details))) return false;
+  const errs = unresolvedLineErrors(_draft?.lines, err.details?.unresolved ?? err.details);
+  if (!errs.length) return false;
+  const first = editorAlive(token) ? markErrors(errs) : null;
+  if (first) { first.scrollIntoView({ behavior: 'smooth', block: 'center' }); first.focus({ preventScroll: true }); }
+  Toast.error(errs.length === 1 ? errs[0].msg
+    : `${errs.length} lines have a code that isn’t a product SKU — pick each product from the list.`);
+  return true;
+}
+
 async function saveQuickOrder() {
   if (!ensureValid()) return;
   const token = _editorToken;
@@ -659,6 +674,7 @@ async function saveQuickOrder() {
     }
   } catch (err) {
     warn('save failed', err);
+    if (surfaceUnresolvedCodes(err, token)) return;
     Toast.error(err.message || 'Could not save — the quick-order backend may not be live yet.');
   } finally {
     if (btn && editorAlive(token)) { btn.disabled = false; btn.textContent = _draft?.id ? 'Save changes' : 'Save quick order'; }
@@ -688,16 +704,19 @@ export default {
             <button class="admin-btn admin-btn--primary" id="qo-new">${icon('plus', 14, 14)} New quick order</button>
           </div>
         </div>
-        <!-- Invoiced sales ARE counted in analytics (the backend materialises each saved
-             invoice as an order). Quick orders are NOT — that half of the backend work is
-             still pending. Say so plainly rather than let the owner assume these totals are
-             in their revenue: silently under-reporting sales is exactly the problem this
-             whole feature set exists to fix. -->
-        <div class="qo-notice">
-          <span><strong>Quick orders aren’t in your sales figures yet.</strong>
-          They’re a register only — the Dashboard, Finance and Demand Ranking don’t see them.
-          Hit <strong>Create invoice</strong> on a row and the sale gets counted (invoiced sales
-          <em>are</em> included, cost of goods and all).</span>
+        <!-- As of 2026-07-14 (backend migration 108) each SAVED quick order
+             materialises a shadow order, so quick-order sales are now counted in
+             analytics just like invoices. Say so plainly — the owner was previously
+             told these were a register only, and would otherwise keep hand-counting
+             sales that are already in the totals. "Create invoice" moves the sale
+             onto the invoice WITHOUT double-counting: the invoice save flips this
+             quick order to status='invoiced', which cancels its own shadow (see the
+             status flip in pages/invoices.js persistDraft). -->
+        <div class="qo-notice qo-notice--info">
+          <span><strong>Quick orders now count in your sales figures.</strong>
+          Every saved quick order is included in the Dashboard, Finance and Demand Ranking
+          (cost of goods and all). Hit <strong>Create invoice</strong> to turn one into an
+          invoice — the sale moves onto that invoice and <em>won’t</em> be counted twice.</span>
         </div>
         <div class="admin-filters" style="display:flex;gap:var(--spacing-2);margin-bottom:var(--spacing-3);flex-wrap:wrap">
           <div class="admin-search" style="flex:1;min-width:240px">

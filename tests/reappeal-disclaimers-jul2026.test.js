@@ -94,20 +94,23 @@ test('PDP: compatible-only compliance disclaimer, keyed off source', () => {
     // The method is invoked from renderProduct.
     assert.match(src, /this\.renderComplianceDisclaimer\(info\)/);
 
-    // Vetted copy present; OEM brand escaped.
-    assert.match(src, /This is a compatible \(third-party\) \$\{type\} designed to work in the \$\{oem\} printers/);
-    assert.match(src, /It is not manufactured, endorsed, or sold by \$\{oem\}/);
+    // Vetted copy present; OEM brand escaped. Condensed 2026-07-15 (owner
+    // request) to the leanest compliant form — third-party / not-made-or-
+    // endorsed-by-OEM / named legal entity, both brand slots dynamic.
+    assert.match(src, /Compatible \(third-party\) \$\{type\} for \$\{oem\} printers/);
+    assert.match(src, /not made or endorsed by \$\{oem\}/);
+    assert.match(src, /Sold by Office Consumables Ltd\./);
     // The 12-month "replacement warranty" claim was retired (ERR-078) and must
-    // never return. The panel now carries the TRUE cover — the 30-day
-    // satisfaction guarantee + CGA sentence — mirroring the backend prerender
-    // (parity, not cloaking). The brief 2026-07-15 removal of the trailing
-    // sentence was reversed the same day once the backend committed to serving
-    // the 30-day wording; the footer still carries CGA disclosure site-wide too.
+    // never return. The 30-day satisfaction-guarantee + CGA sentence was also
+    // REMOVED from the panel on 2026-07-15 (owner request) — the panel is now
+    // shorter than the backend prerender (safe cloaking direction; prerender
+    // re-sync owed backend-side, §5b). CGA disclosure still ships site-wide in
+    // js/footer.js, so nothing legally required is lost from the site.
     assert.doesNotMatch(src, /12-month replacement warranty on compatible cartridges/);
-    assert.match(src, /Compatible cartridges are covered by our 30-day satisfaction guarantee\./,
-        'the PDP panel must state the true 30-day satisfaction guarantee (mirrors backend)');
-    assert.match(src, /Your statutory rights under the New Zealand Consumer Guarantees Act 1993 are unaffected\./,
-        'the PDP panel must carry the CGA-unaffected sentence, byte-identical to the prerender');
+    assert.doesNotMatch(src, /Compatible cartridges are covered by our 30-day satisfaction guarantee/,
+        'the condensed PDP panel must no longer carry the 30-day satisfaction-guarantee sentence');
+    assert.doesNotMatch(body, /Your statutory rights under the New Zealand Consumer Guarantees Act 1993 are unaffected/,
+        'the condensed PDP panel must no longer carry the CGA-unaffected sentence');
     assert.match(src, /Security\.escapeHtml\(info\.brandName/,
         'OEM brand name must be HTML-escaped');
     // Banned: never assert anything about the OEM's own warranty.

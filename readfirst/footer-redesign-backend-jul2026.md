@@ -59,6 +59,15 @@ The redesign closes most of that: the new **Shop** column ships static links to 
 **Ask — pick one:** either drop Drum Units from the prerender footer, or tell us and we'll add it to
 the Shop column. Either is fine; the two footers just need to agree.
 
+> **✅ RESOLVED 2026-07-15 (FE).** Per the owner's call to keep Drum Units in the bot footer, the FE
+> added **`Drum Units` → `/shop?category=drums`** to the human Shop column (`js/footer.js`), between
+> Toner Cartridges and Printer Ribbons. Both footers now list the same four categories in the same
+> order: **Ink Cartridges · Toner Cartridges · Drum Units · Printer Ribbons**. The static-link approach
+> stays within the owner's rule (feed-hydrated category column still banned; `footer.js` never fetches).
+> Pinned by `tests/footer-redesign-jul2026.test.js` §3 (Drum Units parity test + the Shop-column
+> order pin). Verified live against the rendered footer. **No backend action** — the bot footer is
+> already correct.
+
 ### 2d. The bot footer omits FAQ and Shipping — and `/faq` is not linked from the bot homepage at all
 
 Found 2026-07-14 while re-verifying the above. The prerender's `<nav aria-label="Footer links">`

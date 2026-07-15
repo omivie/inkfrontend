@@ -52,7 +52,7 @@ sandbox.globalThis = sandbox;
 const ctx = vm.createContext(sandbox);
 vm.runInContext(stripEsm(fs.readFileSync(LINE_CODES, 'utf8')), ctx, { filename: 'line-codes.js' });
 
-const { codesToVerify, applyResolvedCodes } = sandbox;
+const { codesToVerify, applyResolvedCodes, unresolvedLineErrors } = sandbox;
 
 // Arrays built inside the vm realm carry that realm's prototypes, so deepEqual sees
 // "same structure, not reference-equal". Round-trip through JSON first (same trick as
@@ -148,4 +148,95 @@ test('errors carry the line index the form markers key on', () => {
     const errs = applyResolvedCodes(lines, REAL);
     assert.deepEqual(plain(errs).map((e) => e.line), [1, 3], 'indexes are positional, skipping valid/blank lines');
     for (const e of errs) assert.equal(e.lfield, 'code');
+});
+
+// ─── 6. The backend's fail-soft net, rendered LOUD ──────────────────────────
+// When the catalogue is unreachable the client guard lets the save through and the
+// backend rejects a non-SKU code with 400 VALIDATION_FAILED +
+// `error.details.unresolved: [{position, product_code}]` (backend response Jul 2026).
+// unresolvedLineErrors turns that payload back into the SAME {line,lfield,msg} errors
+// the client guard emits, so the operator sees which line to fix — pinned inline.
+
+test('a backend 400 maps its unresolved codes back onto the offending lines', () => {
+    // #3263/#3264 got past a fail-soft client guard; the backend caught them.
+    const lines = [line('CTN258XLKCMY'), line('CTN258'), line('CLC531XL')];
+    const details = { unresolved: [
+        { position: 2, product_code: 'CTN258' },
+        { position: 3, product_code: 'CLC531XL' },
+    ] };
+    const errs = unresolvedLineErrors(lines, details);
+    assert.deepEqual(plain(errs).map((e) => e.line), [1, 2], 'matched by code to lines 2 and 3 (0-indexed 1,2)');
+    for (const e of errs) assert.equal(e.lfield, 'code', 'must target the code input so it highlights');
+    assert.match(errs[0].msg, /CTN258/);
+    assert.match(errs[0].msg, /isn’t a product SKU/);
+});
+
+test('the {unresolved:[…]} wrapper and a bare array are both accepted', () => {
+    const lines = [line('BADCODE')];
+    const wrapped = unresolvedLineErrors(lines, { unresolved: [{ position: 1, product_code: 'BADCODE' }] });
+    const bare = unresolvedLineErrors(lines, [{ position: 1, product_code: 'BADCODE' }]);
+    assert.deepEqual(plain(wrapped), plain(bare), 'either envelope shape yields the same errors');
+    assert.equal(wrapped.length, 1);
+});
+
+test('every line carrying the same bad code is flagged, not just the first', () => {
+    const lines = [line('CTN258'), line('CTN258XLKCMY'), line('CTN258')];
+    const errs = unresolvedLineErrors(lines, { unresolved: [{ position: 1, product_code: 'CTN258' }] });
+    assert.deepEqual(plain(errs).map((e) => e.line), [0, 2], 'both CTN258 lines highlighted, the valid one skipped');
+});
+
+test('code matching is case-insensitive', () => {
+    const lines = [line('ctn258')];
+    const errs = unresolvedLineErrors(lines, { unresolved: [{ position: 1, product_code: 'CTN258' }] });
+    assert.equal(errs.length, 1);
+    assert.equal(errs[0].line, 0);
+});
+
+test('positional fallback when the code matches no line', () => {
+    // e.g. the backend canonicalised the code it echoes, or the operator edited it.
+    const lines = [line('FREIGHT-ONLY', 'Freight'), line('SOMECODE')];
+    const errs = unresolvedLineErrors(lines, { unresolved: [{ position: 2, product_code: 'DOES-NOT-MATCH' }] });
+    assert.equal(errs.length, 1);
+    assert.equal(errs[0].line, 1, 'position 2 (1-based) → index 1');
+    assert.equal(errs[0].lfield, 'code');
+});
+
+test('a line removed mid-flight still names its code, unpinned', () => {
+    // No code match and position out of range → line:-1 so the summary toast still
+    // tells the operator which code failed.
+    const errs = unresolvedLineErrors([line('CTN258XLKCMY')], { unresolved: [{ position: 9, product_code: 'GHOSTCODE' }] });
+    assert.equal(errs.length, 1);
+    assert.equal(errs[0].line, -1, 'unpinned so no form input is falsely highlighted');
+    assert.match(errs[0].msg, /GHOSTCODE/);
+});
+
+test('empty / absent / null unresolved returns [] and never throws', () => {
+    assert.deepEqual(plain(unresolvedLineErrors([line('X')], { unresolved: [] })), []);
+    assert.deepEqual(plain(unresolvedLineErrors([line('X')], {})), []);
+    assert.deepEqual(plain(unresolvedLineErrors([line('X')], null)), []);
+});
+
+test('a null draft with a real unresolved code surfaces it unpinned, no throw', () => {
+    // Defensive: the draft could be gone by the time the 400 lands. It must not
+    // throw, and the code still names itself (unpinned) in the summary toast.
+    const errs = unresolvedLineErrors(null, { unresolved: [{ position: 1, product_code: 'X' }] });
+    assert.equal(errs.length, 1);
+    assert.equal(errs[0].line, -1);
+    assert.match(errs[0].msg, /“X”/);
+});
+
+test('client guard and backend 400 produce IDENTICAL copy for the same code', () => {
+    // The whole point of the shared skuLineMsg: an operator can't tell which layer
+    // caught the bad code, because the sentence is byte-identical.
+    const guardLines = [line('CTN258')];
+    const guardErr = applyResolvedCodes(guardLines, REAL)[0];
+    const backendErr = unresolvedLineErrors([line('CTN258')],
+        { unresolved: [{ position: 1, product_code: 'CTN258' }] })[0];
+    assert.equal(backendErr.msg, guardErr.msg, 'same line, same code → same message');
+});
+
+test('unresolvedLineErrors is read-only — it never mutates the lines', () => {
+    const lines = [line('CTN258')];
+    unresolvedLineErrors(lines, { unresolved: [{ position: 1, product_code: 'CTN258' }] });
+    assert.equal(lines[0].code, 'CTN258', 'the draft is untouched (unlike applyResolvedCodes)');
 });

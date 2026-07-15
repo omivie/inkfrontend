@@ -183,7 +183,9 @@ test('§2 every page loads legal-config.js BEFORE footer.js', () => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 const COLUMNS = {
-    Shop: ['/ink-cartridges', '/toner-cartridges', '/ribbons', '/shop'],
+    // Drum Units (/shop?category=drums) matches the bot footer's fourth category,
+    // so a crawler and a human see the same four-category set — anti-cloaking §2c.
+    Shop: ['/ink-cartridges', '/toner-cartridges', '/shop?category=drums', '/ribbons', '/shop'],
     Help: ['/track-order', '/shipping', '/returns', '/faq', '/contact'],
     Company: ['/about', '/genuine-vs-compatible', '/terms', '/privacy'],
 };
@@ -200,6 +202,22 @@ test('§3 the three nav columns carry exactly the links the spec lists', () => {
     }
 });
 
+test('§3 the Shop column lists Drum Units, matching the bot footer (anti-cloaking §2c)', () => {
+    // The backend prerender footer lists FOUR categories to Googlebot inside its
+    // <nav aria-label="Shop by category">: Ink Cartridges · Toner Cartridges ·
+    // Drum Units · Printer Ribbons. Until 2026-07-15 the human Shop column carried
+    // only three of them, so a crawler saw a category link a human didn't — the
+    // wrong side of a Google Ads cloaking review (the matter behind the ad
+    // suspension). This asserts the fourth category is present on its own merits,
+    // so removing it goes red even if the order-equality pin above is loosened.
+    const col = GRID.slice(
+        GRID.indexOf('<summary class="footer-column__heading">Shop</summary>'),
+        GRID.indexOf('</details>', GRID.indexOf('>Shop</summary>'))
+    );
+    assert.match(col, /<a href="\/shop\?category=drums">Drum Units<\/a>/,
+        'the Shop column must link Drum Units → /shop?category=drums so the human footer lists the same four categories the bot footer does');
+});
+
 test('§3 each nav column is a <nav> with its own accessible name', () => {
     for (const heading of Object.keys(COLUMNS)) {
         assert.match(GRID, new RegExp(`<nav class="footer-column-nav" aria-label="${heading}">`),
@@ -214,7 +232,10 @@ test('§3 every footer href resolves to a real vercel.json route', () => {
     const hrefs = [...TEMPLATE.matchAll(/href="(\/[^"]*)"/g)].map((m) => m[1]);
     for (const href of new Set(hrefs)) {
         if (href === '/') continue; // the brand logo
-        assert.ok(routes.has(href), `footer links to ${href}, which is not a route in vercel.json`);
+        // A query string (e.g. /shop?category=drums) resolves via the base route's
+        // rewrite — vercel passes the query through — so match on the path only.
+        const routePath = href.split('?')[0];
+        assert.ok(routes.has(routePath), `footer links to ${href}, which is not a route in vercel.json`);
     }
 });
 

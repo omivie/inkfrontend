@@ -118,6 +118,7 @@
     { "source": "/payment", "destination": "/html/payment" },
     { "source": "/order-confirmation", "destination": "/html/order-confirmation" },
     { "source": "/contact", "destination": "/html/contact" },
+    { "source": "/quote", "destination": "/html/quote" },
     { "source": "/track-order", "destination": "/html/track-order" },
     { "source": "/terms", "destination": "/html/terms" },
     { "source": "/privacy", "destination": "/html/privacy" },

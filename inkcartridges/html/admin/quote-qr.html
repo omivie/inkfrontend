@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en-NZ">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#267FB5">
+    <meta name="color-scheme" content="light">
+    <meta name="robots" content="noindex, nofollow">
+    <link rel="icon" type="image/png" href="/favicon.png">
+    <title>QR Code Generator (internal) | InkCartridges.co.nz</title>
+
+    <link rel="stylesheet" href="/css/base.css?v=244762aa">
+    <link rel="stylesheet" href="/css/components.css?v=2bfaadcc">
+
+    <style>
+        .qr-tool { max-width: 880px; margin: 0 auto; padding: 32px 20px 64px; }
+        .qr-tool__title { font-size: 1.75rem; margin: 0 0 4px; }
+        .qr-tool__note { color: #6b7280; margin: 0 0 28px; font-size: 0.95rem; }
+        .qr-tool__grid { display: grid; grid-template-columns: 1.1fr 1fr; gap: 32px; align-items: start; }
+        @media (max-width: 720px) { .qr-tool__grid { grid-template-columns: 1fr; } }
+        .qr-tool__field { display: block; margin-bottom: 16px; }
+        .qr-tool__label { display: block; font-weight: 600; margin-bottom: 6px; font-size: 0.9rem; }
+        .qr-tool__input {
+            width: 100%; box-sizing: border-box; padding: 10px 12px;
+            border: 1px solid #d1d5db; border-radius: 8px; font-size: 1rem;
+        }
+        .qr-tool__input:focus { outline: none; border-color: #0891b2; box-shadow: 0 0 0 3px rgba(8,145,178,.15); }
+        .qr-tool__actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 8px; }
+        .qr-tool__error { color: #b91c1c; font-size: 0.9rem; margin-top: 12px; }
+        .qr-tool__preview-wrap { text-align: center; }
+        .qr-tool__preview {
+            display: inline-block; padding: 16px; background: #fff;
+            border: 1px solid #e5e7eb; border-radius: 12px; width: 260px; height: 260px;
+        }
+        .qr-tool__preview svg { width: 100%; height: 100%; display: block; }
+        .qr-tool__preview-caption { color: #6b7280; font-size: 0.8rem; margin-top: 10px; }
+
+        /* Printable poster — hidden on screen, shown only when printing. */
+        .qr-poster { display: none; }
+        .qr-poster__inner { text-align: center; padding: 48px; }
+        .qr-poster__eyebrow { text-transform: uppercase; letter-spacing: 0.12em; color: #267FB5; font-weight: 700; font-size: 1rem; margin: 0 0 8px; }
+        .qr-poster__headline { font-size: 2.4rem; line-height: 1.15; margin: 0 0 24px; }
+        .qr-poster__code { display: inline-block; width: 320px; height: 320px; margin: 0 auto 20px; }
+        .qr-poster__code svg { width: 100%; height: 100%; display: block; }
+        .qr-poster__sub { font-size: 1.25rem; margin: 0 0 4px; }
+        .qr-poster__url { font-size: 1rem; color: #374151; word-break: break-all; }
+        .qr-poster__brand { margin-top: 32px; font-weight: 700; color: #267FB5; }
+
+        @media print {
+            .qr-tool { display: none; }
+            .qr-poster { display: block; }
+            @page { margin: 12mm; }
+        }
+    </style>
+</head>
+<body>
+    <div class="qr-tool">
+        <h1 class="qr-tool__title">QR Code Generator</h1>
+        <p class="qr-tool__note">
+            Internal tool. Enter a URL to generate a downloadable QR code, or use
+            &ldquo;Print poster&rdquo; for a ready-to-print counter/flyer sign. Defaults
+            to the trade-quote page (/quote).
+        </p>
+
+        <div class="qr-tool__grid">
+            <div>
+                <label class="qr-tool__field">
+                    <span class="qr-tool__label">Destination URL</span>
+                    <input type="url" id="qr-url" class="qr-tool__input" value="https://www.inkcartridges.co.nz/quote" spellcheck="false">
+                </label>
+
+                <div class="qr-tool__actions">
+                    <button type="button" id="qr-download-svg" class="btn btn--secondary">Download SVG</button>
+                    <button type="button" id="qr-download-png" class="btn btn--secondary">Download PNG</button>
+                    <button type="button" id="qr-print" class="btn btn--primary">Print poster</button>
+                </div>
+
+                <p id="qr-error" class="qr-tool__error" hidden></p>
+            </div>
+
+            <div class="qr-tool__preview-wrap">
+                <div id="qr-preview" class="qr-tool__preview" aria-label="QR code preview"></div>
+                <p class="qr-tool__preview-caption">Live preview &mdash; scan to test before printing.</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Printable poster: hidden on screen, revealed by @media print. -->
+    <div class="qr-poster" aria-hidden="true">
+        <div class="qr-poster__inner">
+            <p class="qr-poster__eyebrow">Business &amp; bulk pricing</p>
+            <h2 class="qr-poster__headline">Scan to request<br>a trade quote</h2>
+            <div id="qr-poster-code" class="qr-poster__code"></div>
+            <p class="qr-poster__sub">Tell us your printers &amp; quantities &mdash; we reply within one business day.</p>
+            <p class="qr-poster__url" id="qr-poster-url">https://www.inkcartridges.co.nz/quote</p>
+            <p class="qr-poster__brand">InkCartridges.co.nz</p>
+        </div>
+    </div>
+
+    <script defer src="/js/vendor/qrcode.min.js?v=00000000"></script>
+    <script defer src="/js/quote-qr-page.js?v=00000000"></script>
+</body>
+</html>

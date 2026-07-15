@@ -1,7 +1,7 @@
 /**
  * Admin SPA — Entry point, router, shell
  */
-const APP_VERSION = '2026.07.14-code-universe';
+const APP_VERSION = '2026.07.15-quickorder-sales';
 
 import { AdminAuth } from './auth.js';
 import { FilterState } from './filters.js';
