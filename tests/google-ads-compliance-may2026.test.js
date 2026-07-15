@@ -247,8 +247,12 @@ test('legal-config.js carries a 30-day change-of-mind returnWindowDaysChange', (
 test('legal-config.js carries a 30-day faulty-goods returnWindowDaysFaulty', () => {
     assert.match(LEGAL_CFG_SRC, /returnWindowDaysFaulty:\s*30/);
 });
-test('legal-config.js carries the 12-month compatible-warranty constant', () => {
-    assert.match(LEGAL_CFG_SRC, /compatibleWarrantyMonths:\s*12/);
+test('legal-config.js no longer carries the 12-month compatible-warranty constant', () => {
+    // ERR-078: the 12-month compatible "replacement warranty" was a
+    // misrepresentation and was retired, along with the compatible-warranty
+    // binding. Compatibles are covered by the 30-day satisfaction guarantee.
+    assert.doesNotMatch(LEGAL_CFG_SRC, /compatibleWarrantyMonths:\s*\d/);
+    assert.doesNotMatch(READ(JS('legal-page.js')), /'compatible-warranty':\s*String/);
 });
 test('legal-config.js exposes disambiguationLine() helper', () => {
     assert.match(LEGAL_CFG_SRC, /disambiguationLine\s*:\s*function\b/);
@@ -292,9 +296,11 @@ test('footer.js LocalBusiness JSON-LD carries NZBN + GST identifiers', () => {
 // ─────────────────────────────────────────────────────────────────────────
 const LEGAL_PAGE_SRC = READ(JS('legal-page.js'));
 
+// 'compatible-warranty' removed 2026-07-15 (ERR-078) — the 12-month compatible
+// replacement-warranty claim was a misrepresentation and the binding was retired.
 for (const key of ['disambiguation', 'legal-entity', 'nzbn', 'gst-number',
                    'copyright', 'return-window-faulty', 'return-window-change',
-                   'compatible-warranty', 'dispatch-cutoff']) {
+                   'dispatch-cutoff']) {
     test(`legal-page.js binds [data-legal-bind="${key}"]`, () => {
         const rx = new RegExp(`['"\`]${key}['"\`]\\s*:`);
         assert.match(LEGAL_PAGE_SRC, rx);
@@ -370,8 +376,12 @@ test('/about includes a Consumer Rights section linking to /returns', () => {
 test('/about includes a Where We Ship section', () => {
     assert.match(ABOUT_SRC, /Where we ship/i);
 });
-test('/about references the 12-month compatible warranty', () => {
-    assert.match(ABOUT_SRC, /data-legal-bind="compatible-warranty"/);
+test('/about states the compatible 30-day satisfaction guarantee (not a warranty)', () => {
+    // ERR-078: the 12-month "replacement warranty" claim was a misrepresentation.
+    // /about now states the true cover, and the retired binding must be gone.
+    assert.match(ABOUT_SRC, /30-day satisfaction guarantee/);
+    assert.doesNotMatch(ABOUT_SRC, /data-legal-bind="compatible-warranty"/);
+    assert.doesNotMatch(ABOUT_SRC, /12[- ]month/i);
 });
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -385,8 +395,10 @@ test('/returns binds the change-of-mind window', () => {
 test('/returns binds the 30-day faulty window', () => {
     assert.match(RETURNS_SRC, /data-legal-bind="return-window-faulty"/);
 });
-test('/returns lists the 12-month compatible-warranty in the snapshot', () => {
-    assert.match(RETURNS_SRC, /data-legal-bind="compatible-warranty"/);
+test('/returns states the compatible 30-day satisfaction guarantee in the snapshot', () => {
+    // ERR-078: retired the 12-month compatible "warranty" claim.
+    assert.match(RETURNS_SRC, /30-day satisfaction guarantee/);
+    assert.doesNotMatch(RETURNS_SRC, /data-legal-bind="compatible-warranty"/);
 });
 test('/returns address block names Office Consumables Ltd', () => {
     assert.match(RETURNS_SRC, /data-legal-bind="legal-entity"/);

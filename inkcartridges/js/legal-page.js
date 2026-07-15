@@ -94,7 +94,10 @@
             'return-window':          String(cfg.returnWindowDays),
             'return-window-faulty':   String(cfg.returnWindowDaysFaulty || cfg.returnWindowDays),
             'return-window-change':   String(cfg.returnWindowDaysChange || cfg.returnWindowDays),
-            'compatible-warranty':    String(cfg.compatibleWarrantyMonths || 12) + ' months',
+            // 'compatible-warranty' binding retired 2026-07-15 (ERR-078) — the
+            // 12-month compatible "replacement warranty" claim was a
+            // misrepresentation. Compatibles are covered by the 30-day
+            // satisfaction guarantee, stated as prose on the policy pages.
             'dispatch-cutoff':        cfg.dispatchCutoffDisplay || '',
             'policy-date':            cfg.formatPolicyDate(),
             'policy-version':         cfg.policyVersion,

@@ -138,7 +138,13 @@
         returnWindowDays:        30,
         returnWindowDaysFaulty:  30,
         returnWindowDaysChange:  30,
-        compatibleWarrantyMonths: 12,
+        // NOTE (2026-07-15, ERR-078): the 12-month compatible-cartridge
+        // "replacement warranty" claim was a misrepresentation — the business
+        // does not offer it. Compatibles are covered by the 30-day satisfaction
+        // guarantee (see returnWindowDays) + statutory CGA-1993 rights. The
+        // `compatibleWarrantyMonths` constant and the `compatible-warranty`
+        // data-legal-bind were retired; page copy now states the guarantee as
+        // prose to stay byte-identical with the backend prerender.
         dispatchCutoffDisplay:   '2pm NZT, Auckland metro, business days',
         returnsAddressSameAsBusiness: true,
         // CGA-aligned return rules. Note: faulty / not-as-described returns

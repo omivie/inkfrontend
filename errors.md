@@ -4,6 +4,43 @@ Log every error encountered here. Before editing a file, scan for known issues. 
 
 ---
 
+## ERR-078 — Live misrepresentation: a 12-month compatible-cartridge "replacement warranty" the business never offered (2026-07-15)
+
+**Symptom:** the storefront claimed every compatible cartridge carried a **12-month replacement
+warranty** — on `/about`, `/returns`, `/faq`, `/genuine-vs-compatible`, and the compatible-PDP
+disclaimer. The business does **not** offer this. It is a misrepresentation, the same class of
+issue behind the May/Jul 2026 Google Ads suspensions. Backend dev flagged it
+(`FE-ACTION-REQUIRED-warranty-claim-removal-jul2026.md`) after retiring it on the backend
+(`trustSignals.js` + `prerender.js`).
+
+**Cause:** the claim was **not API-driven** — the storefront never read
+`trust_signals.warranty.compatible_months`/`compatible_label` (zero hits). It came from a **local
+constant** (`legal-config.js` `compatibleWarrantyMonths: 12`) feeding a `compatible-warranty`
+`data-legal-bind`, **plus hardcoded prose** in five pages that didn't use the binding at all. So the
+number had two independent sources — flipping the constant would have missed the prose, exactly the
+single-surface trap that shipped the OEM-warranty claim past two "fixed" reports (ERR-063/065-069).
+
+**Fix (the true policy):** compatibles are covered by the **30-day satisfaction guarantee**
+(`guarantee.days = 30`) + the returns policy + statutory **CGA-1993** rights. Genuine cartridges
+still carry the **original manufacturer warranty** (unchanged, still true). Retired the constant +
+binding at the source; rewrote all prose to the 30-day framing; the compatible-PDP panel now mirrors
+the backend prerender verbatim (parity, not cloaking — the trailing sentence briefly removed
+2026-07-15 was restored as the 30-day + CGA wording). `npm run build` restamped cache tokens.
+
+**Deploy:** shipped **FE-first** (owner call; the hand-off permits it). The backend prerender was
+NOT yet live at commit time (verified: live `/api/site/trust` still returned `compatible_months: 12`,
+every bot page still showed "12-month"). This opens a short, *safe*-direction divergence window
+(humans see the truer 30-day claim; bots still see 12-month) until the backend deploys. **Owed:** a
+bot-vs-browser parity spot-check on `/returns`, `/about`, `/genuine-vs-compatible` + a compatible PDP
+once the backend is live.
+
+**Pinned by:** `tests/warranty-claim-removal-jul2026.test.js` (new — per-page + site-wide walk +
+PDP-panel + source-level constant/binding guards). Also updated:
+`google-ads-compliance-may2026.test.js`, `genuine-vs-compatible-warranty.test.js`,
+`reappeal-disclaimers-jul2026.test.js`, `legal-pages.test.js`. Suite green (2251/0).
+
+---
+
 ## ERR-073 — A test pinned the *implementation* of a compliance rule, not the rule (2026-07-14)
 
 **Symptom:** the owner asked to delete the footer's single-line legal row

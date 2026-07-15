@@ -84,8 +84,12 @@ test('§2 the legally-vetted warranty copy is present, verbatim', () => {
     // Collapse whitespace: the copy is line-wrapped in the source.
     const text = READ(GVC).replace(/\s+/g, ' ').replace(/&rsquo;/g, "'");
 
-    assert.match(text, /Compatible cartridges from us are covered by our own 12-month replacement warranty, and your statutory rights under the New Zealand Consumer Guarantees Act 1993 apply to everything we sell\./,
-        'the vetted first sentence must appear exactly as legal supplied it');
+    assert.match(text, /Compatible cartridges from us are covered by our 30-day satisfaction guarantee, and your statutory rights under the New Zealand Consumer Guarantees Act 1993 apply to everything we sell\./,
+        'the vetted first sentence must appear exactly as legal supplied it (30-day satisfaction '
+        + 'guarantee — the 12-month replacement-warranty claim was retired, ERR-078)');
+    // The retired 12-month claim must not reappear on this page.
+    assert.doesNotMatch(text, /12-month replacement warranty|12 months? replacement/i,
+        'the retired 12-month compatible warranty claim must not return (ERR-078)');
     assert.match(text, /If you have questions about your printer's manufacturer warranty, check the manufacturer's warranty terms\./,
         'the vetted second sentence must appear exactly as legal supplied it');
 });
@@ -163,7 +167,7 @@ test('§3 the patterns do NOT ban legitimate warranty language', () => {
     const legitimate = [
         "If you have questions about your printer's manufacturer warranty, check the manufacturer's warranty terms.",
         "Genuine cartridges carry the printer manufacturer's own warranty.",
-        'Compatible cartridges from us are covered by our own 12-month replacement warranty.',
+        'Compatible cartridges from us are covered by our 30-day satisfaction guarantee.',
         'Your statutory rights under the New Zealand Consumer Guarantees Act 1993 are unaffected.',
         'Void',                 // admin invoice status
         'void content.offsetHeight',  // landing.js reflow idiom
@@ -216,7 +220,7 @@ test('§4 the banned-claim list still recognises the exact paragraph that shippe
         'the banned OEM-warranty paragraph must still be caught by BANNED_CLAIM_PATTERNS');
 
     const legitimateCopy = '<h2>5. Warranty</h2><p>Compatible cartridges from us are covered by '
-        + 'our own 12-month replacement warranty.</p>';
+        + 'our 30-day satisfaction guarantee.</p>';
     assert.ok(!violates(legitimateCopy),
         'a claim about OUR OWN guarantee is legitimate and must not be flagged — the list is a '
         + 'filter on OEM-warranty assertions, not a ban on the word "warranty"');

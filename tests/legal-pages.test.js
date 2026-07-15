@@ -242,7 +242,9 @@ test('§6 legal-config.js exposes every binding key used by the pages', () => {
         // Google Ads "Business Transparency" bindings (May 2026):
         'nzbn', 'gst-number', 'company-number', 'disambiguation', 'copyright',
         'return-window-faulty', 'return-window-change',
-        'compatible-warranty', 'dispatch-cutoff',
+        // 'compatible-warranty' retired 2026-07-15 (ERR-078) — the 12-month
+        // compatible replacement-warranty claim was a misrepresentation.
+        'dispatch-cutoff',
         'tax-line', 'payment-methods', 'carriers',
         'shipping-zones', 'data-processors', 'cookies', 'map',
     ];

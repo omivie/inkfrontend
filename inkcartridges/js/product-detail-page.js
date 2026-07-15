@@ -838,9 +838,15 @@
          * Guarantees Act panel between the buy box and the description for
          * COMPATIBLE products only. Keyed off the trusted `source` field, NOT
          * `isCompatible` (which is force-false for ribbons, so a compatible
-         * ribbon must still get the disclaimer). Do NOT reword the copy — it is
-         * vetted legal phrasing, and it never asserts anything about the OEM's
-         * own warranty. Genuine / unknown-source products render nothing.
+         * ribbon must still get the disclaimer). The copy is vetted legal
+         * phrasing — keep the trademark / third-party / supplier attribution
+         * exactly as written, and never assert anything about the OEM's own
+         * warranty. (The trailing sentence was briefly removed 2026-07-15, then
+         * restored as the 30-day satisfaction-guarantee wording —
+         * ERR-078 — so the human panel stays byte-identical with the backend
+         * prerender. The retired "12-month replacement warranty" claim must NOT
+         * return: compatibles carry the 30-day satisfaction guarantee, not a
+         * warranty.) Genuine / unknown-source products render nothing.
          */
         renderComplianceDisclaimer(info) {
             if (!info || info.source !== 'compatible') return;
@@ -860,7 +866,7 @@
 
             const html = `
                 <div class="compat-disclaimer" id="compat-disclaimer">
-                    This is a compatible (third-party) ${type} designed to work in the ${oem} printers listed on this page. It is not manufactured, endorsed, or sold by ${oem}. Supplied by Office Consumables Ltd, trading as InkCartridges.co.nz. 12-month replacement warranty on compatible cartridges. Your statutory rights under the New Zealand Consumer Guarantees Act 1993 are unaffected.
+                    This is a compatible (third-party) ${type} designed to work in the ${oem} printers listed on this page. It is not manufactured, endorsed, or sold by ${oem}. Supplied by Office Consumables Ltd, trading as InkCartridges.co.nz. Compatible cartridges are covered by our 30-day satisfaction guarantee. Your statutory rights under the New Zealand Consumer Guarantees Act 1993 are unaffected.
                 </div>`;
             pricingEl.insertAdjacentHTML('afterend', html);
         },
