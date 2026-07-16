@@ -838,17 +838,11 @@ const AdminAPI = {
     }
   },
 
-  // ---- Per-product margin (inline edit on the Products table) ----
-  // The operator types a target net margin %; the backend derives the relative
-  // gross-markup offset that achieves it, stores it (so it persists across
-  // general-margin changes), re-prices the row (clearing any retail freeze) and
-  // returns the new retail_price / net_margin_incl_fixed_pct / offset.
-  async setProductTargetMargin(productId, targetMarginPct, notes) {
-    const body = { target_margin_pct: targetMarginPct };
-    if (notes) body.notes = notes;
-    const resp = await window.API.put(`/api/admin/products/${encodeURIComponent(productId)}/margin-offset`, body);
-    return resp?.data ?? null;
-  },
+  // Per-product margin offsets were RETIRED Jul 2026 (market-aware hybrid
+  // pricing engine). The write endpoint PUT /products/:id/margin-offset is now a
+  // deprecated 200-noop. The per-product hard lever is `manual_retail_price`
+  // (sent as a field on updateProduct); competitor undercutting is automatic via
+  // the backend market cap. No FE method calls the offset endpoint any more.
 
   async updateProduct(productId, data) {
     try {
@@ -1444,6 +1438,34 @@ const AdminAPI = {
       return true;
     } catch (e) {
       DebugLog.warn('[AdminAPI] setProductRibbonBrands failed:', e.message);
+      throw e;
+    }
+  },
+
+  /**
+   * Persist a ribbon's OWNER-CURATED related products (products.related_product_skus).
+   *
+   * Direct Supabase write (owner-authenticated), mirroring persistRichTextColumns:
+   * the backend product PUT doesn't round-trip this column. Ribbons are manual-only
+   * (ERR-085) — this array IS the entire "Products related to …" section on the PDP,
+   * with no backend inference. SKUs are trimmed + de-duped (order preserved). An
+   * empty list clears the column to null.
+   */
+  async setRelatedProductSkus(productId, skus) {
+    try {
+      const sb = this._sb();
+      if (!sb) throw new Error('Supabase not available');
+      const seen = new Set();
+      const clean = (Array.isArray(skus) ? skus : [])
+        .map(s => String(s == null ? '' : s).trim())
+        .filter(s => s && !seen.has(s.toUpperCase()) && seen.add(s.toUpperCase()));
+      const { error } = await sb.from('products')
+        .update({ related_product_skus: clean.length ? clean : null })
+        .eq('id', productId);
+      if (error) throw error;
+      return true;
+    } catch (e) {
+      DebugLog.warn('[AdminAPI] setRelatedProductSkus failed:', e.message);
       throw e;
     }
   },

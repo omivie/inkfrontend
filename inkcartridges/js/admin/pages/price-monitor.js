@@ -210,7 +210,7 @@ async function runBulkAction(action, undercutAmount) {
   const verb = action === 'match_cheapest' ? 'match the cheapest competitor' : `undercut by ${formatPrice(undercutAmount)}`;
   const ok = await Modal.confirm({
     title: 'Confirm bulk action',
-    message: `Apply "${verb}" to ${ids.length} product${ids.length !== 1 ? 's' : ''}?`,
+    message: `Set a fixed price to ${verb} on ${ids.length} product${ids.length !== 1 ? 's' : ''}? This writes an exact price override that bypasses the pricing engine until you clear it (in the product's edit drawer).`,
     confirmLabel: 'Apply',
     danger: true,
   }).catch(() => false);
@@ -221,7 +221,7 @@ async function runBulkAction(action, undercutAmount) {
     if (action === 'undercut') payload.undercut_amount = undercutAmount;
     const result = await AdminAPI.priceMonitor.bulkAction(payload);
     const updated = result?.updated ?? ids.length;
-    Toast.success(`Updated ${updated} product${updated !== 1 ? 's' : ''}`);
+    Toast.success(`Fixed price set on ${updated} product${updated !== 1 ? 's' : ''} (overrides the engine until cleared)`);
     _selected.clear();
     _table.clearSelection();
     updateBulkBar();
@@ -349,7 +349,7 @@ function renderShell() {
     <div class="admin-page-header">
       <div>
         <h1 class="admin-page-title">Price Monitor</h1>
-        <p class="admin-page-subtitle">Competitor prices, margin floor alerts, bulk repricing.</p>
+        <p class="admin-page-subtitle">Competitor prices, margin floor alerts, bulk repricing. Match/undercut sets a fixed price override (bypasses the pricing engine until cleared).</p>
       </div>
     </div>
 

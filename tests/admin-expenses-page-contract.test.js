@@ -34,18 +34,19 @@ test('the page module + four utils exist', () => {
   }
 });
 
-test('nav registers an owner-only Expenses item under Analytics', () => {
+test('nav registers an owner-only Expenses item under Finance', () => {
   assert.match(appJs, /key:\s*'expenses'[^}]*ownerOnly:\s*true/, 'NAV_ITEMS must have an owner-only expenses entry');
-  // It sits in the Analytics section (between Finance and Demand Ranking).
-  const analyticsIdx = appJs.indexOf("section: 'Analytics'");
+  // July 2026 IA overhaul: Expenses moved from "Analytics" into the "Finance" section.
+  const financeIdx = appJs.indexOf("section: 'Finance'");
   const expensesIdx = appJs.indexOf("key: 'expenses'");
-  assert.ok(analyticsIdx > 0 && expensesIdx > analyticsIdx, 'expenses nav item belongs to the Analytics section');
+  assert.ok(financeIdx > 0 && expensesIdx > financeIdx, 'expenses nav item belongs to the Finance section');
 });
 
 test('route gate blocks #expenses for non-owners', () => {
-  const m = appJs.match(/const ownerPages = \[([^\]]*)\]/);
-  assert.ok(m, 'ownerPages array must exist');
-  assert.match(m[1], /'expenses'/, "ownerPages must include 'expenses' so direct hash access is blocked");
+  // July 2026: owner gating derives from NAV_ITEMS via isOwnerOnlyRoute() (no
+  // separate ownerPages array). An owner nav item + the derived gate = blocked.
+  assert.match(appJs, /key:\s*'expenses'[^}]*ownerOnly:\s*true/, "expenses must be flagged ownerOnly so isOwnerOnlyRoute() gates it");
+  assert.match(appJs, /isOwnerOnlyRoute\(pageName\)\s*&&\s*!AdminAuth\.isOwner\(\)/, 'navigate() must gate owner routes through isOwnerOnlyRoute()');
 });
 
 test('cache-busting versions were bumped off the previous release', () => {

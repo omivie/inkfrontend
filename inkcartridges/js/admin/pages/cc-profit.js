@@ -6,6 +6,7 @@ import { AdminAPI, AdminAuth, esc } from '../app.js';
 import { DataTable } from '../components/table.js';
 import { Modal } from '../components/modal.js';
 import { Toast } from '../components/toast.js';
+import { normalizeTierResponse, sortTierKeys } from '../utils/pricingCalculator.js';
 
 const formatPrice = (v) => window.formatPrice ? window.formatPrice(v) : `$${Number(v).toFixed(2)}`;
 const TIERS = ['<$10', '$10-30', '$30-60', '$60-100', '$100+'];
@@ -188,85 +189,50 @@ async function loadTierMultipliers() {
   renderTierMultipliers(data);
 }
 
+// Read-only display of the live effective tier multipliers, grouped by source.
+// Editing lives in Control Center → Pricing (the Margin simulator), which
+// previews impact + validates against the live bands before committing. This
+// table used to expect a flat array, but the endpoint returns
+// { defaults, overrides, effective } keyed by source — normalizeTierResponse
+// handles every shape and fails loud on an unrecognised one.
 function renderTierMultipliers(data) {
   const wrap = _el.querySelector('#cc-tier-wrap');
-  if (!data || !Array.isArray(data) || !data.length) {
+  const norm = normalizeTierResponse(data);
+  const eff = norm.effective;
+  if (!eff || !Object.keys(eff).length) {
     wrap.innerHTML = '<div class="admin-empty"><div class="admin-empty__text">No tier multiplier data available</div></div>';
     return;
   }
-  const isOwner = AdminAuth.isOwner();
-  let html = `<table class="admin-table" style="margin:0">
-    <thead><tr>
-      <th>Tier</th>
-      <th style="text-align:right">Multiplier</th>
-      <th style="text-align:right" title="Tier price uplift: (multiplier - 1) × 100. Not the same as product-level Markup % on the Products page.">Tier Multiplier Markup</th>
-    </tr></thead><tbody>`;
-  for (const tier of data) {
-    const name = tier.tier_name || tier.tier || tier.name || '—';
-    const mult = tier.multiplier ?? 1;
-    const markup = ((mult - 1) * 100).toFixed(1);
-    html += `<tr>
-      <td>${esc(name)}</td>
-      <td style="text-align:right">${isOwner
-        ? `<input type="number" class="admin-input cc-tier-input" data-tier="${Security.escapeAttr(name)}" value="${mult}" step="0.01" min="0.5" max="5" style="width:80px;text-align:right;padding:4px 8px;font-size:13px">`
-        : `<span class="cell-mono">${mult.toFixed(2)}</span>`}</td>
-      <td style="text-align:right"><span class="cell-mono cc-tier-markup" data-tier="${Security.escapeAttr(name)}">${markup}%</span></td>
-    </tr>`;
-  }
-  html += '</tbody></table>';
-  if (isOwner) {
-    html += `<div style="margin-top:12px;text-align:right">
-      <button class="admin-btn admin-btn--primary admin-btn--sm" id="cc-tier-save" disabled>Save Multipliers</button>
-    </div>`;
-  }
-  wrap.innerHTML = html;
+  const SOURCE_LABEL = { genuine: 'Genuine', compatible: 'Compatible', ribbon: 'Ribbon' };
+  const order = ['genuine', 'compatible', 'ribbon'].filter(s => eff[s]);
+  for (const s of Object.keys(eff)) if (!order.includes(s)) order.push(s);
 
-  if (isOwner) {
-    // Live markup preview + enable save on change
-    wrap.querySelectorAll('.cc-tier-input').forEach(input => {
-      input.addEventListener('input', () => {
-        const val = parseFloat(input.value) || 1;
-        const markupEl = wrap.querySelector(`.cc-tier-markup[data-tier="${input.dataset.tier}"]`);
-        if (markupEl) markupEl.textContent = ((val - 1) * 100).toFixed(1) + '%';
-        wrap.querySelector('#cc-tier-save').disabled = false;
-      });
-    });
-    wrap.querySelector('#cc-tier-save').addEventListener('click', saveTierMultipliers);
-  }
-}
-
-function saveTierMultipliers() {
-  const inputs = _el.querySelectorAll('.cc-tier-input');
-  const multipliers = {};
-  inputs.forEach(input => { multipliers[input.dataset.tier] = parseFloat(input.value) || 1; });
-
-  const summary = Object.entries(multipliers).map(([t, m]) => `${t}: ${m.toFixed(2)}`).join(', ');
-  const m = Modal.open({
-    title: 'Update Tier Multipliers',
-    body: `<p>Set the following tier multipliers?</p>
-      <p style="font-size:13px;color:var(--text-muted);margin:8px 0">${esc(summary)}</p>
-      <p style="font-size:13px;color:var(--text-muted)">Saved prices update automatically in the background (about a minute).</p>`,
-    footer: `
-      <button class="admin-btn admin-btn--ghost" id="cc-tier-cancel">Cancel</button>
-      <button class="admin-btn admin-btn--primary" id="cc-tier-confirm">Save</button>
-    `,
-  });
-  m.footer.querySelector('#cc-tier-cancel').addEventListener('click', () => m.close());
-  m.footer.querySelector('#cc-tier-confirm').addEventListener('click', async () => {
-    const btn = m.footer.querySelector('#cc-tier-confirm');
-    btn.disabled = true;
-    btn.textContent = 'Saving...';
-    try {
-      const data = await AdminAPI.updateTierMultipliers(multipliers);
-      handleRepriceResponse(data);
-      m.close();
-      await loadTierMultipliers();
-    } catch (e) {
-      Toast.error('Failed to update multipliers');
-      btn.disabled = false;
-      btn.textContent = 'Save';
+  let html = '';
+  for (const src of order) {
+    const map = eff[src] || {};
+    const keys = sortTierKeys(Object.keys(map));
+    if (!keys.length) continue;
+    html += `<h4 class="cc-tier-source-heading">${esc(SOURCE_LABEL[src] || src)}</h4>
+      <table class="admin-table" style="margin:0 0 12px">
+        <thead><tr>
+          <th>Tier (cost band)</th>
+          <th style="text-align:right">Multiplier</th>
+          <th style="text-align:right" title="Tier price uplift: (multiplier - 1) × 100. Not the same as product-level Markup % on the Products page.">Tier Multiplier Markup</th>
+        </tr></thead><tbody>`;
+    for (const name of keys) {
+      const mult = Number(map[name]) || 1;
+      const markup = ((mult - 1) * 100).toFixed(1);
+      html += `<tr>
+        <td class="cell-mono">${esc(name)}</td>
+        <td style="text-align:right" class="cell-mono">${mult.toFixed(3)}</td>
+        <td style="text-align:right" class="cell-mono">${markup}%</td>
+      </tr>`;
     }
-  });
+    html += '</tbody></table>';
+  }
+  html += `<p class="admin-text-muted" style="font-size:13px;margin:4px 0 0">
+    Edit these in <strong>Control Center → Pricing</strong> — the Margin simulator previews impact and validates against the live bands before saving.</p>`;
+  wrap.innerHTML = html;
 }
 
 function showOffsetConfirm(offset) {

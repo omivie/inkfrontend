@@ -452,7 +452,7 @@ function loadWire() {
   const factory = new Function(
     'AdminAPI', 'Toast', 'esc', 'DebugLog', 'window',
     'extractBrandName', '_brands', 'PRODUCT_TYPE_LABELS', 'PRODUCT_TYPE_TO_SHOP_CATEGORY',
-    'describeScopes', 'describeCodesWriteError', 'paginate', 'pagerHtml',
+    'describeScopes', 'describeCodesWriteError', 'paginate', 'pagerHtml', 'RIBBON_PRODUCT_TYPES',
     `${src}; return wireProductCodesSection;`);
   return (deps) => factory(
     { normalizeProductCode: NORMALIZE,
@@ -466,7 +466,8 @@ function loadWire() {
     deps.PRODUCT_TYPE_TO_SHOP_CATEGORY || { ink_cartridge: 'ink', toner_cartridge: 'toner' },
     DESCRIBE_SCOPES,
     deps.describeCodesWriteError || ((e) => (e && e.message) || 'unknown error'),
-    PAGINATE, PAGER_HTML);
+    PAGINATE, PAGER_HTML,
+    deps.RIBBON_PRODUCT_TYPES || ['printer_ribbon', 'typewriter_ribbon', 'correction_tape']);
 }
 
 // A representative Brother ink product.
@@ -551,6 +552,18 @@ test('seed: with no series_codes, it derives via window.API._enrichSeriesCodes',
   const AdminAPI = { getProductCodes: async () => [] };
   await loadWire()({ AdminAPI, window: win })(modal, PROD({ id: 'p2', series_codes: [] }));
   assert.deepEqual([...modal._productCodesSelection.keys()], ['LC57']);
+});
+
+test('seed: a RIBBON is NEVER machine-seeded — starts empty (owner-manual, ERR-086)', async () => {
+  const modal = makeModal(CODE_IDS);
+  // Backend series_codes AND an enrich heuristic that WOULD fire — both must be
+  // ignored for a ribbon, so the owner picks from scratch.
+  const win = makeWindow({ series: [], enrich: (p) => { p.series_codes = ['02']; return true; } });
+  const AdminAPI = { getProductCodes: async () => [] };
+  await loadWire()({ AdminAPI, window: win })(modal, PROD({ id: 'rib1', product_type: 'typewriter_ribbon', series_codes: ['02'] }));
+  assert.equal(modal._productCodesLoaded, true);
+  assert.equal(modal._productCodesSelection.size, 0, 'ribbon seeds no codes — no backend/heuristic pre-tick');
+  assert.equal(modal._els['pc-seed-note'].hidden, true, 'no seed note — nothing was pre-selected');
 });
 
 test('a product WITH saved codes loads them and shows no seed note', async () => {

@@ -1263,14 +1263,21 @@ const API = {
             const products = Array.isArray(data.products) ? data.products : [];
 
             // (1) Override series_codes on every returned product carrying
-            //     manual codes — "manual fully replaces auto".
+            //     manual codes — "manual fully replaces auto". Ribbons are
+            //     owner-manual (ERR-086): a ribbon with NO override carries no
+            //     codes at all — never a backend-derived fallback — so its
+            //     /shop membership is exactly what the owner assigned. (The loop
+            //     runs even when no product has an override so ribbon-clearing
+            //     still happens.)
             if (products.length) {
                 const codeMap = await this._fetchManualCodesByProduct(products.map(p => p && p.id));
-                if (codeMap.size) {
-                    for (const p of products) {
-                        if (p && p.id && codeMap.has(p.id)) {
-                            p.series_codes = [...new Set(codeMap.get(p.id))];
-                        }
+                const ribbonTypes = this._CATEGORY_PRODUCT_TYPES.ribbons;
+                for (const p of products) {
+                    if (!p) continue;
+                    if (p.id && codeMap.has(p.id)) {
+                        p.series_codes = [...new Set(codeMap.get(p.id))];
+                    } else if (ribbonTypes.includes(p.product_type)) {
+                        p.series_codes = [];
                     }
                 }
             }

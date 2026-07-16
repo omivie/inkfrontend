@@ -9,8 +9,9 @@
  *   1. api.js exposes getDemandRanking() that builds the endpoint's OWN query
  *      params (product_type/source/packs/window_days/limit) — NOT the shared
  *      date/brand analyticsQuery() convention (no date_from/brand_filter).
- *   2. app.js registers the owner-only page under the Analytics section and in
- *      the ownerPages gate.
+ *   2. app.js registers the owner-only page under the Catalog section; the client
+ *      owner gate is derived from that ownerOnly flag via isOwnerOnlyRoute()
+ *      (July 2026 IA overhaul — the separate ownerPages array was removed).
  *   3. pages/demand-ranking.js: default-exports init/destroy, uses the
  *      _renderSeq race guard, hides the global filter bar, renders the
  *      low-data "interest-weighted" banner, only emits raw>0 signal chips,
@@ -92,24 +93,28 @@ test('getDemandRanking does NOT route through the date/brand analyticsQuery conv
 // 2. app.js — registration + owner gate
 // ─────────────────────────────────────────────────────────────────────────────
 
-test('app.js registers the demand-ranking nav item under Analytics, owner-only', () => {
+test('app.js registers the demand-ranking nav item under Catalog, owner-only', () => {
     assert.ok(/key:\s*'demand-ranking'/.test(APP_JS),
         'NAV_ITEMS must include a demand-ranking entry');
-    // It sits within the Analytics section (after that section header, before the next).
-    const analyticsIdx = APP_JS.indexOf("section: 'Analytics'");
-    const nextSection = APP_JS.indexOf("section: 'Catalog", analyticsIdx);
+    // July 2026 IA overhaul: demand-ranking (an inventory/demand signal) moved from
+    // "Analytics" into the "Catalog" section (before "Data Operations").
+    const catalogIdx = APP_JS.indexOf("section: 'Catalog'");
+    const dataOpsIdx = APP_JS.indexOf("section: 'Data Operations'");
     const drIdx = APP_JS.indexOf("key: 'demand-ranking'");
-    assert.ok(analyticsIdx !== -1 && drIdx > analyticsIdx && (nextSection === -1 || drIdx < nextSection),
-        'demand-ranking nav item must live under the Analytics section');
+    assert.ok(catalogIdx !== -1 && drIdx > catalogIdx && drIdx < dataOpsIdx,
+        'demand-ranking nav item must live under the Catalog section');
     const navLine = APP_JS.slice(drIdx, drIdx + 120);
     assert.ok(navLine.includes('ownerOnly: true'),
         'demand-ranking nav item must be ownerOnly: true');
 });
 
-test('app.js lists demand-ranking in the ownerPages gate', () => {
-    const gate = APP_JS.slice(APP_JS.indexOf('const ownerPages'), APP_JS.indexOf('const ownerPages') + 200);
-    assert.ok(gate.includes("'demand-ranking'"),
-        'ownerPages must include demand-ranking so the client mirrors the server-side owner gate');
+test('app.js owner-gates demand-ranking via the derived isOwnerOnlyRoute rule', () => {
+    // July 2026: the client owner gate derives from NAV_ITEMS.ownerOnly (no separate
+    // ownerPages array), so the ownerOnly flag above is what mirrors the server gate.
+    assert.ok(/function isOwnerOnlyRoute\s*\(/.test(APP_JS),
+        'isOwnerOnlyRoute() must exist as the single-source owner gate');
+    assert.ok(/isOwnerOnlyRoute\(pageName\)\s*&&\s*!AdminAuth\.isOwner\(\)/.test(APP_JS),
+        'navigate() must gate owner routes through isOwnerOnlyRoute()');
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -2580,6 +2580,15 @@ button.admin-active-dot--clickable:hover::after { opacity: 1; }
   margin-top: 0.5rem;
 }
 
+/* Read-only tier-multiplier table (cc-profit): source group headings. */
+.cc-tier-source-heading {
+  margin: 14px 0 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+.cc-tier-source-heading:first-child { margin-top: 0; }
+
 .admin-modal--wide { max-width: 900px; width: 95vw; }
 /* Invoice email composer — a touch wider than the default modal, with a roomy message box. */
 .admin-modal--invoice-email { max-width: 560px; }
@@ -2700,31 +2709,20 @@ button.admin-active-dot--clickable:hover::after { opacity: 1; }
 .margin-badge--healthy  { background: var(--cyan-dim);   color: var(--cyan-text); }
 .margin-badge--excellent { background: var(--success-dim); color: var(--success); }
 
-/* Clickable Margin % cell — opens the per-product margin-offset editor. */
-.margin-edit-btn {
-  display: inline-flex; align-items: center; gap: 5px;
-  background: none; border: 0; padding: 1px 3px; margin: 0;
-  border-radius: 5px; cursor: pointer; font: inherit;
+/* Per-product exact-price override (manual_retail_price) in the edit drawer.
+   Write-only: the admin API doesn't return the field, so the input is blank and
+   the hint explains it. Replaces the retired per-product margin-offset editor. */
+.manual-price-override__clear {
+  display: flex; align-items: center; gap: 6px;
+  margin-top: 6px; font-size: 12px; font-weight: 400; color: var(--text-muted);
 }
-.margin-edit-btn:hover { background: var(--surface-hover); }
-.margin-edit-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-.margin-offset-chip {
-  font-family: var(--font-mono); font-size: 10px; font-weight: 600;
-  padding: 1px 5px; border-radius: 3px;
-  background: var(--surface-hover); color: var(--text-muted);
+.manual-price-override__hint {
+  margin: 6px 0 0; font-size: 12px; line-height: 1.4; color: var(--text-muted);
 }
-
-/* Inline margin editor — the Margin % cell turns into a small input on click. */
-.margin-inline-edit { display: inline-flex; align-items: center; gap: 4px; }
-.margin-inline-edit > span { font-size: 11px; color: var(--text-muted); }
-.margin-inline-input {
-  width: 64px; padding: 2px 6px; text-align: right;
-  font-family: var(--font-mono); font-size: 12px; font-weight: 600;
-  border: 1px solid var(--accent); border-radius: 5px;
-  background: var(--surface); color: var(--text);
+.manual-price-override__hint code {
+  font-family: var(--font-mono); font-size: 11px;
+  padding: 1px 4px; border-radius: 3px; background: var(--surface-hover);
 }
-.margin-inline-input::-webkit-outer-spin-button,
-.margin-inline-input::-webkit-inner-spin-button { margin: 0; }
 
 .source-badge {
   display: inline-block; padding: 2px 8px; border-radius: 4px;

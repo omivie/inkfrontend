@@ -1,4 +1,32 @@
     // ============================================
+    // RELATED-PRODUCT SKU RESOLUTION
+    // ============================================
+    // Curated related_product_skus are hand-entered. For typewriter ribbons —
+    // which use bare numeric SKUs like "307.11" with no prefix — the related
+    // picker tends to save a compatible product by its BARE code ("141LOT")
+    // while the real product carries the compatible/genuine prefix ("C141LOT").
+    // An exact `.in('sku', [...])` then resolves nothing and the "Products
+    // related to …" section renders as a bare heading (ERR-084: SKU 307.11's
+    // ["141LOT","143LOT"] never resolved to the real C141LOT/C143LOT tapes).
+    //
+    // The convention is a single known letter over a bare code: "C" = compatible,
+    // "G" = genuine. Return the EXACT sku first, then the two prefixed
+    // candidates, so exact always wins and matching stays strict SKU equality
+    // over a tiny candidate set — never a fuzzy substring / ILIKE (which could
+    // pull an unrelated product). A spurious candidate that matches nothing is
+    // harmless; one that matches a real C-/G- sibling is genuinely related.
+    // Pure — exposed on window._pdpRelatedHelpers for tests.
+    function relatedSkuCandidates(sku) {
+        const raw = String(sku == null ? '' : sku).trim();
+        if (!raw) return [];
+        const up = raw.toUpperCase();
+        return [up, 'C' + up, 'G' + up];
+    }
+    if (typeof window !== 'undefined') {
+        window._pdpRelatedHelpers = { relatedSkuCandidates };
+    }
+
+    // ============================================
     // DYNAMIC PRODUCT PAGE
     // ============================================
     const ProductPage = {
@@ -153,7 +181,14 @@
                 // it does /shop — "codes set here fully replace the auto-detected ones".
                 try {
                     const manualCodes = await API.getManualProductCodes(this.product.id);
-                    if (manualCodes.length) this.product.series_codes = manualCodes;
+                    if (manualCodes.length) {
+                        this.product.series_codes = manualCodes;
+                    } else if (this.product.category === 'ribbon') {
+                        // Ribbons are owner-manual (ERR-086): with no explicit
+                        // override they carry NO codes — never a backend-derived
+                        // fallback. Mirrors _applyManualCodes' ribbon rule.
+                        this.product.series_codes = [];
+                    }
                 } catch (_) { /* non-critical — fall back to the backend series_codes */ }
 
                 // Gate test products — active test products are visible to all; inactive only to super admins
@@ -1137,6 +1172,15 @@
                 return;
             }
 
+            // Ribbons are OWNER-MANUAL (ribbon-manual directive, ERR-086): the
+            // "FOR USE IN" block is only ever the admin-written
+            // compatible_devices_html above. With no such copy we show NOTHING —
+            // never auto-derive a compatible-printer list from the backend
+            // product_compatibility join (that fallback runs below for
+            // non-ribbons only). Search still indexes ribbon compatibility
+            // server-side; this only governs what the PAGE displays.
+            if (info.category === 'ribbon') return;
+
             // Fast path 1 — backend grouped compatibility (audit §1.4).
             if (this._renderGroupedPrinterCompat(info)) return;
             // Fast path 2 — flat compatible_printers[] with slug/brand_slug (§2).
@@ -1340,37 +1384,47 @@
                     }
                 };
 
-                // For ribbons: curated related_product_skus FIRST (preserves any hand-set
-                // ordering), then union in the shared-code family so an admin-assigned
-                // product code groups ribbons the same way it groups ink/toner. Before this,
-                // ribbons were code-blind — only related_product_skus fed the section — so a
-                // code set in the Product Codes tab had no effect on a ribbon PDP.
+                // For ribbons: related products are OWNER-CURATED ONLY — exactly the
+                // `related_product_skus` hand-picked in the admin drawer's For Use In
+                // tab, in the saved order. Ribbons are deliberately NOT auto-filled by
+                // the backend (no shared-code family fetch): the ERR-082 code-family
+                // union was retired 2026-07-16 per owner decision so a ribbon shows
+                // only what the owner picked (ERR-085). The curated list still resolves
+                // prefix-tolerantly (ERR-084) so a legacy bare-code entry still lands.
                 if (info.category === 'ribbon') {
                     const manualSkus = info.related_product_skus;
                     if (Array.isArray(manualSkus) && manualSkus.length > 0) {
                         const sb = (typeof Auth !== 'undefined' && Auth.supabase) ? Auth.supabase : null;
                         if (sb) {
+                            // Resolve prefix-tolerantly (ERR-084): a curated entry
+                            // saved as a bare code ("141LOT") still finds the real
+                            // C-/G-prefixed product ("C141LOT"). One query over the
+                            // exact + prefixed candidate union; per entry the exact
+                            // sku wins, else the first prefixed candidate that hits.
+                            const candidates = [];
+                            const seenCand = new Set();
+                            for (const s of manualSkus) {
+                                for (const c of relatedSkuCandidates(s)) {
+                                    if (!seenCand.has(c)) { seenCand.add(c); candidates.push(c); }
+                                }
+                            }
                             const { data: manualProducts } = await sb.from('products')
                                 .select('*')
-                                .in('sku', manualSkus)
+                                .in('sku', candidates)
                                 .eq('is_active', true);
                             if (manualProducts?.length) {
-                                const bysku = {};
-                                manualProducts.forEach(p => { bysku[p.sku] = p; });
-                                const ordered = manualSkus.map(s => bysku[s]).filter(Boolean);
+                                const byUpper = {};
+                                manualProducts.forEach(p => { byUpper[String(p.sku).toUpperCase()] = p; });
+                                const ordered = [];
+                                const usedSku = new Set();
+                                for (const s of manualSkus) {
+                                    for (const c of relatedSkuCandidates(s)) {
+                                        const hit = byUpper[c];
+                                        if (hit && !usedSku.has(hit.sku)) { usedSku.add(hit.sku); ordered.push(hit); break; }
+                                    }
+                                }
                                 addProducts(ordered);
                             }
-                        }
-                    }
-
-                    // The code family — other ribbons in this brand carrying the same code
-                    // (info.series_codes now reflects any manual override applied at load).
-                    const brandSlug = info.brand?.slug || (info.brandName || '').toLowerCase();
-                    const code = this.extractProductCode(info);
-                    if (brandSlug && code) {
-                        const res = await API.getShopData({ brand: brandSlug, category: 'ribbons', code, limit: 200 });
-                        if (res.ok && res.data?.products) {
-                            addProducts(res.data.products.filter(p => p.sku !== info.sku));
                         }
                     }
                 } else {

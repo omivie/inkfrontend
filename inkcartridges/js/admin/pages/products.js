@@ -12,6 +12,7 @@ import { PRODUCT_TYPE_TO_SHOP_CATEGORY, describeCodesWriteError, describeScopes,
 import {
   PRODUCT_TYPE_LABELS, RIBBON_PRODUCT_TYPES, typeFilterGroup, typeFilterOptions,
 } from '../utils/product-types.js';
+import { attachProductAutocomplete } from '../components/product-search.js';
 
 const formatPrice = (v) => window.formatPrice ? window.formatPrice(v) : `$${Number(v).toFixed(2)}`;
 const MISSING = '\u2014';
@@ -219,87 +220,24 @@ function buildColumns() {
   return cols;
 }
 
-// ─── Per-product margin offset (click-to-edit Margin % cell) ──────────────────
+// ─── Margin % cell (read-only) ────────────────────────────────────────────────
 // The Margin % column shows the backend's $0.30-inclusive net margin
 // (net_margin_incl_fixed_pct) when present — owner rows fetched via the
 // /api/admin/products path carry it — and falls back to local compute on the
-// Supabase fast-path. The cell is a button: clicking it opens an editor for the
-// product's gross-markup OFFSET (a relative adjustment layered on the tiered
-// general margin, persisting across general-margin changes). A chip shows any
-// applied offset. Ineligible rows (no cost, ribbons) render a plain badge.
-function marginOffsetEligible(r) {
-  return Number(r.cost_price) > 0 && !RIBBON_PRODUCT_TYPES.includes(r.product_type);
-}
-
+// Supabase fast-path.
+//
+// The click-to-edit per-product margin-offset editor was RETIRED Jul 2026: the
+// market-aware hybrid pricing engine ignores per-product offsets and its write
+// endpoint (PUT /products/:id/margin-offset) is a deprecated 200-noop
+// ({ deprecated:true, applied:false }). The per-product hard lever is now the
+// exact-price override (manual_retail_price) in the edit drawer; competitor
+// undercutting is automatic via the market cap. So the cell is display-only.
 function marginCell(r) {
   const pct = r.net_margin_incl_fixed_pct != null
     ? Number(r.net_margin_incl_fixed_pct)
     : computeProfitability(r).marginPct;
   const badge = pct == null ? MISSING : marginBadge(pct);
-  const off = Number(r.applied_offset);
-  const hasOff = Number.isFinite(off) && Math.abs(off) > 1e-9;
-  const chip = hasOff
-    ? `<span class="margin-offset-chip" title="Per-product margin adjustment (gross markup)">${off > 0 ? '+' : ''}${(off * 100).toFixed(1)}%</span>`
-    : '';
-  if (!marginOffsetEligible(r)) return `<span class="cell-right">${badge}</span>`;
-  const marginAttr = pct == null ? '' : Number(pct).toFixed(1);
-  return `<button type="button" class="margin-edit-btn" data-margin-edit data-id="${esc(String(r.id))}" data-margin="${marginAttr}" title="Click to set this product's target margin">${badge}${chip}</button>`;
-}
-
-// Turn the clicked Margin % cell into an inline input. The operator types a
-// target net margin %; Enter saves (backend derives + stores the offset and
-// re-prices), Escape / clicking away cancels. No popup, no GET round-trip.
-function startInlineMarginEdit(btn) {
-  const id = btn.dataset.id;
-  const cell = btn.closest('td');
-  if (!cell || cell.querySelector('input')) return; // already editing this cell
-  const cur = btn.dataset.margin;
-  const startVal = (cur != null && cur !== '' && cur !== 'null') ? Number(cur).toFixed(1) : '';
-  cell.innerHTML = `<span class="margin-inline-edit"><input type="number" class="margin-inline-input" step="0.1" value="${startVal}" aria-label="Target net margin %"><span>%</span></span>`;
-  const input = cell.querySelector('input');
-  input.focus();
-  input.select();
-
-  let done = false;
-  const revert = () => { if (done) return; done = true; _table.setData(_table.data, _table.pagination); loadRowExtras(); };
-  const commit = async () => {
-    if (done) return;
-    const v = parseFloat(input.value);
-    if (!Number.isFinite(v)) { revert(); return; }
-    done = true;
-    input.disabled = true;
-    try {
-      const res = await AdminAPI.setProductTargetMargin(id, v, null);
-      patchRowFromOffset(id, null, res);
-      Toast.success('Margin updated — price re-calculated');
-    } catch (e) {
-      Toast.error(e.message || 'Failed to update margin');
-      _table.setData(_table.data, _table.pagination);
-      loadRowExtras();
-    }
-  };
-  input.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') { e.preventDefault(); commit(); }
-    else if (e.key === 'Escape') { e.preventDefault(); revert(); }
-  });
-  input.addEventListener('blur', revert);
-}
-
-// Patch the edited row in place from the PUT response so the new price + margin
-// show without a full refetch (the Supabase fast-path wouldn't carry the server
-// fields anyway). Profit $ isn't returned by the PUT, so drop any stale server
-// value and let it recompute locally from the new retail price.
-function patchRowFromOffset(productId, offsetFrac, res) {
-  if (!_table || !Array.isArray(_table.data)) return;
-  const row = _table.data.find(r => String(r.id) === String(productId));
-  if (!row) return;
-  if (res && res.retail_price != null) row.retail_price = res.retail_price;
-  if (res && res.net_margin_incl_fixed_pct != null) row.net_margin_incl_fixed_pct = res.net_margin_incl_fixed_pct;
-  if (res && res.gross_markup_pct != null) row.gross_markup_pct = res.gross_markup_pct;
-  row.applied_offset = (res && res.offset != null) ? res.offset : offsetFrac;
-  delete row.profit_incl_fixed_ex_gst;
-  _table.setData(_table.data, _table.pagination);
-  loadRowExtras(); // re-render blanks the async Compat / For-Use-In cells — refill them
+  return `<span class="cell-right">${badge}</span>`;
 }
 
 // ─── Per-admin column visibility ─────────────────────────────────────────────
@@ -801,6 +739,8 @@ function closeProductModal() {
   if (!_activeModal) return;
   const modal = _activeModal;
   _activeModal = null;
+  // Tear down the related-products autocomplete (it attaches document listeners).
+  try { modal._relatedProductsAc?.destroy?.(); } catch (_) { /* noop */ }
   modal.classList.remove('open');
   setTimeout(() => modal.remove(), 220);
   // Resume async column loading for any cells still showing placeholders
@@ -931,6 +871,11 @@ async function openProductDrawer(product) {
   // otherwise). Fire-and-forget: it self-renders into the static shell built
   // above and parks the selection on modal._ribbonBrandSelection for save.
   wireRibbonBrandsSection(modal, full);
+
+  // Populate the Related Products picker (ribbon-family only — no-ops otherwise).
+  // Self-renders into the For Use In shell and parks the picked SKUs on
+  // modal._relatedProductSkus() for save.
+  wireRelatedProductsSection(modal, full);
 
   // Populate the Product Codes section (every product type). Self-renders into
   // the static shell and parks the selection on modal._productCodesSelection.
@@ -1295,6 +1240,17 @@ function buildProductModalTabs(modal, full, isOwner) {
       ${formGroup('Compare Price', `<input class="admin-input" id="edit-compare-price" type="number" step="0.01" value="${full.compare_at_price || full.compare_price || ''}">`, 'compare_at_price')}
     </div>
     ${isOwner ? formGroup('Supplier Price', `<input class="admin-input" id="edit-cost-price" type="number" step="0.01" value="${full.cost_price || ''}">`, 'cost_price') : ''}
+    ${isOwner ? `
+    <div class="admin-form-group manual-price-override">
+      <label for="edit-manual-retail-price">Override price (exact)</label>
+      <input class="admin-input" id="edit-manual-retail-price" type="number" step="0.01" min="0" placeholder="e.g. 29.99" autocomplete="off">
+      <label class="manual-price-override__clear">
+        <input type="checkbox" id="edit-clear-manual-retail"> Clear existing override
+      </label>
+      <p class="manual-price-override__hint">
+        Forces an <strong>exact</strong> retail price (incl GST), bypassing the pricing engine and the competitor market-cap (<code>manual_retail_price</code>). Leave blank to keep current pricing — the current override isn't shown here because the admin API doesn't return it. Tick <em>Clear existing override</em> to remove one.
+      </p>
+    </div>` : ''}
   `;
 
   // Inventory panel
@@ -1451,6 +1407,23 @@ function buildProductModalTabs(modal, full, isOwner) {
           </div>
           <div class="admin-brandpicker__list" id="ribbon-brand-list" role="listbox" aria-multiselectable="true" aria-label="Ribbon brands"></div>
         </div>
+      </div>
+    </div>
+    `;
+
+    // Related Products — owner-curated. Ribbons are manual-only: this picked
+    // list is the ENTIRE "Products related to …" section on the PDP; nothing is
+    // auto-added from the backend (ERR-085). wireRelatedProductsSection() fills
+    // the chips + wires the product search into this static shell.
+    forUseInHtml += `
+    <hr style="margin:22px 0 18px;border:none;border-top:1px solid var(--border)">
+    <div class="admin-form-group" id="related-products-group">
+      <label>Related Products <span class="admin-ribbon-brands__count" id="related-products-count" hidden></span></label>
+      <p style="font-size:12px;color:var(--text-muted);margin:0 0 10px">Hand-pick the products shown in &ldquo;Products related to &hellip;&rdquo; on this ribbon&rsquo;s page. Search by name or SKU to add one. These are the <strong>only</strong> related products shown — nothing is auto-filled from the backend.</p>
+      <div class="admin-ribbon-brands" id="related-products-chips"><span class="admin-text-muted" style="font-size:13px">Loading…</span></div>
+      <div class="admin-pc-filterwrap" style="margin-top:10px">
+        <svg class="admin-pc-filter-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        <input type="text" class="admin-pc-filter" id="related-product-search" placeholder="Search products by name or SKU…" autocomplete="off" aria-label="Search products to add as related">
       </div>
     </div>
     `;
@@ -1781,6 +1754,134 @@ async function wireRibbonBrandsSection(modal, full) {
 }
 
 /**
+ * Wires the "Related Products" section in the For Use In tab (ribbon-family
+ * products only — the shell is rendered only when isManualCompat is true).
+ *
+ * Ribbons are OWNER-CURATED, not backend-derived (ERR-085): the SKUs picked
+ * here are the entire "Products related to …" section on the PDP — no shared-code
+ * family fetch, no inference. This gives the tab that was previously invisible
+ * (related_product_skus had no admin UI at all — DB-only).
+ *
+ * UI — a chips list of the picked products above a shared product autocomplete
+ * (components/product-search.js), the same picker the Invoices / Quick Order
+ * editors use. Chips are alphabetical by product name.
+ *
+ * Seeding tolerates the C-/G- SKU-prefix convention (ERR-084): a legacy entry
+ * saved as a bare code ("141LOT") resolves to the real product ("C141LOT") for
+ * display AND self-heals to the real SKU on the next Save. An unresolved SKU is
+ * still shown as a bare chip so it stays visible and removable.
+ *
+ * Safety: modal._relatedProductsLoaded is set true ONLY after a clean seed, and
+ * the save handler persists the list solely when that flag is true — so a failed
+ * seed can never be read as "no related products" and wipe the saved list.
+ */
+async function wireRelatedProductsSection(modal, full) {
+  const group = modal.querySelector('#related-products-group');
+  if (!group) return; // not a ribbon-family product — section not rendered
+
+  const chipsEl  = modal.querySelector('#related-products-chips');
+  const countEl  = modal.querySelector('#related-products-count');
+  const searchEl = modal.querySelector('#related-product-search');
+
+  const selection = new Map(); // SKU(upper) → { sku, name }
+  modal._relatedProductSelection = selection;
+  modal._relatedProductsLoaded = false;
+  // The save handler reads this to persist related_product_skus.
+  modal._relatedProductSkus = () => [...selection.values()].map(p => p.sku);
+
+  const selfSku = String(full.sku || '').toUpperCase();
+  // Exact SKU first, then the two canonical prefixed forms (C=compatible,
+  // G=genuine), mirroring the PDP resolver (ERR-084). Exact wins.
+  const candidatesFor = (sku) => {
+    const up = String(sku == null ? '' : sku).trim().toUpperCase();
+    return up ? [up, 'C' + up, 'G' + up] : [];
+  };
+
+  const addProduct = (sku, name) => {
+    const raw = String(sku || '').trim();
+    const key = raw.toUpperCase();
+    if (!key || key === selfSku) return; // never relate a product to itself
+    if (!selection.has(key)) selection.set(key, { sku: raw, name: String(name || raw) });
+  };
+  const removeProduct = (sku) => {
+    selection.delete(String(sku || '').toUpperCase());
+    renderChips();
+  };
+
+  const renderChips = () => {
+    const n = selection.size;
+    if (countEl) { countEl.hidden = n === 0; countEl.textContent = n ? `${n} selected` : ''; }
+    if (n === 0) {
+      chipsEl.innerHTML = `<span class="admin-ribbon-brands__empty">No related products yet — search below to add. Until you pick some, &ldquo;Products related to &hellip;&rdquo; stays empty on the page.</span>`;
+      return;
+    }
+    chipsEl.innerHTML = [...selection.values()]
+      .sort((a, b) => String(a.name).localeCompare(String(b.name), 'en', { sensitivity: 'base' }))
+      .map(p => `<span class="admin-ribbon-brand-chip">${esc(p.name)} <span class="admin-text-muted" style="font-size:11px">${esc(p.sku)}</span>`
+        + `<button type="button" class="admin-ribbon-brand-chip__remove" data-remove-related="${esc(p.sku)}" title="Remove ${esc(p.name)}" aria-label="Remove ${esc(p.name)}">&times;</button></span>`)
+      .join('');
+  };
+
+  // ── Seed from saved related_product_skus ────────────────────────────────
+  try {
+    const sb = (typeof Auth !== 'undefined' && Auth.supabase) ? Auth.supabase : null;
+    // Read the saved list authoritatively from the DB (the backend product
+    // endpoint doesn't reliably echo this column), falling back to whatever the
+    // loaded product happened to carry.
+    let saved = Array.isArray(full.related_product_skus) ? full.related_product_skus : null;
+    if (saved == null && sb && full.id) {
+      const { data: self } = await sb.from('products').select('related_product_skus').eq('id', full.id).single();
+      saved = Array.isArray(self?.related_product_skus) ? self.related_product_skus : [];
+    }
+    saved = saved || [];
+    if (saved.length) {
+      if (sb) {
+        const candidates = [];
+        const seen = new Set();
+        for (const s of saved) for (const c of candidatesFor(s)) if (!seen.has(c)) { seen.add(c); candidates.push(c); }
+        const { data: rows } = await sb.from('products').select('sku,name').in('sku', candidates);
+        const byUpper = {};
+        (rows || []).forEach(r => { byUpper[String(r.sku).toUpperCase()] = r; });
+        for (const s of saved) {
+          let hit = null;
+          for (const c of candidatesFor(s)) { if (byUpper[c]) { hit = byUpper[c]; break; } }
+          if (hit) addProduct(hit.sku, hit.name);          // resolved → real SKU (self-heals bare codes)
+          else addProduct(String(s), String(s));            // unresolved → keep visible as a bare chip
+        }
+      }
+    }
+    modal._relatedProductsLoaded = true;
+  } catch (e) {
+    if (typeof DebugLog !== 'undefined') DebugLog.warn('[products] related products seed failed:', e.message);
+    if (chipsEl) chipsEl.innerHTML = `<span class="admin-ribbon-brands__error">Couldn’t load related products — reopen the product to retry. Saving now leaves the existing list untouched.</span>`;
+    return; // _relatedProductsLoaded stays false → save won't touch the list
+  }
+
+  if (!modal.isConnected) return; // closed mid-fetch
+
+  renderChips();
+
+  // Chip removal (delegated).
+  chipsEl.addEventListener('click', (e) => {
+    const btn = e.target.closest && e.target.closest('[data-remove-related]');
+    if (btn) { e.preventDefault(); removeProduct(btn.getAttribute('data-remove-related')); }
+  });
+
+  // Search-to-add via the shared product autocomplete.
+  const ac = attachProductAutocomplete(searchEl, {
+    onPick: (p) => {
+      const sku = p.sku || p.product_code || '';
+      if (!sku) return;
+      addProduct(sku, p.name || p.product_name || sku);
+      renderChips();
+      searchEl.value = '';
+      if (searchEl.focus) searchEl.focus();
+    },
+  });
+  modal._relatedProductsAc = ac;
+}
+
+/**
  * Wires the "Product Codes" tab — available for EVERY product type. A
  * product's codes are the /shop drilldown chips it appears under; assigning
  * several (LC40 + LC57) makes it show under each.
@@ -1866,6 +1967,11 @@ async function wireProductCodesSection(modal, full) {
   // Derive the product's current codes — what /shop renders for it today.
   // Reuses the storefront's shared extractor so the seed matches the live site.
   const deriveSeed = () => {
+    // Ribbons are owner-manual (ERR-086): never machine-seed codes. A ribbon
+    // with no saved override starts EMPTY — "No codes yet" means truly none, and
+    // the owner picks from scratch — rather than pre-ticking backend/heuristic
+    // guesses. (Non-ribbons keep the derive-from-current seed below.)
+    if (RIBBON_PRODUCT_TYPES.includes(full.product_type)) return [];
     const out = new Set();
     const backend = Array.isArray(full.series_codes) ? full.series_codes : [];
     for (const c of backend) { const n = norm(c); if (n.length >= 2) out.add(n); }
@@ -3315,6 +3421,14 @@ function bindProductModalActions(modal, product) {
 
     if (AdminAuth.isOwner()) {
       data.cost_price = numVal('edit-cost-price');
+      // Exact-price override (manual_retail_price). WRITE-ONLY: the admin GET
+      // doesn't surface the field, so we must NOT send it on every save (blank
+      // would silently wipe an override set via the Price Monitor). Only touch
+      // it on explicit intent — a positive value sets it; the Clear checkbox
+      // nulls it (Clear wins if somehow both are set).
+      const mrp = numVal('edit-manual-retail-price');
+      if (chk('edit-clear-manual-retail')) data.manual_retail_price = null;
+      else if (mrp != null && mrp > 0) data.manual_retail_price = mrp;
     }
 
     try {
@@ -3333,6 +3447,17 @@ function bindProductModalActions(modal, product) {
           await AdminAPI.setProductRibbonBrands(product.id, [...modal._ribbonBrandSelection.keys()]);
         } catch (rbErr) {
           Toast.error(`Product saved, but ribbon brands didn’t: ${rbErr.message}`);
+        }
+      }
+
+      // Persist the owner-curated Related Products list (products.related_product_skus).
+      // Ribbon-family only, and gated on _relatedProductsLoaded so a failed seed can
+      // never be read as "no related products" and wipe the saved list. Non-fatal.
+      if (modal._relatedProductsLoaded && RIBBON_PRODUCT_TYPES.includes(data.product_type)) {
+        try {
+          await AdminAPI.setRelatedProductSkus(product.id, modal._relatedProductSkus());
+        } catch (relErr) {
+          Toast.error(`Product saved, but related products didn’t: ${relErr.message}`);
         }
       }
 
@@ -4094,15 +4219,6 @@ async function renderProductsContent(contentEl) {
       e.stopPropagation();
       const name = btn.dataset.copy;
       navigator.clipboard.writeText(name).then(() => Toast.success('Copied to clipboard')).catch(() => Toast.error('Copy failed'));
-    });
-
-    // Margin cell → inline-edit the target margin (event delegation)
-    tableContainer.addEventListener('click', (e) => {
-      const btn = e.target.closest('[data-margin-edit]');
-      if (!btn) return;
-      e.preventDefault();
-      e.stopPropagation();
-      startInlineMarginEdit(btn);
     });
 
     // Import lock toggle (event delegation)

@@ -3,10 +3,11 @@
  * ===============================================
  *
  * /admin#product-codes edits the /shop drilldown chips by CODE rather than by
- * product. It is owner-only, so it must be registered in BOTH gates (the nav flag
- * and the route's ownerPages array — they are independent lists, and updating only
- * one ships either an invisible page or an unguarded one). The cache-busting
- * versions must be bumped or live browsers never load the new module at all.
+ * product. It is owner-only: since the July 2026 IA overhaul the route gate is
+ * DERIVED from the nav flag (navigate() → isOwnerOnlyRoute(), which reads
+ * NAV_ITEMS.ownerOnly), so a single ownerOnly:true flag both hides the item from
+ * non-owners AND blocks a typed/bookmarked hash — one source, no drift. The
+ * cache-busting versions must be bumped or live browsers never load the new module.
  *
  * It also pins the two hazards this page is built around:
  *   • ERR-046 — page modules import ../app.js BARE. A ?v= there gives app.js a
@@ -36,22 +37,25 @@ const indexHtml = read(path.join(ROOT, 'inkcartridges', 'html', 'admin', 'index.
 
 // ── Registration ─────────────────────────────────────────────────────────────
 
-test('nav registers an owner-only Product Codes item under Catalog & Data Ops', () => {
+test('nav registers an owner-only Product Codes item under Catalog', () => {
   assert.match(appJs, /key:\s*'product-codes'[^}]*ownerOnly:\s*true/,
     'NAV_ITEMS must have an owner-only product-codes entry');
 
-  const catalogIdx = appJs.indexOf("section: 'Catalog & Data Ops'");
-  const systemIdx = appJs.indexOf("section: 'System'");
+  // July 2026 IA overhaul: product-codes lives in the "Catalog" section (before "Data Operations").
+  const catalogIdx = appJs.indexOf("section: 'Catalog'");
+  const dataOpsIdx = appJs.indexOf("section: 'Data Operations'");
   const pageIdx = appJs.indexOf("key: 'product-codes'");
-  assert.ok(catalogIdx > 0 && pageIdx > catalogIdx && pageIdx < systemIdx,
-    'product-codes belongs to the Catalog & Data Ops section');
+  assert.ok(catalogIdx > 0 && pageIdx > catalogIdx && pageIdx < dataOpsIdx,
+    'product-codes belongs to the Catalog section');
 });
 
 test('route gate blocks #product-codes for non-owners', () => {
-  const m = appJs.match(/const ownerPages = \[([^\]]*)\]/);
-  assert.ok(m, 'ownerPages array must exist');
-  assert.match(m[1], /'product-codes'/,
-    "ownerPages must include 'product-codes' so a typed/bookmarked hash is gated too");
+  // July 2026: gating derives from NAV_ITEMS via isOwnerOnlyRoute() (the old separate
+  // ownerPages array is gone, so the two lists can no longer drift out of sync).
+  assert.match(appJs, /key:\s*'product-codes'[^}]*ownerOnly:\s*true/,
+    "product-codes must be ownerOnly so isOwnerOnlyRoute() gates a typed/bookmarked hash");
+  assert.match(appJs, /isOwnerOnlyRoute\(pageName\)\s*&&\s*!AdminAuth\.isOwner\(\)/,
+    'navigate() must gate owner routes through isOwnerOnlyRoute()');
 });
 
 test('the page module exists and exports the router contract', () => {

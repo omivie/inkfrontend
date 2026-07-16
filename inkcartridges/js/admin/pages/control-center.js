@@ -67,7 +67,7 @@ function writeTabToHash(tabId) {
 // Cache-buster for dynamic imports — matches the pattern in app.js
 // (`import('./pages/${name}.js?v=${APP_VERSION}')`) so a new deploy actually
 // reloads tab modules instead of serving the previous bundle from cache.
-const CC_VERSION = '2026.07.05a';
+const CC_VERSION = '2026.07.16b';
 
 async function loadTabModule(tabId) {
   if (_tabModules[tabId]) return _tabModules[tabId];

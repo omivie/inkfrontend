@@ -73,32 +73,34 @@ test('GST_RATE is 15%, STRIPE_RATE is 2.65%, STRIPE_FEE_GST is 15%', () => {
   assert.equal(pricing.STRIPE_FEE_GST, 0.15);
 });
 
-test('DEFAULT_TIERS has all genuine + compatible tier keys from spec §6', () => {
-  const g = ['<=10','10-15','15-20','20-40','40-70','70-100','100-130','130-150','150-200','200-300','300-400','400-600','600-900','900+'];
-  const c = ['<=5','5-10','10-20','20-35','35-55','55-80','80-120','120-180','180+'];
+test('DEFAULT_TIERS has all genuine + compatible + ribbon tier keys (Jul 2026 reband)', () => {
+  const g = ['<=10','10-15','15-20','20-30','30-45','45-60','60-80','80-100','100-130','130-160','160-200','200-260','260-340','340-450','450-600','600-800','800-1000','1000+'];
+  const c = ['<=5','5-8','8-12','12-18','18-25','25-35','35-45','45-55','55-70','70-90','90-120','120-150','150-200','200+'];
+  const r = ['<6','6-10','10-15','15-20','20-30','30-50','50+'];
   assert.deepEqual(Object.keys(pricing.DEFAULT_TIERS.genuine), g);
   assert.deepEqual(Object.keys(pricing.DEFAULT_TIERS.compatible), c);
+  assert.deepEqual(Object.keys(pricing.DEFAULT_TIERS.ribbon), r);
+  assert.equal(g.length, 18);
+  assert.equal(c.length, 14);
 });
 
 test('every default multiplier obeys 1.05 ≤ m ≤ 5', () => {
-  for (const v of Object.values(pricing.DEFAULT_TIERS.genuine)) {
-    assert.ok(v >= 1.05 && v <= 5, `genuine ${v} out of bounds`);
-  }
-  for (const v of Object.values(pricing.DEFAULT_TIERS.compatible)) {
-    assert.ok(v >= 1.05 && v <= 5, `compatible ${v} out of bounds`);
+  for (const src of ['genuine', 'compatible', 'ribbon']) {
+    for (const v of Object.values(pricing.DEFAULT_TIERS[src])) {
+      assert.ok(v >= 1.05 && v <= 5, `${src} ${v} out of bounds`);
+    }
   }
 });
 
 test('every coarse-4-tier preset multiplier obeys 1.05 ≤ m ≤ 5', () => {
-  for (const v of Object.values(pricing.COARSE_4_TIER_PRESET.genuine)) {
-    assert.ok(v >= 1.05 && v <= 5);
-  }
-  for (const v of Object.values(pricing.COARSE_4_TIER_PRESET.compatible)) {
-    assert.ok(v >= 1.05 && v <= 5);
+  for (const src of ['genuine', 'compatible', 'ribbon']) {
+    for (const v of Object.values(pricing.COARSE_4_TIER_PRESET[src])) {
+      assert.ok(v >= 1.05 && v <= 5, `${src} coarse ${v} out of bounds`);
+    }
   }
 });
 
-// ─── Tier lookup boundaries ─────────────────────────────────────────────────
+// ─── Tier lookup boundaries (new bands) ─────────────────────────────────────
 
 test('lookupGenuineMultiplier picks the right tier at every boundary', () => {
   const t = pricing.DEFAULT_TIERS.genuine;
@@ -108,30 +110,32 @@ test('lookupGenuineMultiplier picks the right tier at every boundary', () => {
   assert.equal(pricing.lookupGenuineMultiplier(15, t), t['10-15']);
   assert.equal(pricing.lookupGenuineMultiplier(15.01, t), t['15-20']);
   assert.equal(pricing.lookupGenuineMultiplier(20, t), t['15-20']);
-  assert.equal(pricing.lookupGenuineMultiplier(70, t), t['40-70']);
-  assert.equal(pricing.lookupGenuineMultiplier(900.01, t), t['900+']);
-  assert.equal(pricing.lookupGenuineMultiplier(50000, t), t['900+']);
+  assert.equal(pricing.lookupGenuineMultiplier(20.01, t), t['20-30']);
+  assert.equal(pricing.lookupGenuineMultiplier(30, t), t['20-30']);
+  assert.equal(pricing.lookupGenuineMultiplier(1000, t), t['800-1000']);
+  assert.equal(pricing.lookupGenuineMultiplier(1000.01, t), t['1000+']);
+  assert.equal(pricing.lookupGenuineMultiplier(50000, t), t['1000+']);
 });
 
 test('lookupCompatibleMultiplier picks the right tier at every boundary', () => {
   const t = pricing.DEFAULT_TIERS.compatible;
   assert.equal(pricing.lookupCompatibleMultiplier(0,    t), t['<=5']);
   assert.equal(pricing.lookupCompatibleMultiplier(5,    t), t['<=5']);
-  assert.equal(pricing.lookupCompatibleMultiplier(5.01, t), t['5-10']);
-  assert.equal(pricing.lookupCompatibleMultiplier(10,   t), t['5-10']);
-  assert.equal(pricing.lookupCompatibleMultiplier(10.01,t), t['10-20']);
-  assert.equal(pricing.lookupCompatibleMultiplier(180,  t), t['120-180']);
-  assert.equal(pricing.lookupCompatibleMultiplier(180.01, t), t['180+']);
+  assert.equal(pricing.lookupCompatibleMultiplier(5.01, t), t['5-8']);
+  assert.equal(pricing.lookupCompatibleMultiplier(8,    t), t['5-8']);
+  assert.equal(pricing.lookupCompatibleMultiplier(8.01, t), t['8-12']);
+  assert.equal(pricing.lookupCompatibleMultiplier(200,  t), t['150-200']);
+  assert.equal(pricing.lookupCompatibleMultiplier(200.01, t), t['200+']);
 });
 
 test('tierKeyForCost returns the same key the lookup uses', () => {
   assert.equal(pricing.tierKeyForCost(20,  'genuine'),    '15-20');
-  assert.equal(pricing.tierKeyForCost(50,  'genuine'),    '40-70');
-  assert.equal(pricing.tierKeyForCost(200, 'genuine'),    '150-200');
+  assert.equal(pricing.tierKeyForCost(50,  'genuine'),    '45-60');
+  assert.equal(pricing.tierKeyForCost(200, 'genuine'),    '160-200');
   assert.equal(pricing.tierKeyForCost(4,   'compatible'), '<=5');
-  assert.equal(pricing.tierKeyForCost(12,  'compatible'), '10-20');
-  assert.equal(pricing.tierKeyForCost(100, 'compatible'), '80-120');
-  assert.equal(pricing.tierKeyForCost(9999,'compatible'), '180+');
+  assert.equal(pricing.tierKeyForCost(12,  'compatible'), '8-12');
+  assert.equal(pricing.tierKeyForCost(100, 'compatible'), '90-120');
+  assert.equal(pricing.tierKeyForCost(9999,'compatible'), '200+');
 });
 
 // ─── snapPriceCeil ──────────────────────────────────────────────────────────
@@ -150,13 +154,16 @@ test('snapPriceCeil snaps to .49 / .79 / .99 ceilings (psychology pricing)', () 
 // These are the same fixtures the backend Jest tests pin against. If FE math
 // drifts, the simulator misrepresents what commits will produce.
 
+// Recomputed for the Jul 2026 reband (values captured live from
+// GET /admin/pricing/tier-multipliers). Cost-plus retail only — the backend
+// market cap is applied separately and is not modelled by calcRetail.
 const GOLDENS = [
-  { cost: 20.00,  source: 'genuine',    expected: 32.49,  tierKey: '15-20',   mult: 1.40 },
-  { cost: 50.00,  source: 'genuine',    expected: 71.49,  tierKey: '40-70',   mult: 1.24 },
-  { cost: 200.00, source: 'genuine',    expected: 262.49, tierKey: '150-200', mult: 1.14 },
+  { cost: 20.00,  source: 'genuine',    expected: 32.79,  tierKey: '15-20',   mult: 1.42 },
+  { cost: 50.00,  source: 'genuine',    expected: 79.79,  tierKey: '45-60',   mult: 1.385 },
+  { cost: 200.00, source: 'genuine',    expected: 304.79, tierKey: '160-200', mult: 1.325 },
   { cost: 4.00,   source: 'compatible', expected: 8.79,   tierKey: '<=5',     mult: 1.87 },
-  { cost: 12.00,  source: 'compatible', expected: 23.49,  tierKey: '10-20',   mult: 1.67 },
-  { cost: 100.00, source: 'compatible', expected: 146.49, tierKey: '80-120',  mult: 1.27 },
+  { cost: 12.00,  source: 'compatible', expected: 24.49,  tierKey: '8-12',    mult: 1.75 },
+  { cost: 100.00, source: 'compatible', expected: 154.49, tierKey: '90-120',  mult: 1.34 },
 ];
 
 for (const g of GOLDENS) {

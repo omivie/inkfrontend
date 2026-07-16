@@ -18,6 +18,12 @@
  * ribbons a code-based related path (curated SKUs first, then the brand+ribbons+code
  * family). These source-level checks pin both halves so neither regresses.
  *
+ * UPDATE (ERR-085, Jul 16 2026): the shared-code family union in §3 was RETIRED
+ * for ribbons — the owner decided ribbon related products are manual-only, edited
+ * in the drawer's For Use In "Related Products" picker. §1–§2 stand (the override
+ * reader + PDP load-merge are still used for /shop code parity); §3 now asserts
+ * the ribbon branch is curated-only with NO backend code-family call.
+ *
  * Run: node --test tests/pdp-ribbon-related-by-code-jul2026.test.js
  */
 
@@ -61,30 +67,36 @@ test('the PDP enrichment fetches the product id', () => {
 test('a manual product_codes override replaces series_codes on the PDP', () => {
   assert.match(PDP, /const manualCodes = await API\.getManualProductCodes\(this\.product\.id\)/,
     'the PDP must read the override for the loaded product');
-  assert.match(PDP, /if \(manualCodes\.length\) this\.product\.series_codes = manualCodes;/,
+  assert.match(PDP, /if \(manualCodes\.length\)\s*\{?\s*this\.product\.series_codes = manualCodes;/,
     'a non-empty override fully replaces series_codes — matching /shop\'s "codes set here replace the auto-detected ones"');
+  // ERR-086: with no override, a ribbon carries NO codes (never a derived fallback).
+  assert.match(PDP, /else if \(this\.product\.category === 'ribbon'\)[\s\S]{0,400}?this\.product\.series_codes = \[\];/,
+    'a ribbon with no override is cleared to no codes (owner-manual)');
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 3. Ribbons resolve related products by code (no longer code-blind)
+// 3. Ribbon related products are OWNER-CURATED ONLY (ERR-085, Jul 16 2026)
+//    The ERR-082 shared-code family union was intentionally RETIRED for ribbons:
+//    the owner decided ribbons are manual, not backend-derived. The ribbon branch
+//    must now resolve ONLY the curated related_product_skus (still prefix-tolerant
+//    per ERR-084) and make NO backend code-family call.
 // ─────────────────────────────────────────────────────────────────────────────
 
-test('the api category map routes ribbons to the ribbons shop category', () => {
-  assert.match(PDP, /apiCategoryMap = \{[^}]*ribbon:\s*'ribbons'[^}]*\}/,
-    'ribbon must map to the ribbons /shop category so a code lookup is possible');
-});
+const RIBBON_BRANCH = PDP.slice(
+  PDP.indexOf("if (info.category === 'ribbon') {"),
+  PDP.indexOf('} else {', PDP.indexOf("if (info.category === 'ribbon') {"))
+);
 
-test('the ribbon branch fetches the shared-code family AND keeps curated SKUs', () => {
-  // Curated list preserved (no regression for hand-set ribbons).
+test('the ribbon branch still honours the curated related_product_skus', () => {
   assert.match(PDP, /const manualSkus = info\.related_product_skus;/,
-    'curated related_product_skus must still be honoured');
-  // Code family fetched, scoped to the ribbon's own brand + ribbons.
-  const ribbonBranch = PDP.slice(PDP.indexOf("if (info.category === 'ribbon') {"),
-    PDP.indexOf('} else {', PDP.indexOf("if (info.category === 'ribbon') {")));
-  assert.match(ribbonBranch, /const code = this\.extractProductCode\(info\);/,
-    'the ribbon branch must resolve the product code (which now reflects the manual override)');
-  assert.match(ribbonBranch, /API\.getShopData\(\{ brand: brandSlug, category: 'ribbons', code, limit: 200 \}\)/,
-    'the ribbon branch must pull the same-code family from /shop, scoped to brand + ribbons');
-  assert.match(ribbonBranch, /addProducts\(res\.data\.products\.filter\(p => p\.sku !== info\.sku\)\)/,
-    'and add them (excluding the current product) through the shared dedup');
+    'curated related_product_skus must still feed the ribbon section');
+  assert.match(RIBBON_BRANCH, /relatedSkuCandidates\(/,
+    'and resolve them prefix-tolerantly (ERR-084)');
+});
+
+test('the ribbon branch makes NO backend code-family fetch (manual-only, ERR-085)', () => {
+  assert.doesNotMatch(RIBBON_BRANCH, /getShopData/,
+    'ribbons must not auto-fill related products from the backend code family');
+  assert.doesNotMatch(RIBBON_BRANCH, /extractProductCode/,
+    'no code-derived related fetch may remain in the ribbon branch');
 });

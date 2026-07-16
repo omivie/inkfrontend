@@ -18,9 +18,9 @@ import { Toast } from '../components/toast.js';
 import { Modal } from '../components/modal.js';
 import {
   GST_RATE, STRIPE_RATE,
-  DEFAULT_TIERS, COARSE_4_TIER_PRESET,
-  GENUINE_TIER_KEYS, COMPATIBLE_TIER_KEYS,
-  calcRetail, netMarginPct, grossMarkupPct, validateTierMap,
+  DEFAULT_TIERS, SIMULATABLE_SOURCES,
+  validateTierMap, tierMidpoint, sortTierKeys, snapPriceCeil,
+  coarsePreset, normalizeTierResponse,
 } from '../utils/pricingCalculator.js';
 
 const COPY = {
@@ -38,22 +38,42 @@ const COPY = {
 };
 
 let _host = null;
-let _state = {
-  source: 'compatible',
-  preset: 'live',
-  tiers: cloneTiers(DEFAULT_TIERS),
-  liveTiers: null,
-  result: null,
-  loading: false,
-  scope: { include_overrides: false },
-};
+let _state = null;
 
-function cloneTiers(t) {
-  return { genuine: { ...t.genuine }, compatible: { ...t.compatible } };
+function freshState() {
+  return {
+    source: 'compatible',
+    preset: 'live',
+    tiers: simSubset(DEFAULT_TIERS),  // current editable maps { genuine, compatible }
+    liveTiers: null,                  // normalised effective (baseline for 'live')
+    liveDefaults: null,               // normalised defaults (baseline for 'defaults')
+    result: null,
+    loading: false,
+    scope: { include_overrides: false },
+  };
 }
 
+// The simulator only edits the sources the /simulate endpoint accepts
+// (genuine + compatible — `ribbon` exists in the store but simulate rejects it).
+// Each map is copied verbatim (whatever keys the source provides), falling back
+// to the bundled defaults when a source is absent.
+function simSubset(sources) {
+  const out = {};
+  for (const s of SIMULATABLE_SOURCES) {
+    out[s] = { ...((sources && sources[s]) || DEFAULT_TIERS[s] || {}) };
+  }
+  return out;
+}
+
+function cloneTiers(t) {
+  return simSubset(t);
+}
+
+// Keys of the map currently being edited, in cost order — NEVER a hardcoded
+// list. This guarantees the simulate/commit payload only ever carries live keys
+// (the server schema is .unknown(false); a stale key = "Validation failed").
 function tierKeysFor(source) {
-  return source === 'genuine' ? GENUINE_TIER_KEYS : COMPATIBLE_TIER_KEYS;
+  return sortTierKeys(Object.keys((_state.tiers && _state.tiers[source]) || {}));
 }
 
 function applyPreset(preset) {
@@ -61,9 +81,20 @@ function applyPreset(preset) {
   if (preset === 'live' && _state.liveTiers) {
     _state.tiers = cloneTiers(_state.liveTiers);
   } else if (preset === 'defaults') {
-    _state.tiers = cloneTiers(DEFAULT_TIERS);
+    _state.tiers = cloneTiers(_state.liveDefaults || DEFAULT_TIERS);
   } else if (preset === 'coarse_4') {
-    _state.tiers = cloneTiers(COARSE_4_TIER_PRESET);
+    // Generate coarse multipliers over the LIVE key set for each source.
+    const next = {};
+    for (const s of SIMULATABLE_SOURCES) {
+      const keys = Object.keys(
+        (_state.tiers && _state.tiers[s])
+        || (_state.liveTiers && _state.liveTiers[s])
+        || DEFAULT_TIERS[s]
+        || {}
+      );
+      next[s] = coarsePreset(s, keys);
+    }
+    _state.tiers = next;
   }
 }
 
@@ -173,32 +204,20 @@ function cssEscape(s) {
 }
 
 function previewRetailForTier(tierKey, source, mult) {
-  const cost = midpointCost(tierKey);
+  const cost = tierMidpoint(tierKey);
   const m = Number(mult);
   if (!Number.isFinite(m) || m < 1.05 || m > 5) return '⚠ out of bounds';
-  // Build a single-tier override map then call calcRetail
-  const tiers = cloneTiers(DEFAULT_TIERS);
-  tiers[source][tierKey] = m;
-  const retail = calcRetail(cost, source, tiers);
+  // Cost-plus example at the bucket midpoint for the typed multiplier. Uses the
+  // key's own bounds (tierMidpoint), so it stays correct for any reband. This
+  // is pre-market-cap; the authoritative figures come from /pricing/simulate.
+  const retail = snapPriceCeil(cost * m * (1 + GST_RATE));
   return `cost $${cost.toFixed(2)} → $${retail.toFixed(2)}`;
-}
-
-function midpointCost(tierKey) {
-  // Use a representative cost inside the bucket so the example feels real.
-  const map = {
-    '<=10': 8, '10-15': 12, '15-20': 18, '20-40': 30, '40-70': 55,
-    '70-100': 85, '100-130': 115, '130-150': 140, '150-200': 175,
-    '200-300': 250, '300-400': 350, '400-600': 500, '600-900': 750, '900+': 1000,
-    '<=5': 4, '5-10': 7, '10-20': 15, '20-35': 27, '35-55': 45,
-    '55-80': 65, '80-120': 100, '120-180': 150, '180+': 220,
-  };
-  return map[tierKey] ?? 50;
 }
 
 async function runSimulation() {
   if (_state.loading) return;
   // Pre-flight validation matches server's 1.05 ≤ m ≤ 5.
-  const v = validateTierMap(_state.tiers[_state.source], _state.source);
+  const v = validateTierMap(_state.tiers[_state.source], tierKeysFor(_state.source));
   if (!v.ok) {
     const first = v.errors[0];
     Toast.error(`Tier ${first.key}: ${first.reason.replace('_', ' ')}`);
@@ -214,15 +233,18 @@ async function runSimulation() {
       preview_limit: 500,
     });
     _state.result = resp;
-    renderResults();
   } catch (e) {
     if (e.code === 'RATE_LIMITED') Toast.warning('Slow down — try again in a few seconds.');
     else if (e.code === 'FORBIDDEN') Toast.error('This action requires super_admin.');
     else if (e.code === 'VALIDATION_FAILED') Toast.error(`Validation failed: ${e.message}`);
     else Toast.error(e.message || 'Simulation failed');
   } finally {
+    // Render AFTER clearing the loading flag — renderResults() paints the
+    // skeleton while _state.loading is true, so calling it inside the try (with
+    // loading still set) left the skeleton stuck and the aggregate never showed.
     _state.loading = false;
     setCta(false);
+    if (_host) renderResults();
   }
 }
 
@@ -238,7 +260,7 @@ function setCta(loading) {
 // save is exactly what you'd otherwise paste into the legacy commit form.
 function confirmAndSave() {
   // Pre-flight validation matches the server's 1.05 ≤ m ≤ 5.
-  const v = validateTierMap(_state.tiers[_state.source], _state.source);
+  const v = validateTierMap(_state.tiers[_state.source], tierKeysFor(_state.source));
   if (!v.ok) {
     const first = v.errors[0];
     Toast.error(`Tier ${first.key}: ${first.reason.replace('_', ' ')}`);
@@ -282,12 +304,10 @@ function confirmAndSave() {
       // Refresh the live baseline so the "Live" preset reflects what we just saved.
       const live = await AdminAPI.controlCenter.getTierMultipliers();
       if (!_host) return;
-      const effective = live?.effective || live;
-      if (effective && (effective.genuine || effective.compatible)) {
-        _state.liveTiers = {
-          genuine: { ...DEFAULT_TIERS.genuine, ...(effective.genuine || {}) },
-          compatible: { ...DEFAULT_TIERS.compatible, ...(effective.compatible || {}) },
-        };
+      const norm = normalizeTierResponse(live);
+      if (norm.effective) {
+        _state.liveTiers = simSubset(norm.effective);
+        _state.liveDefaults = simSubset(norm.defaults || norm.effective);
       }
     } catch (e) {
       if (e.code === 'RATE_LIMITED') Toast.warning('Slow down — try again in a few seconds.');
@@ -405,28 +425,28 @@ export default {
   async init(host) {
     _host = host;
     // Reset state per mount so leaving + returning starts clean.
-    _state = {
-      source: 'compatible',
-      preset: 'live',
-      tiers: cloneTiers(DEFAULT_TIERS),
-      liveTiers: null,
-      result: null,
-      loading: false,
-      scope: { include_overrides: false },
-    };
+    _state = freshState();
     renderShell();
 
-    // Try to fetch live tier overrides; fall back silently if endpoint is
-    // not deployed yet (it's part of the existing /pricing/tier-multipliers
-    // endpoint, which may predate this spec).
+    // Fetch the live tier maps and render from WHATEVER keys the API returns —
+    // never a hardcoded bucket list (the backend rebands and its schema is
+    // .unknown(false)). normalizeTierResponse tolerates every response shape and
+    // fails loud on an unrecognised one, so we don't silently edit bundled
+    // defaults as if they were live.
     const live = await AdminAPI.controlCenter.getTierMultipliers();
-    const effective = live?.effective || live;
-    if (effective && (effective.genuine || effective.compatible)) {
-      _state.liveTiers = {
-        genuine: { ...DEFAULT_TIERS.genuine, ...(effective.genuine || {}) },
-        compatible: { ...DEFAULT_TIERS.compatible, ...(effective.compatible || {}) },
-      };
+    if (!_host) return;
+    const norm = normalizeTierResponse(live);
+    if (norm.effective) {
+      _state.liveTiers = simSubset(norm.effective);
+      _state.liveDefaults = simSubset(norm.defaults || norm.effective);
       _state.tiers = cloneTiers(_state.liveTiers);
+    } else {
+      // Loud: we could not resolve live multipliers. Show bundled defaults but
+      // tell the operator so a saved edit isn't mistaken for editing live data.
+      _state.preset = 'defaults';
+      const sel = _host.querySelector('[data-field="preset"]');
+      if (sel) sel.value = 'defaults';
+      Toast.warning('Could not load live tier multipliers — showing bundled defaults. Reload before saving.');
     }
     renderTiers();
     renderResults();

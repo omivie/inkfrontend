@@ -1,7 +1,7 @@
 /**
  * Admin SPA — Entry point, router, shell
  */
-const APP_VERSION = '2026.07.16-code-pagination';
+const APP_VERSION = '2026.07.16-pricing-hybrid-engine';
 
 import { AdminAuth } from './auth.js';
 import { FilterState } from './filters.js';
@@ -48,46 +48,83 @@ function icon(name, w = 18, h = 18) {
 }
 
 // ---- Navigation config ----
-// Sidebar is grouped into labeled sections (June 2026 IA overhaul). An empty
-// section header is automatically suppressed for a role that can see none of
-// its items (see renderSidebar's pending-section logic), so all-owner groups
-// don't leave orphaned labels for staff.
+// Sidebar is grouped into business-workflow sections (July 2026 IA overhaul —
+// see ADMIN_CENTRE_AUDIT.md). Sections read the way an ecommerce operation is
+// run — Sales, Catalog, Data Operations, Finance, Marketing — rather than the
+// order the codebase was built. An empty section header is automatically
+// suppressed for a role that can see none of its items (see renderSidebar's
+// pending-section logic), so all-owner groups don't leave orphaned labels for
+// staff.
+//
+// IMPORTANT: every `key` here is a route hash. The July 2026 overhaul only
+// REGROUPED and RELABELLED items — no key was renamed — so all deep links,
+// hub `?tab=` state, ROUTE_REDIRECTS, keyboard nav and the command palette keep
+// working untouched. Do not rename a key without also adding a ROUTE_REDIRECTS
+// alias for the old one.
 const NAV_ITEMS = [
   { section: 'Overview' },
   { key: 'dashboard', label: 'Dashboard', icon: 'dashboard' },
 
-  { section: 'Sell' },
+  { section: 'Sales' },
   { key: 'orders', label: 'Orders', icon: 'orders' },
   { key: 'quick-order', label: 'Quick Order', icon: 'orders', ownerOnly: true },
-  { key: 'tracking-requests', label: 'Tracking Requests', icon: 'fulfillment', badge: true },
-  { key: 'products', label: 'Products', icon: 'products' },
-  { key: 'customers', label: 'Customers', icon: 'customers' },
   { key: 'invoices', label: 'Invoices', icon: 'invoice', ownerOnly: true },
-  { key: 'promotions', label: 'Promotions', icon: 'finance', ownerOnly: true },
+  { key: 'customers', label: 'Customers', icon: 'customers' },
+  // Kept top-level (not folded into an Orders tab) so its pending-count badge
+  // stays visible as a fulfilment queue.
+  { key: 'tracking-requests', label: 'Tracking Requests', icon: 'fulfillment', badge: true },
 
-  { section: 'Analytics' },
-  { key: 'analytics', label: 'Finance', icon: 'finance', ownerOnly: true },
-  { key: 'expenses', label: 'Expenses', icon: 'invoice', ownerOnly: true },
-  { key: 'demand-ranking', label: 'Demand Ranking', icon: 'analytics', ownerOnly: true },
-
-  { section: 'Catalog & Data Ops' },
-  { key: 'control-center', label: 'Control Center', icon: 'lab', ownerOnly: true },
-  { key: 'sync-report', label: 'Feed Sync', icon: 'products', ownerOnly: true },
-  { key: 'pending-changes', label: 'Pending Changes', icon: 'orders', ownerOnly: true },
-  { key: 'price-monitor', label: 'Price Monitor', icon: 'finance', ownerOnly: true },
-  { key: 'genuine-image-audit', label: 'Image Audit', icon: 'image', ownerOnly: true },
+  { section: 'Catalog' },
+  { key: 'products', label: 'Products', icon: 'products' },
   { key: 'ribbon-brands', label: 'Ribbon Brands', icon: 'products' },
   { key: 'product-codes', label: 'Product Codes', icon: 'products', ownerOnly: true },
+  { key: 'price-monitor', label: 'Price Monitor', icon: 'finance', ownerOnly: true },
+  { key: 'demand-ranking', label: 'Demand Ranking', icon: 'analytics', ownerOnly: true },
+
+  { section: 'Data Operations' },
+  { key: 'sync-report', label: 'Feed Sync', icon: 'products', ownerOnly: true },
+  { key: 'pending-changes', label: 'Pending Changes', icon: 'orders', ownerOnly: true },
+  { key: 'genuine-image-audit', label: 'Image Audit', icon: 'image', ownerOnly: true },
+  // Renamed from "Control Center" (July 2026) — the label was vague; its tabs are
+  // health / pricing / packs / integrity / SEO / links / infra. The ROUTE key stays
+  // `control-center` so `#control-center?tab=…` deep links and cc2-topbar keep working.
+  { key: 'control-center', label: 'Site Health', icon: 'lab', ownerOnly: true },
+
+  { section: 'Finance' },
+  // Label is "Finance" but the route is #analytics: the analytics hub IS the finance
+  // surface (Revenue/Health/Margins/Pricing/Market-Intel/Traffic). Kept as-is so the
+  // existing #analytics deep links and the website-traffic/margin/financial-health
+  // redirects into it keep resolving.
+  { key: 'analytics', label: 'Finance', icon: 'finance', ownerOnly: true },
+  { key: 'expenses', label: 'Expenses', icon: 'invoice', ownerOnly: true },
+
+  { section: 'Marketing' },
+  { key: 'promotions', label: 'Promotions', icon: 'finance', ownerOnly: true },
   { key: 'segments', label: 'Segments', icon: 'mail', ownerOnly: true },
 
   { section: 'System' },
   { key: 'abuse', label: 'Abuse', icon: 'lock', ownerOnly: true },
   { key: 'recovery', label: 'Recovery', icon: 'refunds', ownerOnly: true },
   { key: 'planner', label: 'Planner', icon: 'calendar' },
-
-  { section: 'Settings' },
   { key: 'settings', label: 'Settings', icon: 'settings', ownerOnly: true },
 ];
+
+// ---- Owner-only route gating (single source of truth) ----
+// Previously two lists governed owner access — the `ownerOnly` flags above AND a
+// separate hardcoded array inside navigate(). They drifted: the array covered only
+// 8 of the owner pages, so the other 8 (promotions, analytics, price-monitor,
+// genuine-image-audit, pending-changes, segments, abuse, recovery) were hidden from
+// the sidebar yet still LOADED via a direct hash. Deriving the gate from NAV_ITEMS
+// closes that hole and guarantees the two can never diverge again.
+const NAV_BY_KEY = new Map(NAV_ITEMS.filter(i => i.key).map(i => [i.key, i]));
+// Owner surfaces reachable by direct hash but not shown in the sidebar (they render
+// as tabs inside an owner hub and also self-gate in-page; listing them here gives a
+// direct #hash the same central "Access Restricted" stub instead of a bare load).
+const EXTRA_OWNER_ROUTES = new Set(['contacts', 'cc-profit', 'cc-market-intel']);
+function isOwnerOnlyRoute(pageName) {
+  const item = NAV_BY_KEY.get(pageName);
+  return !!(item && item.ownerOnly) || EXTRA_OWNER_ROUTES.has(pageName);
+}
 
 // Legacy route redirects — old pages now merged into parent pages / hubs.
 const ROUTE_REDIRECTS = {
@@ -279,9 +316,9 @@ async function navigate(pageName) {
     </div>
   `;
 
-  // Owner-only page check
-  const ownerPages = ['settings', 'control-center', 'sync-report', 'invoices', 'quick-order', 'demand-ranking', 'expenses', 'product-codes'];
-  if (ownerPages.includes(pageName) && !AdminAuth.isOwner()) {
+  // Owner-only page check — gate derived from NAV_ITEMS (see isOwnerOnlyRoute),
+  // so every owner page is covered, not a hand-maintained subset.
+  if (isOwnerOnlyRoute(pageName) && !AdminAuth.isOwner()) {
     if (myToken !== _navToken) return; // superseded — don't stomp the newer page's state
     content.innerHTML = `
       <div class="admin-stub">
