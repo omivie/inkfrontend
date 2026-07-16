@@ -159,13 +159,15 @@ test('errors carry the line index the form markers key on', () => {
 
 test('a backend 400 maps its unresolved codes back onto the offending lines', () => {
     // #3263/#3264 got past a fail-soft client guard; the backend caught them.
+    // position is RAW 0-based (backend response Jul 2026 §2), but here the match is
+    // BY CODE so position is ignored — the fixtures use faithful 0-based values anyway.
     const lines = [line('CTN258XLKCMY'), line('CTN258'), line('CLC531XL')];
     const details = { unresolved: [
-        { position: 2, product_code: 'CTN258' },
-        { position: 3, product_code: 'CLC531XL' },
+        { position: 1, product_code: 'CTN258' },
+        { position: 2, product_code: 'CLC531XL' },
     ] };
     const errs = unresolvedLineErrors(lines, details);
-    assert.deepEqual(plain(errs).map((e) => e.line), [1, 2], 'matched by code to lines 2 and 3 (0-indexed 1,2)');
+    assert.deepEqual(plain(errs).map((e) => e.line), [1, 2], 'matched by code to lines at index 1 and 2');
     for (const e of errs) assert.equal(e.lfield, 'code', 'must target the code input so it highlights');
     assert.match(errs[0].msg, /CTN258/);
     assert.match(errs[0].msg, /isn’t a product SKU/);
@@ -173,32 +175,69 @@ test('a backend 400 maps its unresolved codes back onto the offending lines', ()
 
 test('the {unresolved:[…]} wrapper and a bare array are both accepted', () => {
     const lines = [line('BADCODE')];
-    const wrapped = unresolvedLineErrors(lines, { unresolved: [{ position: 1, product_code: 'BADCODE' }] });
-    const bare = unresolvedLineErrors(lines, [{ position: 1, product_code: 'BADCODE' }]);
+    const wrapped = unresolvedLineErrors(lines, { unresolved: [{ position: 0, product_code: 'BADCODE' }] });
+    const bare = unresolvedLineErrors(lines, [{ position: 0, product_code: 'BADCODE' }]);
     assert.deepEqual(plain(wrapped), plain(bare), 'either envelope shape yields the same errors');
     assert.equal(wrapped.length, 1);
 });
 
 test('every line carrying the same bad code is flagged, not just the first', () => {
     const lines = [line('CTN258'), line('CTN258XLKCMY'), line('CTN258')];
-    const errs = unresolvedLineErrors(lines, { unresolved: [{ position: 1, product_code: 'CTN258' }] });
+    const errs = unresolvedLineErrors(lines, { unresolved: [{ position: 0, product_code: 'CTN258' }] });
     assert.deepEqual(plain(errs).map((e) => e.line), [0, 2], 'both CTN258 lines highlighted, the valid one skipped');
 });
 
 test('code matching is case-insensitive', () => {
     const lines = [line('ctn258')];
-    const errs = unresolvedLineErrors(lines, { unresolved: [{ position: 1, product_code: 'CTN258' }] });
+    const errs = unresolvedLineErrors(lines, { unresolved: [{ position: 0, product_code: 'CTN258' }] });
     assert.equal(errs.length, 1);
     assert.equal(errs[0].line, 0);
 });
 
-test('positional fallback when the code matches no line', () => {
-    // e.g. the backend canonicalised the code it echoes, or the operator edited it.
+// ─── 6a. position is RAW 0-based into the SUBMITTED array (backend response Jul 2026 §2) ──
+// The fallback only fires when the echoed code matches no current line (canonicalised
+// or operator-edited mid-request). These pin down the exact index semantics.
+
+test('positional fallback: position is RAW 0-based, no −1 (ERR-079)', () => {
+    // Two submittable lines; the echoed code matches neither, so we fall back to
+    // position. Under the backend's 0-based contract, position 1 is the SECOND line.
     const lines = [line('FREIGHT-ONLY', 'Freight'), line('SOMECODE')];
-    const errs = unresolvedLineErrors(lines, { unresolved: [{ position: 2, product_code: 'DOES-NOT-MATCH' }] });
+    const errs = unresolvedLineErrors(lines, { unresolved: [{ position: 1, product_code: 'DOES-NOT-MATCH' }] });
     assert.equal(errs.length, 1);
-    assert.equal(errs[0].line, 1, 'position 2 (1-based) → index 1');
+    assert.equal(errs[0].line, 1, 'position 1 (0-based) → index 1 (a −1 regression would give 0)');
     assert.equal(errs[0].lfield, 'code');
+});
+
+test('positional fallback: position 0 pins the first submitted line', () => {
+    const lines = [line('FREIGHT-ONLY', 'Freight'), line('SOMECODE')];
+    const errs = unresolvedLineErrors(lines, { unresolved: [{ position: 0, product_code: 'DOES-NOT-MATCH' }] });
+    assert.equal(errs.length, 1);
+    assert.equal(errs[0].line, 0, 'position 0 (0-based) → index 0');
+});
+
+test('position indexes the SUBMITTED array: empty rows are skipped, freight counts', () => {
+    // A truly-empty draft row is dropped before submit (realLines) and consumes NO
+    // slot; a description-only freight line IS submitted and consumes one. So the
+    // backend's submitted array is [freight, SOMECODE] and position 1 is SOMECODE at
+    // DRAFT index 2 — proving we map submitted→draft, not index the raw draft.
+    const lines = [
+        { code: '', description: '', qty: 1, unitCost: 0 },   // blank — dropped before submit
+        line('', 'Freight'),                                  // description-only — submitted
+        line('SOMECODE'),                                     // submitted
+    ];
+    const errs = unresolvedLineErrors(lines, { unresolved: [{ position: 1, product_code: 'DOES-NOT-MATCH' }] });
+    assert.equal(errs.length, 1);
+    assert.equal(errs[0].line, 2, 'submitted index 1 → draft index 2 (blank row skipped, freight counted)');
+});
+
+test('positional fallback: out of range under 0-based → unpinned, never a false pin', () => {
+    // Two submittable lines → valid positions are 0 and 1. position 2 is out of range;
+    // the old 1-based code would have mis-pinned index 1. Now it degrades to line:-1.
+    const lines = [line('FREIGHT-ONLY', 'Freight'), line('SOMECODE')];
+    const errs = unresolvedLineErrors(lines, { unresolved: [{ position: 2, product_code: 'GHOSTCODE' }] });
+    assert.equal(errs.length, 1);
+    assert.equal(errs[0].line, -1, 'past the end of the submitted array → unpinned, not a wrong row');
+    assert.match(errs[0].msg, /GHOSTCODE/);
 });
 
 test('a line removed mid-flight still names its code, unpinned', () => {
@@ -219,7 +258,7 @@ test('empty / absent / null unresolved returns [] and never throws', () => {
 test('a null draft with a real unresolved code surfaces it unpinned, no throw', () => {
     // Defensive: the draft could be gone by the time the 400 lands. It must not
     // throw, and the code still names itself (unpinned) in the summary toast.
-    const errs = unresolvedLineErrors(null, { unresolved: [{ position: 1, product_code: 'X' }] });
+    const errs = unresolvedLineErrors(null, { unresolved: [{ position: 0, product_code: 'X' }] });
     assert.equal(errs.length, 1);
     assert.equal(errs[0].line, -1);
     assert.match(errs[0].msg, /“X”/);
@@ -231,12 +270,12 @@ test('client guard and backend 400 produce IDENTICAL copy for the same code', ()
     const guardLines = [line('CTN258')];
     const guardErr = applyResolvedCodes(guardLines, REAL)[0];
     const backendErr = unresolvedLineErrors([line('CTN258')],
-        { unresolved: [{ position: 1, product_code: 'CTN258' }] })[0];
+        { unresolved: [{ position: 0, product_code: 'CTN258' }] })[0];
     assert.equal(backendErr.msg, guardErr.msg, 'same line, same code → same message');
 });
 
 test('unresolvedLineErrors is read-only — it never mutates the lines', () => {
     const lines = [line('CTN258')];
-    unresolvedLineErrors(lines, { unresolved: [{ position: 1, product_code: 'CTN258' }] });
+    unresolvedLineErrors(lines, { unresolved: [{ position: 0, product_code: 'CTN258' }] });
     assert.equal(lines[0].code, 'CTN258', 'the draft is untouched (unlike applyResolvedCodes)');
 });

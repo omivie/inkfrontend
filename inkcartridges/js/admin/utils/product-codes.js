@@ -59,6 +59,49 @@ export function describeScopes(scopes, brandName = (s) => s) {
   return `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}`;
 }
 
+/**
+ * Window a list for display and describe the pager around it.
+ *
+ * The code catalogue is ~1,200 entries; rendering every tile at once is heavy
+ * and gives the admin no way to walk it. Both code surfaces slice their
+ * (already alphabetically sorted, already filtered) list through this and page
+ * with `pagerHtml`. `page` is clamped so a filter that shrinks the list can't
+ * strand the view on a page that no longer exists.
+ *
+ * @param {Array} list      the full (filtered) list to page over
+ * @param {number} page     desired 0-based page index (clamped into range)
+ * @param {number} perPage  items per page (must be >= 1)
+ * @returns {{page:number, pages:number, total:number, items:Array, hasPrev:boolean, hasNext:boolean}}
+ */
+export function paginate(list, page, perPage) {
+  const arr = Array.isArray(list) ? list : [];
+  const size = Math.max(1, perPage | 0);
+  const total = arr.length;
+  const pages = Math.max(1, Math.ceil(total / size));
+  const p = Math.min(Math.max(page | 0, 0), pages - 1);
+  const start = p * size;
+  return {
+    page: p, pages, total,
+    items: arr.slice(start, start + size),
+    hasPrev: p > 0, hasNext: p < pages - 1,
+  };
+}
+
+/**
+ * Pager row markup for a `paginate()` model — reuses the shared `.admin-pagination`
+ * styles. Returns '' for a single page so callers can append it unconditionally.
+ * Prev/Next carry `data-pcpage` so one delegated grid-click handler drives both.
+ */
+export function pagerHtml(model) {
+  if (!model || model.pages <= 1) return '';
+  return `<div class="admin-pagination admin-pagination--codes">`
+    + `<span class="admin-pagination__info">Page ${model.page + 1} of ${model.pages}</span>`
+    + `<span class="admin-pagination__btns">`
+    + `<button type="button" class="admin-pagination__btn" data-pcpage="prev"${model.hasPrev ? '' : ' disabled'}>Prev</button>`
+    + `<button type="button" class="admin-pagination__btn" data-pcpage="next"${model.hasNext ? '' : ' disabled'}>Next</button>`
+    + `</span></div>`;
+}
+
 /** True if `code` is storable — matches the table's CHECK constraint exactly. */
 export function isValidProductCode(code) {
   const c = String(code || '');

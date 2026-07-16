@@ -1712,8 +1712,13 @@ const AdminAPI = {
   _CODE_UNIVERSE_TTL: 21600000,   // 6 h
 
   _readCodeUniverseCache() {
+    // The stored value is the whole { codes, missed } object, NOT an array —
+    // `_writeCodeUniverseCache(universe)` banks `universe` verbatim. Testing
+    // `Array.isArray(hit.value)` here (as this once did) can never pass for that
+    // shape, so the 6h cache never hit and every drawer/page open re-ran the
+    // ~2s–50s fan-out. Check the actual shape: a fresh hit has a codes array.
     const fresh = (hit) => hit && (Date.now() - hit.at) < this._CODE_UNIVERSE_TTL
-      && Array.isArray(hit.value) && hit.value.length;
+      && hit.value && Array.isArray(hit.value.codes) && hit.value.codes.length;
     if (fresh(this._codeUniverseCache)) return this._codeUniverseCache.value;
     try {
       const raw = localStorage.getItem(this._CODE_UNIVERSE_KEY);

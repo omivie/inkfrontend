@@ -37,6 +37,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
+const vm = require('node:vm');
 
 const ROOT = path.resolve(__dirname, '..');
 const read = (p) => fs.readFileSync(path.join(ROOT, p), 'utf8');
@@ -227,4 +228,125 @@ test('tiles and delete confirms show the scope', () => {
     'the delete confirm must name the scopes it will reach');
   assert.match(PRODUCTS, /const where = describeScopes\(c\.scopes, brandNameOf\)/,
     'the drawer\'s delete confirm must name the scopes it will reach');
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 6. The cache that never hit (ERR-081)
+// ─────────────────────────────────────────────────────────────────────────────
+
+test('the universe cache freshness check tests the STORED shape, not an array', () => {
+  // _writeCodeUniverseCache banks the whole { codes, missed } object as hit.value.
+  // The read used to gate on `Array.isArray(hit.value)`, which can NEVER be true
+  // for an object — so the 6h cache never hit and every open re-ran the ~2s–50s
+  // fan-out. The check must look at hit.value.codes (the array actually stored).
+  const body = method(API, '_readCodeUniverseCache');
+  assert.match(body, /Array\.isArray\(hit\.value\.codes\)/,
+    'freshness must gate on hit.value.codes — the array the write actually stores');
+  assert.ok(!/Array\.isArray\(hit\.value\)\s*&&/.test(body),
+    'the old `Array.isArray(hit.value) &&` predicate can never pass for a { codes, missed } object — it must be gone');
+});
+
+test('what gets written is what the freshness check reads', () => {
+  // Guard against the two drifting apart again: the writer stores `universe`
+  // ({ codes, missed }) verbatim, so the reader must look inside `.codes`.
+  const write = method(API, '_writeCodeUniverseCache');
+  assert.match(write, /value:\s*universe/,
+    'the writer banks the whole { codes, missed } object');
+  const read = method(API, '_readCodeUniverseCache');
+  assert.match(read, /hit\.value\.codes/,
+    'so the reader must reach into hit.value.codes, not treat hit.value as the list');
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 7. Paginating the code list — shared paginate() / pagerHtml()
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Pull a pure `export function name(){…}` out of the util and make it callable. */
+function loadExport(name) {
+  const sig = `export function ${name}(`;
+  const start = UTILS.indexOf(sig);
+  assert.ok(start > -1, `expected an exported ${name}()`);
+  let i = UTILS.indexOf('{', start), depth = 0;
+  for (; i < UTILS.length; i++) {
+    if (UTILS[i] === '{') depth++;
+    else if (UTILS[i] === '}') { depth--; if (depth === 0) break; }
+  }
+  const fn = UTILS.slice(start, i + 1).replace(/^export /, '');
+  return vm.runInNewContext(`(${fn})`);
+}
+
+const paginate = loadExport('paginate');
+const pagerHtml = loadExport('pagerHtml');
+const list = (n) => Array.from({ length: n }, (_, i) => i);
+
+test('paginate windows the list and reports the page count', () => {
+  const pg = paginate(list(130), 0, 60);
+  assert.equal(pg.total, 130);
+  assert.equal(pg.pages, 3);
+  assert.equal(pg.page, 0);
+  assert.equal(pg.items.length, 60);
+  assert.deepEqual(pg.items[0], 0);
+  assert.equal(pg.hasPrev, false);
+  assert.equal(pg.hasNext, true);
+});
+
+test('paginate slices the middle and the (short) last page', () => {
+  const mid = paginate(list(130), 1, 60);
+  assert.deepEqual([mid.items[0], mid.items[mid.items.length - 1]], [60, 119]);
+  assert.ok(mid.hasPrev && mid.hasNext);
+
+  const last = paginate(list(130), 2, 60);
+  assert.equal(last.items.length, 10);   // 130 - 120
+  assert.deepEqual([last.items[0], last.items[9]], [120, 129]);
+  assert.equal(last.hasNext, false);
+});
+
+test('paginate clamps an out-of-range page instead of stranding the view', () => {
+  const over = paginate(list(130), 99, 60);
+  assert.equal(over.page, 2, 'past the end clamps to the last page');
+  const under = paginate(list(130), -5, 60);
+  assert.equal(under.page, 0, 'before the start clamps to the first page');
+});
+
+test('paginate treats an empty list as a single empty page', () => {
+  const pg = paginate([], 3, 60);
+  assert.equal(pg.pages, 1);
+  assert.equal(pg.page, 0);
+  assert.equal(pg.items.length, 0);
+  assert.ok(!pg.hasPrev && !pg.hasNext);
+});
+
+test('an exact multiple of perPage does not mint a trailing empty page', () => {
+  const pg = paginate(list(120), 0, 60);
+  assert.equal(pg.pages, 2, '120 / 60 = 2 pages exactly');
+});
+
+test('pagerHtml is empty for a single page, and marks Prev/Next state otherwise', () => {
+  assert.equal(pagerHtml(paginate(list(40), 0, 60)), '', 'one page needs no pager');
+
+  const first = pagerHtml(paginate(list(130), 0, 60));
+  assert.match(first, /Page 1 of 3/);
+  assert.match(first, /data-pcpage="prev" disabled/, 'Prev is disabled on the first page');
+  assert.match(first, /data-pcpage="next"(?!\s+disabled)/, 'Next is live on the first page');
+
+  const last = pagerHtml(paginate(list(130), 2, 60));
+  assert.match(last, /Page 3 of 3/);
+  assert.match(last, /data-pcpage="next" disabled/, 'Next is disabled on the last page');
+  assert.match(last, /data-pcpage="prev"(?!\s+disabled)/, 'Prev is live on the last page');
+});
+
+test('both code surfaces page through the list, resetting to page 1 on a new filter', () => {
+  // The drawer tab.
+  assert.match(PRODUCTS, /const OTHERS_PER_PAGE = \d+/, 'the drawer caps how many "other" tiles it paints');
+  assert.match(PRODUCTS, /paginate\(rest, othersPage, OTHERS_PER_PAGE\)/, 'the drawer windows the filtered "others" list');
+  assert.match(PRODUCTS, /html \+= pagerHtml\(pg\)/, 'the drawer renders a pager');
+  assert.match(PRODUCTS, /othersPage \+= pager\.dataset\.pcpage === 'next' \? 1 : -1/, 'Prev/Next move the drawer page');
+  assert.match(PRODUCTS, /filterEl\.addEventListener\('input', \(\) => \{ othersPage = 0;/,
+    'typing in the drawer filter must reset to page 1, or a match on page 1 hides behind an old page index');
+
+  // The standalone page.
+  assert.match(PAGE, /const PER_PAGE = \d+/, 'the page caps how many tiles it paints');
+  assert.match(PAGE, /paginate\(shown, _page, PER_PAGE\)/, 'the page windows the visible list');
+  assert.match(PAGE, /_page \+= pager\.getAttribute\('data-pcpage'\) === 'next' \? 1 : -1/, 'Prev/Next move the page');
+  assert.match(PAGE, /_page = 0;\s*\n\s*renderGrid\(\);/, 'a brand/category/filter change resets to page 1');
 });

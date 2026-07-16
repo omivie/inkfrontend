@@ -152,3 +152,30 @@ line_items") is all I need.
 | `js/admin/pages/quick-order.js` | `surfaceUnresolvedCodes()` on save |
 | `js/admin/api.js` | `invoiceError()` envelope parser (quick-order writes now route through it) |
 | `js/admin/utils/invoice-math.js` | `normalizeInvoice()` / `computeInvoiceProfit()` — where `profit_excl_gst` would slot in |
+
+---
+
+## ✅ RESOLVED — 2026-07-15 (backend reply `invoice-followups-backend-reply-jul2026.md`)
+
+Both items are closed on our side.
+
+### §1 — list-row profit column: FE change shipped
+`normalizeInvoice()` (`js/admin/utils/invoice-math.js`) now **prefers** the top-level
+`profit_excl_gst` / `cost_excl_gst` when present, falling back to line-item derivation when absent.
+Detection is by **field presence** (`Object.hasOwnProperty`), NOT truthiness — so a present-`null`
+is an authoritative **UNKNOWN** ("—"), an absent field means old-backend / editor-draft (derive).
+New `profitOrNull()` allows a negative profit (a loss). Margin denominator is reconstructed as
+`revenue = profit + cost` because list rows carry no line items. The owner **Profit** column
+(`pages/invoices.js:492`) needed no edit — it reads straight through `normalizeInvoice`.
+**The column stays "—" until the next Render redeploy makes the fields appear** (prod list currently
+returns 3 rows without them). Additive / backwards-compatible, as you noted.
+
+### §2 — `position` semantics: answered, and a latent FE bug fixed (ERR-080)
+Confirmed **raw 0-based**, indexing the **full submitted `line_items`** (freight/labour lines consume
+a slot; empty rows don't). Our `unresolvedLineErrors()` fallback was doing `pos - 1` (1-based) **and**
+indexing the unfiltered draft — two compounding off-by-ones on the fallback path. Now: a
+submitted→draft index map (same predicate as `realLines`), `position` taken **as-is** (no `-1`), mapped
+back to the draft row the markers highlight. No caller changes. Pinned by
+`tests/admin-invoice-sku-integrity.test.js` (raw-0-based, submitted-array indexing, out-of-range→unpinned)
+and `tests/admin-invoice-cost-math.test.js` (server-precomputed profit path). Full suite green
+(2283 pass / 0 fail).

@@ -8,7 +8,7 @@ import { Toast } from '../components/toast.js';
 import { Modal } from '../components/modal.js';
 import { RichTextEditor } from '../components/rich-text-editor.js?v=rich-text-persist-may2026';
 import { computeProfitability, marginBadge, formatProfitDollars } from '../utils/profitability.js';
-import { PRODUCT_TYPE_TO_SHOP_CATEGORY, describeCodesWriteError, describeScopes } from '../utils/product-codes.js';
+import { PRODUCT_TYPE_TO_SHOP_CATEGORY, describeCodesWriteError, describeScopes, paginate, pagerHtml } from '../utils/product-codes.js';
 import {
   PRODUCT_TYPE_LABELS, RIBBON_PRODUCT_TYPES, typeFilterGroup, typeFilterOptions,
 } from '../utils/product-types.js';
@@ -1969,6 +1969,11 @@ async function wireProductCodesSection(modal, full) {
   let renameDraft = '';     // live value of the inline rename input
   let busy = false;         // guards against a double-fired brand-wide write
 
+  // "Every other code" is ~1,200 tiles — page through it rather than render the
+  // whole thing. The product's OWN codes (section one) are always shown in full.
+  const OTHERS_PER_PAGE = 60;
+  let othersPage = 0;       // 0-based; reset to 0 whenever the filter changes
+
   const TICK = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>`;
   const KEBAB = `<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg>`;
 
@@ -2058,6 +2063,9 @@ async function wireProductCodesSection(modal, full) {
       html += sectionHead('Every other code');
       html += `<span class="admin-pc-empty admin-pc-empty--error">Couldn’t load the rest of the catalogue — reopen the product to retry. Codes above still work.</span>`;
     } else if (rest.length) {
+      // The head counts the WHOLE filtered list; the grid shows one page of it.
+      const pg = paginate(rest, othersPage, OTHERS_PER_PAGE);
+      othersPage = pg.page;   // clamp — a filter may have shrunk the list
       html += sectionHead(`Every other code · ${rest.length.toLocaleString('en-NZ')}`);
       // Partial is not complete. Say which brands are missing rather than let the
       // admin read a short list as the whole catalogue.
@@ -2065,7 +2073,8 @@ async function wireProductCodesSection(modal, full) {
         html += `<span class="admin-pc-empty admin-pc-empty--error">${
           esc(describeScopes(missedScopes, brandNameOf))} didn’t load — codes from there are missing below.</span>`;
       }
-      html += rest.map(renderTile).join('');
+      html += pg.items.map(renderTile).join('');
+      html += pagerHtml(pg);
     } else if (f) {
       html += sectionHead('Every other code');
       html += `<span class="admin-pc-empty">No match in the rest of the catalogue.</span>`;
@@ -2231,6 +2240,13 @@ async function wireProductCodesSection(modal, full) {
 
   // ── Events ─────────────────────────────────────────────────────────────
   gridEl.addEventListener('click', (e) => {
+    // Pager first — it's not a code action, so keep it out of handleAct.
+    const pager = e.target.closest('[data-pcpage]');
+    if (pager) {
+      othersPage += pager.dataset.pcpage === 'next' ? 1 : -1;   // renderGrid clamps
+      renderGrid();
+      return;
+    }
     const act = e.target.closest('[data-act]');
     if (act) return handleAct(act.dataset.act, act.dataset.code);
     const tog = e.target.closest('[data-toggle]');
@@ -2254,7 +2270,7 @@ async function wireProductCodesSection(modal, full) {
     }
   });
 
-  filterEl.addEventListener('input', () => { renderAdd(); renderGrid(); });
+  filterEl.addEventListener('input', () => { othersPage = 0; renderAdd(); renderGrid(); });
   filterEl.addEventListener('keydown', (e) => {
     if (e.key !== 'Enter') return;
     e.preventDefault();

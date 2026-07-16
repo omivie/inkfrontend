@@ -440,12 +440,19 @@ const DESCRIBE_SCOPES = (scopes, brandName = (s) => s) => {
 // asserts on: normalizeProductCode (the drawer has no local norm any more) and
 // getCodeUniverse (the catalogue behind the "every other code" section — an empty
 // one by default, so a test about THIS product's chips isn't about the catalogue).
+// The real pager helpers, lifted verbatim from utils/product-codes.js so the
+// reconstructed drawer pages exactly as the shipped one does.
+const loadUtilFn = (name) => vm.runInNewContext(
+  `(${extractFunction(UTIL_SRC, `export function ${name}(`).replace(/^export /, '')})`);
+const PAGINATE = loadUtilFn('paginate');
+const PAGER_HTML = loadUtilFn('pagerHtml');
+
 function loadWire() {
   const src = extractFunction(PRODUCTS_SRC, 'async function wireProductCodesSection(');
   const factory = new Function(
     'AdminAPI', 'Toast', 'esc', 'DebugLog', 'window',
     'extractBrandName', '_brands', 'PRODUCT_TYPE_LABELS', 'PRODUCT_TYPE_TO_SHOP_CATEGORY',
-    'describeScopes', 'describeCodesWriteError',
+    'describeScopes', 'describeCodesWriteError', 'paginate', 'pagerHtml',
     `${src}; return wireProductCodesSection;`);
   return (deps) => factory(
     { normalizeProductCode: NORMALIZE,
@@ -458,7 +465,8 @@ function loadWire() {
     deps.PRODUCT_TYPE_LABELS || { ink_cartridge: 'Ink Cartridges', toner_cartridge: 'Toner Cartridges' },
     deps.PRODUCT_TYPE_TO_SHOP_CATEGORY || { ink_cartridge: 'ink', toner_cartridge: 'toner' },
     DESCRIBE_SCOPES,
-    deps.describeCodesWriteError || ((e) => (e && e.message) || 'unknown error'));
+    deps.describeCodesWriteError || ((e) => (e && e.message) || 'unknown error'),
+    PAGINATE, PAGER_HTML);
 }
 
 // A representative Brother ink product.

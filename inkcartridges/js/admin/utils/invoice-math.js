@@ -48,6 +48,18 @@ export function costOrNull(v) {
   return Number.isFinite(n) && n >= 0 ? n : null;
 }
 
+/**
+ * Like costOrNull, but a profit may legitimately be NEGATIVE (a loss). Same
+ * UNKNOWN-≠-0 discipline: '' / null / non-numeric → null (unknown); any finite
+ * number, including a negative, → itself. Used for the backend's precomputed
+ * profit_excl_gst, where costOrNull would wrongly null a real loss.
+ */
+export function profitOrNull(v) {
+  if (v === '' || v == null) return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
 /** Ex-GST revenue for one line: qty × sell price. */
 export const lineRevenueExGst = (l) => num(l?.qty) * num(l?.unitCost ?? l?.unitPrice);
 
@@ -121,6 +133,31 @@ export function normalizeInvoice(recOrDraft) {
   const d = { lines, freight: num(r.freight_excl_gst ?? r.freight ?? 0) };
   const totals = computeInvoiceTotals(d);
   const cogs = computeInvoiceCogs(d);
+
+  // §1 (backend response Jul 2026): GET /api/admin/invoices list rows now carry
+  // precomputed cost_excl_gst / profit_excl_gst — the ONLY place the true COGS is
+  // known here, because list rows deliberately omit per-line supplier costs (a list
+  // response mustn't ship our cost). Prefer them when present; fall back to line-item
+  // derivation otherwise, so an editor draft and the pre-deploy backend are unaffected.
+  //
+  // UNKNOWN ≠ 0 is preserved end-to-end. The backend sends BOTH fields as null,
+  // together, when any coded line lacks a supplier cost — or when the invoice is void.
+  // So detection is by field PRESENCE, not truthiness: a present-but-null field is an
+  // authoritative "unknown" (→ "—"), while an ABSENT field means old backend / a draft
+  // and we derive from the lines. A known $0 cost stays a real 0, never null.
+  const hasServerFigures = Object.prototype.hasOwnProperty.call(r, 'profit_excl_gst')
+    || Object.prototype.hasOwnProperty.call(r, 'cost_excl_gst');
+  const serverProfit = profitOrNull(r.profit_excl_gst);   // number | null (loss allowed)
+  const serverCost = costOrNull(r.cost_excl_gst);          // number | null (>= 0)
+  const allKnown = hasServerFigures ? (serverProfit !== null) : cogs.allKnown;
+
+  // Margin denominator: list rows have no line items, so totals.subtotal is 0. When
+  // the server figures are known, revenue = profit + cost — exactly the backend's
+  // Σ line_total_excl_gst (freight excluded), the same basis the detail editor uses.
+  const revenueExGst = (hasServerFigures && allKnown)
+    ? round2(serverProfit + serverCost)
+    : totals.subtotal;
+
   return {
     id: r.id ?? null,
     status: r.status ?? 'unpaid',
@@ -129,15 +166,15 @@ export function normalizeInvoice(recOrDraft) {
     date: (r.order_date || r.issue_date || r.date || '').slice(0, 10) || '',
     sourceOrderId: r.source_order_id ?? null,
     lines,
-    revenueExGst: totals.subtotal,
+    revenueExGst,
     freightExGst: totals.freight,
     gst: totals.gst,
     totalInclGst: totals.total,
-    costExGst: cogs.costExGst,
-    allCostsKnown: cogs.allKnown,
-    unknownCostLines: cogs.unknownLines,
+    costExGst: hasServerFigures ? serverCost : cogs.costExGst,
+    allCostsKnown: allKnown,
+    unknownCostLines: hasServerFigures ? (allKnown ? 0 : null) : cogs.unknownLines,
     units: lines.reduce((s, l) => s + num(l.qty), 0),
-    profit: computeInvoiceProfit(d),
+    profit: hasServerFigures ? serverProfit : computeInvoiceProfit(d),
   };
 }
 

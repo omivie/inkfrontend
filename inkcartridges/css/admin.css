@@ -1783,6 +1783,10 @@
 /* The Product Codes page shows the whole catalogue, not one brand's chips — the
    drawer's 340px box would turn 1,200 tiles into a peephole. */
 .admin-pc-grid--page { max-height: 62vh; }
+/* Pager under the code tiles. In the drawer it's a flex child of .admin-pc-grid
+   (flex-basis:100% breaks it onto its own line, like the section heads); on the
+   page it's a plain block after the grid box. Both read the same. */
+.admin-pagination--codes { flex: 0 0 100%; margin-top: 6px; }
 .admin-pcp-tally { font-size: 12px; margin-left: auto; white-space: nowrap; }
 /* A catalogue missing a brand must not look like a complete one. */
 .admin-pcp-incomplete {

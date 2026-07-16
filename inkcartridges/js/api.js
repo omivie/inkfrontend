@@ -1184,6 +1184,19 @@ const API = {
         return map;
     },
 
+    /**
+     * Effective override codes for ONE product (the product_codes table) → string[].
+     * The PDP uses this to honour a manually-assigned code the same way /shop does:
+     * the override merge (_applyManualCodes) only runs on the getShopData path, so a
+     * singly-loaded product (getProduct/getRibbon) never sees its manual codes. Reuses
+     * the cached anon read below rather than forking a second query.
+     */
+    async getManualProductCodes(productId) {
+        if (!productId) return [];
+        const map = await this._fetchManualCodesByProduct([productId]);
+        return (map && map.get(productId)) || [];
+    },
+
     /** Manual chip counts for a brand+category → [{ code, count }]. */
     async _fetchManualChipCounts(brandSlug, productTypes) {
         if (!brandSlug || !Array.isArray(productTypes) || !productTypes.length) return [];

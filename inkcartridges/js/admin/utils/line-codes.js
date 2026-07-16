@@ -107,8 +107,15 @@ export function applyResolvedCodes(lines, resolved) {
  * accept both. Each entry is matched to a line BY CODE first (trimmed, case-
  * insensitive): that's robust to whatever base `position` counts from and to any
  * canonicalisation, and it correctly flags EVERY line carrying the same bad code.
- * `position` (treated as 1-based) is only a fallback when no code matches, and a
- * `line:-1` unpinned error is the last resort so the code still names itself in the
+ *
+ * `position` is only a fallback when no code matches. The backend (response Jul 2026,
+ * §2) confirmed it is RAW 0-based and indexes the SUBMITTED line_items array — i.e.
+ * realLines(draft): the lines with a code OR description, in draft order. Empty rows
+ * are dropped before submit and never consume a slot; description-only freight/labour
+ * lines DO. (The human error.message string is 1-based via position+1; the structured
+ * field is not — do NOT subtract 1 here.) We map that submitted index back to the
+ * DRAFT index the form markers key on, so the fallback pins the row the operator sees.
+ * A `line:-1` unpinned error is the last resort so the code still names itself in the
  * summary toast even if its line was removed while the request was in flight.
  *
  * Pure and read-only: unlike applyResolvedCodes it never mutates the lines.
@@ -121,6 +128,12 @@ export function unresolvedLineErrors(lines, unresolved) {
   if (!list.length) return errs;
   const rows = lines || [];
   const marked = new Set();
+  // Backend `position` indexes the SUBMITTED array (realLines: code OR description),
+  // NOT the full draft. Build submitted-index → draft-index using the same predicate
+  // buildPayload's realLines() uses, so the fallback maps back onto the row the
+  // operator actually sees — and truly-empty draft rows don't throw off the count.
+  const submittedToDraft = [];
+  rows.forEach((l, i) => { if (clean(l?.code) || clean(l?.description)) submittedToDraft.push(i); });
   for (const u of list) {
     const code = clean(u?.product_code);
     let hit = false;
@@ -134,10 +147,12 @@ export function unresolvedLineErrors(lines, unresolved) {
       }
     });
     if (hit) continue;
-    // 2) By position (1-based), bounds-checked.
+    // 2) By position — RAW 0-based index into the submitted array (no -1), mapped to
+    //    the draft index and bounds-checked.
     const pos = Number(u?.position);
-    const idx = Number.isFinite(pos) ? pos - 1 : -1;
-    if (idx >= 0 && idx < rows.length && !marked.has(idx)) {
+    const idx = (Number.isInteger(pos) && pos >= 0 && pos < submittedToDraft.length)
+      ? submittedToDraft[pos] : -1;
+    if (idx >= 0 && !marked.has(idx)) {
       errs.push({ line: idx, lfield: 'code', msg: skuLineMsg(idx, clean(rows[idx]?.code) || code) });
       marked.add(idx);
       continue;

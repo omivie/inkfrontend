@@ -221,6 +221,91 @@ test('normalizeInvoice falls back to issue_date when there is no order_date', ()
   assert.equal(n.date, '2026-07-01');
 });
 
+// ─── 6b. Server-precomputed cost/profit on GET /api/admin/invoices list rows ──
+// (backend response Jul 2026 §1). List rows carry NO line_items and NO per-line
+// supplier cost — only the two summary figures — so the profit column can ONLY come
+// from these. normalizeInvoice must PREFER them when present, honour UNKNOWN ≠ 0 by
+// FIELD PRESENCE (present-null = authoritative unknown; absent = derive from lines),
+// and reconstruct revenue = profit + cost so the margin % still has a denominator.
+
+test('list row with server figures lights up the profit column (no line_items)', () => {
+  // Invoice #3263 from the backend's cross-check table: revenue 170.43, cost 139.80.
+  const n = normalizeInvoice({
+    id: '8a4b7367', invoice_number: 3263, status: 'unpaid', issue_date: '2026-06-22',
+    total_incl_gst: 195.99, profit_excl_gst: 30.63, cost_excl_gst: 139.80,
+  });
+  approx(n.profit, 30.63);
+  approx(n.costExGst, 139.80);
+  assert.equal(n.allCostsKnown, true);
+  approx(n.revenueExGst, 170.43, 0.02);   // = profit + cost, the margin denominator
+  assert.equal(n.unknownCostLines, 0);
+  // The exact margin % the list column renders: profit / revenue.
+  const pct = n.revenueExGst > 0 ? (n.profit / n.revenueExGst) * 100 : null;
+  approx(pct, 17.97, 0.05);               // matches the editor's "18.0%"
+});
+
+test('server UNKNOWN (null profit/cost) renders "—", never a fake $0', () => {
+  // The backend nulls BOTH fields together when any coded line lacks a cost.
+  const n = normalizeInvoice({
+    id: 'x', status: 'unpaid', total_incl_gst: 100, profit_excl_gst: null, cost_excl_gst: null,
+  });
+  assert.equal(n.profit, null, 'unknown profit must stay null, not coerce to 0');
+  assert.equal(n.costExGst, null);
+  assert.equal(n.allCostsKnown, false, 'the "—" gate must trip');
+  assert.equal(n.unknownCostLines, null, 'count is unknowable from a list row');
+});
+
+test('a present-but-null field beats line-item derivation (presence, not truthiness)', () => {
+  // Even if a row somehow carried line_items with a known cost, an explicit null
+  // profit_excl_gst is the backend saying "unknown" — presence wins.
+  const n = normalizeInvoice({
+    status: 'unpaid', profit_excl_gst: null, cost_excl_gst: null,
+    line_items: [{ product_code: 'X', quantity: 1, unit_cost_excl_gst: 100, supplier_cost_excl_gst: 60 }],
+  });
+  assert.equal(n.profit, null, 'the server field, present and null, is authoritative');
+  assert.equal(n.allCostsKnown, false);
+});
+
+test('a known server ZERO cost is a real 0, not unknown', () => {
+  // e.g. a description-only invoice (freight/labour) — backend says pure margin.
+  const n = normalizeInvoice({
+    status: 'unpaid', profit_excl_gst: 170.43, cost_excl_gst: 0,
+  });
+  assert.equal(n.costExGst, 0, 'a known zero cost stays 0, never null');
+  assert.equal(n.allCostsKnown, true);
+  approx(n.profit, 170.43);
+  approx(n.revenueExGst, 170.43);
+});
+
+test('a server LOSS (negative profit) survives — not nulled like a bad cost', () => {
+  // profitOrNull allows negatives; reusing costOrNull here would wrongly null a loss.
+  const n = normalizeInvoice({
+    status: 'unpaid', profit_excl_gst: -5, cost_excl_gst: 100,
+  });
+  approx(n.profit, -5);
+  assert.equal(n.allCostsKnown, true);
+  approx(n.revenueExGst, 95);
+});
+
+test('absent server fields fall back to line-item derivation (backwards-compatible)', () => {
+  // The pre-deploy world and the editor draft: no profit_excl_gst key at all → derive.
+  const n = normalizeInvoice({
+    status: 'unpaid',
+    line_items: [{ product_code: 'X', quantity: 2, unit_cost_excl_gst: 50, supplier_cost_excl_gst: 30 }],
+  });
+  approx(n.profit, 40);            // qty2 × (50 − 30)
+  approx(n.costExGst, 60);
+  assert.equal(n.allCostsKnown, true);
+  approx(n.revenueExGst, 100);
+});
+
+// House "Pattern B" — the wiring can't be silently reverted.
+test('invoice-math source: normalizeInvoice references profit_excl_gst', () => {
+  const src = fs.readFileSync(INVOICE_MATH, 'utf8');
+  assert.match(src, /profit_excl_gst/, 'normalizeInvoice must consult the server field');
+  assert.match(src, /hasOwnProperty\.call\(r, 'profit_excl_gst'\)/, 'detection is by presence, not truthiness');
+});
+
 // ─── 7. The document projection ──────────────────────────────────────────────
 test('invoiceDocRows yields exactly four fields — cost is not among them', () => {
   const rows = invoiceDocRows({

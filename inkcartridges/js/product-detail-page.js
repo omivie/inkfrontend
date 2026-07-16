@@ -124,9 +124,10 @@
 
                 this.product = response.data;
 
-                // Enrich products from Supabase (description, compatibility, related products)
+                // Enrich products from Supabase (description, compatibility, related products).
+                // Also pull `id` so we can honour the manual product_codes override below.
                 try {
-                    const enrichUrl = `${Config.SUPABASE_URL}/rest/v1/products?sku=eq.${encodeURIComponent(sku)}&select=description_html,compatible_devices_html,related_product_skus&limit=1`;
+                    const enrichUrl = `${Config.SUPABASE_URL}/rest/v1/products?sku=eq.${encodeURIComponent(sku)}&select=id,description_html,compatible_devices_html,related_product_skus&limit=1`;
                     const enrichResp = await fetch(enrichUrl, {
                         headers: {
                             'apikey': Config.SUPABASE_ANON_KEY,
@@ -137,12 +138,23 @@
                         const rows = await enrichResp.json();
                         const extra = rows[0];
                         if (extra) {
+                            if (this.product.id == null) this.product.id = extra.id;
                             if (this.product.description_html == null) this.product.description_html = extra.description_html;
                             if (this.product.compatible_devices_html == null) this.product.compatible_devices_html = extra.compatible_devices_html;
                             if (this.product.related_product_skus == null) this.product.related_product_skus = extra.related_product_skus;
                         }
                     }
                 } catch (_) { /* non-critical enrichment */ }
+
+                // Honour the manual product_codes override on the PDP. The /shop merge
+                // (api.js _applyManualCodes) only runs on getShopData, so a singly-loaded
+                // product never sees its assigned codes; apply them here so a code set in
+                // the admin drives the PDP (breadcrumb code, Related Products) exactly as
+                // it does /shop — "codes set here fully replace the auto-detected ones".
+                try {
+                    const manualCodes = await API.getManualProductCodes(this.product.id);
+                    if (manualCodes.length) this.product.series_codes = manualCodes;
+                } catch (_) { /* non-critical — fall back to the backend series_codes */ }
 
                 // Gate test products — active test products are visible to all; inactive only to super admins
                 if (this._isTestProduct(this.product) && !this.product.active && typeof isCachedSuperAdmin === 'function' && !isCachedSuperAdmin()) {
@@ -1328,7 +1340,11 @@
                     }
                 };
 
-                // For ribbons: only show manually curated related products
+                // For ribbons: curated related_product_skus FIRST (preserves any hand-set
+                // ordering), then union in the shared-code family so an admin-assigned
+                // product code groups ribbons the same way it groups ink/toner. Before this,
+                // ribbons were code-blind — only related_product_skus fed the section — so a
+                // code set in the Product Codes tab had no effect on a ribbon PDP.
                 if (info.category === 'ribbon') {
                     const manualSkus = info.related_product_skus;
                     if (Array.isArray(manualSkus) && manualSkus.length > 0) {
@@ -1346,12 +1362,23 @@
                             }
                         }
                     }
+
+                    // The code family — other ribbons in this brand carrying the same code
+                    // (info.series_codes now reflects any manual override applied at load).
+                    const brandSlug = info.brand?.slug || (info.brandName || '').toLowerCase();
+                    const code = this.extractProductCode(info);
+                    if (brandSlug && code) {
+                        const res = await API.getShopData({ brand: brandSlug, category: 'ribbons', code, limit: 200 });
+                        if (res.ok && res.data?.products) {
+                            addProducts(res.data.products.filter(p => p.sku !== info.sku));
+                        }
+                    }
                 } else {
                     // Non-ribbon: mirror the brand+code shop page exactly.
                     // Use backend's own series list as the source of truth for the code,
                     // matching by substring against the product's name/MPN/SKU.
                     const brandSlug = info.brand?.slug || (info.brandName || '').toLowerCase();
-                    const apiCategoryMap = { ink: 'ink', toner: 'toner', drum: 'drums', label_tape: 'label' };
+                    const apiCategoryMap = { ink: 'ink', toner: 'toner', drum: 'drums', label_tape: 'label', ribbon: 'ribbons' };
                     const apiCategory = apiCategoryMap[info.category] || null;
                     if (brandSlug && apiCategory) {
                         // Prefer the backend-authoritative code (trusts info.series_codes,

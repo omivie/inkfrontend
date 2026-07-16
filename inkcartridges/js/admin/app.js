@@ -1,11 +1,11 @@
 /**
  * Admin SPA — Entry point, router, shell
  */
-const APP_VERSION = '2026.07.15-quickorder-sales';
+const APP_VERSION = '2026.07.16-code-pagination';
 
 import { AdminAuth } from './auth.js';
 import { FilterState } from './filters.js';
-import { AdminAPI } from './api.js?v=code-universe-jul2026';
+import { AdminAPI } from './api.js?v=code-pagination-jul2026';
 
 const esc = (s) => Security.escapeHtml(String(s));
 

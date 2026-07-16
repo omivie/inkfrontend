@@ -264,6 +264,7 @@
                                 <li><a href="/returns">Refunds &amp; Returns</a></li>
                                 <li><a href="/faq">FAQ</a></li>
                                 <li><a href="/contact">Contact Us</a></li>
+                                <li><a href="/quote">Request a Quote</a></li>
                             </ul>
                         </details>
                     </nav>

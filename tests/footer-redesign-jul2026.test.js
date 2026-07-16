@@ -186,7 +186,7 @@ const COLUMNS = {
     // Drum Units (/shop?category=drums) matches the bot footer's fourth category,
     // so a crawler and a human see the same four-category set — anti-cloaking §2c.
     Shop: ['/ink-cartridges', '/toner-cartridges', '/shop?category=drums', '/ribbons', '/shop'],
-    Help: ['/track-order', '/shipping', '/returns', '/faq', '/contact'],
+    Help: ['/track-order', '/shipping', '/returns', '/faq', '/contact', '/quote'],
     Company: ['/about', '/genuine-vs-compatible', '/terms', '/privacy'],
 };
 

@@ -40,6 +40,8 @@ import {
   describeCodesWriteError,
   describeScopes,
   categoryLabel as catLabel,
+  paginate,
+  pagerHtml,
 } from '../utils/product-codes.js';
 
 let _container = null;
@@ -53,6 +55,9 @@ let _universe = [];      // [{ code, count, scopes: [{brandSlug, category}] }] �
 let _missed = [];        // scopes that wouldn't load — the page must SAY so, not imply completeness
 let _filter = '';
 let _menu = null;        // { code, mode: 'menu' | 'rename' | 'delete' }
+let _page = 0;           // 0-based page into the visible codes; reset when the view changes
+
+const PER_PAGE = 60;     // ~1,200 codes is too many tiles to paint at once — page through them
 
 const KEBAB = `<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg>`;
 
@@ -197,8 +202,12 @@ function renderGrid(errorMsg) {
        </div>`
     : '';
 
+  // One page of tiles; the tally still reports the full filtered total below.
+  const pg = paginate(shown, _page, PER_PAGE);
+  _page = pg.page;   // clamp — a filter/picker change may have shrunk the list
   grid.innerHTML = warning
-    + `<div class="admin-pc-grid admin-pc-grid--page">${shown.map(renderTile).join('')}</div>`;
+    + `<div class="admin-pc-grid admin-pc-grid--page">${pg.items.map(renderTile).join('')}</div>`
+    + pagerHtml(pg);
   renderTally(shown.length);
 
   const input = grid.querySelector('[data-rename-input]');
@@ -543,21 +552,31 @@ function renderShell(container) {
   container.querySelector('#pcp-brand').addEventListener('change', (e) => {
     _brandSlug = e.target.value;
     _menu = null;
+    _page = 0;             // a narrowed list starts at its first page
     renderGrid();          // the universe is global — filtering is local
   });
   container.querySelector('#pcp-category').addEventListener('change', (e) => {
     _category = e.target.value;
     _menu = null;
+    _page = 0;
     renderGrid();
   });
   container.querySelector('#pcp-filter').addEventListener('input', (e) => {
     _filter = e.target.value;
+    _page = 0;
     renderGrid();
   });
   container.querySelector('#pcp-add').addEventListener('click', promptNewCode);
 
   // One delegated handler for the whole grid — tiles are re-rendered constantly.
   container.querySelector('#pcp-grid').addEventListener('click', (e) => {
+    // Pager first — it changes the window, not a code.
+    const pager = e.target.closest('[data-pcpage]');
+    if (pager) {
+      _page += pager.getAttribute('data-pcpage') === 'next' ? 1 : -1;   // renderGrid clamps
+      renderGrid();
+      return;
+    }
     const btn = e.target.closest('[data-act]');
     if (!btn) return;
     const act = btn.getAttribute('data-act');
@@ -621,6 +640,7 @@ export default {
     _category = '';
     _filter = '';
     _menu = null;
+    _page = 0;
     FilterState.showBar(false);   // the page ships its own brand/category pickers
 
     container.innerHTML = `<div class="admin-loader"><div class="admin-loading__spinner"></div></div>`;
@@ -654,5 +674,6 @@ export default {
     _filter = '';
     _brandSlug = '';
     _category = '';
+    _page = 0;
   },
 };
