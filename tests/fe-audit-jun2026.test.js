@@ -87,7 +87,6 @@ test('§1 no regression — every previously-allowed frame origin survives', () 
         'https://challenges.cloudflare.com',
         'https://*.paypal.com',
         'https://*.paypalobjects.com',
-        'https://www.openstreetmap.org',
     ]) {
         assert.ok(fs2.includes(origin), `frame-src still allows ${origin}`);
     }

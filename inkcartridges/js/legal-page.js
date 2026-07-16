@@ -16,11 +16,7 @@
  *   3. Build the table-of-contents from `.policy-section[id]` h2s and
  *      smooth-scroll on click. Sticky on desktop only.
  *
- *   4. Render the contact-page mini-map (OpenStreetMap static embed) so
- *      every page that uses `[data-legal-bind="map"]` gets the same
- *      consistent location marker without an external map provider.
- *
- *   5. Wire FAQ accordions (`<details class="faq-item">` is enough — the
+ *   4. Wire FAQ accordions (`<details class="faq-item">` is enough — the
  *      element does the work natively; we just track open/close for GA
  *      so the team can see which questions actually get clicked).
  *
@@ -184,25 +180,6 @@
             }).join('');
         }
 
-        // Static map embed — uses OpenStreetMap so we don't need a paid
-        // Google Maps API key, and the user is never tracked by a third
-        // party while reading our policy pages. Marker centred on the
-        // configured geo coords with a 600m bounding box.
-        $$('[data-legal-bind="map"]').forEach(function (el) {
-            var lat = cfg.geo.lat;
-            var lng = cfg.geo.lng;
-            var bbox = [lng - 0.005, lat - 0.0035, lng + 0.005, lat + 0.0035].join(',');
-            var src  = 'https://www.openstreetmap.org/export/embed.html?bbox=' + encodeURIComponent(bbox)
-                + '&layer=mapnik&marker=' + lat + ',' + lng;
-            el.innerHTML = ''
-                + '<iframe class="legal-map__frame" loading="lazy" '
-                +   'title="Map showing ' + escapeHtml(cfg.formatAddressOneLine()) + '" '
-                +   'src="' + escapeHtml(src) + '"></iframe>'
-                + '<a class="legal-map__link" target="_blank" rel="noopener" '
-                +   'href="https://www.openstreetmap.org/?mlat=' + lat + '&amp;mlon=' + lng + '#map=17/' + lat + '/' + lng + '">'
-                +   'View larger map'
-                + '</a>';
-        });
     }
 
     /** ──────────────────────────────────────────────────────────────────

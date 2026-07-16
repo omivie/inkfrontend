@@ -194,17 +194,16 @@ test('§4 Privacy page complies with Privacy Act 2020 IPP transparency requireme
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// §5 — Google Merchant Center: contact page must have address + map + form
+// §5 — Google Merchant Center: contact page must have address + form
 // ─────────────────────────────────────────────────────────────────────────────
 
-test('§5 Contact page exposes physical address, phone, email, contact form, and a map', () => {
+test('§5 Contact page exposes physical address, phone, email, and a contact form', () => {
     const src = SRC['contact.html'];
     assert.match(src, /37A Archibald Road/,                'Contact must show the physical street address');
     assert.match(src, /Kelston, Auckland 0602/,            'Contact must show the suburb + postcode');
     assert.match(src, /tel:\+?64?2?7?\d{6,8}|tel:0274740115/, 'Contact must offer a tel: link');
     assert.match(src, /mailto:support@inkcartridges\.co\.nz/, 'Contact must offer a mailto: link');
     assert.match(src, /id="contact-form"/,                  'Contact must render a contact form');
-    assert.match(src, /data-legal-bind="map"/,              'Contact must include a map embed (Google Merchant Center requirement)');
 });
 
 test('§5 contact form has required client-side validation hooks', () => {
@@ -292,12 +291,6 @@ test('§7 vercel.json rewrites every legal slug to its /html/ source', () => {
         const found = (VERCEL.rewrites || []).some((r) => r.source === src && r.destination === '/html' + src);
         assert.ok(found, `vercel.json must rewrite ${src} → /html${src}`);
     }
-});
-
-test('§7 vercel.json CSP allows the OpenStreetMap iframe used for the map embed', () => {
-    const csp = (VERCEL.headers || []).flatMap((h) => h.headers || []).find((h) => h.key === 'Content-Security-Policy');
-    assert.ok(csp,                                                  'CSP header must exist');
-    assert.match(csp.value, /frame-src[^;]*openstreetmap\.org/,    'frame-src must allow openstreetmap.org for the map embed');
 });
 
 test('§7 vercel.json CSP allows the Cloudflare Turnstile script + iframe (contact form CAPTCHA)', () => {
@@ -440,7 +433,6 @@ test('§9 pages.css implements every styled hook used by the legal pages', () =>
         '.policy-table', '.policy-table-wrap',
         '.faq-item', '.faq-list',
         '.about-hero', '.about-values', '.about-value',
-        '.legal-map', '.legal-map__frame',
     ];
     for (const h of hooks) {
         assert.ok(PAGES_CSS.indexOf(h) !== -1, `pages.css must declare ${h}`);

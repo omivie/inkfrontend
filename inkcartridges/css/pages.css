@@ -13328,35 +13328,6 @@ body.page-shop {
     margin-top: 8px;
 }
 
-/* Map embed (contact + about location) */
-.legal-map {
-    border: 1px solid var(--color-border, #e5e7eb);
-    border-radius: var(--radius-md, 8px);
-    overflow: hidden;
-    margin: 16px 0 8px;
-    background: #f3f4f6;
-}
-
-.legal-map__frame {
-    width: 100%;
-    height: 320px;
-    border: 0;
-    display: block;
-}
-
-.legal-map__link {
-    display: block;
-    text-align: right;
-    padding: 8px 12px;
-    font-size: 0.85rem;
-    color: var(--cyan-primary, #0891b2);
-    text-decoration: none;
-    background: var(--color-surface-alt, #f9fafb);
-    border-top: 1px solid var(--color-border, #e5e7eb);
-}
-
-.legal-map__link:hover { text-decoration: underline; }
-
 /* ==========================================================================
    MOBILE PARITY — May 2026 (mobile-parity-audit-may2026.md)
    Cart sticky checkout bar (S3.1) + coupon entry (S3.2).
