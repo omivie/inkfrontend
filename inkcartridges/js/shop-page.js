@@ -143,12 +143,28 @@
         return false;
     }
 
-    // Test hook — exercised by tests/search-results-parity-may2026.test.js.
+    // True when the /smart result set contains at least one COMPATIBILITY
+    // match — a row the backend surfaced because the query names a machine in
+    // the product's free-text "for use in" list (e.g. q=VP6000 → the AP800
+    // ribbon 307.11), tagged match_reason:"compatibility". Such a set is a
+    // deliberate backend "zero-strong-match" decision — a HIT, not a miss — so
+    // the digit-noise-strip (softMiss) and autocorrect (hijack) reconciliation
+    // paths below must NOT fire and swap it away for the literal name/SKU
+    // union (which by definition can't contain compat-only rows). Pure so it
+    // stays unit-testable via the window hook. Pinned by
+    // tests/compat-search-badge-jul2026.test.js.
+    function hasCompatibilityMatch(products) {
+        return Array.isArray(products)
+            && products.some(p => p && p.match_reason === 'compatibility');
+    }
+
+    // Test hook — exercised by tests/search-results-parity-may2026.test.js
+    // and tests/compat-search-badge-jul2026.test.js.
     // Not a public surface; product code calls the locals directly.
     if (typeof window !== 'undefined') {
         window._searchParityHelpers = {
             normalizeForMatch, productMatchesQuery, adaptSuggestProduct, mergeLiteralResults,
-            queryCodeMatch,
+            queryCodeMatch, hasCompatibilityMatch,
         };
     }
 
@@ -2792,16 +2808,27 @@
                     const SOFT_MISS_THRESHOLD = 50;
                     const smartHasLiteralMatch = products.some(p => productMatchesQuery(p, searchQuery));
                     const smartCorrected = !!(smartData?.corrected_from || smartData?.did_you_mean);
+                    // compat-search-jul2026 — a compatibility result set (q names
+                    // a machine in a product's "for use in" list, e.g. q=VP6000 →
+                    // the AP800 ribbon) is a real backend hit that literally does
+                    // NOT appear in name/sku, so smartHasLiteralMatch is false and
+                    // the query is digit-shaped. Left ungated it would trip
+                    // softMiss/hijack and get swapped for the literal union (which
+                    // can't contain compat rows), silently dropping the very
+                    // products the customer asked for. Treat it as authoritative.
+                    const hasCompatMatch = hasCompatibilityMatch(products);
                     const hardMiss = products.length === 0 && !smartData?.matched_printer;
                     const softMiss = queryHasDigits
                         && smartCount > 0
                         && smartCount < SOFT_MISS_THRESHOLD
                         && !smartData?.matched_printer
-                        && !smartData?.did_you_mean;
+                        && !smartData?.did_you_mean
+                        && !hasCompatMatch;
                     const hijack = smartCorrected
                         && smartCount > 0
                         && !smartHasLiteralMatch
-                        && !smartData?.matched_printer;
+                        && !smartData?.matched_printer
+                        && !hasCompatMatch;
                     if (hardMiss || softMiss || hijack) {
                         // /api/products?search= → the full, paginated literal
                         // set. /api/search/suggest → the dropdown's exact
@@ -3500,6 +3527,17 @@
                 ? `<span class="product-card__badge product-card__badge--fits-printer" title="Fits ${Security.escapeAttr(product._fitsPrinter)}">Fits Your Printer</span>`
                 : '';
 
+            // compat-search-jul2026 — "Fits <model>" badge when /smart surfaced
+            // this product via its free-text "for use in" compatibility list.
+            // Backend tags such rows match_reason:"compatibility" +
+            // matched_token:"<the machine the user searched>" (e.g. q=VP6000 →
+            // the AP800 ribbon 307.11). The badge answers "why is this here when
+            // I searched VP6000?" and mirrors the fits-printer chip; the tooltip
+            // carries the full "Compatible with <model>" phrase.
+            const compatMatchBadge = (product.match_reason === 'compatibility' && product.matched_token)
+                ? `<span class="product-card__badge product-card__badge--compat-match" title="Compatible with ${Security.escapeAttr(product.matched_token)}">Fits ${Security.escapeHtml(product.matched_token)}</span>`
+                : '';
+
             // source-chip-removal-may2026.md — the per-card
             // COMPATIBLE/GENUINE chip is retired. The section heading above
             // each grid (e.g. "Brother Compatible Inkjet Cartridges") and
@@ -3549,7 +3587,7 @@
                 <a href="${Security.escapeAttr(cardHref)}" class="product-card__link">
                     <div class="product-card__image-wrapper">
                         ${imageContent}
-                        ${fitsPrinterBadge ? `<div class="product-card__chip-stack">${fitsPrinterBadge}</div>` : ''}
+                        ${(fitsPrinterBadge || compatMatchBadge) ? `<div class="product-card__chip-stack">${fitsPrinterBadge}${compatMatchBadge}</div>` : ''}
                         ${packTypeRibbon}
                     </div>
                     <div class="product-card__content">

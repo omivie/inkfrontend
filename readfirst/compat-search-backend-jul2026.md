@@ -3,7 +3,42 @@
 **To:** backend dev (Render repo, `https://ink-backend-zaeq.onrender.com`)
 **From:** frontend (Vercel SPA)
 **Date:** 2026-07-16 · **Re:** `/api/search/smart` does not index product compatibility data
-**Status:** 🔴 One ask, backend-only. The storefront requires **zero** changes — the data the customer is searching for is never sent to any search index. Only the backend can fix this.
+**Status:** 🟢 **CLOSED — backend shipped, FE shipped 2026-07-16.** See the resolution block directly below; the original brief follows for the record.
+
+---
+
+## ✅ RESOLUTION (2026-07-16) — done on both sides
+
+**Backend** (their `compat-search-backend-response-jul2026.md`): `/api/search/smart` now injects
+compatibility matches as a **zero-strong-match fallback** — when a model-shaped query finds no strong
+name/SKU hit, it `ILIKE`s `compatible_devices_html` (raw + alphanumeric-collapsed, so `VP-6000` /
+`vp 6000` also hit) and returns those rows at `relevance_score:25`, `match_tier:3` (below all direct
+tiers). Each carries `match_reason:"compatibility"` + `matched_token:"<query>"`. The structured
+`compatible_printers[]` path was already folded into `search_vector` at weight D, so `AP830`/`AP8100`
+already worked — the real gap was only the free-text blob where `VP6000` lived.
+
+Verified live: `GET /api/search/smart?q=VP6000` → `307.11`, `C141LOT`, `C143LOT`.
+
+**Frontend** (this repo, 2026-07-16 — logged as ERR-083):
+
+1. **Robustness — compat matches can never be reconciled away.** Our results-page reconciliation
+   (`shop-page.js` `loadSearchResults`) swaps a thin `/smart` set for the literal `/api/products` +
+   `/suggest` union on digit queries (`softMiss`) or autocorrected queries (`hijack`). `VP6000` is
+   digit-shaped and its compat rows don't literally match name/SKU, so left unguarded they'd be
+   swapped for a name/SKU-only union that can't contain them. New pure helper
+   `hasCompatibilityMatch(products)` now gates **both** `softMiss` and `hijack` — a compat set is a
+   deliberate backend hit, not a miss. (This also answers your §5a check: confirmed compat matches
+   survive reconciliation for `VP6000`/`AP830`, and a direct query still ranks direct matches first.)
+2. **"Fits &lt;model&gt;" badge.** `createProductCard` renders a teal
+   `product-card__badge--compat-match` chip (mirroring the existing `_fitsPrinter` "Fits Your Printer"
+   chip) for any row with `match_reason:"compatibility"` — text `Fits VP6000`, tooltip
+   `Compatible with VP6000`. `matched_token` escaped (`escapeHtml` text / `escapeAttr` title). **Your
+   optional nice-to-have is now live UI.**
+
+Pinned by `tests/compat-search-badge-jul2026.test.js` (10 tests); full suite green (2307 pass).
+Nothing further owed on either side.
+
+---
 
 Shared vars used in the repro commands below:
 
