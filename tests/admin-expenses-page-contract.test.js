@@ -116,6 +116,40 @@ test('a preset can never carry a date (cash-basis safety)', () => {
   assert.match(util, /export const PRESET_BLOCKED_FIELDS/);
 });
 
+// ─── Owner-managed categories (Jul 2026) ─────────────────────────────────────
+test('owner categories persist in admin_ui_prefs and self-heal from keys in use', () => {
+  const page = read(path.join(ADMIN, 'pages', 'expenses.js'));
+  assert.match(page, /AdminAPI\.setUiPref\(\s*CUSTOM_CATEGORIES_KEY/, 'categories must be written via AdminAPI.setUiPref');
+  assert.match(page, /seedMissingCategories\(/, 'page must seed categories still in use by saved rows');
+  assert.match(page, /await loadCategories\(\)/, 'categories must load before rows are enriched');
+});
+
+test('a custom key the backend enum rejects saves as other + a durable override', () => {
+  const page = read(path.join(ADMIN, 'pages', 'expenses.js'));
+  // The backend 400s "Unknown expense category" for keys outside its enum, so the
+  // save path must gate on the (live-fetched) enum and ride custom keys on 'other'.
+  assert.match(page, /backendAcceptsCategory\(/, 'save must check the backend enum');
+  assert.match(page, /AdminAPI\.expenses\.categories\(\)/, 'the live enum is fetched at init');
+  assert.match(page, /category: 'other'/, "unsupported keys are stored as 'other'");
+  assert.match(page, /AdminAPI\.setUiPref\(\s*CATEGORY_OVERRIDES_KEY/, 'the real key persists in admin_ui_prefs');
+  assert.match(page, /resolveRowCategory\(/, 'reads must resolve the override back');
+});
+
+test('the built-in operating list is retired — only order-linked + other stay hardcoded', () => {
+  const util = read(path.join(ADMIN, 'utils', 'expense-categories.js'));
+  const registry = /export const EXPENSE_CATEGORIES = \[([\s\S]*?)\];/.exec(util);
+  assert.ok(registry, 'EXPENSE_CATEGORIES must exist');
+  for (const retired of ['vehicle_travel', 'supplier_shipping', 'tax_accounting']) {
+    assert.ok(!registry[1].includes(`'${retired}'`), `${retired} must not be a built-in — it lives in RETIRED_CATEGORY_DEFAULTS for seeding only`);
+  }
+  assert.match(util, /export const RETIRED_CATEGORY_DEFAULTS/, 'retired defaults must exist for seeding');
+});
+
+test('financial-health loads the owner category list before rendering', () => {
+  assert.match(fhJs, /CUSTOM_CATEGORIES_KEY/, 'FH must read the shared prefs key');
+  assert.match(fhJs, /setCustomCategories\(/, 'FH must install the list into the registry');
+});
+
 // ─── Live backend wire-up (Jul 2026) ─────────────────────────────────────────
 test('pay/unpay send an explicit occurrence_date so the backend never guesses', () => {
   assert.match(apiJs, /async pay\(id, \{ paid_date, amount, occurrence_date \}/, 'pay must accept occurrence_date');

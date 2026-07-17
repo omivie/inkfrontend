@@ -5133,6 +5133,25 @@ button.admin-active-dot--clickable:hover::after { opacity: 1; }
 .exp-preset-save .admin-input { flex: 1; min-width: 0; }
 .exp-preset-err { color: var(--magenta-text, var(--magenta)); font-size: 12px; min-height: 14px; margin-top: 4px; }
 
+/* Owner-managed expense categories (editor add-row + manage modal) */
+.exp-cat-label { display: flex; align-items: center; gap: 8px; }
+.exp-cat-manage {
+  border: 0; background: transparent; color: var(--text-muted); font-size: 11px; font-weight: 600;
+  cursor: pointer; margin-left: auto; padding: 0 2px; text-decoration: underline; text-underline-offset: 2px;
+}
+.exp-cat-manage:hover { color: var(--cyan-text, var(--cyan)); }
+.exp-cat-add { margin-top: 8px; }
+.exp-cat-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.exp-cat-row {
+  display: flex; align-items: center; gap: 10px; padding: 7px 10px;
+  border: 1px solid var(--border); border-radius: 8px; background: var(--surface);
+}
+.exp-cat-row__label { font-size: 13px; font-weight: 600; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.exp-cat-row__use { color: var(--text-muted); font-size: 11px; white-space: nowrap; }
+.exp-cat-row__acts { display: flex; gap: 6px; margin-left: auto; }
+.exp-cat-row .admin-input { flex: 1; min-width: 0; }
+.exp-cat-row [disabled] { opacity: 0.45; cursor: not-allowed; }
+
 /* Inline per-field validation (backend VALIDATION_FAILED details) */
 .exp-input--invalid { border-color: var(--magenta, #C71F6E) !important; }
 .exp-field-err { display: block; color: var(--magenta-text, var(--magenta)); font-size: 11px; margin-top: 3px; }

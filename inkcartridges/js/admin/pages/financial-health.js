@@ -3,7 +3,10 @@
  */
 import { AdminAPI, FilterState, esc } from '../app.js';
 import { Charts } from '../components/charts.js';
-import { normalizeCategory, categoryKind, gstDefaultFor } from '../utils/expense-categories.js';
+import {
+  normalizeCategory, categoryKind, gstDefaultFor, setCustomCategories,
+  CUSTOM_CATEGORIES_KEY, CATEGORY_OVERRIDES_KEY, normalizeCategoryOverrides, resolveRowCategory,
+} from '../utils/expense-categories.js';
 import { RECURRENCE_TYPES, expandExpenseOccurrences, deriveStatus, isRecurring } from '../utils/expense-recurrence.js';
 import { computeExpenseKpis } from '../utils/expense-math.js';
 
@@ -22,10 +25,11 @@ const num = (v, d = 0) => {
 
 let _container = null;
 let _state = {};
+let _catOverrides = {};   // { expenseId: customKey } — rows the backend stores as 'other'
 
 async function load() {
   const days = FilterState.periodToDays();
-  const [overview, burnRunway, forecasts, cashflow, daily, pnl, expenses] = await Promise.all([
+  const [overview, burnRunway, forecasts, cashflow, daily, pnl, expenses, prefs] = await Promise.all([
     AdminAPI.getAdminAnalyticsOverview(days),
     AdminAPI.getAdminAnalyticsBurnRunway(),
     AdminAPI.getAdminAnalyticsForecasts(),
@@ -33,7 +37,14 @@ async function load() {
     AdminAPI.getAdminAnalyticsDailyRevenue(372),
     AdminAPI.getAdminAnalyticsPnL(days),
     AdminAPI.expenses.list({ limit: 1000 }),
+    // Owner's custom expense categories — fail-soft: P&L TOTALS are correct either
+    // way (an unknown key normalises to 'other', which is operating, and GST is
+    // stored per row); this only keeps per-category grouping consistent with the
+    // Expenses page. Never seed from here — the Expenses page owns that.
+    AdminAPI.getUiPrefs().catch(() => null),
   ]);
+  setCustomCategories(prefs?.[CUSTOM_CATEGORIES_KEY]);
+  _catOverrides = normalizeCategoryOverrides(prefs?.[CATEGORY_OVERRIDES_KEY]);
   // NB the backend's P&L already includes invoiced (phone / walk-in / B2B) sales —
   // it returns includes_invoices: true. The frontend renders; it does not aggregate.
   _state = { overview, burnRunway, forecasts, cashflow, daily, pnl, expenses: expenses?.items || [] };
@@ -52,7 +63,7 @@ function computeExpenseSummary() {
   const mStart = monthStartFH(today), mEnd = monthEndFH(today);
   const from = Math.min(mStart, today - 90 * MS_DAY_FH), to = today + 30 * MS_DAY_FH;
   const enrich = (o) => {
-    const category = normalizeCategory(o.category);
+    const category = normalizeCategory(resolveRowCategory(o.category, o.series_id ?? o.id, _catOverrides));
     const ed = (o.expense_date || o.date || '').slice(0, 10);
     const status = deriveStatus({ due_date: o.due_date, date: ed, paid_date: o.paid_date, paid: o.paid, status: o.status }, today);
     return {

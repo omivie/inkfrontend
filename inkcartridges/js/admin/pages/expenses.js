@@ -28,8 +28,13 @@ import { Modal } from '../components/modal.js';
 import { Toast } from '../components/toast.js';
 import { Charts } from '../components/charts.js';
 import {
-  EXPENSE_CATEGORIES, categoryByKey, categoryLabel, categoryKind,
+  EXPENSE_CATEGORIES, RETIRED_CATEGORY_DEFAULTS,
+  categoryByKey, categoryLabel, categoryKind,
   normalizeCategory, isOrderLinked, gstDefaultFor,
+  operatingCategories, orderLinkedCategories,
+  CUSTOM_CATEGORIES_KEY, CATEGORY_OVERRIDES_KEY, setCustomCategories,
+  addCustomCategory, renameCustomCategory, removeCustomCategory, seedMissingCategories,
+  normalizeCategoryOverrides, resolveRowCategory,
 } from '../utils/expense-categories.js';
 import {
   RECURRENCE_TYPES, parseUtcDate, isoFromMs, expandExpenseOccurrences,
@@ -116,11 +121,14 @@ let _editorToken = 0;
 let _legacyMode = false;    // list came from the legacy endpoint (no server filters)
 let _revenueThisMonth = null;
 let _presets = [];          // saved form templates, from admin_ui_prefs (real DB)
+let _customCats = [];       // owner's category list, from admin_ui_prefs (real DB)
+let _catOverrides = {};     // { expenseId: customKey } for rows the backend stores as 'other'
+let _backendCatKeys = null; // Set of keys the backend's category enum accepts (null = use static fallback)
 let _serverSummary = null;  // { thisMonth, lastMonth } from GET /expenses/summary
 
 // ─── data load + enrichment ──────────────────────────────────────────────────
 function enrichRecord(raw, idx) {
-  const category = normalizeCategory(raw.category);
+  const category = normalizeCategory(resolveRowCategory(raw.category, raw.id, _catOverrides));
   const recurrence = RECURRENCE_TYPES.includes(raw.recurrence) ? raw.recurrence : 'none';
   const rec = {
     ...raw,
@@ -152,7 +160,7 @@ function enrichRecord(raw, idx) {
 }
 
 function enrichOccurrence(o, today) {
-  const category = normalizeCategory(o.category);
+  const category = normalizeCategory(resolveRowCategory(o.category, o.series_id ?? o.expense_id ?? o.id, _catOverrides));
   const status = o.derived_status
     || deriveStatus({ due_date: o.due_date, date: o.date || o.expense_date, paid_date: o.paid_date, paid: o.paid, status: o.status }, today);
   const expense_date = (o.expense_date || o.date || o.occurrence_date || '').slice(0, 10);
@@ -235,6 +243,30 @@ async function loadData() {
   }
   _legacyMode = !!listRes._legacy;
   const items = listRes.items || [];
+
+  // Self-heal the owner's category list BEFORE enrichment: any key in use that
+  // the registry doesn't know (a retired built-in, or a custom added on another
+  // device) is adopted so the row keeps its label instead of collapsing to
+  // "Other". Safe on every load — delete is blocked while a category is in use,
+  // so seeding can never resurrect a deliberate deletion.
+  const seeded = seedMissingCategories(_customCats, items);
+  if (seeded.added.length) {
+    _customCats = setCustomCategories(seeded.list);
+    saveCategories(_customCats).then(ok => { if (ok === false) warn('seeded categories saved on this device only'); });
+  }
+
+  // Prune override entries for deleted expenses. Only when this list is the
+  // complete set (under the fetch limit) — a truncated list must never be read
+  // as "those ids are gone".
+  if (!_legacyMode && items.length < 1000) {
+    const liveIds = new Set(items.map(r => String(r.id)));
+    const stale = Object.keys(_catOverrides).filter(id => !liveIds.has(id));
+    if (stale.length) {
+      for (const id of stale) delete _catOverrides[id];
+      saveCategoryOverrides().then(ok => { if (ok === false) warn('override prune saved on this device only'); });
+    }
+  }
+
   _rows = items.map((r, i) => enrichRecord(r, i));
   _serverSummary = { thisMonth: summaryOf(sumThis), lastMonth: summaryOf(sumPrev) };
 
@@ -386,7 +418,7 @@ function render() {
             <span class="admin-search__icon">${icon('search', 14, 14)}</span>
             <input class="admin-input" id="exp-search" type="search" placeholder="Search name, payee, notes…" autocomplete="off" value="${escA(_filters.search)}" style="width:100%;padding-left:32px">
           </div>
-          <select class="admin-select" id="f-category"><option value="">All categories</option>${EXPENSE_CATEGORIES.map(c => `<option value="${c.key}"${_filters.category === c.key ? ' selected' : ''}>${esc(c.label)}</option>`).join('')}</select>
+          <select class="admin-select" id="f-category">${filterCategoryOptions()}</select>
           <select class="admin-select" id="f-status">
             <option value="">Any status</option>
             <option value="overdue"${_filters.status === 'overdue' ? ' selected' : ''}>Overdue</option>
@@ -788,6 +820,219 @@ function openEditor(model, isDuplicate = false) {
   bindEditor(d, m, isNew);
 }
 
+// ─── categories: persistence + owner management ──────────────────────────────
+// The owner's category list lives in `admin_ui_prefs` under `expenses.categories`
+// — the same per-admin durable store the presets use (see the note below). The
+// registry in utils/expense-categories.js is loaded from it at init, BEFORE any
+// expense is enriched, so every lookup (labels, kinds, GST defaults) knows the
+// owner's categories.
+
+async function loadCategories() {
+  try {
+    const [prefs, backendCats] = await Promise.all([
+      AdminAPI.getUiPrefs(),
+      AdminAPI.expenses.categories(),   // live server enum; fail-soft null
+    ]);
+    _customCats = setCustomCategories(prefs?.[CUSTOM_CATEGORIES_KEY]);
+    _catOverrides = normalizeCategoryOverrides(prefs?.[CATEGORY_OVERRIDES_KEY]);
+    _backendCatKeys = Array.isArray(backendCats) && backendCats.length
+      ? new Set(backendCats.map(c => c && c.key).filter(Boolean))
+      : null;
+  } catch (e) {
+    warn('loadCategories', e);
+    _customCats = setCustomCategories([]);
+    _catOverrides = {};
+    _backendCatKeys = null;
+  }
+}
+
+/**
+ * Can the record's `category` column hold this key? The backend validates
+ * writes against ITS enum (built-ins + the retired operating list — the live
+ * enum is fetched at init; the static lists mirror it as fallback). Any other
+ * key is saved as 'other' + a CATEGORY_OVERRIDES_KEY entry (see the util's
+ * header for why — totals are unaffected, only the label/grouping rides along).
+ */
+function backendAcceptsCategory(key) {
+  if (_backendCatKeys) return _backendCatKeys.has(key);
+  return EXPENSE_CATEGORIES.some(c => c.key === key) || !!RETIRED_CATEGORY_DEFAULTS[key];
+}
+
+async function saveCategoryOverrides() {
+  try {
+    await AdminAPI.getUiPrefs();               // refresh the cache we're about to merge into
+    return await AdminAPI.setUiPref(CATEGORY_OVERRIDES_KEY, _catOverrides);
+  } catch (e) {
+    warn('saveCategoryOverrides', e);
+    return false;
+  }
+}
+
+/**
+ * Point (or stop pointing) an expense id at a custom category after a save.
+ * Returns the durable-write result (false = local cache only), or true when
+ * there was nothing to change.
+ */
+async function syncCategoryOverride(id, customKeyOrNull) {
+  if (id == null) return true;
+  const sid = String(id);
+  const cur = _catOverrides[sid] || null;
+  if (cur === customKeyOrNull) return true;
+  if (customKeyOrNull) _catOverrides[sid] = customKeyOrNull;
+  else delete _catOverrides[sid];
+  return await saveCategoryOverrides();
+}
+
+/**
+ * Persist the owner's category list (same contract as savePresets: re-read the
+ * shared prefs blob first, and return FALSE when the write only reached the
+ * local cache so callers can surface that honestly).
+ */
+async function saveCategories(next) {
+  _customCats = setCustomCategories(next);
+  try {
+    await AdminAPI.getUiPrefs();               // refresh the cache we're about to merge into
+    return await AdminAPI.setUiPref(CUSTOM_CATEGORIES_KEY, _customCats);
+  } catch (e) {
+    warn('saveCategories', e);
+    return false;
+  }
+}
+
+/** <option>s for the editor's category select — owner's list, order-linked, and the add sentinel. */
+function categorySelectOptions(selected) {
+  const opt = (c) => `<option value="${escA(c.key)}"${selected === c.key ? ' selected' : ''}>${esc(c.label)}</option>`;
+  return `<option value="">Select…</option>
+    <optgroup label="Your categories">${operatingCategories().map(opt).join('')}</optgroup>
+    <optgroup label="Order-linked (already counted)">${orderLinkedCategories().map(opt).join('')}</optgroup>
+    <option value="__new__">＋ Add new category…</option>`;
+}
+
+/** <option>s for the filter bar's category select. */
+function filterCategoryOptions() {
+  const all = [...operatingCategories(), ...orderLinkedCategories()];
+  return `<option value="">All categories</option>`
+    + all.map(c => `<option value="${escA(c.key)}"${_filters.category === c.key ? ' selected' : ''}>${esc(c.label)}</option>`).join('');
+}
+
+/** Rebuild the filter dropdown in place after the category list changes. */
+function refreshFilterCategoryOptions() {
+  const sel = _container?.querySelector('#f-category');
+  if (!sel) return;
+  // If the selected filter category was just deleted, clear the filter.
+  if (_filters.category && normalizeCategory(_filters.category) !== _filters.category) {
+    _filters.category = '';
+    _page = 1;
+    refreshTable();
+  }
+  sel.innerHTML = filterCategoryOptions();
+  sel.value = _filters.category;
+}
+
+/** Rebuild an open editor's category select from the current registry, keeping/setting the selection. */
+function rebuildCategorySelect(root, selectedKey) {
+  const sel = root?.querySelector('#e-category');
+  if (!sel) return;
+  const val = selectedKey !== undefined ? selectedKey : sel.value;
+  sel.innerHTML = categorySelectOptions(val);
+  sel.value = val && normalizeCategory(val) === val ? val : '';
+  // Re-run the bound sync (order-linked note + GST default) against the new value.
+  sel.dispatchEvent(new Event('change'));
+}
+
+function categoryUsageCount(key) {
+  return _rows.filter(r => r.category === key).length;
+}
+
+function categoryManagerBody() {
+  const rows = _customCats.map(c => {
+    const n = categoryUsageCount(c.key);
+    const delAttrs = n
+      ? `disabled title="In use by ${n} expense${n === 1 ? '' : 's'} — reassign them first"`
+      : 'title="Delete category"';
+    return `<li class="exp-cat-row" data-cat-key="${escA(c.key)}">
+      <span class="exp-cat-row__label">${esc(c.label)}</span>
+      <span class="exp-cat-row__use">${n ? `${n} expense${n === 1 ? '' : 's'}` : 'unused'}</span>
+      <span class="exp-cat-row__acts">
+        <button type="button" class="admin-btn admin-btn--ghost admin-btn--sm" data-cat-rename="${escA(c.key)}">Rename</button>
+        <button type="button" class="admin-btn admin-btn--ghost admin-btn--sm" data-cat-del="${escA(c.key)}" ${delAttrs}>Delete</button>
+      </span>
+    </li>`;
+  }).join('');
+  return `${rows
+    ? `<ul class="exp-cat-list">${rows}</ul>`
+    : '<div class="exp-empty-inline">No custom categories yet. Add one from the category dropdown ("＋ Add new category…").</div>'}
+  <div class="exp-preset-err" id="cat-mgr-err" role="alert" aria-live="polite"></div>`;
+}
+
+/**
+ * The category manager (Modal over the editor Drawer — same layering the preset
+ * delete confirm already uses). Rename is display-only (the KEY never changes,
+ * so every saved expense picks the new label up). Delete is blocked while a
+ * category is in use — which is exactly what makes continuous seeding safe.
+ */
+function openCategoryManager(editorRoot) {
+  const modal = Modal.open({
+    title: 'Manage categories',
+    body: categoryManagerBody(),
+    footer: '<button class="admin-btn admin-btn--ghost" data-x="close">Close</button>',
+  });
+  if (!modal) return;
+  modal.footer.querySelector('[data-x="close"]')?.addEventListener('click', () => modal.close());
+
+  const mgrErr = (msg) => { const el = modal.body.querySelector('#cat-mgr-err'); if (el) el.textContent = msg || ''; };
+  const afterChange = () => {
+    modal.body.innerHTML = categoryManagerBody();
+    refreshFilterCategoryOptions();
+    refreshTable();
+    if (editorRoot) rebuildCategorySelect(editorRoot);
+  };
+
+  modal.body.addEventListener('click', async (e) => {
+    const renameBtn = e.target.closest('[data-cat-rename]');
+    if (renameBtn) {
+      const key = renameBtn.dataset.catRename;
+      const cat = _customCats.find(c => c.key === key);
+      const row = renameBtn.closest('.exp-cat-row');
+      if (!cat || !row) return;
+      row.innerHTML = `
+        <input class="admin-input" data-cat-rename-input="${escA(key)}" type="text" maxlength="40" value="${escA(cat.label)}">
+        <span class="exp-cat-row__acts">
+          <button type="button" class="admin-btn admin-btn--primary admin-btn--sm" data-cat-rename-save="${escA(key)}">Save</button>
+          <button type="button" class="admin-btn admin-btn--ghost admin-btn--sm" data-cat-rename-cancel="1">Cancel</button>
+        </span>`;
+      row.querySelector('input')?.focus();
+      return;
+    }
+    if (e.target.closest('[data-cat-rename-cancel]')) { mgrErr(''); afterChange(); return; }
+    const renameSave = e.target.closest('[data-cat-rename-save]');
+    if (renameSave) {
+      const key = renameSave.dataset.catRenameSave;
+      const input = modal.body.querySelector(`[data-cat-rename-input="${CSS.escape(key)}"]`);
+      let next;
+      try { next = renameCustomCategory(_customCats, key, input?.value); }
+      catch (e2) { mgrErr(e2.message); return; }
+      const ok = await saveCategories(next);
+      mgrErr('');
+      afterChange();
+      if (ok === false) Toast.warning('Category renamed on this device only — it couldn\'t reach the server.');
+      return;
+    }
+    const delBtn = e.target.closest('[data-cat-del]');
+    if (delBtn && !delBtn.disabled) {
+      const key = delBtn.dataset.catDel;
+      const cat = _customCats.find(c => c.key === key);
+      if (!cat) return;
+      if (categoryUsageCount(key) > 0) { mgrErr('That category is in use — reassign its expenses first.'); return; }
+      const ok = await saveCategories(removeCustomCategory(_customCats, key));
+      mgrErr('');
+      afterChange();
+      if (ok === false) Toast.warning(`Category "${cat.label}" deleted on this device only — it couldn't reach the server.`);
+      else Toast.success(`Category "${cat.label}" deleted.`);
+    }
+  });
+}
+
 // ─── presets: persistence ────────────────────────────────────────────────────
 // Presets live in `admin_ui_prefs` — a per-admin Supabase KV table (RLS-locked to
 // auth.uid()), the same durable store the Products column-picker uses. They are a
@@ -861,8 +1106,6 @@ function presetsPanel() {
 }
 
 function editorBody(m) {
-  const catOptions = (kind) => EXPENSE_CATEGORIES.filter(c => c.kind === kind)
-    .map(c => `<option value="${c.key}"${m.category === c.key ? ' selected' : ''}>${esc(c.label)}</option>`).join('');
   const gstChecked = (m.gst_claimable !== undefined ? m.gst_claimable : gstDefaultFor(m.category || 'other'));
   return `
     <form class="exp-form" id="exp-form" novalidate>
@@ -875,12 +1118,14 @@ function editorBody(m) {
       <div class="exp-field"><label>Name <span class="req">*</span></label><input class="admin-input" id="e-name" value="${escA(m.name)}" placeholder="e.g. Xero subscription, warehouse rent" maxlength="120"></div>
 
       <div class="exp-form__grid2">
-        <div class="exp-field"><label>Category <span class="req">*</span></label>
-          <select class="admin-input" id="e-category">
-            <option value="">Select…</option>
-            <optgroup label="Operating expenses">${catOptions('operating')}</optgroup>
-            <optgroup label="Order-linked (already counted)">${catOptions('order_linked')}</optgroup>
-          </select>
+        <div class="exp-field"><label class="exp-cat-label">Category <span class="req">*</span> <button type="button" class="exp-cat-manage" id="e-cat-manage" title="Rename or delete your categories">Manage</button></label>
+          <select class="admin-input" id="e-category">${categorySelectOptions(m.category)}</select>
+          <div class="exp-preset-save exp-cat-add hidden" id="e-cat-add">
+            <input class="admin-input" id="e-cat-add-name" type="text" maxlength="40" placeholder="New category name" autocomplete="off">
+            <button type="button" class="admin-btn admin-btn--primary admin-btn--sm" id="e-cat-add-save">Add</button>
+            <button type="button" class="admin-btn admin-btn--ghost admin-btn--sm" id="e-cat-add-cancel">Cancel</button>
+          </div>
+          <div class="exp-preset-err" id="e-cat-add-err" role="alert" aria-live="polite"></div>
         </div>
         <div class="exp-field"><label>Payee / supplier</label><input class="admin-input" id="e-payee" value="${escA(m.payee)}" placeholder="Who is paid" maxlength="120"></div>
       </div>
@@ -988,7 +1233,46 @@ function bindEditor(d, model, isNew) {
 
   root.querySelectorAll('.exp-seg').forEach(b => b.addEventListener('click', () => { setType(b.dataset.type); syncFirstOcc(); }));
   $('#e-freq')?.addEventListener('change', () => { syncFreqFields(); syncFirstOcc(); });
-  $('#e-category')?.addEventListener('change', syncLinkedNote);
+
+  // ── Category select: the "＋ Add new category…" sentinel + manager ──
+  // The select must never be LEFT on the sentinel — we snap back to the last real
+  // choice and reveal the inline add row instead.
+  let lastCat = model.category || '';
+  const catAddErr = (msg) => { const el = $('#e-cat-add-err'); if (el) el.textContent = msg || ''; };
+  const hideCatAdd = () => {
+    $('#e-cat-add')?.classList.add('hidden');
+    const nameEl = $('#e-cat-add-name');
+    if (nameEl) nameEl.value = '';
+    catAddErr('');
+  };
+  $('#e-category')?.addEventListener('change', () => {
+    const v = $('#e-category').value;
+    if (v === '__new__') {
+      $('#e-category').value = lastCat;
+      $('#e-cat-add')?.classList.remove('hidden');
+      setTimeout(() => $('#e-cat-add-name')?.focus(), 0);
+      return;
+    }
+    lastCat = v;
+    syncLinkedNote();
+  });
+  const commitNewCategory = async () => {
+    const label = ($('#e-cat-add-name')?.value || '').trim();
+    let next;
+    try { next = addCustomCategory(_customCats, label); }
+    catch (e3) { catAddErr(e3.message); $('#e-cat-add-name')?.focus(); return; }
+    const durable = await saveCategories(next.list);
+    hideCatAdd();
+    rebuildCategorySelect(root, next.key);   // fires change → lastCat + GST default sync
+    refreshFilterCategoryOptions();
+    if (durable === false) Toast.warning(`Category "${label}" saved on this device only — it couldn't reach the server.`);
+    else Toast.success(`Category "${label}" added.`);
+  };
+  $('#e-cat-add-save')?.addEventListener('click', commitNewCategory);
+  $('#e-cat-add-name')?.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); commitNewCategory(); } });
+  $('#e-cat-add-cancel')?.addEventListener('click', hideCatAdd);
+  $('#e-cat-manage')?.addEventListener('click', () => openCategoryManager(root));
+
   $('#e-gst')?.addEventListener('change', () => { $('#e-gst').dataset.touched = '1'; });
   $('#e-endmode')?.addEventListener('change', syncEndMode);
   $('#e-paid')?.addEventListener('change', () => $('#e-paid-wrap').classList.toggle('hidden', !$('#e-paid').checked));
@@ -1006,6 +1290,10 @@ function bindEditor(d, model, isNew) {
     const set = (sel, v) => { const el = $(sel); if (el != null && v !== undefined) el.value = v; };
     set('#e-name', patch.name ?? '');
     set('#e-category', patch.category ?? '');
+    // A preset can carry a category that has since been deleted — the select falls
+    // to '' and validatePayload asks for a category. Track the landed value so the
+    // add-category sentinel snaps back to it, not to a stale choice.
+    lastCat = $('#e-category')?.value || '';
     set('#e-payee', patch.payee ?? '');
     set('#e-amount', patch.amount ?? '');
     set('#e-method', patch.method ?? '');
@@ -1111,11 +1399,25 @@ function bindEditor(d, model, isNew) {
     if (err) { $('#e-err').textContent = err; return; }
     $('#e-err').textContent = '';
     saveBtn.disabled = true; saveBtn.textContent = 'Saving…';
+    // The backend's category enum doesn't know the owner's custom keys — those
+    // save as 'other' (same operating kind, so no total changes) and the real
+    // key rides in the per-expense override map (see CATEGORY_OVERRIDES_KEY).
+    const customKey = backendAcceptsCategory(built.category) ? null : built.category;
+    const payload = customKey ? { ...built, category: 'other' } : built;
     try {
-      if (isNew) await AdminAPI.expenses.create(built);
-      else await AdminAPI.expenses.update(model.id, built);
+      let created = null;
+      if (isNew) created = await AdminAPI.expenses.create(payload);
+      else await AdminAPI.expenses.update(model.id, payload);
       if (token !== _editorToken && !_alive) return;
-      Toast.success(isNew ? 'Expense saved.' : 'Expense updated.');
+      const savedId = isNew ? (created?.expense?.id ?? created?.id ?? null) : model.id;
+      if (customKey && savedId == null) {
+        // Legacy create path without an id: the row will read as "Other" — say so.
+        Toast.warning(`Saved, but the server returned no id — this expense will show as "Other" instead of "${categoryLabel(customKey)}".`);
+      } else {
+        const ovOk = await syncCategoryOverride(savedId, customKey);
+        if (ovOk === false) Toast.warning('Saved — but the category label could only be stored on this device.');
+        else Toast.success(isNew ? 'Expense saved.' : 'Expense updated.');
+      }
       Drawer.close();
       await loadData();
     } catch (e2) {
@@ -1291,6 +1593,10 @@ export default {
     FilterState?.showBar?.(false); // page has its own period control
     container.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;min-height:40vh"><div class="admin-loading__spinner"></div></div>`;
     try {
+      // Categories must be in the registry BEFORE loadData enriches rows (labels,
+      // kinds, GST defaults all resolve through it). getUiPrefs is promise-cached,
+      // so loadPresets re-reading it costs nothing.
+      await loadCategories();
       // Presets are a UI nicety — never let them block or break the page load.
       await Promise.all([loadData(), loadPresets()]);
     } catch (e) {
@@ -1312,6 +1618,9 @@ export default {
     _occurrences = [];
     _kpis = null;
     _presets = [];
+    _customCats = [];
+    _catOverrides = {};
+    _backendCatKeys = null;
     _serverSummary = null;
   },
 };
