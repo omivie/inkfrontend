@@ -190,3 +190,121 @@ test('computeExpenseKpis: no prior-month baseline → pctChange null, empty safe
   approx(empty.thisMonth, 0);
   approx(empty.orderLinked, 0);
 });
+
+// ─── period-parameterized KPIs (tabbed workspace, Jul 2026) ──────────────────
+
+const D = (y, m, d) => Date.UTC(y, m - 1, d);
+const paidRow = (paidIso, amount, extra = {}) => ({
+  category: 'software', kind: 'operating', amount, gst_claimable: false,
+  expense_date: paidIso, status: 'paid', paid: true, paid_date: paidIso, ...extra,
+});
+
+test('computePeriodKpis: cash-basis spend inside the window, prev window delta', () => {
+  const rows = [
+    paidRow('2026-06-10', 100),                 // prev window
+    paidRow('2026-07-05', 150),                 // window
+    paidRow('2026-07-20', 50),                  // window
+    paidRow('2026-08-02', 999),                 // outside both
+    { category: 'inventory', kind: 'order_linked', amount: 500, gst_claimable: true,
+      status: 'paid', paid: true, paid_date: '2026-07-06' },   // order-linked: excluded from spend
+    { category: 'rent', kind: 'operating', amount: 80, gst_claimable: false,
+      expense_date: '2026-07-07', status: 'due', due_date: '2026-07-30' }, // unpaid: no cash date
+  ];
+  const k = sandbox.computePeriodKpis(rows, {
+    fromMs: D(2026, 7, 1), toMs: D(2026, 7, 31),
+    prevFromMs: D(2026, 6, 1), prevToMs: D(2026, 6, 30),
+    next30Start: D(2026, 7, 17), next30End: D(2026, 7, 17) + 30 * 86400000,
+  });
+  approx(k.spend, 200, 0.01);            // 150 + 50; unpaid + order-linked excluded
+  approx(k.prevSpend, 100, 0.01);
+  approx(k.pctChange, 100, 0.01);        // 100 → 200
+  assert.equal(k.txnCount, 2);
+  approx(k.avgExpense, 100, 0.01);
+  approx(k.orderLinked, 500, 0.01);      // surfaced separately, gross
+  approx(k.due, 80, 0.01);               // global open amount, not period-scoped
+  approx(k.upcoming30, 80, 0.01);
+});
+
+test('computePeriodKpis: no prev window (all-time) → null comparison, never fabricated', () => {
+  const k = sandbox.computePeriodKpis([paidRow('2026-07-05', 60)], {
+    fromMs: D(2026, 1, 1), toMs: D(2026, 12, 31),
+    prevFromMs: null, prevToMs: null,
+    next30Start: D(2026, 7, 17), next30End: D(2026, 7, 17) + 30 * 86400000,
+  });
+  assert.equal(k.prevSpend, null);
+  assert.equal(k.pctChange, null);
+  assert.equal(k.avgExpense, 60);
+});
+
+test('computePeriodKpis: zero prev baseline with current spend → pctChange null (no ∞%)', () => {
+  const k = sandbox.computePeriodKpis([paidRow('2026-07-05', 60)], {
+    fromMs: D(2026, 7, 1), toMs: D(2026, 7, 31),
+    prevFromMs: D(2026, 6, 1), prevToMs: D(2026, 6, 30),
+    next30Start: D(2026, 7, 17), next30End: D(2026, 7, 17) + 30 * 86400000,
+  });
+  approx(k.prevSpend, 0);
+  assert.equal(k.pctChange, null);
+});
+
+test('computePeriodKpis: GST netting matches the law (spend netted, gross reported)', () => {
+  const k = sandbox.computePeriodKpis([paidRow('2026-07-05', 115, { gst_claimable: true })], {
+    fromMs: D(2026, 7, 1), toMs: D(2026, 7, 31),
+    next30Start: D(2026, 7, 17), next30End: D(2026, 7, 17) + 30 * 86400000,
+  });
+  approx(k.spend, 100, 0.01);
+  approx(k.spendGross, 115, 0.01);
+  approx(k.gstReclaim, 15, 0.01);
+});
+
+// ─── quarter bucketing ───────────────────────────────────────────────────────
+
+test('bucketExpenses quarter grain: YYYY-Qn keys, boundaries land in the right quarter', () => {
+  const rows = [
+    paidRow('2026-01-01', 10),   // Q1 first day
+    paidRow('2026-03-31', 20),   // Q1 last day
+    paidRow('2026-04-01', 30),   // Q2 first day
+    paidRow('2026-12-31', 40),   // Q4 last day
+  ];
+  const buckets = plain(sandbox.bucketExpenses(rows, D(2026, 1, 1), D(2026, 12, 31), 'quarter'));
+  assert.deepEqual(buckets, [
+    { key: '2026-Q1', total: 30 },
+    { key: '2026-Q2', total: 30 },
+    { key: '2026-Q4', total: 40 },
+  ]);
+});
+
+// ─── detailed category breakdown ─────────────────────────────────────────────
+
+test('categoryBreakdownDetailed: totals, counts, share and prev-window deltas', () => {
+  const rows = [
+    paidRow('2026-07-05', 60, { category: 'software' }),
+    paidRow('2026-07-06', 40, { category: 'software' }),
+    paidRow('2026-07-07', 100, { category: 'rent' }),
+    paidRow('2026-06-05', 50, { category: 'software' }),   // prev window
+    { category: 'software', kind: 'operating', amount: 999, gst_claimable: false,
+      status: 'due', due_date: '2026-07-30' },              // unpaid → excluded (cash basis)
+  ];
+  const out = plain(sandbox.categoryBreakdownDetailed(rows, {
+    fromMs: D(2026, 7, 1), toMs: D(2026, 7, 31),
+    prevFromMs: D(2026, 6, 1), prevToMs: D(2026, 6, 30),
+  }));
+  assert.equal(out.length, 2);
+  assert.equal(out[0].key, 'software');   // 100 total, sorted desc ties → software first here
+  approx(out[0].total, 100, 0.01);
+  assert.equal(out[0].count, 2);
+  approx(out[0].pct, 50, 0.01);
+  approx(out[0].prevTotal, 50, 0.01);
+  approx(out[0].deltaPct, 100, 0.01);
+  assert.equal(out[1].key, 'rent');
+  assert.equal(out[1].prevTotal, 0);
+  assert.equal(out[1].deltaPct, null);     // zero baseline → null, never ∞%
+});
+
+test('categoryBreakdownDetailed: no prev window → prevTotal/deltaPct null', () => {
+  const out = plain(sandbox.categoryBreakdownDetailed(
+    [paidRow('2026-07-05', 60)],
+    { fromMs: D(2026, 7, 1), toMs: D(2026, 7, 31) },
+  ));
+  assert.equal(out[0].prevTotal, null);
+  assert.equal(out[0].deltaPct, null);
+});

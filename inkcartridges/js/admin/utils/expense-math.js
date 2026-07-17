@@ -149,7 +149,7 @@ export function categoryBreakdown(list, { operatingOnly = true, paidOnly = true,
 
 /**
  * Bucket operating-expense spend over time for the trend chart. grain is
- * 'day' | 'week' | 'month'. CASH BASIS: only PAID expenses, bucketed on their
+ * 'day' | 'week' | 'month' | 'quarter'. CASH BASIS: only PAID expenses, bucketed on their
  * `paid_date`, GST-netted — so the bars reconcile with the headline KPI and the
  * P&L. Unpaid/projected spend belongs in the "upcoming" surfaces, never here.
  * Returns ordered [{ key, total }] covering [fromMs, toMs].
@@ -164,6 +164,7 @@ export function bucketExpenses(list, fromMs, toMs, grain = 'month', { netted = t
       const monday = ms - ((dow + 6) % 7) * 86400000;
       return isoDay(monday);
     }
+    if (grain === 'quarter') return `${d.getUTCFullYear()}-Q${Math.floor(d.getUTCMonth() / 3) + 1}`;
     return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
   };
   for (const o of (list || [])) {
@@ -260,11 +261,133 @@ export function computeExpenseKpis(list, opts = {}) {
   };
 }
 
+/**
+ * Period-parameterized KPI bundle for the tabbed Expenses workspace — the same
+ * CASH-BASIS law as computeExpenseKpis (rule 3 in the header), but over an
+ * ARBITRARY [fromMs,toMs] window with an optional equal-length comparison
+ * window instead of being anchored to "this month".
+ *
+ * Spend figures (`spend`, `spendGross`, `prevSpend`, `orderLinked`,
+ * `largestCategory`, `avgExpense`) count ONLY PAID operating expenses, placed
+ * on `paid_date`, GST-netted (gross variants say so). `spend` over a calendar
+ * month === backend `summary.operating_paid` for that month.
+ *
+ * Status figures (`overdue`, `due`, `unpaid`, `upcoming30`) are GLOBAL open
+ * amounts off the DUE date at GROSS — "what needs paying now" — deliberately
+ * NOT period-scoped and never mixed into a spend total.
+ *
+ * prevFromMs=null (e.g. period 'all') → prevSpend/pctChange are null so no
+ * fabricated comparison ships.
+ */
+export function computePeriodKpis(list, opts = {}) {
+  const rows = Array.isArray(list) ? list : [];
+  // NB `toMs` is the module's date parser — the window end is aliased to
+  // `winTo` so the parser stays reachable inside this scope.
+  const {
+    fromMs, toMs: winTo,
+    prevFromMs = null, prevToMs = null,
+    next30Start, next30End,
+    revenueForPeriod = null,
+    recurringTemplates = [],
+  } = opts;
+
+  const op = rows.filter(isOperating);
+  const ol = rows.filter(o => !isOperating(o));
+  const sum = (arr, f) => arr.reduce((s, o) => s + f(o), 0);
+  const net = (o) => pnlCost(amt(o), !!o.gst_claimable);
+  const paidIn = (arr, a, b) => arr.filter(o => inRange(cashMs(o), a, b));
+
+  // ── Cash-basis spend inside the selected window ──
+  const opWindow = paidIn(op, fromMs, winTo);
+  const spend      = sum(opWindow, net);
+  const spendGross = sum(opWindow, amt);
+  const txnCount   = opWindow.length;
+  const avgExpense = txnCount > 0 ? spend / txnCount : null;
+
+  const hasPrev = Number.isFinite(prevFromMs) && Number.isFinite(prevToMs);
+  const prevSpend = hasPrev ? sum(paidIn(op, prevFromMs, prevToMs), net) : null;
+  const pctChange = !hasPrev ? null
+    : (prevSpend > 0 ? ((spend - prevSpend) / prevSpend) * 100
+      : (spend > 0 ? null : 0)); // null = "no prior baseline" (mirrors computeExpenseKpis)
+
+  const orderLinked = sum(paidIn(ol, fromMs, winTo), amt);
+  const gstReclaim  = sum(opWindow, o => gstCredit(amt(o), !!o.gst_claimable));
+
+  // ── Global open amounts, off the DUE date, at gross ──
+  const isOpen = (o) => o.status !== 'paid' && o.status !== 'cancelled' && o.status !== 'skipped';
+  const overdue = sum(op.filter(o => o.status === 'overdue'), amt);
+  const due     = sum(op.filter(o => o.status === 'due'), amt);
+  const unpaid  = overdue + due;
+  const upcoming30 = sum(
+    op.filter(o => isOpen(o) && inRange(toMs(o.due_date ?? o.date), next30Start, next30End)),
+    amt
+  );
+
+  const breakdown = categoryBreakdown(opWindow, { operatingOnly: true, paidOnly: true, netted: true });
+  const largestCategory = breakdown.length ? breakdown[0] : null;
+
+  const recurringMonthly = recurringMonthlyCommitment(recurringTemplates);
+
+  const expenseToRevenuePct = (Number.isFinite(revenueForPeriod) && revenueForPeriod > 0)
+    ? (spend / revenueForPeriod) * 100
+    : null;
+
+  return {
+    spend, spendGross, prevSpend, pctChange, txnCount, avgExpense,
+    overdue, due, unpaid, upcoming30,
+    gstReclaim, orderLinked,
+    recurringMonthly, largestCategory, expenseToRevenuePct,
+  };
+}
+
+/**
+ * Ranked category rows for the Overview bars — cash-basis window spend per
+ * category with transaction counts, share of total, and (when a comparison
+ * window is given) the previous-window total + delta. deltaPct is null when
+ * there is no baseline (prev total 0 or no prev window) — never fabricated.
+ */
+export function categoryBreakdownDetailed(list, {
+  fromMs, toMs: winToMs, prevFromMs = null, prevToMs = null,
+  operatingOnly = true, netted = true,
+} = {}) {
+  const rows = Array.isArray(list) ? list : [];
+  const val = (o) => (netted ? pnlCost(amt(o), !!o.gst_claimable) : amt(o));
+  const hasPrev = Number.isFinite(prevFromMs) && Number.isFinite(prevToMs);
+
+  const cur = new Map();   // key → { total, count }
+  const prev = new Map();  // key → total
+  for (const o of rows) {
+    if (operatingOnly && !isOperating(o)) continue;
+    const ms = cashMs(o);  // NaN for unpaid → excluded (cash basis)
+    const key = o.category || 'other';
+    if (inRange(ms, fromMs, winToMs)) {
+      const e = cur.get(key) || { total: 0, count: 0 };
+      e.total += val(o); e.count += 1;
+      cur.set(key, e);
+    } else if (hasPrev && inRange(ms, prevFromMs, prevToMs)) {
+      prev.set(key, (prev.get(key) || 0) + val(o));
+    }
+  }
+  const grand = [...cur.values()].reduce((s, e) => s + e.total, 0);
+  return [...cur.entries()]
+    .map(([key, e]) => {
+      const prevTotal = hasPrev ? (prev.get(key) || 0) : null;
+      const deltaPct = (hasPrev && prevTotal > 0) ? ((e.total - prevTotal) / prevTotal) * 100 : null;
+      return {
+        key, total: e.total, count: e.count,
+        pct: grand > 0 ? (e.total / grand) * 100 : 0,
+        prevTotal, deltaPct,
+      };
+    })
+    .sort((a, b) => b.total - a.total);
+}
+
 try {
   if (typeof window !== 'undefined') {
     window.ExpenseMath = {
       GST_FRACTION_OF_GROSS, pnlCost, gstCredit, isPaid, cashMs, monthlyCommitment,
       recurringMonthlyCommitment, categoryBreakdown, bucketExpenses, computeExpenseKpis,
+      computePeriodKpis, categoryBreakdownDetailed,
     };
   }
 } catch (_) { /* non-fatal */ }
