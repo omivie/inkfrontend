@@ -1167,7 +1167,7 @@ function editorBody(m) {
 
       <div class="exp-oneoff-only ${m.recurrence !== 'none' ? 'hidden' : ''}">
         <div class="exp-field exp-field--check"><label class="exp-check"><input type="checkbox" id="e-paid" ${m.paid_date ? 'checked' : ''}> Already paid</label></div>
-        <div class="exp-field ${m.paid_date ? '' : 'hidden'}" id="e-paid-wrap"><label>Paid date</label><input class="admin-input" type="date" id="e-paid-date" value="${escA(m.paid_date || todayInputValue())}"></div>
+        <div class="exp-field ${m.paid_date ? '' : 'hidden'}" id="e-paid-wrap"><label>Paid date</label><input class="admin-input" type="date" id="e-paid-date" value="${escA(m.paid_date || m.expense_date || todayInputValue())}"></div>
       </div>
 
       <div class="exp-form__grid2">
@@ -1316,9 +1316,29 @@ function bindEditor(d, model, isNew, guard = { dirty: false }) {
   $('#e-gst')?.addEventListener('change', () => { $('#e-gst').dataset.touched = '1'; syncExGst(); });
   $('#e-endmode')?.addEventListener('change', syncEndMode);
   $('#e-paid')?.addEventListener('change', () => $('#e-paid-wrap').classList.toggle('hidden', !$('#e-paid').checked));
+
+  // ── Paid date mirrors the expense date until the user edits it directly ──
+  // Same "touched" pattern as the GST checkbox: changing the expense date
+  // pushes into the paid field, but once the owner types a paid date, it
+  // sticks (later expense-date edits leave it alone). Pre-mark touched for an
+  // existing record whose stored paid date was deliberately different, so we
+  // never clobber it. Programmatic `.value =` fires no input/change event, so
+  // the mirror never marks itself touched.
+  const paidDate = $('#e-paid-date');
+  if (paidDate && model.paid_date && model.paid_date !== model.expense_date) {
+    paidDate.dataset.touched = '1';
+  }
+  const syncPaidMirror = () => {
+    if (paidDate && paidDate.dataset.touched !== '1') paidDate.value = $('#e-date').value;
+  };
+  paidDate?.addEventListener('input', () => { paidDate.dataset.touched = '1'; });
+  paidDate?.addEventListener('change', () => { paidDate.dataset.touched = '1'; });
+
   for (const sel of ['#e-date', '#e-dow', '#e-dom', '#e-month', '#e-ydom', '#e-interval']) {
     $(sel)?.addEventListener('change', syncFirstOcc);
   }
+  $('#e-date')?.addEventListener('input', syncPaidMirror);
+  $('#e-date')?.addEventListener('change', syncPaidMirror);
 
   // ── Presets ──
   const presetErr = (msg) => { const el = $('#e-preset-err'); if (el) el.textContent = msg || ''; };
@@ -1355,6 +1375,8 @@ function bindEditor(d, model, isNew, guard = { dirty: false }) {
     set('#e-date', todayInputValue());
     set('#e-due', '');
     if ($('#e-paid')) { $('#e-paid').checked = false; $('#e-paid-wrap')?.classList.add('hidden'); }
+    // Re-arm the paid-date mirror against the re-anchored expense date.
+    if (paidDate) { paidDate.dataset.touched = ''; paidDate.value = $('#e-date').value; }
 
     setType(rec === 'none' ? 'none' : 'repeat');
     syncLinkedNote();
@@ -1559,7 +1581,7 @@ function collectPayload(root, { snap = true } = {}) {
   };
   if (type === 'none') {
     payload.recurrence = 'none';
-    if ($('#e-paid')?.checked) payload.paid_date = $('#e-paid-date').value || todayInputValue();
+    if ($('#e-paid')?.checked) payload.paid_date = $('#e-paid-date').value || $('#e-date').value || todayInputValue();
   } else {
     const freq = $('#e-freq').value;
     payload.recurrence = freq;

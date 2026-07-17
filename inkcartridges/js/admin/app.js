@@ -1,7 +1,7 @@
 /**
  * Admin SPA — Entry point, router, shell
  */
-const APP_VERSION = '2026.07.17-expenses-ux-tweaks';
+const APP_VERSION = '2026.07.17-paid-date-mirror';
 
 import { AdminAuth } from './auth.js';
 import { FilterState } from './filters.js';
