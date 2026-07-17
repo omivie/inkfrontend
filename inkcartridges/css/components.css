@@ -3530,3 +3530,148 @@ a.product-card__contact-btn {
         height: 44px;
     }
 }
+
+
+/* =============================================
+   REWARDS NUDGE — guest loyalty popover (Jul 2026)
+   =============================================
+   Non-modal card anchored under the header Account button (js/rewards-nudge.js
+   sets --rn-top/--rn-left/--rn-width/--rn-caret-x). No overlay, no focus trap.
+   --rewards-nudge--card is the <768px mode: full-width card below the header,
+   caret hidden. Pinned by tests/rewards-nudge-jul2026.test.js. */
+
+.rewards-nudge {
+    position: fixed;
+    top: var(--rn-top, 72px);
+    left: var(--rn-left, auto);
+    width: var(--rn-width, 360px);
+    z-index: var(--z-popover);
+    background: var(--white-primary);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-xl);
+    box-shadow: var(--shadow-lg);
+    padding: var(--spacing-5) var(--spacing-5) var(--spacing-4);
+    opacity: 0;
+    transform: translateY(-6px);
+    transition: opacity 180ms ease, transform 180ms ease;
+}
+
+.rewards-nudge.is-open {
+    opacity: 1;
+    transform: none;
+}
+
+/* Caret pointing up at the Account button (desktop/tablet mode only) */
+.rewards-nudge::before {
+    content: '';
+    position: absolute;
+    top: -6px;
+    left: var(--rn-caret-x, 50%);
+    width: 10px;
+    height: 10px;
+    margin-left: -5px;
+    background: var(--white-primary);
+    border-top: 1px solid var(--color-border);
+    border-left: 1px solid var(--color-border);
+    transform: rotate(45deg);
+}
+
+.rewards-nudge--card::before {
+    display: none;
+}
+
+.rewards-nudge__close {
+    position: absolute;
+    top: 2px;
+    right: 2px;
+    min-width: 44px;
+    min-height: 44px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: none;
+    border: none;
+    border-radius: var(--radius-md);
+    color: var(--color-text-muted);
+    cursor: pointer;
+}
+
+.rewards-nudge__close:hover,
+.rewards-nudge__close:focus-visible {
+    color: var(--color-text-heading);
+    background: var(--steel-100);
+}
+
+.rewards-nudge__head {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-2);
+    padding-right: var(--spacing-8); /* keep clear of the close button */
+    margin-bottom: var(--spacing-2);
+}
+
+.rewards-nudge__icon {
+    flex: 0 0 auto;
+    display: flex;
+    color: var(--color-secondary); /* small magenta rewards accent */
+}
+
+.rewards-nudge__title {
+    font-size: var(--font-size-md);
+    font-weight: var(--font-weight-bold);
+    color: var(--color-text-heading);
+    margin: 0;
+}
+
+.rewards-nudge__body {
+    font-size: var(--font-size-sm);
+    color: var(--color-text);
+    line-height: 1.5;
+    margin: 0 0 var(--spacing-4);
+}
+
+.rewards-nudge__cta {
+    display: block;
+    width: 100%;
+    text-align: center;
+    background: var(--color-primary);
+    color: var(--color-text-inverse);
+    font-size: var(--font-size-sm);
+    font-weight: var(--font-weight-semibold);
+    padding: var(--spacing-3) var(--spacing-4);
+    border-radius: var(--radius-md);
+    text-decoration: none;
+    transition: background var(--transition-fast);
+}
+
+.rewards-nudge__cta:hover,
+.rewards-nudge__cta:focus-visible {
+    background: var(--color-primary-dark);
+    color: var(--color-text-inverse);
+}
+
+.rewards-nudge__later {
+    display: block;
+    width: 100%;
+    min-height: 44px;
+    margin-top: var(--spacing-1);
+    background: none;
+    border: none;
+    color: var(--color-text-light);
+    font-size: var(--font-size-xs);
+    cursor: pointer;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+}
+
+.rewards-nudge__later:hover,
+.rewards-nudge__later:focus-visible {
+    color: var(--color-text-heading);
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .rewards-nudge {
+        transition-duration: 0.01ms;
+        transform: none;
+    }
+}
