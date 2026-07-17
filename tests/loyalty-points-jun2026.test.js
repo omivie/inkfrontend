@@ -192,7 +192,7 @@ function runLoyaltyPage(loyaltyData, coupons, orders, opts = {}) {
         API: {
             getLoyalty: async () => {
                 if (opts.loyaltyFails) return { ok: false, code: 'NOT_FOUND', error: 'not found' };
-                return { ok: true, data: loyaltyData, meta: { page: 1, total_pages: 1 } };
+                return { ok: true, data: loyaltyData, meta: opts.meta || { page: 1, total_pages: 1 } };
             },
             getLoyaltyCoupons: async () => ({ ok: true, data: coupons }),
             getOrders: async () => ({ ok: true, data: orders }),
@@ -284,6 +284,59 @@ test('runtime: everything unavailable (points down, no orders, no coupons) → h
     const { els, run } = runLoyaltyPage(null, [], [], { loyaltyFails: true });
     await run();
     assert.equal(els['loyalty-error'].hidden, false, 'hard error pane shown when nothing is available');
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Drift guard (ERR-102) — "fail-soft must be LOUD". Balance is a cached column
+// (user_profiles.loyalty_points_balance) the backend earn path fails to keep in
+// step with the ledger. When the FULL ledger is on screen the numbers must
+// reconcile, or say so loudly instead of rendering three contradictory figures.
+// ─────────────────────────────────────────────────────────────────────────────
+
+test('drift guard: 2×100 earns under a balance of 100 → loud mismatch notice', async () => {
+    // The exact screenshot state: ledger sums to 200, balance shows 100.
+    const loyalty = {
+        program_active: true, points_balance: 100, lifetime_earned: 100,
+        redemption_rate: 100, min_redemption_points: 500,
+        ledger: [
+            { type: 'earn', points: 100, balance_after: 100, created_at: '2026-06-26T00:00:00Z' },
+            { type: 'earn', points: 100, balance_after: 100, created_at: '2026-06-26T00:00:00Z' },
+        ],
+    };
+    const { els, run } = runLoyaltyPage(loyalty, [], []);
+    await run();
+    const notice = els['loyalty-balance-mismatch'];
+    assert.ok(notice && notice.hidden === false, 'mismatch notice is shown');
+    assert.match(notice.innerHTML, /adds up to 200/, 'notice states the ledger total');
+    assert.match(notice.innerHTML, /balance shows 100/, 'notice states the served balance');
+});
+
+test('drift guard: consistent balance (ledger sum == balance) → no notice', async () => {
+    const loyalty = {
+        program_active: true, points_balance: 200, lifetime_earned: 200,
+        redemption_rate: 100, min_redemption_points: 500,
+        ledger: [
+            { type: 'earn', points: 100, balance_after: 100, created_at: '2026-06-26T00:00:00Z' },
+            { type: 'earn', points: 100, balance_after: 200, created_at: '2026-06-27T00:00:00Z' },
+        ],
+    };
+    const { els, run } = runLoyaltyPage(loyalty, [], []);
+    await run();
+    const notice = els['loyalty-balance-mismatch'];
+    assert.ok(!notice || notice.hidden === true, 'no mismatch notice when the numbers reconcile');
+});
+
+test('drift guard: paginated ledger (subset on screen) → skipped, no false alarm', async () => {
+    // Only page 1 of a multi-page ledger is loaded, so a sum mismatch is expected.
+    const loyalty = {
+        program_active: true, points_balance: 500, lifetime_earned: 500,
+        redemption_rate: 100, min_redemption_points: 500,
+        ledger: [{ type: 'earn', points: 100, balance_after: 500, created_at: '2026-06-26T00:00:00Z' }],
+    };
+    const { els, run } = runLoyaltyPage(loyalty, [], [], { meta: { page: 1, total_pages: 3 } });
+    await run();
+    const notice = els['loyalty-balance-mismatch'];
+    assert.ok(!notice || notice.hidden === true, 'no notice while the ledger is paginated');
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -106,6 +106,7 @@
                     }
                     this.renderBalance();
                     this.renderHistory();
+                    this.checkLedgerConsistency();
                 } else {
                     // Soft, honest notice: points balance/history need the backend endpoint.
                     const notice = document.getElementById('loyalty-balance-unavailable');
@@ -163,6 +164,58 @@
             if (lifeEl) lifeEl.textContent = lifetime ? `${lifetime.toLocaleString('en-NZ')} points earned all-time` : '';
 
             section.hidden = false;
+        },
+
+        /**
+         * Loud drift guard — "fail-soft must be LOUD".
+         *
+         * The balance is a CACHED column (user_profiles.loyalty_points_balance)
+         * that the backend is meant to keep in lock-step with the audit ledger.
+         * A missed accrual (earn row written, balance never incremented) or a
+         * duplicated write desyncs them — the exact state behind ERR-102, where
+         * two +100 earns showed under a balance of 100. Rather than silently
+         * rendering three contradictory numbers, say so out loud.
+         *
+         * Only checked when we hold the COMPLETE ledger (single page): with a
+         * paginated ledger the on-screen rows are a subset, so a sum mismatch
+         * would be expected, not a fault. When complete, the signed sum of every
+         * entry must equal the balance, and earn+bonus must equal lifetime_earned.
+         */
+        checkLedgerConsistency() {
+            if (!this.loyalty || this.totalPages > 1 || !this.ledger.length) return;
+
+            const balance = Number(this.loyalty.points_balance) || 0;
+            const sum = this.ledger.reduce((s, r) => s + (Number(r.points) || 0), 0);
+            const lifetime = this.loyalty.lifetime_earned;
+            const earned = this.ledger.reduce((s, r) =>
+                s + ((r.type === 'earn' || r.type === 'bonus') ? (Number(r.points) || 0) : 0), 0);
+
+            const balanceOff = sum !== balance;
+            const lifetimeOff = (lifetime != null) && (Number(lifetime) !== earned);
+            if (!balanceOff && !lifetimeOff) return;
+
+            const fmt = (n) => Number(n).toLocaleString('en-NZ');
+            const msg = balanceOff
+                ? `Your points history adds up to ${fmt(sum)} points, but your balance shows ${fmt(balance)}. `
+                    + `An earn may not have been credited — we're reconciling your account. Please contact us if it doesn't correct itself.`
+                : `Your all-time earned total looks out of step with your points history. We're reconciling your account.`;
+
+            let el = document.getElementById('loyalty-balance-mismatch');
+            if (!el) {
+                const section = document.getElementById('loyalty-balance-section');
+                if (!section || !section.parentNode) return;
+                el = document.createElement('div');
+                el.id = 'loyalty-balance-mismatch';
+                el.className = 'loyalty-notice loyalty-notice--warn';
+                el.setAttribute('role', 'alert');
+                section.parentNode.insertBefore(el, section);
+            }
+            el.innerHTML = `<p>${esc(msg)}</p>`;
+            el.hidden = false;
+
+            if (typeof DebugLog !== 'undefined') {
+                DebugLog.warn('Loyalty ledger/balance mismatch', { balance, sum, lifetime, earned });
+            }
         },
 
         /**
