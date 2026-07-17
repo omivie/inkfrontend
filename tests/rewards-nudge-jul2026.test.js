@@ -183,8 +183,18 @@ test('css: layering token, reduced motion, restrained animation', () => {
     assert.ok(block.includes('var(--z-popover)'), 'must use the shared z-scale token');
     assert.ok(!/z-index:\s*\d/.test(block), 'no raw z-index numbers');
     assert.ok(block.includes('prefers-reduced-motion'), 'reduced-motion support');
-    const dur = block.match(/transition:[^;]*?(\d+)ms/);
-    assert.ok(dur && +dur[1] >= 150 && +dur[1] <= 220, `entry animation 150-220ms, got ${dur && dur[1]}ms`);
+    // Two-speed contract (owner-tuned Jul 17): slow "soft settle" entrance on
+    // .is-open, fast exit on the base rule. Every duration stays calm —
+    // 100–450ms, never flashy, never sluggish. (0.01ms reduced-motion kill
+    // uses a decimal so the \d+ms scan skips it by design.)
+    const durations = [...block.matchAll(/(?<![\d.])(\d+)ms/g)].map((m) => +m[1]);
+    assert.ok(durations.length >= 2, 'enter + exit transitions must both declare ms durations');
+    for (const d of durations) {
+        assert.ok(d >= 100 && d <= 450, `all nudge animation durations 100-450ms, got ${d}ms`);
+    }
+    const openRule = block.match(/\.rewards-nudge\.is-open\s*\{[^}]*\}/);
+    assert.ok(openRule && /transition:/.test(openRule[0]), '.is-open must declare its own (entrance) transition');
+    assert.ok(/cubic-bezier/.test(openRule[0]), 'entrance uses a decelerating cubic-bezier ease');
 });
 
 // ────────────────────────────────────────────────────────────────────

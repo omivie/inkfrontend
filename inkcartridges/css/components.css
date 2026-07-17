@@ -3564,16 +3564,29 @@ a.product-card__contact-btn {
     background: var(--white-primary);
     border: 1px solid var(--color-border);
     border-radius: var(--radius-xl);
-    box-shadow: var(--shadow-lg);
+    /* Zero-alpha copy of --shadow-lg so the shadow can fade IN on entrance —
+       shadow lists must match in shape to interpolate. */
+    box-shadow: 0 10px 15px -3px rgba(15, 23, 42, 0), 0 4px 6px -4px rgba(15, 23, 42, 0);
     padding: var(--spacing-5) var(--spacing-5) var(--spacing-4);
     opacity: 0;
-    transform: translateY(-6px);
-    transition: opacity 180ms ease, transform 180ms ease;
+    transform: translateY(-8px) scale(0.98);
+    /* This base transition governs the EXIT (class removal animates with the
+       target state's transition) — kept fast so closing feels immediate and
+       the 250ms hide-fallback in rewards-nudge.js still outlives it. */
+    transition: opacity 160ms ease, transform 160ms ease, box-shadow 160ms ease;
 }
 
 .rewards-nudge.is-open {
     opacity: 1;
     transform: none;
+    box-shadow: var(--shadow-lg);
+    /* "Soft settle" ENTRANCE (owner-tuned Jul 17): decelerating fade + 8px
+       drift + 98%→100% grow, shadow landing last. Deliberately slower than
+       the exit so it arrives gently but leaves promptly. */
+    transition:
+        opacity 300ms cubic-bezier(0.16, 1, 0.3, 1),
+        transform 300ms cubic-bezier(0.16, 1, 0.3, 1),
+        box-shadow 400ms ease;
 }
 
 /* Caret pointing up at the Account button (desktop/tablet mode only) */
@@ -3685,7 +3698,8 @@ a.product-card__contact-btn {
 }
 
 @media (prefers-reduced-motion: reduce) {
-    .rewards-nudge {
+    .rewards-nudge,
+    .rewards-nudge.is-open {
         transition-duration: 0.01ms;
         transform: none;
     }
