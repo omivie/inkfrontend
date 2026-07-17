@@ -16,6 +16,11 @@
  */
 import { AdminAuth, FilterState, AdminAPI, esc } from '../app.js';
 import { Charts } from '../components/charts.js';
+// Reused pure math so the two expense trend lines reconcile with the rest of the app:
+// COGS from the same convention as the KPI strip, opex from the same cash-basis rules
+// as the Expenses page (paid-only, GST-netted, order-linked excluded).
+import { kpiCogsInclGst } from '../utils/trend-math.js';
+import { cashMs, pnlCost } from '../utils/expense-math.js';
 
 const formatPrice = (v) => window.formatPrice ? window.formatPrice(v) : `$${Number(v || 0).toFixed(2)}`;
 const MISSING = '—';
@@ -647,8 +652,44 @@ function drawPerformanceOverview(d) {
   // a confident 0. Prefer net, fall back to gross, and if both are unknown say so.
   merge(profitList, (r) => numOrNull(r.net_profit) ?? numOrNull(r.gross_profit), 'profit');
   merge(ordList, (r) => numOrNull(r.orders), 'orders');
+  // Gross profit kept as its OWN key: COGS is derived from gross profit specifically
+  // (revenue_ex − cost), so it must not read the net-or-gross `profit` blend above.
+  merge(gpList, (r) => numOrNull(r.gross_profit), 'grossProfit');
   if (!order.length) { chartEmpty(canvasId, d.sRevenue == null ? AWAIT_MSG : EMPTY_MSG); return; }
   order.sort(); // "YYYY-MM-DD" sorts chronologically
+
+  // ── Two derived expense lines (backend ships no per-bucket cogs/expense series) ──
+  // COGS per bucket, incl-GST, via the same helper the KPI strip uses. Null-honest:
+  // an unknown gross_profit bucket leaves COGS null (a gap), never a confident 0.
+  const cogsByBucket = order.map(b => {
+    const rev = numOrNull(byBucket.get(b)?.revenue);
+    const gp  = numOrNull(byBucket.get(b)?.grossProfit);
+    return (rev == null || gp == null) ? null : kpiCogsInclGst(rev, gp);
+  });
+  // Added (operating) expenses per bucket — bucket each PAID operating expense on its
+  // cash date into the bucket whose start is the greatest ≤ that date (works at any
+  // granularity without needing bucket-end dates). Cash-basis + GST-net + order-linked
+  // exclusion all come from expense-math (cashMs skips unpaid; order_linked is COGS).
+  const startMs = order.map(b => Date.parse(b));
+  const indexFor = (ms) => {
+    if (!Number.isFinite(ms)) return -1;
+    let idx = -1;
+    for (let i = 0; i < startMs.length; i++) {
+      if (Number.isFinite(startMs[i]) && startMs[i] <= ms) idx = i; else break;
+    }
+    return idx; // -1 when the date precedes the first bucket → dropped
+  };
+  const opexByBucket = new Array(order.length).fill(0);
+  for (const row of (Array.isArray(d.expenseRows) ? d.expenseRows : [])) {
+    if (!row || row.kind === 'order_linked') continue; // order-linked lives in COGS
+    const i = indexFor(cashMs(row)); // NaN for unpaid → -1 → skipped
+    if (i < 0) continue;
+    opexByBucket[i] += pnlCost(Number(row.amount), row.gst_claimable);
+  }
+  // Total expenses = added opex + COGS. Opex is always known; without COGS we can't
+  // claim a real total, so the total gaps exactly where the COGS/profit line does.
+  const totalExpByBucket = order.map((_, i) =>
+    cogsByBucket[i] == null ? null : cogsByBucket[i] + opexByBucket[i]);
 
   const c = Charts.getThemeColors();
   const labels = order.map(fmtBucket);
@@ -665,6 +706,8 @@ function drawPerformanceOverview(d) {
   const revenue = accum(order.map(b => numOrNull(byBucket.get(b)?.revenue)));
   const profit  = accum(order.map(b => numOrNull(byBucket.get(b)?.profit)));
   const orders  = accum(order.map(b => numOrNull(byBucket.get(b)?.orders)));
+  const addedExpenses = accum(opexByBucket.slice());
+  const totalExpenses = accum(totalExpByBucket.slice());
 
   const drawType = plot ? 'line' : 'bar';
   const mkMoney = (label, data, color) => drawType === 'line'
@@ -676,6 +719,11 @@ function drawPerformanceOverview(d) {
   const datasets = [
     mkMoney('Revenue', revenue, c.success),
     mkMoney(profitLabel, profit, c.cyan),
+    // Expense lines share the left $ axis. Added expenses = logged operating spend;
+    // Total expenses = that + COGS, so the gap between them reads as "how much of the
+    // total is discretionary spend vs cost of goods".
+    mkMoney('Added expenses', addedExpenses, c.magenta),
+    mkMoney('Total expenses', totalExpenses, c.danger),
     // Orders always a line on the right axis so it reads against the money bars/lines.
     { label: 'Orders', data: orders, yAxisID: 'y1', type: 'line',
       borderColor: c.yellow, backgroundColor: hexToRgba(c.yellow, 0.12),
@@ -835,6 +883,7 @@ async function loadDashboard() {
     // tail to count everything under the alert threshold accurately for this catalog.
     AdminAPI.getUnderMarginProducts('genuine', 1, 60, 'under-margin', 'net_margin', 'asc'),    // 9
     AdminAPI.getUnderMarginProducts('compatible', 1, 60, 'under-margin', 'net_margin', 'asc'), // 10
+    AdminAPI.expenses.list({ limit: 1000 }),                 // 11  raw expense records → trend lines
   ];
 
   const results = await Promise.allSettled(promises);
@@ -888,6 +937,9 @@ async function loadDashboard() {
     recentOrders: val(5), topProducts: val(6), missingCost,
     trackingReq: val(7), trackingOrders: val(8),
     worstMarginSkus: worstMargin, worstMarginTruncated,
+    // Raw expense records for the performance chart's Added/Total expense lines.
+    // Fails soft to [] so a null expenses fetch just drops those two lines, never the page.
+    expenseRows: (val(11)?.items) || [],
     ...graphs,
   };
 
@@ -1010,7 +1062,7 @@ function renderOverviewSection(d) {
       <div class="admin-dash-row__label admin-dash-row__label--cyan">Performance <small>${esc(rangeLabel())}</small></div>
       <div class="admin-dash">
         <div class="admin-dash__cell--12 admin-card">
-          <div class="admin-card__title"><span>Performance overview <small>revenue · ${esc(profitWord)} · orders — real values, not normalized</small></span></div>
+          <div class="admin-card__title"><span>Performance overview <small>revenue · ${esc(profitWord)} · expenses · orders — real values, not normalized</small></span></div>
           <div class="admin-chart-box admin-chart-box--tall"><canvas id="dash-c-overview"></canvas></div>
         </div>
       </div>
