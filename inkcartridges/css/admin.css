@@ -5133,6 +5133,25 @@ button.admin-active-dot--clickable:hover::after { opacity: 1; }
 .exp-preset-save .admin-input { flex: 1; min-width: 0; }
 .exp-preset-err { color: var(--magenta-text, var(--magenta)); font-size: 12px; min-height: 14px; margin-top: 4px; }
 
+/* Expenses workspace shell (Jul 2026): tabs, secondary KPI strip, basis select */
+.exp-subtitle { margin: 4px 0 0; color: var(--text-muted); font-size: 13px; }
+.exp-tabs { margin-bottom: 16px; }
+.exp-tab-content { min-height: 40vh; }
+.exp-kpi-grid--primary { margin-bottom: 12px; }
+.exp-kpi-strip {
+  display: flex; flex-wrap: wrap; gap: 8px 20px; align-items: baseline;
+  padding: 10px 14px; margin-bottom: 18px;
+  border: 1px solid var(--border); border-radius: 10px; background: var(--surface);
+}
+.exp-kpi-strip__item { display: flex; gap: 8px; align-items: baseline; min-width: 0; }
+.exp-kpi-strip__label { color: var(--text-muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; white-space: nowrap; }
+.exp-kpi-strip__value { font-size: 13px; font-weight: 700; white-space: nowrap; }
+.exp-basis-label { display: inline-flex; align-items: center; gap: 6px; color: var(--text-muted); font-size: 12px; white-space: nowrap; }
+@media (max-width: 768px) {
+  .exp-kpi-strip { gap: 6px 14px; }
+  .exp-filters { flex-direction: row; flex-wrap: wrap; }
+}
+
 /* Owner-managed expense categories (editor add-row + manage modal) */
 .exp-cat-label { display: flex; align-items: center; gap: 8px; }
 .exp-cat-manage {
