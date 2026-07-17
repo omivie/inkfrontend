@@ -262,9 +262,16 @@ const FilterState = {
     if (params.has('categories')) this._state.categories = params.get('categories').split(',').filter(Boolean);
   },
 
+  // Query params THIS bar owns. Everything else in the hash query (a hub's
+  // `tab=`, the expenses workspace's `cat=`/`q=`/`basis=`, …) is carried
+  // through untouched — rebuilding the query from only our own state used to
+  // silently drop a hub's tab selection on every period change.
+  _OWN_KEYS: ['period', 'granularity', 'from', 'to', 'brands', 'suppliers', 'statuses', 'categories'],
+
   _writeToURL() {
     const hash = window.location.hash;
-    const baseHash = hash.split('?')[0] || '#dashboard';
+    const qIdx = hash.indexOf('?');
+    const baseHash = (qIdx === -1 ? hash : hash.slice(0, qIdx)) || '#dashboard';
     const parts = [];
     if (this._state.period !== '3m') parts.push('period=' + this._state.period);
     if (this._state.granularity && this._state.granularity !== DEFAULT_GRANULARITY) parts.push('granularity=' + this._state.granularity);
@@ -274,6 +281,11 @@ const FilterState = {
     if (this._state.suppliers.length) parts.push('suppliers=' + this._state.suppliers.join(','));
     if (this._state.statuses.length) parts.push('statuses=' + this._state.statuses.join(','));
     if (this._state.categories.length) parts.push('categories=' + this._state.categories.join(','));
+    // Preserve every param we don't own, in its original encoded form.
+    const existing = new URLSearchParams(qIdx === -1 ? '' : hash.slice(qIdx + 1));
+    for (const [k, v] of existing) {
+      if (!this._OWN_KEYS.includes(k)) parts.push(k + '=' + encodeURIComponent(v));
+    }
     const newHash = parts.length ? baseHash + '?' + parts.join('&') : baseHash;
     history.replaceState(null, '', newHash);
   },
