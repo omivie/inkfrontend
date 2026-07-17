@@ -24,7 +24,8 @@ const ACCOUNT_JS = read('inkcartridges/js/account.js');
 // The <=1024 account block (from its comment banner to the closing of the
 // media query) — grab a generous slice to run the pill assertions against.
 const mqStart = PAGES.indexOf('ACCOUNT NAV — mobile pill bar');
-const MOBILE_BLOCK = PAGES.slice(mqStart, mqStart + 4000);
+// The section runs to EOF (it's the last thing in the file) — take the whole tail.
+const MOBILE_BLOCK = PAGES.slice(mqStart);
 
 test('A1 the mobile account block exists inside a <=1024px media query', () => {
     assert.ok(mqStart > -1, 'the "ACCOUNT NAV — mobile pill bar" section must exist in pages.css');
@@ -58,6 +59,28 @@ test('A5 account.js centres the active pill on mobile', () => {
         'account.js must look up the active pill');
     assert.match(ACCOUNT_JS, /scrollIntoView\(\{\s*block:\s*'nearest',\s*inline:\s*'center'\s*\}\)/,
         "the active pill must scrollIntoView with block:'nearest' (no vertical jump)");
+});
+
+test('A7 the scroll affordance (arrows + edge fades) is wired', () => {
+    // CSS: .account-nav is a positioning context; arrows + fade state hooks exist.
+    assert.match(MOBILE_BLOCK, /\.account-nav\s*\{[^}]*position:\s*relative/s,
+        '.account-nav must be position:relative (anchors the scroll arrows)');
+    assert.match(MOBILE_BLOCK, /\.account-nav__scroll\b/,
+        'the .account-nav__scroll chevron buttons must be styled');
+    assert.match(MOBILE_BLOCK, /\.account-nav\.has-overflow-right/,
+        'the has-overflow-right state hook (right fade + next arrow) must exist');
+    assert.match(MOBILE_BLOCK, /\.account-nav\.has-overflow-left/,
+        'the has-overflow-left state hook (left fade + prev arrow) must exist');
+
+    // JS: account.js injects the buttons, drives the state, and scrolls on tap.
+    assert.match(ACCOUNT_JS, /initAccountNavScroll/,
+        'account.js must define + call initAccountNavScroll');
+    assert.match(ACCOUNT_JS, /scrollBy\(\{\s*left:/s,
+        'the arrow buttons must scrollBy the pill row');
+    assert.match(ACCOUNT_JS, /has-overflow-right/,
+        'account.js must toggle the overflow state classes');
+    assert.match(ACCOUNT_JS, /'Scroll navigation (left|right)'/,
+        'the injected arrow buttons must carry an aria-label');
 });
 
 test('A6 the contracts other code depends on survive', () => {

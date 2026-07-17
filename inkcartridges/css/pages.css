@@ -14553,6 +14553,14 @@ body.page-shop {
    every account base rule in source order (same-specificity rules placed
    earlier would silently win — the ERR-088/ERR-094 cascade trap).
    ========================================================================== */
+
+/* Scroll arrows are injected by account.js only while the pill bar is active,
+   but a mobile→desktop resize leaves them in the DOM. Hide them globally by
+   default; the media query below reveals them by scroll state. */
+.account-nav__scroll {
+    display: none;
+}
+
 @media (max-width: 1024px) {
     .account-layout {
         gap: var(--spacing-lg);
@@ -14590,8 +14598,14 @@ body.page-shop {
         white-space: nowrap;
     }
 
-    /* The nav list becomes one swipeable row. A half-visible trailing pill
-       is the scroll affordance; the scrollbar itself is hidden. */
+    /* .account-nav is the positioning context for the scroll arrows + edge
+       fades (injected/toggled by js/account.js#initAccountNavScroll). */
+    .account-nav {
+        position: relative;
+    }
+
+    /* The nav list becomes one swipeable row. The edge fades + arrows below
+       make the "there's more" affordance explicit; the scrollbar is hidden. */
     .account-nav__list {
         display: flex;
         flex-wrap: nowrap;
@@ -14605,6 +14619,89 @@ body.page-shop {
 
     .account-nav__list::-webkit-scrollbar {
         display: none;
+    }
+
+    /* Edge fades — pseudo-elements over the scroller's ends, shown only when
+       there's content to scroll TO on that side (JS toggles the classes).
+       They sit under the arrows and never eat taps. Height matches the pill
+       row band (below the user strip). */
+    .account-nav::before,
+    .account-nav::after {
+        content: '';
+        position: absolute;
+        top: auto;
+        bottom: var(--spacing-2);
+        height: 48px;
+        width: 44px;
+        pointer-events: none;
+        opacity: 0;
+        transition: opacity var(--transition-fast);
+        z-index: 1;
+    }
+
+    .account-nav::before {
+        left: 0;
+        background: linear-gradient(to right, var(--color-background), rgba(255, 255, 255, 0));
+    }
+
+    .account-nav::after {
+        right: 0;
+        background: linear-gradient(to left, var(--color-background), rgba(255, 255, 255, 0));
+    }
+
+    .account-nav.has-overflow-left::before {
+        opacity: 1;
+    }
+
+    .account-nav.has-overflow-right::after {
+        opacity: 1;
+    }
+
+    /* Tappable chevron buttons — hidden by default, revealed with the fade on
+       the matching side. Circular, sitting over the pill row's vertical
+       centre, clear of the user strip above. */
+    .account-nav__scroll {
+        position: absolute;
+        bottom: var(--spacing-2);
+        display: none;
+        align-items: center;
+        justify-content: center;
+        width: 36px;
+        height: 36px;
+        margin-bottom: 6px;   /* centre the 36px button on the 48px band */
+        padding: 0;
+        border: 1px solid var(--steel-200);
+        border-radius: var(--radius-full);
+        background: var(--white-primary);
+        color: var(--color-primary);
+        box-shadow: 0 1px 4px rgba(15, 23, 42, 0.18);
+        cursor: pointer;
+        z-index: 2;
+    }
+
+    .account-nav__scroll:hover {
+        border-color: var(--color-primary);
+    }
+
+    .account-nav__scroll svg {
+        width: 18px;
+        height: 18px;
+    }
+
+    .account-nav__scroll--prev {
+        left: 0;
+    }
+
+    .account-nav__scroll--next {
+        right: 0;
+    }
+
+    .account-nav.has-overflow-left .account-nav__scroll--prev {
+        display: flex;
+    }
+
+    .account-nav.has-overflow-right .account-nav__scroll--next {
+        display: flex;
     }
 
     /* ACCOUNT / ORDERS section headings don't fit a single row. */

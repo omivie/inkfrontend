@@ -45,6 +45,9 @@ const AccountPage = {
                 if (activePill && activePill.scrollIntoView) {
                     activePill.scrollIntoView({ block: 'nearest', inline: 'center' });
                 }
+                // Scroll affordance: tappable chevrons + edge fades so it's
+                // obvious the row scrolls (ERR-100).
+                this.initAccountNavScroll();
             }
         } catch (_) { /* non-fatal — nav still works without the auto-scroll */ }
 
@@ -881,6 +884,61 @@ const AccountPage = {
     },
 
 
+
+    /**
+     * Mobile account nav (<=1024px): the pill row scrolls horizontally, but a
+     * flush-cut last pill doesn't read as scrollable. Inject tappable chevron
+     * buttons + drive the edge-fade state classes so it's obvious there's more
+     * (ERR-100). Idempotent; no-op if the nav isn't present. CSS in pages.css
+     * ("ACCOUNT NAV — mobile pill bar") gates every visual on <=1024px, so on
+     * desktop the injected buttons simply never render.
+     */
+    initAccountNavScroll() {
+        const nav = document.querySelector('.account-nav');
+        const list = nav && nav.querySelector('.account-nav__list');
+        if (!nav || !list || nav.dataset.scrollWired) return;
+        nav.dataset.scrollWired = 'true';
+
+        const CHEVRON = (dir) => '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" '
+            + 'stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
+            + (dir === 'prev' ? '<polyline points="15 18 9 12 15 6"/>' : '<polyline points="9 18 15 12 9 6"/>')
+            + '</svg>';
+
+        const makeBtn = (dir, label) => {
+            const b = document.createElement('button');
+            b.type = 'button';
+            b.className = 'account-nav__scroll account-nav__scroll--' + dir;
+            b.setAttribute('aria-label', label);
+            b.innerHTML = CHEVRON(dir);
+            b.addEventListener('click', () => {
+                const delta = Math.round(list.clientWidth * 0.7);
+                list.scrollBy({ left: dir === 'prev' ? -delta : delta, behavior: 'smooth' });
+            });
+            return b;
+        };
+
+        nav.appendChild(makeBtn('prev', 'Scroll navigation left'));
+        nav.appendChild(makeBtn('next', 'Scroll navigation right'));
+
+        let ticking = false;
+        const update = () => {
+            ticking = false;
+            const max = list.scrollWidth - list.clientWidth;
+            nav.classList.toggle('has-overflow-left', list.scrollLeft > 4);
+            nav.classList.toggle('has-overflow-right', list.scrollLeft < max - 4);
+        };
+        const schedule = () => {
+            if (ticking) return;
+            ticking = true;
+            window.requestAnimationFrame(update);
+        };
+
+        list.addEventListener('scroll', schedule, { passive: true });
+        window.addEventListener('resize', schedule);
+        update();
+        // Re-check once layout has settled (fonts/icons can shift widths).
+        window.requestAnimationFrame(update);
+    },
 
     /**
      * Load user info into sidebar and welcome message
