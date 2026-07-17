@@ -77,6 +77,7 @@ let _imageFilter = '';
 let _sourceFilter = '';
 let _typeFilter = '';
 let _stockFilter = '';
+let _packFilter = '';   // '' | 'singles' | 'packs' — singles vs CMY/KCMY/Value Pack/Multipack
 let _brands = [];
 let _diagnostics = null;
 let _bulkBar = null;
@@ -608,9 +609,13 @@ async function loadProducts() {
   // the backend's product_type filter takes a single value — only `.in(…)` can span
   // the three ribbon types at once. We compensate by applying the image/stock filters
   // and the margin sort on the Supabase result below.
+  //
+  // The pack filter (singles vs CMY/KCMY/Value Pack/Multipack) is Supabase-only for
+  // the same reason: /api/admin/products has no color param, so routing it to the
+  // backend would silently return UNFILTERED rows while the dropdown says otherwise.
   const isMarginSort = _sort === 'margin_pct' || _sort === 'profit_ex_gst';
   const typeGroup = typeFilterGroup(_typeFilter);
-  const needsBackend = !typeGroup && (isMarginSort || !!_imageFilter || !!_stockFilter);
+  const needsBackend = !typeGroup && !_packFilter && (isMarginSort || !!_imageFilter || !!_stockFilter);
   if (needsBackend) {
     const filters = { search: _search, sort: _sort, order: _sortDir };
     if (_brandFilter) filters.brand = _brandFilter;
@@ -653,21 +658,34 @@ async function loadProducts() {
       if (typeGroup) query = query.in('product_type', typeGroup);
       else if (_typeFilter) query = query.eq('product_type', _typeFilter);
 
-      // Image filter — only applied when a grouped type forced us through
-      // Supabase. Approximation: products.image_url IS NOT NULL. (Backend has
-      // a richer join-aware check; this covers the common case.)
-      if (typeGroup && _imageFilter === 'has-images') query = query.not('image_url', 'is', null);
-      else if (typeGroup && _imageFilter === 'no-images') query = query.is('image_url', null);
+      // Pack filter — singles vs multi-cartridge packs, on the color column.
+      // Values come from the canonical ProductColors.PACK_VALUES list (one
+      // source — a hand-rolled list here would drift into the ERR-075 trap).
+      // NULL colors count as singles: a bare not.in drops NULL rows (SQL
+      // three-valued logic), so legacy uncoloured products would silently
+      // vanish from "Singles Only" without the color.is.null arm.
+      if (_packFilter) {
+        const PACKS = window.ProductColors.PACK_VALUES;
+        const packList = `("${PACKS.join('","')}")`;
+        if (_packFilter === 'packs') query = query.in('color', PACKS);
+        else if (_packFilter === 'singles') query = query.or(`color.is.null,color.not.in.${packList}`);
+      }
+
+      // Image filter — only applied when a grouped type or the pack filter
+      // forced us through Supabase. Approximation: products.image_url IS NOT
+      // NULL. (Backend has a richer join-aware check; this covers the common case.)
+      if ((typeGroup || _packFilter) && _imageFilter === 'has-images') query = query.not('image_url', 'is', null);
+      else if ((typeGroup || _packFilter) && _imageFilter === 'no-images') query = query.is('image_url', null);
 
       // Stock filter — products.stock_status is a direct column.
-      if (typeGroup && _stockFilter) query = query.eq('stock_status', _stockFilter);
+      if ((typeGroup || _packFilter) && _stockFilter) query = query.eq('stock_status', _stockFilter);
 
       // Sorting — map column keys to DB columns. Margin/markup/profit normally
       // route to backend; for the grouped-type path we sort client-side after
       // the fetch (see below).
       const sortMap = { brand: 'brand_id' };
       const sortCol = sortMap[_sort] || _sort || 'name';
-      const dbSort = (typeGroup && isMarginSort) ? 'name' : sortCol;
+      const dbSort = ((typeGroup || _packFilter) && isMarginSort) ? 'name' : sortCol;
       query = query.order(dbSort, { ascending: _sortDir !== 'desc' });
 
       // Pagination
@@ -681,7 +699,7 @@ async function loadProducts() {
       // Client-side margin/markup/profit sort for the grouped-type path
       // (we couldn't push it to Supabase because it's a computed value).
       let sortedRows = rows || [];
-      if (typeGroup && isMarginSort) {
+      if ((typeGroup || _packFilter) && isMarginSort) {
         const dir = _sortDir === 'desc' ? -1 : 1;
         sortedRows = [...sortedRows].sort((a, b) => {
           const ap = computeProfitability(a);
@@ -721,6 +739,9 @@ async function loadProducts() {
   }
 
   // Fallback: use backend API
+  // The backend has no color param — if the pack filter is active, say so
+  // LOUDLY rather than presenting unfiltered rows as a filtered result.
+  if (_packFilter) Toast.warning('Pack filter unavailable right now — showing unfiltered results');
   const filters = { search: _search, sort: _sort, order: _sortDir };
   if (_brandFilter) filters.brand = _brandFilter;
   if (_activeFilter !== '') filters.active = _activeFilter;
@@ -3588,6 +3609,10 @@ function getProductExportParams() {
   if (typeGroup) p.set('product_type', typeGroup.join(','));
   else if (_typeFilter) p.set('product_type', _typeFilter);
   if (_stockFilter) p.set('stock_status', _stockFilter);
+  // Forward-compat: the backend export endpoint doesn't understand `pack` yet
+  // (harmless \u2014 unknown params are ignored). handleExport warns the admin so
+  // the mismatch is never silent.
+  if (_packFilter) p.set('pack', _packFilter);
   if (_sort) p.set('sort', _sort);
   if (_sortDir) p.set('order', _sortDir);
   return p.toString();
@@ -3599,6 +3624,9 @@ async function handleExport(format = 'csv') {
       await exportProductsPDF();
       return;
     }
+    // The backend export has no pack/color filter \u2014 exporting silently
+    // unfiltered rows under an active filter would be a lie. Say so.
+    if (_packFilter) Toast.warning(`Pack filter is not applied to ${format.toUpperCase()} exports \u2014 exporting all matching products`);
     Toast.info(`Preparing ${format.toUpperCase()} export\u2026`);
     await AdminAPI.exportData('products', format, getProductExportParams());
     Toast.success('Products exported');
@@ -3638,6 +3666,20 @@ async function exportProductsPDF() {
       all = all.filter(p =>
         _imageFilter === 'no-images' ? !productHasImage(p) : productHasImage(p)
       );
+    }
+
+    // Apply client-side pack filter if active. Guard: if the backend rows
+    // don't carry a color field at all, filtering would silently classify
+    // EVERYTHING as a single — warn instead of pretending we filtered.
+    if (_packFilter) {
+      const PACKS = window.ProductColors.PACK_VALUES;
+      if (!all.some(p => p.color != null)) {
+        Toast.warning('Pack filter not applied to PDF — export data has no color field');
+      } else {
+        all = all.filter(p =>
+          _packFilter === 'packs' ? PACKS.includes(p.color) : !PACKS.includes(p.color)
+        );
+      }
     }
 
     if (!all.length) {
@@ -3682,6 +3724,7 @@ async function exportProductsPDF() {
     if (_brandFilter) filterParts.push(`Brand: ${_brandFilter}`);
     if (_activeFilter !== '') filterParts.push(`Status: ${_activeFilter === 'true' ? 'Active' : 'Inactive'}`);
     if (_imageFilter) filterParts.push(`Images: ${_imageFilter === 'no-images' ? 'Missing' : 'Has images'}`);
+    if (_packFilter) filterParts.push(`Packs: ${_packFilter === 'packs' ? 'Packs only' : 'Singles only'}`);
     const summary = filterParts.length ? filterParts.join(' | ') : 'All products';
     doc.text(`${summary}  \u2022  ${all.length} products  \u2022  ${new Date().toLocaleDateString('en-NZ')}`, 14, 21);
     doc.setTextColor(0);
@@ -4104,6 +4147,11 @@ async function renderProductsContent(contentEl) {
           <option value="low_stock">Low Stock</option>
           <option value="out_of_stock">Out of Stock</option>
         </select>
+        <select class="admin-select" id="pack-filter" title="Singles vs multi-cartridge packs (CMY, KCMY, Value Pack, Multipack)">
+          <option value="">All Packs</option>
+          <option value="singles">Singles Only</option>
+          <option value="packs">Packs Only (CMY/KCMY)</option>
+        </select>
         <span style="flex:1 1 auto"></span>
         ${columnPickerMarkup()}
         ${ownerControls}
@@ -4283,6 +4331,9 @@ async function renderProductsContent(contentEl) {
     header.querySelector('#stock-filter')?.addEventListener('change', (e) => {
       _stockFilter = e.target.value; _page = 1; loadProducts();
     });
+    header.querySelector('#pack-filter')?.addEventListener('change', (e) => {
+      _packFilter = e.target.value; _page = 1; loadProducts();
+    });
 
     // Export
     bindExportDropdown(header, 'export-products', handleExport);
@@ -4392,6 +4443,7 @@ export default {
     _sourceFilter = '';
     _typeFilter = '';
     _stockFilter = '';
+    _packFilter = '';
     _brands = [];
     _diagnostics = null;
     _activeProductTab = 'products';

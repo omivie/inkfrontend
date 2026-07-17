@@ -110,16 +110,18 @@ test('a grouped type is forced down the Supabase path', () => {
   // The backend's product_type param takes ONE value — only .in() can span the
   // three ribbon types. If image/stock/margin-sort routed a grouped type to the
   // backend, the umbrella would silently collapse to a single type.
-  assert.match(PRODUCTS, /const\s+typeGroup\s*=\s*typeFilterGroup\(_typeFilter\)\s*;[\s\S]{0,300}?const\s+needsBackend\s*=\s*!typeGroup\s*&&/,
+  assert.match(PRODUCTS, /const\s+typeGroup\s*=\s*typeFilterGroup\(_typeFilter\)\s*;[\s\S]{0,600}?const\s+needsBackend\s*=\s*!typeGroup\s*&&/,
     'needsBackend must AND with !typeGroup');
 });
 
 test('image, stock and margin-sort still work under a grouped type', () => {
-  assert.match(PRODUCTS, /typeGroup\s*&&\s*_imageFilter\s*===\s*'has-images'[\s\S]{0,120}?\.not\(\s*'image_url'\s*,\s*'is'\s*,\s*null\s*\)/,
+  // Jul 2026: the pack filter shares the forced-Supabase path, so the gates
+  // read `(typeGroup || _packFilter)` — the grouped-type guarantee is unchanged.
+  assert.match(PRODUCTS, /\(typeGroup \|\| _packFilter\)\s*&&\s*_imageFilter\s*===\s*'has-images'[\s\S]{0,120}?\.not\(\s*'image_url'\s*,\s*'is'\s*,\s*null\s*\)/,
     'grouped type + has-images must use .not("image_url", "is", null)');
-  assert.match(PRODUCTS, /typeGroup\s*&&\s*_stockFilter[\s\S]{0,120}?\.eq\(\s*'stock_status'\s*,\s*_stockFilter\s*\)/,
+  assert.match(PRODUCTS, /\(typeGroup \|\| _packFilter\)\s*&&\s*_stockFilter[\s\S]{0,120}?\.eq\(\s*'stock_status'\s*,\s*_stockFilter\s*\)/,
     'grouped type + stock filter must use .eq("stock_status", _stockFilter)');
-  assert.match(PRODUCTS, /typeGroup\s*&&\s*isMarginSort/,
+  assert.match(PRODUCTS, /\(typeGroup \|\| _packFilter\)\s*&&\s*isMarginSort/,
     'grouped type must detect a margin sort and handle it client-side');
   assert.match(PRODUCTS, /computeProfitability\s*\(\s*[ab]\s*\)/,
     'the client-side sort must call computeProfitability(row)');

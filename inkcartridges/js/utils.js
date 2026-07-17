@@ -305,7 +305,14 @@ const ProductColors = {
         { value: 'Black/Red',     label: 'Black/Red' },
         { value: 'Value Pack',    label: 'Value Pack' },
         { value: 'Multipack',     label: 'Multipack' }
-    ]
+    ],
+
+    // Multi-cartridge pack colors — the values the admin "Packs" filter matches.
+    // Every entry MUST also exist in OPTIONS above (contract-tested): a value
+    // that doesn't exactly match a stored products.color string silently
+    // matches ZERO rows (the ERR-075 drum/paper failure mode).
+    // 'Tri-Colour' is deliberately NOT here — it's ONE cartridge (see note above).
+    PACK_VALUES: ['CMY', 'KCMY', 'Value Pack', 'Multipack']
 };
 
 // Make ProductColors available globally (browser-only; Node test runs skip this).

@@ -1,7 +1,7 @@
 /**
  * Admin SPA — Entry point, router, shell
  */
-const APP_VERSION = '2026.07.16-pricing-hybrid-engine';
+const APP_VERSION = '2026.07.17-expense-custom-categories';
 
 import { AdminAuth } from './auth.js';
 import { FilterState } from './filters.js';
