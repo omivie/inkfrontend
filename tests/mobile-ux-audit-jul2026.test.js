@@ -121,6 +121,29 @@ test('WS2 main.js wires initStickyHeader() into the init path', () => {
     assert.match(MAIN_JS, /requestAnimationFrame/, 'scroll handler should be rAF-throttled');
 });
 
+test('WS2b the sticky toggle uses hysteresis (two thresholds), not one — ERR-101', () => {
+    // A single scrollY threshold flip-flops at the bottom of a short page:
+    // collapsing the header shrinks the document, the scroll clamps back
+    // across the one threshold, and it oscillates every frame. The fix is a
+    // dead band with distinct add/remove points.
+    const start = MAIN_JS.indexOf('function initStickyHeader');
+    const body = MAIN_JS.slice(start, MAIN_JS.indexOf('\nfunction ', start + 1));
+    // Must NOT use the single-threshold classList.toggle(..., scrollY > X) form.
+    assert.ok(!/classList\.toggle\(\s*['"]site-header--scrolled['"]\s*,\s*window\.scrollY\s*>/.test(body),
+        'must not toggle on a single scrollY threshold (that is the flip-flop)');
+    // Distinct add + remove points = the dead band.
+    assert.match(body, /classList\.add\(\s*['"]site-header--scrolled['"]/,
+        'must add the scrolled class past the ON threshold');
+    assert.match(body, /classList\.remove\(\s*['"]site-header--scrolled['"]/,
+        'must remove the scrolled class only below a lower OFF threshold');
+    // Two distinct numeric thresholds must exist (regardless of how they're named).
+    const nums = (body.match(/=\s*(\d{1,4})\s*;/g) || [])
+        .map((s) => parseInt(s.replace(/\D/g, ''), 10));
+    const distinct = new Set(nums.filter((n) => n > 0 && n < 2000));
+    assert.ok(distinct.size >= 2,
+        `initStickyHeader needs two distinct scroll thresholds — found ${[...distinct].join(', ') || 'none'}`);
+});
+
 // ─────────────────────────────────────────────────────────────────────────────
 // WS3 — Mobile Filter & Sort sheet
 // ─────────────────────────────────────────────────────────────────────────────

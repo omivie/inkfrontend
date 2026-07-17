@@ -47,11 +47,24 @@ document.addEventListener('DOMContentLoaded', function() {
 function initStickyHeader() {
     const header = document.querySelector('.site-header');
     if (!header) return;
-    const THRESHOLD = 80;
+    // TWO thresholds (hysteresis), NOT one — ERR-101. The scrolled state
+    // collapses the header (hides the ~44px contact row, see the
+    // .site-header--scrolled block in layout.css), which shrinks the document.
+    // At the bottom of a short page scrollY is pinned to maxScroll, so a
+    // single threshold caused a flip-flop: cross 80 → collapse → maxScroll
+    // drops ~44px → scrollY clamps below 80 → expand → pinned back above 80 →
+    // collapse … every frame ("spazzing"). Separate on/off points break it.
+    // Invariant: SCROLL_OFF + collapseHeightDelta(~44px) <= SCROLL_ON, so the
+    // clamp can never re-cross the boundary that produced it. Keep the gap.
+    const SCROLL_ON = 80;
+    const SCROLL_OFF = 24;
     let ticking = false;
     const apply = function() {
         ticking = false;
-        header.classList.toggle('site-header--scrolled', window.scrollY > THRESHOLD);
+        const y = window.scrollY;
+        if (y > SCROLL_ON) header.classList.add('site-header--scrolled');
+        else if (y < SCROLL_OFF) header.classList.remove('site-header--scrolled');
+        // Between OFF and ON: leave the current state as-is (the dead band).
     };
     const onScroll = function() {
         if (ticking) return;

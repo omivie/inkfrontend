@@ -2125,7 +2125,12 @@ summary.footer-column__heading::-webkit-details-marker {
         box-shadow: 0 2px 8px rgba(15, 23, 42, 0.12);
     }
 
-    /* Collapse the low-value rows once scrolled to reclaim vertical space. */
+    /* Collapse the low-value rows once scrolled to reclaim vertical space.
+       HEIGHT-DELTA INVARIANT (ERR-101): hiding .header-contact removes ~44px
+       of document height. main.js#initStickyHeader uses a hysteresis gap
+       (SCROLL_ON 80 / SCROLL_OFF 24 = 56px) that MUST stay larger than this
+       collapse delta, or the scroll-clamp at a short page's bottom flip-flops
+       the header. If you grow what's hidden here past ~56px, widen that gap. */
     .site-header--scrolled .header-contact {
         display: none;
     }
