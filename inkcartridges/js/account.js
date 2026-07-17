@@ -717,6 +717,21 @@ const AccountPage = {
             if (cancelBtn) cancelBtn.addEventListener('click', () => this.closeAddressModal());
             if (backdrop) backdrop.addEventListener('click', () => this.closeAddressModal());
             if (saveBtn) saveBtn.addEventListener('click', () => this.saveAddress());
+
+            // NZ address autocomplete on Street Address (shared module,
+            // js/address-autocomplete.js — same engine as checkout, ERR-096).
+            // Modal markup is static in addresses.html and this setup runs
+            // once per page load, so attaching here is safe; edit-mode prefill
+            // assigns .value directly and never fires input events.
+            if (typeof AddressAutocomplete !== 'undefined') {
+                AddressAutocomplete.attach('address-line1', {
+                    line1: 'address-line1',
+                    line2: 'address-line2',
+                    city: 'address-city',
+                    region: 'address-region',
+                    postcode: 'address-postcode'
+                });
+            }
         }
 
         // Delete modal
@@ -1321,7 +1336,7 @@ const AccountPage = {
                 if (address.address_line2) updateData.address_line2 = address.address_line2;
                 if (address.phone) updateData.phone = address.phone;
 
-                await API.updateAddress(addressId, updateData);
+                this._assertOk(await API.updateAddress(addressId, updateData));
                 await this.loadAddresses();
             }
         } catch (error) {
@@ -1344,6 +1359,16 @@ const AccountPage = {
         const title = document.getElementById('address-modal-title');
         const form = document.getElementById('address-form');
         const saveBtn = document.getElementById('address-save-btn');
+
+        // Reset any leftover state from a previous save attempt (error text,
+        // rate-limit cooldown, disabled button) so the modal opens clean.
+        this._clearAddressCooldown();
+        saveBtn.disabled = false;
+        const errorEl = document.getElementById('address-form-error');
+        if (errorEl) {
+            errorEl.hidden = true;
+            errorEl.textContent = '';
+        }
 
         if (addressId) {
             // Edit mode
@@ -1389,6 +1414,63 @@ const AccountPage = {
             modal.hidden = true;
             document.body.style.overflow = '';
             this.editingAddressId = null;
+            // Stop a running rate-limit countdown — it paints into the (now
+            // hidden) error area and holds the save button disabled.
+            this._clearAddressCooldown();
+        }
+    },
+
+    /**
+     * Convert a resolved `{ ok: false }` API envelope into a thrown Error so a
+     * mutation's catch-branch UI actually fires. api.js RETURNS (does not
+     * throw) error envelopes for most failure codes — awaiting a mutation
+     * without checking `res.ok` read failures as success and toasted "Address
+     * added" on a failed save (ERR-096).
+     */
+    _assertOk(res) {
+        if (res && res.ok === false) {
+            const mapped = API.mapError(res);
+            const err = new Error(mapped.message);
+            err.code = mapped.code;
+            if (mapped.retry_after) err.retryAfter = mapped.retry_after;
+            if (res.request_id) err.request_id = res.request_id;
+            throw err;
+        }
+        return res;
+    },
+
+    /**
+     * Disable the address save button for `seconds` with a live countdown in
+     * the form error area, then restore. RATE_LIMITED means the whole IP is
+     * throttled — an immediately re-enabled button would invite a retry that
+     * is guaranteed to fail with the same opaque message (ERR-096).
+     */
+    _startAddressSaveCooldown(saveBtn, errorEl, seconds, idleLabel) {
+        let remaining = Math.max(1, Math.round(seconds || 30));
+        this._clearAddressCooldown();
+        const paint = () => {
+            errorEl.textContent = `Too many requests — you can try again in ${remaining}s.`;
+            errorEl.hidden = false;
+        };
+        saveBtn.disabled = true;
+        saveBtn.textContent = idleLabel;
+        paint();
+        this._addressCooldownTimer = setInterval(() => {
+            remaining -= 1;
+            if (remaining <= 0) {
+                this._clearAddressCooldown();
+                errorEl.textContent = 'You can try saving again now.';
+                saveBtn.disabled = false;
+                return;
+            }
+            paint();
+        }, 1000);
+    },
+
+    _clearAddressCooldown() {
+        if (this._addressCooldownTimer) {
+            clearInterval(this._addressCooldownTimer);
+            this._addressCooldownTimer = null;
         }
     },
 
@@ -1396,9 +1478,14 @@ const AccountPage = {
      * Save address
      */
     async saveAddress() {
-        const form = document.getElementById('address-form');
         const errorEl = document.getElementById('address-form-error');
         const saveBtn = document.getElementById('address-save-btn');
+
+        // closeAddressModal() nulls editingAddressId — capture the mode up
+        // front so the toast and button label stay truthful (previously edits
+        // always toasted "Address added").
+        const wasEditing = !!this.editingAddressId;
+        const idleLabel = wasEditing ? 'Update Address' : 'Save Address';
 
         // Get form values
         const firstName = document.getElementById('address-first-name').value.trim();
@@ -1423,10 +1510,10 @@ const AccountPage = {
 
         errorEl.hidden = true;
         saveBtn.disabled = true;
-        saveBtn.textContent = this.editingAddressId ? 'Updating...' : 'Saving...';
+        saveBtn.textContent = wasEditing ? 'Updating...' : 'Saving...';
 
         // If this is the first address being added, make it default automatically
-        const isFirstAddress = !this.editingAddressId && (!this.addresses || this.addresses.length === 0);
+        const isFirstAddress = !wasEditing && (!this.addresses || this.addresses.length === 0);
         const shouldBeDefault = isFirstAddress || document.getElementById('address-default').checked;
 
         const deliveryType = document.querySelector('input[name="delivery_type"]:checked')?.value || 'urban';
@@ -1448,21 +1535,26 @@ const AccountPage = {
         if (phone) addressData.phone = phone;
 
         try {
-            if (this.editingAddressId) {
-                await API.updateAddress(this.editingAddressId, addressData);
-            } else {
-                await API.addAddress(addressData);
-            }
+            this._assertOk(wasEditing
+                ? await API.updateAddress(this.editingAddressId, addressData)
+                : await API.addAddress(addressData));
             this.closeAddressModal();
             await this.loadAddresses();
-            this.showToast(this.editingAddressId ? 'Address updated' : 'Address added', 'success');
+            this.showToast(wasEditing ? 'Address updated' : 'Address added', 'success');
+            saveBtn.disabled = false;
+            saveBtn.textContent = idleLabel;
         } catch (error) {
             DebugLog.error('Failed to save address:', error);
-            errorEl.textContent = error.message || 'Failed to save address.';
-            errorEl.hidden = false;
-        } finally {
-            saveBtn.disabled = false;
-            saveBtn.textContent = this.editingAddressId ? 'Update Address' : 'Save Address';
+            // Modal stays open on every failure path — the user's input is
+            // preserved and the error is visible where they're looking.
+            if (error && error.code === 'RATE_LIMITED') {
+                this._startAddressSaveCooldown(saveBtn, errorEl, error.retryAfter, idleLabel);
+            } else {
+                errorEl.textContent = error.message || 'Failed to save address.';
+                errorEl.hidden = false;
+                saveBtn.disabled = false;
+                saveBtn.textContent = idleLabel;
+            }
         }
     },
 
@@ -1491,7 +1583,7 @@ const AccountPage = {
         }
 
         try {
-            await API.deleteAddress(this.deletingAddressId);
+            this._assertOk(await API.deleteAddress(this.deletingAddressId));
             this.closeDeleteModal();
             await this.loadAddresses();
             this.showToast('Address deleted', 'success');
@@ -1872,12 +1964,16 @@ const AccountPage = {
 
         errorEl.hidden = true;
         saveBtn.disabled = true;
-        saveBtn.textContent = this.editingPrinterId ? 'Updating...' : 'Saving...';
+        // hideAddPrinterSection() nulls editingPrinterId — capture the mode up
+        // front so the toast and button label stay truthful (same ERR-096
+        // pattern as the address modal).
+        const wasEditing = !!this.editingPrinterId;
+        saveBtn.textContent = wasEditing ? 'Updating...' : 'Saving...';
 
         try {
             // Server-first: use API
             if (this.editingPrinterId) {
-                await API.updateUserPrinter(this.editingPrinterId, { nickname: nickname || null });
+                this._assertOk(await API.updateUserPrinter(this.editingPrinterId, { nickname: nickname || null }));
             } else {
                 const printerId = document.getElementById('printer-printer-id').value;
                 if (!printerId) {
@@ -1887,19 +1983,19 @@ const AccountPage = {
                     saveBtn.textContent = 'Save Printer';
                     return;
                 }
-                await API.addUserPrinter({ printer_id: printerId });
+                this._assertOk(await API.addUserPrinter({ printer_id: printerId }));
             }
 
             this.hideAddPrinterSection();
             await this.loadPrinters();
-            this.showToast(this.editingPrinterId ? 'Printer updated' : 'Printer added', 'success');
+            this.showToast(wasEditing ? 'Printer updated' : 'Printer added', 'success');
         } catch (error) {
             DebugLog.error('Failed to save printer:', error);
             errorEl.textContent = error.message || 'Failed to save printer.';
             errorEl.hidden = false;
         } finally {
             saveBtn.disabled = false;
-            saveBtn.textContent = this.editingPrinterId ? 'Update Printer' : 'Save Printer';
+            saveBtn.textContent = wasEditing ? 'Update Printer' : 'Save Printer';
         }
     },
 
@@ -1929,7 +2025,7 @@ const AccountPage = {
 
         try {
             // Server-first: use API
-            await API.deleteUserPrinter(this.deletingPrinterId);
+            this._assertOk(await API.deleteUserPrinter(this.deletingPrinterId));
 
             this.closeDeletePrinterModal();
             await this.loadPrinters();

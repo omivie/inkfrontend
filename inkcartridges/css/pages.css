@@ -11728,6 +11728,16 @@ body.page-shop {
     color: #267FB5;
 }
 
+/* Loud fail-soft hint (ERR-096): shown when suggestions are rate-limit paused
+   or both providers are down — degraded autocomplete must be visible, never
+   silent. Muted amber so it reads as a notice, not a validation error. */
+.address-autocomplete__hint {
+    font-size: 0.8rem;
+    color: #8a6d3b;
+    padding: 0.25rem 0 0;
+    line-height: 1.4;
+}
+
 /* ============================================
    SEO / CRO: Product Page Enhancements
    ============================================ */

@@ -68,6 +68,10 @@ const API = {
         const retryCount = opts.retryCount || 0;
         const rateLimitRetry = opts.rateLimitRetry || 0;
         const transientRetry = opts.transientRetry || 0;
+        // Opt-out of the retry ladders (429 + transient 5xx/network) — see
+        // request(): suggestion GETs must fail fast instead of burning the
+        // shared per-IP rate budget on replays (ERR-096).
+        const noRetry = !!opts.noRetry;
         const method = (fetchOptions.method || 'GET').toUpperCase();
         const isIdempotent = method === 'GET' || method === 'HEAD';
 
@@ -99,7 +103,7 @@ const API = {
 
             // Handle rate limiting — only retry idempotent GET requests (never retry mutations)
             if (response.status === 429) {
-                if (method === 'GET' && rateLimitRetry < this.MAX_RATE_LIMIT_RETRIES) {
+                if (method === 'GET' && rateLimitRetry < this.MAX_RATE_LIMIT_RETRIES && !noRetry) {
                     const retryAfter = response.headers.get('Retry-After');
                     const delay = retryAfter ? parseInt(retryAfter, 10) * 1000 : 1000 * Math.pow(2, rateLimitRetry);
                     DebugLog.warn(`Rate limited on ${url}, retrying in ${delay}ms (attempt ${rateLimitRetry + 1})`);
@@ -107,7 +111,14 @@ const API = {
                     return this._fetchWithAuth(url, fetchOptions, { ...opts, rateLimitRetry: rateLimitRetry + 1 });
                 }
                 DebugLog.warn(`Rate limited on ${url}${method !== 'GET' ? ' (non-GET, not retrying)' : ', max retries exceeded'}`);
-                throw new Error('Too many requests. Please wait a moment.');
+                // Carry the machine-readable code + server hint so callers can do
+                // targeted UI (countdown, backoff) instead of a dead-end message
+                // (ERR-096: the account address save could only say "wait a moment").
+                const rateErr = new Error('Too many requests. Please wait a moment.');
+                rateErr.code = 'RATE_LIMITED';
+                const retryAfterSec = parseInt(response.headers.get('Retry-After'), 10);
+                if (Number.isFinite(retryAfterSec)) rateErr.retryAfter = retryAfterSec;
+                throw rateErr;
             }
 
             // Transient 5xx — retry idempotent GETs only. POSTs/PUTs/DELETEs are
@@ -118,7 +129,8 @@ const API = {
             if (isIdempotent
                 && response.status >= 500
                 && response.status < 600
-                && transientRetry < this.MAX_TRANSIENT_RETRIES) {
+                && transientRetry < this.MAX_TRANSIENT_RETRIES
+                && !noRetry) {
                 const delay = this.TRANSIENT_RETRY_BASE_MS * Math.pow(3, transientRetry);
                 DebugLog.warn(`Transient ${response.status} on ${url}, retrying in ${delay}ms (attempt ${transientRetry + 1}/${this.MAX_TRANSIENT_RETRIES})`);
                 await new Promise(r => setTimeout(r, delay));
@@ -162,7 +174,8 @@ const API = {
             const isNetwork = error && error.name === 'TypeError';
             if (isIdempotent
                 && (isAbort || isNetwork)
-                && transientRetry < this.MAX_TRANSIENT_RETRIES) {
+                && transientRetry < this.MAX_TRANSIENT_RETRIES
+                && !noRetry) {
                 const delay = this.TRANSIENT_RETRY_BASE_MS * Math.pow(3, transientRetry);
                 DebugLog.warn(`Transient ${isAbort ? 'timeout' : 'network error'} on ${url}, retrying in ${delay}ms (attempt ${transientRetry + 1}/${this.MAX_TRANSIENT_RETRIES})`);
                 await new Promise(r => setTimeout(r, delay));
@@ -201,7 +214,15 @@ const API = {
         }
 
         try {
-            const response = await this._fetchWithAuth(url, { ...options, headers });
+            // noRetry is a request()-level flag (not a fetch option): callers like
+            // the address-autocomplete suggestion endpoints opt out of the GET
+            // 429/transient retry ladder — a stale suggestion is worthless, and
+            // replaying burns the shared per-IP rate budget (ERR-096: retries
+            // amplified one keystroke into up to 6 requests while both address
+            // providers were down, draining the global limiter that also covers
+            // POST /api/user/address).
+            const { noRetry, ...fetchOpts } = options;
+            const response = await this._fetchWithAuth(url, { ...fetchOpts, headers }, noRetry ? { noRetry: true } : {});
 
             // Capture guest session ID from response header
             const respSessionId = response.headers.get('X-Guest-Session');
@@ -2181,6 +2202,10 @@ const API = {
     // =========================================================================
     // ADDRESS AUTOCOMPLETE
     // =========================================================================
+    // All four endpoints share a tight 30 req/min/IP budget on the backend AND
+    // count against the global per-IP limiter that also covers account writes.
+    // noRetry: a replayed suggestion is stale by the time it lands, and each
+    // retry burns budget the user needs for their actual save (ERR-096).
 
     /**
      * NZ Post address suggestions (primary for NZ addresses)
@@ -2188,7 +2213,7 @@ const API = {
      * @param {number} max - Max results (default 5)
      */
     async nzpostSuggest(query, max = 5) {
-        return this.get(`/api/address/nzpost/suggest?q=${encodeURIComponent(query)}&max=${max}`);
+        return this.get(`/api/address/nzpost/suggest?q=${encodeURIComponent(query)}&max=${max}`, { noRetry: true });
     },
 
     /**
@@ -2196,21 +2221,21 @@ const API = {
      * @param {string} dpid - NZ Post DPID identifier
      */
     async nzpostDetails(dpid) {
-        return this.get(`/api/address/nzpost/details?dpid=${encodeURIComponent(dpid)}`);
+        return this.get(`/api/address/nzpost/details?dpid=${encodeURIComponent(dpid)}`, { noRetry: true });
     },
 
     /**
      * Google Places address autocomplete (fallback when NZ Post is unavailable)
      */
     async addressAutocomplete(query) {
-        return this.get(`/api/address/autocomplete?q=${encodeURIComponent(query)}`);
+        return this.get(`/api/address/autocomplete?q=${encodeURIComponent(query)}`, { noRetry: true });
     },
 
     /**
      * Google Place details by place_id
      */
     async addressDetails(placeId) {
-        return this.get(`/api/address/details?place_id=${encodeURIComponent(placeId)}`);
+        return this.get(`/api/address/details?place_id=${encodeURIComponent(placeId)}`, { noRetry: true });
     },
 
     // =========================================================================

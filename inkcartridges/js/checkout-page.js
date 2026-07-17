@@ -2062,239 +2062,27 @@
             }
         },
 
-        // Initialize address autocomplete for shipping and billing address fields
+        // Initialize address autocomplete for shipping and billing address fields.
+        // The dropdown/debounce/provider logic lives in the shared
+        // AddressAutocomplete module (js/address-autocomplete.js, ERR-090) so
+        // checkout and the account addresses modal can't drift.
         initAddressAutocomplete() {
-            this._setupAutocompleteFor('address1', {
-                address1Id: 'address1',
-                address2Id: 'address2',
-                cityId: 'city',
-                regionId: 'region',
-                postcodeId: 'postcode'
-            });
-            this._setupAutocompleteFor('billing-address1', {
-                address1Id: 'billing-address1',
-                address2Id: 'billing-address2',
-                cityId: 'billing-city',
-                regionId: 'billing-region',
-                postcodeId: 'billing-postcode'
-            });
-        },
-
-        // Wire up autocomplete dropdown for a single address input
-        _setupAutocompleteFor(inputId, fieldMap) {
-            const input = document.getElementById(inputId);
-            if (!input) return;
-
-            // Create dropdown
-            const dropdown = document.createElement('ul');
-            dropdown.className = 'address-autocomplete__dropdown';
-            dropdown.setAttribute('role', 'listbox');
-            dropdown.setAttribute('aria-label', 'Address suggestions');
-            dropdown.hidden = true;
-
-            // Wrap input in positioned container
-            const wrapper = document.createElement('div');
-            wrapper.className = 'address-autocomplete__wrapper';
-            input.parentNode.insertBefore(wrapper, input);
-            wrapper.appendChild(input);
-            wrapper.appendChild(dropdown);
-
-            let debounceTimer = null;
-            let currentSuggestions = [];
-
-            const hideSuggestions = () => {
-                dropdown.hidden = true;
-                dropdown.innerHTML = '';
-                currentSuggestions = [];
-            };
-
-            // Fill address fields from a details response (shared by both providers)
-            const applyAddressDetails = (d) => {
-                const setField = (id, value) => {
-                    const el = document.getElementById(id);
-                    if (!el) return;
-                    el.value = value || '';
-                    el.dispatchEvent(new Event('input', { bubbles: true }));
-                    el.dispatchEvent(new Event('change', { bubbles: true }));
-                };
-
-                setField(fieldMap.address1Id, d.address_line1);
-                setField(fieldMap.address2Id, d.address_line2);
-                setField(fieldMap.cityId, d.city);
-                setField(fieldMap.postcodeId, d.postal_code);
-
-                if (fieldMap.regionId && d.region) {
-                    const regionEl = document.getElementById(fieldMap.regionId);
-                    if (regionEl) {
-                        regionEl.value = this._normalizeRegion(d.region);
-                        regionEl.dispatchEvent(new Event('change', { bubbles: true }));
-                    }
-                }
-
-                this.updateShippingCost?.();
-            };
-
-            // Fill from Google Places details
-            const fillFromGoogleDetails = async (placeId) => {
-                try {
-                    const res = await API.addressDetails(placeId);
-                    if (res.ok && res.data) applyAddressDetails(res.data);
-                } catch (e) {
-                    // Silently fail — user can still type manually
-                }
-            };
-
-            // Fill from NZ Post details
-            const fillFromNzpostDetails = async (dpid) => {
-                try {
-                    const res = await API.nzpostDetails(dpid);
-                    if (res.ok && res.data) applyAddressDetails(res.data);
-                } catch (e) {
-                    // Silently fail — user can still type manually
-                }
-            };
-
-            // Render suggestions in the dropdown
-            const renderSuggestions = (suggestions) => {
-                currentSuggestions = suggestions;
-                dropdown.innerHTML = '';
-                suggestions.forEach((suggestion) => {
-                    const li = document.createElement('li');
-                    li.className = 'address-autocomplete__option';
-                    li.setAttribute('role', 'option');
-                    li.setAttribute('tabindex', '-1');
-                    li.textContent = suggestion.label;
-                    li.addEventListener('mousedown', (e) => {
-                        e.preventDefault();
-                        input.value = suggestion.label;
-                        hideSuggestions();
-                        if (suggestion.provider === 'nzpost') {
-                            fillFromNzpostDetails(suggestion.id);
-                        } else {
-                            fillFromGoogleDetails(suggestion.id);
-                        }
-                    });
-                    dropdown.appendChild(li);
-                });
-                dropdown.hidden = false;
-            };
-
-            input.addEventListener('input', () => {
-                clearTimeout(debounceTimer);
-                const q = input.value.trim();
-                if (q.length < 2) {
-                    hideSuggestions();
-                    return;
-                }
-                debounceTimer = setTimeout(async () => {
-                    try {
-                        // Try NZ Post first (more accurate for NZ addresses)
-                        let suggestions = [];
-                        try {
-                            const nzRes = await API.nzpostSuggest(q);
-                            if (nzRes.ok && nzRes.data?.length) {
-                                suggestions = nzRes.data.map(s => ({
-                                    id: s.dpid,
-                                    label: s.full_address || s.description,
-                                    provider: 'nzpost'
-                                }));
-                            }
-                        } catch {
-                            // NZ Post unavailable — fall through to Google Places
-                        }
-
-                        // Fall back to Google Places if NZ Post returned nothing
-                        if (!suggestions.length) {
-                            const res = await API.addressAutocomplete(q);
-                            if (res.ok && res.data?.length) {
-                                suggestions = res.data.map(s => ({
-                                    id: s.place_id,
-                                    label: s.description,
-                                    provider: 'google'
-                                }));
-                            }
-                        }
-
-                        if (!suggestions.length) {
-                            hideSuggestions();
-                            return;
-                        }
-                        renderSuggestions(suggestions);
-                    } catch (e) {
-                        hideSuggestions();
-                    }
-                }, 300);
-            });
-
-            // Keyboard navigation
-            input.addEventListener('keydown', (e) => {
-                if (dropdown.hidden) return;
-                const items = dropdown.querySelectorAll('.address-autocomplete__option');
-                const focused = dropdown.querySelector('.address-autocomplete__option--focused');
-                let idx = focused ? Array.from(items).indexOf(focused) : -1;
-
-                if (e.key === 'ArrowDown') {
-                    e.preventDefault();
-                    focused?.classList.remove('address-autocomplete__option--focused');
-                    idx = (idx + 1) % items.length;
-                    items[idx]?.classList.add('address-autocomplete__option--focused');
-                    items[idx]?.scrollIntoView({ block: 'nearest' });
-                } else if (e.key === 'ArrowUp') {
-                    e.preventDefault();
-                    focused?.classList.remove('address-autocomplete__option--focused');
-                    idx = (idx - 1 + items.length) % items.length;
-                    items[idx]?.classList.add('address-autocomplete__option--focused');
-                    items[idx]?.scrollIntoView({ block: 'nearest' });
-                } else if (e.key === 'Enter' && focused) {
-                    e.preventDefault();
-                    const suggestion = currentSuggestions[Array.from(items).indexOf(focused)];
-                    if (suggestion) {
-                        input.value = suggestion.description;
-                        hideSuggestions();
-                        fillFromDetails(suggestion.place_id);
-                    }
-                } else if (e.key === 'Escape') {
-                    hideSuggestions();
-                }
-            });
-
-            // Hide on outside click
-            document.addEventListener('click', (e) => {
-                if (!wrapper.contains(e.target)) hideSuggestions();
-            });
-
-            // Hide on blur (delay allows mousedown on option to fire first)
-            input.addEventListener('blur', () => {
-                setTimeout(hideSuggestions, 150);
-            });
-        },
-
-        // Map a Google Places region name to NZ region select option value
-        _normalizeRegion(region) {
-            if (!region) return '';
-            const map = {
-                'northland': 'northland',
-                'auckland': 'auckland',
-                'waikato': 'waikato',
-                'bay of plenty': 'bay-of-plenty',
-                'gisborne': 'gisborne',
-                "hawke's bay": 'hawkes-bay',
-                'hawkes bay': 'hawkes-bay',
-                'taranaki': 'taranaki',
-                'manawatu-whanganui': 'manawatu-wanganui',
-                'manawatu whanganui': 'manawatu-wanganui',
-                'manawatu-wanganui': 'manawatu-wanganui',
-                'wellington': 'wellington',
-                'tasman': 'tasman',
-                'nelson': 'nelson',
-                'marlborough': 'marlborough',
-                'west coast': 'west-coast',
-                'canterbury': 'canterbury',
-                'otago': 'otago',
-                'southland': 'southland'
-            };
-            const r = region.toLowerCase().trim();
-            return map[r] || r.replace(/\s+/g, '-');
+            if (typeof AddressAutocomplete === 'undefined') return;
+            const onApply = () => this.updateShippingCost?.();
+            AddressAutocomplete.attach('address1', {
+                line1: 'address1',
+                line2: 'address2',
+                city: 'city',
+                region: 'region',
+                postcode: 'postcode'
+            }, { onApply });
+            AddressAutocomplete.attach('billing-address1', {
+                line1: 'billing-address1',
+                line2: 'billing-address2',
+                city: 'billing-city',
+                region: 'billing-region',
+                postcode: 'billing-postcode'
+            }, { onApply });
         }
     };
 
