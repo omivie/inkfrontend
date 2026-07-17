@@ -37,6 +37,58 @@ test('_writeToURL declares its own keys and carries every foreign param through'
   assert.match(filters, /const qIdx = hash\.indexOf\('\?'\)/, 'writer reads the existing query to preserve it');
 });
 
+// ─── Tab modules exist and stay pure renderers ────────────────────────────────
+
+const TAB_FILES = ['expenses-tab-overview.js', 'expenses-tab-all.js', 'expenses-tab-recurring.js'];
+
+test('the three tab modules exist and the shell statically imports them', () => {
+  const shell = read(path.join(ADMIN, 'pages', 'expenses.js'));
+  for (const f of TAB_FILES) {
+    assert.ok(fs.existsSync(path.join(ADMIN, 'pages', f)), `${f} must exist`);
+    assert.ok(shell.includes(`from './${f}'`), `shell must statically import ${f}`);
+  }
+  assert.match(shell, /readTabFromHash/, 'shell owns tab parsing');
+  assert.match(shell, /writeHashParams/, 'shell owns hash-param writing');
+  assert.match(shell, /addEventListener\('hashchange'/, 'external ?tab= edits must switch tabs');
+  assert.match(shell, /role="tablist"/, 'tabs carry ARIA roles');
+  assert.match(shell, /FilterState\.showBar\(true\)/, 'the GLOBAL period bar drives the page');
+  assert.match(shell, /FilterState\.setDataStartDate\(/, "period=all must start at real data (ERR-048 rule)");
+});
+
+test('tab modules never write browser storage or fetch directly', () => {
+  for (const f of TAB_FILES) {
+    const src = read(path.join(ADMIN, 'pages', f));
+    assert.doesNotMatch(src, /localStorage\.setItem/i, `${f}: no browser storage`);
+    assert.doesNotMatch(src, /sessionStorage\.setItem/i, `${f}: no browser storage`);
+    assert.doesNotMatch(src, /window\.API\.(get|post|put|delete)/, `${f}: data I/O goes through the shell ctx`);
+  }
+});
+
+// ─── All tab: columns, bulk actions ──────────────────────────────────────────
+
+test('column visibility persists via AdminAPI prefs (never browser storage)', () => {
+  const all = read(path.join(ADMIN, 'pages', 'expenses-tab-all.js'));
+  assert.match(all, /COLUMN_PREF_KEY = 'expenses\.columns'/, 'pref key pinned');
+  assert.match(all, /api\.setUiPref\(COLUMN_PREF_KEY/, 'persisted through the ctx AdminAPI surface');
+});
+
+test('bulk writes are sequential with RATE_LIMITED backoff and loud summaries', () => {
+  const all = read(path.join(ADMIN, 'pages', 'expenses-tab-all.js'));
+  assert.match(all, /RATE_LIMITED/, 'backoff must key on the RATE_LIMITED code');
+  assert.match(all, /1000 \* 2 \*\* \(attempt - 1\)/, 'exponential backoff (1s/2s/4s)');
+  assert.match(all, /failures\.push/, 'failures collected, never swallowed');
+  assert.match(all, /bulkSummaryToast/, 'every bulk run ends in an honest summary');
+  // The bulk bar is a document.body appendage — it must be removed in destroy.
+  assert.match(all, /removeBulkBar\(\);[\s\S]{0,200}_table\?\.destroy/, 'destroy() removes the bulk bar');
+});
+
+test('bulk category change routes custom keys through the override map', () => {
+  const all = read(path.join(ADMIN, 'pages', 'expenses-tab-all.js'));
+  assert.match(all, /categories\.backendAccepts\(/, 'gates on the live backend enum');
+  assert.match(all, /setOverrideLocal\(/, 'batch-mutates the override map');
+  assert.match(all, /persistOverrides\(\)/, 'persists ONCE after the loop');
+});
+
 // ─── Drawer close guard ───────────────────────────────────────────────────────
 
 test('Drawer.close() consults onBeforeClose and a false return vetoes the close', () => {

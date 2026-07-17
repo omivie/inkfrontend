@@ -499,7 +499,14 @@ function filteredRows() {
     if (f.method && r.method !== f.method) return false;
     if (f.type === 'oneoff' && r.recurring) return false;
     if (f.type === 'recurring' && !r.recurring) return false;
-    if (f.status && r._status !== f.status) return false;
+    if (f.status) {
+      // 'unpaid' is the quick-chip pseudo-status: any one-off still open —
+      // overdue, due today, or scheduled for later. (The KPI "Due (unpaid)"
+      // is narrower: only overdue + due, i.e. currently owing.)
+      if (f.status === 'unpaid') {
+        if (r._status !== 'overdue' && r._status !== 'due' && r._status !== 'scheduled') return false;
+      } else if (r._status !== f.status) return false;
+    }
     if (!r.recurring) {
       const d = parseUtcDate(basisDate(r));
       // basis=paid/due with no such date → the row has no place on that axis.

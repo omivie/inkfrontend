@@ -5147,6 +5147,14 @@ button.admin-active-dot--clickable:hover::after { opacity: 1; }
 .exp-kpi-strip__label { color: var(--text-muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; white-space: nowrap; }
 .exp-kpi-strip__value { font-size: 13px; font-weight: 700; white-space: nowrap; }
 .exp-basis-label { display: inline-flex; align-items: center; gap: 6px; color: var(--text-muted); font-size: 12px; white-space: nowrap; }
+.exp-kpi-strip--table { margin-bottom: 10px; }
+.exp-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+.exp-chip {
+  border: 1px solid var(--border); border-radius: 999px; background: var(--surface);
+  color: var(--text); font-size: 12px; font-weight: 600; padding: 5px 12px; cursor: pointer;
+}
+.exp-chip:hover { border-color: var(--border-strong); }
+.exp-chip--active { background: var(--cyan); border-color: var(--cyan); color: #fff; }
 @media (max-width: 768px) {
   .exp-kpi-strip { gap: 6px 14px; }
   .exp-filters { flex-direction: row; flex-wrap: wrap; }
