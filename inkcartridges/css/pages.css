@@ -6730,109 +6730,22 @@ body.filter-sort-open { overflow: hidden; }
     gap: var(--spacing-sm);
 }
 
-/* ==========================================================================
-   ACCOUNT NAV — mobile pill bar (Jul 2026, ERR-095 family)
-   Below 1024px the account sidebar used to stack its full ~800px tower (user
-   card + 9 nav buttons + trust panel) ABOVE the page content — a wall of
-   buttons before any information. Instead: a compact user strip + ONE
-   horizontally swipeable row of pills, content immediately below. Pure CSS —
-   the 10 account pages' static <aside class="account-sidebar"> markup is
-   untouched (keep that class: track-order-page.js keys off it).
-   Desktop (>1024px) keeps the classic vertical sidebar card.
-   ========================================================================== */
 @media (max-width: 1024px) {
     .account-layout {
-        grid-template-columns: 1fr;
-        gap: var(--spacing-lg);
+        /* minmax(0,…) not 1fr: the item's implicit min-width:auto would size
+           the track to the pill row's full ~1400px width instead of letting
+           it scroll (same min-content leak as ERR-094's Turnstile). */
+        grid-template-columns: minmax(0, 1fr);
     }
 
-    /* Nav stays above the content, but shrinks from a tower to a strip. */
     .account-sidebar {
         order: -1;
-        background: none;
-        border: none;
-        border-radius: 0;
-        padding: 0;
-    }
-
-    /* Compact identity strip. */
-    .account-sidebar__user {
-        padding: 0 0 var(--spacing-3);
-        margin-bottom: var(--spacing-2);
-        border-bottom: none;
-    }
-
-    .account-sidebar__avatar {
-        width: 36px;
-        height: 36px;
-        flex-shrink: 0;
-    }
-
-    .account-sidebar__details {
-        min-width: 0;
-    }
-
-    .account-sidebar__email {
-        display: block;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-    }
-
-    /* The nav list becomes one swipeable row. A half-visible trailing pill
-       is the scroll affordance; the scrollbar itself is hidden. */
-    .account-nav__list {
-        display: flex;
-        flex-wrap: nowrap;
-        align-items: center;
-        gap: var(--spacing-2);
-        overflow-x: auto;
-        -webkit-overflow-scrolling: touch;
-        padding: 2px 2px var(--spacing-2);
-        scrollbar-width: none;
-    }
-
-    .account-nav__list::-webkit-scrollbar {
-        display: none;
-    }
-
-    /* ACCOUNT / ORDERS section headings don't fit a single row. */
-    .account-nav__divider {
-        display: none;
-    }
-
-    .account-nav__item {
-        width: auto;
-        flex: 0 0 auto;
-        margin: 0;
-    }
-
-    /* Pills. Existing --active colors (primary bg / inverse text) and the
-       --logout muted/error-hover colors carry over unchanged. */
-    .account-nav__item a {
-        border: 1px solid var(--steel-200);
-        border-radius: var(--radius-full);
-        background: var(--white-primary);
-        white-space: nowrap;
-        padding: 0 var(--spacing-4);
-        min-height: 44px;
-    }
-
-    .account-nav__item a svg {
-        width: 16px;
-        height: 16px;
-        flex-shrink: 0;
-    }
-
-    .account-nav__item--active a {
-        border-color: var(--color-primary);
-    }
-
-    /* Trust bullets are noise on a phone task page (they stay on desktop). */
-    .account-sidebar__trust {
-        display: none;
     }
 }
+/* (The mobile pill-bar restyle of the account sidebar lives at the END of
+   this file — it must come after every account base rule in source order,
+   or same-specificity base rules silently win. See "ACCOUNT NAV — mobile
+   pill bar" section.) */
 
 @media (max-width: 768px) {
     .orders-table thead {
@@ -14624,5 +14537,117 @@ body.page-shop {
     }
     .quote-file__spinner {
         animation-duration: 1.6s;   /* still visibly "busy", far less motion */
+    }
+}
+
+/* ==========================================================================
+   ACCOUNT NAV — mobile pill bar (Jul 2026, text-fit/UX follow-up)
+   Below 1024px the account sidebar used to stack its full ~800px tower (user
+   card + 9 nav buttons + trust panel) ABOVE the page content — a wall of
+   buttons before any information. Instead: a compact user strip + ONE
+   horizontally swipeable row of pills, content immediately below. Pure CSS —
+   the 10 account pages' static <aside class="account-sidebar"> markup is
+   untouched (keep that class: track-order-page.js keys off it).
+   Desktop (>1024px) keeps the classic vertical sidebar card.
+   POSITION MATTERS: this section lives at the END of pages.css so it follows
+   every account base rule in source order (same-specificity rules placed
+   earlier would silently win — the ERR-088/ERR-094 cascade trap).
+   ========================================================================== */
+@media (max-width: 1024px) {
+    .account-layout {
+        gap: var(--spacing-lg);
+    }
+
+    /* Nav stays above the content, but shrinks from a tower to a strip. */
+    .account-sidebar {
+        background: none;
+        border: none;
+        border-radius: 0;
+        padding: 0;
+    }
+
+    /* Compact identity strip. */
+    .account-sidebar__user {
+        padding: 0 0 var(--spacing-3);
+        margin-bottom: var(--spacing-2);
+        border-bottom: none;
+    }
+
+    .account-sidebar__avatar {
+        width: 36px;
+        height: 36px;
+        flex-shrink: 0;
+    }
+
+    .account-sidebar__details {
+        min-width: 0;
+    }
+
+    .account-sidebar__email {
+        display: block;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    /* The nav list becomes one swipeable row. A half-visible trailing pill
+       is the scroll affordance; the scrollbar itself is hidden. */
+    .account-nav__list {
+        display: flex;
+        flex-wrap: nowrap;
+        align-items: center;
+        gap: var(--spacing-2);
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        padding: 2px 2px var(--spacing-2);
+        scrollbar-width: none;
+    }
+
+    .account-nav__list::-webkit-scrollbar {
+        display: none;
+    }
+
+    /* ACCOUNT / ORDERS section headings don't fit a single row. */
+    .account-nav__divider {
+        display: none;
+    }
+
+    .account-nav__item {
+        width: auto;
+        flex: 0 0 auto;
+        margin: 0;
+    }
+
+    /* Pills. */
+    .account-nav__item a {
+        border: 1px solid var(--steel-200);
+        border-radius: var(--radius-full);
+        background: var(--white-primary);
+        white-space: nowrap;
+        padding: 0 var(--spacing-4);
+        min-height: 44px;
+    }
+
+    .account-nav__item a svg {
+        width: 16px;
+        height: 16px;
+        flex-shrink: 0;
+    }
+
+    /* Active + logout colors restated here because the pill base above would
+       otherwise out-cascade the earlier base rules (same specificity). */
+    .account-nav__item--active a {
+        background-color: var(--color-primary);
+        color: var(--color-text-inverse);
+        border-color: var(--color-primary);
+    }
+
+    .account-nav__item--logout a {
+        color: var(--color-text-muted);
+    }
+
+    /* Trust bullets are noise on a phone task page (they stay on desktop). */
+    .account-sidebar__trust {
+        display: none;
     }
 }

@@ -35,6 +35,19 @@ const AccountPage = {
         // Load user info into sidebar (for all account pages)
         this.loadUserInfo();
 
+        // Mobile pill-bar nav (<=1024px, ERR-099): the account nav is one
+        // horizontally scrollable row — bring the current page's pill into
+        // view so the active state is never hidden off-screen.
+        // block:'nearest' guarantees no vertical scroll jump.
+        try {
+            if (window.matchMedia('(max-width: 1024px)').matches) {
+                const activePill = document.querySelector('.account-nav__item--active');
+                if (activePill && activePill.scrollIntoView) {
+                    activePill.scrollIntoView({ block: 'nearest', inline: 'center' });
+                }
+            }
+        } catch (_) { /* non-fatal — nav still works without the auto-scroll */ }
+
         // Admin access is surfaced by the global header shortcut
         // (main.js#initAdminHeaderLink), reachable from every page — see
         // project_admin_header_link_may2026.
