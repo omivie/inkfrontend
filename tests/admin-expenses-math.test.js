@@ -308,3 +308,13 @@ test('categoryBreakdownDetailed: no prev window → prevTotal/deltaPct null', ()
   assert.equal(out[0].prevTotal, null);
   assert.equal(out[0].deltaPct, null);
 });
+
+test('recurringMonthlyCommitment drops date-ended series when today is given', () => {
+  const templates = [
+    { recurrence: 'monthly', amount: 100, series_state: 'active' },
+    { recurrence: 'monthly', amount: 50, series_state: 'active', recurrence_end: '2026-07-01' },  // ended in the past
+    { recurrence: 'monthly', amount: 25, series_state: 'active', recurrence_end: '2026-12-31' },  // ends in the future
+  ];
+  approx(sandbox.recurringMonthlyCommitment(templates), 175);                       // no today → legacy behavior
+  approx(sandbox.recurringMonthlyCommitment(templates, Date.UTC(2026, 6, 17)), 125); // date-ended series dropped
+});

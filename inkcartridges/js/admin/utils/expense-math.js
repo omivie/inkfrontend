@@ -116,13 +116,22 @@ export function monthlyCommitment(template) {
   }
 }
 
-/** Sum monthly commitment across ACTIVE recurring templates only. */
-export function recurringMonthlyCommitment(templates) {
+/**
+ * Sum monthly commitment across ACTIVE recurring templates only. When a
+ * `todayMs` is given, a series whose `recurrence_end` has already passed is
+ * excluded too — it is no longer a commitment, whatever its stored
+ * `series_state` says (a cancelled subscription recorded via an end date).
+ */
+export function recurringMonthlyCommitment(templates, todayMs = null) {
   if (!Array.isArray(templates)) return 0;
   return templates.reduce((s, t) => {
     if (!t || !t.recurrence || t.recurrence === 'none') return s;
     const state = t.series_state || 'active';
     if (state !== 'active') return s;
+    if (todayMs != null && t.recurrence_end) {
+      const end = toMs(t.recurrence_end);
+      if (Number.isFinite(end) && end < todayMs) return s;
+    }
     return s + monthlyCommitment(t);
   }, 0);
 }
@@ -326,7 +335,8 @@ export function computePeriodKpis(list, opts = {}) {
   const breakdown = categoryBreakdown(opWindow, { operatingOnly: true, paidOnly: true, netted: true });
   const largestCategory = breakdown.length ? breakdown[0] : null;
 
-  const recurringMonthly = recurringMonthlyCommitment(recurringTemplates);
+  // next30Start doubles as "today" — date-ended series drop out of commitment.
+  const recurringMonthly = recurringMonthlyCommitment(recurringTemplates, next30Start ?? null);
 
   const expenseToRevenuePct = (Number.isFinite(revenueForPeriod) && revenueForPeriod > 0)
     ? (spend / revenueForPeriod) * 100
