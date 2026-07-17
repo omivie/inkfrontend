@@ -1,7 +1,7 @@
 /**
  * Admin SPA — Entry point, router, shell
  */
-const APP_VERSION = '2026.07.17-expenses-workspace-p7d';
+const APP_VERSION = '2026.07.17-expenses-workspace';
 
 import { AdminAuth } from './auth.js';
 import { FilterState } from './filters.js';

@@ -213,7 +213,7 @@ function onEndSeries(e) {
         try {
           await _ctx.api.end(id, { end_date: endIso });
         } catch (err) {
-          // The documented /end endpoint 500s (ERR-094, backend bug). Writing
+          // The documented /end endpoint 500s (ERR-097, backend bug). Writing
           // recurrence_end via the update path stops projections and drops the
           // series from the commitment math identically — same outcome.
           await _ctx.api.update(id, endFallbackPayload(_ctx, row, endIso));
