@@ -22,6 +22,8 @@
     { "source": "faq", "destination": "/html/faq.html" },
     { "source": "genuine-vs-compatible", "destination": "/html/genuine-vs-compatible.html" },
     { "source": "ribbons", "destination": "/html/ribbons.html" },
+    { "source": "quote", "destination": "/html/quote.html" },
+    { "source": "auth/reset-password", "destination": "/html/account/reset-password.html" },
     { "source": "account", "destination": "/html/account/index.html" },
     { "source": "account/addresses", "destination": "/html/account/addresses.html" },
     { "source": "account/favourites", "destination": "/html/account/favourites.html" },
