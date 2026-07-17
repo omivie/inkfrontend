@@ -6730,13 +6730,107 @@ body.filter-sort-open { overflow: hidden; }
     gap: var(--spacing-sm);
 }
 
+/* ==========================================================================
+   ACCOUNT NAV — mobile pill bar (Jul 2026, ERR-095 family)
+   Below 1024px the account sidebar used to stack its full ~800px tower (user
+   card + 9 nav buttons + trust panel) ABOVE the page content — a wall of
+   buttons before any information. Instead: a compact user strip + ONE
+   horizontally swipeable row of pills, content immediately below. Pure CSS —
+   the 10 account pages' static <aside class="account-sidebar"> markup is
+   untouched (keep that class: track-order-page.js keys off it).
+   Desktop (>1024px) keeps the classic vertical sidebar card.
+   ========================================================================== */
 @media (max-width: 1024px) {
     .account-layout {
         grid-template-columns: 1fr;
+        gap: var(--spacing-lg);
     }
 
+    /* Nav stays above the content, but shrinks from a tower to a strip. */
     .account-sidebar {
         order: -1;
+        background: none;
+        border: none;
+        border-radius: 0;
+        padding: 0;
+    }
+
+    /* Compact identity strip. */
+    .account-sidebar__user {
+        padding: 0 0 var(--spacing-3);
+        margin-bottom: var(--spacing-2);
+        border-bottom: none;
+    }
+
+    .account-sidebar__avatar {
+        width: 36px;
+        height: 36px;
+        flex-shrink: 0;
+    }
+
+    .account-sidebar__details {
+        min-width: 0;
+    }
+
+    .account-sidebar__email {
+        display: block;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    /* The nav list becomes one swipeable row. A half-visible trailing pill
+       is the scroll affordance; the scrollbar itself is hidden. */
+    .account-nav__list {
+        display: flex;
+        flex-wrap: nowrap;
+        align-items: center;
+        gap: var(--spacing-2);
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        padding: 2px 2px var(--spacing-2);
+        scrollbar-width: none;
+    }
+
+    .account-nav__list::-webkit-scrollbar {
+        display: none;
+    }
+
+    /* ACCOUNT / ORDERS section headings don't fit a single row. */
+    .account-nav__divider {
+        display: none;
+    }
+
+    .account-nav__item {
+        width: auto;
+        flex: 0 0 auto;
+        margin: 0;
+    }
+
+    /* Pills. Existing --active colors (primary bg / inverse text) and the
+       --logout muted/error-hover colors carry over unchanged. */
+    .account-nav__item a {
+        border: 1px solid var(--steel-200);
+        border-radius: var(--radius-full);
+        background: var(--white-primary);
+        white-space: nowrap;
+        padding: 0 var(--spacing-4);
+        min-height: 44px;
+    }
+
+    .account-nav__item a svg {
+        width: 16px;
+        height: 16px;
+        flex-shrink: 0;
+    }
+
+    .account-nav__item--active a {
+        border-color: var(--color-primary);
+    }
+
+    /* Trust bullets are noise on a phone task page (they stay on desktop). */
+    .account-sidebar__trust {
+        display: none;
     }
 }
 
@@ -13587,5 +13681,948 @@ body.page-shop {
 @media (max-width: 768px) {
     html {
         overflow-y: auto;
+    }
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Quote page (/quote) — Jul 2026 two-stage trade-quote redesign.
+   Mobile-first (QR business-card traffic is the primary audience): single
+   column base, ≥768px grid with a sticky support aside on the LEFT while
+   the form stays FIRST in the DOM. Forked from the contact block above —
+   never restyle .contact-* from here (/contact must stay untouched).
+   ───────────────────────────────────────────────────────────────────────── */
+
+.quote-page {
+    padding: var(--spacing-6, 24px) 0 var(--spacing-12, 56px);
+}
+
+.quote-page__header {
+    max-width: 640px;
+    margin: 0 auto var(--spacing-6, 24px);
+    text-align: center;
+}
+
+.quote-page__title {
+    margin: 0 0 8px;
+    font-size: clamp(1.6rem, 4vw, 2.1rem);
+    font-weight: 800;
+    color: var(--color-text, #111827);
+    letter-spacing: -0.01em;
+}
+
+.quote-page__lead {
+    margin: 0;
+    font-size: var(--font-size-md, 1rem);
+    color: var(--color-text-secondary, #4b5563);
+    line-height: 1.55;
+}
+
+/* Trust row: short reassurance under the lead, dot-separated. */
+.quote-page__trust {
+    margin: 10px 0 0;
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--color-text, #111827);
+}
+
+/* Legal disambiguation stays available but subtle (was a long sentence
+   directly under the intro). */
+.quote-page__legal {
+    margin: 8px 0 0;
+    font-size: 0.75rem;
+    color: var(--color-text-muted, #6b7280);
+}
+
+.quote-page__layout {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--spacing-6, 24px);
+    align-items: start;
+}
+
+@media (min-width: 768px) {
+    .quote-page__layout {
+        /* Aside LEFT, form RIGHT — but the form is first in the DOM so
+           mobile and screen readers hit the form immediately. */
+        grid-template-columns: 300px minmax(0, 1fr);
+    }
+    .quote-page__main {
+        grid-column: 2;
+        grid-row: 1;
+    }
+    .quote-aside {
+        grid-column: 1;
+        grid-row: 1;
+    }
+}
+
+/* ── Step indicator ────────────────────────────────────────────────────── */
+
+.quote-steps {
+    list-style: none;
+    margin: 0 0 var(--spacing-4, 16px);
+    padding: 0;
+    display: flex;
+    gap: var(--spacing-6, 24px);
+}
+
+.quote-steps__step {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--color-text-muted, #6b7280);
+}
+
+.quote-steps__num {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    border: 2px solid var(--color-border, #d1d5db);
+    background: #fff;
+    font-size: 0.8rem;
+    flex-shrink: 0;
+}
+
+.quote-steps__step[aria-current="step"] {
+    color: var(--color-text, #111827);
+}
+
+.quote-steps__step[aria-current="step"] .quote-steps__num {
+    border-color: var(--cyan-primary, #267FB5);
+    background: var(--cyan-primary, #267FB5);
+    color: #fff;
+}
+
+.quote-steps__step--done .quote-steps__num {
+    border-color: var(--cyan-primary, #267FB5);
+    color: var(--cyan-primary, #267FB5);
+}
+
+/* ── Form card + stages ────────────────────────────────────────────────── */
+
+.quote-card {
+    background: var(--white-primary, #fff);
+    border: 1px solid var(--color-border, #e5e7eb);
+    border-radius: var(--radius-lg, 12px);
+    padding: clamp(var(--spacing-4, 16px), 1vw + 12px, var(--spacing-6, 24px));
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+    /* Stage transitions scroll the card into view — clear the sticky header. */
+    scroll-margin-top: calc(var(--header-h, 56px) + 12px);
+}
+
+/* Inline field errors (inserted by quote-page.js, aria-describedby-linked). */
+.quote-field-error {
+    display: block;
+    margin-top: 4px;
+    font-size: 0.8rem;
+    color: var(--color-error, #ef4444);
+}
+
+.quote-stage__title {
+    margin: 0 0 4px;
+    font-size: 1.2rem;
+    font-weight: 700;
+    color: var(--color-text, #111827);
+}
+
+.quote-stage__title:focus {
+    outline: none;
+}
+
+.quote-stage__hint {
+    margin: 0 0 var(--spacing-4, 16px);
+    font-size: 0.9rem;
+    color: var(--color-text-secondary, #4b5563);
+    line-height: 1.5;
+}
+
+/* Entry transition — understanding-only, disabled under reduced motion. */
+.quote-stage {
+    animation: quote-stage-in 0.25s ease;
+}
+
+@keyframes quote-stage-in {
+    from { opacity: 0; transform: translateY(6px); }
+    to   { opacity: 1; transform: none; }
+}
+
+/* ── Error summary ─────────────────────────────────────────────────────── */
+
+.quote-error-summary {
+    margin: 0 0 var(--spacing-4, 16px);
+    padding: 12px 14px;
+    border-radius: var(--radius-md, 8px);
+    background: #fef2f2;
+    border: 1px solid #fecaca;
+    color: #991b1b;
+    font-size: 0.9rem;
+    line-height: 1.5;
+}
+
+.quote-error-summary ul {
+    margin: 6px 0 0;
+    padding-left: 18px;
+}
+
+.quote-error-summary a {
+    color: inherit;
+    font-weight: 600;
+}
+
+/* ── Method choice buttons ─────────────────────────────────────────────── */
+
+.quote-methods {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--spacing-3, 12px);
+    margin: 0 0 var(--spacing-4, 16px);
+}
+
+@media (min-width: 480px) {
+    .quote-methods {
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+    }
+}
+
+.quote-method {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    min-height: var(--tap-min, 48px);
+    padding: 12px 8px;
+    border: 1.5px solid var(--color-border, #d1d5db);
+    border-radius: var(--radius-md, 8px);
+    background: #fff;
+    color: var(--color-text, #111827);
+    font: inherit;
+    font-size: 0.82rem;
+    font-weight: 600;
+    line-height: 1.25;
+    text-align: center;
+    cursor: pointer;
+    transition: border-color 0.15s ease, background-color 0.15s ease;
+}
+
+.quote-method svg {
+    width: 22px;
+    height: 22px;
+    color: var(--cyan-primary, #267FB5);
+    flex-shrink: 0;
+}
+
+.quote-method:hover {
+    border-color: var(--cyan-primary, #267FB5);
+}
+
+.quote-method:focus-visible {
+    outline: none;
+    border-color: var(--cyan-primary, #267FB5);
+    box-shadow: 0 0 0 3px rgba(38, 127, 181, 0.25);
+}
+
+.quote-method[aria-pressed="true"] {
+    border-color: var(--cyan-primary, #267FB5);
+    background: var(--cyan-50, #eff6fb);
+    box-shadow: inset 0 0 0 1px var(--cyan-primary, #267FB5);
+}
+
+/* ── Method panels ─────────────────────────────────────────────────────── */
+
+.quote-panel {
+    margin: 0 0 var(--spacing-4, 16px);
+    padding: var(--spacing-4, 16px);
+    border: 1px solid var(--color-border, #e5e7eb);
+    border-radius: var(--radius-md, 8px);
+    background: var(--steel-50, #f8fafc);
+}
+
+.quote-panel__title {
+    margin: 0 0 4px;
+    font-size: 0.95rem;
+    font-weight: 700;
+    color: var(--color-text, #111827);
+}
+
+.quote-panel__hint {
+    margin: 0 0 var(--spacing-3, 12px);
+    font-size: 0.85rem;
+    color: var(--color-text-secondary, #4b5563);
+    line-height: 1.5;
+}
+
+/* ── Upload panel ──────────────────────────────────────────────────────── */
+
+.quote-upload-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--spacing-3, 12px);
+    margin: 0 0 var(--spacing-3, 12px);
+}
+
+.quote-upload-actions .btn {
+    flex: 1 1 200px;
+}
+
+.quote-file-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.quote-file {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    gap: 10px;
+    align-items: center;
+    padding: 8px 10px;
+    border: 1px solid var(--color-border, #e5e7eb);
+    border-radius: var(--radius-md, 8px);
+    background: #fff;
+    font-size: 0.85rem;
+}
+
+.quote-file__name {
+    /* Long filenames truncate safely instead of forcing overflow. */
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-weight: 600;
+    color: var(--color-text, #111827);
+}
+
+.quote-file__meta {
+    color: var(--color-text-muted, #6b7280);
+    white-space: nowrap;
+}
+
+.quote-file--error .quote-file__meta {
+    color: var(--color-error, #ef4444);
+}
+
+.quote-file__spinner {
+    display: inline-block;
+    width: 14px;
+    height: 14px;
+    border: 2px solid var(--cyan-primary, #267FB5);
+    border-top-color: transparent;
+    border-radius: 50%;
+    animation: quote-spin 0.7s linear infinite;
+    vertical-align: -2px;
+}
+
+@keyframes quote-spin {
+    to { transform: rotate(360deg); }
+}
+
+.quote-file__remove,
+.quote-file__retry {
+    min-width: var(--tap-min, 48px);
+    min-height: 32px;
+    padding: 4px 10px;
+    border: 1px solid var(--color-border, #d1d5db);
+    border-radius: var(--radius-md, 8px);
+    background: #fff;
+    color: var(--color-text, #111827);
+    font: inherit;
+    font-size: 0.8rem;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.quote-file__remove:hover,
+.quote-file__retry:hover {
+    border-color: var(--color-error, #ef4444);
+    color: var(--color-error, #ef4444);
+}
+
+.quote-file__retry:hover {
+    border-color: var(--cyan-primary, #267FB5);
+    color: var(--cyan-primary, #267FB5);
+}
+
+/* ── Product rows ──────────────────────────────────────────────────────── */
+
+.quote-rows {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-3, 12px);
+    margin: 0 0 var(--spacing-3, 12px);
+}
+
+.quote-row {
+    margin: 0;
+    padding: var(--spacing-3, 12px);
+    border: 1px solid var(--color-border, #e5e7eb);
+    border-radius: var(--radius-md, 8px);
+    background: #fff;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 88px;
+    gap: var(--spacing-3, 12px);
+}
+
+.quote-row__code {
+    grid-column: 1;
+    position: relative;   /* combobox listbox anchor */
+}
+
+.quote-row__qty {
+    grid-column: 2;
+}
+
+.quote-row__prefs,
+.quote-row__notes,
+.quote-row__actions {
+    grid-column: 1 / -1;
+}
+
+.quote-row__prefs {
+    margin: 0;
+    padding: 0;
+    border: 0;
+}
+
+.quote-row__prefs legend {
+    padding: 0;
+    margin: 0 0 6px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--color-text, #111827);
+}
+
+.quote-pref-group {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+/* Radio pills — the input stays real (keyboard/AT), the label is the pill. */
+.quote-pref {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    min-height: 36px;
+    padding: 6px 12px;
+    border: 1.5px solid var(--color-border, #d1d5db);
+    border-radius: var(--radius-full, 999px);
+    background: #fff;
+    font-size: 0.82rem;
+    font-weight: 600;
+    color: var(--color-text, #111827);
+    cursor: pointer;
+}
+
+.quote-pref input {
+    position: absolute;
+    opacity: 0;
+    width: 100%;
+    height: 100%;
+    left: 0;
+    top: 0;
+    margin: 0;
+    cursor: pointer;
+}
+
+.quote-pref:has(input:checked) {
+    border-color: var(--cyan-primary, #267FB5);
+    background: var(--cyan-50, #eff6fb);
+}
+
+.quote-pref:has(input:focus-visible) {
+    box-shadow: 0 0 0 3px rgba(38, 127, 181, 0.25);
+}
+
+.quote-row__actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+}
+
+.quote-row__btn {
+    min-height: 36px;
+    min-width: var(--tap-min, 48px);
+    padding: 6px 12px;
+    border: 1px solid var(--color-border, #d1d5db);
+    border-radius: var(--radius-md, 8px);
+    background: #fff;
+    color: var(--color-text, #111827);
+    font: inherit;
+    font-size: 0.8rem;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.quote-row__btn:hover {
+    border-color: var(--cyan-primary, #267FB5);
+    color: var(--cyan-primary, #267FB5);
+}
+
+.quote-add-row {
+    align-self: flex-start;
+}
+
+/* ── Combobox (autocomplete) ───────────────────────────────────────────── */
+
+.quote-ac {
+    position: absolute;
+    z-index: var(--z-dropdown, 100);
+    top: calc(100% + 4px);
+    left: 0;
+    right: 0;
+    max-height: 260px;
+    overflow-y: auto;
+    margin: 0;
+    padding: 4px;
+    list-style: none;
+    background: #fff;
+    border: 1px solid var(--color-border, #e5e7eb);
+    border-radius: var(--radius-md, 8px);
+    box-shadow: var(--shadow-lg, 0 10px 15px -3px rgba(0, 0, 0, 0.1));
+}
+
+.quote-ac[hidden] {
+    display: none;
+}
+
+.quote-ac__option {
+    padding: 10px 12px;
+    border-radius: var(--radius-sm, 6px);
+    font-size: 0.88rem;
+    color: var(--color-text, #111827);
+    cursor: pointer;
+}
+
+.quote-ac__option[aria-selected="true"],
+.quote-ac__option:hover {
+    background: var(--cyan-50, #eff6fb);
+}
+
+.quote-ac__meta {
+    display: block;
+    font-size: 0.78rem;
+    color: var(--color-text-muted, #6b7280);
+}
+
+/* Printer picker inside the lookup panel. */
+.quote-printers {
+    margin-top: var(--spacing-5, 20px);
+    padding-top: var(--spacing-4, 16px);
+    border-top: 1px solid var(--color-border, #e5e7eb);
+}
+
+.quote-printers .quote-chips {
+    margin-top: var(--spacing-3, 12px);
+}
+
+.quote-panel__hint--limits {
+    margin: var(--spacing-3, 12px) 0 0;
+}
+
+.quote-printer-fields {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--spacing-3, 12px);
+}
+
+@media (min-width: 480px) {
+    .quote-printer-fields {
+        grid-template-columns: 160px minmax(0, 1fr);
+    }
+}
+
+.quote-printer-model-wrap {
+    position: relative;
+}
+
+.quote-chips {
+    list-style: none;
+    margin: var(--spacing-3, 12px) 0 0;
+    padding: 0;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.quote-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 6px 6px 12px;
+    border-radius: var(--radius-full, 999px);
+    background: var(--cyan-50, #eff6fb);
+    border: 1px solid var(--cyan-primary, #267FB5);
+    color: var(--color-text, #111827);
+    font-size: 0.82rem;
+    font-weight: 600;
+}
+
+.quote-chip__remove {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    border: 0;
+    border-radius: 50%;
+    background: transparent;
+    color: var(--color-text-muted, #6b7280);
+    font-size: 1rem;
+    line-height: 1;
+    cursor: pointer;
+}
+
+.quote-chip__remove:hover {
+    background: rgba(38, 127, 181, 0.15);
+    color: var(--color-text, #111827);
+}
+
+/* ── Stage-1 recap on stage 2 ──────────────────────────────────────────── */
+
+.quote-summary {
+    margin: 0 0 var(--spacing-4, 16px);
+    padding: var(--spacing-3, 12px) var(--spacing-4, 16px);
+    border: 1px solid var(--color-border, #e5e7eb);
+    border-left: 3px solid var(--cyan-primary, #267FB5);
+    border-radius: var(--radius-md, 8px);
+    background: var(--steel-50, #f8fafc);
+    font-size: 0.88rem;
+    line-height: 1.55;
+    color: var(--color-text, #111827);
+}
+
+.quote-summary__head {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 12px;
+    margin: 0 0 4px;
+}
+
+.quote-summary__title {
+    margin: 0;
+    font-size: 0.8rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--color-text-muted, #6b7280);
+}
+
+.quote-summary__edit {
+    border: 0;
+    background: none;
+    padding: 4px;
+    color: var(--cyan-primary, #267FB5);
+    font: inherit;
+    font-size: 0.85rem;
+    font-weight: 600;
+    cursor: pointer;
+    text-decoration: underline;
+}
+
+.quote-summary ul {
+    margin: 0;
+    padding-left: 18px;
+}
+
+/* ── Additional business details (collapsed by default) ───────────────── */
+
+.quote-extra {
+    margin: 0 0 var(--spacing-2, 8px);
+    border: 1px solid var(--color-border, #e5e7eb);
+    border-radius: var(--radius-md, 8px);
+    background: #fff;
+}
+
+.quote-extra summary {
+    list-style: none;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    min-height: var(--tap-min, 48px);
+    padding: 10px 14px;
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: var(--color-text, #111827);
+    cursor: pointer;
+}
+
+.quote-extra summary::-webkit-details-marker {
+    display: none;
+}
+
+.quote-extra summary::after {
+    content: "+";
+    font-size: 1.2rem;
+    color: var(--color-text-muted, #6b7280);
+}
+
+.quote-extra[open] summary::after {
+    content: "\2212";
+}
+
+.quote-extra__body {
+    padding: 0 14px 14px;
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-4, 16px);
+}
+
+/* ── Turnstile + result + actions (forked from contact) ────────────────── */
+
+.quote-turnstile {
+    min-height: 65px;
+    /* Same guard as .contact-form__turnstile: never let the fixed-width
+       Turnstile iframe prop the card open on small phones. */
+    min-width: 0;
+    overflow-x: auto;
+}
+
+.quote-turnstile-error {
+    margin: 8px 0 0;
+    padding: 10px 12px;
+    border-radius: var(--radius-md, 8px);
+    background: #fef2f2;
+    border: 1px solid #fecaca;
+    color: #991b1b;
+    font-size: 0.85rem;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+
+.quote-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: var(--spacing-3, 12px);
+}
+
+.quote-actions .btn {
+    min-width: 180px;
+}
+
+@media (max-width: 480px) {
+    /* Full-width primary CTAs on phones. */
+    .quote-actions {
+        flex-direction: column;
+    }
+    .quote-actions .btn {
+        width: 100%;
+    }
+}
+
+.quote-back {
+    border: 0;
+    background: none;
+    padding: 8px 0;
+    min-height: var(--tap-min, 48px);
+    color: var(--cyan-primary, #267FB5);
+    font: inherit;
+    font-size: 0.9rem;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+/* ── Success card ──────────────────────────────────────────────────────── */
+
+.quote-success {
+    text-align: center;
+    padding: var(--spacing-8, 32px) var(--spacing-4, 16px);
+}
+
+.quote-success__icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 56px;
+    height: 56px;
+    border-radius: 50%;
+    background: #ecfdf5;
+    color: var(--color-success-green, #16a34a);
+    margin: 0 0 var(--spacing-4, 16px);
+}
+
+.quote-success__title {
+    margin: 0 0 8px;
+    font-size: 1.4rem;
+    font-weight: 800;
+    color: var(--color-text, #111827);
+}
+
+.quote-success__ref {
+    display: inline-block;
+    margin: 0 0 var(--spacing-4, 16px);
+    padding: 6px 14px;
+    border-radius: var(--radius-full, 999px);
+    background: var(--cyan-50, #eff6fb);
+    border: 1px solid var(--cyan-primary, #267FB5);
+    font-weight: 700;
+    color: var(--color-text, #111827);
+}
+
+.quote-success__copy {
+    max-width: 460px;
+    margin: 0 auto var(--spacing-5, 20px);
+    color: var(--color-text-secondary, #4b5563);
+    font-size: 0.95rem;
+    line-height: 1.6;
+}
+
+.quote-success__actions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: var(--spacing-3, 12px);
+}
+
+/* ── Support aside ─────────────────────────────────────────────────────── */
+
+.quote-support {
+    border: 1px solid var(--color-border, #e5e7eb);
+    border-radius: var(--radius-lg, 12px);
+    background: var(--white-primary, #fff);
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+
+@media (min-width: 768px) {
+    .quote-aside {
+        /* Sticky like .cart-summary; align-self:start so the grid doesn't
+           stretch it, which would break position:sticky. Stops naturally at
+           the end of .quote-page__layout, well before the footer. */
+        position: sticky;
+        top: var(--spacing-lg, 24px);
+        align-self: start;
+    }
+    /* Panel is always open on desktop — the summary toggle is a phone-only
+       affordance (JS also forces open ≥ tablet breakpoint). */
+    .quote-support summary {
+        pointer-events: none;
+    }
+    .quote-support summary::after {
+        display: none;
+    }
+}
+
+.quote-support summary {
+    list-style: none;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    min-height: var(--tap-min, 48px);
+    padding: 12px 16px;
+    font-size: 0.95rem;
+    font-weight: 700;
+    color: var(--color-text, #111827);
+    cursor: pointer;
+}
+
+.quote-support summary::-webkit-details-marker {
+    display: none;
+}
+
+.quote-support summary::after {
+    content: "+";
+    font-size: 1.2rem;
+    color: var(--color-text-muted, #6b7280);
+}
+
+.quote-support[open] summary::after {
+    content: "\2212";
+}
+
+.quote-support__body {
+    padding: 0 16px 16px;
+}
+
+.quote-support__list {
+    list-style: none;
+    margin: 0 0 var(--spacing-4, 16px);
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    font-size: 0.88rem;
+    color: var(--color-text, #111827);
+}
+
+.quote-support__list li {
+    display: flex;
+    gap: 8px;
+    align-items: start;
+    line-height: 1.45;
+}
+
+.quote-support__list svg {
+    width: 16px;
+    height: 16px;
+    color: var(--color-success-green, #16a34a);
+    flex-shrink: 0;
+    margin-top: 2px;
+}
+
+.quote-support__steps {
+    margin: 0 0 var(--spacing-4, 16px);
+    padding-left: 20px;
+    font-size: 0.85rem;
+    color: var(--color-text-secondary, #4b5563);
+    line-height: 1.5;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.quote-support__steps strong {
+    color: var(--color-text, #111827);
+}
+
+.quote-support__contact {
+    margin: 0;
+    padding: var(--spacing-3, 12px) var(--spacing-4, 16px);
+    background: var(--cyan-50, #eff6fb);
+    border-radius: var(--radius-md, 8px);
+    font-size: 0.85rem;
+    line-height: 1.6;
+    /* Unbreakable email must wrap, not overflow (text-fit lesson). */
+    overflow-wrap: anywhere;
+}
+
+.quote-support__contact a {
+    font-weight: 700;
+    color: var(--color-text, #111827);
+}
+
+/* ── FAQ under the form ────────────────────────────────────────────────── */
+
+.quote-faq {
+    margin-top: var(--spacing-6, 24px);
+}
+
+.quote-faq__title {
+    margin: 0 0 var(--spacing-4, 16px);
+    font-size: 1.1rem;
+    font-weight: 700;
+    color: var(--color-text, #111827);
+}
+
+/* ── Reduced motion ────────────────────────────────────────────────────── */
+
+@media (prefers-reduced-motion: reduce) {
+    .quote-stage {
+        animation: none;
+    }
+    .quote-file__spinner {
+        animation-duration: 1.6s;   /* still visibly "busy", far less motion */
     }
 }

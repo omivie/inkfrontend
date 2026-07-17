@@ -46,12 +46,21 @@ const QR_JS_RAW = read('js/quote-qr-page.js');
 const QR_JS = stripComments(QR_JS_RAW);
 const VERCEL = JSON.parse(read('vercel.json'));
 
-// ─── /quote page: form fields ────────────────────────────────────────────────
-test('/quote form collects the business + contact + needs fields', () => {
+// ─── /quote page: two-stage form ─────────────────────────────────────────────
+test('/quote form collects contact fields and the stage-1 product inputs', () => {
   assert.match(QUOTE_HTML, /id="quote-form"/, 'quote-form missing');
-  for (const name of ['business_name', 'name', 'email', 'phone', 'printers', 'items', 'delivery_address', 'notes']) {
+  for (const name of ['business_name', 'name', 'email', 'phone', 'pasted_list', 'help_text']) {
     assert.match(QUOTE_HTML, new RegExp(`name="${name}"`), `field ${name} missing from /quote form`);
   }
+});
+
+test('/quote is a two-stage flow with progress, row template, and camera capture', () => {
+  assert.match(QUOTE_HTML, /id="quote-stage-1"/, 'stage 1 missing');
+  assert.match(QUOTE_HTML, /id="quote-stage-2"/, 'stage 2 missing');
+  assert.match(QUOTE_HTML, /id="quote-steps"/, 'step indicator missing');
+  assert.match(QUOTE_HTML, /<template id="quote-row-template">/, 'product-row template missing');
+  assert.match(QUOTE_HTML, /capture="environment"/, 'mobile camera capture input missing');
+  assert.match(QUOTE_HTML, /id="quote-success"/, 'success state missing');
 });
 
 test('/quote form keeps the honeypot + Turnstile host + result region', () => {
@@ -85,12 +94,14 @@ test('controller reuses API.submitContactForm with a /api/contact fallback', () 
   assert.doesNotMatch(QUOTE_JS, /\/api\/quote\b/, 'must not call a non-existent /api/quote endpoint yet');
 });
 
-test('controller composes a message body from the business fields', () => {
+test('controller composes a structured message body (redesign v2 sections)', () => {
   assert.match(QUOTE_JS, /function composeMessage\(/, 'composeMessage() missing');
   // The composed body must carry the structured sections the inbox needs.
+  assert.match(QUOTE_JS, /'Reference: '/, 'message must include the quote reference');
   assert.match(QUOTE_JS, /'Business: '/, 'message must include Business line');
   assert.match(QUOTE_JS, /'Products & quantities:'/, 'message must include Products & quantities');
-  assert.match(QUOTE_JS, /'Delivery address:'/, 'message must include Delivery address');
+  assert.match(QUOTE_JS, /'Printer models:'/, 'message must include Printer models');
+  assert.match(QUOTE_JS, /'Uploaded files/, 'message must list uploaded file paths');
 });
 
 test('controller enforces the Turnstile gate and honeypot', () => {
@@ -99,10 +110,11 @@ test('controller enforces the Turnstile gate and honeypot', () => {
   assert.match(QUOTE_JS, /honeypot/i, 'honeypot handling missing');
 });
 
-test('controller requires business name, contact name, email, and items', () => {
+test('controller requires business name, contact name, email, and stage-1 content', () => {
   assert.match(QUOTE_JS, /business name/i, 'business-name validation missing');
   assert.match(QUOTE_JS, /valid email address/i, 'email validation missing');
-  assert.match(QUOTE_JS, /products and quantities/i, 'items validation missing');
+  // Stage 1 must demand at least one product clue (photo/row/list/help).
+  assert.match(QUOTE_JS, /at least one thing you need/i, 'stage-1 content validation missing');
 });
 
 // ─── QR generator tool ───────────────────────────────────────────────────────

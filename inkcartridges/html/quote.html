@@ -27,7 +27,7 @@
     <link rel="stylesheet" href="/css/layout.css?v=9a16c0f6">
     <link rel="stylesheet" href="/css/components.css?v=79d69fe3">
     <link rel="stylesheet" href="/css/modern-effects.css?v=afe20f45">
-    <link rel="stylesheet" href="/css/pages.css?v=02ece8ad">
+    <link rel="stylesheet" href="/css/pages.css?v=6db7cab3">
     <link rel="stylesheet" href="/css/search.css?v=91a5801c">
 </head>
 <body>
@@ -152,133 +152,387 @@
             </div>
         </nav>
 
-        <section class="contact-page">
+        <section class="quote-page">
             <div class="container">
-                <header class="contact-page__header">
-                    <h1 class="contact-page__title">Request a trade quote</h1>
-                    <p class="contact-page__lead">
-                        Buying ink, toner, or ribbons for your business? Tell us which
-                        printers you run and roughly how many cartridges you need &mdash;
-                        we&rsquo;ll email a tailored quote with bulk pricing within one
-                        business day.
+                <header class="quote-page__header">
+                    <h1 class="quote-page__title">Request a business quote</h1>
+                    <p class="quote-page__lead">
+                        Send us your cartridge codes, printer models, or a quick photo
+                        &mdash; we&rsquo;ll check compatibility and email tailored
+                        business pricing for genuine and compatible supplies.
                     </p>
-                    <p class="legal-page__disambiguation"><small data-legal-bind="disambiguation">InkCartridges.co.nz is operated by Office Consumables Ltd (NZBN 9429033934204, GST 94-509-459).</small></p>
+                    <p class="quote-page__trust">Reviewed by a real person &middot; Reply within one business day &middot; Delivery throughout New Zealand</p>
+                    <p class="quote-page__trust" id="quote-card-note" hidden>Have one of our business cards? You&rsquo;re in the right place.</p>
+                    <p class="quote-page__legal"><small data-legal-bind="disambiguation">InkCartridges.co.nz is operated by Office Consumables Ltd (NZBN 9429033934204, GST 94-509-459).</small></p>
                 </header>
 
-                <div class="contact-page__layout">
-                    <article class="contact-card" aria-labelledby="quote-benefits-heading">
-                        <h2 id="quote-benefits-heading" class="contact-card__title">Why buy through us</h2>
+                <div class="quote-page__layout">
+                    <div class="quote-page__main">
+                        <ol id="quote-steps" class="quote-steps" aria-label="Quote request progress">
+                            <li class="quote-steps__step" data-step="1" aria-current="step"><span class="quote-steps__num" aria-hidden="true">1</span> What you need</li>
+                            <li class="quote-steps__step" data-step="2"><span class="quote-steps__num" aria-hidden="true">2</span> Your details</li>
+                        </ol>
 
-                        <ul class="contact-card__list">
-                            <li class="contact-card__item">
-                                <span class="contact-card__icon" aria-hidden="true">
-                                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+                        <div class="quote-card">
+                            <form id="quote-form" class="contact-form quote-form" novalidate>
+
+                                <!-- ── Stage 1: products first (QR visitors are near their printer) ── -->
+                                <section id="quote-stage-1" class="quote-stage" aria-labelledby="quote-stage1-heading">
+                                    <h2 id="quote-stage1-heading" class="quote-stage__title" tabindex="-1">What do you need?</h2>
+                                    <p class="quote-stage__hint">Start whichever way is easiest &mdash; you can combine as many as you like.</p>
+
+                                    <div id="quote-error-summary-1" class="quote-error-summary" role="alert" hidden></div>
+
+                                    <div class="quote-methods" role="group" aria-label="How would you like to tell us what you need?">
+                                        <button type="button" id="quote-method-upload" class="quote-method" aria-pressed="false" aria-controls="quote-panel-upload" data-track="quote:method-upload">
+                                            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+                                            Photo or file
+                                        </button>
+                                        <button type="button" id="quote-method-lookup" class="quote-method" aria-pressed="false" aria-controls="quote-panel-lookup" data-track="quote:method-lookup">
+                                            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                                            Printer or cartridge
+                                        </button>
+                                        <button type="button" id="quote-method-paste" class="quote-method" aria-pressed="false" aria-controls="quote-panel-paste" data-track="quote:method-paste">
+                                            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="8" height="4" rx="1" ry="1"/></svg>
+                                            Paste a list
+                                        </button>
+                                        <button type="button" id="quote-method-help" class="quote-method" aria-pressed="false" aria-controls="quote-panel-help" data-track="quote:method-help">
+                                            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                                            Help me identify
+                                        </button>
+                                    </div>
+
+                                    <div id="quote-panel-upload" class="quote-panel" hidden>
+                                        <h3 class="quote-panel__title">Photo or file upload</h3>
+                                        <p class="quote-panel__hint">
+                                            Snap your printer&rsquo;s model label or cartridge box &mdash; or upload
+                                            an invoice, spreadsheet, or product list. An old supplier invoice is
+                                            often the fastest way to an accurate quote.
+                                        </p>
+                                        <div class="quote-upload-actions">
+                                            <button type="button" id="quote-take-photo" class="btn btn--primary" data-track="quote:camera">Take a photo</button>
+                                            <button type="button" id="quote-choose-files" class="btn btn--outline" data-track="quote:upload">Upload files</button>
+                                        </div>
+                                        <input type="file" id="quote-file-camera" accept="image/*" capture="environment" hidden>
+                                        <input type="file" id="quote-file-picker" multiple hidden accept="image/jpeg,image/png,image/webp,application/pdf,text/csv,.csv,.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet">
+                                        <ul id="quote-file-list" class="quote-file-list" aria-live="polite"></ul>
+                                        <p class="quote-panel__hint quote-panel__hint--limits">JPG, PNG, WebP, PDF, CSV, or XLSX &mdash; up to 6 files, 10&nbsp;MB each. A team member reviews every upload personally.</p>
+                                    </div>
+
+                                    <div id="quote-panel-lookup" class="quote-panel" hidden>
+                                        <h3 class="quote-panel__title">Products</h3>
+                                        <p class="quote-panel__hint">Type a cartridge code or product name (e.g. TN-2450, HP 65XL Black) &mdash; we&rsquo;ll match it as you type.</p>
+                                        <div id="quote-rows" class="quote-rows"></div>
+                                        <button type="button" id="quote-add-row" class="btn btn--outline btn--sm quote-add-row" data-track="quote:add-row">+ Add another product</button>
+
+                                        <div class="quote-printers">
+                                            <h3 class="quote-panel__title">Printer models <span class="contact-form__optional">(optional)</span></h3>
+                                            <p class="quote-panel__hint">Not sure which cartridge your printer takes? Add the printer instead and we&rsquo;ll match the right supplies.</p>
+                                            <div class="quote-printer-fields">
+                                                <label class="contact-form__field">
+                                                    <span class="contact-form__label">Brand</span>
+                                                    <select id="quote-printer-brand" class="form-input">
+                                                        <option value="">Select brand&hellip;</option>
+                                                    </select>
+                                                </label>
+                                                <div class="contact-form__field quote-printer-model-wrap">
+                                                    <label class="contact-form__label" for="quote-printer-model">Model</label>
+                                                    <input type="text" id="quote-printer-model" class="form-input" placeholder="e.g. HL-L2350DW" autocomplete="off" maxlength="80" role="combobox" aria-expanded="false" aria-autocomplete="list">
+                                                </div>
+                                            </div>
+                                            <button type="button" id="quote-add-printer" class="btn btn--outline btn--sm" data-track="quote:add-printer">Add printer</button>
+                                            <ul id="quote-printer-list" class="quote-chips" aria-live="polite" aria-label="Added printers"></ul>
+                                        </div>
+                                    </div>
+
+                                    <div id="quote-panel-paste" class="quote-panel" hidden>
+                                        <label class="contact-form__field">
+                                            <span class="contact-form__label">Paste a product list instead</span>
+                                            <textarea name="pasted_list" id="quote-paste" rows="5" maxlength="2000" class="form-input"
+                                                      placeholder="Paste your list &mdash; any format is fine, e.g.&#10;3&times; TN-2450 toner&#10;2&times; HP 65XL black&#10;1&times; HP 65 tri-colour"></textarea>
+                                        </label>
+                                    </div>
+
+                                    <div id="quote-panel-help" class="quote-panel" hidden>
+                                        <label class="contact-form__field">
+                                            <span class="contact-form__label">Tell us what you&rsquo;re trying to find</span>
+                                            <textarea name="help_text" id="quote-help" rows="4" maxlength="1000" class="form-input"
+                                                      placeholder="Describe your printer or what you print — e.g. &quot;Small office Brother laser printer, we go through a black toner about every two months.&quot;"></textarea>
+                                        </label>
+                                        <p class="quote-panel__hint">A team member will identify the right supplies and include them in your quote.</p>
+                                    </div>
+
+                                    <div class="quote-actions">
+                                        <button type="button" id="quote-next" class="btn btn--primary btn--large" data-track="quote:stage1-next">Continue to your details</button>
+                                    </div>
+                                </section>
+
+                                <!-- ── Stage 2: contact + optional business details ── -->
+                                <section id="quote-stage-2" class="quote-stage" aria-labelledby="quote-stage2-heading" hidden>
+                                    <button type="button" id="quote-back" class="quote-back" data-track="quote:stage2-back">&larr; Back to products</button>
+                                    <h2 id="quote-stage2-heading" class="quote-stage__title" tabindex="-1">Where should we send your quote?</h2>
+
+                                    <div id="quote-error-summary-2" class="quote-error-summary" role="alert" hidden></div>
+
+                                    <div id="quote-summary" class="quote-summary" hidden>
+                                        <div class="quote-summary__head">
+                                            <h3 class="quote-summary__title">Your request</h3>
+                                            <button type="button" id="quote-edit-stage1" class="quote-summary__edit" data-track="quote:edit-stage1">Edit</button>
+                                        </div>
+                                        <ul id="quote-summary-list"></ul>
+                                    </div>
+
+                                    <div class="contact-form__row">
+                                        <label class="contact-form__field">
+                                            <span class="contact-form__label">Your name <span aria-hidden="true">*</span></span>
+                                            <input type="text" name="name" required maxlength="120" autocomplete="name" class="form-input">
+                                        </label>
+
+                                        <label class="contact-form__field">
+                                            <span class="contact-form__label">Business or organisation <span aria-hidden="true">*</span></span>
+                                            <input type="text" name="business_name" required maxlength="160" autocomplete="organization" class="form-input">
+                                        </label>
+                                    </div>
+
+                                    <div class="contact-form__row">
+                                        <label class="contact-form__field">
+                                            <span class="contact-form__label">Email <span aria-hidden="true">*</span></span>
+                                            <input type="email" name="email" required maxlength="200" autocomplete="email" class="form-input">
+                                        </label>
+
+                                        <label class="contact-form__field">
+                                            <span class="contact-form__label">Phone <span class="contact-form__optional">(optional &mdash; speeds up compatibility questions)</span></span>
+                                            <input type="tel" name="phone" maxlength="40" autocomplete="tel" class="form-input">
+                                        </label>
+                                    </div>
+
+                                    <details id="quote-more-details" class="quote-extra">
+                                        <summary>Additional business details <span class="contact-form__optional">(all optional)</span></summary>
+                                        <div class="quote-extra__body">
+                                            <div class="contact-form__row">
+                                                <label class="contact-form__field">
+                                                    <span class="contact-form__label">NZBN</span>
+                                                    <input type="text" name="nzbn" maxlength="13" inputmode="numeric" class="form-input">
+                                                </label>
+                                                <label class="contact-form__field">
+                                                    <span class="contact-form__label">Existing account number</span>
+                                                    <input type="text" name="account_no" maxlength="40" class="form-input">
+                                                </label>
+                                            </div>
+
+                                            <div class="contact-form__row">
+                                                <label class="contact-form__field">
+                                                    <span class="contact-form__label">Preferred contact method</span>
+                                                    <select name="preferred_contact" class="form-input">
+                                                        <option value="">Either</option>
+                                                        <option value="email">Email</option>
+                                                        <option value="phone">Phone</option>
+                                                    </select>
+                                                </label>
+                                                <label class="contact-form__field">
+                                                    <span class="contact-form__label">Purchase order required?</span>
+                                                    <select name="po_required" class="form-input">
+                                                        <option value="">Unsure</option>
+                                                        <option value="yes">Yes</option>
+                                                        <option value="no">No</option>
+                                                    </select>
+                                                </label>
+                                            </div>
+
+                                            <div class="contact-form__row">
+                                                <label class="contact-form__field">
+                                                    <span class="contact-form__label">How often do you order?</span>
+                                                    <select name="order_frequency" class="form-input">
+                                                        <option value="">Unsure</option>
+                                                        <option value="one-off">One-off</option>
+                                                        <option value="monthly">Monthly</option>
+                                                        <option value="quarterly">Every few months</option>
+                                                    </select>
+                                                </label>
+                                                <label class="contact-form__field">
+                                                    <span class="contact-form__label">Urgency</span>
+                                                    <select name="urgency" class="form-input">
+                                                        <option value="">Standard</option>
+                                                        <option value="soon">Needed soon</option>
+                                                        <option value="out">Printer is out of ink/toner now</option>
+                                                    </select>
+                                                </label>
+                                            </div>
+
+                                            <div class="contact-form__row">
+                                                <label class="contact-form__field">
+                                                    <span class="contact-form__label">Delivery suburb</span>
+                                                    <input type="text" name="delivery_suburb" maxlength="80" autocomplete="address-level3" class="form-input">
+                                                </label>
+                                                <label class="contact-form__field">
+                                                    <span class="contact-form__label">City</span>
+                                                    <input type="text" name="delivery_city" maxlength="80" autocomplete="address-level2" class="form-input">
+                                                </label>
+                                            </div>
+
+                                            <div class="contact-form__row">
+                                                <label class="contact-form__field">
+                                                    <span class="contact-form__label">Postcode</span>
+                                                    <input type="text" name="delivery_postcode" maxlength="4" inputmode="numeric" autocomplete="postal-code" class="form-input">
+                                                </label>
+                                                <label class="contact-form__field">
+                                                    <span class="contact-form__label">Required by</span>
+                                                    <input type="date" name="required_by" class="form-input">
+                                                </label>
+                                            </div>
+
+                                            <p class="quote-panel__hint">Your delivery location helps us include accurate freight where applicable.</p>
+                                        </div>
+                                    </details>
+
+                                    <!-- Honeypot — bots fill it; humans never see it. -->
+                                    <div class="contact-form__hp" aria-hidden="true" style="position:absolute;left:-10000px;top:auto;width:1px;height:1px;overflow:hidden;">
+                                        <label>Leave this field empty<input type="text" name="website" tabindex="-1" autocomplete="off"></label>
+                                    </div>
+
+                                    <div id="quote-turnstile" class="quote-turnstile" aria-label="CAPTCHA challenge"></div>
+                                    <div id="quote-turnstile-error" class="quote-turnstile-error" hidden>
+                                        <span>The security check couldn&rsquo;t load. Check your connection and try again.</span>
+                                        <button type="button" id="quote-turnstile-retry" class="btn btn--outline btn--sm">Retry</button>
+                                    </div>
+
+                                    <div class="quote-actions">
+                                        <button type="submit" id="quote-submit" class="btn btn--primary btn--large">
+                                            Request my quote
+                                        </button>
+                                    </div>
+
+                                    <p class="quote-panel__hint">No obligation to order. Your details are used only to prepare and respond to your quote.</p>
+
+                                    <div id="quote-result" class="contact-form__result" role="status" aria-live="polite" hidden></div>
+                                </section>
+                            </form>
+
+                            <!-- ── Success state (replaces the form after submission) ── -->
+                            <div id="quote-success" class="quote-success" hidden>
+                                <span class="quote-success__icon" aria-hidden="true">
+                                    <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
                                 </span>
-                                <div>
-                                    <div class="contact-card__label">Bulk &amp; account pricing</div>
-                                    <div class="contact-card__hint">Sharper pricing the more you order &mdash; genuine and compatible options.</div>
+                                <h2 class="quote-success__title">Your quote request has been received</h2>
+                                <p><span id="quote-success-ref" class="quote-success__ref"></span></p>
+                                <p class="quote-success__copy">
+                                    We&rsquo;ll review your products and contact you within one business day.
+                                    If it&rsquo;s urgent, call <a href="tel:+64274740115">027 474 0115</a>
+                                    (Mon&ndash;Fri, 9am&ndash;5pm NZT) or email
+                                    <a href="mailto:support@inkcartridges.co.nz">support@inkcartridges.co.nz</a>
+                                    and mention your reference.
+                                </p>
+                                <div class="quote-success__actions">
+                                    <a href="/shop" class="btn btn--secondary">Back to shopping</a>
+                                    <button type="button" id="quote-again" class="btn btn--outline">Submit another request</button>
                                 </div>
-                            </li>
+                            </div>
+                        </div>
 
-                            <li class="contact-card__item">
-                                <span class="contact-card__icon" aria-hidden="true">
-                                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-                                </span>
-                                <div>
-                                    <div class="contact-card__label">Reply within 1 business day</div>
-                                    <div class="contact-card__hint">A real person prices your list &mdash; no automated runaround.</div>
+                        <!-- Product-row template — stamped by quote-page.js; values are set via
+                             .value/textContent, never innerHTML with user data. -->
+                        <template id="quote-row-template">
+                            <fieldset class="quote-row">
+                                <legend class="visually-hidden">Product</legend>
+                                <div class="quote-row__code contact-form__field">
+                                    <label class="contact-form__label" data-row-label="code">Cartridge code, product, or printer model</label>
+                                    <input type="text" class="form-input" data-row-input="code" maxlength="120" autocomplete="off" role="combobox" aria-expanded="false" aria-autocomplete="list" placeholder="e.g. TN-2450">
                                 </div>
-                            </li>
-
-                            <li class="contact-card__item">
-                                <span class="contact-card__icon" aria-hidden="true">
-                                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="1" y="3" width="15" height="13"/><polygon points="16 8 20 8 23 11 23 16 16 16 16 8"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/></svg>
-                                </span>
-                                <div>
-                                    <div class="contact-card__label">NZ-wide delivery</div>
-                                    <div class="contact-card__hint">Auckland-based &mdash; fast dispatch across New Zealand.</div>
+                                <div class="quote-row__qty contact-form__field">
+                                    <label class="contact-form__label" data-row-label="qty">Qty</label>
+                                    <input type="number" class="form-input" data-row-input="qty" min="1" max="999" step="1" value="1" inputmode="numeric">
                                 </div>
-                            </li>
-                        </ul>
+                                <fieldset class="quote-row__prefs">
+                                    <legend>Genuine or compatible?</legend>
+                                    <div class="quote-pref-group">
+                                        <label class="quote-pref"><input type="radio" data-row-input="pref" value="both" checked>Show me both</label>
+                                        <label class="quote-pref"><input type="radio" data-row-input="pref" value="genuine">Genuine/OEM</label>
+                                        <label class="quote-pref"><input type="radio" data-row-input="pref" value="compatible">Compatible</label>
+                                        <label class="quote-pref"><input type="radio" data-row-input="pref" value="no-preference">No preference</label>
+                                    </div>
+                                </fieldset>
+                                <div class="quote-row__notes contact-form__field">
+                                    <label class="contact-form__label" data-row-label="notes">Notes <span class="contact-form__optional">(optional)</span></label>
+                                    <input type="text" class="form-input" data-row-input="notes" maxlength="140" placeholder="e.g. colour, high-yield if available">
+                                </div>
+                                <div class="quote-row__actions">
+                                    <button type="button" class="quote-row__btn" data-row-action="duplicate" aria-label="Duplicate this product">Duplicate</button>
+                                    <button type="button" class="quote-row__btn" data-row-action="remove" aria-label="Remove this product">Remove</button>
+                                </div>
+                            </fieldset>
+                        </template>
 
-                        <p class="contact-card__footnote">
-                            Prefer to talk it through? Call <a href="tel:+64274740115">027 474 0115</a>
-                            (Mon&ndash;Fri, 9am&ndash;5pm NZT) or email
-                            <a href="mailto:support@inkcartridges.co.nz">support@inkcartridges.co.nz</a>.
-                        </p>
-                    </article>
+                        <section class="quote-faq" aria-labelledby="quote-faq-heading">
+                            <h2 id="quote-faq-heading" class="quote-faq__title">Quote questions</h2>
 
-                    <article class="contact-form-card" aria-labelledby="quote-form-heading">
-                        <h2 id="quote-form-heading" class="contact-form-card__title">Tell us what you need</h2>
-                        <p class="contact-form-card__lead">
-                            The more detail you give &mdash; printer models, cartridge codes,
-                            and quantities &mdash; the more accurate your quote.
-                        </p>
+                            <details class="faq-item">
+                                <summary class="faq-item__question">Do I need to know my cartridge code?</summary>
+                                <div class="faq-item__answer">
+                                    <p>No. A photo of your printer&rsquo;s model label or cartridge box, or just the
+                                    printer&rsquo;s make and model, is enough &mdash; we&rsquo;ll match the right supplies for you.</p>
+                                </div>
+                            </details>
 
-                        <form id="quote-form" class="contact-form" novalidate>
-                            <div class="contact-form__row">
-                                <label class="contact-form__field">
-                                    <span class="contact-form__label">Business name <span aria-hidden="true">*</span></span>
-                                    <input type="text" name="business_name" required maxlength="160" autocomplete="organization" class="form-input">
-                                </label>
+                            <details class="faq-item">
+                                <summary class="faq-item__question">Can I upload my current supplier invoice?</summary>
+                                <div class="faq-item__answer">
+                                    <p>Yes &mdash; a recent invoice or purchase list (PDF, spreadsheet, or photo) is often
+                                    the fastest way to an accurate like-for-like quote. A team member reviews every upload personally.</p>
+                                </div>
+                            </details>
 
-                                <label class="contact-form__field">
-                                    <span class="contact-form__label">Your name <span aria-hidden="true">*</span></span>
-                                    <input type="text" name="name" required maxlength="120" autocomplete="name" class="form-input">
-                                </label>
+                            <details class="faq-item">
+                                <summary class="faq-item__question">Can you quote genuine and compatible options?</summary>
+                                <div class="faq-item__answer">
+                                    <p>Yes. Ask for either &mdash; or both side by side &mdash; per product. Compatible
+                                    cartridges offer significant savings; genuine keeps you on the manufacturer&rsquo;s own supplies.</p>
+                                </div>
+                            </details>
+
+                            <details class="faq-item">
+                                <summary class="faq-item__question">How quickly will I receive a response?</summary>
+                                <div class="faq-item__answer">
+                                    <p>A real person reviews your request and replies within one business day
+                                    (Mon&ndash;Fri, 9am&ndash;5pm NZT). If it&rsquo;s urgent, call
+                                    <a href="tel:+64274740115">027 474 0115</a>.</p>
+                                </div>
+                            </details>
+
+                            <details class="faq-item">
+                                <summary class="faq-item__question">Do I need an account to request a quote?</summary>
+                                <div class="faq-item__answer">
+                                    <p>No account needed &mdash; just a name, business, and email address so we can send
+                                    your pricing.</p>
+                                </div>
+                            </details>
+                        </section>
+                    </div>
+
+                    <aside class="quote-aside">
+                        <details id="quote-support" class="quote-support">
+                            <summary>Why request a quote?</summary>
+                            <div class="quote-support__body">
+                                <ul class="quote-support__list">
+                                    <li><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg> Bulk &amp; account pricing &mdash; sharper the more you order</li>
+                                    <li><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg> Genuine and compatible options, priced side by side</li>
+                                    <li><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg> Reply within one business day &mdash; reviewed by a real person</li>
+                                    <li><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg> Delivery throughout New Zealand</li>
+                                </ul>
+
+                                <ol class="quote-support__steps">
+                                    <li><strong>Send your requirements</strong> &mdash; codes, models, a photo, or a list.</li>
+                                    <li><strong>We check compatibility</strong> and availability.</li>
+                                    <li><strong>You receive tailored pricing</strong> &mdash; approve it and we arrange your order.</li>
+                                </ol>
+
+                                <p class="quote-support__contact">
+                                    Prefer to talk it through? Call <a href="tel:+64274740115">027 474 0115</a>
+                                    (Mon&ndash;Fri, 9am&ndash;5pm NZT) or email
+                                    <a href="mailto:support@inkcartridges.co.nz">support@inkcartridges.co.nz</a>.
+                                </p>
                             </div>
-
-                            <div class="contact-form__row">
-                                <label class="contact-form__field">
-                                    <span class="contact-form__label">Email <span aria-hidden="true">*</span></span>
-                                    <input type="email" name="email" required maxlength="200" autocomplete="email" class="form-input">
-                                </label>
-
-                                <label class="contact-form__field">
-                                    <span class="contact-form__label">Phone <span class="contact-form__optional">(optional)</span></span>
-                                    <input type="tel" name="phone" maxlength="40" autocomplete="tel" class="form-input">
-                                </label>
-                            </div>
-
-                            <label class="contact-form__field">
-                                <span class="contact-form__label">Printer make &amp; model(s) <span class="contact-form__optional">(optional)</span></span>
-                                <input type="text" name="printers" maxlength="300" class="form-input" placeholder="e.g. Brother HL-L2350DW, HP OfficeJet Pro 8710">
-                            </label>
-
-                            <label class="contact-form__field">
-                                <span class="contact-form__label">Products &amp; quantities <span aria-hidden="true">*</span></span>
-                                <textarea name="items" rows="5" required maxlength="2000" class="form-input"
-                                          placeholder="List cartridge codes and how many, e.g.&#10;3&times; TN-2450 toner&#10;2&times; HP 65XL black&#10;1&times; HP 65 tri-colour"></textarea>
-                            </label>
-
-                            <label class="contact-form__field">
-                                <span class="contact-form__label">Delivery address <span class="contact-form__optional">(optional)</span></span>
-                                <textarea name="delivery_address" rows="3" maxlength="400" class="form-input" autocomplete="street-address"
-                                          placeholder="Where should we deliver? Helps us include freight in the quote."></textarea>
-                            </label>
-
-                            <label class="contact-form__field">
-                                <span class="contact-form__label">Additional notes <span class="contact-form__optional">(optional)</span></span>
-                                <textarea name="notes" rows="3" maxlength="1000" class="form-input"
-                                          placeholder="Anything else — how often you reorder, purchase-order requirements, deadlines…"></textarea>
-                            </label>
-
-                            <!-- Honeypot — bots fill it; humans never see it. -->
-                            <div class="contact-form__hp" aria-hidden="true" style="position:absolute;left:-10000px;top:auto;width:1px;height:1px;overflow:hidden;">
-                                <label>Leave this field empty<input type="text" name="website" tabindex="-1" autocomplete="off"></label>
-                            </div>
-
-                            <div id="quote-turnstile" class="contact-form__turnstile" aria-label="CAPTCHA challenge"></div>
-
-                            <div class="contact-form__actions">
-                                <button type="submit" id="quote-submit" class="btn btn--primary btn--lg">
-                                    Request my quote
-                                </button>
-                            </div>
-
-                            <div id="quote-result" class="contact-form__result" role="status" aria-live="polite" hidden></div>
-                        </form>
-                    </article>
+                        </details>
+                    </aside>
                 </div>
             </div>
         </section>
@@ -302,6 +556,7 @@
     <script defer src="/js/mega-nav.js?v=9a073f70"></script>
     <script defer src="/js/rewards-nudge.js?v=f5a2df30"></script>
     <script defer src="/js/legal-page.js?v=a8d75bd2"></script>
-    <script defer src="/js/quote-page.js?v=290a8486"></script>
+    <script defer src="/js/printer-data.js?v=2431d3ae"></script>
+    <script defer src="/js/quote-page.js?v=77a165c3"></script>
 </body>
 </html>

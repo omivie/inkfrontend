@@ -45,6 +45,8 @@
     }
   ],
   "redirects": [
+    { "source": "/card", "destination": "/quote?utm_source=business-card&utm_medium=qr", "permanent": false },
+
     { "source": "/account/", "destination": "/account", "permanent": true },
 
     { "source": "/orders/track", "destination": "/track-order", "permanent": true },

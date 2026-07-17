@@ -1,4 +1,7 @@
 {
+  "redirects": [
+    { "source": "card", "destination": "/quote?utm_source=business-card&utm_medium=qr", "type": 302 }
+  ],
   "rewrites": [
     { "source": "ribbon/**", "destination": "/html/product/index.html" },
     { "source": "products/**", "destination": "/html/product/index.html" },
