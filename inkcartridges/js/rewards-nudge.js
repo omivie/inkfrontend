@@ -36,7 +36,7 @@
     var CAMPAIGN = {
         version: 1,             // bump to re-arm after a dismissal cycle
         enabled: true,
-        delayMs: 6000,          // shown ~6s after load once auth settles
+        delayMs: 3000,          // shown ~3s after load once auth settles (owner-tuned Jul 17, was 6s)
         dismissDays: 7,         // explicit-dismissal cooldown
         trigger: 'timer',       // reserved for future: 'scroll' | 'exit'
         heading: 'Earn rewards on every order',
