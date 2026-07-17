@@ -437,6 +437,7 @@ function render() {
           <select class="admin-select" id="f-method"><option value="">Any method</option>${PAYMENT_METHODS.map(m => `<option value="${m.key}"${_filters.method === m.key ? ' selected' : ''}>${esc(m.label)}</option>`).join('')}</select>
           <button class="admin-btn admin-btn--ghost admin-btn--sm" id="exp-reset">Reset</button>
         </div>
+        <div id="exp-hidden-note"></div>
         <div id="exp-table"></div>
       </div>
     </div>
@@ -590,6 +591,39 @@ function refreshTable() {
   const start = (_page - 1) * _limit;
   const pageRows = all.slice(start, start + _limit);
   _table.setData(pageRows, { total: all.length, page: _page, limit: _limit });
+  updateHiddenNote(all.length);
+}
+
+/**
+ * LOUD empty state: saved expenses that the filters or the period control hide
+ * must never read as "you have no expenses". The period filter lives in a
+ * different card (the chart header) and Reset doesn't touch it, so a backdated
+ * one-off silently vanishing here is exactly the absence-read-as-healthy-zero
+ * trap (ERR-063/068/073…). When everything is hidden, say so — with the count,
+ * the reason, and a one-click "Show all" that widens the period to the data.
+ */
+function updateHiddenNote(visibleTotal) {
+  const host = _container?.querySelector('#exp-hidden-note');
+  if (!host) return;
+  if (visibleTotal > 0 || !_rows.length) { host.innerHTML = ''; return; }
+  const periodLabel = PERIODS.find(p => p.key === _period)?.label || 'selected period';
+  const dates = _rows.map(r => r.expense_date).filter(Boolean).sort();
+  const earliest = dates[0] || '';
+  host.innerHTML = `
+    <div class="exp-notice" role="status">
+      ${icon('search', 13, 13)}
+      ${_rows.length === 1 ? 'Your 1 saved expense is' : `All ${_rows.length} saved expenses are`}
+      hidden by the current filters or the &ldquo;${esc(periodLabel)}&rdquo; period${earliest ? ` — the oldest is dated ${esc(fmtDate(earliest))}` : ''}.
+      <button class="admin-btn admin-btn--ghost admin-btn--sm" id="exp-show-all" style="margin-left:8px">Show all</button>
+    </div>`;
+  host.querySelector('#exp-show-all')?.addEventListener('click', () => {
+    _filters = { search: '', category: '', status: '', type: '', method: '' };
+    _page = 1;
+    _period = 'custom';
+    _customFrom = earliest || isoFromMs(todayUtcMs() - 365 * 86400000);
+    _customTo = todayInputValue();
+    reloadOccurrencesThenRender();
+  });
 }
 
 // ─── charts ──────────────────────────────────────────────────────────────────

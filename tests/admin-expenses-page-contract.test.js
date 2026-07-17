@@ -145,6 +145,17 @@ test('the built-in operating list is retired — only order-linked + other stay 
   assert.match(util, /export const RETIRED_CATEGORY_DEFAULTS/, 'retired defaults must exist for seeding');
 });
 
+test('hidden rows are announced, never a silent empty table (ERR-090)', () => {
+  const page = read(path.join(ADMIN, 'pages', 'expenses.js'));
+  // The period control filters one-offs by date but lives in a different card;
+  // a backdated expense must not read as "no expenses". When everything is
+  // hidden the page says so with a count and offers a one-click widen.
+  assert.match(page, /updateHiddenNote\(/, 'refreshTable must drive the hidden-rows notice');
+  assert.match(page, /exp-hidden-note/, 'the notice slot must exist in the table card');
+  assert.match(page, /exp-show-all/, 'a Show-all CTA must widen the period to the data');
+  assert.match(page, /hidden by the current filters or the/, 'the message names the cause, not a generic empty state');
+});
+
 test('financial-health loads the owner category list before rendering', () => {
   assert.match(fhJs, /CUSTOM_CATEGORIES_KEY/, 'FH must read the shared prefs key');
   assert.match(fhJs, /setCustomCategories\(/, 'FH must install the list into the registry');
