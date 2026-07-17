@@ -120,9 +120,12 @@ test('S0.6 the tel: utility link is shown on mobile (mailto hidden)', () => {
         'email item should be hidden on mobile');
     assert.match(LAYOUT, /\.header-contact__item\[href\^="tel:"\]\s*\{[^}]*min-height:\s*44px/s,
         'tel item should be a visible 44px tap target on mobile');
-    // It must NOT be unconditionally display:none — assert it is re-shown.
-    assert.match(LAYOUT, /@media \(max-width: 768px\)[\s\S]*\.header-contact\s*\{[\s\S]*?display:\s*flex/,
-        'header-contact must be re-shown (display:flex) inside a mobile media query');
+    // It must NOT be unconditionally display:none — assert it is shown.
+    // Jul 2026 responsive rebuild: the header CSS is mobile-first, so the
+    // tap-to-call chip is a BASE rule (active at every hamburger width)
+    // rather than living inside a max-width media query.
+    assert.match(LAYOUT, /\.header-contact\s*\{[\s\S]*?display:\s*flex/,
+        'header-contact must be display:flex (mobile-first base rule)');
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

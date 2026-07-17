@@ -116,8 +116,12 @@
     // leaving mobile / closing. On mobile we relocate the panel inside the
     // nav-menu so it scrolls with the (absolutely-positioned) menu instead of
     // being clipped behind it.
-    const MOBILE_BREAKPOINT = 768;
-    const isMobile = () => window.matchMedia(`(max-width: ${MOBILE_BREAKPOINT}px)`).matches;
+    // "Mobile" = every hamburger mode, i.e. NOT the desktop-nav media query
+    // (Config.MQ_DESKTOP_NAV, min-width 1100px) — the negated min-width keeps
+    // JS exactly complementary to the CSS gate with no off-by-one.
+    const isMobile = () => !window.matchMedia(
+        (typeof Config !== 'undefined' && Config.MQ_DESKTOP_NAV) || '(min-width: 1100px)'
+    ).matches;
     const panelOrigins = new WeakMap();
     function rememberOrigin(panel) {
         if (panel && !panelOrigins.has(panel)) {

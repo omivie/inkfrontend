@@ -37,6 +37,15 @@ const Config = {
     ITEMS_PER_PAGE: 20,
     SEARCH_DEBOUNCE_MS: 300,
 
+    // Responsive breakpoints (responsive rebuild Jul 2026) — the JS mirror of
+    // the header breakpoint system documented in css/base.css. Keep in sync:
+    //   compact 480 · tablet 768 · desktopNav 1100 (full nav row only >=1100,
+    //   where its ~870px of nowrap links + 200px search genuinely fit).
+    BREAKPOINTS: { compact: 480, tablet: 768, desktopNav: 1100 },
+    // matchMedia string for the desktop-nav gate; JS "mobile" = !matches,
+    // exactly complementary to the CSS @media (min-width: 1100px) blocks.
+    MQ_DESKTOP_NAV: '(min-width: 1100px)',
+
     // Currency formatting
     CURRENCY: 'NZD',
     LOCALE: 'en-NZ',

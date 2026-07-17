@@ -145,7 +145,10 @@
 }
 
 .hero__title {
-    font-size: var(--font-size-2xl);
+    /* Fluid 25px → 30px (responsive rebuild Jul 2026 — replaces the stepped
+       480/768 overrides); balance stops the ragged mid-width line breaks. */
+    font-size: clamp(var(--font-size-xl), 1.15rem + 1.4vw, var(--font-size-2xl));
+    text-wrap: balance;
     font-weight: var(--font-weight-extrabold);
     margin-bottom: var(--spacing-md);
     color: var(--white-primary);
@@ -158,7 +161,7 @@
 }
 
 .hero__subtitle {
-    font-size: var(--font-size-lg);
+    font-size: clamp(var(--font-size-base), 0.95rem + 0.4vw, var(--font-size-lg));
     color: rgba(255, 255, 255, 0.9);
     margin-bottom: var(--spacing-lg);
     max-width: 720px;
@@ -188,9 +191,18 @@
     font-weight: var(--font-weight-medium);
 }
 
+/* The literal <span class="hero__trust-sep">•</span> separators are separate
+   flex items, so mid-width wrapping could strand a lone bullet at a line
+   edge. Hide them and attach the bullet to the preceding text instead —
+   it can now never wrap on its own (responsive rebuild Jul 2026). */
 .hero__trust-sep {
+    display: none;
+}
+
+.hero__trust-text:not(:last-of-type)::after {
+    content: '•';
+    margin-left: var(--spacing-sm);
     color: rgba(255, 255, 255, 0.5);
-    font-size: var(--font-size-sm);
 }
 
 .hero__cta {
@@ -212,21 +224,15 @@
 }
 
 @media (max-width: 480px) {
-    .hero__title {
-        font-size: var(--font-size-xl);
-    }
-
-    .hero__subtitle {
-        font-size: var(--font-size-base);
-    }
-
+    /* (Title/subtitle sizes are fluid clamp() on the base rules now.) */
     .hero__trust-row {
         flex-direction: column;
         gap: var(--spacing-xs);
     }
 
-    .hero__trust-sep {
-        display: none;
+    /* Stacked — no trailing bullets. */
+    .hero__trust-text:not(:last-of-type)::after {
+        content: none;
     }
 }
 
@@ -243,7 +249,24 @@
     display: flex;
     justify-content: center;
     flex-wrap: wrap;
-    gap: var(--spacing-2xl);
+    gap: clamp(var(--spacing-lg), 4vw, var(--spacing-2xl));
+}
+
+/* Mid widths: a deterministic 2×2 grid instead of flex-wrap roulette
+   (2+2 vs 3+1 depending on a few px) — responsive rebuild Jul 2026. */
+@media (max-width: 1024px) {
+    .trust-bar__list {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        justify-items: center;
+        gap: var(--spacing-md) var(--spacing-lg);
+    }
+}
+
+@media (max-width: 480px) {
+    .trust-bar__list {
+        grid-template-columns: 1fr;
+    }
 }
 
 .trust-bar__item {
@@ -9098,10 +9121,7 @@ body.filter-sort-open { overflow: hidden; }
    ========================================================================== */
 
 @media (max-width: 768px) {
-    .hero__title {
-        font-size: var(--font-size-xl);
-    }
-
+    /* (.hero__title is fluid clamp() on its base rule — old override removed.) */
     .newsletter__form {
         flex-direction: column;
     }
@@ -9121,14 +9141,8 @@ body.filter-sort-open { overflow: hidden; }
         padding: var(--spacing-2xl) 0;
     }
 
-    .trust-bar__list {
-        gap: var(--spacing-lg);
-    }
-
-    .trust-bar__item {
-        flex-basis: 100%;
-        justify-content: center;
-    }
+    /* (.trust-bar__list stacking now lives with its base rule — the list is
+       a deterministic grid below 1024px, single column below 480px.) */
 
     .confirmation-details {
         grid-template-columns: 1fr;

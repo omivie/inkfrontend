@@ -55,93 +55,59 @@
        all shift between pages. See project_navbar_parity_may2026 — search
        bar drift was a regression caused exactly by this cascade leak. */
     --container-max-width: 1200px;
-    --container-padding: var(--spacing-8);
+    --container-padding: clamp(var(--spacing-4), 0.5rem + 2vw, var(--spacing-8));
 }
 
-/* Top utility bar */
-.top-bar {
-    background-color: var(--color-background-dark);
-    color: var(--color-text-inverse);
-    padding: var(--spacing-2) 0;
-    font-size: var(--font-size-sm);
-    position: relative;
-}
+/* (Dead .top-bar utility-bar CSS removed in the Jul 2026 responsive
+   rebuild — no storefront HTML references it.) */
 
-/* CMYK accent strip at very top of page */
-.top-bar::before {
-    content: '';
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    height: 3px;
-    background: var(--accent-strip-gradient);
-    z-index: 1;
-}
+/* ==========================================================================
+   SITE HEADER — responsive rebuild Jul 2026 (mobile-first)
 
-.top-bar .container {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    flex-wrap: wrap;
-    gap: var(--spacing-sm);
-}
+   Four intentional modes, content-driven breakpoints (see base.css tokens
+   + js/config.js Config.BREAKPOINTS — keep the three in sync):
 
-.top-bar__contact {
-    display: flex;
-    align-items: center;
-    gap: var(--spacing-lg);
-}
+     base            320–479   compact mobile — logo left + icon-only actions,
+                               hamburger + full-width search row, tap-to-call chip
+     min-width 480   480–767   large mobile — same composition, more air
+     min-width 768   768–1099  tablet — grid header (contact | logo | actions),
+                               tagline + labels return, STILL hamburger
+     min-width 1100  1100+     desktop — full nav row (it measures ~870px of
+                               nowrap links + 200px search; below ~1100 it clips)
 
-.top-bar__contact a {
-    color: var(--color-text-inverse);
-    display: flex;
-    align-items: center;
-    gap: var(--spacing-1);
-    transition: color var(--transition-fast);
-}
-
-.top-bar__contact a:hover {
-    color: var(--color-primary-light);
-    text-decoration: none;
-}
-
-.top-bar__links {
-    display: flex;
-    align-items: center;
-    gap: var(--spacing-md);
-}
-
-.top-bar__links a {
-    color: var(--color-text-inverse);
-    transition: color var(--transition-fast);
-}
-
-.top-bar__links a:hover {
-    color: var(--color-primary-light);
-    text-decoration: none;
-}
+   Invariants (tests/responsive-header-jul2026.test.js):
+     - .logo-block is NEVER position:absolute (the old transform-centering
+       let contact/actions overlap the logo at 481–1000px, and center-
+       justified overflow clipped the logo's LEFT edge at 390px)
+     - the desktop nav is gated at (min-width: 1100px)
+   ========================================================================== */
 
 /* Main header with logo, search, cart */
 .header-main {
-    padding: calc(var(--spacing-3) + 5px) 0;
+    padding: var(--spacing-2) 0;
     background-color: var(--color-background);
 }
 
 .header-main .container {
     display: flex;
-    align-items: flex-end;
+    flex-wrap: wrap;
+    align-items: center;
     justify-content: space-between;
-    gap: var(--spacing-lg);
+    gap: var(--spacing-2);
     position: relative;
 }
 
-/* Header contact info */
+/* Header contact info — on mobile this is the compact tap-to-call utility
+   row under the logo (S0.6, mobile-parity-may2026): phone only, email
+   hidden until desktop. */
 .header-contact {
     display: flex;
-    flex-direction: column;
-    gap: var(--spacing-1);
-    min-width: 200px;
+    flex-direction: row;
+    align-items: center;
+    gap: var(--spacing-3);
+    min-width: 0;
+    order: 3;
+    width: 100%;
 }
 
 .header-contact__item {
@@ -160,13 +126,26 @@
     text-decoration: none;
 }
 
-/* Logo block - contains logo and tagline */
+/* S0.6 — email is dropped below desktop (long string, lower value than a
+   one-tap phone call for our phone-first NZ ink buyer). */
+.header-contact__item[href^="mailto:"] {
+    display: none;
+}
+
+.header-contact__item[href^="tel:"] {
+    display: inline-flex;
+    min-height: 44px;
+    align-items: center;
+    font-weight: var(--font-weight-semibold);
+}
+
+/* Logo block - contains logo and tagline. IN FLOW at every width — never
+   position:absolute (see header comment above). */
 .logo-block {
-    position: absolute;
-    left: 50%;
-    top: 50%;
-    transform: translate(-50%, -50%);
-    text-align: center;
+    order: 1;
+    flex: 1 1 auto;
+    min-width: 0;
+    text-align: left;
 }
 
 /* Logo - Bold CMYK Identity */
@@ -175,7 +154,7 @@
     text-decoration: none;
     display: flex;
     align-items: center;
-    justify-content: center;
+    justify-content: flex-start;
     gap: var(--spacing-2);
 }
 
@@ -186,7 +165,8 @@
 }
 
 .logo__tagline {
-    display: block;
+    /* Hidden on mobile — returns at the 768px tablet mode. */
+    display: none;
     font-size: var(--font-size-base);
     color: var(--black-primary);
     margin-top: -8px;
@@ -210,11 +190,18 @@
 }
 
 .logo__text {
-    font-size: var(--font-size-3xl);
+    /* Fluid, solved (and browser-measured) for "logo + 3 action icons share
+       row one": lockup ≈ 9.9em + 18px (gap + ink dot), icon cluster 171px,
+       fluid container padding ≈ 8px + 2vw → font ≤ 9.7vw − 22.3px.
+       ~15.5px at 390, ~24px at 480; below ~355px (or with the 4th admin
+       icon) the actions wrap to their own tidy line instead of clipping.
+       The 768 tablet mode and 1100 desktop mode restore larger sizes. */
+    font-size: clamp(0.8125rem, 9.7vw - 22.3px, var(--font-size-2xl));
     font-weight: var(--font-weight-bold);
     color: var(--cyan-primary);
     transition: all 0.2s ease;
     letter-spacing: -0.02em;
+    white-space: nowrap;
 }
 
 .logo:hover .logo__text {
@@ -329,23 +316,38 @@
     flex: 1;
 }
 
-/* Header actions (account, cart) */
+/* Header actions (account, cart) — icon-only on mobile, labels return at
+   the 768px tablet mode. */
 .header-actions {
     display: flex;
     align-items: center;
-    gap: var(--spacing-xl);
+    gap: var(--spacing-2);
+    order: 2;
+    flex: 0 0 auto;
 }
 
-
+/* S0.1 — every action is a >=48px (--tap-min) touch target at all widths.
+   The visible 24px icon is unchanged; padding does the work.
+   (mobile-parity-may2026 S0.1 → mobile-ux-audit-jul2026 §5b) */
 .header-actions__item {
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: var(--spacing-1);
+    justify-content: center;
+    gap: var(--tap-gap);
+    padding: var(--spacing-1);
+    min-width: var(--tap-min);
+    min-height: var(--tap-min);
     color: var(--color-text);
     text-decoration: none;
     font-size: var(--font-size-sm);
     transition: color var(--transition-fast);
+}
+
+/* Icon-only below tablet: hide the text label under each icon. The links
+   keep their accessible names via aria-label in the markup. */
+.header-actions__item > span:not(.header-actions__icon) {
+    display: none;
 }
 
 .header-actions__item:hover {
@@ -412,45 +414,71 @@
     position: relative;
 }
 
+/* Base = hamburger row: toggle + full-width search + submit. The desktop
+   nav row only exists at >=1100px, where it genuinely fits. */
 .primary-nav .container {
     display: flex;
+    flex-wrap: nowrap;
     align-items: center;
-    justify-content: space-between;
+    justify-content: flex-start;
+    gap: var(--spacing-3);
     position: relative;
+    padding-top: var(--spacing-2);
+    padding-bottom: var(--spacing-2);
 }
 
-.nav-menu {
+/* Hamburger toggle — visible in every mode below the 1100px desktop nav.
+   48×48 touch target: Apple floor 44 raised to WCAG AAA --tap-min
+   (mobile-parity-may2026 S0.1 → mobile-ux-audit-jul2026 §5b). */
+.nav-toggle {
     display: flex;
     align-items: center;
+    justify-content: center;
+    flex: 0 0 auto;
+    padding: var(--spacing-3);
+    width: var(--tap-min);
+    height: var(--tap-min);
+    color: var(--white-primary);
+    font-size: var(--font-size-xl);
+}
+
+/* Base = collapsed menu: a full-width dark dropdown under the nav ribbon,
+   opened by .nav-toggle (main.js#initNavigation toggles .is-open). */
+.nav-menu {
+    display: none;
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    background: var(--steel-900);
+    flex-direction: column;
+    align-items: stretch;
+    padding: var(--spacing-4);
     gap: 0;
+    z-index: 100;
+}
+
+.nav-menu.is-open {
+    display: flex;
 }
 
 .nav-menu__item {
     position: relative;
-}
-
-.nav-menu__item:not(:last-child)::after {
-    content: '';
-    position: absolute;
-    right: 0;
-    top: 50%;
-    transform: translateY(-50%);
-    height: 20px;
-    width: 1px;
-    background-color: rgba(255, 255, 255, 0.1);
+    width: 100%;
 }
 
 .nav-menu__link {
-    display: flex;
-    align-items: center;
-    gap: var(--spacing-1);
+    display: block;
+    width: 100%;
+    text-align: left;
     padding: var(--spacing-3) var(--spacing-4);
+    min-height: 44px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.2);
     color: var(--steel-200);
     font-size: var(--font-size-sm);
     font-weight: var(--font-weight-medium);
     text-transform: uppercase;
     letter-spacing: 0.08em;
-    white-space: nowrap;
     transition: background-color var(--transition-fast), color var(--transition-fast);
 }
 
@@ -529,68 +557,19 @@
 }
 
 
-/* Search form in nav bar */
-.search-wrapper {
-    position: relative;
-    width: 50%;
-    max-width: 50%;
-    margin-left: auto;
-    flex-shrink: 1;
-    min-width: 200px;
-}
-
-/* When search-form--nav is inside a wrapper, fill the wrapper (wrapper already handles sizing) */
-.search-wrapper .search-form.search-form--nav {
-    width: 100%;
-    max-width: 100%;
-    margin-left: 0;
-}
-
-/* When search-form--nav is standalone (no wrapper): fill the space
-   between the nav menu and the container's right edge naturally. */
+/* Search form in nav bar. Base = full-width in the hamburger row (it shares
+   the ribbon with only the 48px toggle). The desktop inline sizing +
+   focus-expand + dark overlay are scoped to the >=1100px mode below.
+   (.search-wrapper CSS removed — the markup wrapper was retired May 2026;
+   navbar-parity forbids reintroducing it.) */
 .search-form.search-form--nav {
-    width: auto;
-    max-width: 50%;
-    margin-left: auto;
     flex: 1 1 auto;
-    min-width: 200px;
+    width: auto;
+    max-width: none;
+    min-width: 0;
+    margin: 0;
     transition: none;
     z-index: 10;
-}
-
-/* Expanded state: stretch to full container width */
-.search-form.search-form--nav.is-expanded {
-    position: absolute;
-    right: 0;
-    left: 0;
-    width: 100%;
-    max-width: 100%;
-}
-
-/* Expanded state for wrapper: stretch wrapper to full container width, stay anchored */
-.search-wrapper.is-expanded {
-    position: absolute;
-    top: 0;
-    right: 0;
-    bottom: 0;
-    left: 0;
-    width: 100%;
-    max-width: 100%;
-    display: flex;
-    align-items: center;
-    z-index: 10;
-}
-
-/* Dark overlay below expanded search */
-.primary-nav.search-active::after {
-    content: '';
-    position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    background: rgba(0, 0, 0, 0.35);
-    z-index: 5;
 }
 
 .search-form--nav .search-form__input {
@@ -629,11 +608,217 @@
     background-color: var(--yellow-primary);
     border-color: var(--yellow-primary);
     color: var(--black-primary);
+    /* S0.1 — the nav search submit is a >=48px (--tap-min) target. */
+    min-width: var(--tap-min);
+    min-height: var(--tap-min);
 }
 
 .search-form--nav .search-form__button:hover {
     background-color: var(--yellow-dark);
     border-color: var(--yellow-dark);
+}
+
+
+/* ==========================================================================
+   HEADER MODE B — large mobile (>=480px)
+   Same composition as compact mobile, with more air.
+   ========================================================================== */
+@media (min-width: 480px) {
+    .header-main .container {
+        gap: var(--spacing-3);
+    }
+
+    .header-actions {
+        gap: var(--spacing-3);
+    }
+}
+
+/* ==========================================================================
+   HEADER MODE C — tablet (>=768px), STILL hamburger navigation.
+   The brand row becomes a 3-column grid (contact | logo | actions) —
+   true centering with overlap impossible by construction, replacing the
+   old position:absolute transform-centering. The desktop nav row does not
+   fit until ~1100px, so the hamburger + full-width search stay.
+   ========================================================================== */
+@media (min-width: 768px) {
+    .header-main {
+        padding: calc(var(--spacing-3) + 5px) 0;
+    }
+
+    .header-main .container {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+        align-items: center;
+        gap: var(--spacing-3);
+    }
+
+    /* Contact returns to a stacked column on the left (phone only —
+       the email would starve the grid until desktop). */
+    .header-contact {
+        order: 0;
+        grid-column: 1;
+        justify-self: start;
+        flex-direction: column;
+        align-items: flex-start;
+        gap: var(--spacing-1);
+        width: auto;
+        margin: 0;
+    }
+
+    .logo-block {
+        order: 0;
+        grid-column: 2;
+        text-align: center;
+        min-width: 0;
+    }
+
+    .logo {
+        justify-content: center;
+    }
+
+    .logo__text {
+        font-size: clamp(1.4rem, 0.2rem + 2.5vw, var(--font-size-3xl));
+    }
+
+    .header-actions {
+        order: 0;
+        grid-column: 3;
+        justify-self: end;
+        gap: clamp(var(--spacing-3), 1.5vw, var(--spacing-xl));
+    }
+}
+
+/* Tagline returns once the centre column can afford its ~300px without
+   squeezing the action icons out of their 1fr track (measured: the
+   4-item admin case needs >=~250px per side, available from ~900px). */
+@media (min-width: 900px) {
+    .logo__tagline {
+        display: block;
+    }
+
+    .header-main .container {
+        gap: var(--spacing-lg);
+    }
+}
+
+/* ==========================================================================
+   HEADER MODE D — desktop (>=1100px). The full nav row appears only here:
+   five uppercase nowrap links measure ~870px, plus the 200px-min search —
+   below ~1100px it clips (this is why the old 768px gate produced a broken
+   790px header). Hamburger hides; the menu becomes a horizontal row.
+   ========================================================================== */
+@media (min-width: 1100px) {
+    .header-contact__item[href^="mailto:"] {
+        display: flex;
+    }
+
+    .header-contact__item[href^="tel:"] {
+        min-height: 0;
+        font-weight: var(--font-weight-medium);
+    }
+
+    .logo__text {
+        font-size: var(--font-size-3xl);
+    }
+
+    /* Labels return under the action icons (measured: with labels the
+       4-item admin case needs >=~300px per side — comfortable from 1100). */
+    .header-actions__item > span:not(.header-actions__icon) {
+        display: inline;
+    }
+
+    /* Fluid gap: ~17px at 1100 easing to the classic 32px by ~1600px —
+       measured so the 4-item admin case (~250px of items) stays inside its
+       ~320px grid track right at the breakpoint. */
+    .header-actions {
+        gap: clamp(var(--spacing-4), 3vw - 1rem, var(--spacing-xl));
+    }
+
+    .nav-toggle {
+        display: none;
+    }
+
+    .primary-nav .container {
+        justify-content: space-between;
+        padding-top: 0;
+        padding-bottom: 0;
+    }
+
+    .nav-menu {
+        display: flex;
+        position: static;
+        background: none;
+        flex-direction: row;
+        align-items: center;
+        padding: 0;
+        gap: 0;
+        z-index: auto;
+    }
+
+    .nav-menu__item {
+        width: auto;
+    }
+
+    /* Hairline separators between items (desktop row only). */
+    .nav-menu__item:not(:last-child)::after {
+        content: '';
+        position: absolute;
+        right: 0;
+        top: 50%;
+        transform: translateY(-50%);
+        height: 20px;
+        width: 1px;
+        background-color: rgba(255, 255, 255, 0.1);
+    }
+
+    .nav-menu__link {
+        display: flex;
+        align-items: center;
+        gap: var(--spacing-1);
+        width: auto;
+        min-height: 0;
+        border-bottom: none;
+        white-space: nowrap;
+        /* Fluid inline padding: ~10px at 1100 easing to 16px on wide screens,
+           so the row fits comfortably right at the breakpoint. */
+        padding: var(--spacing-3) clamp(10px, 0.5vw + 4px, var(--spacing-4));
+    }
+
+    /* Inline search on the right: capped width, expands on focus. */
+    .search-form.search-form--nav {
+        width: auto;
+        max-width: 50%;
+        margin-left: auto;
+        min-width: 200px;
+    }
+
+    /* Restore the compact desktop search height (base carries the 48px
+       mobile tap target). */
+    .search-form--nav .search-form__button {
+        min-width: 0;
+        min-height: 0;
+    }
+
+    /* Expanded state: stretch to full container width. */
+    .search-form.search-form--nav.is-expanded {
+        position: absolute;
+        right: 0;
+        left: 0;
+        width: 100%;
+        max-width: 100%;
+    }
+
+    /* Dark overlay below expanded search. */
+    .primary-nav.search-active::after {
+        content: '';
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: rgba(0, 0, 0, 0.35);
+        z-index: 5;
+    }
 }
 
 
@@ -791,8 +976,10 @@
     color: var(--cyan-dark);
 }
 
-/* Responsive — Mega Dropdown */
-@media (max-width: 768px) {
+/* Responsive — Mega Dropdown. Below the 1100px desktop nav the mega panels
+   are relocated INSIDE the open hamburger menu (js/mega-nav.js), so the
+   "mobile" restyle must cover the whole hamburger range. */
+@media (max-width: 1099.98px) {
     .brands-mega {
         padding: var(--spacing-lg) 0;
     }
@@ -901,14 +1088,9 @@
     color: var(--cyan-dark);
 }
 
-/* Responsive — Ribbons Mega Dropdown */
-@media (max-width: 1024px) {
-    .ribbons-mega__grid {
-        grid-template-columns: repeat(4, 1fr);
-    }
-}
-
-@media (max-width: 768px) {
+/* Responsive — Ribbons Mega Dropdown (in-nav below the 1100px desktop nav,
+   same as the brands mega above). */
+@media (max-width: 1099.98px) {
     .ribbons-mega {
         padding: var(--spacing-lg) 0;
     }
@@ -1175,62 +1357,11 @@
     }
 }
 
-/* Mobile menu toggle */
-.nav-toggle {
-    display: none;
-    padding: var(--spacing-3);
-    color: var(--color-text-inverse);
-    font-size: var(--font-size-xl);
-}
-
-/* Mobile menu panel */
-.mobile-menu {
-    display: none;
-    position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    background-color: var(--color-background);
-    z-index: var(--z-modal);
-    overflow-y: auto;
-}
-
-.mobile-menu.is-open {
-    display: block;
-}
-
-.mobile-menu__header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: var(--spacing-4);
-    border-bottom: 1px solid var(--color-border);
-}
-
-.mobile-menu__close {
-    padding: var(--spacing-2);
-    font-size: var(--font-size-xl);
-    color: var(--color-text);
-}
-
-.mobile-menu__nav {
-    padding: var(--spacing-4);
-}
-
-.mobile-menu__link {
-    display: block;
-    padding: var(--spacing-3) 0;
-    min-height: 44px;
-    color: var(--color-text);
-    font-size: var(--font-size-md);
-    border-bottom: 1px solid var(--color-border-light);
-}
-
-.mobile-menu__link:hover {
-    color: var(--color-primary);
-    text-decoration: none;
-}
+/* (The .nav-toggle hamburger base rule lives in the SITE HEADER section —
+   it must precede the header mode media queries in the cascade.
+   Orphaned full-screen .mobile-menu overlay CSS removed in the Jul 2026
+   responsive rebuild — no storefront HTML or JS ever referenced it; the
+   admin SPA's .mobile-menu is a different component with its own CSS.) */
 
 
 /* ==========================================================================
@@ -1866,115 +1997,19 @@
        block above — the redesign's breakpoints are 940px and 560px.) */
 }
 
+/* NOTE (responsive rebuild Jul 2026): the header's responsive rules no
+   longer live here — the SITE HEADER section above is mobile-first, with
+   modes at min-width 480 / 768 / 900 / 1100. The May 2026 mobile-parity
+   (S0.1 tap targets, S0.6 tap-to-call chip) and Jul 2026 mobile-ux rules
+   were absorbed into the header's base rules. Only non-header leftovers
+   from the old patch blocks remain below. */
 @media (max-width: 768px) {
-    .header-contact {
-        display: none;
-    }
-
-    .header-main .container {
-        flex-wrap: wrap;
-    }
-
+    /* Legacy generic (non-nav) search forms stack full-width on mobile. */
     .search-form {
         order: 3;
         max-width: none;
         width: 100%;
         margin-top: var(--spacing-md);
-    }
-
-    .search-wrapper,
-    .search-form--nav {
-        max-width: 100%;
-        flex-shrink: 1;
-    }
-
-    /* On mobile the wrapper is already full width — skip the expand
-       animation that pulls it out of flow and collapses the ribbon. */
-    .search-wrapper.is-expanded,
-    .search-form.search-form--nav.is-expanded {
-        position: relative;
-        top: auto;
-        right: auto;
-        bottom: auto;
-        left: auto;
-        z-index: 10;
-    }
-
-    /* The dark search overlay isn't useful on mobile — the search bar
-       already lives in a full-width ribbon. Hide it so it can't cover
-       the input. */
-    .primary-nav.search-active::after {
-        display: none;
-    }
-
-    .primary-nav .container {
-        flex-wrap: nowrap;
-        justify-content: flex-start;
-        align-items: center;
-        gap: var(--spacing-3);
-        position: relative;
-        padding-top: var(--spacing-2);
-        padding-bottom: var(--spacing-2);
-        padding-left: var(--spacing-4);
-        padding-right: var(--spacing-4);
-    }
-
-    .nav-toggle {
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        position: static;
-        flex: 0 0 auto;
-        transform: none;
-        /* 48×48 touch target: Apple floor 44 raised to WCAG AAA --tap-min
-           (mobile-parity-may2026 S0.1 → mobile-ux-audit-jul2026 §5b). */
-        width: var(--tap-min);
-        height: var(--tap-min);
-        color: var(--white-primary);
-    }
-
-    .search-form.search-form--nav,
-    .search-form--nav,
-    .search-wrapper {
-        flex: 1 1 auto;
-        width: auto;
-        max-width: none;
-        min-width: 0;
-        margin: 0;
-    }
-
-    .search-form--nav .search-form__input,
-    .search-form--nav .search-form__button {
-        padding-top: 0.25rem;
-        padding-bottom: 0.25rem;
-        font-size: var(--font-size-sm);
-    }
-
-    .nav-menu {
-        display: none;
-        position: absolute;
-        top: 100%;
-        left: 0;
-        right: 0;
-        background: var(--steel-900);
-        flex-direction: column;
-        padding: var(--spacing-4);
-        z-index: 100;
-    }
-
-    .nav-menu.is-open {
-        display: flex;
-    }
-
-    .nav-menu__item {
-        width: 100%;
-    }
-
-    .nav-menu__link {
-        display: block;
-        padding: var(--spacing-3) var(--spacing-4);
-        min-height: 44px;
-        border-bottom: 1px solid rgba(255, 255, 255, 0.2);
     }
 
     .contact-layout {
@@ -1987,46 +2022,9 @@
 }
 
 @media (max-width: 480px) {
-    .header-contact {
-        display: none;
-    }
-
-    .header-actions__item > span:not(.header-actions__icon) {
-        display: none;
-    }
-
-    .logo__text {
-        font-size: 1.2rem;
-    }
-
     #google-reviews-badge,
     #google-reviews-badge iframe {
         display: none !important;
-    }
-
-    .logo-block {
-        position: relative;
-        left: auto;
-        top: auto;
-        transform: none;
-        text-align: left;
-        flex: 1;
-        min-width: 0;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-    }
-
-    .logo__tagline {
-        display: none;
-    }
-
-    .header-main .container {
-        gap: var(--spacing-2);
-    }
-
-    .header-actions {
-        gap: var(--spacing-3);
     }
 
     .product-grid--list .product-card {
@@ -2034,72 +2032,9 @@
     }
 }
 
-/* ==========================================================================
-   MOBILE PARITY — May 2026 (mobile-parity-audit-may2026.md)
-   Accessibility + touch-target fixes for the shared site-header.
-   S0.1: icon-only header links get a 44×44 hit area; the visible 24px icon
-         is unchanged. aria-labels live in the markup (every page header).
-   S0.6: the tap-to-call phone number stays visible on mobile (it was
-         display:none) — a tel: link is more useful on a phone than desktop.
-   ========================================================================== */
-@media (max-width: 768px) {
-    /* S0.1 — grow the tap area. The July mobile-ux audit (§5b) raised the
-       target from the 44px Apple floor to the 48px WCAG 2.5.5 AAA size we
-       standardised on (--tap-min). The icon stays 24px; padding does the work. */
-    .header-actions__item {
-        min-width: var(--tap-min);
-        min-height: var(--tap-min);
-        padding: var(--spacing-1);
-        gap: var(--tap-gap);
-        justify-content: center;
-    }
-
-    /* S0.1 — the nav search submit was ~30px tall; lift it to --tap-min (48). */
-    .search-form--nav .search-form__button {
-        min-width: var(--tap-min);
-        min-height: var(--tap-min);
-    }
-
-    /* S0.6 — re-show the utility bar but as a single tap-to-call chip.
-       The email is dropped on mobile (long string, lower value than a
-       one-tap phone call for our phone-first NZ ink buyer). */
-    .header-contact {
-        display: flex;
-        flex-direction: row;
-        align-items: center;
-        gap: var(--spacing-3);
-        min-width: 0;
-        order: 4;
-        width: 100%;
-        margin-top: var(--spacing-1);
-    }
-
-    .header-contact__item[href^="mailto:"] {
-        display: none;
-    }
-
-    .header-contact__item[href^="tel:"] {
-        display: inline-flex;
-        min-height: 44px;
-        align-items: center;
-        font-weight: var(--font-weight-semibold);
-    }
-}
-
-@media (max-width: 480px) {
-    /* The 480px breakpoint hides the action labels (icon-only). Keep the
-       full 44×44 hit area so the icons remain comfortably tappable, and
-       keep the tap-to-call chip visible (override the legacy display:none
-       that lived in the 480 block). */
-    .header-contact {
-        display: flex;
-    }
-
-    .header-actions__item {
-        min-width: var(--tap-min);
-        min-height: var(--tap-min);
-    }
-}
+/* (MOBILE PARITY May 2026 S0.1/S0.6 header blocks removed — the >=48px
+   touch targets and the tap-to-call chip are now the header's BASE rules
+   in the SITE HEADER section above, active at every hamburger width.) */
 
 /* ==========================================================================
    MOBILE PARITY — May 2026 (S0.5) — footer link columns as accordions.
@@ -2171,8 +2106,11 @@ summary.footer-column__heading::-webkit-details-marker {
    rule here lives inside the mobile breakpoint. JS toggles .site-header--
    scrolled (main.js#initStickyHeader). Do NOT touch --container-max-width
    here (navbar chrome-lock, see .site-header comment above).
+   Jul 2026 responsive rebuild: the gate moved from 768px to 1099.98px so
+   the pinned header covers every hamburger mode (search stays reachable);
+   desktop (>=1100) is untouched.
    ========================================================================== */
-@media (max-width: 768px) {
+@media (max-width: 1099.98px) {
     .site-header {
         position: sticky;
         top: 0;

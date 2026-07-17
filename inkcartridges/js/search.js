@@ -192,7 +192,12 @@
             if (!state.input || !state.dropdown) return;
             const formRect = state.form.getBoundingClientRect();
             const inputRect = state.input.getBoundingClientRect();
-            const isMobile = window.innerWidth <= 640;
+            // "Mobile" = below the tablet breakpoint (Config.BREAKPOINTS, the
+            // JS mirror of the css/base.css header breakpoint system). From
+            // 768px up the form itself is wide (full-width until 1100, inline
+            // after), so the form-anchored desktop math lays out correctly.
+            const isMobile = window.innerWidth <
+                ((typeof Config !== 'undefined' && Config.BREAKPOINTS && Config.BREAKPOINTS.tablet) || 768);
             // On mobile, center the dropdown across the viewport (not the form,
             // which is a narrow 260px centered box). 16px side margins.
             //

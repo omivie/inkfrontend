@@ -106,7 +106,9 @@ test('WS1 the PDP sticky-atc button reaches --tap-min (was 45px)', () => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 test('WS2 .site-header is position:sticky inside the mobile breakpoint', () => {
-    assert.match(LAYOUT, /@media \(max-width: 768px\)[\s\S]*\.site-header\s*\{[\s\S]*?position:\s*sticky;[\s\S]*?top:\s*0/,
+    // Jul 2026 responsive rebuild: the sticky gate covers every hamburger
+    // mode (max-width: 1099.98px), not just <=768 — breakpoint-agnostic here.
+    assert.match(LAYOUT, /@media \(max-width: \d+(?:\.\d+)?px\)\s*\{\s*\.site-header\s*\{[\s\S]*?position:\s*sticky;[\s\S]*?top:\s*0/,
         '.site-header must pin (sticky, top:0) on mobile');
     assert.match(LAYOUT, /\.site-header--scrolled\b/,
         'a scrolled compact state class must exist');

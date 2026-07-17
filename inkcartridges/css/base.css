@@ -261,13 +261,28 @@
        ========================================== */
 
     --container-max-width: 1200px;
-    --container-padding: var(--spacing-8);  /* 32px margins for breathing room */
+    /* Fluid page gutter: ~16px at 375px viewport → 32px from ~1200px.
+       Responsive rebuild Jul 2026 — replaces the fixed 32px that burned
+       64px of a 390px phone on padding alone. */
+    --container-padding: clamp(var(--spacing-4), 0.5rem + 2vw, var(--spacing-8));
 
     /* Breakpoints (for reference in JS, CSS uses media queries) */
     --breakpoint-sm: 640px;
     --breakpoint-md: 768px;
     --breakpoint-lg: 1024px;
     --breakpoint-xl: 1280px;
+
+    /* ==========================================
+       HEADER BREAKPOINT SYSTEM (responsive rebuild Jul 2026)
+       Single source of truth — mirrored in js/config.js Config.BREAKPOINTS.
+       Content-driven, mobile-first:
+         base            320–479   compact mobile (icon-only actions, hamburger)
+         min-width 480   480–767   large mobile (same composition, more air)
+         min-width 768   768–1099  tablet (grid header, labels+tagline, STILL hamburger)
+         min-width 1100  1100+     desktop (full nav row — measured ~870px of links
+                                   + 200px search; it does NOT fit below ~1100px)
+       If you change these, update Config.BREAKPOINTS / Config.MQ_DESKTOP_NAV too.
+       ========================================== */
 
     /* ==========================================
        Z-INDEX LAYERS
