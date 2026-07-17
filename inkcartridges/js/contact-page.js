@@ -79,6 +79,11 @@
             try {
                 widgetId = window.turnstile.render('#contact-turnstile', {
                     sitekey: siteKey,
+                    // Turnstile's normal widget is a fixed 300px iframe — wider
+                    // than a small phone's card interior, and it propped the
+                    // whole contact layout past the viewport at <=360px
+                    // (text-fit audit Jul 2026). Compact is 150px.
+                    size: window.matchMedia('(max-width: 400px)').matches ? 'compact' : 'normal',
                     callback: function (token) { lastToken = token; },
                     'expired-callback': function () { lastToken = null; },
                     'error-callback': function () { lastToken = null; },

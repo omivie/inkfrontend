@@ -1450,7 +1450,10 @@
 
 .footer-brand__logo .logo__text {
     color: var(--footer-text);
-    font-size: var(--font-size-xl);
+    /* Fluid: ~21px at 320 → 25px from ~560px. The lockup is nowrap (base
+       .logo__text rule) and sits beside a 40px icon — a fixed 25px overflowed
+       320px viewports by ~15px (text-fit audit Jul 2026). */
+    font-size: clamp(1.125rem, 0.5rem + 4vw, var(--font-size-xl));
     min-width: 0;
 }
 
@@ -2134,3 +2137,6 @@ summary.footer-column__heading::-webkit-details-marker {
         padding-bottom: var(--spacing-1);
     }
 }
+
+/* ERR-094 (Jul 2026): footer logo text is fluid (clamp) so the lockup fits a
+   320px viewport. See tests/text-fit-jul2026.test.js. */

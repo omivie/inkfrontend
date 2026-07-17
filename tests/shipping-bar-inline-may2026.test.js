@@ -92,7 +92,11 @@ test('§2 the moved pill carries the --inline modifier', () => {
 });
 
 test('§5 exactly one shipping-info-bar element on /shop (no dup left behind)', () => {
-    const hits = SHOP_HTML.match(/class="[^"]*shipping-info-bar[^"]*"/g) || [];
+    // Count the BLOCK class only — BEM children (shipping-info-bar__text /
+    // __sep, added by the Jul 2026 text-fit audit so the pill text wraps
+    // with normal spaces) are parts of the one pill, not duplicates.
+    const hits = (SHOP_HTML.match(/class="[^"]*"/g) || [])
+        .filter((attr) => /(?:"|\s)shipping-info-bar(?:\s|")/.test(attr));
     assert.equal(
         hits.length,
         1,

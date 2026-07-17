@@ -7613,6 +7613,15 @@ body.filter-sort-open { overflow: hidden; }
     gap: var(--spacing-md);
 }
 
+/* Small phones: "Google"/"Microsoft" are single words that can't wrap, so
+   the side-by-side pair clips at ~320px — stack them full-width instead
+   (text-fit audit Jul 2026). */
+@media (max-width: 480px) {
+    .auth-social__buttons {
+        flex-direction: column;
+    }
+}
+
 .auth-social__btn {
     flex: 1;
     display: flex;
@@ -8530,6 +8539,10 @@ body.filter-sort-open { overflow: hidden; }
     flex: 1;
     border-radius: var(--radius-md) 0 0 var(--radius-md);
     border-right: none;
+    /* Kill the UA's ~170px min-width so input + button fit a 320px viewport
+       (text-fit audit Jul 2026). */
+    min-width: 0;
+    width: 100%;
 }
 
 .error-content__search .search-form__button {
@@ -12581,12 +12594,30 @@ body.page-shop {
     padding: 6px 12px;
     font-size: var(--font-size-xs, 0.8125rem);
     line-height: 1.2;
-    white-space: nowrap;
+    /* NO white-space:nowrap here: this rule sits AFTER the <=768px override
+       blocks in source order, so a nowrap here silently killed their
+       white-space:normal (same specificity, later source wins) — that was
+       the <=390px pill overflow. Desktop has room; if squeezed, wrap.
+       min-width:0 lets the pill shrink inside its flex row.
+       (text-fit audit Jul 2026) */
+    min-width: 0;
+}
+
+/* The pill text is one span with NORMAL spaces around the bullet so it can
+   wrap into two clean lines on small phones (was `&nbsp;&bull;&nbsp;`,
+   which glued "$100 • Fast" into an unbreakable run). */
+.shipping-info-bar__text {
+    min-width: 0;
+}
+
+.shipping-info-bar__sep {
+    color: #4ade80;
 }
 
 .shipping-info-bar--inline svg {
     width: 14px;
     height: 14px;
+    flex-shrink: 0;
 }
 
 .product-shipping-note {
@@ -12724,7 +12755,11 @@ body.page-shop {
 
 @media (max-width: 768px) {
     .contact-page__layout {
-        grid-template-columns: 1fr;
+        /* minmax(0,…), same as the desktop tracks: a plain 1fr keeps the
+           item's implicit min-width:auto, which let wide fixed content (the
+           300px Turnstile iframe) prop the whole column past the viewport
+           (text-fit audit Jul 2026). */
+        grid-template-columns: minmax(0, 1fr);
     }
 }
 
@@ -12733,7 +12768,8 @@ body.page-shop {
     background: var(--white-primary, #fff);
     border: 1px solid var(--color-border, #e5e7eb);
     border-radius: var(--radius-lg, 12px);
-    padding: var(--spacing-6, 24px);
+    /* Fluid: 16px at 320 → 24px from ~640 (text-fit audit Jul 2026). */
+    padding: clamp(var(--spacing-4, 16px), 1vw + 12px, var(--spacing-6, 24px));
     box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
 }
 
@@ -12756,7 +12792,10 @@ body.page-shop {
 
 .contact-card__item {
     display: grid;
-    grid-template-columns: 36px 1fr;
+    /* minmax(0,1fr): the value cell must be allowed to shrink below its
+       content's min width, else the unbreakable support@… email props the
+       whole card past the viewport on small phones (text-fit audit Jul 2026). */
+    grid-template-columns: 36px minmax(0, 1fr);
     gap: 12px;
     align-items: start;
 }
@@ -12788,6 +12827,8 @@ body.page-shop {
     color: var(--color-text, #111827);
     text-decoration: none;
     margin-top: 2px;
+    /* Long unbreakable values (email addresses) wrap instead of overflowing. */
+    overflow-wrap: anywhere;
 }
 
 .contact-card__value[href]:hover {
@@ -12890,6 +12931,12 @@ body.page-shop {
 
 .contact-form__turnstile {
     min-height: 65px;
+    /* Never let the fixed-width Turnstile iframe prop the card open — the
+       widget renders `compact` on small phones (contact/quote-page.js), and
+       min-width:0 stops the container's min-content propagating regardless
+       (text-fit audit Jul 2026). */
+    min-width: 0;
+    overflow-x: auto;
 }
 
 .contact-form__actions {
@@ -13154,6 +13201,23 @@ body.page-shop {
     margin: 0 0 18px;
     border: 1px solid var(--color-border, #e5e7eb);
     border-radius: var(--radius-md, 8px);
+}
+
+/* Scroll affordance: Mac/iOS overlay scrollbars are invisible until touched,
+   so a horizontally-scrollable table read as "cut off". Edge-fade shadows
+   (background-attachment: local/scroll pair) appear only on the scrollable
+   side(s) and slide away as you scroll — pure CSS, works because tbody rows
+   are transparent (text-fit audit Jul 2026). Shared by the legal tables. */
+.policy-table-wrap,
+.legal-table-wrap {
+    background:
+        linear-gradient(to right, #fff 30%, rgba(255, 255, 255, 0)) left / 40px 100%,
+        linear-gradient(to left, #fff 30%, rgba(255, 255, 255, 0)) right / 40px 100%,
+        radial-gradient(farthest-side at 0 50%, rgba(15, 23, 42, 0.18), transparent) left / 14px 100%,
+        radial-gradient(farthest-side at 100% 50%, rgba(15, 23, 42, 0.18), transparent) right / 14px 100%;
+    background-repeat: no-repeat;
+    background-attachment: local, local, scroll, scroll;
+    background-color: #fff;
 }
 
 .policy-table {

@@ -213,13 +213,28 @@
 }
 
 .btn--large {
-    padding: var(--spacing-4) var(--spacing-8);
-    font-size: var(--font-size-md);
+    /* Fluid: 17px/20px inline padding at 320 easing to 19px/32px from ~768 —
+       "Find My Exact Cartridge" fits a 320px hero without wrapping
+       (text-fit audit Jul 2026). */
+    padding: var(--spacing-4) clamp(var(--spacing-5), 2vw + 8px, var(--spacing-8));
+    font-size: clamp(var(--font-size-base), 1rem + 0.6vw, var(--font-size-md));
     min-height: 52px;
 }
 
 .btn--full-width {
     width: 100%;
+}
+
+/* Small phones: a label that doesn't fit WRAPS instead of clipping past the
+   button's edge (base .btn is white-space:nowrap for desktop composure).
+   line-height opens up so wrapped lines aren't cramped by the base 1.
+   (text-fit audit Jul 2026 — cart "Proceed to Checkout", auth "Send Reset
+   Link" and friends clipped at 320px.) */
+@media (max-width: 480px) {
+    .btn {
+        white-space: normal;
+        line-height: 1.3;
+    }
 }
 
 /* Button States - Success/Error feedback */
@@ -3675,3 +3690,6 @@ a.product-card__contact-btn {
         transform: none;
     }
 }
+
+/* ERR-094 (Jul 2026): buttons wrap below 480px instead of clipping; .btn--large
+   is fluid. See tests/text-fit-jul2026.test.js. */

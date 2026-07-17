@@ -84,6 +84,10 @@
             if (widgetId !== null) return;
             try {
                 widgetId = window.turnstile.render('#quote-turnstile', {
+                    // Compact on small phones — the 300px normal widget propped
+                    // the card past the viewport (text-fit audit Jul 2026;
+                    // mirrors contact-page.js).
+                    size: window.matchMedia('(max-width: 400px)').matches ? 'compact' : 'normal',
                     sitekey: siteKey,
                     callback: function (token) { lastToken = token; },
                     'expired-callback': function () { lastToken = null; },
