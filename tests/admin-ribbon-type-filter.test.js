@@ -117,8 +117,12 @@ test('a grouped type is forced down the Supabase path', () => {
 test('image, stock and margin-sort still work under a grouped type', () => {
   // Jul 2026: the pack filter shares the forced-Supabase path, so the gates
   // read `(typeGroup || _packFilter)` — the grouped-type guarantee is unchanged.
-  assert.match(PRODUCTS, /\(typeGroup \|\| _packFilter\)\s*&&\s*_imageFilter\s*===\s*'has-images'[\s\S]{0,120}?\.not\(\s*'image_url'\s*,\s*'is'\s*,\s*null\s*\)/,
-    'grouped type + has-images must use .not("image_url", "is", null)');
+  // ERR-091: both image branches must be JOIN-AWARE (image_url + product_images);
+  // the old image_url-only approximation leaked 356 imaged products into "No Images".
+  assert.match(PRODUCTS, /\(typeGroup \|\| _packFilter\)\s*&&\s*_imageFilter\s*===\s*'has-images'[\s\S]{0,160}?\.or\(\s*'image_url\.not\.is\.null,product_images\.not\.is\.null'\s*\)/,
+    'grouped type + has-images must OR image_url with the product_images embed');
+  assert.match(PRODUCTS, /\(typeGroup \|\| _packFilter\)\s*&&\s*_imageFilter\s*===\s*'no-images'[\s\S]{0,160}?\.is\(\s*'image_url'\s*,\s*null\s*\)\.is\(\s*'product_images'\s*,\s*null\s*\)/,
+    'grouped type + no-images must require BOTH image_url AND product_images to be null');
   assert.match(PRODUCTS, /\(typeGroup \|\| _packFilter\)\s*&&\s*_stockFilter[\s\S]{0,120}?\.eq\(\s*'stock_status'\s*,\s*_stockFilter\s*\)/,
     'grouped type + stock filter must use .eq("stock_status", _stockFilter)');
   assert.match(PRODUCTS, /\(typeGroup \|\| _packFilter\)\s*&&\s*isMarginSort/,

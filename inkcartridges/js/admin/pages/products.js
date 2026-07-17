@@ -672,10 +672,17 @@ async function loadProducts() {
       }
 
       // Image filter — only applied when a grouped type or the pack filter
-      // forced us through Supabase. Approximation: products.image_url IS NOT
-      // NULL. (Backend has a richer join-aware check; this covers the common case.)
-      if ((typeGroup || _packFilter) && _imageFilter === 'has-images') query = query.not('image_url', 'is', null);
-      else if ((typeGroup || _packFilter) && _imageFilter === 'no-images') query = query.is('image_url', null);
+      // forced us through Supabase. Join-aware: images live in BOTH legacy
+      // products.image_url AND the product_images table (356 products have
+      // rows there with image_url NULL — the old image_url-only approximation
+      // leaked them into "No Images", ERR-091). The embed-null filters only
+      // work because selectCols above embeds product_images(…); removing that
+      // embed makes these throw 42703 (caught → backend fallback, which warns).
+      if ((typeGroup || _packFilter) && _imageFilter === 'has-images') {
+        query = query.or('image_url.not.is.null,product_images.not.is.null');
+      } else if ((typeGroup || _packFilter) && _imageFilter === 'no-images') {
+        query = query.is('image_url', null).is('product_images', null);
+      }
 
       // Stock filter — products.stock_status is a direct column.
       if ((typeGroup || _packFilter) && _stockFilter) query = query.eq('stock_status', _stockFilter);

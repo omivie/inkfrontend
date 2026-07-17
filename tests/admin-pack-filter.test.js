@@ -118,6 +118,27 @@ test('"packs" queries .in("color", PACKS); "singles" keeps NULL colors', () => {
     '"Singles Only" must include the color.is.null arm — a bare not.in drops NULL-color rows (SQL three-valued logic)');
 });
 
+test('the forced-Supabase image filter is JOIN-AWARE (ERR-091)', () => {
+  // The pack filter forces the Supabase path, where the image filter used to be
+  // the approximation `image_url IS NULL`. Images live in TWO places — legacy
+  // products.image_url AND the product_images table: 356 live products have
+  // product_images rows with image_url NULL, so "No Images" + "Singles Only"
+  // showed rows with visible thumbnails. Both branches must consult BOTH sources.
+  assert.match(PRODUCTS, /\.or\(\s*'image_url\.not\.is\.null,product_images\.not\.is\.null'\s*\)/,
+    'has-images must OR legacy image_url with the product_images embed');
+  assert.match(PRODUCTS, /\.is\(\s*'image_url'\s*,\s*null\s*\)\.is\(\s*'product_images'\s*,\s*null\s*\)/,
+    'no-images must require BOTH image_url AND product_images to be null');
+});
+
+test('selectCols keeps the product_images embed the null-filters depend on', () => {
+  // PostgREST embed-null filtering (product_images=is.null / not.is.null) only
+  // works when the relation is embedded in the select — dropping the embed makes
+  // the image filter throw 42703 at runtime (caught → backend fallback + warning,
+  // but the filter itself dies). Pin the dependency.
+  assert.match(PRODUCTS, /const selectCols = '[^']*product_images\(/,
+    'the Supabase select list must embed product_images(…) — the join-aware image filter depends on it');
+});
+
 test('backend fallback path warns instead of silently ignoring the pack filter', () => {
   const fallback = PRODUCTS.match(/\/\/ Fallback: use backend API[\s\S]{0,600}/);
   assert.ok(fallback, 'the backend fallback block must exist');
