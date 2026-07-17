@@ -36,3 +36,14 @@ test('_writeToURL declares its own keys and carries every foreign param through'
   // The base hash must be split at the FIRST ?, never re-parsed lossily.
   assert.match(filters, /const qIdx = hash\.indexOf\('\?'\)/, 'writer reads the existing query to preserve it');
 });
+
+// ─── Drawer close guard ───────────────────────────────────────────────────────
+
+test('Drawer.close() consults onBeforeClose and a false return vetoes the close', () => {
+  const drawer = read(path.join(ADMIN, 'components', 'drawer.js'));
+  assert.match(drawer, /onBeforeClose/, 'open() must accept onBeforeClose');
+  assert.match(drawer, /onBeforeClose\(\)\s*===\s*false\)\s*return/, 'close() must veto on exactly false');
+  // Escape must not disarm itself before the veto decision — close() owns removal.
+  assert.doesNotMatch(drawer, /Escape'\)\s*\{\s*close\(\);\s*document\.removeEventListener/,
+    'Escape handler must let close() own listener removal so a veto re-arms it');
+});

@@ -11,7 +11,7 @@ const Drawer = {
     return this._root;
   },
 
-  open({ title, body, footer, width, onClose }) {
+  open({ title, body, footer, width, onClose, onBeforeClose }) {
     this.close();
     const root = this._getRoot();
     if (!root) return null;
@@ -64,12 +64,14 @@ const Drawer = {
     const close = () => this.close();
     drawer.querySelector('.admin-drawer__close').addEventListener('click', close);
     backdrop.addEventListener('click', close);
+    // close() owns the listener removal (committed path only) — so a veto from
+    // onBeforeClose leaves Escape armed for the next attempt.
     const onKeydown = (e) => {
-      if (e.key === 'Escape') { close(); document.removeEventListener('keydown', onKeydown); }
+      if (e.key === 'Escape') close();
     };
     document.addEventListener('keydown', onKeydown);
 
-    this._current = { backdrop, drawer, onClose, onKeydown };
+    this._current = { backdrop, drawer, onClose, onBeforeClose, onKeydown };
 
     return {
       el: drawer,
@@ -90,7 +92,11 @@ const Drawer = {
 
   close() {
     if (!this._current) return;
-    const { backdrop, drawer, onClose, onKeydown } = this._current;
+    const { backdrop, drawer, onClose, onBeforeClose, onKeydown } = this._current;
+    // A veto (returning exactly false) keeps the drawer open — used by editors
+    // with unsaved changes. The guard shows its own confirm and, once the user
+    // agrees, clears its dirty flag and re-calls close(), which then commits.
+    if (typeof onBeforeClose === 'function' && onBeforeClose() === false) return;
     backdrop.classList.remove('open');
     drawer.classList.remove('open');
     document.removeEventListener('keydown', onKeydown);
