@@ -810,7 +810,7 @@ function openDetail(row) {
 function freshDraft() {
   return {
     id: null, _synthId: true, name: '', payee: '', category: '', amount: '',
-    gst_claimable: undefined, expense_date: todayInputValue(), due_date: '', paid_date: '',
+    gst_claimable: undefined, expense_date: todayInputValue(), due_date: '', paid_date: todayInputValue(),
     method: '', reference: '', notes: '', recurrence: 'none', series_state: 'active',
     recurrence_day_of_week: 3, recurrence_day_of_month: '', recurrence_month: 1,
     recurrence_interval_days: '', recurrence_end: '', recurrence_count: '',
@@ -1691,7 +1691,7 @@ export default {
     FilterState.showBar(true);
     FilterState.setVisibleFilters([]);
     FilterState.setGranularityVisible(true);
-    FilterState.setDefaults({ period: '1m' });
+    FilterState.setDefaults({ period: 'all' });
     _unsubFilter = FilterState.subscribe(() => { if (_alive) loadData(); });
 
     renderShell();

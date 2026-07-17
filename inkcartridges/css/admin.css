@@ -5065,6 +5065,10 @@ button.admin-active-dot--clickable:hover::after { opacity: 1; }
 .exp-tag--linked { background: var(--input-bg); color: var(--text-muted); border: 1px solid var(--border); }
 
 .exp-filters { display: flex; gap: 8px; margin-bottom: 14px; flex-wrap: wrap; align-items: center; }
+/* The four top-level filter selects flow side by side (wrap 4→2 on narrow)
+   instead of each claiming a full row from the global .admin-select width:100%.
+   Direct-child combinator excludes the basis select nested in .exp-basis-label. */
+.exp-filters > .admin-select { flex: 1 1 150px; width: auto; min-width: 140px; }
 .exp-custom-range { display: flex; align-items: center; gap: 8px; margin: 4px 0 12px; font-size: 13px; color: var(--text-muted); }
 .exp-custom-range .admin-input { width: auto; }
 .exp-empty-inline { padding: 22px; text-align: center; color: var(--text-muted); font-size: 13px; }

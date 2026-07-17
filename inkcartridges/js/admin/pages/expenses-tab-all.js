@@ -158,7 +158,7 @@ function toolbarHtml(ctx) {
   const { escA } = ctx.fmt;
   return `
     <div class="admin-filters exp-filters">
-      <div class="admin-search" style="flex:1;min-width:220px">
+      <div class="admin-search" style="flex:1 1 100%;min-width:220px">
         <span class="admin-search__icon">${icon('search', 14, 14)}</span>
         <input class="admin-input" id="exp-search" type="search" placeholder="Search name, payee, notes, reference…" autocomplete="off" value="${escA(f.q)}" style="width:100%;padding-left:32px" aria-label="Search expenses">
       </div>
