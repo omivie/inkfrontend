@@ -462,6 +462,65 @@ mark.smart-ac__mark {
 .search-did-you-mean a { color: #92400e; text-decoration: underline; }
 .search-did-you-mean a:hover { text-decoration: none; }
 
+/* search-ux-frontend-jul2026 §1 — "Showing results similar to 'X'" banner for a
+   fuzzy (SKU/model typo) result set. Amber, like did-you-mean, since both signal
+   "we adjusted your query". */
+.search-similar-banner {
+    padding: 8px 14px;
+    background: #fef3c7;
+    border: 1px solid #fcd34d;
+    border-radius: 8px;
+    font-size: 13px;
+    color: #92400e;
+}
+.search-similar-banner strong { color: #92400e; }
+
+/* search-ux-frontend-jul2026 §1 — "Best matches for your search" notice when the
+   whole result set is a semantic (natural-language) best guess. Neutral/calm so
+   it reassures rather than alarms. */
+.search-best-matches {
+    padding: 8px 14px;
+    background: var(--color-surface-subtle, #f1f5f9);
+    border: 1px solid var(--color-border, #e2e8f0);
+    border-left: 3px solid var(--cyan-primary, #2563eb);
+    border-radius: 8px;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--color-text-secondary, #475569);
+}
+
+/* search-ux-frontend-jul2026 §5 — intent reflection chip row (brand / category /
+   source). Non-filtering context, so the chips read as quiet metadata; only the
+   brand chip is a link ("More <Brand> →"). */
+.search-intent-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+}
+.search-intent-chip {
+    display: inline-flex;
+    align-items: center;
+    padding: 4px 12px;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--color-text-secondary, #475569);
+    background: var(--color-surface-subtle, #f1f5f9);
+    border: 1px solid var(--color-border, #e2e8f0);
+}
+.search-intent-chip--brand {
+    color: var(--cyan-primary, #2563eb);
+    background: var(--cyan-light, #e0f2fe);
+    border-color: var(--cyan-primary, #2563eb);
+    text-decoration: none;
+    transition: background 0.15s ease, color 0.15s ease;
+}
+.search-intent-chip--brand:hover {
+    background: var(--cyan-primary, #2563eb);
+    color: #fff;
+}
+
 /* Spec §3.1 — printer hero banner above the grid. */
 .printer-hero {
     display: flex;
@@ -528,6 +587,17 @@ mark.smart-ac__mark {
    from the blue printer-intent chip. */
 .product-card__badge--compat-match {
     background: #0d9488;
+    color: #fff;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+}
+
+/* search-ux-frontend-jul2026 §1 — "Suggested" chip for a per-card semantic
+   best-guess (partial semantic set). Indigo, to read as a soft "we think this
+   fits" while staying distinct from the blue printer-intent and teal compat
+   chips. */
+.product-card__badge--suggested {
+    background: #6366f1;
     color: #fff;
     font-weight: 700;
     letter-spacing: 0.02em;

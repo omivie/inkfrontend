@@ -386,8 +386,11 @@ test('shop-page.js — loadSearchResults computes a hijack flag', () => {
         'smartHasLiteralMatch must scan /smart products with productMatchesQuery');
 });
 
-test('shop-page.js — fallback fires on hardMiss OR softMiss OR hijack', () => {
-    assert.match(SHOP_CODE, /if\s*\(\s*hardMiss\s*\|\|\s*softMiss\s*\|\|\s*hijack\s*\)/);
+test('shop-page.js — fallback fires on hardMiss OR softMiss OR hijack (or exact mode)', () => {
+    // search-ux-frontend-jul2026 §2 added `|| exactMode` so the "Search instead"
+    // link honours the raw query literally. The three reconciliation triggers
+    // must remain in the condition.
+    assert.match(SHOP_CODE, /if\s*\(\s*hardMiss\s*\|\|\s*softMiss\s*\|\|\s*hijack\s*\|\|\s*exactMode\s*\)/);
 });
 
 test('shop-page.js — the !did_you_mean gate no longer blocks the hijack path', () => {
@@ -428,9 +431,15 @@ test('shop-page.js — taking the fallback nulls smartData (kills the bad banner
 
 test('shop-page.js — a stale did_you_mean banner is suppressed on literal hits', () => {
     assert.match(SHOP_CODE, /let\s+bannerData\s*=\s*smartData/);
+    // The clone nulls BOTH did_you_mean AND corrected_from (search-ux-frontend
+    // -jul2026 §2 added the corrected_from correction banner, so its misfire
+    // must be dropped on the same literal-hit condition). Order-agnostic check.
     assert.match(SHOP_CODE,
-        /Object\.assign\(\{\}\s*,\s*smartData\s*,\s*\{\s*did_you_mean:\s*null\s*\}\)/,
+        /bannerData\s*=\s*Object\.assign\(\{\}\s*,\s*smartData\s*,\s*\{[^}]*did_you_mean:\s*null[^}]*\}\)/,
         'must clone smartData (never mutate the SWR cache) when dropping did_you_mean');
+    assert.match(SHOP_CODE,
+        /bannerData\s*=\s*Object\.assign\(\{\}\s*,\s*smartData\s*,\s*\{[^}]*corrected_from:\s*null[^}]*\}\)/,
+        'must also drop corrected_from so a contradicted correction banner never shows');
     assert.match(SHOP_CODE, /this\.renderSearchBanners\(\s*bannerData\s*,\s*searchQuery\s*\)/);
 });
 

@@ -22,10 +22,18 @@
  *       every list page (shop, search, printer products, printer detail).
  *       It belongs ONLY on the PDP.
  *
- *   §3  When the API returns `did_you_mean: <string>`, the banner reads
+ *   §3  When the API returns `did_you_mean: <string>` ALONE, the banner reads
  *       "Did you mean <string>?" with the suggestion linking to
- *       /search?q=<encoded>. The "Showing similar results. Search instead
- *       for X" copy is retired.
+ *       /search?q=<encoded>. The old "Showing similar results" copy stays
+ *       retired.
+ *
+ *       UPDATE (search-ux-frontend-jul2026 §2): a "Showing results for X.
+ *       Search instead for Y" correction banner is now honest — but ONLY for a
+ *       real backend auto-correction (`corrected_from` set), and its
+ *       "Search instead" link re-runs the raw query in exact mode
+ *       (`&exact=1`) so it shows literal results / an honest zero-state
+ *       instead of looping back through /smart's autocorrect. A
+ *       `did_you_mean` WITHOUT `corrected_from` must still use "Did you mean X?".
  *
  * Run with: node --test tests/category-page-contract-may2026.test.js
  */
@@ -359,28 +367,35 @@ test('§3 shop-page.js renderSearchBanners renders "Did you mean X?" with /searc
     );
 });
 
-test('§3 shop-page.js does NOT emit the retired "Showing similar results" copy', () => {
+test('§3 shop-page.js never emits the retired "Showing similar results" copy', () => {
     assert.ok(
         !/`[^`]*Showing similar results[^`]*`/.test(SHOP_CODE),
         'no template literal may emit "Showing similar results."'
     );
-    assert.ok(
-        !/`[^`]*Showing results for[^`]*`/.test(SHOP_CODE),
-        'no template literal may emit "Showing results for …"'
-    );
-    assert.ok(
-        !/`[^`]*Search instead for[^`]*`/.test(SHOP_CODE),
-        'no template literal may emit "Search instead for …"'
-    );
 });
 
-test('§3 shop-page.js retires the search-correction-banner DOM class', () => {
-    assert.ok(
-        !/className\s*=\s*['"]search-correction-banner['"]/.test(SHOP_CODE),
-        'shop-page.js must not assign className="search-correction-banner"'
-    );
-    assert.ok(
-        !/class=["']search-correction-banner["']/.test(SHOP_CODE),
-        'shop-page.js must not write a class="search-correction-banner" attribute'
-    );
+// Anchors: grab each banner branch from its guard to its wrap.appendChild(banner).
+const CORRECTION_BRANCH = SHOP_CODE.match(
+    /if\s*\(correctedFrom\s*&&\s*didYouMean\)\s*\{([\s\S]*?)wrap\.appendChild\(banner\)/);
+const DYM_ALONE_BRANCH = SHOP_CODE.match(
+    /else\s+if\s*\(didYouMean\)\s*\{([\s\S]*?)wrap\.appendChild\(banner\)/);
+
+test('§3 correction copy is gated on corrected_from and re-runs the raw query in exact mode', () => {
+    // search-ux-frontend-jul2026 §2 — "Showing results for X / Search instead
+    // for Y" is honest ONLY for a real auto-correction, and the search-instead
+    // link must carry exact=1 so it can't loop back through /smart.
+    assert.ok(CORRECTION_BRANCH, 'the corrected_from correction branch must exist');
+    const branch = CORRECTION_BRANCH[1];
+    assert.match(branch, /Showing results for/, 'correction copy lives in the corrected_from branch');
+    assert.match(branch, /Search instead for/, 'search-instead copy lives in the corrected_from branch');
+    assert.match(branch, /search-correction-banner/, 'the correction banner uses its class here');
+    assert.match(branch, /exact=1/, 'the search-instead link must carry exact=1 (no re-correction loop)');
+});
+
+test('§3 a did_you_mean WITHOUT corrected_from still reads "Did you mean X?"', () => {
+    assert.ok(DYM_ALONE_BRANCH, 'the did-you-mean-alone branch must exist');
+    const branch = DYM_ALONE_BRANCH[1];
+    assert.match(branch, /search-did-you-mean/, 'alone branch uses the honest did-you-mean class');
+    assert.doesNotMatch(branch, /Showing results for|Search instead for|search-correction-banner/,
+        'the correction copy/class must NOT leak into the did-you-mean-alone path');
 });

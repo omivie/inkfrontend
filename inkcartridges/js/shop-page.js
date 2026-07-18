@@ -158,13 +158,47 @@
             && products.some(p => p && p.match_reason === 'compatibility');
     }
 
+    // search-ux-frontend-jul2026 §1 — tally the provenance tags /smart stamps on
+    // rows that aren't a literal keyword hit (`match_reason`: semantic | fuzzy |
+    // compatibility | null). The result decides HOW we label the set:
+    //   • all rows semantic → one "Best matches for your search" section notice.
+    //   • some rows semantic → a per-card "Suggested" chip on just those rows.
+    //   • any fuzzy row      → a "Showing results similar to '<token>'" banner
+    //                          (SKU/model typo; token from the first fuzzy row).
+    //   • compatibility      → per-card "Fits <token>" chip (handled elsewhere).
+    // Never surface the raw enum. Pure so it stays unit-testable via the window
+    // hook; safe on null/empty/malformed input. Pinned by
+    // tests/search-match-reason-labelling-jul2026.test.js.
+    function summarizeMatchReasons(products) {
+        const summary = {
+            total: 0, semantic: 0, fuzzy: 0, compatibility: 0,
+            fuzzyToken: null, hasSemantic: false, allSemantic: false,
+        };
+        if (!Array.isArray(products)) return summary;
+        for (const p of products) {
+            if (!p) continue;
+            summary.total++;
+            const reason = p.match_reason;
+            if (reason === 'semantic') summary.semantic++;
+            else if (reason === 'fuzzy') {
+                summary.fuzzy++;
+                if (!summary.fuzzyToken && p.matched_token) summary.fuzzyToken = p.matched_token;
+            } else if (reason === 'compatibility') summary.compatibility++;
+        }
+        summary.hasSemantic = summary.semantic > 0;
+        // "all" means every returned row is a semantic hit — the whole set is a
+        // best-guess answer, so a single header reads truer than N chips.
+        summary.allSemantic = summary.total > 0 && summary.semantic === summary.total;
+        return summary;
+    }
+
     // Test hook — exercised by tests/search-results-parity-may2026.test.js
     // and tests/compat-search-badge-jul2026.test.js.
     // Not a public surface; product code calls the locals directly.
     if (typeof window !== 'undefined') {
         window._searchParityHelpers = {
             normalizeForMatch, productMatchesQuery, adaptSuggestProduct, mergeLiteralResults,
-            queryCodeMatch, hasCompatibilityMatch,
+            queryCodeMatch, hasCompatibilityMatch, summarizeMatchReasons,
         };
     }
 
@@ -649,6 +683,13 @@
             const _rawSort = params.get('sort');
             this.state.sort = this.SORT_OPTIONS.includes(_rawSort) ? _rawSort : 'recommended';
             this.state.inStock = params.get('in_stock') === '1';
+            // search-ux-frontend-jul2026 §2 — `exact=1` means "search literally
+            // what I typed, don't let /smart auto-correct me." It's set by the
+            // correction banner's "Search instead for X" link so re-running the
+            // raw query shows the honest literal result set (or a real zero-state
+            // + recovery rails), instead of /smart silently re-correcting the
+            // query back and looping. Consumed in loadSearchResults.
+            this.state.exact = params.get('exact') === '1';
             // Pagination — `page` only applies on the search-results level, but
             // we parse it unconditionally so popstate restores the right page.
             const rawPage = parseInt(params.get('page'), 10);
@@ -733,6 +774,11 @@
             if (this.state.sort && this.state.sort !== 'recommended') params.set('sort', this.state.sort);
             if (this.state.inStock) params.set('in_stock', '1');
             if (this.state.search) params.set('q', this.state.search);
+            // Preserve exact-search intent across in-app navigation (e.g.
+            // paginating a "search instead" result set) — search-ux-frontend
+            // -jul2026 §2. A fresh header search navigates without it, so it
+            // naturally clears when the shopper searches something new.
+            if (this.state.search && this.state.exact) params.set('exact', '1');
             // `page` is meaningful only on search-results and only beyond p1;
             // omitting it on p1 keeps the canonical URL clean and the browser
             // history short.
@@ -2803,6 +2849,13 @@
                     //              also trips this, but the literal endpoints
                     //              return zero rows for a typo so the swap is
                     //              declined and /smart's correction stands.
+                    // search-ux-frontend-jul2026 §2 — exact mode ("Search instead
+                    // for X" from the correction banner): honour the raw query
+                    // literally. Force the literal-substring path and prefer it
+                    // unconditionally, so /smart's autocorrect can't re-hijack the
+                    // query back into a loop. An empty literal set then falls
+                    // through to the honest zero-result recovery screen.
+                    const exactMode = !!this.state.exact;
                     const queryHasDigits = /\d/.test(String(searchQuery || ''));
                     const smartCount = products.length;
                     const SOFT_MISS_THRESHOLD = 50;
@@ -2829,7 +2882,7 @@
                         && !smartHasLiteralMatch
                         && !smartData?.matched_printer
                         && !hasCompatMatch;
-                    if (hardMiss || softMiss || hijack) {
+                    if (hardMiss || softMiss || hijack || exactMode) {
                         // /api/products?search= → the full, paginated literal
                         // set. /api/search/suggest → the dropdown's exact
                         // ranked shortlist (incl. loose digit matches that
@@ -2864,13 +2917,19 @@
                                 mergedFiltered = true;
                             }
                         }
+                        // exactMode: always take the literal set (even when
+                        // empty) so the raw query is honoured verbatim and the
+                        // correction banner never re-appears — the honest
+                        // zero-result screen shows instead of a re-correction.
                         // hijack / hardMiss: any literal hit beats /smart's set
                         // (it is empty or provably wrong). softMiss: only swap
                         // when the literal set strictly out-counts /smart, so
                         // we never trade away a good ranking for a flat one.
-                        const shouldUseFallback = (hijack || hardMiss)
-                            ? mergedUsed.length > 0
-                            : mergedUsed.length > smartCount;
+                        const shouldUseFallback = exactMode
+                            ? true
+                            : (hijack || hardMiss)
+                                ? mergedUsed.length > 0
+                                : mergedUsed.length > smartCount;
                         if (shouldUseFallback) {
                             products = mergedUsed;
                             smartData = null;
@@ -2905,10 +2964,18 @@
                 // results. Drop it — clone first so the SWR-cached envelope is
                 // never mutated.
                 let bannerData = smartData;
-                if (smartData && smartData.did_you_mean && !smartData.matched_printer
+                if (smartData
+                    && (smartData.did_you_mean || smartData.corrected_from)
+                    && !smartData.matched_printer
                     && Array.isArray(smartData.products)
                     && smartData.products.some(p => productMatchesQuery(p, searchQuery))) {
-                    bannerData = Object.assign({}, smartData, { did_you_mean: null });
+                    // The correction contradicts the results (they literally match
+                    // the raw query), so drop BOTH the did-you-mean AND the
+                    // corrected_from banner — otherwise we'd claim to have swapped
+                    // a query we actually honoured ("Showing results for X. Search
+                    // instead for Y." when Y's own results are on the page). Clone
+                    // first so the SWR-cached envelope is never mutated.
+                    bannerData = Object.assign({}, smartData, { did_you_mean: null, corrected_from: null });
                 }
                 this.renderSearchBanners(bannerData, searchQuery);
 
@@ -2918,6 +2985,22 @@
                 if (smartData?.matched_printer?.name) {
                     const printerName = smartData.matched_printer.name;
                     for (const p of products) p._fitsPrinter = printerName;
+                }
+
+                // search-ux-frontend-jul2026 §1 — when only SOME rows are semantic
+                // best-guesses, tag those rows for the per-card "Suggested" chip.
+                // When ALL rows are semantic the set gets one "Best matches for
+                // your search" section notice instead (renderSearchBanners), so we
+                // deliberately DON'T tag chips in that case. Tags the live objects
+                // by reference so brand-narrowing/filtering below preserves them —
+                // same pattern as _fitsPrinter above. When reconciliation swapped
+                // to literal results (smartData nulled) these rows carry no
+                // match_reason, so the summary is empty and nothing is tagged.
+                const reasonSummary = summarizeMatchReasons(products);
+                if (reasonSummary.hasSemantic && !reasonSummary.allSemantic) {
+                    for (const p of products) {
+                        if (p && p.match_reason === 'semantic') p._suggestedChip = true;
+                    }
                 }
 
                 // Backend intent: type/source/matched_brand_slug come from
@@ -3105,10 +3188,18 @@
             });
         },
 
-        // Spec §2.2 / §3.1 — render the corrected_from / did_you_mean /
-        // matched_printer notices. Mounted just inside #level-products so the
-        // banners appear above the genuine/compatible grids whether or not
-        // we have results.
+        // search-ux-frontend-jul2026 §1/§2/§5 — render, above the grids, every
+        // notice that explains WHY the result set looks the way it does:
+        //   • printer hero              (matched_printer, §4)
+        //   • correction banner         (corrected_from + did_you_mean, §2)
+        //   • did-you-mean banner       (did_you_mean alone, §2)
+        //   • "similar results" banner  (any fuzzy row, §1)
+        //   • "best matches" notice     (all rows semantic, §1)
+        //   • intent chip row           (brand / category / source, §5)
+        // Mounted just inside #level-products so they appear whether or not we
+        // have results. Each notice is appended only when it applies and the
+        // wrapper is mounted only if at least one exists. Pinned by
+        // tests/search-match-reason-labelling-jul2026.test.js.
         renderSearchBanners(smartData, searchQuery) {
             // Tear down any previous banners on this load
             const existing = document.querySelector('#search-banners');
@@ -3118,7 +3209,7 @@
 
             const matchedPrinter = smartData.matched_printer;
             const didYouMean = smartData.did_you_mean;
-            if (!matchedPrinter && !didYouMean) return;
+            const correctedFrom = smartData.corrected_from;
 
             const wrap = document.createElement('div');
             wrap.id = 'search-banners';
@@ -3144,23 +3235,93 @@
                 wrap.appendChild(hero);
             }
 
-            // category-page-contract-may2026.md §3 — when did_you_mean is
-            // present, the banner reads "Did you mean X?" with X linking to
-            // /search?q=<encoded>. The previous "Showing similar results.
-            // Search instead for X" copy was misleading: the original query
-            // was never asked for again. The honest framing is the one the
-            // backend already powers — both the zero-result fallback and the
-            // weak-result fallback (May 2026, F1) populate did_you_mean, and
-            // both branches share the same banner now.
-            if (didYouMean) {
+            // §2 — two mutually-exclusive query-correction notices:
+            //
+            // (a) corrected_from SET → the backend auto-corrected the query and
+            //     is showing results for the correction (e.g. q=511 →
+            //     corrected_from:"511", did_you_mean:"Lexmark MX 511"). We say so
+            //     plainly and offer a link that re-runs the ORIGINAL raw query.
+            //     This is honest — the query really was swapped — and does NOT
+            //     revive the misleading copy retired in
+            //     category-page-contract-may2026.md §3 (that was about
+            //     did_you_mean, where the query was never actually changed).
+            //     Note: when reconciliation preferred the literal set it nulls
+            //     smartData, so bannerData is null and we never reach here.
+            //
+            // (b) did_you_mean ALONE → results are weak/none; the honest framing
+            //     is a clickable "Did you mean X?" suggestion.
+            if (correctedFrom && didYouMean) {
+                const banner = document.createElement('div');
+                banner.className = 'search-correction-banner';
+                banner.innerHTML = `
+                    <span>Showing results for <strong>${Security.escapeHtml(didYouMean)}</strong>.</span>
+                    <a class="search-correction-banner__link" href="/search?q=${encodeURIComponent(correctedFrom)}&exact=1">Search instead for “${Security.escapeHtml(correctedFrom)}”</a>
+                `;
+                wrap.appendChild(banner);
+            } else if (didYouMean) {
                 const banner = document.createElement('div');
                 banner.className = 'search-did-you-mean';
                 banner.innerHTML = `
                     Did you mean
-                    <a href="/search?q=${Security.escapeAttr(didYouMean)}"><strong>${Security.escapeHtml(didYouMean)}</strong></a>?
+                    <a href="/search?q=${encodeURIComponent(didYouMean)}"><strong>${Security.escapeHtml(didYouMean)}</strong></a>?
                 `;
                 wrap.appendChild(banner);
             }
+
+            // §1 — provenance notices driven by per-row match_reason. A fuzzy row
+            // means the query was a SKU/model typo; an all-semantic set means the
+            // whole answer is a natural-language best guess. Compatibility rows
+            // get a per-card "Fits" chip in createProductCard, and a partial
+            // semantic set gets per-card "Suggested" chips (tagged in
+            // loadSearchResults) — so neither is handled here.
+            const reasons = summarizeMatchReasons(smartData.products);
+            if (reasons.fuzzyToken) {
+                const banner = document.createElement('div');
+                banner.className = 'search-similar-banner';
+                banner.innerHTML = `Showing results similar to <strong>“${Security.escapeHtml(reasons.fuzzyToken)}”</strong>`;
+                wrap.appendChild(banner);
+            }
+            if (reasons.allSemantic) {
+                const notice = document.createElement('div');
+                notice.className = 'search-best-matches';
+                notice.textContent = 'Best matches for your search';
+                wrap.appendChild(notice);
+            }
+
+            // §5 — reflect the backend's intent read as a compact, non-filtering
+            // chip row so the result set reads as intentional. Brand links to
+            // "More <Brand> →"; category (ink/toner) and source (genuine/
+            // compatible) are shown as static context chips. We deliberately do
+            // NOT pre-select the mobile Filter-&-Sort source radio — that would
+            // hard-filter (suppress a section), and the spec says reflect, don't
+            // filter. Only chips that add signal are rendered.
+            const intent = smartData.intent;
+            if (intent) {
+                const chips = [];
+                const brandSlug = intent.matched_brand_slug;
+                const brand = brandSlug && this.brandInfo ? this.brandInfo[brandSlug] : null;
+                if (brand && brand.name) {
+                    chips.push(`<a class="search-intent-chip search-intent-chip--brand" href="/shop?brand=${encodeURIComponent(brandSlug)}">More ${Security.escapeHtml(brand.name)} →</a>`);
+                }
+                if (intent.category) {
+                    const cat = String(intent.category);
+                    const catLabel = cat.charAt(0).toUpperCase() + cat.slice(1);
+                    chips.push(`<span class="search-intent-chip">${Security.escapeHtml(catLabel)}</span>`);
+                }
+                if (intent.source === 'genuine' || intent.source === 'compatible') {
+                    const srcLabel = intent.source === 'genuine' ? 'Genuine' : 'Compatible';
+                    chips.push(`<span class="search-intent-chip">${srcLabel}</span>`);
+                }
+                if (chips.length > 0) {
+                    const row = document.createElement('div');
+                    row.className = 'search-intent-chips';
+                    row.innerHTML = chips.join('');
+                    wrap.appendChild(row);
+                }
+            }
+
+            // Mount only if at least one notice was appended.
+            if (!wrap.firstChild) return;
 
             // Insert at the top of #level-products (which holds the grids).
             const host = this.elements.levelProducts;
@@ -3538,6 +3699,15 @@
                 ? `<span class="product-card__badge product-card__badge--compat-match" title="Compatible with ${Security.escapeAttr(product.matched_token)}">Fits ${Security.escapeHtml(product.matched_token)}</span>`
                 : '';
 
+            // search-ux-frontend-jul2026 §1 — "Suggested" chip for a partial
+            // semantic set (some but not all rows are natural-language best
+            // guesses). loadSearchResults tags `_suggestedChip` on the semantic
+            // rows; an all-semantic set gets one section notice instead of N
+            // chips, so nothing is tagged there.
+            const suggestedBadge = product._suggestedChip
+                ? `<span class="product-card__badge product-card__badge--suggested" title="Suggested match for your search">Suggested</span>`
+                : '';
+
             // source-chip-removal-may2026.md — the per-card
             // COMPATIBLE/GENUINE chip is retired. The section heading above
             // each grid (e.g. "Brother Compatible Inkjet Cartridges") and
@@ -3587,7 +3757,7 @@
                 <a href="${Security.escapeAttr(cardHref)}" class="product-card__link">
                     <div class="product-card__image-wrapper">
                         ${imageContent}
-                        ${(fitsPrinterBadge || compatMatchBadge) ? `<div class="product-card__chip-stack">${fitsPrinterBadge}${compatMatchBadge}</div>` : ''}
+                        ${(fitsPrinterBadge || compatMatchBadge || suggestedBadge) ? `<div class="product-card__chip-stack">${fitsPrinterBadge}${compatMatchBadge}${suggestedBadge}</div>` : ''}
                         ${packTypeRibbon}
                     </div>
                     <div class="product-card__content">

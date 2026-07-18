@@ -175,11 +175,13 @@ test('createProductCard — matched_token is escaped in both text and attribute'
         'token in the title attribute must go through Security.escapeAttr');
 });
 
-test('createProductCard — chip-stack renders when EITHER fits-printer OR compat badge is present', () => {
+test('createProductCard — chip-stack renders when ANY of fits-printer / compat / suggested badge is present', () => {
+    // search-ux-frontend-jul2026 §1 added a third chip (suggestedBadge); the
+    // stack must include it and appear whenever any of the three exists.
     assert.match(
         SHOP_CODE,
-        /\(fitsPrinterBadge\s*\|\|\s*compatMatchBadge\)\s*\?\s*`<div class="product-card__chip-stack">\$\{fitsPrinterBadge\}\$\{compatMatchBadge\}<\/div>`/,
-        'the chip-stack must emit both badges and appear whenever either exists'
+        /\(fitsPrinterBadge\s*\|\|\s*compatMatchBadge\s*\|\|\s*suggestedBadge\)\s*\?\s*`<div class="product-card__chip-stack">\$\{fitsPrinterBadge\}\$\{compatMatchBadge\}\$\{suggestedBadge\}<\/div>`/,
+        'the chip-stack must emit all three badges and appear whenever any exists'
     );
 });
 

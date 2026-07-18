@@ -157,8 +157,11 @@ test('soft-miss only swaps when the literal set strictly beats smart count', () 
     // `merged` (dropdown shortlist unioned with the full literal set).
     // Jun 2026: digit queries filter `merged` → `mergedUsed` (off-topic flood
     // strip) before this comparison; the strict-beat rule is unchanged.
+    // Jul 2026 (search-ux-frontend §2): an `exactMode ? true :` arm was prepended
+    // for the "Search instead" flow, but the hijack/hardMiss vs soft-miss
+    // strict-beat structure below it is unchanged.
     assert.match(SHOP_CODE,
-        /shouldUseFallback\s*=\s*\(hijack\s*\|\|\s*hardMiss\)[\s\S]{0,150}mergedUsed\.length\s*>\s*smartCount/);
+        /shouldUseFallback\s*=\s*exactMode[\s\S]{0,80}\(hijack\s*\|\|\s*hardMiss\)[\s\S]{0,150}mergedUsed\.length\s*>\s*smartCount/);
 });
 
 test('fallback path still uses SEARCH_PAGE_SIZE + page so pagination keeps working', () => {
