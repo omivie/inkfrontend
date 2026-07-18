@@ -21,7 +21,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link rel="stylesheet" href="/css/base.css?v=e9b82f71">
-    <link rel="stylesheet" href="/css/layout.css?v=60815935">
+    <link rel="stylesheet" href="/css/layout.css?v=c9176903">
     <link rel="stylesheet" href="/css/components.css?v=79d69fe3">
     <link rel="stylesheet" href="/css/modern-effects.css?v=afe20f45">
     <link rel="stylesheet" href="/css/pages.css?v=84962ae5">
@@ -222,6 +222,31 @@
             font-size: 0.75rem;
             color: var(--gray-500);
             text-align: center;
+        }
+
+        /* Express Checkout Element (wallet buttons) — sits above the card form */
+        #express-checkout-wrapper {
+            margin-bottom: 1rem;
+        }
+
+        /* "or pay with card" divider between the wallet row and the card form.
+           Modeled on .auth-social__divider. Hidden with the wrapper when ECE is empty. */
+        .express-divider {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            margin: 0.75rem 0 0;
+            color: var(--gray-500);
+            font-size: 0.8125rem;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .express-divider::before,
+        .express-divider::after {
+            content: '';
+            flex: 1;
+            height: 1px;
+            background: var(--gray-200);
         }
 
         /* Stripe PaymentElement wrapper */
@@ -655,6 +680,13 @@
                                 <div class="payment-section__body">
                                     <!-- Main column: Stripe + pay button -->
                                     <div class="payment-col-main">
+                                        <!-- Express Checkout: one-tap wallet buttons (Link / Apple Pay / Google Pay).
+                                             Removed entirely by payment-page.js when no wallet is eligible. -->
+                                        <div id="express-checkout-wrapper">
+                                            <div id="express-checkout-element"></div>
+                                            <div class="express-divider"><span>or pay with card</span></div>
+                                        </div>
+
                                         <div class="payment-element-wrapper">
                                             <div id="payment-element">
                                             </div>
@@ -781,12 +813,12 @@
     <script defer src="/js/cart-analytics.js?v=b2724a74"></script>
     <script defer src="/js/products.js?v=f32abaec"></script>
     <script defer src="/js/search.js?v=be6f2323"></script>
-    <script defer src="/js/main.js?v=862ba5ab"></script>
+    <script defer src="/js/main.js?v=f6b7b932"></script>
     <script defer src="/js/legal-config.js?v=2db8a49b"></script>
     <script defer src="/js/footer.js?v=cb9f19a6"></script>
     <script defer src="/js/modern-effects.js?v=ad8bff1e"></script>
 
-    <script defer src="/js/payment-page.js?v=9305839c"></script>
+    <script defer src="/js/payment-page.js?v=676f0758"></script>
     <script defer src="/js/analytics.js?v=8c9ee196"></script>
     <script defer src="/js/site-guard.js?v=e0b0e4ba"></script>
 </body>
