@@ -64,13 +64,14 @@ test('shared module exists and exposes window.AddressAutocomplete.attach', () =>
         'attach(inputId, fieldMap, opts) is the single public entry point');
 });
 
-test('module debounces at ≥300ms and requires ≥2 chars (handoff contract)', () => {
+test('module debounces at ≥300ms and requires ≥3 chars (handoff contract)', () => {
     const debounce = MODULE_SRC.match(/debounceMs\s*=\s*opts\.debounceMs\s*\|\|\s*(\d+)/);
     assert.ok(debounce, 'attach must read opts.debounceMs with a numeric default');
     assert.ok(Number(debounce[1]) >= 300,
-        `default debounce must be ≥300ms per ADDRESS_AUTOCOMPLETE_HANDOFF.md (got ${debounce[1]})`);
+        `default debounce must be ≥300ms per address-autocomplete-nzpost.md (got ${debounce[1]})`);
     const minChars = MODULE_SRC.match(/minChars\s*=\s*opts\.minChars\s*\|\|\s*(\d+)/);
-    assert.ok(minChars && Number(minChars[1]) >= 2, 'default minChars must be ≥2');
+    assert.ok(minChars && Number(minChars[1]) >= 3,
+        `default minChars must be ≥3 — the handoff says "don't fire below 3 characters" (got ${minChars && minChars[1]})`);
 });
 
 test('module has a stale-response guard and a session query cache', () => {
@@ -85,8 +86,8 @@ test('module has a stale-response guard and a session query cache', () => {
 test('module circuit-breaks NZ Post after a 5xx and pauses on RATE_LIMITED', () => {
     assert.match(MODULE_SRC, /_nzpostDisabled\s*=\s*true/,
         'a 5xx from NZ Post ("not configured") must disable it for the session');
-    assert.match(MODULE_SRC, /if\s*\(!AddressAutocomplete\._nzpostDisabled\)/,
-        'the NZ Post attempt must be gated on the breaker');
+    assert.match(MODULE_SRC, /if\s*\(AddressAutocomplete\._nzpostDisabled\)\s*\{[\s\S]{0,120}return/,
+        'a tripped breaker must short-circuit the lookup before any network call');
     assert.match(MODULE_SRC, /code\s*!==\s*['"]RATE_LIMITED['"]\)\s*return false/,
         'rate-limit handler must key off code === RATE_LIMITED');
     assert.match(MODULE_SRC, /errOrEnv\.retryAfter\s*\|\|\s*errOrEnv\.retry_after\s*\|\|\s*30/,
@@ -187,6 +188,58 @@ test('region applier lands on account-modal display-name option values', () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
+// §2b — details→field normalization (behavioural, vm sandbox)
+//
+// THE BUG THIS PINS: the module was wired to NZ Post before the provider went
+// live, so its details mapping read `d.postal_code` (the Google-era name). Live
+// NZ Post /details returns `postcode` — so picking a suggestion left POSTCODE
+// blank, breaking shipping calc and the required-field save. _normalizeDetails
+// makes the field-name mapping a single tested concern.
+// ─────────────────────────────────────────────────────────────────────────────
+
+test('_normalizeDetails maps the LIVE NZ Post /details payload (postcode, not postal_code)', () => {
+    const AC = loadModule();
+    // Verbatim from address-autocomplete-nzpost.md (curl dpid=1464938).
+    const live = {
+        dpid: '1464938',
+        full_address: '131 Tiverton Road, New Windsor, New Windsor, Auckland, 0600',
+        address_line1: '131 Tiverton Road',
+        address_line2: 'New Windsor',
+        suburb: 'New Windsor',
+        city: 'Auckland',
+        region: '',
+        postcode: '0600',
+    };
+    const f = AC._normalizeDetails(live);
+    assert.equal(f.line1, '131 Tiverton Road');
+    assert.equal(f.line2, 'New Windsor');
+    assert.equal(f.city, 'Auckland');
+    assert.equal(f.postcode, '0600', 'POSTCODE must come from `postcode` — the show-stopper bug');
+    assert.equal(f.region, '', 'empty NZ Post region must stay empty (user picks it; never block submit)');
+});
+
+test('_normalizeDetails stays back-compatible with a legacy postal_code payload', () => {
+    const AC = loadModule();
+    const f = AC._normalizeDetails({ address_line1: '1 Queen St', city: 'Auckland', postal_code: '1010' });
+    assert.equal(f.postcode, '1010', 'postal_code must still resolve so the normalizer tolerates backend variance');
+    assert.equal(f.line1, '1 Queen St');
+});
+
+test('_normalizeDetails tolerates a missing/empty payload without throwing', () => {
+    const AC = loadModule();
+    // Field-by-field (not deepEqual): the sandbox object has a cross-realm
+    // prototype, so deepStrictEqual would fail on identity, not content.
+    for (const input of [null, undefined, {}]) {
+        const f = AC._normalizeDetails(input);
+        assert.equal(f.line1, '');
+        assert.equal(f.line2, '');
+        assert.equal(f.city, '');
+        assert.equal(f.region, '');
+        assert.equal(f.postcode, '');
+    }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
 // §3 — checkout delegates to the shared module
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -272,12 +325,10 @@ test('saveAddress handles RATE_LIMITED with a countdown instead of a dead-end me
 // §5 — api.js source contract: noRetry + enriched 429
 // ─────────────────────────────────────────────────────────────────────────────
 
-test('all four address suggestion methods opt out of retries', () => {
+test('both NZ Post address methods opt out of retries', () => {
     for (const endpoint of [
         '/api/address/nzpost/suggest',
         '/api/address/nzpost/details',
-        '/api/address/autocomplete',
-        '/api/address/details',
     ]) {
         const idx = API_SRC.indexOf(endpoint);
         assert.ok(idx > 0, `${endpoint} method must exist`);
@@ -285,6 +336,21 @@ test('all four address suggestion methods opt out of retries', () => {
         assert.ok(window.includes('noRetry: true'),
             `${endpoint} must pass { noRetry: true } — a replayed suggestion is stale and burns the shared per-IP budget`);
     }
+});
+
+test('Google Places is fully retired — no source references the old endpoints/wrappers', () => {
+    // Google was disabled backend-side (address-autocomplete-nzpost.md); keeping a
+    // doomed fallback only burned the shared 30/min/IP budget this module protects.
+    for (const [name, src] of [['api.js', API_SRC], ['address-autocomplete.js', MODULE_SRC]]) {
+        assert.ok(!src.includes('/api/address/autocomplete'), `${name} must not call the retired Google autocomplete endpoint`);
+        assert.ok(!src.includes('/api/address/details'), `${name} must not call the retired Google details endpoint`);
+        assert.ok(!src.includes('addressAutocomplete'), `${name} must not reference the retired addressAutocomplete wrapper`);
+        assert.ok(!/\baddressDetails\b/.test(src), `${name} must not reference the retired addressDetails wrapper`);
+    }
+    // The module reads NZ Post's `postcode`, not the Google-era `postal_code`,
+    // when writing form fields — but the normalizer keeps a back-compat fallback.
+    assert.match(MODULE_SRC, /d\.postcode\s*\|\|\s*d\.postal_code/,
+        'postcode mapping must prefer NZ Post `postcode` with a `postal_code` fallback');
 });
 
 test('_fetchWithAuth honours noRetry on all three retry ladders', () => {
@@ -380,7 +446,7 @@ test('noRetry suggestion GET on 500: exactly ONE fetch (transient ladder suppres
     const { API, calls } = loadApi({
         fetchImpl: () => mockResponse({ status: 500, body: { ok: false, error: { code: 'INTERNAL_ERROR', message: 'NZ Post address service not configured' } } }),
     });
-    const resp = await API.addressAutocomplete('12 queen');
+    const resp = await API.nzpostSuggest('12 queen');
     assert.equal(resp.ok, false, '5xx resolves to a structured envelope');
     assert.equal(calls.length, 1,
         'this exact server state (provider down) previously cost 3 requests per attempt');
@@ -391,7 +457,7 @@ test('429 thrown error parses Retry-After into err.retryAfter', async () => {
         fetchImpl: () => mockResponse({ status: 429, body: RATE_BODY, headers: { 'Retry-After': '30' } }),
     });
     await assert.rejects(
-        () => API.addressDetails('ChIJx'),
+        () => API.nzpostDetails('1464938'),
         (err) => err.code === 'RATE_LIMITED' && err.retryAfter === 30,
         'Retry-After must surface so the UI can count down'
     );

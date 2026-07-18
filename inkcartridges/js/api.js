@@ -2200,17 +2200,17 @@ const API = {
     },
 
     // =========================================================================
-    // ADDRESS AUTOCOMPLETE
+    // ADDRESS AUTOCOMPLETE (NZ Post — sole provider; Google retired 2026-07-18)
     // =========================================================================
-    // All four endpoints share a tight 30 req/min/IP budget on the backend AND
+    // Both endpoints share a tight 30 req/min/IP budget on the backend AND
     // count against the global per-IP limiter that also covers account writes.
     // noRetry: a replayed suggestion is stale by the time it lands, and each
     // retry burns budget the user needs for their actual save (ERR-096).
 
     /**
-     * NZ Post address suggestions (primary for NZ addresses)
+     * NZ Post address suggestions
      * @param {string} query - Address search text
-     * @param {number} max - Max results (default 5)
+     * @param {number} max - Max results (1–24, default 5)
      */
     async nzpostSuggest(query, max = 5) {
         return this.get(`/api/address/nzpost/suggest?q=${encodeURIComponent(query)}&max=${max}`, { noRetry: true });
@@ -2222,20 +2222,6 @@ const API = {
      */
     async nzpostDetails(dpid) {
         return this.get(`/api/address/nzpost/details?dpid=${encodeURIComponent(dpid)}`, { noRetry: true });
-    },
-
-    /**
-     * Google Places address autocomplete (fallback when NZ Post is unavailable)
-     */
-    async addressAutocomplete(query) {
-        return this.get(`/api/address/autocomplete?q=${encodeURIComponent(query)}`, { noRetry: true });
-    },
-
-    /**
-     * Google Place details by place_id
-     */
-    async addressDetails(placeId) {
-        return this.get(`/api/address/details?place_id=${encodeURIComponent(placeId)}`, { noRetry: true });
     },
 
     // =========================================================================

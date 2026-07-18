@@ -5,17 +5,23 @@
  * addresses modal). Extracted from checkout-page.js so the two pages can't
  * drift — the checkout copy had an Enter-key crash (nonexistent
  * `fillFromDetails`) and per-keystroke request amplification that burned the
- * shared per-IP rate budget while both providers were down.
+ * shared per-IP rate budget while the provider was down.
  *
- * Backend contract (ADDRESS_AUTOCOMPLETE_HANDOFF.md):
- *   GET /api/address/nzpost/suggest?q=&max=   → { ok, data: [{ dpid, full_address }] }
- *   GET /api/address/nzpost/details?dpid=     → { ok, data: { address_line1, ... } }
- *   GET /api/address/autocomplete?q=          → { ok, data: [{ place_id, description }] }
- *   GET /api/address/details?place_id=        → { ok, data: { address_line1, address_line2, city, region, postal_code } }
- * Both providers share a 30 req/min/IP limiter (429 → RATE_LIMITED) that also
- * draws from the global per-IP budget covering account writes, so this module
- * is deliberately frugal:
- *   - 300ms debounce, min 2 chars (handoff advises ≥300ms)
+ * Provider: NZ Post Address Checker (live & verified 2026-07-18). It is the
+ * SOLE provider — the old Google Places proxy was disabled backend-side and is
+ * fully retired here (a doomed fallback request per empty query only burned the
+ * shared rate budget this module exists to protect).
+ *
+ * Backend contract (address-autocomplete-nzpost.md):
+ *   GET /api/address/nzpost/suggest?q=&max=  → { ok, data: [{ dpid, full_address }] }
+ *   GET /api/address/nzpost/details?dpid=    → { ok, data: {
+ *          address_line1, address_line2, suburb, city, region, postcode } }
+ *   NB: details returns `postcode` (NOT the Google-era `postal_code`), and
+ *   `region` is usually "" — NZ Post has no region field, so we leave the
+ *   REGION select for the user and never block submit on it.
+ * The endpoint is rate-limited 30 req/min/IP AND draws from the global per-IP
+ * budget covering account writes, so this module is deliberately frugal:
+ *   - 300ms debounce, min 3 chars (handoff: don't fire below 3 characters)
  *   - session cache per query (including empty results)
  *   - stale-response guard — only the latest in-flight lookup may render
  *   - NZ Post circuit breaker — one 5xx ("not configured") disables it for the session
@@ -24,9 +30,9 @@
  *     stale by the time it lands, and each retry burns budget the user needs
  *     for their actual save
  *
- * Fail-soft must be LOUD (project rule): when suggestions are paused or both
- * providers fail, a visible hint tells the user to type manually — degraded
- * autocomplete must never read as "nothing happened". Manual entry always works.
+ * Fail-soft must be LOUD (project rule): when suggestions are paused or NZ Post
+ * fails, a visible hint tells the user to type manually — degraded autocomplete
+ * must never read as "nothing happened". Manual entry always works.
  */
 
 const AddressAutocomplete = {
@@ -40,7 +46,8 @@ const AddressAutocomplete = {
 
     // Circuit breaker: NZ Post responded 5xx ("NZ Post address service not
     // configured") — skip it for the rest of the session instead of paying a
-    // doomed request per keystroke before every Google fallback.
+    // doomed request per keystroke. Suggestions then degrade to the LOUD
+    // manual-entry hint (the handoff's intended degraded state).
     _nzpostDisabled: false,
 
     // Epoch-ms until which ALL attached inputs skip lookups after a
@@ -54,7 +61,7 @@ const AddressAutocomplete = {
      * @param {object} [opts]
      * @param {function} [opts.onApply] - called with the details payload after fields fill (e.g. checkout shipping-cost refresh)
      * @param {number} [opts.debounceMs=300]
-     * @param {number} [opts.minChars=2]
+     * @param {number} [opts.minChars=3]
      */
     attach(inputId, fieldMap, opts = {}) {
         const input = document.getElementById(inputId);
@@ -62,7 +69,7 @@ const AddressAutocomplete = {
         input.dataset.autocompleteAttached = 'true';
 
         const debounceMs = opts.debounceMs || 300;
-        const minChars = opts.minChars || 2;
+        const minChars = opts.minChars || 3;
 
         // Dropdown + wrapper
         const dropdown = document.createElement('ul');
@@ -102,7 +109,7 @@ const AddressAutocomplete = {
             currentSuggestions = [];
         };
 
-        // Fill address fields from a details response (shared by both providers)
+        // Fill address fields from an NZ Post details response.
         const applyAddressDetails = (d) => {
             const setField = (id, value) => {
                 const el = document.getElementById(id);
@@ -112,14 +119,19 @@ const AddressAutocomplete = {
                 el.dispatchEvent(new Event('change', { bubbles: true }));
             };
 
-            setField(fieldMap.line1, d.address_line1);
-            setField(fieldMap.line2, d.address_line2);
-            setField(fieldMap.city, d.city);
-            setField(fieldMap.postcode, d.postal_code);
+            // Normalize field names up front (postcode vs the retired
+            // Google-era postal_code) so the mapping is one tested concern.
+            const fields = AddressAutocomplete._normalizeDetails(d);
+            setField(fieldMap.line1, fields.line1);
+            setField(fieldMap.line2, fields.line2);
+            setField(fieldMap.city, fields.city);
+            setField(fieldMap.postcode, fields.postcode);
 
-            if (fieldMap.region && d.region) {
+            // region is usually "" from NZ Post — only apply a real value, and
+            // never block submit waiting for it (the user picks it manually).
+            if (fieldMap.region && fields.region) {
                 const regionEl = document.getElementById(fieldMap.region);
-                if (regionEl) this._applyRegion(regionEl, d.region);
+                if (regionEl) this._applyRegion(regionEl, fields.region);
             }
 
             if (typeof opts.onApply === 'function') opts.onApply(d);
@@ -142,9 +154,7 @@ const AddressAutocomplete = {
         // would read as "it worked" while the fields stay empty.
         const fillFromSelection = async (suggestion) => {
             try {
-                const res = suggestion.provider === 'nzpost'
-                    ? await API.nzpostDetails(suggestion.id)
-                    : await API.addressDetails(suggestion.id);
+                const res = await API.nzpostDetails(suggestion.id);
                 if (res && res.ok && res.data) {
                     applyAddressDetails(res.data);
                     hideHint();
@@ -184,60 +194,42 @@ const AddressAutocomplete = {
             hideHint();
         };
 
-        // Fetch suggestions for a query: NZ Post first (more accurate for NZ),
-        // Google Places fallback. Returns {suggestions, failed} — failed=true
-        // means every attempted provider errored (vs a healthy empty result).
+        // Fetch NZ Post suggestions for a query. Returns {suggestions, failed}
+        // — failed=true means the provider errored (vs a healthy empty result,
+        // which is just "no matches" and must NOT show the scary hint).
         const fetchSuggestions = async (q) => {
-            let suggestions = [];
-            let nzpostFailed = false;
-            let googleFailed = false;
+            // Session circuit breaker tripped by an earlier 5xx — no request,
+            // degrade to the LOUD manual-entry hint.
+            if (AddressAutocomplete._nzpostDisabled) {
+                return { suggestions: [], failed: true };
+            }
 
-            if (!AddressAutocomplete._nzpostDisabled) {
-                try {
-                    const nzRes = await API.nzpostSuggest(q);
-                    if (nzRes && nzRes.ok && nzRes.data?.length) {
-                        suggestions = nzRes.data.map(s => ({
+            try {
+                const nzRes = await API.nzpostSuggest(q);
+                if (nzRes && nzRes.ok && nzRes.data?.length) {
+                    return {
+                        suggestions: nzRes.data.map(s => ({
                             id: s.dpid,
-                            label: s.full_address || s.description,
-                            provider: 'nzpost'
-                        }));
-                    } else if (nzRes && nzRes.ok === false) {
-                        if (handleRateLimit(nzRes)) return { suggestions: [], failed: true, rateLimited: true };
-                        nzpostFailed = true;
-                        // 5xx = service not configured/down — stop paying for it this session
-                        if (nzRes.code === 'INTERNAL_ERROR' || (nzRes.status && nzRes.status >= 500)) {
-                            AddressAutocomplete._nzpostDisabled = true;
-                            DebugLog.warn('AddressAutocomplete: NZ Post suggest unavailable — disabled for this session');
-                        }
-                    }
-                } catch (e) {
-                    if (handleRateLimit(e)) return { suggestions: [], failed: true, rateLimited: true };
-                    nzpostFailed = true;
+                            label: s.full_address
+                        })),
+                        failed: false
+                    };
                 }
-            } else {
-                nzpostFailed = true;
-            }
-
-            if (!suggestions.length) {
-                try {
-                    const res = await API.addressAutocomplete(q);
-                    if (res && res.ok && res.data?.length) {
-                        suggestions = res.data.map(s => ({
-                            id: s.place_id,
-                            label: s.description,
-                            provider: 'google'
-                        }));
-                    } else if (res && res.ok === false) {
-                        if (handleRateLimit(res)) return { suggestions: [], failed: true, rateLimited: true };
-                        googleFailed = true;
+                if (nzRes && nzRes.ok === false) {
+                    if (handleRateLimit(nzRes)) return { suggestions: [], failed: true, rateLimited: true };
+                    // 5xx = service not configured/down — stop paying for it this session.
+                    if (nzRes.code === 'INTERNAL_ERROR' || (nzRes.status && nzRes.status >= 500)) {
+                        AddressAutocomplete._nzpostDisabled = true;
+                        DebugLog.warn('AddressAutocomplete: NZ Post suggest unavailable — disabled for this session');
                     }
-                } catch (e) {
-                    if (handleRateLimit(e)) return { suggestions: [], failed: true, rateLimited: true };
-                    googleFailed = true;
+                    return { suggestions: [], failed: true };
                 }
+                // ok:true but empty — a healthy "no matches", not a failure.
+                return { suggestions: [], failed: false };
+            } catch (e) {
+                if (handleRateLimit(e)) return { suggestions: [], failed: true, rateLimited: true };
+                return { suggestions: [], failed: true };
             }
-
-            return { suggestions, failed: nzpostFailed && googleFailed && !suggestions.length };
         };
 
         input.addEventListener('input', () => {
@@ -279,7 +271,7 @@ const AddressAutocomplete = {
                 } else {
                     hideSuggestions();
                     if (result.failed) {
-                        // LOUD fail-soft: both providers errored ≠ "no matches".
+                        // LOUD fail-soft: NZ Post errored ≠ a healthy "no matches".
                         showHint('Address suggestions are unavailable right now — please type your address manually.');
                     } else {
                         hideHint();
@@ -328,6 +320,26 @@ const AddressAutocomplete = {
         input.addEventListener('blur', () => {
             setTimeout(hideSuggestions, 150);
         });
+    },
+
+    /**
+     * Normalize an NZ Post /details payload to the canonical field set the
+     * form needs. NZ Post returns `postcode`; the retired Google shape used
+     * `postal_code` — reading both keeps the mapping robust to backend variance
+     * and is the one tested place the postcode field-name lives (the missing
+     * normalization here left POSTCODE blank on every NZ Post pick).
+     * @param {object} d - raw details payload
+     * @returns {{line1:string,line2:string,city:string,region:string,postcode:string}}
+     */
+    _normalizeDetails(d) {
+        d = d || {};
+        return {
+            line1: d.address_line1 || '',
+            line2: d.address_line2 || '',
+            city: d.city || '',
+            region: d.region || '',
+            postcode: d.postcode || d.postal_code || ''
+        };
     },
 
     /**
