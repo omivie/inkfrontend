@@ -313,6 +313,10 @@ test('main.js — slimmed (initBasicAutocomplete deletion takes ~210 lines)', ()
     // The mobile-ux audit (Jul 2026, mobile-ux-audit-jul2026.md §2a) added
     // initStickyHeader — an rAF-throttled scroll toggle that pins the mobile
     // header — ~35 lines incl. doc comment, lifting the ceiling to 725.
-    assert.ok(lines <= 725,
-        `main.js is ${lines} lines; expected ≤725. If you've added a load-bearing feature, document it; if you've re-introduced deleted search logic, see readfirst/SEARCH_AUDIT.md.`);
+    // The mobile-nav-drawer scroll fix (Jul 2026, ERR-103) added setNavMenuBound
+    // — measures the open drawer's top and bounds its max-height to the viewport
+    // so the brands grid can't fall below the fold — ~25 lines incl. doc comment
+    // and a resize listener, lifting the ceiling to 750.
+    assert.ok(lines <= 750,
+        `main.js is ${lines} lines; expected ≤750. If you've added a load-bearing feature, document it; if you've re-introduced deleted search logic, see readfirst/SEARCH_AUDIT.md.`);
 });

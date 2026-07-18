@@ -289,6 +289,21 @@ function initCartBadgeFromStorage() {
  * ==========
  */
 
+// Bound the open mobile drawer to the space between its top edge and the
+// viewport bottom so its own overflow-y:auto (layout.css .nav-menu) can scroll
+// the lower rows into reach (ERR-103). Measured, not hardcoded: the header's
+// height — hence the drawer's top offset — varies across the four responsive
+// modes and the scrolled/collapsed state. getBoundingClientRect forces layout,
+// so .top is accurate immediately after .is-open flips display to flex.
+function setNavMenuBound(navMenu, isOpen) {
+    if (isOpen) {
+        const top = navMenu.getBoundingClientRect().top;
+        navMenu.style.maxHeight = (window.innerHeight - top) + 'px';
+    } else {
+        navMenu.style.maxHeight = '';
+    }
+}
+
 function initNavigation() {
     const navToggle = $('.nav-toggle');
     const navMenu = $('#nav-menu');
@@ -297,6 +312,7 @@ function initNavigation() {
         navToggle.addEventListener('click', function() {
             const isOpen = navMenu.classList.toggle('is-open');
             navToggle.setAttribute('aria-expanded', isOpen);
+            setNavMenuBound(navMenu, isOpen);
         });
     }
 
@@ -306,7 +322,16 @@ function initNavigation() {
             if (!e.target.closest('.primary-nav')) {
                 navMenu.classList.remove('is-open');
                 navToggle.setAttribute('aria-expanded', 'false');
+                setNavMenuBound(navMenu, false);
             }
+        }
+    });
+
+    // Orientation change / resize while open: re-measure so the bound tracks
+    // the new viewport height.
+    window.addEventListener('resize', function() {
+        if (navMenu && navMenu.classList.contains('is-open')) {
+            setNavMenuBound(navMenu, true);
         }
     });
 

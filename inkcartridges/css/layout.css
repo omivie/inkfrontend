@@ -456,6 +456,19 @@
     padding: var(--spacing-4);
     gap: 0;
     z-index: 100;
+    /* The drawer is absolutely positioned and can grow taller than the
+       viewport (esp. once CARTRIDGE BRANDS expands its ~10-brand grid inside
+       it). Make the drawer its OWN scroll container so its lower rows stay
+       reachable — otherwise the bottom brands fall below the fold with no way
+       to scroll to them (ERR-103). The exact max-height is set by JS from the
+       drawer's measured top (main.js#setNavMenuBound) because the header — and
+       therefore this drawer's top offset — varies across the four responsive
+       modes and the scrolled/collapsed state. overscroll-behavior keeps the
+       gesture inside the drawer so the page body (and sticky header) don't move
+       while scrolling the menu. */
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
 }
 
 .nav-menu.is-open {
