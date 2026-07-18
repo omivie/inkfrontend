@@ -12370,6 +12370,17 @@ body.page-shop {
 }
 .loyalty-notice p { margin: 0; }
 
+/* Loud variant — the drift/mismatch alert (role="alert"). Must read as clearly
+   more urgent than the neutral amber "unavailable" notice above, so a genuine
+   cache↔ledger drift can't be mistaken for a soft status message. */
+.loyalty-notice--warn {
+    background: #fef2f2;
+    border-color: #fecaca;
+    border-left: 4px solid #dc2626;
+    color: #991b1b;
+    font-weight: 500;
+}
+
 /* Balance hero */
 .loyalty-balance-section { margin-bottom: var(--spacing-6, 1.5rem); }
 .loyalty-balance {

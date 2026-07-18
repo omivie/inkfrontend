@@ -169,36 +169,54 @@
         /**
          * Loud drift guard — "fail-soft must be LOUD".
          *
-         * The balance is a CACHED column (user_profiles.loyalty_points_balance)
-         * that the backend is meant to keep in lock-step with the audit ledger.
-         * A missed accrual (earn row written, balance never incremented) or a
-         * duplicated write desyncs them — the exact state behind ERR-102, where
-         * two +100 earns showed under a balance of 100. Rather than silently
-         * rendering three contradictory numbers, say so out loud.
+         * The balance is a CACHED column (user_profiles.loyalty_points_balance,
+         * + loyalty_lifetime_earned) that the backend keeps in lock-step with the
+         * audit ledger via ONE atomic, idempotent writer — the award_loyalty_points
+         * / adjust_loyalty_points RPCs (mig 085), which insert the ledger row AND
+         * bump the cache in a single FOR UPDATE transaction. So in steady state
+         * cache == ledger. If they diverge, that's genuine drift or a regression in
+         * that writer (the state behind ERR-102, since reconciled) — surface it
+         * loudly rather than silently rendering three contradictory numbers.
          *
-         * Only checked when we hold the COMPLETE ledger (single page): with a
-         * paginated ledger the on-screen rows are a subset, so a sum mismatch
-         * would be expected, not a fault. When complete, the signed sum of every
-         * entry must equal the balance, and earn+bonus must equal lifetime_earned.
+         * Only checked when we hold the COMPLETE ledger (single page): a paginated
+         * ledger is a subset, so a reconstruction mismatch would be expected, not a
+         * fault. When complete, we RE-DERIVE the cache from the ledger reproducing
+         * the RPC arithmetic EXACTLY, so a healthy account never trips the alert:
+         *   • running balance = GREATEST(prev + points, 0) — every mutation floors
+         *     at 0 (a clawback/over-redeem clamps the cache while the ledger stays
+         *     signed; a naive Σ(points) would diverge and false-alarm);
+         *   • lifetime_earned = Σ max(0, points) over {earn, bonus, adjust} — positive
+         *     admin adjusts DO count toward lifetime (excluding them undercounts a
+         *     perfectly healthy account).
          */
         checkLedgerConsistency() {
             if (!this.loyalty || this.totalPages > 1 || !this.ledger.length) return;
 
             const balance = Number(this.loyalty.points_balance) || 0;
-            const sum = this.ledger.reduce((s, r) => s + (Number(r.points) || 0), 0);
             const lifetime = this.loyalty.lifetime_earned;
-            const earned = this.ledger.reduce((s, r) =>
-                s + ((r.type === 'earn' || r.type === 'bonus') ? (Number(r.points) || 0) : 0), 0);
 
-            const balanceOff = sum !== balance;
-            const lifetimeOff = (lifetime != null) && (Number(lifetime) !== earned);
+            // Order-independent reconstruction: sort ascending so the floor is applied
+            // in the same sequence the backend wrote the rows.
+            const rows = this.ledger.slice().sort((a, b) =>
+                new Date(a.created_at || 0) - new Date(b.created_at || 0));
+
+            let derived = 0;
+            for (const r of rows) derived = Math.max(0, derived + (Number(r.points) || 0));
+
+            const LIFETIME_TYPES = { earn: 1, bonus: 1, adjust: 1 };
+            const derivedLifetime = rows.reduce((s, r) =>
+                s + (LIFETIME_TYPES[r.type] ? Math.max(0, Number(r.points) || 0) : 0), 0);
+
+            const balanceOff = derived !== balance;
+            const lifetimeOff = (lifetime != null) && (Number(lifetime) !== derivedLifetime);
             if (!balanceOff && !lifetimeOff) return;
 
             const fmt = (n) => Number(n).toLocaleString('en-NZ');
             const msg = balanceOff
-                ? `Your points history adds up to ${fmt(sum)} points, but your balance shows ${fmt(balance)}. `
-                    + `An earn may not have been credited — we're reconciling your account. Please contact us if it doesn't correct itself.`
-                : `Your all-time earned total looks out of step with your points history. We're reconciling your account.`;
+                ? `Your points history adds up to ${fmt(derived)} points, but your balance shows ${fmt(balance)}. `
+                    + `We've flagged your account for reconciliation — please contact us if it doesn't correct itself.`
+                : `Your all-time earned total (${fmt(derivedLifetime)}) looks out of step with your points history. `
+                    + `We've flagged your account for reconciliation.`;
 
             let el = document.getElementById('loyalty-balance-mismatch');
             if (!el) {
@@ -214,7 +232,7 @@
             el.hidden = false;
 
             if (typeof DebugLog !== 'undefined') {
-                DebugLog.warn('Loyalty ledger/balance mismatch', { balance, sum, lifetime, earned });
+                DebugLog.warn('Loyalty ledger/balance mismatch', { balance, derived, lifetime, derivedLifetime });
             }
         },
 

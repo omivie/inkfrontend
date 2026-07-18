@@ -288,9 +288,14 @@ test('runtime: everything unavailable (points down, no orders, no coupons) → h
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Drift guard (ERR-102) — "fail-soft must be LOUD". Balance is a cached column
-// (user_profiles.loyalty_points_balance) the backend earn path fails to keep in
-// step with the ledger. When the FULL ledger is on screen the numbers must
-// reconcile, or say so loudly instead of rendering three contradictory figures.
+// (user_profiles.loyalty_points_balance) the backend keeps in lock-step with the
+// ledger via the atomic award_loyalty_points / adjust_loyalty_points RPCs. When
+// the FULL ledger is on screen, the guard RE-DERIVES the cache reproducing that
+// RPC arithmetic EXACTLY — floor-at-0 running balance, lifetime = Σ positive
+// points over {earn,bonus,adjust} — so it stays silent on every healthy account
+// (positive adjusts, floored clawbacks, redeem series) and fires ONLY on genuine
+// drift, saying so loudly instead of rendering contradictory figures. The two
+// false-positive classes below are exactly the ones the backend flagged.
 // ─────────────────────────────────────────────────────────────────────────────
 
 test('drift guard: 2×100 earns under a balance of 100 → loud mismatch notice', async () => {
@@ -337,6 +342,101 @@ test('drift guard: paginated ledger (subset on screen) → skipped, no false ala
     await run();
     const notice = els['loyalty-balance-mismatch'];
     assert.ok(!notice || notice.hidden === true, 'no notice while the ledger is paginated');
+});
+
+test('drift guard: positive admin adjust folded into lifetime → no false alarm', async () => {
+    // The exact class the backend flagged (account a06e2a41): adjust_loyalty_points
+    // folds GREATEST(points,0) into loyalty_lifetime_earned. A guard that counted
+    // only earn+bonus would undercount (100) vs lifetime (150) and cry wolf.
+    const loyalty = {
+        program_active: true, points_balance: 150, lifetime_earned: 150,
+        redemption_rate: 100, min_redemption_points: 500,
+        ledger: [
+            { type: 'earn', points: 100, balance_after: 100, created_at: '2026-06-26T00:00:00Z' },
+            { type: 'adjust', points: 50, balance_after: 150, created_at: '2026-06-27T00:00:00Z' },
+        ],
+    };
+    const { els, run } = runLoyaltyPage(loyalty, [], []);
+    await run();
+    const notice = els['loyalty-balance-mismatch'];
+    assert.ok(!notice || notice.hidden === true, 'positive adjust counts toward lifetime — no alarm');
+});
+
+test('drift guard: clawback floored at 0 → no false alarm', async () => {
+    // The backend's one named future drift source: a clawback that would take the
+    // cache negative floors at 0 (GREATEST(prev+points,0)) while the ledger row
+    // stays signed. A naive Σ(points)=-50 would diverge from the floored cache (0).
+    const loyalty = {
+        program_active: true, points_balance: 0, lifetime_earned: 100,
+        redemption_rate: 100, min_redemption_points: 500,
+        ledger: [
+            { type: 'earn', points: 100, balance_after: 100, created_at: '2026-06-26T00:00:00Z' },
+            { type: 'clawback', points: -150, balance_after: 0, created_at: '2026-06-27T00:00:00Z' },
+        ],
+    };
+    const { els, run } = runLoyaltyPage(loyalty, [], []);
+    await run();
+    const notice = els['loyalty-balance-mismatch'];
+    assert.ok(!notice || notice.hidden === true, 'floored clawback reconstructs to 0 — no alarm');
+});
+
+test('drift guard: earn + redeem series → no false alarm', async () => {
+    // Redeem rows are signed-negative; the running balance nets them out and
+    // lifetime_earned ignores them (redeem ∉ {earn,bonus,adjust}).
+    const loyalty = {
+        program_active: true, points_balance: 200, lifetime_earned: 500,
+        redemption_rate: 100, min_redemption_points: 500,
+        ledger: [
+            { type: 'earn', points: 500, balance_after: 500, created_at: '2026-06-26T00:00:00Z' },
+            { type: 'redeem', points: -300, balance_after: 200, created_at: '2026-06-28T00:00:00Z' },
+        ],
+    };
+    const { els, run } = runLoyaltyPage(loyalty, [], []);
+    await run();
+    const notice = els['loyalty-balance-mismatch'];
+    assert.ok(!notice || notice.hidden === true, 'earn-then-redeem reconciles — no alarm');
+});
+
+test('drift guard: negative admin adjust does not inflate lifetime → no false alarm', async () => {
+    // A negative adjust lowers the balance but must NOT count toward lifetime
+    // (only max(0,points) does), so lifetime stays at the 200 earned.
+    const loyalty = {
+        program_active: true, points_balance: 150, lifetime_earned: 200,
+        redemption_rate: 100, min_redemption_points: 500,
+        ledger: [
+            { type: 'earn', points: 200, balance_after: 200, created_at: '2026-06-26T00:00:00Z' },
+            { type: 'adjust', points: -50, balance_after: 150, created_at: '2026-06-27T00:00:00Z' },
+        ],
+    };
+    const { els, run } = runLoyaltyPage(loyalty, [], []);
+    await run();
+    const notice = els['loyalty-balance-mismatch'];
+    assert.ok(!notice || notice.hidden === true, 'negative adjust excluded from lifetime — no alarm');
+});
+
+test('drift guard: correct balance but stale lifetime_earned → still fires (real drift)', async () => {
+    // Balance reconciles (200) but the cached lifetime is stale (100 vs 200 earned)
+    // — a genuine regression the guard must still catch.
+    const loyalty = {
+        program_active: true, points_balance: 200, lifetime_earned: 100,
+        redemption_rate: 100, min_redemption_points: 500,
+        ledger: [
+            { type: 'earn', points: 100, balance_after: 100, created_at: '2026-06-26T00:00:00Z' },
+            { type: 'earn', points: 100, balance_after: 200, created_at: '2026-06-27T00:00:00Z' },
+        ],
+    };
+    const { els, run } = runLoyaltyPage(loyalty, [], []);
+    await run();
+    const notice = els['loyalty-balance-mismatch'];
+    assert.ok(notice && notice.hidden === false, 'stale lifetime still trips the guard');
+    assert.match(notice.innerHTML, /all-time earned total \(200\)/, 'notice states the derived lifetime');
+});
+
+test('drift guard: the loud .loyalty-notice--warn style actually exists in CSS', () => {
+    // The banner is injected with class "loyalty-notice--warn"; guard against it
+    // silently regressing to a no-op modifier (then "loud" falls back to neutral).
+    const css = HTML('css/pages.css');
+    assert.match(css, /\.loyalty-notice--warn\s*\{/, 'pages.css defines a .loyalty-notice--warn rule');
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
