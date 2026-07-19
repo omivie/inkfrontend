@@ -766,6 +766,12 @@
         padding: 0;
         gap: 0;
         z-index: auto;
+        /* Reset the mobile-drawer overflow-y:auto (base rule). Otherwise, with
+           overflow-y:auto and overflow-x:visible, the spec promotes overflow-x
+           to auto, so the desktop flex row shows a spurious horizontal scrollbar
+           under the nav ribbon. The vertical drawer scroll stays where it's
+           needed on the <1100px hamburger drawer (ERR-103). */
+        overflow: visible;
     }
 
     .nav-menu__item {
