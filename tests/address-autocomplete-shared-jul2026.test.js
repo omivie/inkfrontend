@@ -515,3 +515,354 @@ test('script order: api.js < address-autocomplete.js < page controller', () => {
         assert.ok(mod < ctrl, `${name}: ${controller} attaches the module — it must come after`);
     }
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// §8 — attach() behaviour under a fake DOM (ERR-109 + a11y + empty results)
+//
+// THE BUG THIS PINS (ERR-109): on EVERY call site `fieldMap.line1` is the
+// attached input itself (checkout `address1`/`billing-address1`, account
+// `address-line1`). applyAddressDetails writes that field and dispatches a
+// bubbling `input` event — which other listeners legitimately need (shipping
+// recalc, dirty-state) — and that event re-entered the module's OWN input
+// handler. Result: an extra uncached /suggest request on every single
+// selection, against a 30 req/min/IP budget shared with account writes, plus
+// the dropdown re-opening ~300ms after the user picked. Same request-
+// amplification failure mode as ERR-096, one layer down.
+//
+// These run the real module against a minimal DOM so the assertion is on
+// observable behaviour (fetch counts, aria state), not source text.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+
+// Minimal DOM: only what the module actually touches.
+function makeDom() {
+    class FakeEl {
+        constructor(tag) {
+            this.tagName = String(tag).toUpperCase();
+            this.children = [];
+            this.parentNode = null;
+            this.attrs = {};
+            this.dataset = {};
+            this.listeners = {};
+            this.value = '';
+            this.hidden = false;
+            this.textContent = '';
+            this.id = '';
+            this._classes = new Set();
+            this.classList = {
+                add: (c) => this._classes.add(c),
+                remove: (c) => this._classes.delete(c),
+                contains: (c) => this._classes.has(c),
+            };
+        }
+        get className() { return Array.from(this._classes).join(' '); }
+        set className(v) { this._classes = new Set(String(v).split(/\s+/).filter(Boolean)); }
+        set innerHTML(v) { if (v === '') { this.children.forEach(c => { c.parentNode = null; }); this.children = []; } }
+        get innerHTML() { return ''; }
+        setAttribute(k, v) { this.attrs[k] = String(v); if (k === 'id') this.id = String(v); }
+        getAttribute(k) { return Object.prototype.hasOwnProperty.call(this.attrs, k) ? this.attrs[k] : null; }
+        removeAttribute(k) { delete this.attrs[k]; }
+        appendChild(node) {
+            if (node.parentNode) node.parentNode.children = node.parentNode.children.filter(c => c !== node);
+            node.parentNode = this;
+            this.children.push(node);
+            return node;
+        }
+        insertBefore(node, ref) {
+            const i = this.children.indexOf(ref);
+            if (node.parentNode) node.parentNode.children = node.parentNode.children.filter(c => c !== node);
+            node.parentNode = this;
+            this.children.splice(i < 0 ? this.children.length : i, 0, node);
+            return node;
+        }
+        contains(node) {
+            if (node === this) return true;
+            return this.children.some(c => c.contains(node));
+        }
+        _descendants() { return this.children.flatMap(c => [c, ...c._descendants()]); }
+        querySelectorAll(sel) {
+            const cls = sel.replace(/^\./, '');
+            return this._descendants().filter(el => el._classes.has(cls));
+        }
+        querySelector(sel) { return this.querySelectorAll(sel)[0] || null; }
+        addEventListener(type, fn) { (this.listeners[type] ||= []).push(fn); }
+        dispatchEvent(evt) { (this.listeners[evt.type] || []).forEach(fn => fn(evt)); return true; }
+        scrollIntoView() {}
+        focus() {}
+    }
+
+    const byId = new Map();
+    const root = new FakeEl('div');
+    const mk = (tag, id) => { const el = new FakeEl(tag); el.id = id; byId.set(id, el); root.appendChild(el); return el; };
+
+    const document = {
+        getElementById: (id) => byId.get(id) || null,
+        createElement: (tag) => new FakeEl(tag),
+        addEventListener() {},
+        body: root,
+    };
+    return { document, mk, root, FakeEl };
+}
+
+// Boot the real module against a fake DOM + API spy. Returns handles for
+// driving it: type(), and counters for each endpoint.
+function bootAttached(opts = {}) {
+    const { document, mk } = makeDom();
+    const ids = opts.ids || {
+        line1: 'address1', line2: 'address2', city: 'city',
+        region: 'region', postcode: 'postcode',
+    };
+    Object.values(ids).forEach(id => mk('input', id));
+
+    const calls = { suggest: [], details: [] };
+    const suggestData = opts.suggestData !== undefined ? opts.suggestData : [
+        { dpid: 1464938, full_address: '131 Tiverton Road, New Windsor, Auckland 0600' },
+    ];
+    // Verbatim live payload for dpid 1464938 (see readfirst/address-autocomplete-nzpost-jul2026.md).
+    const detailsData = opts.detailsData !== undefined ? opts.detailsData : {
+        dpid: '1464938',
+        full_address: '131 Tiverton Road, New Windsor, New Windsor, Auckland, 0600',
+        address_line1: '131 Tiverton Road',
+        address_line2: 'New Windsor',
+        suburb: 'New Windsor',
+        city: 'Auckland',
+        region: '',
+        postcode: '0600',
+    };
+
+    const API = {
+        async nzpostSuggest(q) {
+            calls.suggest.push(q);
+            if (opts.suggestResponse) return opts.suggestResponse;
+            return { ok: true, data: suggestData };
+        },
+        async nzpostDetails(dpid) {
+            calls.details.push(dpid);
+            return { ok: true, data: detailsData };
+        },
+    };
+
+    const sandbox = {
+        console, Map, Set, Promise, Date, JSON, Error, Object, Array,
+        String, Number, Boolean, RegExp,
+        setTimeout, clearTimeout, setInterval, clearInterval,
+        Event: class Event { constructor(type, o) { this.type = type; Object.assign(this, o); } },
+        document,
+        DebugLog: { log() {}, warn() {}, error() {} },
+        API,
+        window: {},
+    };
+    sandbox.window = sandbox;
+    sandbox.globalThis = sandbox;
+    const ctx = vm.createContext(sandbox);
+    vm.runInContext(MODULE_SRC, ctx, { filename: 'address-autocomplete.js' });
+
+    const AC = sandbox.AddressAutocomplete;
+    // Fresh module state per boot (these are module-level and sticky).
+    AC._cache = new Map();
+    AC._seq = 0;
+    AC._nzpostDisabled = false;
+    AC._pausedUntil = 0;
+    AC._selfFill = false;
+    AC._instances = [];
+
+    const DEBOUNCE = 20;
+    AC.attach(ids.line1, ids, { debounceMs: DEBOUNCE, ...(opts.attachOpts || {}) });
+
+    const input = document.getElementById(ids.line1);
+    const wrapper = input.parentNode;
+    const dropdown = wrapper.querySelector('.address-autocomplete__dropdown');
+    const hint = wrapper.querySelector('.address-autocomplete__hint');
+
+    const type = async (text) => {
+        input.value = text;
+        input.dispatchEvent({ type: 'input' });
+        await sleep(DEBOUNCE + 40);
+    };
+    const key = (k) => input.dispatchEvent({ type: 'keydown', key: k, preventDefault() {} });
+
+    return { AC, document, input, wrapper, dropdown, hint, calls, type, key, sleep, DEBOUNCE, ids };
+}
+
+test('ERR-109: selecting a suggestion does NOT fire a second /suggest (self-fill re-entrancy)', async () => {
+    const t = bootAttached();
+
+    await t.type('131 Tiverton');
+    assert.equal(t.calls.suggest.length, 1, 'one debounced lookup for the typed query');
+    assert.equal(t.dropdown.hidden, false, 'dropdown should be open with the match');
+
+    const option = t.dropdown.querySelector('.address-autocomplete__option');
+    assert.ok(option, 'a suggestion should have rendered');
+    option.dispatchEvent({ type: 'mousedown', preventDefault() {} });
+
+    // Past the debounce window a re-entrant lookup would have fired in.
+    await sleep(t.DEBOUNCE + 60);
+
+    assert.equal(t.calls.details.length, 1, 'exactly one /details for the pick');
+    assert.equal(t.calls.suggest.length, 1,
+        'THE BUG: filling line1 dispatched `input` and re-triggered our own lookup — ' +
+        'an extra uncached /suggest per selection against a 30 req/min/IP budget');
+    assert.equal(t.dropdown.hidden, true, 'dropdown must stay closed after selection, not re-open');
+});
+
+test('ERR-109 guard is not over-broad: real typing after a fill still searches', async () => {
+    const t = bootAttached();
+
+    await t.type('131 Tiverton');
+    t.dropdown.querySelector('.address-autocomplete__option')
+        .dispatchEvent({ type: 'mousedown', preventDefault() {} });
+    await sleep(t.DEBOUNCE + 60);
+    assert.equal(t.calls.suggest.length, 1);
+
+    // User edits the address by hand afterwards — this MUST still search.
+    await t.type('12 Queen Street');
+    assert.equal(t.calls.suggest.length, 2, 'genuine user input after a fill must still trigger a lookup');
+    assert.equal(t.AC._selfFill, false, 'the guard must not be left stuck on');
+});
+
+test('selection fills the form from DISCRETE fields (postcode, not full_address)', async () => {
+    const t = bootAttached();
+    await t.type('131 Tiverton');
+    t.dropdown.querySelector('.address-autocomplete__option')
+        .dispatchEvent({ type: 'mousedown', preventDefault() {} });
+    await sleep(t.DEBOUNCE + 60);
+
+    assert.equal(t.document.getElementById('address1').value, '131 Tiverton Road');
+    assert.equal(t.document.getElementById('city').value, 'Auckland');
+    assert.equal(t.document.getElementById('postcode').value, '0600', 'POSTCODE must fill from `postcode`');
+    assert.equal(t.document.getElementById('region').value, '',
+        'empty NZ Post region stays empty — the user picks it, and it must never block submit');
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// §9 — degraded states are DISTINCT (fail-soft must be LOUD, but honest)
+//
+// An empty result means the service is HEALTHY and the address simply isn't in
+// the dataset. Showing the "unavailable" copy there cries wolf; showing nothing
+// at all reads as "still loading". Both are wrong — it gets its own soft line.
+// ─────────────────────────────────────────────────────────────────────────────
+
+test('empty results (ok:true, data:[]) show the soft "no matching addresses" hint', async () => {
+    const t = bootAttached({ suggestData: [] });
+    await t.type('999 Nowhere Street');
+
+    assert.equal(t.dropdown.hidden, true);
+    assert.equal(t.hint.hidden, false, 'silence reads as "nothing happened" — must surface');
+    assert.match(t.hint.textContent, /no matching addresses/i);
+    assert.doesNotMatch(t.hint.textContent, /unavailable/i,
+        'a healthy provider must not be reported as unavailable');
+});
+
+test('a cached empty query shows the SAME soft hint (no silent second impression)', async () => {
+    const t = bootAttached({ suggestData: [] });
+    await t.type('999 Nowhere Street');
+    const first = t.hint.textContent;
+
+    await t.type('12 Somewhere');          // different query
+    await t.type('999 Nowhere Street');    // back to the cached dead end
+
+    assert.equal(t.calls.suggest.length, 2, 'the repeat query must be served from cache — zero extra requests');
+    assert.equal(t.hint.hidden, false, 'cached dead-end must not silently show nothing');
+    assert.equal(t.hint.textContent, first, 'cached and uncached empty results must look identical');
+});
+
+test('provider failure shows the manual-entry fallback and trips the session breaker', async () => {
+    const t = bootAttached({ suggestResponse: { ok: false, code: 'INTERNAL_ERROR' } });
+    await t.type('131 Tiverton');
+
+    assert.equal(t.hint.hidden, false);
+    assert.match(t.hint.textContent, /unavailable right now .* type your address manually/i);
+    assert.equal(t.AC._nzpostDisabled, true, '5xx must disable NZ Post for the session, not retry per keystroke');
+
+    await t.type('12 Queen Street');
+    assert.equal(t.calls.suggest.length, 1, 'breaker must stop further doomed requests');
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// §10 — combobox a11y. Arrow-key movement used to be a CSS class only, so a
+// screen reader announced nothing as the user moved through the list.
+// ─────────────────────────────────────────────────────────────────────────────
+
+test('input carries combobox semantics wired to the listbox', () => {
+    const t = bootAttached();
+    assert.equal(t.input.getAttribute('role'), 'combobox');
+    assert.equal(t.input.getAttribute('aria-autocomplete'), 'list');
+    assert.equal(t.input.getAttribute('aria-expanded'), 'false', 'closed on attach');
+    assert.equal(t.input.getAttribute('aria-controls'), t.dropdown.id);
+    assert.ok(t.dropdown.id, 'the listbox needs an id for aria-controls to point at');
+});
+
+test('aria-expanded tracks the dropdown, and Escape clears the active option', async () => {
+    const t = bootAttached();
+    await t.type('131 Tiverton');
+    assert.equal(t.input.getAttribute('aria-expanded'), 'true');
+
+    t.key('ArrowDown');
+    const option = t.dropdown.querySelector('.address-autocomplete__option');
+    assert.equal(t.input.getAttribute('aria-activedescendant'), option.id,
+        'aria-activedescendant must name the focused option element');
+    assert.equal(option.getAttribute('aria-selected'), 'true');
+
+    t.key('Escape');
+    assert.equal(t.input.getAttribute('aria-expanded'), 'false');
+    assert.equal(t.input.getAttribute('aria-activedescendant'), null, 'stale activedescendant must be cleared');
+});
+
+test('arrow keys move aria-selected rather than accumulating it', async () => {
+    const t = bootAttached({
+        suggestData: [
+            { dpid: 1, full_address: '1 Queen Street, Auckland 1010' },
+            { dpid: 2, full_address: '2 Queen Street, Auckland 1010' },
+        ],
+    });
+    await t.type('Queen Street');
+    const [a, b] = t.dropdown.querySelectorAll('.address-autocomplete__option');
+
+    t.key('ArrowDown');
+    assert.equal(a.getAttribute('aria-selected'), 'true');
+    t.key('ArrowDown');
+    assert.equal(b.getAttribute('aria-selected'), 'true');
+    assert.equal(a.getAttribute('aria-selected'), 'false', 'exactly one option may be selected at a time');
+    assert.equal(t.input.getAttribute('aria-activedescendant'), b.id);
+});
+
+test('two attachments on one page get unique listbox ids (checkout shipping + billing)', () => {
+    const shipping = bootAttached();
+    const billing = bootAttached({
+        ids: {
+            line1: 'billing-address1', line2: 'billing-address2', city: 'billing-city',
+            region: 'billing-region', postcode: 'billing-postcode',
+        },
+    });
+    assert.notEqual(shipping.dropdown.id, billing.dropdown.id,
+        'duplicate ids would make aria-activedescendant point at the wrong list');
+    assert.match(billing.dropdown.id, /billing-address1/);
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// §11 — the backend contract the module cites must exist in-repo
+// ─────────────────────────────────────────────────────────────────────────────
+
+test('_normalizeDetails carries suburb through (provider returns it — do not drop it)', () => {
+    const AC = loadModule();
+    const f = AC._normalizeDetails({ address_line1: '131 Tiverton Road', suburb: 'New Windsor', city: 'Auckland', postcode: '0600' });
+    assert.equal(f.suburb, 'New Windsor');
+});
+
+test('the cited NZ Post contract doc is vendored in-repo', () => {
+    const rel = 'readfirst/address-autocomplete-nzpost-jul2026.md';
+    assert.ok(fs.existsSync(path.join(ROOT, rel)),
+        `${rel} is cited by the module and these tests — it must exist, not live only in someone's Downloads`);
+    const doc = READ(rel);
+    assert.match(doc, /\/api\/address\/nzpost\/suggest/, 'contract must document the suggest endpoint');
+    assert.match(doc, /\/api\/address\/nzpost\/details/, 'contract must document the details endpoint');
+    assert.match(MODULE_SRC, /readfirst\/address-autocomplete-nzpost-jul2026\.md/,
+        'the module must cite the real in-repo path');
+});
+
+test('module keeps the ERR-109 self-fill guard (source pin)', () => {
+    assert.match(MODULE_SRC, /_selfFill/, 'the re-entrancy guard must not be refactored away');
+    assert.match(MODULE_SRC, /finally\s*\{\s*AddressAutocomplete\._selfFill = false;/,
+        'the guard must be released in a finally — a throwing listener must not deaden autocomplete');
+});

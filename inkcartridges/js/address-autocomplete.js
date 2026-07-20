@@ -12,7 +12,7 @@
  * fully retired here (a doomed fallback request per empty query only burned the
  * shared rate budget this module exists to protect).
  *
- * Backend contract (address-autocomplete-nzpost.md):
+ * Backend contract (readfirst/address-autocomplete-nzpost-jul2026.md):
  *   GET /api/address/nzpost/suggest?q=&max=  → { ok, data: [{ dpid, full_address }] }
  *   GET /api/address/nzpost/details?dpid=    → { ok, data: {
  *          address_line1, address_line2, suburb, city, region, postcode } }
@@ -54,10 +54,36 @@ const AddressAutocomplete = {
     // RATE_LIMITED response — the budget is per-IP, not per-field.
     _pausedUntil: 0,
 
+    // Re-entrancy guard (ERR-109). On every call site `fieldMap.line1` IS the
+    // attached input, and filling it dispatches a bubbling `input` event that
+    // other listeners legitimately need (shipping recalc, dirty-state). Without
+    // this flag that event re-enters our own input handler and schedules a
+    // lookup for the address the user JUST picked — an extra uncached /suggest
+    // per selection against a 30 req/min/IP budget, plus the dropdown popping
+    // back open ~300ms after selection. dispatchEvent is synchronous, so the
+    // flag's open window is exactly our programmatic writes; real typing is
+    // never suppressed.
+    _selfFill: false,
+
+    // Attached instances + a single shared document click listener. One
+    // listener per attach() would accumulate on every re-attach.
+    _instances: [],
+    _docListenerBound: false,
+
+    _bindDocumentListener() {
+        if (this._docListenerBound) return;
+        this._docListenerBound = true;
+        document.addEventListener('click', (e) => {
+            AddressAutocomplete._instances.forEach((inst) => {
+                if (!inst.wrapper.contains(e.target)) inst.hide();
+            });
+        });
+    },
+
     /**
      * Enhance a street-address input with an autocomplete dropdown.
      * @param {string} inputId - id of the address line 1 input
-     * @param {object} fieldMap - element ids: { line1, line2, city, region, postcode }
+     * @param {object} fieldMap - element ids: { line1, line2, city, region, postcode, suburb? }
      * @param {object} [opts]
      * @param {function} [opts.onApply] - called with the details payload after fields fill (e.g. checkout shipping-cost refresh)
      * @param {number} [opts.debounceMs=300]
@@ -71,12 +97,28 @@ const AddressAutocomplete = {
         const debounceMs = opts.debounceMs || 300;
         const minChars = opts.minChars || 3;
 
+        // Ids are derived from the input id so two attachments on one page
+        // (checkout's shipping + billing blocks) can't collide — duplicate ids
+        // would make aria-activedescendant point at the wrong list.
+        const domId = String(inputId).replace(/[^a-zA-Z0-9_-]/g, '-');
+        const listId = `address-ac-list-${domId}`;
+        const optionId = (i) => `address-ac-opt-${domId}-${i}`;
+
         // Dropdown + wrapper
         const dropdown = document.createElement('ul');
         dropdown.className = 'address-autocomplete__dropdown';
+        dropdown.id = listId;
         dropdown.setAttribute('role', 'listbox');
         dropdown.setAttribute('aria-label', 'Address suggestions');
         dropdown.hidden = true;
+
+        // Combobox semantics on the input itself. Without these the arrow-key
+        // "focused" state is a CSS class only and a screen reader announces
+        // nothing as the user moves through the list.
+        input.setAttribute('role', 'combobox');
+        input.setAttribute('aria-autocomplete', 'list');
+        input.setAttribute('aria-expanded', 'false');
+        input.setAttribute('aria-controls', listId);
 
         // Loud fail-soft hint — visible whenever suggestions are degraded.
         const hint = document.createElement('div');
@@ -107,6 +149,8 @@ const AddressAutocomplete = {
             dropdown.hidden = true;
             dropdown.innerHTML = '';
             currentSuggestions = [];
+            input.setAttribute('aria-expanded', 'false');
+            input.removeAttribute('aria-activedescendant');
         };
 
         // Fill address fields from an NZ Post details response.
@@ -122,16 +166,30 @@ const AddressAutocomplete = {
             // Normalize field names up front (postcode vs the retired
             // Google-era postal_code) so the mapping is one tested concern.
             const fields = AddressAutocomplete._normalizeDetails(d);
-            setField(fieldMap.line1, fields.line1);
-            setField(fieldMap.line2, fields.line2);
-            setField(fieldMap.city, fields.city);
-            setField(fieldMap.postcode, fields.postcode);
 
-            // region is usually "" from NZ Post — only apply a real value, and
-            // never block submit waiting for it (the user picks it manually).
-            if (fieldMap.region && fields.region) {
-                const regionEl = document.getElementById(fieldMap.region);
-                if (regionEl) this._applyRegion(regionEl, fields.region);
+            // ERR-109: fieldMap.line1 IS this input on every call site, so the
+            // bubbling `input` events below would re-trigger our own lookup.
+            // Keep dispatching them (other listeners need them) but suppress
+            // the self-inflicted search. try/finally so a throwing listener
+            // can't strand the flag and deaden autocomplete for the session.
+            AddressAutocomplete._selfFill = true;
+            try {
+                setField(fieldMap.line1, fields.line1);
+                setField(fieldMap.line2, fields.line2);
+                // Optional — no current form has a suburb input, but the
+                // provider returns one and the map supports it.
+                if (fieldMap.suburb) setField(fieldMap.suburb, fields.suburb);
+                setField(fieldMap.city, fields.city);
+                setField(fieldMap.postcode, fields.postcode);
+
+                // region is usually "" from NZ Post — only apply a real value,
+                // and never block submit waiting for it (user picks it).
+                if (fieldMap.region && fields.region) {
+                    const regionEl = document.getElementById(fieldMap.region);
+                    if (regionEl) AddressAutocomplete._applyRegion(regionEl, fields.region);
+                }
+            } finally {
+                AddressAutocomplete._selfFill = false;
             }
 
             if (typeof opts.onApply === 'function') opts.onApply(d);
@@ -178,10 +236,12 @@ const AddressAutocomplete = {
         const renderSuggestions = (suggestions) => {
             currentSuggestions = suggestions;
             dropdown.innerHTML = '';
-            suggestions.forEach((suggestion) => {
+            suggestions.forEach((suggestion, i) => {
                 const li = document.createElement('li');
                 li.className = 'address-autocomplete__option';
+                li.id = optionId(i);
                 li.setAttribute('role', 'option');
+                li.setAttribute('aria-selected', 'false');
                 li.setAttribute('tabindex', '-1');
                 li.textContent = suggestion.label;
                 li.addEventListener('mousedown', (e) => {
@@ -191,6 +251,8 @@ const AddressAutocomplete = {
                 dropdown.appendChild(li);
             });
             dropdown.hidden = false;
+            input.setAttribute('aria-expanded', 'true');
+            input.removeAttribute('aria-activedescendant');
             hideHint();
         };
 
@@ -225,7 +287,10 @@ const AddressAutocomplete = {
                     return { suggestions: [], failed: true };
                 }
                 // ok:true but empty — a healthy "no matches", not a failure.
-                return { suggestions: [], failed: false };
+                // Still surfaced (softly): silence here reads as "nothing
+                // happened" and leaves the user waiting on a dropdown that is
+                // never coming.
+                return { suggestions: [], failed: false, empty: true };
             } catch (e) {
                 if (handleRateLimit(e)) return { suggestions: [], failed: true, rateLimited: true };
                 return { suggestions: [], failed: true };
@@ -233,6 +298,11 @@ const AddressAutocomplete = {
         };
 
         input.addEventListener('input', () => {
+            // ERR-109: this event came from our own applyAddressDetails fill,
+            // not the user. Searching for the address they just picked burns a
+            // request and re-opens the dropdown they just dismissed.
+            if (AddressAutocomplete._selfFill) return;
+
             clearTimeout(debounceTimer);
             const q = input.value.trim();
             if (q.length < minChars) {
@@ -252,8 +322,14 @@ const AddressAutocomplete = {
                 // Session cache — retyping a seen query costs zero requests.
                 if (AddressAutocomplete._cache.has(q)) {
                     const cached = AddressAutocomplete._cache.get(q);
-                    if (cached.length) renderSuggestions(cached);
-                    else { hideSuggestions(); hideHint(); }
+                    if (cached.length) {
+                        renderSuggestions(cached);
+                    } else {
+                        // Same soft "no matches" copy as the uncached path —
+                        // a cached dead-end must not look different.
+                        hideSuggestions();
+                        showHint('No matching addresses — you can type your address manually.');
+                    }
                     return;
                 }
 
@@ -273,6 +349,11 @@ const AddressAutocomplete = {
                     if (result.failed) {
                         // LOUD fail-soft: NZ Post errored ≠ a healthy "no matches".
                         showHint('Address suggestions are unavailable right now — please type your address manually.');
+                    } else if (result.empty) {
+                        // Healthy service, address just isn't in the dataset.
+                        // Deliberately NOT the "unavailable" copy — that would
+                        // cry wolf about a provider that is working fine.
+                        showHint('No matching addresses — you can type your address manually.');
                     } else {
                         hideHint();
                     }
@@ -287,18 +368,28 @@ const AddressAutocomplete = {
             const focused = dropdown.querySelector('.address-autocomplete__option--focused');
             let idx = focused ? Array.from(items).indexOf(focused) : -1;
 
+            // Move the roving active option, keeping the CSS class, the
+            // aria-selected state and aria-activedescendant in lockstep — the
+            // class alone announces nothing to a screen reader.
+            const moveTo = (nextIdx) => {
+                if (focused) {
+                    focused.classList.remove('address-autocomplete__option--focused');
+                    focused.setAttribute('aria-selected', 'false');
+                }
+                const next = items[nextIdx];
+                if (!next) return;
+                next.classList.add('address-autocomplete__option--focused');
+                next.setAttribute('aria-selected', 'true');
+                next.scrollIntoView({ block: 'nearest' });
+                input.setAttribute('aria-activedescendant', next.id);
+            };
+
             if (e.key === 'ArrowDown') {
                 e.preventDefault();
-                focused?.classList.remove('address-autocomplete__option--focused');
-                idx = (idx + 1) % items.length;
-                items[idx]?.classList.add('address-autocomplete__option--focused');
-                items[idx]?.scrollIntoView({ block: 'nearest' });
+                moveTo((idx + 1) % items.length);
             } else if (e.key === 'ArrowUp') {
                 e.preventDefault();
-                focused?.classList.remove('address-autocomplete__option--focused');
-                idx = (idx - 1 + items.length) % items.length;
-                items[idx]?.classList.add('address-autocomplete__option--focused');
-                items[idx]?.scrollIntoView({ block: 'nearest' });
+                moveTo((idx - 1 + items.length) % items.length);
             } else if (e.key === 'Enter' && focused) {
                 e.preventDefault();
                 // Same path as mousedown — the old checkout copy called a
@@ -311,10 +402,10 @@ const AddressAutocomplete = {
             }
         });
 
-        // Hide on outside click
-        document.addEventListener('click', (e) => {
-            if (!wrapper.contains(e.target)) hideSuggestions();
-        });
+        // Hide on outside click — registered against ONE shared document
+        // listener rather than adding a new one per attach().
+        AddressAutocomplete._instances.push({ wrapper, hide: hideSuggestions });
+        AddressAutocomplete._bindDocumentListener();
 
         // Hide on blur (delay allows mousedown on option to fire first)
         input.addEventListener('blur', () => {
@@ -329,13 +420,17 @@ const AddressAutocomplete = {
      * and is the one tested place the postcode field-name lives (the missing
      * normalization here left POSTCODE blank on every NZ Post pick).
      * @param {object} d - raw details payload
-     * @returns {{line1:string,line2:string,city:string,region:string,postcode:string}}
+     * `suburb` is carried through even though neither current form has a
+     * suburb input — it is in the payload, and silently dropping a field the
+     * provider returns is the kind of loss nobody notices until a form needs it.
+     * @returns {{line1:string,line2:string,suburb:string,city:string,region:string,postcode:string}}
      */
     _normalizeDetails(d) {
         d = d || {};
         return {
             line1: d.address_line1 || '',
             line2: d.address_line2 || '',
+            suburb: d.suburb || '',
             city: d.city || '',
             region: d.region || '',
             postcode: d.postcode || d.postal_code || ''
