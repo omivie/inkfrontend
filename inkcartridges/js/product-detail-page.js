@@ -514,6 +514,13 @@
             document.getElementById('product-title').textContent = info.displayName;
             document.getElementById('product-sku').textContent = `SKU: ${info.sku}${info.manufacturer_part_number ? ' | Model: ' + info.manufacturer_part_number : ''}`;
 
+            // Aggregate rating badge — surface accumulating ratings at the top of
+            // the buy-box so the review flywheel is visible (review-flywheel FE,
+            // Jul 2026). Gated EXACTLY like the product-card rating
+            // (products.js) so cards and PDP agree on when a rating "exists".
+            // Display-only; the backend prerender owns aggregateRating JSON-LD.
+            this.renderRatingBadge(info);
+
             // Quick-spec list (Colour · Page yield) — issue #8. Only real,
             // reliable API values; suspicious yields are suppressed.
             this.renderSpecs(info);
@@ -590,6 +597,12 @@
                         `<span class="product-cost-per-page" data-testid="cost-per-page">${Security.escapeHtml(String(info.cost_per_page_display))}</span>`);
                 }
             }
+
+            // Business-account price panel. Async and additive: the retail price
+            // above is rendered and correct for everyone, and this panel appears
+            // afterwards only for a signed-in business customer. Guests and
+            // retail shoppers fire no request at all.
+            this.renderBusinessPrice(info);
 
             // GST trust signal lives in the static "Incl. GST" badge rendered
             // beside the price (html/product/index.html). The dollar breakdown
@@ -921,6 +934,83 @@
                     Compatible (third-party) ${type} for ${oem} printers — not made or endorsed by ${oem}. Sold by Office Consumables Ltd.
                 </div>`;
             pricingEl.insertAdjacentHTML('afterend', html);
+        },
+
+        /**
+         * Business-account price panel (business-account-pricing handoff, Jul 2026).
+         *
+         * For a signed-in business customer, GET /api/business/pricing returns
+         * the price checkout will ACTUALLY charge for this SKU — already capped
+         * by the "never sell at a loss" floor. We render that number verbatim.
+         * We never compute `retail x (1 - tier%)`: on a thin-margin item the
+         * floor reduces the discount (`floored:true`) and the computed figure
+         * would be a promise the checkout does not keep.
+         *
+         * Deliberately NOT touched: #product-price and its itemprop="price"
+         * `content` attribute. That microdata mirrors the backend prerender and
+         * feeds Google Merchant Center — writing a per-account price into it
+         * would be cloaking and would break the buy-box parity test. The public
+         * retail price stays the public retail price; the business price is an
+         * additive panel outside the buy-box <dl>.
+         *
+         * Fail-soft: guests and retail accounts fire no request; any error, any
+         * unfound SKU and any zero-savings item leave the page exactly as it is.
+         */
+        async renderBusinessPrice(info) {
+            const sku = info && info.sku;
+            if (!sku || typeof Business === 'undefined') return;
+
+            const pricingEl = document.querySelector('.product-info__pricing');
+            if (!pricingEl) return;
+
+            let item;
+            try {
+                item = await Business.getPricingFor(sku);
+            } catch (e) {
+                DebugLog.warn('[PDP] business pricing unavailable:', e && e.message);
+                return;
+            }
+
+            // The shopper may have navigated to another product while the
+            // request was in flight — never paint a stale price.
+            if (!this.product || this.product.sku !== sku) return;
+
+            const offer = Business.describeOffer(item);
+            if (!offer) return;
+
+            const existing = document.getElementById('business-price');
+            if (existing) existing.remove();
+
+            const pct = offer.percent != null
+                ? ` <span class="business-price__pct">(${Security.escapeHtml(Business.formatPercent(offer.percent))})</span>`
+                : '';
+
+            // A floored line gets an explicit reason rather than a silently
+            // smaller-than-advertised discount.
+            const note = offer.floored
+                ? `<p class="business-price__note">This item is already close to cost, so it is priced as low as we can go — below your usual tier discount.</p>`
+                : '';
+
+            pricingEl.insertAdjacentHTML('afterend',
+                `<section class="business-price" id="business-price" data-testid="business-price" aria-label="Your business account price">
+                    <p class="business-price__eyebrow">Your business price</p>
+                    <p class="business-price__row">
+                        <span class="business-price__amount">${Security.escapeHtml(formatPrice(offer.businessPrice))}</span>
+                        <span class="business-price__retail">retail <s>${Security.escapeHtml(formatPrice(offer.retailPrice))}</s></span>
+                    </p>
+                    <p class="business-price__save">Save ${Security.escapeHtml(formatPrice(offer.savings))}${pct}</p>
+                    ${note}
+                </section>`);
+
+            // The sticky mobile buy-bar mirrors #product-price, which stays at
+            // public retail for the microdata. Hand it the business price and
+            // lock it, so the price on the buy button matches the price the
+            // cart will charge.
+            const stickyPrice = document.getElementById('sticky-atc-price');
+            if (stickyPrice) {
+                stickyPrice.textContent = formatPrice(offer.businessPrice);
+                stickyPrice.dataset.businessLocked = '1';
+            }
         },
 
         /**
@@ -1803,6 +1893,73 @@
             ).join('');
         },
 
+        // Aggregate rating badge in the buy-box header. Only shows once at least
+        // one rating exists (avg && review_count > 0) — the same gate the
+        // product cards use (products.js) so nothing renders a bare "0 reviews".
+        // Clicking scrolls to the reviews section, which loadReviews() unhides.
+        renderRatingBadge(info) {
+            const el = document.getElementById('product-rating-badge');
+            if (!el) return;
+            const avg = parseFloat(info.average_rating);
+            const count = parseInt(info.review_count, 10);
+            if (!avg || !(count > 0)) {
+                el.hidden = true;
+                return;
+            }
+            el.innerHTML =
+                `<span class="product-info__rating-stars" aria-hidden="true">${this._renderStars(avg, 16)}</span>` +
+                `<span class="product-info__rating-value">${avg.toFixed(1)}</span>` +
+                `<span class="product-info__rating-count">${count} review${count !== 1 ? 's' : ''}</span>`;
+            el.setAttribute('aria-label', `Rated ${avg.toFixed(1)} out of 5 from ${count} review${count !== 1 ? 's' : ''} — read reviews`);
+            el.hidden = false;
+        },
+
+        // Returns the signed-in user's own review for `productId`, or null if
+        // they have none. Fail-soft: any read problem returns null so the caller
+        // falls back to showing the form (the submit path still guards against a
+        // 409 with a friendly message) — an error must never masquerade as a
+        // confirmed rating, and a confirmed rating must never be missed.
+        async _getUserReviewForProduct(productId) {
+            if (!productId) return null;
+            try {
+                const resp = await API.getUserReviews();
+                // Tolerate both the documented bare-array body and an
+                // envelope-wrapped { data: [...] } / { data: { reviews: [...] } }.
+                const list = Array.isArray(resp) ? resp
+                    : (resp && Array.isArray(resp.data)) ? resp.data
+                    : (resp && resp.data && Array.isArray(resp.data.reviews)) ? resp.data.reviews
+                    : (resp && Array.isArray(resp.reviews)) ? resp.reviews
+                    : null;
+                if (!list) return null;
+                return list.find(r => r && String(r.product_id) === String(productId)) || null;
+            } catch (_) {
+                return null;
+            }
+        },
+
+        // Read-only "you already rated this" panel shown in place of the write-a-
+        // review form (§1.3). Includes any written title/body, and flags a
+        // not-yet-approved review as pending so the customer isn't confused when
+        // it's absent from the public list.
+        renderAlreadyRated(formWrap, review) {
+            const rating = parseInt(review.rating, 10) || 0;
+            const isApproved = (review.status || 'approved') === 'approved';
+            const title = review.title ? `<h4 class="review-already__review-title">${Security.escapeHtml(review.title)}</h4>` : '';
+            const body = review.body ? `<p class="review-already__review-body">${Security.escapeHtml(review.body)}</p>` : '';
+            const pending = isApproved ? '' : '<p class="review-already__pending">Your review is awaiting approval and will appear here once published.</p>';
+            formWrap.innerHTML = `
+                <div class="review-already">
+                    <h3 class="product-reviews__form-title">Your rating</h3>
+                    <div class="review-already__stars" aria-label="You rated this ${rating} out of 5">${this._renderStars(rating, 22)}</div>
+                    <p class="review-already__thanks">You rated this ${rating}★ — thanks for your feedback!</p>
+                    ${title}
+                    ${body}
+                    ${pending}
+                </div>
+            `;
+            formWrap.hidden = false;
+        },
+
         async loadReviews() {
             const info = this.product;
             if (!info || !info.id) return;
@@ -1890,18 +2047,67 @@
                         }
                     });
                 }
+
+                // §1.1 — welcome a customer back from a one-click email rating.
+                // The backend records the rating then 302-redirects here with
+                // ?rated=N (N = 1–5). Thank them, reveal the reviews, and scroll
+                // to them. setupReviewForm() has already swapped the write-a-review
+                // form for the "You rated this N★" acknowledgement (§1.3), so we
+                // don't dangle a comment prompt the backend can't accept.
+                this.handleRatedParam(params, section);
             } catch (e) {
                 // Reviews are non-critical
             }
         },
 
-        setupReviewForm(info) {
+        // Reads ?rated=N (1–5) and welcomes the customer back after a one-click
+        // rating. Idempotent: the param is stripped from the address bar so a
+        // refresh or a Back navigation doesn't re-toast, and so the canonical-URL
+        // rewrite (which preserves the query string) doesn't carry it forward.
+        handleRatedParam(params, section) {
+            const rated = parseInt(params.get('rated'), 10);
+            if (!(rated >= 1 && rated <= 5)) return;
+
+            if (typeof showToast === 'function') {
+                showToast(`Thanks for your ${rated}-star rating!`, 'success', 6000);
+            }
+            if (section) {
+                section.hidden = false;
+                requestAnimationFrame(() => {
+                    section.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                });
+            }
+
+            // Drop only the `rated` param; keep everything else intact.
+            try {
+                const url = new URL(window.location.href);
+                url.searchParams.delete('rated');
+                window.history.replaceState({}, '', url.pathname + url.search + url.hash);
+            } catch (_) { /* replaceState is best-effort */ }
+        },
+
+        async setupReviewForm(info) {
             const formWrap = document.getElementById('review-form-wrap');
             const form = document.getElementById('review-form');
             if (!formWrap || !form) return;
 
             const isLoggedIn = typeof Auth !== 'undefined' && Auth.user;
             if (!isLoggedIn) return;
+
+            // §1.3 — never surface a 409. A one-click star rating from the email
+            // creates a reviews row, so a subsequent POST /api/reviews for the
+            // same product returns 409 "already reviewed". Before offering the
+            // write-a-review form, check the signed-in user's own reviews; if one
+            // exists (one-click OR written), show a read-only acknowledgement
+            // instead of the form. One-click ratings are APPROVED with no text and
+            // PUT /api/reviews/:id edits only PENDING rows, so there is nothing to
+            // "add a comment" to — treating the product as already rated is the
+            // honest behaviour, not a limitation we paper over with a doomed form.
+            const existing = await this._getUserReviewForProduct(info.id);
+            if (existing) {
+                this.renderAlreadyRated(formWrap, existing);
+                return;
+            }
 
             formWrap.hidden = false;
             let selectedRating = 0;
@@ -2205,13 +2411,23 @@
         }, { threshold: 0 });
         observer.observe(actionsContainer);
 
-        // Mirror price from product info
+        // Mirror price from product info.
+        //
+        // EXCEPT when a business account owns this bar: renderBusinessPrice()
+        // sets data-business-locked and writes the customer's real (floored)
+        // price here. #product-price must keep showing PUBLIC retail because it
+        // carries the itemprop="price" microdata that feeds Merchant Center, so
+        // without this lock the sticky bar would contradict the business panel
+        // sitting directly above it — retail on the buy button, business price
+        // in the panel. (ERR-110)
         const priceEl = document.getElementById('product-price');
         if (priceEl && stickyPrice) {
-            new MutationObserver(() => {
+            const mirror = () => {
+                if (stickyPrice.dataset.businessLocked === '1') return;
                 stickyPrice.textContent = priceEl.textContent;
-            }).observe(priceEl, { childList: true, characterData: true, subtree: true });
-            stickyPrice.textContent = priceEl.textContent;
+            };
+            new MutationObserver(mirror).observe(priceEl, { childList: true, characterData: true, subtree: true });
+            mirror();
         }
 
         // Trigger same click as main Add to Cart (re-query to avoid stale reference)

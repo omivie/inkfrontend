@@ -3189,6 +3189,37 @@
     margin: 0 0 var(--spacing-sm) 0;
 }
 
+/* Buy-box aggregate rating badge (review-flywheel FE, Jul 2026) */
+.product-info__rating {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--spacing-xs);
+    margin-top: var(--spacing-xs);
+    text-decoration: none;
+    color: inherit;
+    font-size: var(--font-size-sm);
+    line-height: 1;
+}
+
+.product-info__rating:hover .product-info__rating-count,
+.product-info__rating:focus-visible .product-info__rating-count {
+    text-decoration: underline;
+}
+
+.product-info__rating-stars {
+    display: inline-flex;
+    gap: 2px;
+    color: #f59e0b;
+}
+
+.product-info__rating-value {
+    font-weight: var(--font-weight-bold);
+}
+
+.product-info__rating-count {
+    color: var(--color-text-muted);
+}
+
 .reviews-summary__stars {
     display: inline-flex;
     gap: 2px;
@@ -3344,6 +3375,38 @@
 
 .review-form__status--error {
     color: var(--color-error);
+}
+
+/* "You already rated this" acknowledgement (review-flywheel FE §1.3) */
+.review-already__stars {
+    display: flex;
+    gap: 3px;
+    color: #f59e0b;
+    margin-bottom: var(--spacing-sm);
+}
+
+.review-already__thanks {
+    font-weight: var(--font-weight-semibold);
+    margin: 0 0 var(--spacing-sm) 0;
+}
+
+.review-already__review-title {
+    font-size: var(--font-size-md);
+    font-weight: var(--font-weight-semibold);
+    margin: 0 0 var(--spacing-xs) 0;
+}
+
+.review-already__review-body {
+    color: var(--color-text);
+    line-height: 1.6;
+    margin: 0 0 var(--spacing-sm) 0;
+}
+
+.review-already__pending {
+    color: var(--color-text-muted);
+    font-size: var(--font-size-sm);
+    font-style: italic;
+    margin: 0;
 }
 
 /* Review Distribution Bars */
@@ -6448,6 +6511,103 @@ body.filter-sort-open { overflow: hidden; }
 .account-empty p {
     color: var(--color-text-light);
     margin-bottom: var(--spacing-lg);
+}
+
+/* My Reviews page (review-flywheel FE, Jul 2026) */
+.account-reviews-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-md);
+}
+
+.account-review-card {
+    background-color: var(--color-background);
+    border: 1px solid var(--color-border-light);
+    border-radius: var(--radius-lg);
+    padding: var(--spacing-lg);
+}
+
+.account-review-card__head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: var(--spacing-sm);
+    flex-wrap: wrap;
+    margin-bottom: var(--spacing-xs);
+}
+
+.account-review-card__product {
+    font-weight: var(--font-weight-semibold);
+    color: var(--color-text);
+    text-decoration: none;
+}
+
+a.account-review-card__product:hover,
+a.account-review-card__product:focus-visible {
+    color: var(--color-primary);
+    text-decoration: underline;
+}
+
+.account-review-card__status {
+    font-size: var(--font-size-xs);
+    font-weight: var(--font-weight-medium);
+    padding: 2px 8px;
+    border-radius: var(--radius-full, 999px);
+    background-color: var(--color-background-alt);
+    color: var(--color-text-muted);
+    white-space: nowrap;
+}
+
+.account-review-card__status--pending {
+    background-color: #fef3c7;
+    color: #92400e;
+}
+
+.account-review-card__stars {
+    display: flex;
+    gap: 2px;
+    color: #f59e0b;
+    margin-bottom: var(--spacing-xs);
+}
+
+.account-review-card__title {
+    font-size: var(--font-size-md);
+    font-weight: var(--font-weight-semibold);
+    margin: 0 0 var(--spacing-xs) 0;
+}
+
+.account-review-card__body {
+    color: var(--color-text);
+    line-height: 1.6;
+    margin: 0 0 var(--spacing-xs) 0;
+}
+
+.account-review-card__rating-only {
+    color: var(--color-text-muted);
+    font-style: italic;
+    margin: 0 0 var(--spacing-xs) 0;
+}
+
+.account-review-card__date {
+    color: var(--color-text-muted);
+    font-size: var(--font-size-sm);
+    margin: 0;
+}
+
+.account-loading {
+    padding: var(--spacing-xs) 0;
+}
+
+.account-error {
+    text-align: center;
+    padding: var(--spacing-xl);
+    border: 1px solid var(--color-border-light);
+    border-radius: var(--radius-lg);
+}
+
+.account-error p {
+    color: var(--color-text-light);
+    margin: 0 0 var(--spacing-md) 0;
 }
 
 /* Printers Preview */
@@ -14758,4 +14918,175 @@ body.page-shop {
     .account-sidebar__trust {
         display: none;
     }
+}
+
+/* ============================================================================
+   BUSINESS ACCOUNT PRICING (B2B) — Jul 2026
+   ============================================================================
+   Surfaces the signed-in business customer's real, floored price. Painted in
+   the brand cyan (trade / account colour) so it reads as distinct from the
+   green loyalty rows and the red promotional discount badges.
+   Every number in these blocks comes verbatim from /api/business/*.
+   ========================================================================= */
+
+/* ── PDP panel ─────────────────────────────────────────────────────────── */
+
+.business-price {
+    margin-top: var(--spacing-md);
+    border: 1.5px solid var(--color-border);
+    border-left: 4px solid var(--cyan-primary);
+    border-radius: var(--radius-md);
+    background: var(--color-background-alt);
+    padding: var(--spacing-md);
+}
+
+.business-price[hidden] {
+    display: none;
+}
+
+.business-price__eyebrow {
+    font-family: var(--font-family-mono);
+    font-size: var(--font-size-xs, 0.8125rem);
+    font-weight: var(--font-weight-semibold, 600);
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--cyan-primary);
+    margin: 0 0 var(--spacing-xs);
+}
+
+.business-price__row {
+    display: flex;
+    align-items: baseline;
+    flex-wrap: wrap;
+    gap: var(--spacing-xs) var(--spacing-sm);
+    margin: 0;
+}
+
+.business-price__amount {
+    font-size: var(--font-size-xl, 1.5rem);
+    font-weight: var(--font-weight-bold, 700);
+    color: var(--color-text-heading);
+}
+
+.business-price__retail {
+    font-size: var(--font-size-sm);
+    color: var(--color-text-muted);
+}
+
+.business-price__save {
+    margin: var(--spacing-xs) 0 0;
+    font-size: var(--font-size-sm);
+    font-weight: var(--font-weight-semibold, 600);
+    color: var(--color-success-green, #16a34a);
+}
+
+.business-price__pct {
+    font-weight: var(--font-weight-normal, 400);
+}
+
+/* Loss-floor explainer — muted so it informs without alarming. */
+.business-price__note {
+    margin: var(--spacing-xs) 0 0;
+    font-size: var(--font-size-xs, 0.8125rem);
+    line-height: 1.45;
+    color: var(--color-text-muted);
+}
+
+/* ── Product-card overlay ──────────────────────────────────────────────── */
+
+.product-card__biz-price {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    flex-basis: 100%;
+    margin-top: 0.35rem;
+    padding-top: 0.35rem;
+    border-top: 1px dashed var(--color-border);
+}
+
+.product-card__biz-label {
+    font-family: var(--font-family-mono);
+    font-size: 0.62rem;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--cyan-primary);
+}
+
+.product-card__biz-amount {
+    font-size: var(--font-size-base, 1rem);
+    font-weight: var(--font-weight-bold, 700);
+    color: var(--color-text-heading);
+}
+
+.product-card__biz-save {
+    font-size: 0.72rem;
+    font-weight: 600;
+    color: var(--color-success-green, #16a34a);
+}
+
+/* ── Summary rows (cart / checkout / payment / confirmation) ───────────── */
+
+.cart-summary__row--b2b span:last-child,
+.checkout-summary__row--b2b span:last-child,
+.confirmation-totals__row--b2b dd {
+    color: var(--cyan-primary);
+    font-weight: var(--font-weight-semibold, 600);
+}
+
+.cart-summary__row--b2b[hidden],
+.checkout-summary__row--b2b[hidden],
+.confirmation-totals__row--b2b[hidden] {
+    display: none;
+}
+
+/* Floored-lines explainer under the cart's B2B row. */
+.cart-summary__note {
+    margin: calc(var(--spacing-xs) * -1) 0 var(--spacing-sm);
+    font-size: var(--font-size-xs, 0.8125rem);
+    line-height: 1.4;
+    color: var(--color-text-muted);
+}
+
+.cart-summary__note[hidden] {
+    display: none;
+}
+
+/* ── Account dashboard panel ───────────────────────────────────────────── */
+
+.business-panel {
+    margin-top: var(--spacing-lg);
+    border: 1.5px solid var(--color-border);
+    border-left: 4px solid var(--cyan-primary);
+    border-radius: var(--radius-md);
+    background: var(--color-background-alt);
+    padding: var(--spacing-md);
+}
+
+.business-panel[hidden] {
+    display: none;
+}
+
+.business-panel__eyebrow {
+    font-family: var(--font-family-mono);
+    font-size: var(--font-size-xs, 0.8125rem);
+    font-weight: var(--font-weight-semibold, 600);
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--cyan-primary);
+    margin: 0 0 var(--spacing-xs);
+}
+
+.business-panel__tier {
+    margin: 0 0 var(--spacing-xs);
+    font-size: var(--font-size-lg, 1.125rem);
+    font-weight: var(--font-weight-bold, 700);
+    color: var(--color-text-heading);
+}
+
+.business-panel__desc {
+    margin: 0;
+    font-size: var(--font-size-sm);
+    line-height: 1.5;
+    color: var(--color-text-light);
 }

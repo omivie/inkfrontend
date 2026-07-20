@@ -245,13 +245,18 @@ function renderPnLTable() {
   const periods = Array.isArray(pnl.periods) ? pnl.periods : [];
   const cur = periods[periods.length - 1] || pnl.totals || {};
   const prev = periods.length >= 2 ? periods[periods.length - 2] : {};
+  // GST BASIS (backend migration 118 — verified live 2026-07-20, ERR-111): `revenue` is
+  // GST-INCLUSIVE while every row beneath it is GST-EXCLUSIVE. Confirmed by arithmetic on
+  // the live payload: 8342.15 × 20/23 − 5662.84 = 1591.20 = gross_profit. So the rows do
+  // NOT subtract down the column, and the footnote below says so — otherwise the owner
+  // reads "8342 − 5663 = 2679" and gets the pre-118 over-stated figure back.
   const rows = [
-    ['Revenue', cur.revenue, prev.revenue],
-    ['Cost of Goods Sold', cur.cogs, prev.cogs, true],
+    ['Revenue (incl. GST)', cur.revenue, prev.revenue],
+    ['Cost of Goods Sold (ex-GST)', cur.cogs, prev.cogs, true],
     ['Gross Profit', cur.gross_profit, prev.gross_profit],
     // Invoiced sales settle by bank transfer, so they add exactly $0 of card fees.
-    ['Stripe Fees', cur.stripe_fees, prev.stripe_fees, true],
-    ['Operating Expenses', cur.operating_expenses, prev.operating_expenses, true],
+    ['Stripe Fees (ex-GST)', cur.stripe_fees, prev.stripe_fees, true],
+    ['Operating Expenses (ex-GST)', cur.operating_expenses, prev.operating_expenses, true],
     ['Net Profit', cur.net_profit, prev.net_profit, false, true],
   ];
 
@@ -290,6 +295,10 @@ function renderPnLTable() {
     </tr>`;
   }
   html += '</tbody></table>';
+  // Additive only — never routes a value through num(v, 0), so the "—" honesty above stands.
+  html += `<p class="fh-pnl-note">Revenue is GST-inclusive; cost of goods, fees, expenses and profit
+    are GST-exclusive. Gross profit = revenue ÷ 1.15 − cost of goods, so these rows don’t subtract
+    straight down the column. GST is collected on IRD’s behalf and remitted, so it was never income.</p>`;
   if (unknownRows.length) {
     html += `<p class="fh-pnl-note">${esc(unknownRows.join(', '))} ${unknownRows.length === 1 ? 'is' : 'are'} unavailable —
       at least one sale in this period has no cost of goods recorded, so profit can’t be calculated.

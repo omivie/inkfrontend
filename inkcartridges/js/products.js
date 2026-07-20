@@ -459,6 +459,7 @@ const Products = {
 
                 // Render products
                 container.innerHTML = this.renderCards(products);
+                this.decorateBusinessPricing(container);
 
                 // Render pagination
                 const paginationContainer = document.getElementById('pagination');
@@ -599,10 +600,25 @@ const Products = {
                 container.innerHTML = products.map(p => this.renderCard(p)).join('');
                 this.bindImageFallbacks(container);
                 this.bindAddToCartEvents(container);
+                this.decorateBusinessPricing(container);
             }
         } catch (error) {
             DebugLog.error('Error loading featured products:', error);
         }
+    },
+
+    /**
+     * Overlay the signed-in business customer's price onto rendered cards.
+     *
+     * Fire-and-forget on purpose: the retail cards are already painted and
+     * correct for everyone, so this only ever adds. Guests and retail accounts
+     * short-circuit inside Business.decorateCards without a network request.
+     * @param {Element} container
+     */
+    decorateBusinessPricing(container) {
+        if (typeof Business === 'undefined' || !container) return;
+        Business.decorateCards(container).catch(e =>
+            DebugLog.warn('[Products] business pricing overlay failed:', e && e.message));
     },
 
     /**

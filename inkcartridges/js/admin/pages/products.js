@@ -1895,8 +1895,12 @@ async function wireRelatedProductsSection(modal, full) {
     if (btn) { e.preventDefault(); removeProduct(btn.getAttribute('data-remove-related')); }
   });
 
-  // Search-to-add via the shared product autocomplete.
+  // Search-to-add via the shared product autocomplete. This field is the LAST
+  // thing in a tall scroll panel, so pull it up on focus — the results menu is
+  // portalled and can't be clipped any more (ERR-107), but the operator still
+  // wants the input and its matches in view together.
   const ac = attachProductAutocomplete(searchEl, {
+    scrollIntoViewOnFocus: true,
     onPick: (p) => {
       const sku = p.sku || p.product_code || '';
       if (!sku) return;

@@ -32,9 +32,12 @@
  *     endpoint, since the bulk /orders list omits it — see ERR-039). The window
  *     total is then `payload._reconciledCogsInclGst`.
  *   - Fallback (provisional, no snapshots resolvable): recover an approximate
- *     incl-GST cost from the KPI summary's gross_profit via `kpiCogsInclGst`
- *     (which assumes the BACKEND's gross_profit = revenue_ex − cost_incl) and
- *     distribute it across buckets by revenue. Labelled "provisional" in the UI.
+ *     cost from the KPI summary's gross_profit via `kpiCogsExGst` (profit basis)
+ *     or `kpiCogsInclGst` (cash-to-supplier basis) and distribute it across
+ *     buckets by revenue. Labelled "provisional" in the UI. The backend's
+ *     convention is `gross_profit = revenue_ex − cogs_EX` (migration 118,
+ *     verified against live figures 2026-07-20) — NOT `revenue_ex − cost_incl`,
+ *     which is what this file assumed before ERR-111.
  *
  * Operating expenses source-of-truth:
  *   - /api/admin/analytics/expenses returns manually-logged spend with a date
@@ -257,22 +260,38 @@ export function distributeCogsByRevenue(buckets, totalCogs) {
   return buckets;
 }
 
-// Compute total COGS (incl-GST, real cash to suppliers) from the KPI summary.
+// Recover total COGS from the KPI summary, in BOTH GST bases.
 //
-// The KPI summary RPC reports `revenue` GROSS (incl-GST) and `gross_profit`
-// per the canonical profitability.js convention:
-//     gross_profit = revenue_ex_gst − cost_incl_gst
-// So the incl-GST cost is recovered by taking revenue back to its ex-GST base
-// and subtracting gross profit — NO further gross-up:
-//     cost_incl_gst = revenue_ex_gst − gross_profit
-//                   = revenue_gross × (1 − 3/23) − gross_profit
+// THE CONVENTION (backend migration 118, live 2026-07-20 — do not "re-fix" this):
+//     gross_profit = revenue_ex_gst − cogs_EX_gst        ← both sides ex-GST
+// so inverting gross_profit yields the EX-GST cost:
+//     cogs_ex_gst = revenue_ex_gst − gross_profit
+//                 = revenue_gross × (1 − 3/23) − gross_profit
 // (1 − 3/23 = 20/23 = 1/1.15.)
 //
-// Bug fixed 2026-05-16: this previously did `(revenue − gross_profit) × 1.15`.
-// But `revenue_gross − gross_profit` already equals `output_GST + cost_incl_gst`
-// (substitute the convention above), so the × 1.15 inflated COGS by ~38% — the
-// chart showed $873.59 of COGS where the true figure was $583.02.
-export function kpiCogsInclGst(kpiRevenue, kpiGrossProfit) {
+// Verified against the live figures rather than assumed. `period=all` on
+// 2026-07-20: revenue 8342.15, cogs 5662.84, gross_profit 1591.20.
+//     revenue_INCL − cogs = 8342.15 − 5662.84 = 2679.31  ← the pre-118 gross, exactly
+//     revenue_EX   − cogs = 7254.04 − 5662.84 = 1591.20  ← the live gross, exactly
+// The same `cogs` satisfies both, so migration 118 changed ONLY the revenue
+// basis; COGS was ex-GST before and after. (The $1,088 the owner "gained" was
+// just revenue GST: 8342.15 × 3/23 = 1088.11.)
+//
+// WHY TWO FUNCTIONS. Ex-GST is the profit basis; incl-GST is the cash that
+// actually left the bank for suppliers. The old single `kpiCogsInclGst` returned
+// the EX-GST figure under an incl-GST name — a 15% understatement of supplier
+// cash wherever it was plotted as spend (~$849 all-time). Rather than redefine
+// one name, both bases are now named for what they are. Note the codebase
+// already knew: the reconciliation test in dashboard-trend-math.test.js has
+// asserted "kpiCogsInclGst(rev, gross_profit) recovers cost_EX" since June.
+//
+// Bug fixed 2026-05-16 and STILL FIXED: the ex-GST helper must NOT gross up.
+// `revenue_gross − gross_profit` already equals `output_GST + cogs`, so applying
+// ×1.15 to THAT inflated COGS by ~38% ($873.59 where the truth was $583.02).
+// The ×1.15 in `kpiCogsInclGst` below is a different operation on a different
+// base — it grosses up the ex-GST cost, exactly as `orderCostInclGst` does to
+// `supplier_cost_snapshot`. Same destination, and the two agree to the cent.
+export function kpiCogsExGst(kpiRevenue, kpiGrossProfit) {
   // null/undefined ⇒ "unknown", not zero. Number(null) is 0 (a finite value),
   // so without this explicit check a null gross_profit would slip past the
   // isFinite guard below and make COGS equal the ENTIRE ex-GST revenue. That
@@ -284,6 +303,15 @@ export function kpiCogsInclGst(kpiRevenue, kpiGrossProfit) {
   if (!Number.isFinite(rev) || !Number.isFinite(gp)) return 0;
   const revenueExGst = rev * (1 - GST_FRACTION_OF_GROSS);
   return Math.max(0, revenueExGst - gp);
+}
+
+// Real cash to suppliers = the ex-GST cost grossed up by GST, matching the
+// treatment `orderCostInclGst` gives each order's `supplier_cost_snapshot`.
+// Inverse of `reconciledGrossProfitInclGst` (which subtracts cogsIncl/1.15):
+//     reconciledGrossProfitInclGst(rev, kpiCogsInclGst(rev, gp)) === gp
+// Those two were NOT inverses before this fix — that was the bug.
+export function kpiCogsInclGst(kpiRevenue, kpiGrossProfit) {
+  return kpiCogsExGst(kpiRevenue, kpiGrossProfit) * COST_GST_GROSS_UP;
 }
 
 // Sum cost (incl-GST cash to supplier) for a single order's line items.

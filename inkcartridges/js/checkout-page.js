@@ -326,6 +326,16 @@
             }
             // Loyalty points discount (mutually exclusive with coupons) — server-validated.
             this.totals.loyaltyDiscount = (typeof Cart !== 'undefined' && Cart.loyalty && Cart.loyalty.applied_value_dollars) || 0;
+
+            // Business-account (B2B) discount. This page estimates its other
+            // totals client-side, but a B2B discount CANNOT be estimated: it is
+            // computed per line against the "never sell at a loss" floor, so on
+            // thin-margin items it is smaller than the tier %. The only correct
+            // source is the server summary — read it, never derive it.
+            const serverSummary = (typeof Cart !== 'undefined' && Cart.serverSummary) || null;
+            const b2b = computeDiscountBreakdown(serverSummary);
+            this.totals.b2bDiscount = b2b.b2b;
+            this.totals.b2bMeta = b2b.b2bMeta;
         },
 
         // Update shipping cost and UI info (ETA, spend-more, split shipment)
@@ -335,7 +345,7 @@
             // Fetch shipping from backend API with full item weights
             await this.fetchShippingFromAPI();
 
-            this.totals.total = this.totals.subtotal - this.totals.discount - (this.totals.loyaltyDiscount || 0) + this.totals.shipping;
+            this.totals.total = this.totals.subtotal - this.totals.discount - (this.totals.loyaltyDiscount || 0) - (this.totals.b2bDiscount || 0) + this.totals.shipping;
             this.updateTotalsDisplay();
             this.updateShippingInfo();
         },
@@ -537,6 +547,21 @@
                     loyaltyEl.textContent = `-$${ld.toFixed(2)}`;
                 } else {
                     loyaltyRow.hidden = true;
+                }
+            }
+
+            // Show business-account discount if applied (server-sourced, floored)
+            const b2bRow = document.getElementById('checkout-b2b-row');
+            const b2bEl = document.getElementById('checkout-b2b-discount');
+            if (b2bRow && b2bEl) {
+                const bd = this.totals.b2bDiscount || 0;
+                if (bd > 0) {
+                    b2bRow.hidden = false;
+                    b2bEl.textContent = `-$${bd.toFixed(2)}`;
+                    const label = document.getElementById('checkout-b2b-label');
+                    if (label) label.textContent = businessDiscountLabel(this.totals.b2bMeta);
+                } else {
+                    b2bRow.hidden = true;
                 }
             }
 
@@ -2064,7 +2089,7 @@
 
         // Initialize address autocomplete for shipping and billing address fields.
         // The dropdown/debounce/provider logic lives in the shared
-        // AddressAutocomplete module (js/address-autocomplete.js, ERR-090) so
+        // AddressAutocomplete module (js/address-autocomplete.js, ERR-096) so
         // checkout and the account addresses modal can't drift.
         initAddressAutocomplete() {
             if (typeof AddressAutocomplete === 'undefined') return;

@@ -1,7 +1,7 @@
 /**
  * Admin SPA — Entry point, router, shell
  */
-const APP_VERSION = '2026.07.17-expense-trend-lines';
+const APP_VERSION = '2026.07.20-net-series-gst-basis';
 
 import { AdminAuth } from './auth.js';
 import { FilterState } from './filters.js';

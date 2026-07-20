@@ -3604,11 +3604,21 @@
             if (typeof Products !== 'undefined' && Products.bindImageFallbacks) {
                 Products.bindImageFallbacks(container);
             }
+
+            // Business-account pricing overlay. Batches the grid's SKUs in one
+            // call and no-ops instantly for guests and retail shoppers, so the
+            // card renderer itself stays synchronous and untouched.
+            if (typeof Business !== 'undefined') {
+                Business.decorateCards(container).catch(e =>
+                    DebugLog.warn('[Shop] business pricing overlay failed:', e && e.message));
+            }
         },
 
         createProductCard(product, isCompatible) {
             const card = document.createElement('article');
             card.className = 'product-card';
+            // Business-pricing overlay finds cards by SKU (see Business.decorateCards).
+            if (product && product.sku) card.setAttribute('data-sku', product.sku);
 
             // Use retail_price from backend API
             const price = product.retail_price || 0;

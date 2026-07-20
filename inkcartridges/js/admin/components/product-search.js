@@ -130,7 +130,9 @@ async function searchProducts(q) {
   return data?.products || data?.items || [];
 }
 
-export function attachProductAutocomplete(input, { onPick } = {}) {
+// Extra options (e.g. scrollIntoViewOnFocus) pass straight through to
+// attachAutocomplete — spread LAST so a caller can override a default here.
+export function attachProductAutocomplete(input, { onPick, ...rest } = {}) {
   return attachAutocomplete(input, {
     minChars: 2,
     menuClass: 'admin-ac__menu--product',
@@ -156,5 +158,6 @@ export function attachProductAutocomplete(input, { onPick } = {}) {
       </span>`;
     },
     onPick,
+    ...rest,
   });
 }

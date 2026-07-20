@@ -488,6 +488,17 @@
 .fh-pnl-note { margin: 10px 0 0; font-size: 11.5px; line-height: 1.5; color: var(--text-muted); }
 .fh-pnl-note a { color: var(--cyan-text, #0e7490); text-decoration: underline; }
 
+/* Dashboard Performance card: the backend's per-period profit series disagreeing with its
+   own KPI tile is a DATA-INTEGRITY alert, not a footnote — it must not read as muted prose
+   the eye skips (ERR-111; the previous console-only warning went unseen for weeks). */
+.admin-dash-note--alert {
+  color: var(--text);
+  background: var(--danger-bg, rgba(220, 38, 38, 0.08));
+  border-left: 3px solid var(--danger, #dc2626);
+  border-radius: 4px;
+  padding: 8px 10px;
+}
+
 /* Quick Order: its sales are NOT yet in analytics (backend deferred). Stated up
    front — an under-reported revenue figure the owner doesn't know about is worse
    than an ugly banner. */
@@ -4782,11 +4793,22 @@ button.admin-active-dot--clickable:hover::after { opacity: 1; }
 /* ---- Shared admin autocomplete (components/autocomplete.js) ---- */
 .admin-ac { position: relative; width: 100%; }
 .admin-ac > .admin-input, .admin-ac > input { width: 100%; }
+/* PORTALLED to <body> and placed with position:fixed by autocomplete.js
+   (ERR-107). It used to be position:absolute inside `.admin-ac`, which any
+   ancestor with overflow clipped — the product modal cut the Related Products
+   results down to two visible rows. `left`/`top`/`bottom`/`max-height` are all
+   driven by positionMenu(), which publishes the space available as
+   `--admin-ac-fit`; the max-height below min()s that against this variant's own
+   ceiling, so a vh ceiling stays live across window resizes.
+   z-index clears .admin-product-modal (1100) and
+   .admin-drawer (1001) but stays under .admin-modal-backdrop (1200) so a
+   confirm dialog still covers the menu. */
 .admin-ac__menu {
-  display: none; position: absolute; left: 0; right: 0; top: calc(100% + 4px);
-  z-index: 60; background: var(--surface); border: 1px solid var(--border);
+  display: none; position: fixed;
+  width: var(--admin-ac-anchor-w, auto); max-width: calc(100vw - 16px);
+  z-index: 1150; background: var(--surface); border: 1px solid var(--border);
   border-radius: var(--radius); box-shadow: 0 10px 28px rgba(0,0,0,0.22);
-  max-height: 320px; overflow-y: auto; padding: 4px 0;
+  max-height: min(var(--admin-ac-fit, 100vh), 320px); overflow-y: auto; padding: 4px 0;
 }
 .admin-ac__item {
   display: block; width: 100%; text-align: left; padding: 8px 12px;
@@ -4819,8 +4841,8 @@ button.admin-active-dot--clickable:hover::after { opacity: 1; }
    A much larger, storefront-style dropdown: wider than the (narrow) input,
    tall, with a product thumbnail + code + name + price per row. */
 .admin-ac__menu--product {
-  right: auto; width: 560px; max-width: 92vw;
-  max-height: min(70vh, 620px);
+  width: 560px; max-width: 92vw;
+  max-height: min(var(--admin-ac-fit, 100vh), 70vh, 620px);
 }
 .admin-ac__menu--product .admin-ac__item { padding: 0; }
 .admin-ac__product {

@@ -29,6 +29,25 @@ SITE=https://www.inkcartridges.co.nz
 
 ### 1. `kpi-summary` nulls ALL profit for any range containing an invoiced sale
 
+> **✅ CLOSED — RESOLVED AND RE-VERIFIED LIVE 2026-07-20.**
+> Fixed by backend **migration 118 + commit `b356b48`**. The root cause was **not** invoice-COGS
+> coerced to zero (ERR-068 did **not** recur — all invoice lines carry real costs): the RPC was
+> subtracting an **ex-GST COGS from GST-INCLUSIVE revenue**, so the 15% GST collected on revenue
+> was booked as profit, and Stripe fees were left out of the comparison.
+>
+> Re-verified by the FE against the live API, `period=all`:
+> `revenue 8342.15 · gross_profit 1591.20 · stripe_fees 178.65 · operating_expenses 1071.69 ·
+> net_profit 340.86`, and `1591.20 − 178.65 − 1071.69 = 340.86` exactly. `Σ gross_profit_series`
+> now equals `kpi-summary.gross_profit` to within **$0.01** (was ~$1,307 out). Checked across four
+> windows including this item's own `2026-06-22..28` acceptance window — every gap ≤ 2c, which is
+> per-bucket rounding, with zero null buckets.
+>
+> **Note the tiles now read LOWER, and that is the fix.** Gross `$2,679 → $1,591`, net
+> `$1,272 → $340.86`. Any pricing decided off the old tiles was made on inflated figures.
+>
+> FE follow-through shipped as **ERR-111**: the ERR-106 proration was deleted, the chart plots the
+> real `net_profit_series`, and two knock-on defects the fix exposed were corrected — see §1b.
+
 > **This supersedes the old "zero-item shadow orders" P0, which is now CLOSED — see below.**
 > The zero-item theory was wrong. We measured it. Please read the measurement before acting.
 
@@ -82,19 +101,42 @@ false "0.0% margin, reprice-or-drop" alert on the owner's dashboard).
 **Acceptance.** For `date_from=2026-06-22&date_to=2026-06-28`, `kpi-summary` returns a real
 `gross_profit` — and it agrees with what `gross_profit_series` already reports for that bucket.
 
-**Meanwhile, we've un-blanked the dashboard ourselves.** The frontend now rebuilds the headline
-figures by **summing your own `gross_profit_series` buckets** (`gross − stripe_fees −
-operating_expenses`, your own formula — we verified it reproduces your `net_profit` to the cent on
-four un-poisoned weeks). It is **self-disabling**: the moment `kpi-summary` returns a real
-`gross_profit`, we use yours and the workaround never runs. So this is no longer an emergency —
-but it is still your bug, and we'd like to delete our workaround.
+**~~Meanwhile, we've un-blanked the dashboard ourselves.~~ — now inert (2026-07-20).** The FE
+rebuild (`recoverProfitFromSeries`: sum your `gross_profit_series`, then `gross − stripe_fees −
+operating_expenses`) is **self-disabling and currently dormant**, because `kpi-summary` returns real
+figures again. We have **deliberately kept it** rather than deleted it — this endpoint has regressed
+once already, and dormant insurance costs nothing. It was upgraded rather than removed: each half
+now gates independently, so a real gross alongside a null net no longer blanks the Net tile, and
+provenance is tracked per figure so a rebuilt gross can't mislabel a genuine net as reconstructed.
+**No action needed from you.** If `kpi-summary` stays healthy you will never see it run.
 
-### 1b. `net_profit_series` does not exist
+### ~~1b. `net_profit_series` does not exist~~ — ✅ CLOSED, verified live 2026-07-20
 
-The bundle has **no `net_profit_series` key at all** — only `gross_profit_series`. Our Performance
-chart has been falling back to gross profit and labelling it "Net profit" ever since (our bug, now
-fixed: the legend names what it actually plots). **Either ship `net_profit_series` or tell us it
-isn't coming** and we'll stop reserving the slot.
+It exists and it reconciles. Rows are `{ bucket_start, net_profit, stripe_fees,
+operating_expenses }` — the per-bucket `stripe_fees` field is new with `b356b48`. `Σ net_profit`
+matches `kpi-summary.net_profit` within 2c across every window we checked. The Performance chart now
+plots it **directly**: the ERR-106 proration that spread whole-range scalars across buckets is
+deleted, because the frontend no longer needs to manufacture per-bucket figures the backend didn't
+publish. Nothing further needed.
+
+**Two knock-on defects the migration exposed on OUR side, both now fixed (ERR-111) — no backend
+action required, recorded so the numbers' history is traceable:**
+
+1. **`kpiCogsInclGst` was on the dead GST convention.** It computed `revenue_ex − gross_profit` and
+   called the result incl-GST. Since migration 118 that expression yields the **ex-GST** cogs, so
+   every cost line understated real supplier cash by 15% (~$849 all-time). Settled by arithmetic on
+   your own published figures: `rev_INCL − cogs = 2679.31` reproduces the pre-fix gross exactly and
+   `rev_EX − cogs = 1591.20` reproduces the live one, so `cogs` is the same ex-GST number on both
+   sides — only the revenue basis moved. Split into `kpiCogsExGst` (profit basis) and
+   `kpiCogsInclGst` (cash basis, `× 1.15`); they are now true inverses of
+   `reconciledGrossProfitInclGst`, which they were not before.
+2. **The margin tiles divided ex-GST profit by GST-inclusive revenue** → 19.07%, while your own
+   `margin_proxy` said 21.9%. We were never reading `margin_proxy` at all. Now we prefer it, and
+   fall back to an ex-GST base. Tiles moved 19.1% → 21.9%.
+
+**One small ask, non-blocking:** `/api/admin/analytics/overview` carries no `stripe_fees` field, so
+the "now ex-GST" note in your message doesn't apply to it. If it's meant to, it's missing.
+`/summary/financial` doesn't exist in our codebase at all — we only call `/pnl` and `/overview`.
 
 ### ~~1c. Zero-item shadow orders~~ — ✅ CLOSED, verified fixed
 
@@ -317,8 +359,8 @@ your own acceptance grep returns `0`). No coordination needed; drop it whenever 
 
 | # | Item | Priority | Verified live 2026-07-14 |
 |---|---|---|---|
-| 1 | `kpi-summary` nulls all profit when an invoiced sale is in range | **P0** | ✅ measured — 19-week probe, 100% correlation |
-| 1b | `net_profit_series` absent from the bundle | P1 | ✅ measured |
+| ~~1~~ | ~~`kpi-summary` profit wrong/null~~ | ~~**P0**~~ | ✅ **CLOSED 2026-07-20** — migration 118 + `b356b48`. Cause was ex-GST COGS vs incl-GST revenue, not ERR-068. Σ series == KPI within $0.01 |
+| ~~1b~~ | ~~`net_profit_series` absent from the bundle~~ | ~~P1~~ | ✅ **CLOSED 2026-07-20** — ships with per-bucket `stripe_fees`; FE proration deleted (ERR-111) |
 | ~~1c~~ | ~~Zero-item shadow orders~~ | ~~P0~~ | ✅ **CLOSED — verified fixed, all 84 items costed** |
 | 2 | Prerender footer missing "No card surcharges" | P1 | ✅ **backend reports SHIPPED** (commit `2ab2e12`) — footer-redesign-backend-response |
 | 3 | Prerender address `Rd` → `Road` | P1 | ✅ **backend code done** — pending an Ops Render-env flip (`BUSINESS_STREET`) |

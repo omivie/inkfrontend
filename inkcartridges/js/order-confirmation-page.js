@@ -231,6 +231,18 @@
                     ?? apiOrder.loyalty?.discount_amount
                     ?? 0
                 ) || 0,
+                // Business-account (B2B) discount applied to this order. Read
+                // several candidates: the order row may carry a flat column or
+                // the same nested b2b_discount block the cart summary uses.
+                b2bDiscount: Number(
+                    apiOrder.b2b_discount_amount
+                    ?? apiOrder.b2b_discount?.discount_amount
+                    ?? apiOrder.business_discount_amount
+                    ?? 0
+                ) || 0,
+                b2bMeta: apiOrder.b2b_discount && typeof apiOrder.b2b_discount === 'object'
+                    ? apiOrder.b2b_discount
+                    : null,
                 pointsEarned: Number(
                     apiOrder.points_earned
                     ?? apiOrder.loyalty_points_earned
@@ -549,6 +561,23 @@
                     loyaltyRow.hidden = false;
                 } else {
                     loyaltyRow.hidden = true;
+                }
+            }
+
+            // Business-account discount applied to this order (only if any).
+            const b2bRow = document.getElementById('totals-b2b-row');
+            const b2bEl = document.getElementById('totals-b2b');
+            const b2bDiscount = Number(order.b2bDiscount) || 0;
+            if (b2bRow && b2bEl) {
+                if (b2bDiscount > 0) {
+                    b2bEl.textContent = `-$${b2bDiscount.toFixed(2)}`;
+                    b2bRow.hidden = false;
+                    const label = document.getElementById('totals-b2b-label');
+                    if (label && typeof businessDiscountLabel === 'function') {
+                        label.textContent = businessDiscountLabel(order.b2bMeta);
+                    }
+                } else {
+                    b2bRow.hidden = true;
                 }
             }
 

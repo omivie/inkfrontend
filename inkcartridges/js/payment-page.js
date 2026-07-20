@@ -255,11 +255,18 @@
                 document.getElementById('checkout-subtotal').textContent = `$${this.totals.subtotal.toFixed(2)}`;
                 document.getElementById('checkout-shipping').textContent = this.totals.shipping === 0 ? 'FREE' : `$${this.totals.shipping.toFixed(2)}`;
 
-                // Loyalty points discount shows on its own row; net it out of the
-                // generic discount line so it isn't double-counted (summary.discount
-                // already includes the loyalty amount).
-                const loyaltyDiscount = this.totals.loyaltyDiscount || 0;
-                const otherDiscount = Math.max(0, this.totals.discount - loyaltyDiscount);
+                // Loyalty and business-account discounts each show on their own
+                // row; both are netted out of the generic discount line so they
+                // aren't double-counted (summary.discount is the aggregate).
+                // Shared with cart.js so the two summaries cannot drift.
+                // cartData.b2b_discount is the response-level metadata object;
+                // summary.b2b_discount is the bare amount. The helper takes both.
+                const breakdown = computeDiscountBreakdown(summary, this.totals.discount, cartData.b2b_discount);
+                const loyaltyDiscount = breakdown.loyalty;
+                const b2bDiscount = breakdown.b2b;
+                const otherDiscount = breakdown.other;
+                this.totals.loyaltyDiscount = loyaltyDiscount;
+                this.totals.b2bDiscount = b2bDiscount;
 
                 // Show discount if present
                 const discountRow = document.getElementById('checkout-discount-row');
@@ -282,6 +289,21 @@
                         loyaltyEl.textContent = `-$${loyaltyDiscount.toFixed(2)}`;
                     } else {
                         loyaltyRow.hidden = true;
+                    }
+                }
+
+                // Business-account (B2B) discount — already floored per line by
+                // the backend. Rendered verbatim; never recomputed from the tier %.
+                const b2bRow = document.getElementById('checkout-b2b-row');
+                const b2bEl = document.getElementById('checkout-b2b-discount');
+                if (b2bRow && b2bEl) {
+                    if (b2bDiscount > 0) {
+                        b2bRow.hidden = false;
+                        b2bEl.textContent = `-$${b2bDiscount.toFixed(2)}`;
+                        const label = document.getElementById('checkout-b2b-label');
+                        if (label) label.textContent = businessDiscountLabel(breakdown.b2bMeta);
+                    } else {
+                        b2bRow.hidden = true;
                     }
                 }
 

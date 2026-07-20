@@ -365,13 +365,16 @@ test('sumTrendTotals: empty / nullish series returns zeros, no crash', () => {
 
 test('integration: dashboard 3m window matches the user-visible totals', () => {
   // Reproduce the screenshot fixture: revenue $1,277.36, gross_profit $557.48,
-  // 31 orders, no logged opex. GST-NEUTRAL model (GST line = net remitted):
-  //   COGS   = kpiCogsInclGst(1277.36, 557.48) = 1277.36/1.15 − 557.48 ≈ 553.27
-  //   Stripe = (1277.36 × 0.0265 + 31 × 0.30) × 1.15        ≈ 49.6225
-  //   GST    = (1277.36 − 553.27 − 49.6225) × 3/23          ≈ 87.974  (NET remitted)
+  // 31 orders, no logged opex. GST-NEUTRAL model (GST line = net remitted).
+  // Figures rebased for ERR-111: COGS on this chart is real cash to suppliers
+  // (incl-GST), so it grosses the recovered ex-GST cost up by 1.15. Everything
+  // downstream cascades from that, and the GST-neutral identity still closes.
+  //   COGS   = kpiCogsInclGst(1277.36, 557.48) = 553.268 × 1.15  ≈ 636.26
+  //   Stripe = (1277.36 × 0.0265 + 31 × 0.30) × 1.15             ≈ 49.6225
+  //   GST    = (1277.36 − 636.26 − 49.6225) × 3/23               ≈ 77.15  (NET remitted)
   //   Opex   = 0 (none logged)
-  //   Total  ≈ 690.87
-  //   Net    ≈ 586.49 profit  (= (rev − cogs − stripe)/1.15, GST-neutral)
+  //   Total  ≈ 763.03
+  //   Net    ≈ 514.33 profit  (= (rev − cogs − stripe)/1.15, GST-neutral)
   const buckets = [
     { revenue: 1277.36, orders: 31,
       pnlCogs: 0, hasPnlCogs: false, cogsDerived: 0,
@@ -388,15 +391,19 @@ test('integration: dashboard 3m window matches the user-visible totals', () => {
   sandbox.assembleBucketExpense(buckets[0]);
   const totals = sandbox.sumTrendTotals(buckets);
 
-  assert.ok(Math.abs(totals.cogs   - 553.27)  < 0.05, `cogs=${totals.cogs}`);
+  assert.ok(Math.abs(totals.cogs   - 636.258) < 0.05, `cogs=${totals.cogs}`);
   assert.equal(totals.opex, 0);
   assert.ok(Math.abs(totals.stripe - 49.6225) < 0.01, `stripe=${totals.stripe}`);
-  assert.ok(Math.abs(totals.gst    - 87.974)  < 0.01, `net gst=${totals.gst}`);
-  assert.ok(Math.abs(totals.expenses - 690.87) < 0.05,
-    `expected ~$690.87 expenses, got ${totals.expenses}`);
+  assert.ok(Math.abs(totals.gst    - 77.1495) < 0.01, `net gst=${totals.gst}`);
+  assert.ok(Math.abs(totals.expenses - 763.03) < 0.05,
+    `expected ~$763.03 expenses, got ${totals.expenses}`);
   // Net must be the GST-neutral take-home, NOT the old GST-double-counted figure.
   const net = totals.revenue - totals.expenses;
-  assert.ok(Math.abs(net - 586.49) < 0.05, `expected GST-neutral net ~$586.49, got ${net}`);
+  assert.ok(Math.abs(net - 514.33) < 0.05, `expected GST-neutral net ~$514.33, got ${net}`);
+  // The GST-neutral identity is the real invariant — it must hold on ANY cost
+  // basis, so it is the assertion that would have caught ERR-111 either way.
+  assert.ok(Math.abs(net - (totals.revenue - totals.cogs - totals.stripe) / 1.15) < 1e-9,
+    'net must collapse to (revenue − cogs − stripe) / 1.15');
   // Regression guard: GST line must be NET (~$88), never the gross output GST
   // (~$166.6) that double-counted the input credits already inside COGS+Stripe.
   assert.ok(totals.gst < 120, `regression guard: GST must be net remitted, got ${totals.gst}`);
@@ -419,41 +426,63 @@ test('integration: a bucket with logged opex flips a profit window into a loss',
   assert.ok(buckets[0].net < 0, 'net must be negative on a loss day');
 });
 
-// ─── kpiCogsInclGst — incl-GST cost from the KPI summary ────────────────────
+// ─── kpiCogsExGst / kpiCogsInclGst — COGS from the KPI summary ──────────────
 //
-// Formula corrected 2026-05-16. The KPI summary reports `revenue` GROSS and
-// `gross_profit = revenue_ex_gst − cost_incl_gst`. So:
-//     cost_incl_gst = revenue_ex_gst − gross_profit
-//                   = (revenue_gross / 1.15) − gross_profit
-// The previous `(revenue − gross_profit) × 1.15` over-counted COGS by ~38%
-// because `revenue_gross − gross_profit` already equals
-// `output_GST + cost_incl_gst` — see the regression guards below.
+// THE LIVE CONVENTION (backend migration 118, verified 2026-07-20 — ERR-111):
+//     gross_profit = revenue_ex_gst − cogs_EX_gst
+// so inverting gross_profit yields the EX-GST cost, and real cash to suppliers
+// is that grossed up by GST:
+//     cogs_ex   = (revenue_gross × 20/23) − gross_profit   ← kpiCogsExGst
+//     cogs_incl = cogs_ex × 1.15                           ← kpiCogsInclGst
+//
+// Before ERR-111 this file assumed `gross_profit = revenue_ex − cost_INCL`, so
+// the single `kpiCogsInclGst` returned the EX-GST figure under an incl-GST name
+// — understating supplier cash by 15%. Every fixture below that constructs a
+// `gross_profit` has been rebuilt on the ex-GST basis; the real-world figures
+// each test asserts (per-order cost, the $873.59 bug) are unchanged.
+//
+// Still true and still guarded: the ex-GST helper must NOT gross up. Applying
+// ×1.15 to `revenue_GROSS − gross_profit` was the 2026-05-16 bug (+38%).
 
-test('kpiCogsInclGst: $1,277.36 revenue − $557.48 GP → $553.27 incl-GST cost', () => {
-  // (1277.36 / 1.15) − 557.48 = 1110.748 − 557.48 = 553.268
-  const cogs = sandbox.kpiCogsInclGst(1277.36, 557.48);
+test('kpiCogsExGst: $1,277.36 revenue − $557.48 GP → $553.27 ex-GST cost', () => {
+  // (1277.36 × 20/23) − 557.48 = 1110.748 − 557.48 = 553.268
+  const cogs = sandbox.kpiCogsExGst(1277.36, 557.48);
   assert.ok(Math.abs(cogs - 553.268) < 0.01, `expected ~$553.27, got ${cogs}`);
 });
 
-test('kpiCogsInclGst: current screenshot fixture $1,354.10 / $594.46 → $583.02', () => {
+test('kpiCogsInclGst: same inputs → $636.26 of real cash to suppliers', () => {
+  // 553.268 × 1.15 = 636.258. This is the figure that belongs on a spend line;
+  // plotting the ex-GST 553.27 as "cash out" understates it by 15% (ERR-111).
+  const cogs = sandbox.kpiCogsInclGst(1277.36, 557.48);
+  assert.ok(Math.abs(cogs - 636.258) < 0.01, `expected ~$636.26, got ${cogs}`);
+});
+
+test('kpiCogsExGst: current screenshot fixture $1,354.10 / $594.46 → $583.02', () => {
   // The 2026-05-16 dashboard screenshot: revenue $1,354.10, gross_profit
-  // $594.46. (1354.10 / 1.15) − 594.46 = 1177.478 − 594.46 = 583.018.
-  const cogs = sandbox.kpiCogsInclGst(1354.10, 594.46);
+  // $594.46. (1354.10 × 20/23) − 594.46 = 1177.478 − 594.46 = 583.018.
+  const cogs = sandbox.kpiCogsExGst(1354.10, 594.46);
   assert.ok(Math.abs(cogs - 583.018) < 0.01, `expected ~$583.02, got ${cogs}`);
 });
 
-test('kpiCogsInclGst: regression — never re-introduce the ×1.15 over-gross-up', () => {
-  // The buggy formula gave (1354.10 − 594.46) × 1.15 = $873.59 — a $290
-  // over-count. Guard the corrected value stays well clear of it.
-  const cogs = sandbox.kpiCogsInclGst(1354.10, 594.46);
-  assert.ok(cogs < 600, `COGS must not balloon back toward the $873.59 bug, got ${cogs}`);
+test('kpiCogs*: regression — never re-introduce the ×1.15 on the WRONG base', () => {
+  // The 2026-05-16 bug was `(revenue_GROSS − gross_profit) × 1.15` = $873.59 for
+  // this fixture — a $290 over-count, because `revenue_gross − gross_profit`
+  // already contains the output GST. The legitimate gross-up (ERR-111) applies
+  // ×1.15 to the EX-GST cost instead and lands at $670.47, well clear of $873.59.
+  assert.ok(sandbox.kpiCogsExGst(1354.10, 594.46) < 600,
+    'the ex-GST helper must never gross up at all');
+  const incl = sandbox.kpiCogsInclGst(1354.10, 594.46);
+  assert.ok(Math.abs(incl - 670.471) < 0.01, `expected ~$670.47, got ${incl}`);
+  assert.ok(incl < 800, `COGS must not balloon back toward the $873.59 bug, got ${incl}`);
 });
 
 test('kpiCogsInclGst: KPI fallback agrees with exact per-order COGS', () => {
-  // The whole point of the fix: when items[] are absent and the chart falls
-  // back to the KPI figure, it must land on the SAME number the per-order
-  // path produces. 4 May order — true cost incl-GST = 198.65 × 1.15 = 228.45.
-  //   revenue gross 358.24, gross_profit = 311.513 − 228.448 = 83.065
+  // The whole point: when items[] are absent and the chart falls back to the KPI
+  // figure, it must land on the SAME number the per-order path produces — and
+  // that path grosses `supplier_cost_snapshot` up by 1.15, so the KPI path must
+  // too. 4 May order — true cost ex-GST $198.65, incl-GST 198.65 × 1.15 = $228.45.
+  //   revenue gross 358.24 → revenue_ex 311.513
+  //   gross_profit (live convention) = revenue_ex − cost_EX = 311.513 − 198.65 = 112.863
   const perOrder = sandbox.orderCostInclGst({
     items: [
       { qty: 1, supplier_cost_snapshot: 18.85 },
@@ -464,9 +493,12 @@ test('kpiCogsInclGst: KPI fallback agrees with exact per-order COGS', () => {
       { qty: 1, supplier_cost_snapshot: 34.95 },
     ],
   });
-  const kpiFallback = sandbox.kpiCogsInclGst(358.24, 83.065);
+  const kpiFallback = sandbox.kpiCogsInclGst(358.24, 112.863);
   assert.ok(Math.abs(kpiFallback - perOrder) < 0.05,
     `KPI fallback (${kpiFallback}) must match per-order cost (${perOrder})`);
+  // ...and the ex-GST helper must recover the raw snapshot sum, not the grossed-up one.
+  assert.ok(Math.abs(sandbox.kpiCogsExGst(358.24, 112.863) - 198.65) < 0.05,
+    'ex-GST helper must recover the un-grossed supplier cost');
 });
 
 test('kpiCogsInclGst: NaN inputs return 0, not NaN', () => {
@@ -717,9 +749,17 @@ test('reconciliation end-to-end: snapshot COGS drives both the chart and the KPI
   const reconciledGP = sandbox.reconciledGrossProfitInclGst(revenueGross, windowCogs);
   // gross_profit is on the EX-GST cost basis, so inverting it yields cost_EX,
   // exactly windowCogs/1.15 — proving the convention flipped cleanly.
-  const recoveredCostEx = sandbox.kpiCogsInclGst(revenueGross, reconciledGP);
+  const recoveredCostEx = sandbox.kpiCogsExGst(revenueGross, reconciledGP);
   assert.ok(Math.abs(recoveredCostEx - windowCogs / 1.15) < 1e-6,
     `gross_profit must be on the ex-GST basis: ${recoveredCostEx} vs ${windowCogs / 1.15}`);
+  // ERR-111: kpiCogsInclGst is the exact inverse of reconciledGrossProfitInclGst.
+  // These two were NOT inverses before the fix — kpiCogsInclGst returned cost_EX
+  // under an incl-GST name, so this round-trip silently lost 15%.
+  const recoveredCostIncl = sandbox.kpiCogsInclGst(revenueGross, reconciledGP);
+  assert.ok(Math.abs(recoveredCostIncl - windowCogs) < 1e-6,
+    `incl-GST helper must recover the original cash figure: ${recoveredCostIncl} vs ${windowCogs}`);
+  assert.ok(Math.abs(sandbox.reconciledGrossProfitInclGst(revenueGross, recoveredCostIncl) - reconciledGP) < 1e-9,
+    'round-trip gross_profit → cogs_incl → gross_profit must be lossless');
   // Canonical gross profit ~$602; net (Gross − stripe_ex) is the real take-home,
   // both well below the optimistic $890 RPC figure but POSITIVE and honest.
   assert.ok(reconciledGP > 580 && reconciledGP < 620,
@@ -1030,19 +1070,24 @@ test('integration: when items[] are absent, KPI fallback equals the per-order co
       pnlGst: 0, hasPnlGst: false,
       hasNet: false },
   ];
-  // Single-order window: revenue gross 358.24, gross_profit per profitability.js
-  // = revenue_ex_gst − cost_incl_gst = 311.513 − 228.448 = 83.065.
-  // Corrected fallback: kpiCogsInclGst(358.24, 83.065)
-  //   = 358.24/1.15 − 83.065 = 311.513 − 83.065 = 228.448
-  // — i.e. EXACTLY the per-order cost. Pre-fix this returned $316.45 (a 38%
-  // over-count); the fallback and the exact path must now agree.
-  const totalCogs = sandbox.kpiCogsInclGst(358.24, 83.065);
+  // Single-order window: revenue gross 358.24 → revenue_ex 311.513. On the live
+  // backend convention (migration 118) gross_profit = revenue_ex − cost_EX
+  //   = 311.513 − 198.65 = 112.863.
+  // Fallback: kpiCogsInclGst(358.24, 112.863) = (311.513 − 112.863) × 1.15
+  //   = 198.65 × 1.15 = 228.448 — i.e. EXACTLY the per-order cost, which is
+  // itself supplier_cost_snapshot grossed up. Both paths gross up, so they agree.
+  // Two historical over-counts are guarded below: $316.45 (the 2026-05-16 ×1.15
+  // on the wrong base) and, going the other way, the ERR-111 15% UNDER-count
+  // that would have shown $198.65 here.
+  const totalCogs = sandbox.kpiCogsInclGst(358.24, 112.863);
   sandbox.distributeCogsByRevenue(buckets, totalCogs);
   sandbox.assembleBucketExpense(buckets[0]);
   assert.ok(Math.abs(buckets[0].cogsTotal - 228.4475) < 0.1,
     `KPI-fallback COGS must match the exact per-order cost ($228.45), got ${buckets[0].cogsTotal}`);
   assert.ok(buckets[0].cogsTotal < 300,
     `regression guard: fallback must not balloon back to the $316 over-count, got ${buckets[0].cogsTotal}`);
+  assert.ok(buckets[0].cogsTotal > 210,
+    `ERR-111 regression guard: dropping the gross-up would show the ex-GST $198.65 here, got ${buckets[0].cogsTotal}`);
 });
 
 // ─── isRevenueOrder — order-status filter ───────────────────────────────────
@@ -1230,10 +1275,13 @@ test('kpiCogsInclGst: null gross_profit returns 0, not the entire ex-GST revenue
   assert.equal(sandbox.kpiCogsInclGst(undefined, undefined), 0);
 });
 
-test('kpiCogsInclGst: real revenue + gross_profit still recovers incl-GST COGS', () => {
-  // $1,150 gross → $1,000 ex-GST. gross_profit $400 → COGS incl-GST $600.
-  const cogs = sandbox.kpiCogsInclGst(1150, 400);
-  assert.ok(Math.abs(cogs - 600) < 0.001, `expected $600 COGS, got ${cogs}`);
+test('kpiCogs*: real revenue + gross_profit recovers both GST bases', () => {
+  // $1,150 gross → $1,000 ex-GST. gross_profit $400 → cost_EX $600, and the
+  // cash that actually left the bank for those goods is 600 × 1.15 = $690.
+  assert.ok(Math.abs(sandbox.kpiCogsExGst(1150, 400) - 600) < 0.001,
+    `expected $600 ex-GST COGS, got ${sandbox.kpiCogsExGst(1150, 400)}`);
+  assert.ok(Math.abs(sandbox.kpiCogsInclGst(1150, 400) - 690) < 0.001,
+    `expected $690 incl-GST COGS, got ${sandbox.kpiCogsInclGst(1150, 400)}`);
 });
 
 // ─── cogsIsKnown — COGS-unknown vs COGS-genuinely-zero ──────────────────────

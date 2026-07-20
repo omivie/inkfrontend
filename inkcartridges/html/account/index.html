@@ -24,7 +24,7 @@
     <link rel="stylesheet" href="/css/layout.css?v=ea114dc3">
     <link rel="stylesheet" href="/css/components.css?v=79d69fe3">
     <link rel="stylesheet" href="/css/modern-effects.css?v=afe20f45">
-    <link rel="stylesheet" href="/css/pages.css?v=84962ae5">
+    <link rel="stylesheet" href="/css/pages.css?v=6c51f041">
     <link rel="stylesheet" href="/css/search.css?v=5caba86a">
     <meta name="twitter:card" content="summary_large_image">
     <meta name="twitter:title" content="My Account | InkCartridges.co.nz">
@@ -207,6 +207,12 @@
                                     </a>
                                 </li>
                                 <li class="account-nav__item">
+                                    <a href="/account/reviews">
+                                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+                                        My Reviews
+                                    </a>
+                                </li>
+                                <li class="account-nav__item">
                                     <a href="/account/track-order">
                                         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
                                         Track Order
@@ -293,6 +299,13 @@
                                 <h3 class="dash-nav-card__title">Order History</h3>
                                 <p class="dash-nav-card__desc">View past orders and invoices</p>
                             </a>
+                            <a href="/account/reviews" class="dash-nav-card">
+                                <span class="dash-nav-card__icon">
+                                    <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+                                </span>
+                                <h3 class="dash-nav-card__title">My Reviews</h3>
+                                <p class="dash-nav-card__desc">Your product ratings &amp; reviews</p>
+                            </a>
                             <a href="/account/track-order" class="dash-nav-card">
                                 <span class="dash-nav-card__icon">
                                     <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
@@ -323,6 +336,14 @@
                                 <p class="dash-nav-card__desc">Find ink & toner for your printer</p>
                             </a>
                         </div>
+
+                        <!-- Business account: ships hidden, unhidden by Account.loadBusinessStatus()
+                             only for an active B2B account. Retail customers never see it. -->
+                        <section class="business-panel" id="dash-business-panel" data-testid="business-panel" hidden aria-label="Business account">
+                            <p class="business-panel__eyebrow">Business account</p>
+                            <p class="business-panel__tier" id="dash-business-tier">Active</p>
+                            <p class="business-panel__desc">Your business pricing is applied automatically on product pages and at checkout. Some items are already priced close to cost, so they may save less than your tier rate.</p>
+                        </section>
 
                     </div>
                 </div>
@@ -358,7 +379,8 @@
     <script defer src="/js/api.js?v=874ba7f5"></script>
     <script defer src="/js/schema.js?v=dd78df4e"></script>
     <script defer src="/js/auth.js?v=d8e7f6f2"></script>
-    <script defer src="/js/products.js?v=f32abaec"></script>
+    <script defer src="/js/business.js?v=891bfd2f"></script>
+    <script defer src="/js/products.js?v=68f52ea8"></script>
     <script defer src="/js/search.js?v=be6f2323"></script>
     <script defer src="/js/main.js?v=f6b7b932"></script>
     <script defer src="/js/legal-config.js?v=2db8a49b"></script>
@@ -366,10 +388,10 @@
     <script defer src="/js/mega-nav.js?v=9a073f70"></script>
     <script defer src="/js/rewards-nudge.js?v=f5a2df30"></script>
     <script defer src="/js/modern-effects.js?v=ad8bff1e"></script>
-    <script defer src="/js/cart.js?v=34fb5bfe"></script>
+    <script defer src="/js/cart.js?v=ba4981e0"></script>
     <script defer src="/js/favourites.js?v=cb9c5483"></script>
     <script defer src="/js/printer-data.js?v=2431d3ae"></script>
-    <script defer src="/js/account.js?v=4eafee51"></script>
+    <script defer src="/js/account.js?v=e3388efc"></script>
     <script defer src="/js/account-page.js?v=4a5f96a9"></script>
     <script defer src="/js/analytics.js?v=8c9ee196"></script>
     <script defer src="/js/site-guard.js?v=e0b0e4ba"></script>

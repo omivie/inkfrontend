@@ -4,6 +4,90 @@ Log every error encountered here. Before editing a file, scan for known issues. 
 
 ---
 
+## ERR-111 — Profit tiles were over-stated by the revenue GST; two FE helpers silently changed meaning when the backend changed basis (2026-07-20)
+
+**Symptom.** Backend shipped a P0 fix (migration 118 + `b356b48`) and asked the frontend to follow
+through. Verifying it surfaced that the owner's historical Gross/Net Profit tiles had been
+**inflated**: `period=all` gross `$2,679 → $1,591`, net `$1,272 → $340.86`.
+
+**Cause (backend, already fixed).** `kpi-summary` subtracted an **ex-GST COGS from GST-INCLUSIVE
+revenue**, booking the 15% GST collected on revenue as profit, and left Stripe fees out of the
+comparison. Not ERR-068 — invoice COGS was never zeroed.
+
+**Cause (frontend, found only by verifying).** The migration changed a **basis**, not a value, so
+two helpers that invert that basis silently changed meaning while their names kept asserting the old
+one:
+
+1. `kpiCogsInclGst` computed `revenue_ex − gross_profit` and called it incl-GST. Post-118 that
+   expression yields the **ex-GST** cogs — a 15% understatement of real supplier cash (~$849
+   all-time) on every cost line. Proof is pure arithmetic on the backend's own numbers:
+   `rev_INCL − cogs = 2679.31` reproduces the pre-fix gross exactly and `rev_EX − cogs = 1591.20`
+   reproduces the live one, so `cogs` is the same ex-GST figure on both sides.
+2. The margin tiles divided ex-GST profit by GST-inclusive revenue → **19.07%**, while the backend's
+   own `margin_proxy` said **21.9%**. The frontend never read `margin_proxy` at all.
+
+**Fix.** Deleted the ERR-106 proration (`buildReconciledNetSeries`) and plotted the backend's real
+`net_profit_series`, which reconciles by construction post-118. Split the COGS helper into
+`kpiCogsExGst` (profit basis) and `kpiCogsInclGst` (cash basis, `×1.15`) — now true inverses of
+`reconciledGrossProfitInclGst`, which they were not before. Backend per-bucket `operating_expenses`
+became primary over the client-side `/expenses` bucketing (which read $1,375.76 vs the backend's
+$1,071.69); the client path survives as a **differently-labelled**, disclosed fallback. Margins
+prefer `margin_proxy`. The drift guard was kept (not retired as the backend suggested), had its
+null-as-zero false-alarm fixed, gained a bucket-scaled tolerance, and now renders a **visible**
+on-card alert instead of a console warning nobody reads.
+
+**Pinned by** `tests/dashboard-net-series-jul2026.test.js` (44), plus updates to
+`dashboard-trend-math.test.js`, `dashboard-profit-recovery.test.js`, `admin-cogs-honesty.test.js`.
+Full suite 2683/0.
+
+**Lesson.** When a backend changes a *basis* rather than a value, grep for the **inverse
+operations**, not just the field name — every helper that inverts the basis changes meaning while
+its docblock keeps asserting the old one. The contradiction here had been sitting in a *passing*
+test comment (`kpiCogsInclGst … recovers cost_EX`) for six weeks. Also: verify a handoff before
+coding — two of the four endpoints it named either lacked the field or didn't exist, while the two
+genuinely broken things weren't mentioned at all.
+
+---
+
+## FEATURE — Review Flywheel frontend (one-click rating landing + My Reviews) (2026-07-19)
+
+**What:** implemented the three FE action items from `review-flywheel-FE-handoff-jul2026.md`. The
+post-purchase email now embeds one-click star ratings; the backend records an **approved** review and
+302-redirects the customer to a storefront URL with `?rated=N`.
+- **§1.1** PDP + `/account/reviews` welcome a one-click rater: `?rated=N` (1–5) → "Thanks for your
+  N-star rating!" toast, scroll to reviews, then `history.replaceState` strips the param (idempotent —
+  the canonical-URL rewrite otherwise preserves the query string and would re-toast on refresh/Back).
+- **§1.2** PDP hero rating badge (`#product-rating-badge`) populated from
+  `average_rating`/`review_count`, gated **exactly** like the product card (`avg && review_count > 0`).
+  Display-only; **no client-side aggregateRating JSON-LD** (backend prerender owns structured data).
+- **§1.3** already-rated guard: `setupReviewForm()` is now **async** and calls
+  `API.getUserReviews()`; if a review exists for the product it renders a "You rated this N★"
+  acknowledgement instead of the write form — so `POST /api/reviews` never fires its **409**. One-click
+  ratings are approved-with-no-text and `PUT /api/reviews/:id` edits only pending rows, so there is
+  genuinely nothing to append a comment to — treating the product as already-rated is the honest UX.
+- New `/account/reviews` page (fallback redirect target) + `js/account-reviews-page.js`; fails **loud**
+  (error panel + retry) rather than rendering an empty list as a healthy zero. `serve.json` rewrite
+  added (local dev — vercel's `/account/:path*` catch-all already covers prod). "My Reviews" added to
+  every account sidebar + a dashboard card.
+
+**Two test-contract gotchas hit and satisfied (note for the next account page):**
+1. **Canonical-URL §4** (`polished-slugs-may2026.test.js`): any JS building `/products/${slug}/${sku}`
+   MUST also reference `canonical_url` first. Fixed `productHref()` to prefer `review.canonical_url`.
+2. **Header parity** (`ia-reorg-jul2026.test.js §1`): pins the exact count of pages shipping the shared
+   header (`assert.equal(PAGES_WITH_NAV.length, N)`). Adding `reviews.html` bumped 28→29 — update that
+   number when adding any full page. The byte-identical-header hash assertion still held (cloned header).
+
+**Skipped (owner decision):** the handoff's optional §3 footer/nav category links (Label Tape / Photo
+Paper). `footer-redesign-jul2026.test.js §3` pins the human footer to the exact four categories the
+backend prerender shows Googlebot; adding two more without the bot footer matching is reverse cloaking
+— the class of issue behind the ad suspensions. Deferred until the prerender footer is confirmed.
+
+**Pinned by:** `tests/review-flywheel-fe-jul2026.test.js` (new, 12 tests). Suite green (2567/0);
+one intermittent cross-file failure (`admin-cogs-honesty` chart-mapper) belongs to an **unrelated
+uncommitted admin dashboard WIP** in the tree, not this change — left untouched.
+
+---
+
 ## ERR-078 — Live misrepresentation: a 12-month compatible-cartridge "replacement warranty" the business never offered (2026-07-15)
 
 **Symptom:** the storefront claimed every compatible cartridge carried a **12-month replacement

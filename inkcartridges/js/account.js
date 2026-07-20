@@ -68,6 +68,10 @@ const AccountPage = {
             this.setupPrinterModalHandlers();
         } else if (path.includes('/account/personal-details')) {
             // Personal details page — handled by its own inline script
+        } else if (path.includes('/account/reviews')) {
+            // My Reviews page — handled by its own controller
+            // (account-reviews-page.js). Skip loadDashboard() so its
+            // dashboard-only API calls don't fire here.
         } else if (path.includes('/account')) {
             await this.loadDashboard();
         }
@@ -814,6 +818,37 @@ const AccountPage = {
         this.loadSavingsBanner();
         // Load loyalty points balance for the dashboard card (non-blocking)
         this.loadLoyaltyBalance();
+        // Business-account status + tier (non-blocking; hidden for retail users)
+        this.loadBusinessStatus();
+    },
+
+    /**
+     * Show the business-account panel on the dashboard.
+     *
+     * business-account-pricing (Jul 2026). Retail customers and guests never
+     * see this — the panel ships hidden and only unhides for an active business
+     * account. The tier % is described as "up to" on purpose: it is a CEILING,
+     * and the backend's loss floor reduces it on thin-margin items, so promising
+     * a flat percentage here would contradict the PDP and the cart.
+     * Silent no-op if the element isn't present or the call fails.
+     */
+    async loadBusinessStatus() {
+        const panel = document.getElementById('dash-business-panel');
+        if (!panel || typeof Business === 'undefined') return;
+        try {
+            const { active, tier } = await Business.getStatus();
+            if (!active) return;
+
+            const tierEl = document.getElementById('dash-business-tier');
+            if (tierEl) {
+                tierEl.textContent = tier
+                    ? `${Business.tierLabel(tier)} tier`
+                    : 'Active';
+            }
+            panel.hidden = false;
+        } catch (e) {
+            DebugLog.warn('[Account] business status unavailable:', e && e.message);
+        }
     },
 
     /**

@@ -15,6 +15,86 @@
 
 'use strict';
 
+/**
+ * Split the aggregate `summary.discount` into its named components.
+ *
+ * `summary.discount` is the TOTAL of every discount the backend applied.
+ * Loyalty (`loyalty_discount_amount`) and the B2B business-account discount
+ * (`b2b_discount.discount_amount`) are sub-components of it that get their own
+ * summary rows, so each must be netted out of the generic "You Save" line or
+ * the shopper sees the same dollars counted twice.
+ *
+ * The B2B block is computed per line WITH the loss floor, so `discount_amount`
+ * may be less than `discount_percent x subtotal`. That is expected and it is
+ * authoritative — never recompute it. See business.js and
+ * business-account-pricing-FE-handoff.md.
+ *
+ * TWO PAYLOAD SHAPES, both handled (verified live 2026-07-20).
+ * The handoff documents `summary.b2b_discount` as the metadata OBJECT. The live
+ * API actually sends:
+ *     summary.b2b_discount  ->  4.68                       (a NUMBER, the amount)
+ *     response.b2b_discount ->  { pricing_tier, discount_percent,
+ *                                 effective_percent, discount_amount,
+ *                                 floored_line_count, source }   (the OBJECT)
+ * Reading only the documented shape rendered NOTHING, because `typeof 4.68`
+ * is not 'object'. So both are accepted: whichever carries the object becomes
+ * the metadata, whichever carries a number becomes the amount. If the backend
+ * later moves the object into `summary`, this keeps working unchanged.
+ *
+ * Also verified live: `summary.discount` INCLUDES the B2B amount (a cart with
+ * only a B2B discount reported discount === b2b_discount === 4.68), so the B2B
+ * row must be netted out of "You Save" exactly like loyalty.
+ *
+ * Pure: no DOM, no I/O. Shared by cart.js, checkout-page.js, payment-page.js
+ * and order-confirmation-page.js so the four summaries cannot drift apart.
+ *
+ * @param {object|null} summary  the API cart `summary` object
+ * @param {number} [total]       aggregate discount; defaults to summary.discount
+ * @param {object|number|null} [b2bBlock]  the response-level `b2b_discount`
+ * @returns {{loyalty:number, b2b:number, other:number, total:number,
+ *            b2bMeta:(object|null)}}
+ */
+function computeDiscountBreakdown(summary, total, b2bBlock) {
+    const s = summary && typeof summary === 'object' ? summary : {};
+
+    const num = (v) => {
+        const n = Number(v);
+        return Number.isFinite(n) && n > 0 ? n : 0;
+    };
+    const isObj = (v) => !!v && typeof v === 'object';
+
+    const aggregate = Number.isFinite(Number(total)) ? Math.max(0, Number(total)) : num(s.discount);
+    const loyalty = num(s.loyalty_discount_amount);
+
+    // Metadata: whichever source carries the object.
+    const b2bMeta = isObj(b2bBlock) ? b2bBlock : (isObj(s.b2b_discount) ? s.b2b_discount : null);
+    // Amount: prefer the object's own figure, else whichever source is numeric.
+    const b2b = num(b2bMeta && b2bMeta.discount_amount) || num(s.b2b_discount) || num(b2bBlock);
+
+    return {
+        loyalty,
+        b2b,
+        other: Math.max(0, aggregate - loyalty - b2b),
+        total: aggregate,
+        b2bMeta
+    };
+}
+if (typeof window !== 'undefined') window.computeDiscountBreakdown = computeDiscountBreakdown;
+
+/**
+ * Label for a B2B summary row, e.g. "Business account (Gold tier)".
+ * Falls back to a plain label when the tier is absent or unrecognised.
+ * @param {object|null} b2bMeta  summary.b2b_discount
+ * @returns {string}
+ */
+function businessDiscountLabel(b2bMeta) {
+    const tier = b2bMeta && typeof b2bMeta.pricing_tier === 'string' ? b2bMeta.pricing_tier : '';
+    if (!tier) return 'Business account';
+    const label = tier.charAt(0).toUpperCase() + tier.slice(1).toLowerCase();
+    return `Business account (${label} tier)`;
+}
+if (typeof window !== 'undefined') window.businessDiscountLabel = businessDiscountLabel;
+
 const Cart = {
     // Storage key for guest cart data
     STORAGE_KEY: 'inkcartridges_cart',
@@ -297,6 +377,18 @@ const Cart = {
         const summary = responseData.summary
             ? { ...responseData.summary }
             : null;
+        // Normalise the B2B block at the boundary. The live API puts the
+        // metadata OBJECT at the response top level and leaves
+        // `summary.b2b_discount` as a bare NUMBER (the amount). Folding the
+        // object into the summary here means every one of the ~15
+        // `this.serverSummary = parsed.summary` assignments carries the tier
+        // and floored_line_count for free, instead of threading a new field
+        // through all of them. The bare number is kept when no object is sent.
+        // See computeDiscountBreakdown() above. (ERR-110)
+        if (summary && responseData.b2b_discount && typeof responseData.b2b_discount === 'object') {
+            summary.b2b_discount = responseData.b2b_discount;
+        }
+
         const couponCode = responseData.coupon?.code || null;
         const discountAmount = responseData.coupon?.discount_amount || summary?.discount || 0;
 
@@ -1055,6 +1147,64 @@ const Cart = {
     },
 
     /**
+     * Render the cart summary's three discount rows — "You Save", loyalty and
+     * business account — from one breakdown.
+     *
+     * This exists because renderCartPage() and _updateCartSummaryDOM() used to
+     * write these rows separately and had drifted: only the surgical path
+     * rendered the loyalty row and netted it out, so on a fresh cart load the
+     * loyalty row stayed hidden until the shopper changed a quantity. Adding a
+     * third discount line to two divergent code paths would have doubled that
+     * bug, so both paths now call this. (errors.md ERR-110)
+     *
+     * @param {number} discount  aggregate discount (Cart.getDiscount())
+     */
+    _renderDiscountRows: function(discount) {
+        const { loyalty, b2b, other, b2bMeta } = computeDiscountBreakdown(this.serverSummary, discount);
+
+        const setRow = (rowId, valueId, amount) => {
+            const row = document.getElementById(rowId);
+            const el = document.getElementById(valueId);
+            if (!row || !el) return;
+            if (amount > 0) {
+                row.hidden = false;
+                el.textContent = '-' + formatPrice(amount);
+            } else {
+                row.hidden = true;
+            }
+        };
+
+        setRow('cart-savings-row', 'cart-savings', other);
+        setRow('cart-loyalty-row', 'cart-loyalty-discount', loyalty);
+        setRow('cart-b2b-row', 'cart-b2b-discount', b2b);
+
+        // Tier label on the B2B row. Always the realised `effective_percent`,
+        // never the tier ceiling — on a floored cart the ceiling is not what
+        // the customer actually got.
+        const b2bLabel = document.getElementById('cart-b2b-label');
+        if (b2bLabel && b2b > 0) b2bLabel.textContent = businessDiscountLabel(b2bMeta);
+
+        // When the loss floor bit on one or more lines, say so plainly rather
+        // than letting the shopper wonder why 15% off didn't produce 15%.
+        const note = document.getElementById('cart-b2b-note');
+        if (note) {
+            const flooredLines = b2bMeta && Number(b2bMeta.floored_line_count) > 0;
+            if (b2b > 0 && flooredLines) {
+                const pct = b2bMeta && Number.isFinite(Number(b2bMeta.effective_percent))
+                    ? Number(b2bMeta.effective_percent)
+                    : null;
+                const realised = pct != null && typeof Business !== 'undefined'
+                    ? ` You saved ${Business.formatPercent(pct)} overall.`
+                    : '';
+                note.textContent = 'Some items are already at their best possible price.' + realised;
+                note.hidden = false;
+            } else {
+                note.hidden = true;
+            }
+        }
+    },
+
+    /**
      * Surgically update cart summary DOM elements.
      * Updates counts, subtotal, shipping, total, progress bar without rebuilding cart items.
      */
@@ -1082,39 +1232,13 @@ const Cart = {
         const subtotalEl = document.getElementById('cart-subtotal');
         const gstEl = document.getElementById('cart-gst');
         const totalEl = document.getElementById('cart-total');
-        const savingsRow = document.getElementById('cart-savings-row');
-        const savingsEl = document.getElementById('cart-savings');
-        const loyaltyRow = document.getElementById('cart-loyalty-row');
-        const loyaltyEl = document.getElementById('cart-loyalty-discount');
-
-        // Loyalty discount is part of serverSummary.discount; show it on its own row
-        // and net it out of the "You Save" line so it isn't double-counted.
-        const loyaltyDiscount = (this.serverSummary && this.serverSummary.loyalty_discount_amount) || 0;
-        const otherSavings = Math.max(0, discount - loyaltyDiscount);
-
         if (itemCountEl) itemCountEl.textContent = itemCount;
         if (subtotalEl) subtotalEl.textContent = formatPrice(subtotal);
         if (gstEl) gstEl.textContent = formatPrice(this.serverSummary?.gst_amount != null ? this.serverSummary.gst_amount : calculateGST(cartTotal));
         if (totalEl) totalEl.textContent = formatPrice(cartTotal) + ' NZD';
 
-        if (savingsRow && savingsEl) {
-            if (otherSavings > 0) {
-                savingsRow.hidden = false;
-                savingsEl.textContent = '-' + formatPrice(otherSavings);
-            } else {
-                savingsRow.hidden = true;
-            }
-        }
-
-        if (loyaltyRow && loyaltyEl) {
-            if (loyaltyDiscount > 0) {
-                loyaltyRow.hidden = false;
-                loyaltyEl.textContent = '-' + formatPrice(loyaltyDiscount);
-            } else {
-                loyaltyRow.hidden = true;
-            }
-        }
-
+        // Savings / loyalty / business-account rows — one shared renderer.
+        this._renderDiscountRows(discount);
 
         // Cart summary class-based elements
         const cartSummary = document.querySelector('.cart-summary');
@@ -1794,22 +1918,14 @@ const Cart = {
             const subtotalEl = document.getElementById('cart-subtotal');
             const gstEl = document.getElementById('cart-gst');
             const totalEl = document.getElementById('cart-total');
-            const savingsRow = document.getElementById('cart-savings-row');
-            const savingsEl = document.getElementById('cart-savings');
 
             if (itemCountEl) itemCountEl.textContent = itemCount;
             if (subtotalEl) subtotalEl.textContent = formatPrice(subtotal);
             if (gstEl) gstEl.textContent = formatPrice(this.serverSummary?.gst_amount != null ? this.serverSummary.gst_amount : calculateGST(cartTotal));
             if (totalEl) totalEl.textContent = formatPrice(cartTotal) + ' NZD';
 
-            if (savingsRow && savingsEl) {
-                if (discount > 0) {
-                    savingsRow.hidden = false;
-                    savingsEl.textContent = '-' + formatPrice(discount);
-                } else {
-                    savingsRow.hidden = true;
-                }
-            }
+            // Savings / loyalty / business-account rows — one shared renderer.
+            this._renderDiscountRows(discount);
 
             if (cartSummary) {
                 const subtotalClassEl = cartSummary.querySelector('.cart-summary__subtotal');

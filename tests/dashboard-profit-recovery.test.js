@@ -202,7 +202,11 @@ test('the KPI tiles read the recovered figures, not cur.gross_profit directly', 
 });
 
 test('a rebuilt tile says so — it is not passed off as kpi-summary’s own number', () => {
-  assert.match(src, /const profitNote = recovered \? REBUILT : COGS_UNKNOWN/);
+  // Provenance is now PER FIGURE. A single shared flag stamped "Rebuilt…" on BOTH tiles
+  // whenever either was rebuilt, mislabelling a real backend number as reconstructed.
+  assert.match(src, /const grossNote = recovered\?\.grossRebuilt \? REBUILT : COGS_UNKNOWN/);
+  assert.match(src, /const netNote\s+= recovered\?\.netRebuilt\s+\? REBUILT : COGS_UNKNOWN/);
+  assert.doesNotMatch(src, /const profitNote =/, 'the shared note is what mislabelled tiles');
   assert.match(src, /ERR-074/, 'the REBUILT note should cite the defect');
 });
 
@@ -270,4 +274,59 @@ test('every order is cost-checked, not just invoice-channel ones', () => {
 
 test('cancelled orders are excluded — the backend excludes them from COGS too', () => {
   assert.match(src, /!== 'cancelled'/);
+});
+
+// ─── 7. RETIRED: the ERR-106 proration ──────────────────────────────────────
+//
+// `buildReconciledNetSeries` prorated two whole-range scalars across buckets so the chart
+// line would land exactly on the Net Profit KPI. It existed only because the backend's
+// `net_profit_series` did not reconcile (line ~$200 vs KPI ~$1,047).
+//
+// Backend migration 118 fixed the root cause — kpi-summary had been subtracting an ex-GST
+// COGS from GST-INCLUSIVE revenue, booking the 15% revenue GST as profit. Verified live
+// 2026-07-20 across four windows: Σ net_profit_series now equals kpi-summary.net_profit to
+// within 2c over 30 buckets. So the frontend stopped manufacturing per-bucket figures the
+// backend never published, and plots the real series.
+//
+// Those five proration tests are GONE with the code they pinned. Their surviving invariants
+// — null-honesty, negative buckets, all-null degrade, and reconciliation to the KPI — moved
+// to tests/dashboard-net-series-jul2026.test.js, restated against the real series (ERR-110).
+
+// ─── 8. Static wiring — real series, no proration, un-clamped axis ───────────
+
+test('drawPerformanceOverview plots the backend net series — the proration is gone', () => {
+  // Deleted, not merely unused — it invented per-bucket figures. Matched on the declaration
+  // and on any call site; the docblock is free to NAME it when explaining why it's gone.
+  assert.doesNotMatch(
+    src, /function\s+buildReconciledNetSeries|const\s+buildReconciledNetSeries\s*=/,
+    'the ERR-106 proration helper must be deleted',
+  );
+  assert.doesNotMatch(
+    src, /buildReconciledNetSeries\s*\(/,
+    'the ERR-106 proration must have no call sites',
+  );
+  // The profit line and its label both come from the shared planner.
+  assert.match(src, /const plan = planProfitLine\(order, byBucket\)/);
+  assert.match(src, /mkMoney\(plan\.label, profit, c\.cyan\)/);
+  // net_profit_series must be MERGED now (the opposite of the ERR-106 state).
+  assert.match(src, /merge\(npList, \(r\) => numOrNull\(r\.net_profit\), 'netProfit'\)/);
+  // The loud reconciliation guard must survive, with the same recognisable string.
+  assert.match(src, /does not reconcile to the Net Profit KPI/);
+  assert.match(src, /checkNetDrift\(plan, kpiNet, order\.length\)/);
+});
+
+test('the money axis is no longer clamped at 0, so losses render below the baseline', () => {
+  // Scope to the Performance-overview body — the sibling drawRevenueProfit keeps its own
+  // deliberate min:0 (dual-axis baseline alignment), so assert against THIS chart only.
+  const body = src.slice(
+    src.indexOf('function drawPerformanceOverview'),
+    src.indexOf('function drawAllCharts'),
+  );
+  assert.doesNotMatch(
+    body, /y:\s*\{ beginAtZero: true, min: 0, position: 'left'/,
+    'the min:0 clamp on the money axis is what hid negative net profit',
+  );
+  assert.match(body, /y1:\s*\{ beginAtZero: true, min: 0, position: 'right'/, 'orders axis stays >=0');
+  // …and an emphasised zero gridline is drawn so break-even is obvious.
+  assert.match(body, /gctx\.tick\?\.value === 0 \? c\.textMuted : c\.border/);
 });

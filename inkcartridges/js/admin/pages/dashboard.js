@@ -621,55 +621,119 @@ function drawForecast(canvasId, payload) {
 // ride the left $ axis; order volume rides the right count axis. Merges the three series by
 // bucket_start and honors cumulative 'all' mode for the money series (orders stay per-bucket
 // so the line always reads as daily/weekly volume, never a runaway running total).
-function drawPerformanceOverview(d) {
-  const canvasId = 'dash-c-overview';
-  const revList = resolveList(d.sRevenue, ['series', 'data']) || [];
-  const gpList  = resolveList(d.sGrossProfit, ['series', 'data']) || [];
-  const npList  = resolveList(d.sNetProfit, ['series', 'data']);
-  const ordList = resolveList(d.sOrders, ['series', 'data']) || [];
+/**
+ * Merge every Performance-overview series onto one chronological bucket axis.
+ *
+ * Shared by `drawPerformanceOverview` (which plots it) and `renderOverviewSection` (which
+ * names it in the card subtitle) so the subtitle and the chart legend are provably the same
+ * string. They used to be computed independently and could contradict each other.
+ *
+ * Pure: no DOM, no Charts, no FilterState.
+ */
+function buildOverviewBuckets(d) {
+  const revList = resolveList(d?.sRevenue, ['series', 'data']) || [];
+  const gpList  = resolveList(d?.sGrossProfit, ['series', 'data']) || [];
+  const ordList = resolveList(d?.sOrders, ['series', 'data']) || [];
+  const npList  = resolveList(d?.sNetProfit, ['series', 'data']) || [];
 
-  // Prefer the real per-bucket net-profit series; fall back to the gross-profit series
-  // until the backend ships net_profit_series. As of 2026-07-14 the bundle carries NO
-  // `net_profit_series` key at all, so the fallback is the ONLY path that ever runs — and
-  // the dataset used to be hard-labelled "Net profit" regardless, which meant the legend
-  // named a number the chart was not plotting. Label what we actually drew (ERR-074).
-  const hasNet = Array.isArray(npList) && npList.length > 0;
-  const profitList = hasNet ? npList : gpList;
-  const profitLabel = hasNet ? 'Net profit' : 'Gross profit';
-
-  const byBucket = new Map(); // bucket_start -> { revenue, profit, orders }
+  const byBucket = new Map(); // bucket key -> { revenue, grossProfit, netProfit, fees, opex, orders }
   const order = [];
   const merge = (list, valFn, dstKey) => {
-    for (const r of list) {
-      const b = r.bucket_start ?? r.date;
+    for (const r of (Array.isArray(list) ? list : [])) {
+      // Normalise to YYYY-MM-DD. Four series merging on a RAW key means one shipping
+      // "2026-07-01T00:00:00Z" against another shipping "2026-07-01" would silently split
+      // one day into two labels and halve both lines.
+      const b = String(r?.bucket_start ?? r?.date ?? '').slice(0, 10);
+      if (!b) continue;
       if (!byBucket.has(b)) { byBucket.set(b, {}); order.push(b); }
       byBucket.get(b)[dstKey] = valFn(r);
     }
   };
   merge(revList, (r) => numOrNull(r.revenue), 'revenue');
-  // The ?? chain LOOKS null-safe but used to terminate in `?? 0` — so when BOTH
-  // net_profit and gross_profit were null (exactly the unknown-COGS case) it yielded
-  // a confident 0. Prefer net, fall back to gross, and if both are unknown say so.
-  merge(profitList, (r) => numOrNull(r.net_profit) ?? numOrNull(r.gross_profit), 'profit');
   merge(ordList, (r) => numOrNull(r.orders), 'orders');
-  // Gross profit kept as its OWN key: COGS is derived from gross profit specifically
-  // (revenue_ex − cost), so it must not read the net-or-gross `profit` blend above.
+  // Gross profit is the source of the derived COGS line (COGS = revenue_ex − gross_profit)
+  // and the honest fallback for the profit line. Reads gross_profit_series specifically —
+  // never a net-or-gross blend.
   merge(gpList, (r) => numOrNull(r.gross_profit), 'grossProfit');
-  if (!order.length) { chartEmpty(canvasId, d.sRevenue == null ? AWAIT_MSG : EMPTY_MSG); return; }
-  order.sort(); // "YYYY-MM-DD" sorts chronologically
+  // Net profit + its two components, straight from the backend. Since migration 118 these
+  // reconcile to kpi-summary by construction (verified live 2026-07-20, residual ≤2c/30
+  // buckets), so the plotted line IS the backend's figure — no proration, no reconstruction.
+  merge(npList, (r) => numOrNull(r.net_profit), 'netProfit');
+  merge(npList, (r) => numOrNull(r.stripe_fees), 'fees');
+  merge(npList, (r) => numOrNull(r.operating_expenses), 'opex');
 
-  // ── Two derived expense lines (backend ships no per-bucket cogs/expense series) ──
-  // COGS per bucket, incl-GST, via the same helper the KPI strip uses. Null-honest:
-  // an unknown gross_profit bucket leaves COGS null (a gap), never a confident 0.
+  order.sort(); // "YYYY-MM-DD" sorts chronologically
+  return { order, byBucket };
+}
+
+/**
+ * Render the Performance card's honesty captions.
+ *
+ * "Fail-soft must be LOUD": partial-ness and backend disagreement belong in the UI, not in
+ * a console nobody reads. ERR-106's drift guard warned correctly and went unnoticed for
+ * weeks because DebugLog was its only channel.
+ */
+function renderOverviewNotes(plan, drift, opexLabel, hasBackendOpex) {
+  const host = document.getElementById('dash-overview-notes');
+  if (!host) return;
+  const notes = [];
+
+  if (drift) {
+    // Both figures are the backend's own, so this is a backend inconsistency — say so
+    // plainly rather than implying the chart is at fault.
+    notes.push(`<p class="fh-pnl-note admin-dash-note--alert"><strong>These two backend figures disagree.</strong>
+      The per-period ${esc(plan.label.toLowerCase())} adds up to ${esc(formatPrice(drift.seriesTotal))},
+      but the Net Profit tile reads ${esc(formatPrice(drift.kpiNet))} (gap ${esc(formatPrice(Math.abs(drift.gap)))}).
+      Neither figure can be trusted until this is resolved.</p>`);
+  }
+
+  if (plan.basis === 'gross-fallback') {
+    notes.push(`<p class="fh-pnl-note">Net profit isn’t available per period for this range, so this chart
+      shows <strong>gross profit</strong> instead — before Stripe fees and operating expenses.</p>`);
+  } else if (plan.nullCount > 0) {
+    const total = plan.knownCount + plan.nullCount;
+    notes.push(`<p class="fh-pnl-note">${plan.nullCount} of ${total} periods have no profit figure
+      (a sale in them has no cost of goods recorded), so the profit line gaps there rather than
+      reading as ${esc(formatPrice(0))}.</p>`);
+  }
+
+  if (!hasBackendOpex) {
+    notes.push(`<p class="fh-pnl-note">“${esc(opexLabel)}” is bucketed from your logged expenses in the
+      browser because the backend didn’t return per-period operating expenses for this range. It can
+      differ from the Net Profit tile’s expense figure, which also counts recurring charges.</p>`);
+  }
+
+  host.innerHTML = notes.join('');
+}
+
+function drawPerformanceOverview(d) {
+  const canvasId = 'dash-c-overview';
+  const { order, byBucket } = buildOverviewBuckets(d);
+  if (!order.length) { chartEmpty(canvasId, d.sRevenue == null ? AWAIT_MSG : EMPTY_MSG); return; }
+
+  // ── Cost lines ────────────────────────────────────────────────────────────────────
+  // COGS per bucket as real cash to suppliers (incl-GST), via the same helper the KPI
+  // strip uses. Null-honest: an unknown gross_profit bucket leaves COGS null (a gap),
+  // never a confident 0. See ERR-111 — this figure is grossed up because the backend's
+  // gross_profit is on the ex-GST cost basis (migration 118).
   const cogsByBucket = order.map(b => {
     const rev = numOrNull(byBucket.get(b)?.revenue);
     const gp  = numOrNull(byBucket.get(b)?.grossProfit);
     return (rev == null || gp == null) ? null : kpiCogsInclGst(rev, gp);
   });
-  // Added (operating) expenses per bucket — bucket each PAID operating expense on its
-  // cash date into the bucket whose start is the greatest ≤ that date (works at any
-  // granularity without needing bucket-end dates). Cash-basis + GST-net + order-linked
-  // exclusion all come from expense-math (cashMs skips unpaid; order_linked is COGS).
+  // Stripe fees per bucket — shipped by the backend on net_profit_series since migration 118.
+  const feesByBucket = order.map(b => numOrNull(byBucket.get(b)?.fees));
+
+  // Operating expenses per bucket. PRIMARY is the backend's own `operating_expenses` — it is
+  // range-scoped, GST-net, order-linked-excluded and includes recurring expense_occurrences,
+  // and it is the figure the Net Profit KPI actually subtracts. The client-side bucketing of
+  // /expenses below is a FALLBACK ONLY: measured live 2026-07-20 it read $1,375.76 of face
+  // value against the backend's $1,071.69 for the same window, because it misses recurring
+  // occurrences, doesn't GST-net identically, isn't range-scoped, and silently drops rows
+  // before the first bucket. Two different measurements — so they get two different labels.
+  const backendOpex = order.map(b => numOrNull(byBucket.get(b)?.opex));
+  const hasBackendOpex = backendOpex.some(v => v != null);
+
   const startMs = order.map(b => Date.parse(b));
   const indexFor = (ms) => {
     if (!Number.isFinite(ms)) return -1;
@@ -679,17 +743,27 @@ function drawPerformanceOverview(d) {
     }
     return idx; // -1 when the date precedes the first bucket → dropped
   };
-  const opexByBucket = new Array(order.length).fill(0);
-  for (const row of (Array.isArray(d.expenseRows) ? d.expenseRows : [])) {
-    if (!row || row.kind === 'order_linked') continue; // order-linked lives in COGS
-    const i = indexFor(cashMs(row)); // NaN for unpaid → -1 → skipped
-    if (i < 0) continue;
-    opexByBucket[i] += pnlCost(Number(row.amount), row.gst_claimable);
+  const loggedOpex = new Array(order.length).fill(0);
+  if (!hasBackendOpex) {
+    // Cash-basis + GST-net + order-linked exclusion all come from expense-math
+    // (cashMs skips unpaid; order_linked is COGS).
+    for (const row of (Array.isArray(d.expenseRows) ? d.expenseRows : [])) {
+      if (!row || row.kind === 'order_linked') continue; // order-linked lives in COGS
+      const i = indexFor(cashMs(row)); // NaN for unpaid → -1 → skipped
+      if (i < 0) continue;
+      loggedOpex[i] += pnlCost(Number(row.amount), row.gst_claimable);
+    }
   }
-  // Total expenses = added opex + COGS. Opex is always known; without COGS we can't
-  // claim a real total, so the total gaps exactly where the COGS/profit line does.
-  const totalExpByBucket = order.map((_, i) =>
-    cogsByBucket[i] == null ? null : cogsByBucket[i] + opexByBucket[i]);
+  const opexByBucket = hasBackendOpex ? backendOpex : loggedOpex;
+  const opexLabel = hasBackendOpex ? 'Operating expenses' : 'Logged expenses (client-side)';
+
+  // Total costs = COGS + operating expenses + Stripe fees — every component now per-bucket.
+  // Any unknown component makes the total unknown: a gap, never a confident partial sum.
+  const totalCostByBucket = order.map((_, i) => {
+    const parts = [cogsByBucket[i], opexByBucket[i], feesByBucket[i]];
+    if (parts.some(v => v == null)) return null;
+    return parts.reduce((a, v) => a + v, 0);
+  });
 
   const c = Charts.getThemeColors();
   const labels = order.map(fmtBucket);
@@ -703,11 +777,31 @@ function drawPerformanceOverview(d) {
       return (acc += v);
     });
   };
+  // ── Profit line — the BACKEND's per-bucket figure, not a reconstruction ─────────────
+  // net_profit_series reconciles to kpi-summary by construction since migration 118, so we
+  // plot it directly. `plan` also decides the legend label, so the line can never claim to
+  // be net profit while actually showing gross.
+  const cur  = d.kpis?.current ?? {};
+  const plan = planProfitLine(order, byBucket);
+
+  // Loud guard (fail-soft must be LOUD). Both numbers below are the backend's own, so a trip
+  // means the BACKEND disagrees with itself — the caption says exactly that rather than
+  // blaming the chart. Resolved from the same expression the KPI tile renders, so the guard
+  // can't pass while the tile shows something else.
+  const recovered = recoverProfitFromSeries(cur, d.sGrossProfit, d.sNetProfit);
+  const kpiNet    = cur.net_profit ?? recovered?.net ?? null;
+  const drift     = checkNetDrift(plan, kpiNet, order.length);
+  if (drift) {
+    window.DebugLog?.warn?.(
+      `[Dashboard] net-profit line ($${drift.seriesTotal.toFixed(2)}) does not reconcile to the Net Profit KPI ($${drift.kpiNet.toFixed(2)}) — gap $${Math.abs(drift.gap).toFixed(2)}, tolerance $${drift.tolerance.toFixed(2)}. Both figures are backend-sourced, so this is a backend inconsistency.`);
+  }
+  renderOverviewNotes(plan, drift, opexLabel, hasBackendOpex);
+
   const revenue = accum(order.map(b => numOrNull(byBucket.get(b)?.revenue)));
-  const profit  = accum(order.map(b => numOrNull(byBucket.get(b)?.profit)));
+  const profit  = accum(plan.values.slice());
   const orders  = accum(order.map(b => numOrNull(byBucket.get(b)?.orders)));
   const addedExpenses = accum(opexByBucket.slice());
-  const totalExpenses = accum(totalExpByBucket.slice());
+  const totalExpenses = accum(totalCostByBucket.slice());
 
   const drawType = plot ? 'line' : 'bar';
   const mkMoney = (label, data, color) => drawType === 'line'
@@ -718,12 +812,12 @@ function drawPerformanceOverview(d) {
 
   const datasets = [
     mkMoney('Revenue', revenue, c.success),
-    mkMoney(profitLabel, profit, c.cyan),
-    // Expense lines share the left $ axis. Added expenses = logged operating spend;
-    // Total expenses = that + COGS, so the gap between them reads as "how much of the
-    // total is discretionary spend vs cost of goods".
-    mkMoney('Added expenses', addedExpenses, c.magenta),
-    mkMoney('Total expenses', totalExpenses, c.danger),
+    mkMoney(plan.label, profit, c.cyan),
+    // Cost lines share the left $ axis. Operating expenses = spend that isn't cost of goods;
+    // Total costs = that + COGS + Stripe fees, so the gap between them reads as "how much of
+    // the total is running the business vs buying the stock".
+    mkMoney(opexLabel, addedExpenses, c.magenta),
+    mkMoney('Total costs', totalExpenses, c.danger),
     // Orders always a line on the right axis so it reads against the money bars/lines.
     { label: 'Orders', data: orders, yAxisID: 'y1', type: 'line',
       borderColor: c.yellow, backgroundColor: hexToRgba(c.yellow, 0.12),
@@ -741,11 +835,21 @@ function drawPerformanceOverview(d) {
           label: (ctx) => ctx.dataset.yAxisID === 'y1'
             ? `${ctx.dataset.label}: ${Math.round(ctx.raw || 0)}`
             : `${ctx.dataset.label}: ${formatPrice(ctx.raw || 0)}`,
+          // Revenue is what landed in the bank (incl-GST) and costs are what left it
+          // (incl-GST), but PROFIT is measured net of GST — GST is collected on behalf of
+          // IRD and remitted, so it was never income. Without this note the lines look
+          // like they should subtract to the profit line, and they don't.
+          footer: () => 'Revenue and costs incl. GST; profit is measured net of GST.',
         } },
       },
       scales: {
         x: { ticks: { maxTicksLimit: 10 } },
-        y:  { beginAtZero: true, min: 0, position: 'left',  ticks: { callback: (v) => formatPrice(v) } },
+        // No `min: 0` — the money axis auto-scales below zero so a loss-making period reads as
+        // a dip under the baseline instead of being clipped flat. beginAtZero keeps 0 in view
+        // when everything is positive. The zero gridline is emphasised so break-even is obvious.
+        y:  { beginAtZero: true, position: 'left', ticks: { callback: (v) => formatPrice(v) },
+              grid: { drawBorder: false, color: (gctx) => gctx.tick?.value === 0 ? c.textMuted : c.border } },
+        // Orders can't be negative — keep this axis clamped at 0.
         y1: { beginAtZero: true, min: 0, position: 'right', grid: { drawOnChartArea: false },
               ticks: { color: c.textMuted, font: { size: 11 }, precision: 0, callback: (v) => Math.round(v) } },
       },
@@ -1053,17 +1157,19 @@ function rowN(label, accent, cards) {
 // Full-width real-numbers performance overview (replaces the old normalized "All metrics"
 // chart). Just a tall canvas — drawPerformanceOverview fills it; no toolbar/legend wiring.
 function renderOverviewSection(d) {
-  // Name the series the chart actually plots. `net_profit_series` is absent from the live
-  // bundle, so the profit dataset is really gross profit — see drawPerformanceOverview.
-  const npList = resolveList(d?.sNetProfit, ['series', 'data']);
-  const profitWord = (Array.isArray(npList) && npList.length > 0) ? 'net profit' : 'gross profit';
+  // Name the series the chart ACTUALLY plots, from the same planner the chart's legend uses.
+  // These were computed independently before, so the subtitle could read "gross profit"
+  // while the legend said "Net profit" on the very same card.
+  const { order, byBucket } = buildOverviewBuckets(d);
+  const profitWord = planProfitLine(order, byBucket).label.toLowerCase();
   return `
     <section class="admin-dash-row">
       <div class="admin-dash-row__label admin-dash-row__label--cyan">Performance <small>${esc(rangeLabel())}</small></div>
       <div class="admin-dash">
         <div class="admin-dash__cell--12 admin-card">
-          <div class="admin-card__title"><span>Performance overview <small>revenue · ${esc(profitWord)} · expenses · orders — real values, not normalized</small></span></div>
+          <div class="admin-card__title"><span>Performance overview <small>revenue · ${esc(profitWord)} · costs · orders — real values, not normalized</small></span></div>
           <div class="admin-chart-box admin-chart-box--tall"><canvas id="dash-c-overview"></canvas></div>
+          <div id="dash-overview-notes"></div>
         </div>
       </div>
     </section>
@@ -1335,6 +1441,84 @@ function fmtPct(v) {
 }
 
 /**
+ * Decide what the Performance chart's profit line actually plots, and say so honestly.
+ *
+ * The backend ships a real per-bucket `net_profit_series` (rows carry `net_profit`,
+ * `stripe_fees` and `operating_expenses`), and since migration 118 it reconciles to
+ * `kpi-summary.net_profit` by construction — verified live 2026-07-20 across four windows,
+ * residual ≤ 2c over 30 buckets. So we plot the backend's number directly.
+ *
+ * We used to PRORATE two whole-range scalars across buckets to force the line onto the KPI
+ * tile (ERR-106's `buildReconciledNetSeries`). That is gone: it manufactured per-bucket
+ * figures the backend never published. When the backend can't say what net was in a bucket,
+ * the honest answer is to plot gross profit and CALL IT gross profit — never to invent net.
+ *
+ * @param order    string[]  bucket keys, chronological
+ * @param byBucket Map       bucket key -> { revenue, grossProfit, netProfit, fees, opex, orders }
+ * @returns {{ values:(number|null)[], label:string, basis:string, knownCount:number,
+ *            nullCount:number, seriesTotal:number|null, complete:boolean }}
+ *   `basis` is 'net-series' or 'gross-fallback'. Callers MUST read `label`/`basis` rather
+ *   than assuming "net" — that assumption is what let the card subtitle and the chart legend
+ *   drift apart. Nulls stay null (a gap, never a confident 0 — ERR-028).
+ */
+function planProfitLine(order, byBucket) {
+  const gross = order.map(b => numOrNull(byBucket.get(b)?.grossProfit));
+  const net   = order.map(b => numOrNull(byBucket.get(b)?.netProfit));
+  const netKnown = net.filter(v => v != null).length;
+
+  // No usable net anywhere → plot gross and label it gross. An all-null net series is NOT
+  // a run of $0 net; it means the backend didn't answer, so we must not answer for it.
+  const useNet = netKnown > 0;
+  const values = useNet ? net : gross;
+
+  let knownCount = 0, total = 0;
+  for (const v of values) if (v != null) { knownCount++; total += v; }
+  const nullCount = values.length - knownCount;
+
+  return {
+    values,
+    label: useNet ? 'Net profit' : 'Gross profit',
+    basis: useNet ? 'net-series' : 'gross-fallback',
+    knownCount,
+    nullCount,
+    seriesTotal: knownCount ? total : null,
+    complete: knownCount > 0 && nullCount === 0,
+  };
+}
+
+/**
+ * Guard: the per-bucket profit series and the headline KPI tile must agree.
+ *
+ * Both figures are now the BACKEND'S — the frontend reconstructs nothing — so a trip here
+ * means the backend disagrees with itself, not that the chart is wrong. The caller surfaces
+ * that on the card, because the last time this broke the console warning fired and nobody
+ * saw it (ERR-074 → ERR-106 → this).
+ *
+ * Tolerance scales with bucket count. `Σ series` sums per-bucket-rounded values while the
+ * RPC rounds once, so a residual of ~1c per bucket is expected and harmless (measured: 2c
+ * over 30 buckets). A real basis regression is orders of magnitude larger — the original
+ * defect was $1,088 (revenue GST booked as profit) — so 2c/bucket cannot mask one. The 5c
+ * floor stops a single-bucket range from tripping on ordinary float noise.
+ *
+ * @returns null when there is nothing to say, else { seriesTotal, kpiNet, gap, tolerance }.
+ */
+function checkNetDrift(plan, kpiNet, bucketCount) {
+  // A PARTIAL series has nothing to say about backend self-consistency: its sum is a subset
+  // of the range the KPI covers, so any comparison is meaningless. The old guard summed
+  // nulls as 0 against a full-range KPI and false-alarmed on every gapped series.
+  if (!plan || !plan.complete || plan.basis !== 'net-series') return null;
+  if (kpiNet == null || !Number.isFinite(kpiNet)) return null;
+  const seriesTotal = plan.seriesTotal;
+  if (seriesTotal == null || !Number.isFinite(seriesTotal)) return null;
+
+  const n = Number.isFinite(bucketCount) && bucketCount > 0 ? bucketCount : 1;
+  const tolerance = Math.max(0.05, 0.02 * n);
+  const gap = seriesTotal - kpiNet;
+  if (Math.abs(gap) <= tolerance) return null;
+  return { seriesTotal, kpiNet, gap, tolerance };
+}
+
+/**
  * Rebuild Gross/Net Profit from the backend's own per-bucket series when kpi-summary
  * drops them.
  *
@@ -1363,27 +1547,67 @@ function fmtPct(v) {
  *     in the range, and then "—" is the honest answer. ERR-028 stands.
  *   • stripe_fees / operating_expenses are themselves known, or `net` stays null on its own
  *
- * Self-disabling: skipped entirely the moment kpi-summary returns a real gross_profit, so
- * the backend fix retires this with no coordination and no second deploy.
+ * Self-disabling: each half is skipped the moment kpi-summary returns that figure, so a
+ * healthy backend retires this with no coordination and no second deploy. As of 2026-07-20
+ * the live payload carries both, so this returns null and nothing below runs — it is pure
+ * insurance. Kept rather than deleted because this exact endpoint has already regressed
+ * once (see readfirst/backend-open-items-jul2026.md §1).
+ *
+ * Provenance is reported PER FIGURE (`grossRebuilt` / `netRebuilt`). A single flag used to
+ * stamp "Rebuilt…" on both tiles whenever either was rebuilt, mislabelling a real backend
+ * number as reconstructed.
  */
-function recoverProfitFromSeries(cur, grossProfitSeries) {
-  if (!cur || cur.gross_profit != null) return null;
+function recoverProfitFromSeries(cur, grossProfitSeries, netProfitSeries) {
+  if (!cur) return null;
 
-  const rows = resolveList(grossProfitSeries, ['series', 'data']);
-  if (!Array.isArray(rows) || rows.length === 0) return null;
+  // Sum a per-bucket series, but only if EVERY bucket is known. One unknown bucket means
+  // the range total is unknown, and "—" is the honest answer (ERR-028).
+  const sumComplete = (series, key) => {
+    const rows = resolveList(series, ['series', 'data']);
+    if (!Array.isArray(rows) || rows.length === 0) return null;
+    let total = 0;
+    for (const r of rows) {
+      const v = numOrNull(r[key]);
+      if (v == null) return null;   // unknown bucket → unknown range. Don't guess.
+      total += v;
+    }
+    return total;
+  };
 
-  let gross = 0;
-  for (const r of rows) {
-    const v = numOrNull(r.gross_profit);
-    if (v == null) return null;   // unknown bucket → unknown range. Don't guess.
-    gross += v;
+  // ── Gross half ── fires only when kpi-summary dropped its own figure.
+  const grossRebuilt = cur.gross_profit == null;
+  const gross = grossRebuilt ? sumComplete(grossProfitSeries, 'gross_profit') : numOrNull(cur.gross_profit);
+
+  // ── Net half ── gated INDEPENDENTLY of gross. Previously the whole function bailed when
+  // gross_profit was present, so a real gross alongside a null net left the Net tile blank
+  // even with a complete net_profit_series sitting in the same bundle.
+  const netRebuilt = cur.net_profit == null;
+  let net = netRebuilt ? null : numOrNull(cur.net_profit);
+  if (netRebuilt) {
+    const fees = numOrNull(cur.stripe_fees);
+    const opex = numOrNull(cur.operating_expenses);
+    // PRIMARY: kpi-summary's own formula off its own range-exact scalars. Deliberately
+    // preferred over summing the series — `Σ series` carries per-bucket rounding (~1c per
+    // bucket), while these scalars are rounded once for the whole range.
+    if (gross != null && fees != null && opex != null) {
+      net = gross - fees - opex;
+    } else {
+      // FALLBACK: the backend's per-bucket net. Costs a few cents of rounding, but it is a
+      // real published figure and beats leaving the tile blank.
+      net = sumComplete(netProfitSeries, 'net_profit');
+    }
   }
 
-  const fees = numOrNull(cur.stripe_fees);
-  const opex = numOrNull(cur.operating_expenses);
-  const net  = (fees != null && opex != null) ? gross - fees - opex : null;
+  // Nothing rebuilt and nothing recovered → behave exactly as if this function didn't exist.
+  if (!grossRebuilt && !netRebuilt) return null;
+  if (gross == null && net == null) return null;
 
-  return { gross, net };
+  return {
+    gross,
+    net,
+    grossRebuilt: grossRebuilt && gross != null,
+    netRebuilt:   netRebuilt   && net   != null,
+  };
 }
 
 function renderKpiStrip(d) {
@@ -1411,16 +1635,28 @@ function renderKpiStrip(d) {
   // rebuild both figures from the backend's own weekly gross-profit series. Null → the tiles
   // stay "—", exactly as before. There is no previous-period series, so `prev` is left alone
   // and the delta badges simply don't render — honest, rather than a delta against a guess.
-  const recovered  = recoverProfitFromSeries(cur, d.sGrossProfit);
+  const recovered  = recoverProfitFromSeries(cur, d.sGrossProfit, d.sNetProfit);
   const grossProfit = cur.gross_profit ?? recovered?.gross ?? null;
   const netProfit   = cur.net_profit   ?? recovered?.net   ?? null;
 
-  // Backend kpi-summary omits gross_margin/net_margin → derive from profit ÷ revenue (matches
-  // how the headline tiles read). Uses each profit's own revenue base; null when revenue is 0.
-  const marginOf = (profit, revenue) =>
-    profit != null && revenue ? (profit / revenue) * 100 : null;
-  const grossMarginPct     = cur.gross_margin  != null ? Number(cur.gross_margin)  : marginOf(grossProfit, cur.revenue);
-  const grossMarginPctPrev = prev.gross_margin != null ? Number(prev.gross_margin) : marginOf(prev.gross_profit, prev.revenue);
+  // Backend kpi-summary omits gross_margin/net_margin → derive it. The base MUST be ex-GST
+  // revenue: profit is measured net of GST (migration 118), so dividing it by GST-inclusive
+  // revenue understates every margin by ~13%. Live 2026-07-20 that read 19.1% where the
+  // backend's own margin_proxy said 21.9% (1591.20 / 7254.04). Prefer the backend's figure
+  // when it ships one, exactly as we do for every other number on this page.
+  const exGst = (revenue) => (revenue != null && Number.isFinite(Number(revenue)))
+    ? Number(revenue) * (20 / 23)
+    : null;
+  const marginOf = (profit, revenue) => {
+    const base = exGst(revenue);
+    return (profit != null && base) ? (profit / base) * 100 : null;
+  };
+  const grossMarginPct     = cur.gross_margin  != null ? Number(cur.gross_margin)
+                           : cur.margin_proxy  != null ? Number(cur.margin_proxy)
+                           : marginOf(grossProfit, cur.revenue);
+  const grossMarginPctPrev = prev.gross_margin != null ? Number(prev.gross_margin)
+                           : prev.margin_proxy != null ? Number(prev.margin_proxy)
+                           : marginOf(prev.gross_profit, prev.revenue);
   const netMarginPct       = cur.net_margin    != null ? Number(cur.net_margin)    : marginOf(netProfit, cur.revenue);
   const netMarginPctPrev   = prev.net_margin   != null ? Number(prev.net_margin)   : marginOf(prev.net_profit, prev.revenue);
 
@@ -1429,8 +1665,11 @@ function renderKpiStrip(d) {
   const COGS_UNKNOWN = ' Shows "—" when any sale in the range has no cost of goods recorded — see "Sales missing a cost" under Action needed.';
   // …but when we rebuilt the figure, say so on the tile rather than passing it off as the
   // summary endpoint's own number.
-  const REBUILT = ' Rebuilt by summing the backend’s own weekly gross-profit series: kpi-summary is currently dropping this figure for any range containing an invoiced sale (ERR-074).';
-  const profitNote = recovered ? REBUILT : COGS_UNKNOWN;
+  const REBUILT = ' Rebuilt from the backend’s own per-period series because kpi-summary dropped this figure for the selected range (ERR-074).';
+  // Provenance PER FIGURE. One shared flag used to stamp "Rebuilt…" on both tiles whenever
+  // either was rebuilt — claiming a real backend number was reconstructed.
+  const grossNote = recovered?.grossRebuilt ? REBUILT : COGS_UNKNOWN;
+  const netNote   = recovered?.netRebuilt   ? REBUILT : COGS_UNKNOWN;
 
   const tiles = [
     { label: 'Revenue', value: cur.revenue != null ? formatPrice(cur.revenue) : null, raw: cur.revenue, prev: prev.revenue,
@@ -1438,21 +1677,23 @@ function renderKpiStrip(d) {
     {
       label: 'Gross Profit', value: grossProfit != null ? formatPrice(grossProfit) : null,
       raw: grossProfit, prev: prev.gross_profit, stackNext: true,
-      tooltip: `Revenue (ex-GST) − COGS, computed by the backend.${profitNote}`,
+      tooltip: `Revenue (ex-GST) − cost of goods (ex-GST), computed by the backend.${grossNote}`,
     },
     {
       label: 'Gross Margin', value: fmtPct(grossMarginPct), raw: grossMarginPct, prev: grossMarginPctPrev,
-      tooltip: 'Gross profit ÷ revenue. Profit quality, not size.',
+      tooltip: 'Gross profit ÷ revenue, both ex-GST. Profit quality, not size.',
     },
     {
       label: 'Net Profit', value: netProfit != null ? formatPrice(netProfit) : null,
       raw: netProfit, prev: prev.net_profit, alert: netProfit != null && netProfit < 0, stackNext: true,
-      tooltip: `Revenue − COGS − fees − GST − Opex, computed by the backend. Invoiced sales carry no card fee (bank transfer).${profitNote}`,
+      // No separate "− GST" term: since migration 118 every figure below revenue is ex-GST,
+      // so GST is already outside this calculation rather than a line item inside it.
+      tooltip: `Gross profit − Stripe fees − operating expenses, all ex-GST, computed by the backend. Invoiced sales carry no card fee (bank transfer).${netNote}`,
     },
     {
       label: 'Net Margin', value: fmtPct(netMarginPct), raw: netMarginPct, prev: netMarginPctPrev,
       alert: netMarginPct != null && netMarginPct < 0,
-      tooltip: 'Net profit ÷ revenue. What you actually keep.',
+      tooltip: 'Net profit ÷ revenue, both ex-GST. What you actually keep.',
     },
     { label: 'Orders', value: cur.orders != null ? String(cur.orders) : null, raw: cur.orders, prev: prev.orders,
       tooltip: 'Paid orders placed in the selected range. Includes invoiced sales.' },

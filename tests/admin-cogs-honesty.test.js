@@ -87,12 +87,27 @@ test('no chart mapper coerces a value with `|| 0` any more', () => {
     assert.ok(!/byBucket\.get\(b\)\?\.\w+\s*\|\|\s*0/.test(body),
       `${fn}() still has a byBucket…|| 0 — an absent bucket must be a gap, not a $0 point.`);
   }
-  // drawPerformanceOverview's ?? chain specifically: net → gross → UNKNOWN, not 0.
+  // The profit line now plots the BACKEND's own net_profit_series directly — since migration
+  // 118 it reconciles to kpi-summary by construction, so the ERR-106 proration
+  // (buildReconciledNetSeries) is gone. What must NOT change is the null honesty: the
+  // planner reads each bucket through numOrNull, so an unknown bucket stays a null gap and
+  // never becomes a fabricated 0 (ERR-028 stands under the new source too).
+  const plan = functionBody(dashboardSrc, 'planProfitLine');
+  assert.ok(/numOrNull\(byBucket\.get\(b\)\?\.netProfit\)/.test(plan),
+    'the profit line must read net_profit through numOrNull (null bucket → null gap)');
+  assert.ok(/numOrNull\(byBucket\.get\(b\)\?\.grossProfit\)/.test(plan),
+    'the gross fallback must be the null-honest gross read');
+  assert.ok(!/\|\|\s*0/.test(plan),
+    'planProfitLine must never coerce an unknown bucket to 0');
+  // Declaration + call sites only; the docblock may still NAME it when explaining the removal.
+  assert.ok(!/function\s+buildReconciledNetSeries|buildReconciledNetSeries\s*\(/.test(dashboardSrc),
+    'the ERR-106 proration must be gone — it manufactured per-bucket figures the backend never published');
+
+  // The total-costs line must gap when ANY component is unknown, rather than quietly
+  // reporting a partial sum as though it were the whole cost.
   const perf = functionBody(dashboardSrc, 'drawPerformanceOverview');
-  assert.ok(!/Number\(r\.net_profit \?\? r\.gross_profit \?\? 0\)/.test(perf),
-    'the net→gross fallback must end in null, not 0: when BOTH are null the COGS is unknown.');
-  assert.ok(/numOrNull\(r\.net_profit\)\s*\?\?\s*numOrNull\(r\.gross_profit\)/.test(perf),
-    'expected: numOrNull(net) ?? numOrNull(gross) — no trailing 0');
+  assert.ok(/parts\.some\(v => v == null\)\s*\)\s*return null/.test(perf),
+    'Total costs must be null when any of COGS / opex / fees is unknown');
 });
 
 test('a cumulative running total does not silently step over an unknown bucket', () => {

@@ -64,8 +64,25 @@ test('cart.js: summary renders loyalty_discount_amount without double-counting s
     const src = JS('cart.js');
     assert.match(src, /loyalty_discount_amount/, 'summary must read loyalty_discount_amount');
     assert.match(src, /cart-loyalty-row/, 'must target the cart loyalty summary row');
+
     // "You Save" must net out the loyalty portion so it isn't shown twice.
-    assert.match(src, /discount\s*-\s*loyaltyDiscount/, 'other savings must subtract the loyalty discount');
+    //
+    // ERR-110 (Jul 2026): this netting used to be inlined in
+    // _updateCartSummaryDOM as `discount - loyaltyDiscount`. It now lives in the
+    // shared pure helper computeDiscountBreakdown(), which BOTH cart renderers
+    // and the checkout/payment/confirmation summaries call — the inline version
+    // existed in only one of cart.js's two renderers, so on a fresh cart load
+    // the loyalty row stayed hidden until the shopper changed a quantity.
+    // The behaviour is pinned here and exercised for real (loyalty + B2B
+    // together, clamped at zero) in tests/business-account-pricing-jul2026.test.js.
+    assert.match(src, /aggregate\s*-\s*loyalty\s*-\s*b2b/,
+        'the shared breakdown must subtract the loyalty (and B2B) portions from "other"');
+    assert.match(src, /function computeDiscountBreakdown\(/,
+        'the netting must live in one shared helper, not be re-inlined per renderer');
+
+    const calls = src.match(/this\._renderDiscountRows\(/g) || [];
+    assert.equal(calls.length, 2,
+        'both cart summary renderers must go through the shared discount-row renderer');
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

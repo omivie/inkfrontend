@@ -37,6 +37,7 @@
     { "source": "account/orders", "destination": "/html/account/orders.html" },
     { "source": "account/personal-details", "destination": "/html/account/personal-details.html" },
     { "source": "account/printers", "destination": "/html/account/printers.html" },
+    { "source": "account/reviews", "destination": "/html/account/reviews.html" },
     { "source": "account/reset-password", "destination": "/html/account/reset-password.html" },
     { "source": "account/settings", "destination": "/html/account/settings.html" },
     { "source": "account/track-order", "destination": "/html/account/track-order.html" },
