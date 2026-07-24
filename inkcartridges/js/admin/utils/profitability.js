@@ -15,6 +15,13 @@
  *   - Fee base for an order is the FULL customer-paid amount (incl. shipping
  *     + GST) because Stripe charges on what hit the card. When the caller
  *     doesn't have the exact charge, fall back to (revenue + shipping) × 1.15.
+ *   - Absorbed courier (free-shipping orders): when the customer paid $0
+ *     shipping but we still paid the courier, that cost IS ours and reduces
+ *     take-home. Pass opts.absorbedShipping (the backend's owner-only
+ *     order.shipping_absorbed object). It is a GST-inclusive cost handled
+ *     exactly like the supplier/Stripe lines — deducted ex-GST from profit,
+ *     its GST reclaimed at the IRD line. Absent / { applies:false } ⇒ $0, so
+ *     aggregates and card/invoice paths that don't pass it are unchanged.
  *
  *   priceExGst    = retail_price / (1 + gstRate)        // retail_price stored incl-GST
  *   stripeFee     = retail_price * STRIPE_RATE          // per-unit; $0.30 fixed is per-order
@@ -36,6 +43,35 @@ const MISSING = '—';
  * more than an identical website order, which is the truth, not a bug.
  */
 export const NO_PAYMENT_FEES = { stripeRate: 0, stripeFixed: 0 };
+
+/**
+ * Parse opts.absorbedShipping (the backend's owner-only order.shipping_absorbed)
+ * into the courier cost's three GST parts, or all-zero when it doesn't apply.
+ *
+ * Contract (see order-profit-absorbed-shipping hand-off):
+ *   - Anchor on amount_incl_gst — the actual zone/weight courier rate, and what
+ *     the on-screen "Courier absorbed" row displays.
+ *   - gst is the reclaimable input credit (gst_component). Courier fees are
+ *     GST-inclusive, so when the backend omits it we derive incl × 3/23
+ *     (= incl × 0.15/1.15), the GST embedded in a GST-inclusive amount.
+ *   - exGst is derived as incl − gst (NOT read from amount_ex_gst) so the cash
+ *     waterfall foots exactly regardless of backend rounding; it equals the
+ *     provided amount_ex_gst in practice (12.00 − 1.57 = 10.43).
+ *
+ * Fail-soft & LOUD-by-absence: applies!==true, or a non-finite / non-positive
+ * amount_incl_gst, yields { exGst:0, gst:0, inclGst:0 } — a missing field never
+ * invents a cost, and a present one is never silently dropped.
+ */
+function absorbedShippingParts(opts, gstRate = GST_RATE) {
+  const a = (opts && typeof opts === 'object') ? opts.absorbedShipping : null;
+  if (!a || typeof a !== 'object' || a.applies !== true) return { exGst: 0, gst: 0, inclGst: 0 };
+  const inclGst = Number(a.amount_incl_gst);
+  if (!Number.isFinite(inclGst) || inclGst <= 0) return { exGst: 0, gst: 0, inclGst: 0 };
+  let gst = Number(a.gst_component);
+  if (!Number.isFinite(gst) || gst < 0) gst = inclGst * (gstRate / (1 + gstRate)); // GST inside a GST-incl amount
+  const exGst = inclGst - gst;
+  return { exGst, gst, inclGst };
+}
 
 export function computeProfitability(row, gstRate = GST_RATE) {
   const retail = Number(row?.retail_price);
@@ -65,6 +101,9 @@ export function computeProfitability(row, gstRate = GST_RATE) {
  *   opts.stripeRate / opts.stripeFixed — override the processor fee. Spread
  *                         NO_PAYMENT_FEES for a bank-transfer sale (invoiced /
  *                         phone order): no card, so no fee.
+ *   opts.absorbedShipping — backend order.shipping_absorbed. When it applies,
+ *                         the absorbed courier cost (ex-GST) is subtracted too.
+ *                         Absent ⇒ $0, so aggregate/invoice callers are unchanged.
  *
  * Stripe fee is feeBase × stripeRate + stripeFixed, deducted ex-GST.
  */
@@ -82,16 +121,19 @@ export function computeOrderProfit(revenueExGst, totalCostExGst, opts = {}) {
     ? paid
     : (rev + (Number.isFinite(ship) ? ship : 0)) * (1 + gstRate);
   const stripeFee = feeBase * stripeRate + stripeFixed;
-  return rev - costExGst - stripeFee;
+  const absorbedExGst = absorbedShippingParts(opts, gstRate).exGst; // $0 unless free-ship courier absorbed
+  return rev - costExGst - stripeFee - absorbedExGst;
 }
 
 /**
  * Per-line net profit for an order's items.
  *
- * The order's Stripe fee includes a fixed $0.30 that can't be attributed to any
- * single line, so we derive the whole order fee (= revenue − cost − orderProfit)
- * and allocate it across lines proportionally to ex-GST line revenue. This
- * guarantees Σ lineProfits === computeOrderProfit(...) exactly.
+ * The order carries order-level costs that can't be attributed to a single line
+ * — the fixed $0.30 Stripe fee and any absorbed courier cost — so we derive the
+ * whole order-level deduction (= revenue − cost − orderProfit) and allocate it
+ * across lines proportionally to ex-GST line revenue. This guarantees
+ * Σ lineProfits === computeOrderProfit(...) exactly, so the per-line Profit
+ * column and its foot always agree with the Profit Breakdown take-home.
  *
  *   lines: [{ revenueExGst, costExGst }]  — costExGst null/NaN ⇒ that line's
  *          profit is null (cost unknown) but its revenue still counts toward
@@ -110,7 +152,9 @@ export function computeLineProfits(lines, opts = {}) {
     if (Number.isFinite(cost)) totalCost += cost;
   }
   const totalProfit = computeOrderProfit(totalRevenue, totalCost, opts);
-  const orderStripeFee = (totalProfit != null && totalRevenue > 0)
+  // Whole-order deduction not attributable to a line: Stripe fee (incl. the
+  // fixed $0.30) + absorbed courier cost. Allocated by revenue share below.
+  const orderLevelFee = (totalProfit != null && totalRevenue > 0)
     ? totalRevenue - totalCost - totalProfit
     : null;
   const lineProfits = rows.map((l) => {
@@ -120,7 +164,7 @@ export function computeLineProfits(lines, opts = {}) {
     if (!Number.isFinite(rev) || !Number.isFinite(cost) || totalProfit == null || totalRevenue <= 0) {
       return null;
     }
-    const feeShare = (orderStripeFee ?? 0) * (rev / totalRevenue);
+    const feeShare = (orderLevelFee ?? 0) * (rev / totalRevenue);
     return rev - cost - feeShare;
   });
   return { lineProfits, totalProfit, totalRevenue, totalCost };
@@ -133,10 +177,15 @@ export function computeLineProfits(lines, opts = {}) {
  * bank), so the GST you genuinely pay your supplier and Stripe is visible.
  *
  *   customerPaidInclGst
- *     − supplierCostInclGst   (cost ex-GST + the GST you pay the supplier)
- *     − stripeFeeInclGst      (Stripe fee + the GST Stripe charges on it)
- *     − gstRemittedToIrd      (GST collected − GST already paid out as credits)
- *   = netProfit               (identical to computeOrderProfit — GST nets to 0)
+ *     − supplierCostInclGst      (cost ex-GST + the GST you pay the supplier)
+ *     − stripeFeeInclGst         (Stripe fee + the GST Stripe charges on it)
+ *     − absorbedShippingInclGst  (free-ship courier we absorbed, if any; incl-GST)
+ *     − gstRemittedToIrd         (GST collected − GST already paid out as credits)
+ *   = netProfit                  (identical to computeOrderProfit — GST nets to 0)
+ *
+ * The absorbed-courier line is handled exactly like the supplier/Stripe lines:
+ * shown incl-GST, its GST reclaimed inside gstRemittedToIrd. Present only when
+ * opts.absorbedShipping applies; otherwise all absorbedShipping* fields are 0.
  *
  * gstRemittedToIrd is both the residual that makes the waterfall foot AND the
  * true GST return figure (output tax − input tax credits) — the two are
@@ -168,12 +217,21 @@ export function computeProfitBreakdown(revenueExGst, totalCostExGst, opts = {}) 
   // Supplier — paid the cost plus the GST on it.
   const supplierCostGst = costExGst * gstRate;
   const supplierCostInclGst = costExGst + supplierCostGst;
+  // Absorbed courier — a free-shipping order where the customer paid $0 shipping
+  // but we still paid the courier. GST-inclusive cost, its GST reclaimable, so
+  // it behaves exactly like the supplier/Stripe lines. $0 unless it applies.
+  const absorbed = absorbedShippingParts(opts, gstRate);
+  const absorbedShippingInclGst = absorbed.inclGst;
+  const absorbedShippingGst = absorbed.gst;
+  const absorbedShippingExGst = absorbed.exGst;
+  const a = (opts && typeof opts === 'object') ? opts.absorbedShipping : null;
+  const absorbedShippingApplies = absorbedShippingInclGst > 0;
   // Take-home is GST-neutral (the GST you pay is reclaimed) — same as computeOrderProfit.
-  const netProfit = rev - costExGst - stripeFeeExGst;
+  const netProfit = rev - costExGst - stripeFeeExGst - absorbedShippingExGst;
   // GST collected from the customer, and what's left to remit to IRD after
-  // crediting the GST already paid to supplier + Stripe.
+  // crediting the GST already paid to supplier + Stripe + absorbed courier.
   const gstCollected = customerPaid - rev;
-  const gstRemittedToIrd = gstCollected - supplierCostGst - stripeFeeGst;
+  const gstRemittedToIrd = gstCollected - supplierCostGst - stripeFeeGst - absorbedShippingGst;
   const netMarginPct = (netProfit / rev) * 100;
   return {
     customerPaidInclGst: customerPaid,
@@ -187,6 +245,12 @@ export function computeProfitBreakdown(revenueExGst, totalCostExGst, opts = {}) 
     stripeFeeExGst,
     stripeFeeGst,
     stripeFeeInclGst,
+    absorbedShippingApplies,
+    absorbedShippingInclGst,
+    absorbedShippingGst,
+    absorbedShippingExGst,
+    absorbedShippingZone: absorbedShippingApplies && a ? (a.zone ?? null) : null,
+    absorbedShippingDeliveryType: absorbedShippingApplies && a ? (a.delivery_type ?? null) : null,
     gstRemittedToIrd,
     netProfit,
     netMarginPct,

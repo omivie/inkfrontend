@@ -36,6 +36,49 @@ function channelBadge(o) {
     : `<span class="admin-badge admin-badge--web" title="Placed through the website checkout.">Website</span>`;
 }
 
+/**
+ * Turn a backend shipping-zone slug ("north-island") into a display label
+ * ("North Island") for the absorbed-courier tooltip. Blank/absent → '' so the
+ * caller drops the "for {zone}" clause entirely rather than printing junk.
+ */
+function titleCaseZone(zone) {
+  if (!zone || typeof zone !== 'string') return '';
+  return zone.trim().split(/[-_\s]+/).filter(Boolean)
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(' ');
+}
+
+/**
+ * How a line item's pack was produced. The backend resolves this from `pack_type`
+ * plus a pre-boxed-vs-assembled sourcing flag and sends the already-decided value \u2014
+ * the frontend never computes it. Absent/unknown renders a LOUD em-dash, never a
+ * silent "single" default (see the "fail-soft must be loud" convention).
+ */
+function originBadge(origin) {
+  const map = {
+    in_house_pack: ['in-house', 'Assembled', 'Assembled in-house from multiple single products.'],
+    supplier_pack: ['supplier-pack', 'Pre-boxed', 'Bought pre-boxed as a single pack from one supplier.'],
+    single: ['single', 'Single', 'A single product (not a pack).'],
+  };
+  const m = map[origin];
+  if (!m) return `<span class="admin-text-muted">${MISSING}</span>`;
+  return `<span class="admin-badge admin-badge--${m[0]}" title="${Security.escapeAttr(m[2])}">${esc(m[1])}</span>`;
+}
+
+/**
+ * Supplier(s) a line item was sourced from. For an in-house pack the backend sends one
+ * `suppliers[]` entry per constituent single; we show the DISTINCT supplier names and
+ * map each constituent -> supplier in the hover tooltip. Absent/empty renders MISSING
+ * (loud fail-soft) so an existing order never looks silently "supplier-less".
+ */
+function supplierCell(item) {
+  const list = Array.isArray(item.suppliers) ? item.suppliers.filter((s) => s && s.name) : [];
+  if (!list.length) return `<span class="admin-text-muted">${MISSING}</span>`;
+  const distinct = [...new Set(list.map((s) => s.name))];
+  const tip = list.map((s) => `${s.color || s.sku || '?'} \u2192 ${s.name}`).join('\n');
+  return `<span title="${Security.escapeAttr(tip)}">${distinct.map(esc).join(', ')}</span>`;
+}
+
 let _container = null;
 let _table = null;
 let _page = 1;
@@ -295,15 +338,20 @@ async function openOrderModal(order) {
   if (_activeModal !== modal) return; // closed during fetch
 
   const o = fullOrder || order;
+  // getOrder returned null (fetch failed / backend hiccup) — we fell back to the
+  // thinner list row. Flag it so the items section can be LOUD about the degraded
+  // load rather than rendering a clean-looking empty state (fail-soft must be loud).
+  const detailLoadFailed = !fullOrder;
+  if (detailLoadFailed) Toast.error('Order detail failed to load — showing summary only');
 
   // Update header title (actions + badge will be set by buildOrderModalContent)
   modal.querySelector('.admin-product-modal__title').textContent = o.order_number || o.id?.slice(0, 8) || 'Order';
 
   // Build single-page content
-  buildOrderModalContent(modal, o, events || [], breakdown);
+  buildOrderModalContent(modal, o, events || [], breakdown, { detailLoadFailed });
 }
 
-function buildOrderModalContent(modal, o, events, breakdown) {
+function buildOrderModalContent(modal, o, events, breakdown, { detailLoadFailed = false } = {}) {
   const showCost = AdminAuth.isOwner();
   const omRow = (label, value) =>
     `<div class="om-meta-row"><span>${label}</span><span>${value}</span></div>`;
@@ -361,8 +409,8 @@ function buildOrderModalContent(modal, o, events, breakdown) {
   let orderProfitBreakdown = null;  // populated below; consumed by the Profit Breakdown section
   let profitFootTip = '';           // fee wording differs for an invoiced (bank-transfer) sale
   if (o.items?.length) {
-    itemsHtml += `<table class="admin-order-items"><thead><tr>`;
-    itemsHtml += `<th>Product</th><th>SKU</th><th>Qty</th><th>Price <span class="admin-text-muted" style="font-weight:400">(excl. GST)</span></th>`;
+    itemsHtml += `<div class="admin-order-items-scroll"><table class="admin-order-items"><thead><tr>`;
+    itemsHtml += `<th>Product</th><th>SKU</th><th>Qty</th><th>Supplier</th><th>Origin</th><th>Price <span class="admin-text-muted" style="font-weight:400">(excl. GST)</span></th>`;
     if (showCost) itemsHtml += `<th>Cost <span class="admin-text-muted" style="font-weight:400">(excl. GST)</span></th><th>Profit <span class="admin-text-muted" style="font-weight:400">(net)</span></th>`;
     itemsHtml += `</tr></thead><tbody>`;
     let totalPrice = 0, totalCost = 0;
@@ -387,12 +435,17 @@ function buildOrderModalContent(modal, o, events, breakdown) {
       itemRows.push({ item, itemPrice, qty, lineRevenue, hasCost, itemHref });
     }
     const customerPaidInclGst = breakdown?.total_incl_gst ?? o.total_amount ?? o.total ?? null;
+    // Absorbed courier on a free-shipping order (owner-only backend field). When it
+    // applies, this order-level cost is subtracted from both the per-line Profit
+    // column and the Profit Breakdown take-home, so every figure agrees. Absent /
+    // { applies:false } / non-owner ⇒ no effect.
+    const absorbedShipping = o.shipping_absorbed || null;
     // An invoiced sale is settled by bank transfer — there is no card processor, so
     // NO fee. Charging it Stripe's 2.65% + $0.30 (the website default) understates
     // its profit and invents a payment it never made.
     const feeOpts = isInvoiceOrder(o)
-      ? { customerPaidInclGst, ...NO_PAYMENT_FEES }
-      : { customerPaidInclGst };
+      ? { customerPaidInclGst, absorbedShipping, ...NO_PAYMENT_FEES }
+      : { customerPaidInclGst, absorbedShipping };
     // Per-line net profit — the order's payment fee (incl. the fixed $0.30, where one
     // applies) is allocated across lines by revenue share, so the line column sums to
     // the foot total exactly.
@@ -410,6 +463,11 @@ function buildOrderModalContent(modal, o, events, breakdown) {
     profitFootTip = isInvoiceOrder(o)
       ? 'Net profit (GST-neutral): ex-GST revenue minus ex-GST supplier cost. This is an invoiced sale paid by bank transfer, so there is no card fee. GST is a pass-through — see the Profit Breakdown section.'
       : 'Net profit (GST-neutral): ex-GST revenue minus ex-GST supplier cost minus Stripe fee (2.65% + $0.30) on the full charged amount. GST is a pass-through — see the Profit Breakdown section.';
+    // Free-shipping order where we absorbed the courier: that cost is allocated
+    // across the lines (by revenue share) too, so say so in the foot tooltip.
+    if (absorbedShipping && absorbedShipping.applies === true && Number(absorbedShipping.amount_incl_gst) > 0) {
+      profitFootTip += ' Absorbed courier cost (free shipping) is subtracted — see the Profit Breakdown.';
+    }
     itemRows.forEach(({ item, itemPrice, hasCost, itemHref }, idx) => {
       const profitCell = showCost
         ? `<td class="mono" style="color:var(--success-text,#15803d)">${lineProfits[idx] != null ? formatPrice(lineProfits[idx]) : MISSING}</td>`
@@ -418,17 +476,32 @@ function buildOrderModalContent(modal, o, events, breakdown) {
         <td class="cell-truncate">${item.sku && itemHref ? `<a href="${esc(itemHref)}" target="_blank" style="color:var(--text);text-decoration:underline;text-decoration-color:var(--border);text-underline-offset:2px">${esc(item.product_name || item.name || item.description || MISSING)}</a>` : esc(item.product_name || item.name || item.description || MISSING)}</td>
         <td class="mono">${esc(item.sku || MISSING)}</td>
         <td>${item.qty ?? item.quantity ?? MISSING}</td>
+        <td class="admin-order-items__supplier">${supplierCell(item)}</td>
+        <td>${originBadge(item.origin)}</td>
         <td class="mono">${itemPrice != null ? formatPrice(itemPrice) : MISSING}</td>
         ${showCost ? `<td class="mono">${item.supplier_cost_snapshot != null ? formatPrice(item.supplier_cost_snapshot) : MISSING}</td>${profitCell}` : ''}
       </tr>`;
     });
     itemsHtml += `</tbody><tfoot><tr class="admin-order-items__total">
-      <td colspan="3"></td>
+      <td colspan="5"></td>
       <td class="mono"><strong>${formatPrice(totalPrice)}</strong></td>
       ${showCost ? `<td class="mono"><strong>${formatPrice(totalCost)}</strong></td><td class="mono" style="color:var(--success-text,#15803d)" title="${esc(profitFootTip)}"><strong>${profit != null ? formatPrice(profit) : MISSING}</strong></td>` : ''}
-    </tr></tfoot></table>`;
+    </tr></tfoot></table></div>`;
   } else {
-    itemsHtml += `<p class="admin-text-muted">${MISSING} No items</p>`;
+    // No line items to render. Two very different reasons live here and must NOT look
+    // alike (fail-soft must be LOUD): a genuinely item-less order vs. a detail fetch that
+    // failed or returned empty while the order clearly HAS items. Use the count hints the
+    // API carries on the list/detail row to tell them apart.
+    const expectedCount = o.items_count ?? o.item_count ?? o.order_items?.length ?? null;
+    if (detailLoadFailed || (expectedCount != null && expectedCount > 0)) {
+      const n = expectedCount != null && expectedCount > 0 ? expectedCount : null;
+      itemsHtml += `<div class="admin-empty" style="border:1px solid var(--danger-dim,#fecaca);background:var(--danger-dim,rgba(248,113,113,0.08));border-radius:8px;padding:16px;margin:12px 0">
+        <div class="admin-empty__title" style="color:var(--danger,#dc2626)">Couldn't load this order's line items</div>
+        <div class="admin-empty__text">${n != null ? `This order has ${n} item${n === 1 ? '' : 's'}, but none were returned` : 'The order detail didn’t load fully'} — the detail may have failed to load. Close and reopen the order, or check the backend if it persists.</div>
+      </div>`;
+    } else {
+      itemsHtml += `<p class="admin-text-muted">${MISSING} No items</p>`;
+    }
   }
 
   // Profit Breakdown rows (owner-only) — cash waterfall: the full incl-GST
@@ -452,8 +525,19 @@ function buildOrderModalContent(modal, o, events, breakdown) {
     } else {
       profitBreakdownInner += pbRow(`Paid to Stripe ${muted(`(2.65% + $0.30, incl. ${formatPrice(b.stripeFeeGst)} GST)`)}`, neg(b.stripeFeeInclGst));
     }
+    // Absorbed courier (free-shipping order): a real cost we paid, shown incl-GST
+    // like the lines above; its GST is netted at the IRD line below. Only when it applies.
+    if (b.absorbedShippingApplies) {
+      const zoneLabel = titleCaseZone(b.absorbedShippingZone);
+      const delivery = b.absorbedShippingDeliveryType ? String(b.absorbedShippingDeliveryType) : 'urban';
+      const courierTip = `Actual courier rate${zoneLabel ? ` for ${zoneLabel}` : ''} (${delivery} assumed). Free shipping — the customer paid $0, we absorbed this; its GST (${formatPrice(b.absorbedShippingGst)}) is reclaimed at the IRD line below.`;
+      profitBreakdownInner += pbRow(
+        `<span title="${esc(courierTip)}">Courier absorbed ${muted('(free shipping) ⓘ')}</span>`,
+        neg(b.absorbedShippingInclGst));
+    }
+    const irdCreditSources = b.absorbedShippingApplies ? 'supplier, Stripe and courier' : 'supplier and Stripe';
     profitBreakdownInner += pbRow(
-      `<span title="GST you collected from the customer (${formatPrice(b.gstCollected)}) minus the GST you already paid out to your supplier and Stripe — those are reclaimable, so only the remainder goes to IRD.">GST remitted to IRD ${muted('(after credits) ⓘ')}</span>`,
+      `<span title="GST you collected from the customer (${formatPrice(b.gstCollected)}) minus the GST you already paid out to your ${irdCreditSources} — those are reclaimable, so only the remainder goes to IRD.">GST remitted to IRD ${muted('(after credits) ⓘ')}</span>`,
       neg(b.gstRemittedToIrd));
     profitBreakdownInner += `<div style="border-top:1px solid var(--border,#e5e7eb);margin:8px 0 6px"></div>`;
     profitBreakdownInner += pbRow('<strong>Take-home profit</strong>',

@@ -152,6 +152,22 @@ test('familyKey picks the LAST product code for compatibles that list multiple',
     assert.equal(base, 'B:CANON:BCI6');
 });
 
+test('familyKey collapses HP 804XL Black + Tri-Colour (CLR) onto the same base', () => {
+    // Jul 2026: the 804XL colour cartridge became a proper Tri-Colour single
+    // with SKU suffix CLR. Before CLR was added to the multi-letter colour
+    // strip, "804XLCLR" lost only its trailing "R" → base "804CL", forking the
+    // tri-colour off its "804XLBK" black sibling (base "804"). Both must land
+    // on B:HP:804 so the pair shares a family row / related products.
+    const fk = (name) => ProductSort.familyKey({ name, brand: { name: 'HP' } });
+    const base = fk('HP Genuine 804XLBK Ink Cartridge 804XL Black (600 pages)');
+    assert.equal(base, 'B:HP:804');
+    assert.equal(fk('HP Genuine 804XLCLR Ink Cartridge 804XL Tri-Colour (415 pages)'), base,
+        'genuine tri-colour (804XLCLR) must collapse to 804, not 804CL');
+    assert.equal(fk('804XLCLR Compatible Ink Cartridge for HP 804XL Tri-Colour'), base,
+        'compatible tri-colour (name leads with 804XLCLR) must collapse to 804');
+    assert.equal(fk('804XLBK Compatible Ink Cartridge for HP 804XL Black (600 pages)'), base);
+});
+
 test('familyKey ignores trailing page-count parens for bare-numeric codes (HP)', () => {
     // "HP Genuine 975A Ink Cartridge Black (450 Pages)" must pick 975A,
     // not 450. Bare-numeric pass uses the FIRST match for exactly this reason.

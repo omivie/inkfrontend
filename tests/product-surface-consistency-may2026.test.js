@@ -128,6 +128,58 @@ test('_enrichSeriesCodes also derives PGI650 from CCLI671KCMY-style multipack na
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
+// CLR (Tri-Colour) suffix — Jul 2026. HP 804XL colour cartridge was re-coded
+// from a generic "Colour" (mis-coded RD) to a proper Tri-Colour single with
+// SKU suffix `CLR` (C804XLCLR). Before the fix, COLOR_SUFFIX did not carry CLR,
+// so stripSuffix("804XLCLR") stripped nothing and the compatible tri-colour's
+// series code came out as the whole "804XLCLR" — it never joined the "804XL"
+// family that its "804XLBK" black sibling belongs to.
+// ─────────────────────────────────────────────────────────────────────────────
+
+function runEnrich(product) {
+    const fnStart = API_CODE.indexOf('_enrichSeriesCodes(product) {');
+    let depth = 0, end = -1;
+    for (let i = fnStart; i < API_CODE.length; i++) {
+        if (API_CODE[i] === '{') depth++;
+        else if (API_CODE[i] === '}') { depth--; if (depth === 0) { end = i + 1; break; } }
+    }
+    const fnSrc = API_CODE.slice(fnStart, end);
+    const wrap = `const fn = function ${fnSrc}; fn(product); product`;
+    return vm.runInContext(wrap, vm.createContext({ product, RegExp, String, Set, Array }));
+}
+
+test('_enrichSeriesCodes derives 804XL from C804XLCLR (tri-colour), matching its black sibling', () => {
+    const clr = runEnrich({
+        sku: 'C804XLCLR',
+        name: '804XLCLR Compatible Ink Cartridge for HP 804XL Tri-Colour',
+        series_codes: [],
+    });
+    const bk = runEnrich({
+        sku: 'C804XLBK',
+        name: '804XLBK Compatible Ink Cartridge for HP 804XL Black (600 pages)',
+        series_codes: [],
+    });
+    assert.ok(clr.series_codes.includes('804XL'),
+        `tri-colour series_codes should include '804XL', got ${JSON.stringify(clr.series_codes)}`);
+    assert.ok(!clr.series_codes.includes('804XLCLR'),
+        `tri-colour series_codes must NOT carry the raw colour-suffixed SKU '804XLCLR', got ${JSON.stringify(clr.series_codes)}`);
+    assert.ok(bk.series_codes.includes('804XL'),
+        `black series_codes should include '804XL', got ${JSON.stringify(bk.series_codes)}`);
+    // The pair must share a code so they co-group in related products.
+    assert.ok(clr.series_codes.some(c => bk.series_codes.includes(c)),
+        `tri-colour ${JSON.stringify(clr.series_codes)} and black ${JSON.stringify(bk.series_codes)} must share a series code`);
+});
+
+test('COLOR_SUFFIX carries CLR but deliberately NOT bare CL (Clear)', () => {
+    const idx = API_CODE.indexOf('const COLOR_SUFFIX');
+    assert.ok(idx !== -1, 'COLOR_SUFFIX not found in api.js');
+    const line = API_CODE.slice(idx, API_CODE.indexOf('\n', idx));
+    assert.match(line, /\|CLR\|/, 'COLOR_SUFFIX must include the CLR tri-colour token');
+    assert.ok(!/\|CL\|/.test(line),
+        'COLOR_SUFFIX must NOT include bare CL — that means Clear and would corrupt real Clear codes');
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Bug #2 — soft-miss fallback when smart returns few off-topic hits for a digit query
 // ─────────────────────────────────────────────────────────────────────────────
 

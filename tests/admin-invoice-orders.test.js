@@ -132,8 +132,10 @@ test('orders.js exports isInvoiceOrder and renders a Channel column', () => {
 
 test('orders.js passes NO_PAYMENT_FEES for an invoiced order', () => {
   assert.ok(/NO_PAYMENT_FEES/.test(ordersSrc), 'must import and use NO_PAYMENT_FEES');
-  assert.ok(/isInvoiceOrder\(o\)\s*\n?\s*\?\s*\{ customerPaidInclGst, \.\.\.NO_PAYMENT_FEES \}/.test(ordersSrc),
-    'the fee options must branch on isInvoiceOrder(o)');
+  // absorbedShipping (free-ship courier) rides alongside on both branches — see
+  // order-profit-absorbed-shipping-jul2026.test.js. It must not displace NO_PAYMENT_FEES.
+  assert.ok(/isInvoiceOrder\(o\)\s*\n?\s*\?\s*\{ customerPaidInclGst, absorbedShipping, \.\.\.NO_PAYMENT_FEES \}/.test(ordersSrc),
+    'the fee options must branch on isInvoiceOrder(o) and still spread NO_PAYMENT_FEES');
   // Both the per-line profits AND the waterfall must use the branched options.
   assert.ok(/computeLineProfits\([\s\S]{0,220}?feeOpts,/.test(ordersSrc),
     'computeLineProfits must receive feeOpts, not a hard-coded { customerPaidInclGst }');

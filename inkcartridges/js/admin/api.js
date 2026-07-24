@@ -619,6 +619,15 @@ const AdminAPI = {
   async getTrafficBySource(filterParams, signal) {
     return analyticsHttpGet(`/api/admin/analytics/series/traffic-by-source?${analyticsQuery(filterParams)}`, signal);
   },
+  // Traffic time-series (daily sessions + pageviews) for the Performance overview overlay. This
+  // endpoint keys on `from`/`to` (NOT the `date_from`/`date_to` analyticsQuery emits), so build
+  // the query directly. Caller supplies a wide fallback range so the all-time view still returns.
+  async getTrafficTimeseries(from, to, signal) {
+    const q = new URLSearchParams();
+    if (from) q.set('from', from);
+    if (to)   q.set('to', to);
+    return analyticsHttpGet(`/api/admin/analytics/traffic/timeseries?${q.toString()}`, signal);
+  },
   async getConversionBySource(filterParams, signal) {
     return analyticsHttpGet(`/api/admin/analytics/conversion-by-source?${analyticsQuery(filterParams)}`, signal);
   },

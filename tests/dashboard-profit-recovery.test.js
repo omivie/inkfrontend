@@ -326,7 +326,57 @@ test('the money axis is no longer clamped at 0, so losses render below the basel
     body, /y:\s*\{ beginAtZero: true, min: 0, position: 'left'/,
     'the min:0 clamp on the money axis is what hid negative net profit',
   );
-  assert.match(body, /y1:\s*\{ beginAtZero: true, min: 0, position: 'right'/, 'orders axis stays >=0');
+  // The money axis is now set from the real data floor (moneyMin ≤ 0), so a loss still dips
+  // below the baseline — but the number is explicit so the count axes can align to it.
+  assert.match(body, /y:\s*\{ min: moneyMin, max: moneyMax, position: 'left'/);
   // …and an emphasised zero gridline is drawn so break-even is obvious.
   assert.match(body, /gctx\.tick\?\.value === 0 \? c\.textMuted : c\.border/);
+});
+
+test('orders can never render below the baseline — count axes share the money-zero row', () => {
+  const body = src.slice(
+    src.indexOf('function drawPerformanceOverview'),
+    src.indexOf('function drawAllCharts'),
+  );
+  // Root cause of "orders show as negative": a hard min:0 on the orders axis pinned orders-0 to
+  // the plot BOTTOM, while the money axis dipped below 0 for a loss — so its 0 gridline sat
+  // higher, and low order counts fell beneath it. The fix gives every COUNT axis the money
+  // axis's own below-zero fraction, so all zeros land on the same pixel row.
+  assert.match(body, /const zeroFrac = moneyMax > 0 \? moneyMin \/ moneyMax : 0/);
+  assert.match(body, /y1:\s*\{ min: ordersMax \* zeroFrac, max: ordersMax, position: 'right'/,
+    'orders-0 aligns to the money-0 gridline instead of the plot bottom');
+  // Any negative tick the alignment introduces is blanked, so the axis never prints a negative count.
+  assert.match(body, /callback: \(v\) => v < 0 \? '' : Math\.round\(v\)/,
+    'negative order-count ticks are hidden');
+  // The orders axis must NOT go back to a hard min:0 — that reintroduces the misalignment.
+  assert.doesNotMatch(body, /y1:\s*\{ beginAtZero: true, min: 0/);
+});
+
+test('traffic overlay: sessions + pageviews on a hidden, baseline-aligned scale, fail-soft loud', () => {
+  const body = src.slice(
+    src.indexOf('function drawPerformanceOverview'),
+    src.indexOf('function drawAllCharts'),
+  );
+  // Both lines are added on the hidden y2 scale (no third number column) and share the same
+  // zeroFrac alignment as orders, so traffic can't dip below the baseline either.
+  assert.match(body, /trafficLine\('Sessions', sessions, /);
+  assert.match(body, /trafficLine\('Pageviews', pageviews, /);
+  assert.match(body, /yAxisID: 'y2'/);
+  assert.match(body, /y2:\s*\{ min: trafficMax \* zeroFrac, max: trafficMax, position: 'right', display: false/);
+  // Fail-soft must be LOUD: no data → lines omitted (guarded on trafficMissing), never a zero line,
+  // and the card says so.
+  assert.match(body, /if \(!trafficMissing\)/);
+  // The note text lives in renderOverviewNotes (above this body slice) → assert against full src.
+  assert.match(src, /Traffic data isn’t available for this range/);
+  assert.match(body, /renderOverviewNotes\(plan, drift, opexLabel, hasBackendOpex, trafficMissing\)/);
+  // Daily rows are re-bucketed to this chart's grain via the shared indexFor().
+  assert.match(body, /indexFor\(Date\.parse\(String\(row\?\.date/);
+});
+
+test('the dashboard fetches the traffic time-series and parses it null-honestly', () => {
+  // Wired into the parallel load, with a wide fallback range so the all-time view still returns.
+  assert.match(src, /AdminAPI\.getTrafficTimeseries\(trafficFrom, trafficTo, signal\)/);
+  assert.match(src, /const trafficFrom = from \|\| '2000-01-01'/);
+  // Parsed through the shared normalizer → [] when absent (→ lines omit), never a fabricated zero.
+  assert.match(src, /sTraffic: normalizeSeries\(val\(12\)\)/);
 });

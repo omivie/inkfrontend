@@ -4,6 +4,264 @@ Log every error encountered here. Before editing a file, scan for known issues. 
 
 ---
 
+## ERR-119 — Order line-items table INVISIBLE on every order: scroll wrapper collapsed to height 0 in the modal's column flex (2026-07-24)
+
+**Reported ("where did the products go?" ×3).** The order-detail modal showed NO line-items table —
+meta → Financial Breakdown → Dates, with a blank gap where products belong.
+
+**TRUE root cause (self-inflicted; corrected from an earlier wrong call).** The Supplier/Origin
+columns work added a horizontal-scroll wrapper `.admin-order-items-scroll { overflow-x:auto }`
+around the `<table>`. That wrapper is a flex item inside `#om-content`
+(`.admin-product-modal__scroll`, a `display:flex; flex-direction:column` container). Per the CSS
+Flexbox spec, a flex item whose `overflow` ≠ `visible` gets an **automatic min-height of 0**. The
+modal content is a touch taller than the viewport (scrollHeight 717 > clientHeight 697), so
+flex-shrink drove the wrapper to **height:0**, and `overflow-x:auto` then **clipped** the 107px
+table → products painted nowhere. This affected EVERY order, not just one. Confirmed live via
+`getComputedStyle`: wrapper `height 0px`, table `height 107px`, `visibility:visible`.
+
+**Why I missed it twice.** I "verified" with DOM-only checks (`hasTable:true`, row count) and a
+screenshot that was cut off before the items area — never actually looked at the rendered table.
+DOM presence ≠ visibility. My first two explanations ("transient backend deploy") were wrong.
+
+**Fix (one line, `css/admin.css`).** `.admin-order-items-scroll { overflow-x:auto; max-width:100%;
+flex-shrink:0; }` — `flex-shrink:0` stops the wrapper collapsing while keeping horizontal scroll for
+the wide (up to 8-col owner) table. **Verified VISUALLY** on a clean stylesheet-only load (no inline
+hacks): wrapper 131px, table renders with Supplier "Augmento" + Origin "Assembled" for order
+`20260724000003`. Bumped `APP_VERSION`; `npm run build` restamped the admin.css `?v=` token — user
+must hard-reload (an open SPA session keeps the old CSS).
+
+**Kept from the earlier pass (still valid, separate concern).** `buildOrderModalContent` now takes
+`{ detailLoadFailed }` from `openOrderModal` (`detailLoadFailed = !fullOrder`, + a `Toast.error`), and
+the empty branch splits on `expectedCount = o.items_count ?? o.item_count ?? o.order_items?.length`:
+`detailLoadFailed || expectedCount>0` → LOUD red `.admin-empty` warning; else quiet "— No items".
+This is defensive-only — it did NOT cause or fix the invisibility (for real orders `items` exist, so
+the table rendered and was then clipped). Backend HAS shipped `origin` + `suppliers` + top-level
+`supplier_fulfillment`.
+
+**Lesson.** For a "can't see X" bug, verify the RENDERED pixels (screenshot + computed height/box),
+never just DOM presence. And suspect your own most-recent CSS before blaming a backend deploy.
+
+---
+
+## ERR-118 — Absorbed courier cost missing from order profit → take-home over-reported on free-shipping orders (2026-07-24)
+
+**Reported (backend hand-off).** On a free-shipping order (subtotal ≥ $100) the customer pays **$0
+shipping** but we still pay the courier. That absorbed cost was **missing from the owner order
+modal's profit math**, so take-home over-reported. Worked example order `20260723000001` (genuine
+Kyocera toner, free ship, North Island): reported **$30.49 / 25.3%**, but ~$12 courier was absorbed
+and never subtracted → true **$20.06 / 16.6%**.
+
+**Backend change.** `GET /api/admin/orders/:id` now returns owner-only
+`order.shipping_absorbed` = `{ applies, zone, delivery_type, amount_incl_gst, gst_component,
+amount_ex_gst }` (the real zone/weight courier rate from `shipping_rates`; `{ applies:false }`
+otherwise; absent for non-owners; same gating as `supplier_fulfillment`).
+
+**Fix (FE, `js/admin/utils/profitability.js` + `js/admin/pages/orders.js`).** Treat the courier line
+exactly like the supplier/Stripe lines — shown incl-GST, GST netted at the IRD line, so the cash
+waterfall still foots:
+- New internal `absorbedShippingParts(opts, gstRate)` parses `opts.absorbedShipping`. **Anchor on
+  `amount_incl_gst`**; use `gst_component` (derive `incl × 3/23` if absent); **derive `exGst = incl −
+  gst`** (NOT the backend's `amount_ex_gst`) so the waterfall foots exactly despite backend rounding.
+- `computeOrderProfit` subtracts `exGst` (defaults 0 → invoiced sales & dashboard aggregates
+  unchanged, as the doc scopes). `computeLineProfits` needs no logic change: its derived order-level
+  fee (`rev − cost − totalProfit`) now includes the courier cost and is **allocated across lines by
+  revenue share** (same as the fixed $0.30 Stripe fee) — so the per-line Profit column/foot and the
+  waterfall take-home stay equal (margin-consistency gate, ERR-113). Renamed local `orderStripeFee` →
+  `orderLevelFee`.
+- `computeProfitBreakdown` subtracts `inclGst` as a new **Courier absorbed (free shipping)** outflow,
+  reduces `gstRemittedToIrd` by the courier GST, exposes `absorbedShipping{Applies,InclGst,Gst,ExGst,
+  Zone,DeliveryType}`. `orders.js` adds `absorbedShipping: o.shipping_absorbed` to **both** `feeOpts`
+  branches, renders the row (guarded on `absorbedShippingApplies`) between "Paid to Stripe" and "GST
+  remitted to IRD", with a "Actual courier rate for {zone}, urban assumed" tooltip.
+
+**LOUD-by-absence.** `applies!==true` or a non-positive `amount_incl_gst` → contribution is $0 and
+nothing renders: a missing field never invents a cost, a present one is never silently dropped.
+
+**Out of scope (per hand-off).** Dashboard / Financial Health / P&L aggregates still ignore absorbed
+shipping. Rural accuracy would need `delivery_type` persisted at checkout (not currently stored).
+
+**Tests.** `tests/profitability.test.js` extended (doc worked example foots $30.49→$20.06,
+IRD $4.57→$3.00; applies:false / absent = no-op; derived GST; per-line allocation ratio).
+New `tests/order-profit-absorbed-shipping-jul2026.test.js` pins the render wiring. Updated the
+exact-shape `feeOpts` pin in `tests/admin-invoice-orders.test.js` for the new `absorbedShipping` arg.
+
+---
+
+## ERR-117 — Performance overview: Orders line rendered BELOW the zero baseline; +taller +traffic (2026-07-24)
+
+**Reported.** On the Dashboard "Performance overview" the yellow **Orders** line dipped *below the
+$0 gridline* even though orders can never be negative. User also wanted the chart **taller with more
+$ increments**, and a **Traffic** overlay (sessions + pageviews) added to the same chart.
+
+**Cause (the below-zero symptom).** The chart is Chart.js with a dual axis. The money axis (`y`)
+deliberately auto-scales *below zero* so a loss dips under the baseline, putting its `0` ~10% up
+from the plot bottom. The Orders axis (`y1`) was clamped `min:0`, pinning orders-`0` to the very
+bottom. Chart.js maps each axis independently, so the two zeros landed at **different pixels** — low
+order counts sat beneath the money-`0` gridline and *read as negative*. It was never negative data;
+it was two misaligned baselines.
+
+**Fix — one shared below-zero fraction for every count axis** (`drawPerformanceOverview`,
+`js/admin/pages/dashboard.js`):
+- Compute the money domain explicitly (`moneyMin ≤ 0`, `moneyMax`, nice-rounded) instead of leaving
+  it to Chart.js — losses still dip (moneyMin is the real negative floor), but now the number is
+  known. `zeroFrac = moneyMin / moneyMax` (≤ 0).
+- Each COUNT axis gets `min = axisMax * zeroFrac`, so orders-`0` / traffic-`0` land on the **exact
+  pixel row** of the money-`0` gridline. Counts (always ≥ 0) can never render below it.
+- Negative ticks the alignment introduces are blanked: `callback: v => v < 0 ? '' : Math.round(v)`
+  — the axis never prints a negative order count. `y1` must NOT go back to a hard `min:0`.
+
+**Taller + finer increments.** New CSS modifier `.admin-chart-box--xtall` (460px) for this chart
+ONLY — do NOT bump `.admin-chart-box--tall` (340px, shared by 5 charts). Money `stepSize` via a
+`niceDown(range/12)` helper → ~$500 steps instead of Chart.js's ~$1k (rounding *down* never
+overshoots to fewer lines the way rounding up does).
+
+**Traffic overlay (user: both sessions + pageviews, hidden scale).** New
+`AdminAPI.getTrafficTimeseries(from,to)` → `/api/admin/analytics/traffic/timeseries` (keys on
+`from`/`to`, NOT the `date_from`/`date_to` analyticsQuery emits). Fetched in the parallel load
+(index 12) with a wide fallback range (`from||'2000-01-01'`, `to||today`) so the all-time view still
+returns; parsed via the shared `normalizeSeries()`. Daily rows re-bucketed to the chart's grain with
+the existing `indexFor()`. Two **dashed violet** lines (`#7C3AED`/`#A78BFA`) on a **hidden** `y2`
+scale (no third number column), same `zeroFrac` alignment; tooltip shows integer counts.
+**Fail-soft LOUD:** no usable data → both lines omitted (never a misleading zero) + card note
+"Traffic data isn't available for this range."
+
+**Palette note.** Adding traffic makes 7 series. The dataviz validator's two FAILs
+(red↔magenta normal-vision ΔE 12.8; green/yellow lightness) are **pre-existing** on the 5 original
+series — the two violets are NOT the worst adjacent pair, and dashing is their secondary encoding.
+
+`payload.sTraffic` is new → **`DASH_CACHE_SCHEMA` bumped 1→2** (ERR-116) so old-shape localStorage
+blobs are ignored. `APP_VERSION` → `2026.07.24-perf-overview-traffic`; api.js import token →
+`traffic-timeseries-jul2026`; `npm run build` restamped `?v=`. Pinned by 4 new tests in
+**tests/dashboard-profit-recovery.test.js** (axis alignment, negative-tick blanking, traffic overlay,
+traffic fetch/parse).
+
+---
+
+## ERR-116 — Dashboard still spun on a full page refresh (in-memory cache only) (2026-07-24)
+
+**Reported** right after ERR-115: a hard refresh showed the centered spinner on a blank page.
+**Cause.** The stale-while-revalidate cache `_payloadCache` (`js/admin/pages/dashboard.js`) is an
+**in-memory `Map`** — empty after any full page load — so the cold-load branch painted
+`dashboardSkeleton()`. The SWR only helped *in-app* navigation.
+
+**Fix (user chose: show last data, persisted across sessions).** Write the last-rendered payload
+through to **localStorage** and seed the Map from it once per module life, so the existing warm-cache
+render path fires on a refresh — instant full-colour repaint, then revalidate. Mirrors AdminAPI's
+account-keyed, fail-soft localStorage caches (`api.js` ui-prefs / code-universe):
+
+- `DASH_CACHE_SCHEMA = 1` — **bump when the `payload` object shape changes**, else an old-shape blob
+  is ignored (not fed to `render()`).
+- Key `admin_dash_cache:${Auth.user.id||'anon'}` — account-scoped (one admin's financials don't leak
+  into another's session on a shared browser); reads still gated to `isOwner`.
+- Read/write wrapped in `try/catch` (private mode / quota) → degrades to the spinner, never throws.
+- **Single entry** (the last view) — a refresh keeps the same URL/filters so its key always matches;
+  bounds storage size (payload carries up to 1000 expense rows + 18 chart series).
+- Seeded repaint wrapped in `try/catch`: a bad blob clears storage + falls back to the spinner
+  (no white-screen) even if `DASH_CACHE_SCHEMA` wasn't bumped.
+
+First-EVER load (nothing persisted) still shows the spinner — the `dashboardSkeleton()` branch and the
+`_loadSeq` race-guard are untouched, so `tests/admin-skeleton-load-may2026.test.js` stays green.
+`APP_VERSION` bumped to `2026.07.24-dash-coldload-persist` (versions the dynamic page import) +
+`npm run build` restamped `?v=`. Pinned by **tests/dashboard-coldload-persist-jul2026.test.js** (6).
+
+---
+
+## ERR-115 — Admin Dashboard / Website Traffic reloaded in "feint" colours; user wanted full colour (2026-07-24)
+
+**Reported** with a screenshot of the Dashboard rendered washed-out during a warm-cache/filter reload:
+"use the normal colours and then load the data whenever it loads … rather than a feint version."
+
+**Cause.** The single rule `.admin-page--reloading > *:not(.admin-page-header)` in `css/admin.css`
+dimmed the whole body during a re-load (`opacity: .55` + `filter: saturate(.85)`) so users would
+"perceive activity." It fires on two paths in `js/admin/pages/dashboard.js` — the stale-while-revalidate
+warm-cache paint (line ~956) and the filter-change reload (line ~960) — and on the shared
+`website-traffic.js`. Cold first load was never faint (it's the `.admin-loader` spinner).
+
+**Fix.** CSS-only. Deleted the dimming block; kept `.admin-page--reloading { position: relative; }`
+as a no-op hook, and removed the now-pointless `.admin-page--reloading … { transition: none; }` line
+from the `prefers-reduced-motion` block (kept `.admin-skel { animation: none; }`). The JS toggles and
+the `_loadSeq` race-guard are untouched, so stale-while-revalidate still paints cached data instantly
+and swaps in fresh values — just at **full colour** now. Applies to both admin pages (shared class).
+
+**Cache token** `admin.css?v=` restamped by `npm run build` (`3ea9e52b` → `e40bdf63`). Pinning test
+`tests/admin-skeleton-load-may2026.test.js` stays green (15/15) — it only asserts the class + JS
+toggles exist and that reduced-motion disables `.admin-skel`, all preserved.
+
+---
+
+## ERR-114 — Backend and frontend disagree by 15% on whether Stripe's 2.65% is GST-inclusive (2026-07-22) — OPEN, BACKEND
+
+**Found by** reverse-engineering the pinned live `kpi-summary` payload while auditing whether
+invoiced sales were being charged a card fee. **The carve-out is fine** — that part of the audit
+came back clean:
+
+```
+revenue 8342.15 · orders 63 · invoice_revenue 1268.48 · invoice_orders 3 · stripe_fees 178.65
+
+naive (all orders)                 0.0265 × 8342.15 + 0.30 × 63   = 239.97
+carved (card orders only)          0.0265 × 7073.67 + 0.30 × 60   = 205.45
+carved × 20/23                                                     = 178.6541
+backend stripe_fees                                                = 178.65   ← exact to 0.4c
+```
+
+So the backend formula is `(2.65% × card revenue + $0.30 × card orders) × 20/23`. Invoiced
+(bank-transfer) sales ARE excluded — no defect there.
+
+**The defect.** That trailing `× 20/23` means the backend treats Stripe's `2.65% + $0.30` as
+**GST-INCLUSIVE** and strips GST out to express the fee ex-GST. `utils/profitability.js` treats the
+identical rate as **ex-GST** and adds GST *on top* (`computeProfitBreakdown.stripeFeeGst`). Both
+cannot be right, and they differ by exactly 15% — **$26.80 all-time** on the payload above.
+
+**Consequence.** The order modal's take-home profit and the dashboard's Net Profit are computed on
+two different fee conventions. Whichever is correct, one of them is wrong on every card sale.
+
+**To settle it:** read one Stripe NZ invoice/statement. If Stripe's published 2.65% is quoted
+exclusive of GST (and GST is added as a separate line), `profitability.js` is right and the backend
+is understating fees / overstating net profit by 15%. If it is GST-inclusive, the backend is right
+and `profitability.js` over-deducts.
+
+**Pinned by** `tests/dashboard-net-series-jul2026.test.js` §10c (3 tests: the carve-out holds, the
+backend formula is exact, and the FE/BE divergence is exactly 1.15×). Those tests document the
+divergence rather than assert a winner — update them when it is settled, do not "fix" one side blind.
+
+**Related:** `deriveStripe` in `utils/trend-math.js` has NO carve-out at all. It has zero production
+callers (tests only) and is now marked ⚠️ UNWIRED — do not re-wire it without adding one.
+
+---
+
+## ERR-113 — Net Margin tile contradicted the Net Profit tile beside it by ~100× (2026-07-22)
+
+**Symptom.** `#dashboard?period=all`, live: Revenue $7,728.48 · Net Profit **−$19.67** · Net Margin
+**−29.3%**. But `−19.67 / (7728.48 × 20/23) = −0.29%`. Two tiles in the same strip, 40px apart,
+disagreeing by two orders of magnitude. Gross Margin (21.1%) was correct.
+
+**Cause.** `renderKpiStrip` rendered `cur.net_margin` **verbatim** whenever the backend shipped it
+(`dashboard.js`), so the backend's figure went to screen without ever being checked against the
+profit and revenue the very next tile displays. The FE's own `marginOf()` fallback would have
+produced −0.3%; it was never reached. The bad value is backend-side (ERR-111's remediation made
+`margin_proxy` authoritative for gross, and net inherited the same blind trust).
+
+**Fix (frontend).** New `checkMarginConsistency(label, backendPct, derivedPct)` next to
+`checkNetDrift`. The backend figure is still **preferred** — but only once it agrees with
+`profit / (revenue × 20/23)`. Tolerance is **relative** (`max(0.5pp, 5% of derived)`) so a 100×
+scale error and an ERR-111-style basis error both trip while ordinary rounding does not. On a trip:
+render the **derived** figure — internal consistency across the strip beats deference to a number
+that disagrees with its own inputs — and emit a LOUD `.admin-dash-note--alert` naming both values
+and flagging a ~100× ratio as a scale bug. Applied to Gross Margin too, where it is currently silent
+and serves as a regression detector.
+
+**Rule.** "Prefer the backend" ≠ "render the backend blindly". Any backend figure that is
+*derivable* from two other figures already on screen must be cross-checked against them, and the
+disagreement surfaced — never silently resolved. Same discipline as `checkNetDrift`.
+
+**Still open (backend):** the source of the ~100× `net_margin`, and the **$30.80** net-profit drift
+the dashboard's own banner reports (Σ per-bucket net −$50.47 vs tile −$19.67, tolerance ~$0.60).
+Both are backend self-inconsistencies; the frontend now reports them loudly but cannot fix them.
+
+**Pinned by** `tests/dashboard-net-series-jul2026.test.js` §10b (7 tests).
+
+---
+
 ## ERR-111 — Profit tiles were over-stated by the revenue GST; two FE helpers silently changed meaning when the backend changed basis (2026-07-20)
 
 **Symptom.** Backend shipped a P0 fix (migration 118 + `b356b48`) and asked the frontend to follow

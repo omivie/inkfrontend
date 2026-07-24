@@ -1,11 +1,11 @@
 /**
  * Admin SPA — Entry point, router, shell
  */
-const APP_VERSION = '2026.07.20-net-series-gst-basis';
+const APP_VERSION = '2026.07.24-order-items-visible-fix';
 
 import { AdminAuth } from './auth.js';
 import { FilterState } from './filters.js';
-import { AdminAPI } from './api.js?v=code-pagination-jul2026';
+import { AdminAPI } from './api.js?v=traffic-timeseries-jul2026';
 
 const esc = (s) => Security.escapeHtml(String(s));
 

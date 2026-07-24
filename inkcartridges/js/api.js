@@ -1449,7 +1449,14 @@ const API = {
         // magenta specialty colors) from eating the "L" of an "XL" high-yield
         // body — e.g. "200XLC" must strip just the trailing "C", leaving "200XL",
         // not "200X". "200LC" still strips "LC" (preceded by a digit, not X).
-        const COLOR_SUFFIX = /(?:KCMY|CMYK|BCMY|CMY|PBK|PCY|PMG|PYL|VLM|MK|PB|PC|PM|PY|MB|(?<!X)LC|(?<!X)LM|BK|CY|MG|YL|RD|GN|BL|VT|GR|WH|OR|PK|K|C|M|Y)$/;
+        //
+        // CLR = Tri-Colour single cartridge (HP 804XLCLR, Canon CL511CLR).
+        // Added Jul 2026 so "804XLCLR" strips to "804XL" and co-groups with its
+        // "804XLBK" black sibling. It sits before the 1-char "C" so the whole
+        // "CLR" is consumed, not just a stray "C". Deliberately NOT "CL": bare
+        // "CL" means Clear in our vocabulary — stripping it would corrupt real
+        // Clear-cartridge codes. "CLR" is unambiguous.
+        const COLOR_SUFFIX = /(?:KCMY|CMYK|BCMY|CMY|CLR|PBK|PCY|PMG|PYL|VLM|MK|PB|PC|PM|PY|MB|(?<!X)LC|(?<!X)LM|BK|CY|MG|YL|RD|GN|BL|VT|GR|WH|OR|PK|K|C|M|Y)$/;
 
         const stripSuffix = (token) => {
             if (!token) return '';

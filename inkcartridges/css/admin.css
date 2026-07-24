@@ -665,6 +665,11 @@
    behaves differently: bank transfer, so no card fee on its profit. */
 .admin-badge--invoice { background: var(--cyan-dim); color: var(--cyan-text); }
 .admin-badge--web { background: var(--surface-3, rgba(148,163,184,0.14)); color: var(--text-muted); }
+/* Order-item origin — how a line's pack was produced. Assembled = we built it from
+   singles (Supplier cell lists all constituents); Pre-boxed = one supplier pack. */
+.admin-badge--in-house { background: var(--cyan-dim); color: var(--cyan-text); }
+.admin-badge--supplier-pack { background: var(--yellow-dim); color: var(--yellow-text); }
+.admin-badge--single { background: var(--surface-3, rgba(148,163,184,0.14)); color: var(--text-muted); }
 
 /* ---- Drawer ---- */
 .admin-drawer-backdrop {
@@ -1014,7 +1019,24 @@
 .admin-timeline__text strong { color: var(--text); font-weight: 500; }
 
 /* ---- Order Items ---- */
+/* The items table can reach 8 columns (Product, SKU, Qty, Supplier, Origin, Price,
+   and owner-only Cost + Profit). Confine any overflow to the table itself — the modal
+   scroll body (#om-content) has no overflow-x, so without this a wide table blows out
+   the flex column. */
+/* flex-shrink:0 is REQUIRED: this wrapper is a flex item inside the column-flex modal
+   body (#om-content). overflow-x:auto forces its automatic min-height to 0 (flexbox
+   spec), so without this it shrinks to height 0 when the modal overflows and CLIPS the
+   whole items table to invisibility (ERR-119). */
+.admin-order-items-scroll { overflow-x: auto; max-width: 100%; flex-shrink: 0; }
 .admin-order-items { width: 100%; border-collapse: collapse; font-size: 14px; margin: 12px 0; }
+/* Supplier can list several names for an in-house pack — cap it and ellipsize.
+   NB: .cell-truncate is scoped to .admin-table, so it does nothing here; the full
+   list stays available via the cell's title tooltip. */
+.admin-order-items__supplier { max-width: 220px; }
+.admin-order-items__supplier > span {
+  display: inline-block; max-width: 100%;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom;
+}
 .admin-order-items th {
   text-align: left; padding: 6px 10px;
   font-size: 12px; font-weight: 700;
@@ -1029,6 +1051,8 @@
 /* ---- Charts ---- */
 .admin-chart-box { position: relative; height: 280px; }
 .admin-chart-box--tall { height: 340px; }
+/* Performance overview only — extra height for its 7 series + finer $ gridlines. */
+.admin-chart-box--xtall { height: 460px; }
 .admin-chart-box canvas { width: 100% !important; height: 100% !important; }
 
 /* "Action needed" panel — the card is NOT a link; each item row is its own link. */
@@ -3093,8 +3117,8 @@ button.admin-active-dot--clickable:hover::after { opacity: 1; }
    ----------------------------------------------------------------------------
    Shown on FIRST load of Dashboard + Website Traffic so the user sees a
    matched-layout placeholder instead of a flash of "empty" content. Subsequent
-   re-loads (filter changes) use `.admin-page--reloading` to dim the existing
-   page so we don't blow away real data only to redraw it 200ms later.
+   re-loads (filter changes) keep the existing data on screen in FULL colour via
+   `.admin-page--reloading` (no dim) and swap fresh values in when they land.
    ============================================================================ */
 @keyframes admin-skel-shimmer {
   0%   { background-position: -150% 0; }
@@ -3129,18 +3153,13 @@ button.admin-active-dot--clickable:hover::after { opacity: 1; }
 .admin-skel__line--title { height: 18px; width: 220px; margin-bottom: 16px; }
 .admin-skel__stat   { height: 38px; width: 96px; }
 
-/* During a re-load, dim the page slightly so users perceive activity without
-   the layout collapsing. Pointer-events stay live — nothing is disabled. */
+/* During a re-load we keep already-rendered content in FULL colour — no dim.
+   Existing data stays live and legible while fresh values swap in on arrival
+   (stale-while-revalidate). The class is retained as a no-op positioning hook. */
 .admin-page--reloading { position: relative; }
-.admin-page--reloading > *:not(.admin-page-header) {
-  opacity: .55;
-  transition: opacity .18s ease;
-  filter: saturate(.85);
-}
 
 @media (prefers-reduced-motion: reduce) {
   .admin-skel { animation: none; }
-  .admin-page--reloading > *:not(.admin-page-header) { transition: none; }
 }
 
 /* Marketing insight feed. */

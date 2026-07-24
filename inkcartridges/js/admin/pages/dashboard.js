@@ -21,6 +21,9 @@ import { Charts } from '../components/charts.js';
 // as the Expenses page (paid-only, GST-netted, order-linked excluded).
 import { kpiCogsInclGst } from '../utils/trend-math.js';
 import { cashMs, pnlCost } from '../utils/expense-math.js';
+// Robustly parse the traffic time-series (array | {data|series|points}) into
+// [{ date, sessions, pageviews }] for the Performance overview overlay.
+import { normalizeSeries } from '../utils/traffic-analytics.js';
 
 const formatPrice = (v) => window.formatPrice ? window.formatPrice(v) : `$${Number(v || 0).toFixed(2)}`;
 const MISSING = '—';
@@ -58,9 +61,51 @@ let _effectiveGranularity = null;
 
 // Last successful render payload, keyed by the active filter signature. Survives SPA
 // navigation (NOT cleared in destroy) so returning to the dashboard paints instantly,
-// then revalidates in the background (stale-while-revalidate). In-memory only.
+// then revalidates in the background (stale-while-revalidate). In-memory Map, but the
+// most-recent view is also written through to localStorage (see below) so a FULL PAGE
+// REFRESH — which starts with an empty Map — paints the last-known dashboard instantly
+// instead of a spinner, then revalidates just the same.
 const _payloadCache = new Map();
 const _PAYLOAD_CACHE_MAX = 12;
+let _storageHydrated = false;   // seed the Map from localStorage exactly once per module life
+
+// Persisted cold-load cache. Mirrors the account-keyed, fail-soft localStorage pattern used
+// by AdminAPI's ui-prefs / code-universe caches (js/admin/api.js). Single entry — the last
+// view rendered — which is enough because a refresh keeps the same URL/filters, so the
+// last-rendered key always matches the cold-load lookup, and it bounds storage size (a
+// payload can carry up to 1000 expense rows + 18 chart series).
+// BUMP DASH_CACHE_SCHEMA whenever the `payload` object shape (in loadDashboard) changes, so
+// a stale-shape blob from a previous deploy is ignored rather than fed to render().
+const DASH_CACHE_SCHEMA = 2; // 2: added payload.sTraffic (Performance overview traffic overlay)
+function _dashCacheKey() {
+  const uid = (typeof Auth !== 'undefined' && Auth.user && Auth.user.id) ? Auth.user.id : 'anon';
+  return `admin_dash_cache:${uid}`;
+}
+function _readPersistedPayload(cacheKey) {
+  try {
+    const raw = localStorage.getItem(_dashCacheKey());
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || parsed.v !== DASH_CACHE_SCHEMA) {
+      try { localStorage.removeItem(_dashCacheKey()); } catch (_) { /* non-fatal */ }
+      return null;
+    }
+    // Only reuse it for the exact same filter signature we're loading.
+    return parsed.key === cacheKey ? (parsed.payload || null) : null;
+  } catch (_) {
+    return null;   // private mode / malformed / disabled storage
+  }
+}
+function _writePersistedPayload(cacheKey, payload) {
+  try {
+    localStorage.setItem(_dashCacheKey(), JSON.stringify({ v: DASH_CACHE_SCHEMA, key: cacheKey, payload }));
+  } catch (_) {
+    /* quota / private mode — cold-load just falls back to the spinner next time */
+  }
+}
+function _clearPersistedPayload() {
+  try { localStorage.removeItem(_dashCacheKey()); } catch (_) { /* non-fatal */ }
+}
 
 // ---------- action-alert thresholds ----------
 
@@ -673,10 +718,17 @@ function buildOverviewBuckets(d) {
  * a console nobody reads. ERR-106's drift guard warned correctly and went unnoticed for
  * weeks because DebugLog was its only channel.
  */
-function renderOverviewNotes(plan, drift, opexLabel, hasBackendOpex) {
+function renderOverviewNotes(plan, drift, opexLabel, hasBackendOpex, trafficMissing) {
   const host = document.getElementById('dash-overview-notes');
   if (!host) return;
   const notes = [];
+
+  if (trafficMissing) {
+    // Fail-soft must be LOUD: the traffic lines were requested but no usable series came back
+    // for this range. Say so rather than plotting a flat zero that reads as "no visitors".
+    notes.push(`<p class="fh-pnl-note">Traffic data isn’t available for this range, so the Sessions and
+      Pageviews lines are hidden rather than drawn as zero.</p>`);
+  }
 
   if (drift) {
     // Both figures are the backend's own, so this is a backend inconsistency — say so
@@ -795,13 +847,75 @@ function drawPerformanceOverview(d) {
     window.DebugLog?.warn?.(
       `[Dashboard] net-profit line ($${drift.seriesTotal.toFixed(2)}) does not reconcile to the Net Profit KPI ($${drift.kpiNet.toFixed(2)}) — gap $${Math.abs(drift.gap).toFixed(2)}, tolerance $${drift.tolerance.toFixed(2)}. Both figures are backend-sourced, so this is a backend inconsistency.`);
   }
-  renderOverviewNotes(plan, drift, opexLabel, hasBackendOpex);
+
+  // ── Traffic overlay (sessions + pageviews) ──────────────────────────────────────────
+  // Daily rows from /traffic/timeseries, re-bucketed to THIS chart's grain via the same
+  // indexFor() the opex fallback uses (out-of-range rows fall to -1 and drop). Fail-soft LOUD:
+  // a failed/empty fetch → sessions/pageviews stay null → both lines omitted (never plotted as
+  // a misleading zero) and renderOverviewNotes flags it.
+  const trafficRows = Array.isArray(d.sTraffic) ? d.sTraffic : null;
+  const trafficMissing = !trafficRows || trafficRows.length === 0;
+  let sessions = null, pageviews = null;
+  if (!trafficMissing) {
+    const sBk = new Array(order.length).fill(0);
+    const pBk = new Array(order.length).fill(0);
+    for (const row of trafficRows) {
+      const i = indexFor(Date.parse(String(row?.date ?? '').slice(0, 10)));
+      if (i < 0) continue;
+      sBk[i] += Number(row?.sessions)  || 0;
+      pBk[i] += Number(row?.pageviews) || 0;
+    }
+    sessions  = accum(sBk);
+    pageviews = accum(pBk);
+  }
+
+  renderOverviewNotes(plan, drift, opexLabel, hasBackendOpex, trafficMissing);
 
   const revenue = accum(order.map(b => numOrNull(byBucket.get(b)?.revenue)));
   const profit  = accum(plan.values.slice());
   const orders  = accum(order.map(b => numOrNull(byBucket.get(b)?.orders)));
   const addedExpenses = accum(opexByBucket.slice());
   const totalExpenses = accum(totalCostByBucket.slice());
+
+  // ── Axis domains ────────────────────────────────────────────────────────────────────
+  // Round a value UP / DOWN to a "nice" 1/2/2.5/5 × 10ⁿ step.
+  const niceUp = (v) => {
+    if (!(v > 0)) return 1;
+    const mag = Math.pow(10, Math.floor(Math.log10(v)));
+    const n = v / mag;
+    return (n <= 1 ? 1 : n <= 2 ? 2 : n <= 2.5 ? 2.5 : n <= 5 ? 5 : 10) * mag;
+  };
+  const niceDown = (v) => {
+    if (!(v > 0)) return 1;
+    const mag = Math.pow(10, Math.floor(Math.log10(v)));
+    const n = v / mag;
+    return (n >= 10 ? 10 : n >= 5 ? 5 : n >= 2.5 ? 2.5 : n >= 2 ? 2 : 1) * mag;
+  };
+  // Money (left) axis — set min/max explicitly (Chart.js auto-scaling is otherwise opaque to us,
+  // and we need the exact numbers to align the count axes below). Losses still dip under zero:
+  // moneyMin is the real negative data floor, only 0 when nothing is below break-even.
+  const allMoney = [revenue, profit, addedExpenses, totalExpenses]
+    .flat().filter(v => v != null && Number.isFinite(v));
+  const rawMoneyMax = allMoney.length ? Math.max(0, ...allMoney) : 0;
+  const rawMoneyMin = allMoney.length ? Math.min(0, ...allMoney) : 0;
+  // Aim for ≥12 gridlines → finer $ increments than Chart.js's default ~10. niceDown never
+  // overshoots to FEWER lines the way rounding up can (e.g. a $10k range → $500 steps, not $1k).
+  const moneyStep = niceDown((Math.max(rawMoneyMax, 1) - Math.min(rawMoneyMin, 0)) / 12);
+  const moneyMax  = Math.max(moneyStep, Math.ceil(rawMoneyMax / moneyStep) * moneyStep);
+  const moneyMin  = rawMoneyMin < 0 ? Math.floor(rawMoneyMin / moneyStep) * moneyStep : 0;
+  // The shared below-zero fraction. Give every COUNT axis the same fraction and their zeros land
+  // on the exact pixel row of the money-zero gridline — so Orders/Traffic (always ≥ 0) can never
+  // render below the baseline, while the money lines still dip for a loss. zeroFrac ≤ 0.
+  const zeroFrac = moneyMax > 0 ? moneyMin / moneyMax : 0;
+
+  const ordersVals   = orders.filter(v => v != null && Number.isFinite(v));
+  const rawOrdersMax = ordersVals.length ? Math.max(...ordersVals) : 0;
+  const ordersStep   = niceUp(Math.max(rawOrdersMax, 1) / 7);
+  const ordersMax    = Math.max(ordersStep, Math.ceil(rawOrdersMax / ordersStep) * ordersStep);
+
+  const trafficVals   = [...(sessions || []), ...(pageviews || [])].filter(v => v != null && Number.isFinite(v));
+  const rawTrafficMax = trafficVals.length ? Math.max(...trafficVals) : 0;
+  const trafficMax    = rawTrafficMax > 0 ? rawTrafficMax * 1.08 : 1;   // headroom; axis is hidden
 
   const drawType = plot ? 'line' : 'bar';
   const mkMoney = (label, data, color) => drawType === 'line'
@@ -824,6 +938,23 @@ function drawPerformanceOverview(d) {
       borderWidth: 2, fill: false, tension: 0.35, pointRadius: 0, pointHoverRadius: 4 },
   ];
 
+  // Traffic pair — dashed & on the hidden y2 scale so they group visually as "traffic" and don't
+  // add a third column of numbers. Two shades of violet keep them distinct from every solid line
+  // (green/cyan/magenta/red/yellow) while reading as one family. Omitted when data is unavailable.
+  if (!trafficMissing) {
+    const TRAFFIC_SESSIONS  = '#7C3AED'; // violet-600
+    const TRAFFIC_PAGEVIEWS = '#A78BFA'; // violet-400
+    const trafficLine = (label, data, color) => ({
+      label, data, yAxisID: 'y2', type: 'line', borderColor: color,
+      backgroundColor: 'transparent', borderDash: [5, 4], borderWidth: 2,
+      fill: false, tension: 0.35, pointRadius: 0, pointHoverRadius: 4,
+    });
+    datasets.push(
+      trafficLine('Sessions', sessions, TRAFFIC_SESSIONS),
+      trafficLine('Pageviews', pageviews, TRAFFIC_PAGEVIEWS),
+    );
+  }
+
   // Bar base with a line dataset mixed in (Chart.js honors per-dataset `type`).
   const fn = drawType === 'line' ? Charts.line : Charts.bar;
   guardDraw(fn.call(Charts, canvasId, {
@@ -832,8 +963,9 @@ function drawPerformanceOverview(d) {
       plugins: {
         legend: { display: true, position: 'top', labels: { color: c.textMuted, font: { size: 11 }, boxWidth: 10, boxHeight: 10 } },
         tooltip: { callbacks: {
-          label: (ctx) => ctx.dataset.yAxisID === 'y1'
-            ? `${ctx.dataset.label}: ${Math.round(ctx.raw || 0)}`
+          // y1 (Orders) and y2 (Traffic) are integer counts; everything else is money.
+          label: (ctx) => (ctx.dataset.yAxisID === 'y1' || ctx.dataset.yAxisID === 'y2')
+            ? `${ctx.dataset.label}: ${Math.round(ctx.raw || 0).toLocaleString('en-NZ')}`
             : `${ctx.dataset.label}: ${formatPrice(ctx.raw || 0)}`,
           // Revenue is what landed in the bank (incl-GST) and costs are what left it
           // (incl-GST), but PROFIT is measured net of GST — GST is collected on behalf of
@@ -843,15 +975,23 @@ function drawPerformanceOverview(d) {
         } },
       },
       scales: {
-        x: { ticks: { maxTicksLimit: 10 } },
-        // No `min: 0` — the money axis auto-scales below zero so a loss-making period reads as
-        // a dip under the baseline instead of being clipped flat. beginAtZero keeps 0 in view
-        // when everything is positive. The zero gridline is emphasised so break-even is obvious.
-        y:  { beginAtZero: true, position: 'left', ticks: { callback: (v) => formatPrice(v) },
+        x: { ticks: { maxTicksLimit: 12 } },
+        // Explicit min/max (not Chart.js auto) so the count axes can align their zeros to ours.
+        // moneyMin is negative only for a real loss, so loss periods still dip under the baseline;
+        // the finer stepSize gives more $ gridlines. The zero gridline is emphasised.
+        y:  { min: moneyMin, max: moneyMax, position: 'left',
+              ticks: { color: c.textMuted, font: { size: 11 }, stepSize: moneyStep, callback: (v) => formatPrice(v) },
               grid: { drawBorder: false, color: (gctx) => gctx.tick?.value === 0 ? c.textMuted : c.border } },
-        // Orders can't be negative — keep this axis clamped at 0.
-        y1: { beginAtZero: true, min: 0, position: 'right', grid: { drawOnChartArea: false },
-              ticks: { color: c.textMuted, font: { size: 11 }, precision: 0, callback: (v) => Math.round(v) } },
+        // Orders (count) — min set so orders-0 lands on the money-0 gridline (zeroFrac). Negative
+        // ticks the alignment introduces are blanked, so the axis never shows a negative order count.
+        y1: { min: ordersMax * zeroFrac, max: ordersMax, position: 'right', grid: { drawOnChartArea: false },
+              ticks: { color: c.textMuted, font: { size: 11 }, stepSize: ordersStep, callback: (v) => v < 0 ? '' : Math.round(v) } },
+        // Traffic (count) — hidden scale (no ticks/label), same zero alignment so the dashed lines
+        // never dip below the baseline. Only present when traffic data loaded.
+        ...(trafficMissing ? {} : {
+          y2: { min: trafficMax * zeroFrac, max: trafficMax, position: 'right', display: false,
+                grid: { drawOnChartArea: false } },
+        }),
       },
     },
   }), canvasId);
@@ -946,14 +1086,36 @@ async function loadDashboard() {
   const g = resolveGranularity();
   const cacheKey = params.toString();   // includes granularity via getParams()
 
-  // Stale-while-revalidate: warm cache paints instantly + dims while revalidating;
-  // cold first load → spinner; filter-change reload → keep page, dim it. All paths
-  // share the _loadSeq race guard so a stale fetch can't paint over a newer one.
+  // On the very first load of this module life (i.e. a full page refresh — the in-memory
+  // Map is empty), seed it from localStorage so the warm-cache branch below fires and we
+  // paint the last-known dashboard instantly instead of a spinner. Once-only: later filter
+  // changes rely on the in-memory Map, which is fresher than storage.
+  if (isOwner && !_storageHydrated) {
+    _storageHydrated = true;
+    if (!_payloadCache.has(cacheKey)) {
+      const persisted = _readPersistedPayload(cacheKey);
+      if (persisted) _payloadCache.set(cacheKey, persisted);
+    }
+  }
+
+  // Stale-while-revalidate: warm cache (in-memory OR seeded from storage) paints instantly
+  // in full colour while revalidating; cold first load with nothing cached → spinner;
+  // filter-change reload → keep the page on screen. All paths share the _loadSeq race guard
+  // so a stale fetch can't paint over a newer one.
   const cached = isOwner ? _payloadCache.get(cacheKey) : null;
   if (cached) {
-    render(cached);
-    _hasRenderedSuccessfully = true;
-    _container.classList.add('admin-page--reloading');
+    // Guard the repaint: a stale-shape payload that slipped past the version gate must not
+    // white-screen the page. On throw, drop the bad blob and fall back to the spinner.
+    try {
+      render(cached);
+      _hasRenderedSuccessfully = true;
+      _container.classList.add('admin-page--reloading');
+    } catch (err) {
+      window.DebugLog?.warn?.('[Dashboard] cached repaint failed — clearing persisted cache', err?.message || err);
+      _payloadCache.delete(cacheKey);
+      _clearPersistedPayload();
+      if (!_hasRenderedSuccessfully) _container.innerHTML = dashboardSkeleton();
+    }
   } else if (!_hasRenderedSuccessfully) {
     _container.innerHTML = dashboardSkeleton();
   } else {
@@ -968,6 +1130,11 @@ async function loadDashboard() {
   }
 
   const from = params.get('from'), to = params.get('to');
+  // Traffic time-series feeds the Performance overview's Sessions/Pageviews overlay. Its endpoint
+  // needs an explicit from/to; the all-time view leaves both blank, so pass a wide fallback (the
+  // backend clamps to available data and out-of-range rows drop during client-side re-bucketing).
+  const trafficFrom = from || '2000-01-01';
+  const trafficTo   = to   || new Date().toISOString().slice(0, 10);
   // One bundle call covers all 18 graph charts (backend's preferred path — avoids
   // the parallel fan-out that tripped the rate limiter). The KPI band, tables and
   // refund reasons stay on their existing dedicated endpoints. The last three feed the
@@ -988,6 +1155,7 @@ async function loadDashboard() {
     AdminAPI.getUnderMarginProducts('genuine', 1, 60, 'under-margin', 'net_margin', 'asc'),    // 9
     AdminAPI.getUnderMarginProducts('compatible', 1, 60, 'under-margin', 'net_margin', 'asc'), // 10
     AdminAPI.expenses.list({ limit: 1000 }),                 // 11  raw expense records → trend lines
+    AdminAPI.getTrafficTimeseries(trafficFrom, trafficTo, signal), // 12  Performance overview traffic overlay
   ];
 
   const results = await Promise.allSettled(promises);
@@ -1044,6 +1212,9 @@ async function loadDashboard() {
     // Raw expense records for the performance chart's Added/Total expense lines.
     // Fails soft to [] so a null expenses fetch just drops those two lines, never the page.
     expenseRows: (val(11)?.items) || [],
+    // Daily traffic rows for the Performance overview overlay; [] when the fetch failed or the
+    // range has no data → both traffic lines omit and the card notes it (never a misleading zero).
+    sTraffic: normalizeSeries(val(12)),
     ...graphs,
   };
 
@@ -1053,6 +1224,8 @@ async function loadDashboard() {
   if (_payloadCache.size > _PAYLOAD_CACHE_MAX) {
     _payloadCache.delete(_payloadCache.keys().next().value);
   }
+  // Write through to localStorage so the next full page refresh paints this view instantly.
+  _writePersistedPayload(cacheKey, payload);
 }
 
 // ---------- render ----------
@@ -1168,7 +1341,7 @@ function renderOverviewSection(d) {
       <div class="admin-dash">
         <div class="admin-dash__cell--12 admin-card">
           <div class="admin-card__title"><span>Performance overview <small>revenue · ${esc(profitWord)} · costs · orders — real values, not normalized</small></span></div>
-          <div class="admin-chart-box admin-chart-box--tall"><canvas id="dash-c-overview"></canvas></div>
+          <div class="admin-chart-box admin-chart-box--xtall"><canvas id="dash-c-overview"></canvas></div>
           <div id="dash-overview-notes"></div>
         </div>
       </div>
@@ -1294,8 +1467,17 @@ const MISSING_COST_PAGE = 100;
 const MISSING_COST_MAX_PAGES = 3;
 const MISSING_COST_BATCH = 6;          // keep the detail fan-out under the 60/min limiter
 
-const isInvoiceOrder = (o) => String(o?.payment_method || '').toLowerCase() === 'invoice'
-  || /^INV-/i.test(String(o?.order_number || ''));
+// Local copy of the orders.js predicate (canonical version + rationale: pages/orders.js
+// `isInvoiceOrder`). Importing it would drag DataTable/Drawer/Modal in for a one-line test,
+// so the rules are mirrored — INCLUDING the `channel` check, which this copy was missing.
+// Without it a backend that starts sending `channel: 'invoice'` on non-INV- numbered rows
+// would route them to the wrong page here while orders.js classified them correctly.
+const isInvoiceOrder = (o) => {
+  if (!o) return false;
+  if (o.channel) return String(o.channel).toLowerCase() === 'invoice';
+  if (o.payment_method) return String(o.payment_method).toLowerCase() === 'invoice';
+  return /^INV-/i.test(String(o.order_number || ''));
+};
 
 async function computeMissingCostAlert(range, kpis, signal) {
   const cogsUnknown = kpis?.current ? kpis.current.gross_profit == null : false;
@@ -1519,6 +1701,40 @@ function checkNetDrift(plan, kpiNet, bucketCount) {
 }
 
 /**
+ * Guard: a margin the backend reports must agree with the profit tile sitting beside it.
+ *
+ * We prefer the backend's own `margin_proxy` / `gross_margin` / `net_margin` (ERR-111 — its
+ * figure is authoritative and we do not want to re-derive what it already computed). But
+ * "prefer" cannot mean "render blindly": live 2026-07-22 the Net Margin tile read −29.3%
+ * while the Net Profit tile 40px away read −$19.67 on $7,728.48 of revenue, which is −0.29%.
+ * The strip contradicted itself and said nothing, because the frontend passed `cur.net_margin`
+ * straight through.
+ *
+ * So the backend figure now has to pass a consistency gate against the same profit and the
+ * same ex-GST base the tile beside it uses. When it fails we render the DERIVED figure —
+ * internal consistency across the strip beats deference to a number that disagrees with its
+ * own inputs — and the caller says so on the card. This does NOT stop reading the backend:
+ * an agreeing `margin_proxy` still wins, exactly as before.
+ *
+ * Tolerance is RELATIVE so it scales with the figure: a 100× scale error trips, a basis error
+ * (the ~13% understatement from an incl-GST denominator) trips, ordinary rounding does not.
+ * The 0.5pp floor keeps a near-zero margin from tripping on float noise.
+ *
+ * @returns null when the two agree (or either is unavailable), else the disagreement.
+ */
+function checkMarginConsistency(label, backendPct, derivedPct) {
+  if (backendPct == null || !Number.isFinite(backendPct)) return null;
+  if (derivedPct == null || !Number.isFinite(derivedPct)) return null;
+  const tolerance = Math.max(0.5, Math.abs(derivedPct) * 0.05);
+  const gap = backendPct - derivedPct;
+  if (Math.abs(gap) <= tolerance) return null;
+  // Ratio is the tell that names the failure mode (~100 = a scale bug) — but it is
+  // meaningless when the derived figure is ~0, so it stays null there rather than exploding.
+  const ratio = Math.abs(derivedPct) > 0.001 ? backendPct / derivedPct : null;
+  return { label, backend: backendPct, derived: derivedPct, gap, tolerance, ratio };
+}
+
+/**
  * Rebuild Gross/Net Profit from the backend's own per-bucket series when kpi-summary
  * drops them.
  *
@@ -1651,13 +1867,26 @@ function renderKpiStrip(d) {
     const base = exGst(revenue);
     return (profit != null && base) ? (profit / base) * 100 : null;
   };
-  const grossMarginPct     = cur.gross_margin  != null ? Number(cur.gross_margin)
+  // The backend's figure is preferred — but only once it agrees with the profit tile beside
+  // it (see checkMarginConsistency). A backend margin that contradicts its own profit and
+  // revenue is not authoritative, it is broken, and rendering it verbatim makes the strip lie.
+  const grossMarginBackend = cur.gross_margin  != null ? Number(cur.gross_margin)
                            : cur.margin_proxy  != null ? Number(cur.margin_proxy)
-                           : marginOf(grossProfit, cur.revenue);
+                           : null;
+  const grossMarginDerived = marginOf(grossProfit, cur.revenue);
+  const grossMarginCheck   = checkMarginConsistency('Gross Margin', grossMarginBackend, grossMarginDerived);
+  const grossMarginPct     = grossMarginCheck ? grossMarginDerived
+                           : (grossMarginBackend ?? grossMarginDerived);
+
+  const netMarginBackend   = cur.net_margin != null ? Number(cur.net_margin) : null;
+  const netMarginDerived   = marginOf(netProfit, cur.revenue);
+  const netMarginCheck     = checkMarginConsistency('Net Margin', netMarginBackend, netMarginDerived);
+  const netMarginPct       = netMarginCheck ? netMarginDerived
+                           : (netMarginBackend ?? netMarginDerived);
+
   const grossMarginPctPrev = prev.gross_margin != null ? Number(prev.gross_margin)
                            : prev.margin_proxy != null ? Number(prev.margin_proxy)
                            : marginOf(prev.gross_profit, prev.revenue);
-  const netMarginPct       = cur.net_margin    != null ? Number(cur.net_margin)    : marginOf(netProfit, cur.revenue);
   const netMarginPctPrev   = prev.net_margin   != null ? Number(prev.net_margin)   : marginOf(prev.net_profit, prev.revenue);
 
   // "—" on a profit tile is the honest answer when the backend can't compute COGS
@@ -1732,6 +1961,21 @@ function renderKpiStrip(d) {
     html += renderKpiTile(t, '', noDelta);
   }
   html += '</div>';
+
+  // Fail-soft must be LOUD. A margin that disagrees with the profit tile beside it is a
+  // data-integrity problem, not a footnote — the last time a backend figure silently
+  // contradicted its own inputs it went unnoticed for weeks (ERR-111). Say which number the
+  // backend sent, which one we're showing, and why.
+  for (const chk of [grossMarginCheck, netMarginCheck]) {
+    if (!chk) continue;
+    const scale = chk.ratio != null && Math.abs(Math.abs(chk.ratio) - 100) < 10
+      ? ' That is almost exactly 100× out, which is a scale bug at the source, not a rounding difference.'
+      : '';
+    html += `<p class="fh-pnl-note admin-dash-note--alert"><strong>${esc(chk.label)} doesn’t match its own profit figure.</strong>
+      The backend reported ${esc(fmtPct(chk.backend))}, but its own ${esc(chk.label === 'Net Margin' ? 'Net Profit' : 'Gross Profit')}
+      over ex-GST revenue gives ${esc(fmtPct(chk.derived))}. Showing the derived figure so this strip stays
+      internally consistent.${scale}</p>`;
+  }
   return html;
 }
 

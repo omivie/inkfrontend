@@ -447,6 +447,17 @@ function safeNum(v) {
   return Number.isFinite(n) ? n : 0;
 }
 
+// ⚠️ UNWIRED — no production caller. Referenced ONLY by tests/dashboard-trend-math.test.js.
+// The dashboard now plots the backend's own per-bucket `stripe_fees` off net_profit_series
+// (dashboard.js `feesByBucket`); this helper is left over from the client-derived era.
+//
+// DO NOT re-wire it without adding an invoiced-sale carve-out. It bills 2.65% + $0.30 against
+// EVERY dollar and EVERY order in the bucket, including invoiced (bank-transfer) sales that
+// never touched a card. The backend's own figure carves them out — verified against the live
+// 2026-07-20 payload, exact to 0.4c (pinned in tests/dashboard-net-series-jul2026.test.js
+// §10c) — and every per-sale path spreads NO_PAYMENT_FEES for them. This would silently
+// overstate fees by 0.0265 × invoice_revenue + 0.30 × invoice_orders.
+//
 // Per-bucket Stripe fee derived from gross revenue + order count.
 // 2.65% × gross + $0.30 × orders, then × 1.15 for the GST Stripe charges on its
 // fee (real cash outflow per the 2026-05-12 convention).

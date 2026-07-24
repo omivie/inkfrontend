@@ -1024,7 +1024,11 @@ const ProductSort = (function() {
             // Now strip color from the right. Multi-letter first so `BK` isn't
             // reduced to `B` (which would survive the single-letter pass).
             // PC = Photo Cyan, PM = Photo Magenta (Canon BCI6PC / BCI6PM).
-            suffix = suffix.replace(/(BK|CY|MG|YL|PK|MK|LC|LM|GY|PC|PM)$/, '');
+            // CLR = Tri-Colour single (HP 804XLCLR) — must strip WHOLE here,
+            // else the single-letter pass below strips only the trailing `R`
+            // and leaves `...CL`, forking the tri-colour off its base family.
+            // NOT `CL`: bare `CL` means Clear, a different cartridge.
+            suffix = suffix.replace(/(BK|CY|MG|YL|PK|MK|LC|LM|GY|PC|PM|CLR)$/, '');
             suffix = suffix.replace(/(K|C|M|Y|R|G|B)$/, '');
             base = prefix + digits + suffix;
         } else {

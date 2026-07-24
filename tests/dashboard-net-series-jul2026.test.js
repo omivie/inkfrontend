@@ -98,15 +98,18 @@ sandbox.globalThis = sandbox;
 const ctx = vm.createContext(sandbox);
 vm.runInContext(
   [lift('numOrNull'), lift('resolveList'), lift('buildOverviewBuckets'),
-   lift('planProfitLine'), lift('checkNetDrift'), lift('recoverProfitFromSeries')].join('\n\n')
+   lift('planProfitLine'), lift('checkNetDrift'), lift('checkMarginConsistency'),
+   lift('recoverProfitFromSeries')].join('\n\n')
   + '\n;globalThis.buildOverviewBuckets = buildOverviewBuckets;'
   + '\n;globalThis.planProfitLine = planProfitLine;'
   + '\n;globalThis.checkNetDrift = checkNetDrift;'
+  + '\n;globalThis.checkMarginConsistency = checkMarginConsistency;'
   + '\n;globalThis.recoverProfitFromSeries = recoverProfitFromSeries;',
   ctx,
   { filename: 'dashboard-lifted.js' },
 );
-const { buildOverviewBuckets, planProfitLine, checkNetDrift, recoverProfitFromSeries } = sandbox;
+const { buildOverviewBuckets, planProfitLine, checkNetDrift, checkMarginConsistency,
+        recoverProfitFromSeries } = sandbox;
 
 // trend-math is a real ES module with no DOM deps — strip `export` and run it.
 const trendSandbox = { console, Math, Number, Object, Array, String, Boolean, JSON, Error, Date };
@@ -464,6 +467,96 @@ test('the derived margin base is ex-GST revenue, not the GST-inclusive figure', 
   assert.equal(round(right), 21.94);
   assert.ok(Math.abs(right - LIVE_CURRENT.margin_proxy) < 0.05,
     'the ex-GST base must agree with the backend’s margin_proxy');
+});
+
+// ─── 10b. Margin consistency gate (ERR-113) ─────────────────────────────────
+//
+// Live 2026-07-22, period=all: revenue 7728.48, gross_profit 1418.44, net_profit −19.67.
+// The Net Margin tile read −29.3% while −19.67 / (7728.48 × 20/23) = −0.29% — the tile
+// contradicted the Net Profit tile beside it by ~100×, and the frontend passed the backend's
+// figure through in silence. Preferring the backend is right; rendering it BLINDLY is not.
+
+const LIVE_0722 = { revenue: 7728.48, gross_profit: 1418.44, net_profit: -19.67 };
+const exGst = (rev) => rev * (20 / 23);
+const derivedMargin = (profit, rev) => (profit / exGst(rev)) * 100;
+
+test('the live −29.3% net margin is caught: it disagrees with its own profit tile', () => {
+  const derived = derivedMargin(LIVE_0722.net_profit, LIVE_0722.revenue);
+  assert.equal(round(derived), -0.29, 'the honest figure is −0.29%, not −29.3%');
+  const chk = checkMarginConsistency('Net Margin', -29.3, derived);
+  assert.ok(chk, 'a 100× disagreement must trip the gate');
+  assert.equal(chk.backend, -29.3);
+  assert.ok(Math.abs(Math.abs(chk.ratio) - 100) < 10, 'the ratio must name it as a scale bug');
+});
+
+test('an agreeing margin_proxy stays silent — this gate does not stop trusting the backend', () => {
+  // The live 2026-07-20 pair: margin_proxy 21.9 vs derived 21.94. Pure rounding.
+  const derived = derivedMargin(LIVE_CURRENT.gross_profit, LIVE_CURRENT.revenue);
+  assert.equal(round(derived), 21.94);
+  assert.equal(checkMarginConsistency('Gross Margin', LIVE_CURRENT.margin_proxy, derived), null);
+});
+
+test('the ERR-111 incl-GST basis error still trips the gate', () => {
+  // 19.07% (÷ GST-inclusive revenue) vs 21.94% (÷ ex-GST). The gate is a second net under
+  // the original defect: if the base ever regresses, the strip says so out loud.
+  assert.ok(checkMarginConsistency('Gross Margin', 19.07, 21.94));
+});
+
+test('ordinary rounding never trips it, and a near-zero margin does not explode', () => {
+  assert.equal(checkMarginConsistency('Gross Margin', 21.9, 21.94), null);
+  assert.equal(checkMarginConsistency('Net Margin', 0.01, 0.02), null, '0.5pp floor absorbs float noise');
+  const chk = checkMarginConsistency('Net Margin', 40, 0.0001);
+  assert.equal(chk.ratio, null, 'a ~0 denominator must not produce an absurd ratio');
+});
+
+test('unknown on either side is not a disagreement', () => {
+  assert.equal(checkMarginConsistency('Net Margin', null, 12), null);
+  assert.equal(checkMarginConsistency('Net Margin', 12, null), null);
+  assert.equal(checkMarginConsistency('Net Margin', NaN, 12), null);
+});
+
+test('renderKpiStrip shows the DERIVED figure when the gate trips, and says so loudly', () => {
+  const body = functionBody(src, 'renderKpiStrip');
+  assert.match(body, /grossMarginCheck\s*\?\s*grossMarginDerived/,
+    'a failing gross gate must fall back to the derived figure');
+  assert.match(body, /netMarginCheck\s*\?\s*netMarginDerived/,
+    'a failing net gate must fall back to the derived figure');
+  assert.match(body, /admin-dash-note--alert/,
+    'the disagreement must be surfaced in the UI, not just swapped silently');
+  assert.match(body, /esc\(fmtPct\(chk\.backend\)\)/, 'the note must name the backend’s own figure');
+});
+
+// ─── 10c. Backend stripe_fees convention (ERR-114) ──────────────────────────
+//
+// Reverse-engineered from the live 2026-07-20 payload above, exact to 0.4 of a cent. Pinned
+// because it is the ONLY record of the backend's fee formula anywhere in this repo, and
+// because it disagrees with profitability.js by 15%.
+
+test('backend stripe_fees DOES carve out invoiced (bank-transfer) sales', () => {
+  const naive = 0.0265 * LIVE_CURRENT.revenue + 0.30 * LIVE_CURRENT.orders;
+  assert.ok(LIVE_CURRENT.stripe_fees < naive - 1,
+    'if this ever equals the naive figure, invoiced sales are being charged a card fee they never paid');
+});
+
+test('backend stripe_fees = (2.65% × card revenue + $0.30 × card orders) × 20/23', () => {
+  const cardRevenue = LIVE_CURRENT.revenue - LIVE_CURRENT.invoice_revenue;
+  const cardOrders  = LIVE_CURRENT.orders  - LIVE_CURRENT.invoice_orders;
+  const feeInclGst  = 0.0265 * cardRevenue + 0.30 * cardOrders;
+  assert.equal(round(feeInclGst * 20 / 23), LIVE_CURRENT.stripe_fees,
+    'the backend treats the 2.65% + $0.30 as GST-INCLUSIVE and strips GST to express it ex-GST');
+});
+
+test('DIVERGENCE: profitability.js treats the same rate as ex-GST — 15% apart', () => {
+  // profitability.js: stripeFee = base × 0.0265 + 0.30, deducted ex-GST, with GST ADDED on top
+  // (computeProfitBreakdown.stripeFeeGst). The backend divides the identical expression by 1.15.
+  // Both cannot be right. Whichever is, the order modal and the dashboard currently disagree by
+  // 15% of every card fee — $26.80 all-time on this payload.
+  const cardRevenue = LIVE_CURRENT.revenue - LIVE_CURRENT.invoice_revenue;
+  const cardOrders  = LIVE_CURRENT.orders  - LIVE_CURRENT.invoice_orders;
+  const feStyle = 0.0265 * cardRevenue + 0.30 * cardOrders;   // ex-GST per profitability.js
+  const beStyle = LIVE_CURRENT.stripe_fees;                    // ex-GST per the backend
+  assert.equal(round(feStyle - beStyle), 26.80);
+  assert.equal(round(feStyle / beStyle), 1.15);
 });
 
 // ─── 11. Source wiring ──────────────────────────────────────────────────────
