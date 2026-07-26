@@ -219,15 +219,20 @@ test('the "add a cost" copy fires ONLY when culprits were actually found', () =>
     src, /showMissing\s*=\s*!!\(missingCost && \(missingCost\.count > 0 \|\| missingCost\.cogsUnknown\)\)/,
     'the old cogsUnknown-keyed gate is what made the card lie (ERR-074)',
   );
-  assert.match(src, /const hasCulprits\s*=\s*!!\(missingCost && missingCost\.count > 0\)/);
+  // The scan runs off the critical path now (ERR-121), so "found culprits" additionally
+  // requires a SETTLED scan — a pending or failed scan is not a count of zero.
+  assert.match(src, /const hasCulprits\s*=\s*scanSettled && missingCost\.count > 0/);
+  assert.match(src, /const scanSettled\s*=\s*!!missingCost && !scanPending && !scanFailed/);
   assert.match(
-    src, /if \(hasCulprits\) \{\s*cards\.push\(alertCard\(\s*'Sales missing a cost'/,
+    src, /else if \(hasCulprits\) \{\s*cards\.push\(alertCard\(\s*'Sales missing a cost'/,
     'the actionable "Sales missing a cost" card must be gated on hasCulprits',
   );
 });
 
 test('no culprits + unrecoverable profit → blames the endpoint, not the owner’s data', () => {
-  assert.match(src, /const showDegraded = !hasCulprits && cur\.gross_profit == null && !recovered/);
+  // `scanSettled &&` guard added with ERR-121: "we looked and found nothing" is only
+  // claimable once the scan has actually finished.
+  assert.match(src, /const showDegraded = scanSettled && !hasCulprits && cur\.gross_profit == null && !recovered/);
   assert.match(src, /alertCard\('Profit unavailable'/);
   // …and it must NOT show when the rebuild worked — the dashboard is functional then.
   assert.match(src, /!recovered/);
@@ -245,14 +250,16 @@ test('a truncated or partly-failed scan is never reported as a clean bill of hea
 // ─── 6. The scan must look where the culprits actually are ──────────────────
 
 test('the missing-cost scan owns its fetch and takes EVERY status', () => {
-  const call = src.match(/computeMissingCostAlert\(([^)]*)\)/g) || [];
+  // ERR-121 moved the scan off the critical path, so the range now reaches it via
+  // startMissingCostScan rather than a direct awaited call — the contract is unchanged.
+  const call = src.match(/(?:computeMissingCostAlert|startMissingCostScan)\(([^)]*)\)/g) || [];
   assert.ok(
     call.some(c => c.includes('{ from, to }')),
     'must pass a range and fetch its own orders — reusing the tracking list (paid|processing '
     + 'only, limit 50) is what blinded it: 10 of 59 live orders are shipped/completed',
   );
   assert.doesNotMatch(
-    src, /computeMissingCostAlert\(val\(8\)/,
+    src, /(?:computeMissingCostAlert|startMissingCostScan)\(val\(8\)/,
     'index 8 is the tracking card\'s paid|processing list — do not reuse it here',
   );
   // The fetch inside the scan must carry NO statuses key, or api.js re-adds the filter.

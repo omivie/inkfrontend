@@ -4,6 +4,76 @@ Log every error encountered here. Before editing a file, scan for known issues. 
 
 ---
 
+## ERR-120 — No admin surface for page copy; the safe rebuild, and the two traps it had to walk around (2026-07-27)
+
+**Asked:** "do we have a place in the admin center where I can change what is on the pages such as
+the about us page or the policy page?" **Answer was no** — and deliberately so: the legal-content
+CMS was deleted end-to-end on 2026-07-14 (ERR-065 → ERR-069) and is pinned deleted by 21 tests.
+Editing a sentence meant hand-editing HTML.
+
+**Why it was buildable after all.** `inkcartridges/middleware.js`'s bot matcher covers only `/`,
+`/shop`, `/ribbons`, `/ink-cartridges`, `/toner-cartridges` and product routes. **None of the seven
+content pages is prerendered** — bots and humans receive the identical static file. The thing that
+killed the old CMS was never "an editor"; it was editing at **render time**, which produced two
+documents from one URL (served HTML ≠ rendered DOM = cloaking).
+
+**The design rule, and the whole feature in one line:** the editor rewrites
+`inkcartridges/html/<doc>.html` **in git, at author time**, then opens a PR. It is a GUI over a git
+commit, not a CMS. There is still exactly one artifact, so `curl`, a browser and AdsBot cannot
+disagree. `js/legal-page.js` is not touched, imported or extended — the storefront runtime gains
+nothing and keeps its zero-network-I/O property.
+
+**Trap 1 — contentEditable is lossy against this markup, in two ways that would have shipped.**
+- `RichTextEditor.sanitizeHTML()` strips **every** `class` attribute and unwraps attribute-less
+  `<span>`s. Pointed at `returns#snapshot` it destroys `div.policy-callout` outright.
+- `innerHTML` decodes `&rsquo;`/`&sect;`/`&ndash;` to literal characters. That one is worse than it
+  looks: `tests/genuine-vs-compatible-warranty.test.js` normalises `&rsquo;` before matching its
+  two legally-vetted sentences, so writing a literal `’` renders identically and turns CI **red**.
+
+  Fix: a DOM-free block model (`js/admin/utils/page-copy-model.js`) is the ONLY thing that writes
+  markup. Text is **decoded on parse and re-encoded on serialize**, so the two input paths — file
+  (`&rsquo;`) and contentEditable (`’`) — converge on identical bytes. `editor.innerHTML` is parsed
+  INTO the model and discarded; it never reaches a file. Watch `\s` in any collapse: it matches
+  U+00A0 in JavaScript, so a careless `.replace(/\s+/g,' ')` silently eats every deliberate NBSP.
+
+**Trap 2 — a first edit would have reflowed its whole section.** The editor writes by serializing
+the model, and the hand-authored files were not in that canonical form. The owner's first save
+would have produced an unreviewable diff, indistinguishable from a mangling bug. Fix: one
+deliberate pure-formatting pass (`scripts/canonicalise-page-copy.mjs`, editable regions only —
+locked ones stay byte-exact). Verified text-preserving: **rendered text, `data-legal-bind` count,
+`<script ?v=>` lines, `<h2>`s and ids all identical to HEAD across all 7 files**, full suite
+2784/0. Real edits now diff to one line.
+
+**Guards are the point, not the WYSIWYG** (`js/admin/utils/page-copy-guards.js`, run client-side
+for feedback and — per `page-copy-editor-backend-brief.md` — server-side as the authority):
+tag/attr allowlist (this writes into a shipped page = stored-XSS with a permanent payload),
+`data-legal-bind` multiset equality (inventing a key is as fatal as deleting one — §5 of the
+retired-CMS suite asserts `legal-page.js` implements every key in the HTML), business facts banned
+as plain prose outside their binding, `LegalConfig.BANNED_CLAIM_PATTERNS` on entity-decoded
+whitespace-collapsed text, and `requiredPhrases` for sentences CI pins. **Every failure is a hard
+reject naming the node, never a silent strip** — a silent sanitise is ERR-069's "Saved. Live on
+next page-load." in a different costume. A missing config → `GUARD_UNAVAILABLE`, refuse the save;
+an absent list must never read as "no violations found" (ERR-063/068/075).
+
+**Fail closed, both directions.** The manifest (`page-copy-regions.js`) is an authoring **gate**,
+so an unlisted section is read-only and a test goes red until someone decides — the opposite of
+ERR-063's `FILES_TO_SCAN`, which was a **scanner** allowlist and failed open. The parser returns
+`null` for anything it cannot classify; the region renders read-only with an explanation rather
+than being "parsed as best we can" and written back.
+
+**Naming, to stay clear of the 21 retired-CMS assertions:** module is `pages/page-copy.js` (never
+`legal-content.js`); a top-level `Content` nav group, not a Settings tab with `id:'legal'`;
+`ROUTE_REDIRECTS['legal-content']` left byte-identical at `'settings'` (it is an equality
+assertion — repointing it at the new page turns that suite red); the retired table name appears
+nowhere, code, comment or brief.
+
+**Pinned by** `tests/page-copy-editor-jul2026.test.js` (40 tests: canonical form, idempotence,
+splice fidelity, every guard, manifest integrity, retired-CMS avoidance).
+**Backend is PENDING** — `page-copy-editor-backend-brief.md`. Until it ships, the frontend probes,
+gets a 404, says **"Publishing is not available"** in those words, and offers Copy diff / Download.
+
+---
+
 ## ERR-119 — Order line-items table INVISIBLE on every order: scroll wrapper collapsed to height 0 in the modal's column flex (2026-07-24)
 
 **Reported ("where did the products go?" ×3).** The order-detail modal showed NO line-items table —

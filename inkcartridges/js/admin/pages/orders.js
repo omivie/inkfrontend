@@ -12,6 +12,62 @@ const formatPrice = (v) => window.formatPrice ? window.formatPrice(v) : `$${Numb
 const MISSING = '\u2014';
 
 /**
+ * Which order statuses the backend will actually let us DELETE.
+ *
+ * `DELETE /api/admin/orders/:id` enforces a cancelled-only guard server-side and
+ * rejects anything else with "Only cancelled orders can be deleted" (ERR-119).
+ * That string lives ONLY on the backend \u2014 never re-implement the rule inline.
+ * This list is the single source of truth for BOTH the single-order Delete button
+ * and the bulk bar, so the two can never drift apart again. When the backend ships
+ * the owner-only hard purge (see backend-fixes.md), this is the only thing to change.
+ */
+const DELETABLE_STATUSES = ['cancelled'];
+const NOT_DELETABLE_REASON = 'Only cancelled orders can be deleted \u2014 change the status first.';
+
+function isDeletable(order) {
+  return DELETABLE_STATUSES.includes(String(order?.status || '').toLowerCase());
+}
+
+/**
+ * Selection survives pagination (DataTable.setData does not clear it), so the bulk
+ * bar can hold ids whose rows are no longer in `_table.data`. Remember every order
+ * we have seen this session so we can still read a selected order's status \u2014 and
+ * therefore its deletability \u2014 after the admin has paged away from it.
+ */
+const _seenOrders = new Map();
+
+function rememberOrders(rows) {
+  for (const r of rows || []) {
+    if (r && r.id) _seenOrders.set(r.id, { order_number: r.order_number, status: r.status });
+  }
+}
+
+function lookupOrder(id) {
+  return (_table?.data || []).find(r => r.id === id) || _seenOrders.get(id) || null;
+}
+
+function orderLabel(id) {
+  const o = lookupOrder(id);
+  return o?.order_number || String(id || '').slice(0, 8) || 'order';
+}
+
+/**
+ * Split a bulk selection into what we can delete and what the backend would refuse.
+ * An id we cannot resolve to a status counts as blocked: firing a request we know
+ * may be rejected is worse than telling the admin we can't vouch for it.
+ */
+function partitionSelection(selected) {
+  const deletable = [];
+  const blocked = [];
+  for (const id of selected) {
+    const order = lookupOrder(id);
+    if (order && isDeletable(order)) deletable.push(id);
+    else blocked.push(id);
+  }
+  return { deletable, blocked };
+}
+
+/**
  * Is this order an invoiced sale (phone / walk-in / B2B) rather than a website order?
  *
  * The backend materialises a saved invoice as a shadow `orders` row. It sets
@@ -213,6 +269,7 @@ async function loadOrders() {
     page: _page,
     limit: 20,
   };
+  rememberOrders(rows);
   _table.setData(rows, pagination);
 }
 
@@ -229,10 +286,24 @@ function updateBulkBar(selected) {
     _bulkBar.className = 'admin-bulk-bar';
     document.body.appendChild(_bulkBar);
   }
+  // Only offer a delete the backend can actually honour. Previously the bulk bar
+  // rendered Delete unconditionally while the single-order button was gated to
+  // cancelled-only, so selecting a paid order sent a request that always failed
+  // with "0 deleted, 1 failed: Only cancelled orders can be deleted" (ERR-119).
+  const { deletable, blocked } = partitionSelection(selected);
+  const nothingDeletable = deletable.length === 0;
+  const deleteLabel = blocked.length > 0 && !nothingDeletable
+    ? `Delete ${deletable.length} of ${count}`
+    : 'Delete';
+
   _bulkBar.innerHTML = `
-    <span class="admin-bulk-bar__count">${count} selected</span>
+    <span class="admin-bulk-bar__count">${count} selected${
+      blocked.length > 0 ? ` · <span style="color:var(--warning,#b45309)">${blocked.length} not deletable</span>` : ''
+    }</span>
     <div class="admin-bulk-bar__actions">
-      <button class="admin-btn admin-btn--sm admin-btn--danger" data-bulk="delete">Delete</button>
+      <button class="admin-btn admin-btn--sm admin-btn--danger" data-bulk="delete"${
+        nothingDeletable ? ' disabled' : ''
+      } title="${esc(nothingDeletable ? NOT_DELETABLE_REASON : `Delete ${deletable.length} cancelled order${deletable.length > 1 ? 's' : ''}`)}">${deleteLabel}</button>
       <button class="admin-btn admin-btn--sm admin-btn--ghost" data-bulk="clear">Clear</button>
     </div>
   `;
@@ -243,35 +314,74 @@ function updateBulkBar(selected) {
   });
 }
 
+/**
+ * Report a partially-successful bulk delete LOUDLY: name every order that failed
+ * and why, rather than collapsing N distinct rejections into one error string.
+ *
+ * Deferred behind a timeout because Modal.confirm calls Modal.close() *after* its
+ * onConfirm resolves \u2014 opening this synchronously would have it closed instantly.
+ */
+function showDeleteResults({ done, failures, skipped }) {
+  const rows = [
+    ...failures.map(f => `<li><strong>${esc(f.label)}</strong> \u2014 ${esc(f.message)}</li>`),
+    ...skipped.map(id => `<li><strong>${esc(orderLabel(id))}</strong> \u2014 ${esc(NOT_DELETABLE_REASON)}</li>`),
+  ].join('');
+
+  setTimeout(() => {
+    Modal.open({
+      title: 'Delete finished with problems',
+      body: `
+        <p style="margin:0 0 12px;color:var(--text-secondary)">
+          ${done} order${done === 1 ? '' : 's'} deleted.
+          ${failures.length + skipped.length} not deleted:
+        </p>
+        <ul style="margin:0;padding-left:18px;color:var(--text-secondary);line-height:1.7">${rows}</ul>
+      `,
+      footer: `<button class="admin-btn admin-btn--ghost" data-action="dismiss">Close</button>`,
+    })?.footer.querySelector('[data-action="dismiss"]')?.addEventListener('click', () => Modal.close());
+  }, 320);
+}
+
 async function bulkDelete() {
   if (!_table) return;
   const selected = _table.getSelected();
-  const count = selected.size;
-  if (count === 0) return;
+  if (selected.size === 0) return;
+
+  // Never send ids the backend's cancelled-only guard will reject (ERR-119) \u2014
+  // they are reported as skipped instead.
+  const { deletable: ids, blocked: skipped } = partitionSelection(selected);
+  if (ids.length === 0) {
+    Toast.error(NOT_DELETABLE_REASON);
+    return;
+  }
+
+  const count = ids.length;
+  const skipNote = skipped.length > 0
+    ? ` ${skipped.length} selected order${skipped.length > 1 ? 's are' : ' is'} not cancelled and will be skipped.`
+    : '';
 
   Modal.confirm({
     title: 'Delete Orders',
-    message: `Permanently delete ${count} order${count > 1 ? 's' : ''}? This cannot be undone.`,
+    message: `Permanently delete ${count} cancelled order${count > 1 ? 's' : ''}? This cannot be undone.${skipNote}`,
     confirmLabel: `Delete ${count}`,
     confirmClass: 'admin-btn--danger',
     onConfirm: async () => {
-      const ids = [...selected];
       let done = 0;
-      let failed = 0;
-      let firstError = null;
+      const failures = [];
       Toast.info(`Deleting ${count} order${count > 1 ? 's' : ''}\u2026`);
       for (let i = 0; i < ids.length; i += 5) {
         const batch = ids.slice(i, i + 5);
         const results = await Promise.allSettled(batch.map(id => AdminAPI.deleteOrder(id)));
-        for (const r of results) {
+        results.forEach((r, j) => {
           if (r.status === 'fulfilled') done++;
-          else { failed++; firstError = firstError || r.reason?.message; }
-        }
+          else failures.push({ label: orderLabel(batch[j]), message: r.reason?.message || 'Delete failed' });
+        });
       }
       if (_table) _table.clearSelection();
       updateBulkBar(new Set());
-      if (failed > 0) {
-        Toast.error(`${done} deleted, ${failed} failed${firstError ? `: ${firstError}` : ''}`);
+      if (failures.length > 0 || skipped.length > 0) {
+        Toast.error(`${done} deleted, ${failures.length + skipped.length} not deleted`);
+        showDeleteResults({ done, failures, skipped });
       } else {
         Toast.success(`${done} order${done > 1 ? 's' : ''} deleted`);
       }
@@ -618,7 +728,7 @@ function buildOrderModalContent(modal, o, events, breakdown, { detailLoadFailed 
     `<button class="admin-btn admin-btn--ghost admin-btn--sm" data-action="resend-invoice">${icon('mail', 13, 13)} Resend Invoice</button>`,
     `<button class="admin-btn admin-btn--danger admin-btn--sm" data-action="create-refund">${icon('refunds', 13, 13)} Refund</button>`,
   ];
-  if (o.status === 'cancelled') {
+  if (isDeletable(o)) {
     btns.push(`<button class="admin-btn admin-btn--ghost admin-btn--sm" style="color:var(--danger);border-color:var(--danger)" data-action="delete">${icon('trash', 13, 13)} Delete</button>`);
   }
   modal.querySelector('#om-header-actions').innerHTML =
@@ -651,7 +761,7 @@ function bindModalActions(modal, order) {
     }
   });
 
-  if (order.status === 'cancelled') {
+  if (isDeletable(order)) {
     modal.querySelector('[data-action="delete"]')?.addEventListener('click', () => {
       Modal.confirm({
         title: 'Delete Order',

@@ -1079,7 +1079,17 @@ function bundleToGraphs(b) {
 async function loadDashboard() {
   if (!_container) return;
   const mySeq = ++_loadSeq;
+  FilterState.setBusy(true);
+  try {
+    await runDashboardLoad(mySeq);
+  } finally {
+    // Only the newest load clears the spinner. A superseded load finishing late must not
+    // signal "done" while the fetch the user is actually waiting on is still in flight.
+    if (mySeq === _loadSeq) FilterState.setBusy(false);
+  }
+}
 
+async function runDashboardLoad(mySeq) {
   const params = FilterState.getParams();
   const signal = FilterState.getAbortSignal();
   const isOwner = AdminAuth.isOwner();
@@ -1144,17 +1154,17 @@ async function loadDashboard() {
     AdminAPI.getDashboardKPIs(params, signal),               // 1  KPI band
     AdminAPI.getCustomerStats(params, signal),               // 2  new / returning KPI
     AdminAPI.getRefundAnalytics(params, signal),             // 3  refund reasons + rate KPI
-    AdminAPI.getOutOfStock({ limit: 5 }),                    // 4  out-of-stock KPI
+    AdminAPI.getOutOfStock({ limit: 5 }, signal),            // 4  out-of-stock KPI
     AdminAPI.getOrders({ from, to }, 1, 8, signal),          // 5  recent orders table
     AdminAPI.getTopProducts(params, signal),                 // 6  most-bought table
-    AdminAPI.getTrackingRequests({ status: 'pending' }),     // 7  alert: orders needing tracking
+    AdminAPI.getTrackingRequests({ status: 'pending' }, signal), // 7  alert: orders needing tracking
     AdminAPI.getOrders({ from, to, statuses: ['paid', 'processing'] }, 1, 50, signal), // 8  alert: untracked open orders
     // Worst-margin SKUs + low-margin alert. The endpoint needs a concrete source ('' → 400),
     // so fetch genuine + compatible worst-first and merge. limit:60 each gives a deep enough
     // tail to count everything under the alert threshold accurately for this catalog.
-    AdminAPI.getUnderMarginProducts('genuine', 1, 60, 'under-margin', 'net_margin', 'asc'),    // 9
-    AdminAPI.getUnderMarginProducts('compatible', 1, 60, 'under-margin', 'net_margin', 'asc'), // 10
-    AdminAPI.expenses.list({ limit: 1000 }),                 // 11  raw expense records → trend lines
+    AdminAPI.getUnderMarginProducts('genuine', 1, 60, 'under-margin', 'net_margin', 'asc', signal),    // 9
+    AdminAPI.getUnderMarginProducts('compatible', 1, 60, 'under-margin', 'net_margin', 'asc', signal), // 10
+    AdminAPI.expenses.list({ limit: 1000 }, signal),          // 11  raw expense records → trend lines
     AdminAPI.getTrafficTimeseries(trafficFrom, trafficTo, signal), // 12  Performance overview traffic overlay
   ];
 
@@ -1166,15 +1176,14 @@ async function loadDashboard() {
 
   // Which sales are stopping the backend computing profit? This owns its own order fetch —
   // it must see EVERY status, and index 8 is filtered to paid|processing for the tracking
-  // card. Reusing it is what made this scan blind (ERR-074). Never blocks the render: it
-  // fails soft to null.
-  let missingCost = null;
-  try {
-    missingCost = await computeMissingCostAlert({ from, to }, val(1), signal);
-  } catch (err) {
-    window.DebugLog?.warn?.('[Dashboard] missing-cost alert failed', err?.message || err);
-  }
-  if (mySeq !== _loadSeq || !_container) return;   // the await above is a fresh race window
+  // card. Reusing it is what made this scan blind (ERR-074).
+  //
+  // ⚠ It is DELIBERATELY NOT AWAITED HERE. The scan costs up to ~1 order-list page plus 120
+  // order-detail GETs; awaiting it put ~20 sequential round-trips between "all chart data has
+  // arrived" and "anything is on screen", which is what made the whole dashboard — the
+  // Performance overview most visibly — take seconds to paint for one alert card's sake.
+  // It now runs in the background and patches only its own card (see startMissingCostScan).
+  const missingCost = { pending: true, cogsUnknown: val(1)?.current ? val(1).current.gross_profit == null : false };
 
   // Graphs come solely from the resilient bundle (per-chart isolation server-side;
   // a failed sub-chart → null key → that one tile's empty state). We deliberately
@@ -1226,6 +1235,46 @@ async function loadDashboard() {
   }
   // Write through to localStorage so the next full page refresh paints this view instantly.
   _writePersistedPayload(cacheKey, payload);
+
+  // Everything above is on screen. NOW pay for the missing-cost scan, off the critical path.
+  startMissingCostScan({ from, to }, val(1), signal, mySeq, cacheKey, payload);
+}
+
+/**
+ * Run the missing-cost scan in the background and patch its card in place when it lands.
+ *
+ * Not awaited by the caller — that is the entire point. The result is written back into the
+ * payload object that is already banked in `_payloadCache` (same object reference) and
+ * re-persisted, so a later stale-while-revalidate repaint shows the real count instead of a
+ * frozen "checking…".
+ */
+function startMissingCostScan(range, kpis, signal, mySeq, cacheKey, payload) {
+  computeMissingCostAlert(range, kpis, signal)
+    .then((result) => {
+      // A scan that resolved to nothing at all is not a clean bill of health.
+      applyMissingCost(payload, result || { failed: true, cogsUnknown: payload.missingCost?.cogsUnknown }, mySeq, cacheKey);
+    })
+    .catch((err) => {
+      if (err?.name === 'AbortError' || signal?.aborted) return;   // superseded load / left the page
+      window.DebugLog?.warn?.('[Dashboard] missing-cost scan failed', err?.message || err);
+      applyMissingCost(payload, { failed: true, cogsUnknown: payload.missingCost?.cogsUnknown }, mySeq, cacheKey);
+    });
+}
+
+// Patch the banked payload + the "Action needed" panel with a settled (or failed) scan.
+// Repaints ONLY that panel — re-rendering the whole dashboard would tear down and rebuild
+// all 18 Chart.js instances for one card.
+function applyMissingCost(payload, missingCost, mySeq, cacheKey) {
+  payload.missingCost = missingCost;
+  // Re-persist so a cold load repaints the settled count, not the pending placeholder.
+  if (_payloadCache.get(cacheKey) === payload) _writePersistedPayload(cacheKey, payload);
+
+  // Same race guard as the main load: a superseded scan must never paint over a newer one.
+  if (mySeq !== _loadSeq || !_container) return;
+  const mount = _container.querySelector(`#${ALERTS_MOUNT_ID}`);
+  if (!mount) return;   // page re-rendered from a different path; the banked payload still has it
+  mount.innerHTML = renderAlertsSection(payload);
+  wireAlertToggles(mount);
 }
 
 // ---------- render ----------
@@ -1255,7 +1304,7 @@ function render(d) {
     </div>
     ${renderKpiStrip(d)}
     ${renderOverviewSection(d)}
-    ${renderAlertsSection(d)}
+    <div id="${ALERTS_MOUNT_ID}">${renderAlertsSection(d)}</div>
     ${rowN('Products', 'cyan', [
       chartCard('Top SKUs by revenue', 'top 8', 'dash-c-sku-revenue', 4),
       chartCard('Top SKUs by gross profit', 'top 8', 'dash-c-sku-profit', 4),
@@ -1356,6 +1405,11 @@ function renderOverviewSection(d) {
 // and expands to the full list on demand (wireAlertToggles).
 const ALERT_PREVIEW = 5;
 
+// The "Action needed" panel is the ONE region that repaints on its own, after first paint:
+// the missing-cost scan is deliberately off the critical path (see runDashboardLoad), so the
+// panel first renders a pending state and is re-rendered in place when the scan lands.
+const ALERTS_MOUNT_ID = 'dash-alerts-mount';
+
 function alertCard(title, count, why, items, sev, emptyMsg, span = 4) {
   const rows = items.length
     ? items.map(it => {
@@ -1402,11 +1456,18 @@ function renderAlertsSection(d) {
   // profit is missing. "Action needed" must mean the owner can act.
   const cur = d.kpis?.current ?? {};
   const recovered = recoverProfitFromSeries(cur, d.sGrossProfit);
-  const hasCulprits  = !!(missingCost && missingCost.count > 0);
+  // The scan no longer blocks first paint, so it has two states the card must not conflate
+  // with a result: still running, and failed. Neither is "0 sales missing a cost" — presenting
+  // an unfinished or failed scan as a clean bill of health is the ERR-074 bug wearing a new hat.
+  const scanPending = !!missingCost?.pending;
+  const scanFailed  = !!missingCost?.failed;
+  const scanSettled = !!missingCost && !scanPending && !scanFailed;
+  const hasCulprits  = scanSettled && missingCost.count > 0;
   // Only cry "degraded" when the tiles are actually blank — if the series rebuild worked,
-  // the dashboard is functional and the tile's own tooltip carries the provenance.
-  const showDegraded = !hasCulprits && cur.gross_profit == null && !recovered;
-  const showFourth   = hasCulprits || showDegraded;
+  // the dashboard is functional and the tile's own tooltip carries the provenance. Requires a
+  // SETTLED scan: "no culprits" is only meaningful once we've actually looked.
+  const showDegraded = scanSettled && !hasCulprits && cur.gross_profit == null && !recovered;
+  const showFourth   = hasCulprits || showDegraded || scanPending || scanFailed;
   const span = showFourth ? 3 : 4;
 
   const cards = [
@@ -1418,7 +1479,16 @@ function renderAlertsSection(d) {
       lowWhy, lowMargin.items, lowMargin.count > 0 ? 'warning' : null, 'None under threshold', span),
   ];
 
-  if (hasCulprits) {
+  if (scanPending) {
+    // Neutral severity and an em-dash count: this says "not known yet", never "all clear".
+    cards.push(alertCard('Sales missing a cost', '—',
+      'checking every sale in this range for a recorded cost — the dashboard above is already up to date',
+      [], null, '', span));
+  } else if (scanFailed) {
+    cards.push(alertCard('Sales missing a cost', '—',
+      'the cost scan failed, so whether any sale is missing a cost is UNKNOWN — this is not a zero. Reload to retry',
+      [], 'warning', '', span));
+  } else if (hasCulprits) {
     cards.push(alertCard(
       'Sales missing a cost', missingCost.count,
       'these sales have no cost of goods recorded, so profit can’t be computed for any range that contains them — add a cost to bring the figures back',
@@ -1486,15 +1556,46 @@ async function computeMissingCostAlert(range, kpis, signal) {
   // Every status, not just the two the tracking card cares about. Cancelled orders carry no
   // revenue and the backend excludes them from COGS, so they're excluded here too — counting
   // them would invent culprits the backend never looks at.
+  //
+  // Page 1 first — its `pagination` tells us how many pages actually exist, so the remaining
+  // pages go out in ONE parallel batch instead of a serial walk. (The old loop paid a full
+  // round-trip per page just to discover whether a next page existed.)
   const list = [];
   let incomplete = false;
-  for (let page = 1; page <= MISSING_COST_MAX_PAGES; page++) {
-    const resp = await AdminAPI.getOrders({ from: range.from, to: range.to }, page, MISSING_COST_PAGE, signal);
-    const rows = firstArray(resp, ['orders', 'data', 'items']);
-    list.push(...rows);
-    if (rows.length < MISSING_COST_PAGE) break;
-    if (page === MISSING_COST_MAX_PAGES) incomplete = true;   // more pages exist than we read
+  const fetchPage = (page) =>
+    AdminAPI.getOrders({ from: range.from, to: range.to }, page, MISSING_COST_PAGE, signal);
+
+  const first = await fetchPage(1);
+  const firstRows = firstArray(first, ['orders', 'data', 'items']);
+  list.push(...firstRows);
+
+  if (firstRows.length >= MISSING_COST_PAGE) {
+    // Trust the backend's page count when it gives one; otherwise fall back to walking to the
+    // cap. Either way MISSING_COST_MAX_PAGES is the hard ceiling.
+    const pg = first?.pagination || {};
+    const total = Number(pg.total_pages ?? (Number(pg.total) ? Math.ceil(Number(pg.total) / MISSING_COST_PAGE) : NaN));
+    const wanted = Number.isFinite(total) && total > 0 ? total : MISSING_COST_MAX_PAGES;
+    const last = Math.min(wanted, MISSING_COST_MAX_PAGES);
+    if (wanted > MISSING_COST_MAX_PAGES) incomplete = true;   // more pages exist than we read
+
+    const rest = [];
+    for (let page = 2; page <= last; page++) rest.push(fetchPage(page));
+    const settled = await Promise.allSettled(rest);
+    settled.forEach((res, idx) => {
+      // A page we failed to fetch is a page we did NOT scan. Say so.
+      if (res.status !== 'fulfilled') { incomplete = true; return; }
+      const rows = firstArray(res.value, ['orders', 'data', 'items']);
+      list.push(...rows);
+      // No page count came back and the last page we read was still full → there is more.
+      if (idx + 2 === last && !Number.isFinite(total) && rows.length >= MISSING_COST_PAGE) incomplete = true;
+    });
   }
+  // An aborted fetch returns null → firstArray → [] → an EMPTY list that is indistinguishable
+  // from "this range genuinely has no orders". Reporting that as `count: 0` would print
+  // "All sales are costed" off the back of a scan that never ran — the ERR-074 conflation.
+  // Abort is not a result; say so and let the card render its unknown state.
+  if (signal?.aborted) return { cogsUnknown, failed: true };
+
   const revenueOrders = list.filter(o => String(o.status || '').toLowerCase() !== 'cancelled');
   if (!revenueOrders.length) return base;
 
@@ -1504,9 +1605,14 @@ async function computeMissingCostAlert(range, kpis, signal) {
   if (budget.length < revenueOrders.length) incomplete = true;
 
   const culprits = [];
+  // Count what we ACTUALLY looked at — `budget.length` overstates it the moment the loop
+  // breaks early, and `scanned` is what the card prints to justify a clean bill of health.
+  let scanned = 0;
   for (let i = 0; i < budget.length; i += MISSING_COST_BATCH) {
     const batch = budget.slice(i, i + MISSING_COST_BATCH);
-    const results = await Promise.allSettled(batch.map(o => AdminAPI.getOrder(o.id)));
+    if (signal?.aborted) { incomplete = true; break; }   // superseded load / left the page
+    const results = await Promise.allSettled(batch.map(o => AdminAPI.getOrder(o.id, signal)));
+    scanned += batch.length;
     results.forEach((res, j) => {
       const order = batch[j];
       // A detail call we couldn't make is an order we did NOT clear. Say so, don't assume.
@@ -1527,7 +1633,7 @@ async function computeMissingCostAlert(range, kpis, signal) {
   return {
     cogsUnknown,
     incomplete,
-    scanned: budget.length,
+    scanned,
     count: culprits.length,
     items: culprits.map(({ order, reason }) => ({
       label: `${order.order_number || String(order.id).slice(0, 8)} · ${formatPrice(totalOf(order))}`,
@@ -1541,8 +1647,10 @@ async function computeMissingCostAlert(range, kpis, signal) {
 }
 
 // Expand/collapse the alert item lists (show all ↔ show first ALERT_PREVIEW).
-function wireAlertToggles() {
-  _container?.querySelectorAll('[data-alert-toggle]').forEach(btn => {
+// Takes a root so the alerts panel can be re-wired on its own after the background
+// missing-cost scan repaints it, without re-binding buttons elsewhere on the page.
+function wireAlertToggles(root = _container) {
+  root?.querySelectorAll('[data-alert-toggle]').forEach(btn => {
     btn.addEventListener('click', () => {
       const list = btn.previousElementSibling;
       const collapsed = list?.classList.toggle('admin-alert-card__list--collapsed');
@@ -2094,6 +2202,9 @@ export default {
   destroy() {
     Charts.destroyAll();
     FilterState.setGranularityVisible(false);   // hide bar-width control on other pages
+    // _loadSeq++ below makes any in-flight load decline to clear the spinner, so clear it
+    // here — otherwise navigating away mid-load strands one in the next page's filter bar.
+    FilterState.setBusy(false);
     _container = null;
     _hasRenderedSuccessfully = false;
     _loadSeq++;                                  // any in-flight load now stale-checks and bails

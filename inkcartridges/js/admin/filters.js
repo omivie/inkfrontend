@@ -57,6 +57,7 @@ const FilterState = {
   _dropdowns: new Map(),
   _visibleFilters: null, // null = show all; array = only show these keys
   _showGranularity: false, // pages opt in via setGranularityVisible(true)
+  _busy: false,            // pages opt in via setBusy() — drives the bar's activity spinner
   // Earliest date the store actually has data for (the first order's date). Used as the
   // 'all' period's start so graphs begin at real data — not a far-past placeholder that
   // floods the range with empty buckets and blows the backend's per-grain bucket cap.
@@ -165,6 +166,15 @@ const FilterState = {
     // first load doesn't fire an over-the-cap request (e.g. ?granularity=hour&period=all).
     if (show) this._clampGranularity();
     this._render();
+  },
+
+  // Show/hide the filter-bar activity spinner. Pages opt in around their own fetches, so
+  // a page that never calls this simply never shows one. DOM-only (no _render()) — a
+  // rebuild here would tear down an open multi-select dropdown mid-interaction.
+  setBusy(on = true) {
+    this._busy = !!on;
+    const el = this._el?.querySelector('.admin-filter-spinner');
+    if (el) el.classList.toggle('is-busy', this._busy);
   },
 
   // Real span of the selected window in days (uses the actual from/to, not the
@@ -372,9 +382,12 @@ const FilterState = {
 
     // Reset button (right)
     const hasFilters = s.brands.length || s.suppliers.length || s.statuses.length || s.categories.length || s.period !== '3m';
-    const rightHtml = hasFilters
-      ? '<button class="admin-filter-reset" data-action="reset-filters">Clear</button>'
-      : '';
+    // Activity spinner sits left of Clear and is emitted unconditionally — the hasFilters
+    // gate above owns the Clear button only. Its busy class is written here too because
+    // _render() replaces innerHTML wholesale: a re-render mid-load must not drop it.
+    const rightHtml =
+      `<span class="admin-filter-spinner${this._busy ? ' is-busy' : ''}" role="status" aria-live="polite" aria-label="Loading"></span>` +
+      (hasFilters ? '<button class="admin-filter-reset" data-action="reset-filters">Clear</button>' : '');
 
     const html = `
       <div class="admin-filters">

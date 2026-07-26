@@ -263,7 +263,9 @@ const AdminAPI = {
         };
         params.set('sort', sortMap[filters.sort] || 'newest');
       }
-      const resp = await window.API.get(`/api/admin/orders?${params}`);
+      // `signal` was accepted but silently dropped here — every caller that passed one
+      // (the dashboard passes it on three separate calls) was un-cancellable.
+      const resp = await window.API.get(`/api/admin/orders?${params}`, signal ? { signal } : {});
       return resp?.data ?? null;
     } catch (e) {
       adminApiWarn('Failed to load orders', e);
@@ -288,9 +290,12 @@ const AdminAPI = {
     }
   },
 
-  async getOrder(orderId) {
+  // `signal` matters here: the dashboard's missing-cost scan fans out up to 120 of these.
+  // Without it, leaving the page left them all in flight, burning the 60/min limiter budget
+  // against whatever page the user actually navigated to.
+  async getOrder(orderId, signal = null) {
     try {
-      const resp = await window.API.get(`/api/admin/orders/${orderId}`);
+      const resp = await window.API.get(`/api/admin/orders/${orderId}`, signal ? { signal } : {});
       // Backend wraps single order in data.order
       return resp?.data?.order ?? resp?.data ?? null;
     } catch (e) {
@@ -371,7 +376,7 @@ const AdminAPI = {
 
   async deleteOrder(orderId) {
     try {
-      const resp = await window.API.delete(`/api/admin/orders/${orderId}`);
+      const resp = await window.API.delete(`/api/admin/orders/${encodeURIComponent(orderId)}`);
       if (resp && resp.ok === false) throw new Error(resp.error || 'Delete failed');
       return true;
     } catch (e) {
@@ -2291,11 +2296,11 @@ const AdminAPI = {
    * List tracking requests. `status` is 'pending' | 'fulfilled' | 'all'.
    * Returns { requests, total } or null on error.
    */
-  async getTrackingRequests(filters = {}) {
+  async getTrackingRequests(filters = {}, signal = null) {
     try {
       const status = filters.status || 'pending';
       const params = new URLSearchParams({ status });
-      const resp = await window.API.get(`/api/admin/tracking-requests?${params}`);
+      const resp = await window.API.get(`/api/admin/tracking-requests?${params}`, signal ? { signal } : {});
       return resp?.data ?? null;
     } catch (e) {
       adminApiWarn('Failed to load tracking requests', e);
@@ -2428,10 +2433,10 @@ const AdminAPI = {
     } catch (e) { adminApiWarn('Price changes', e); return null; }
   },
 
-  async getOutOfStock(params = {}) {
+  async getOutOfStock(params = {}, signal = null) {
     try {
       const qs = new URLSearchParams(params).toString();
-      return await window.API.get(`/api/admin/margin/out-of-stock${qs ? '?' + qs : ''}`);
+      return await window.API.get(`/api/admin/margin/out-of-stock${qs ? '?' + qs : ''}`, signal ? { signal } : {});
     } catch (e) { adminApiWarn('Out of stock', e); return null; }
   },
 
@@ -2490,10 +2495,10 @@ const AdminAPI = {
     } catch (e) { adminApiWarn('Pricing heatmap', e); return null; }
   },
 
-  async getUnderMarginProducts(source = 'genuine', page = 1, limit = 50, mode = 'under-margin', sort_by = 'net_margin', sort_order = 'asc') {
+  async getUnderMarginProducts(source = 'genuine', page = 1, limit = 50, mode = 'under-margin', sort_by = 'net_margin', sort_order = 'asc', signal = null) {
     try {
       const qs = new URLSearchParams({ source, page, limit, mode, sort_by, sort_order });
-      const resp = await window.API.get(`/api/admin/pricing/under-margin?${qs}`);
+      const resp = await window.API.get(`/api/admin/pricing/under-margin?${qs}`, signal ? { signal } : {});
       return resp ?? null;
     } catch (e) { adminApiWarn('Under-margin products', e); return null; }
   },
@@ -3314,12 +3319,13 @@ const AdminAPI = {
     },
 
     // ---- Reads (fail-soft → null) ----
-    async list(params = {}) {
+    async list(params = {}, signal = null) {
       try {
-        const resp = await window.API.get(`/api/admin/expenses${this._q(params)}`);
+        const opts = signal ? { signal } : {};
+        const resp = await window.API.get(`/api/admin/expenses${this._q(params)}`, opts);
         if (this._notFound(resp)) {
           // Legacy endpoint: flat list + total; no server filters/paging.
-          const legacy = await window.API.get(`/api/admin/analytics/expenses?limit=${params.limit || 500}`);
+          const legacy = await window.API.get(`/api/admin/analytics/expenses?limit=${params.limit || 500}`, opts);
           if (!legacy || legacy.ok === false) return { items: [], pagination: null, summary: null, _legacy: true };
           return { ...this._normalizeList(legacy.data), _legacy: true };
         }
