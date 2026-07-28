@@ -95,6 +95,40 @@
     }
 
     // ============================================
+    // TRUST STATS  (traffic-conversion-jul2026 §2)
+    // ============================================
+    // Sitewide social proof under the hero trust bar: "47+ customers served".
+    //
+    // Counts are floored to honest bands server-side, hence the trailing "+".
+    // A null count means NOT COMPUTED, not zero — its tile is dropped rather
+    // than painted as "0+", and when all three are null the section stays
+    // hidden and the homepage is byte-identical to before. That IS the current
+    // production state (the backend's nightly sweep has never run), so this
+    // ships invisible and switches itself on later with no deploy.
+    //
+    // Fail-open: TrustStats.raw() resolves to {} on any error.
+
+    async function loadTrustStats() {
+        const section = document.getElementById('trust-stats');
+        const list = document.getElementById('trust-stats-list');
+        if (!section || !list || typeof TrustStats === 'undefined') return;
+
+        const lines = TrustStats.lines(await TrustStats.stats());
+        if (!lines.length) {
+            section.hidden = true;
+            return;
+        }
+        list.innerHTML = lines.map((row) => `
+            <li class="trust-stats__item" data-stat="${Security.escapeAttr(row.key)}">
+                <span class="trust-stats__value">${Security.escapeHtml(row.value)}</span>
+                <span class="trust-stats__label">${Security.escapeHtml(row.label)}</span>
+            </li>`).join('');
+        section.hidden = false;
+    }
+
+    loadTrustStats();
+
+    // ============================================
     // FEATURED PRODUCTS
     // ============================================
 
@@ -131,12 +165,19 @@
                 // source-chip-removal-may2026.md — featured-grid cards no
                 // longer ship a per-card COMPATIBLE/GENUINE chip. Source is
                 // already conveyed by the product name on the card.
+                // Aggregate review stars (traffic-conversion-jul2026 §1) — same
+                // gate as products.js / shop-page.js: nothing at all when
+                // review_count is 0, never an empty star row or "0 reviews".
+                const ratingHtml = (p.average_rating && p.review_count > 0 && typeof Products !== 'undefined' && Products._miniStars)
+                    ? `<div class="product-card__rating">${Products._miniStars(Math.round(parseFloat(p.average_rating)))} <span class="product-card__review-count">(${parseInt(p.review_count, 10)})</span></div>`
+                    : '';
                 return `
                     <a href="${Security.escapeAttr(cardHref)}" class="product-card">
                         <div class="product-card__image-wrapper">${imageHtml}</div>
                         <div class="product-card__info">
                             <span class="product-card__brand">${Security.escapeHtml(brandName)}</span>
                             <h3 class="product-card__name">${Security.escapeHtml(name)}</h3>
+                            ${ratingHtml}
                             <span class="product-card__price">${formatPrice(price)}</span>
                         </div>
                     </a>`;

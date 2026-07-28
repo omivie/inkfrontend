@@ -302,6 +302,66 @@
 .trust-bar__item:nth-child(4) .trust-bar__icon { color: var(--cyan-dark); }
 
 /* ==========================================================================
+   TRUST STATS — sitewide social proof (traffic-conversion-jul2026 §2)
+   ==========================================================================
+   Big-number tiles under the trust bar: "47+ / customers served". Populated by
+   js/landing.js from /api/site/trust; the section ships `hidden` and only
+   unhides when at least one count comes back non-null, so nothing here has to
+   cope with an empty or "0+" state. Flex-wrap (not a fixed grid) so 1, 2 or 3
+   surviving tiles all centre correctly — any of those is a real possibility
+   since each count can be null independently.
+   ========================================================================== */
+
+.trust-stats {
+    padding: var(--spacing-lg) 0;
+    background-color: var(--white-primary);
+    border-bottom: 1px solid var(--color-border);
+}
+
+.trust-stats__list {
+    display: flex;
+    justify-content: center;
+    flex-wrap: wrap;
+    gap: clamp(var(--spacing-lg), 6vw, var(--spacing-2xl));
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.trust-stats__item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+    text-align: center;
+}
+
+.trust-stats__value {
+    font-size: clamp(1.5rem, 4vw, 2rem);
+    font-weight: 700;
+    line-height: 1.1;
+    color: var(--cyan-dark);
+    font-variant-numeric: tabular-nums;
+}
+
+/* CMY rotation, matching the trust bar directly above it. */
+.trust-stats__item:nth-child(2) .trust-stats__value { color: var(--magenta-primary); }
+.trust-stats__item:nth-child(3) .trust-stats__value { color: var(--yellow-dark); }
+
+.trust-stats__label {
+    font-size: var(--font-size-xs);
+    color: var(--steel-700);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+@media (max-width: 480px) {
+    .trust-stats__list {
+        gap: var(--spacing-md) var(--spacing-lg);
+    }
+}
+
+/* ==========================================================================
    FIND YOUR INK FAST - Guided Printer Finder
    ========================================================================== */
 
@@ -4841,6 +4901,18 @@ body.filter-sort-open { overflow: hidden; }
 }
 .cart-delivery svg { flex-shrink: 0; color: var(--cyan-primary); }
 
+/* Same-day dispatch countdown (traffic-conversion-jul2026 §4). Pulled up
+   against the delivery estimate above it so the two read as one block; ships
+   hidden and stays hidden whenever same_day_eligible is false. */
+.cart-dispatch {
+    margin: calc(var(--spacing-md) * -1 + var(--spacing-2xs, 2px)) 0 var(--spacing-md);
+    padding: 0 var(--spacing-md);
+    font-size: var(--font-size-sm);
+    font-weight: 600;
+    color: var(--color-success-green, #16a34a);
+    font-variant-numeric: tabular-nums;
+}
+
 .cart-trust-signals {
     display: flex;
     flex-wrap: wrap;
@@ -6446,6 +6518,45 @@ body.filter-sort-open { overflow: hidden; }
     border-top: 1px solid var(--color-border);
 }
 
+/* Row states driven by OrderTotals.rows() `kind` (js/order-totals.js).
+   Before Jul 2026 this page had no discount row at all and printed
+   `order.subtotal || order.total`, so a loyalty-redeemed order's figures did
+   not add up on screen (ERR-127). */
+.order-summary__list dd.order-summary__value--negative,
+.order-summary__list dd.order-summary__value--free {
+    color: var(--color-success);
+    font-weight: var(--font-weight-semibold);
+}
+
+.order-summary__list dd.order-summary__value--points {
+    color: var(--color-primary, #267FB5);
+    font-weight: var(--font-weight-semibold);
+}
+
+/* UNKNOWN is not zero. An em-dash reads as "not reported" and is deliberately
+   muted so it cannot be mistaken for a figure. */
+.order-summary__list dd.order-summary__value--unknown {
+    color: var(--color-text-muted);
+}
+
+.order-summary__note {
+    margin: var(--spacing-sm) 0 0;
+    font-size: var(--font-size-xs);
+    line-height: 1.5;
+    color: var(--color-text-muted);
+}
+
+.order-summary__error {
+    margin: var(--spacing-sm) 0 0;
+    font-size: var(--font-size-sm);
+    color: var(--color-error, #C0392B);
+}
+
+.order-actions #download-receipt-btn svg {
+    margin-right: 6px;
+    vertical-align: middle;
+}
+
 /* Order Shipping Address */
 .order-shipping {
     margin-top: var(--spacing-lg);
@@ -7536,6 +7647,65 @@ a.account-review-card__product:focus-visible {
         width: 40px;
         height: 40px;
     }
+}
+
+/* --- Retroactive loyalty claim banner ---------------------------------------
+   Shown once, only when the backend reported that a converting guest's prior
+   orders were claimed and their points awarded during /account/sync. Louder than
+   the savings banner beside it because it announces an EVENT that just happened,
+   not a standing figure. */
+.account-retro-banner {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--spacing-md);
+    padding: var(--spacing-md) var(--spacing-lg);
+    margin-bottom: var(--spacing-lg);
+    background: linear-gradient(135deg, rgba(38, 127, 181, 0.10), rgba(34, 197, 94, 0.08));
+    border: 1px solid var(--color-primary, #267FB5);
+    border-radius: var(--radius-lg, 12px);
+}
+.account-retro-banner__icon {
+    width: 48px; height: 48px;
+    display: flex; align-items: center; justify-content: center;
+    background: rgba(38, 127, 181, 0.15);
+    color: var(--color-primary, #267FB5);
+    border-radius: 50%;
+    flex-shrink: 0;
+}
+.account-retro-banner__text {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+.account-retro-banner__title {
+    font-size: 20px;
+    font-weight: 800;
+    line-height: 1.2;
+    color: var(--color-primary, #267FB5);
+}
+.account-retro-banner__body {
+    margin-top: 4px;
+    font-size: 14px;
+    line-height: 1.5;
+    color: var(--color-text);
+}
+.account-retro-banner__body a {
+    color: var(--color-primary, #267FB5);
+    font-weight: 600;
+}
+.account-retro-banner__dismiss {
+    /* --tap-min: 48px minimum touch target (mobile UX audit, ERR-058). */
+    min-width: var(--tap-min, 48px);
+    min-height: var(--tap-min, 48px);
+    display: flex; align-items: center; justify-content: center;
+    background: none;
+    border: 0;
+    padding: 0;
+    cursor: pointer;
+    color: var(--color-text-muted);
+    flex-shrink: 0;
+}
+.account-retro-banner__dismiss:hover {
+    color: var(--color-text);
 }
 
 /* --- Dashboard Navigation Grid --- */
@@ -9120,6 +9290,33 @@ a.account-review-card__product:focus-visible {
 .confirmation-totals__row--earned dd {
     color: var(--color-primary, #267FB5);
     font-weight: var(--font-weight-semibold);
+}
+
+/* Coupon / residual discount row — same negative-amount treatment as loyalty. */
+.confirmation-totals__row--coupon dd {
+    color: var(--color-success);
+    font-weight: var(--font-weight-semibold);
+}
+
+/* Estimate caveat under the totals. Shown ONLY when the points figure is a
+   client-side estimate (the backend does not yet expose points_earned on the
+   order — BF-011). A bare "≈" is not a disclosure a customer can read. */
+.confirmation-totals__note {
+    margin: var(--spacing-sm) 0 0;
+    font-size: var(--font-size-xs);
+    line-height: 1.5;
+    color: var(--color-text-muted);
+}
+
+.confirmation-totals__actions {
+    margin-top: var(--spacing-md);
+    display: flex;
+    justify-content: flex-end;
+}
+
+.confirmation-totals__actions .btn svg {
+    margin-right: 6px;
+    vertical-align: middle;
 }
 
 /* Post-purchase prompt cards */
@@ -11970,6 +12167,48 @@ body.page-shop {
 .buy-box__delivery-cutoff {
     color: var(--color-text-muted, #4b5563);
 }
+
+/* Same-day dispatch countdown + PDP social proof
+   (traffic-conversion-jul2026 §3/§4).
+   All four elements ship `hidden` and are only revealed when their backing
+   field is present, so none of them reserves layout space by default. */
+.buy-box__dispatch {
+    margin: 8px 0 0;
+    font-size: var(--text-sm, 0.875rem);
+    font-weight: 600;
+    color: var(--color-success-green, #16a34a);
+    /* Tabular figures so the seconds ticking down don't shift the line width. */
+    font-variant-numeric: tabular-nums;
+}
+
+.product-info__pack-savings {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 4px 8px;
+    margin: 8px 0 0;
+    font-size: var(--text-sm, 0.875rem);
+}
+.product-info__pack-savings-headline {
+    font-weight: 700;
+    color: var(--color-success-green, #16a34a);
+}
+.product-info__pack-savings-sub {
+    color: var(--color-text-muted, #6b7280);
+}
+
+.product-info__printer-proof,
+.product-info__waitlist-proof {
+    margin: 8px 0 0;
+    font-size: var(--text-sm, 0.875rem);
+    color: var(--color-text-muted, #4b5563);
+}
+.product-info__waitlist-proof {
+    /* Sits directly above the Contact-us CTA on an out-of-stock product. */
+    margin-bottom: 8px;
+    font-weight: 600;
+    color: var(--magenta-primary, #c1124e);
+}
 .buy-box__returns-link {
     color: var(--cyan-primary, #267FB5);
     text-decoration: underline;
@@ -13732,6 +13971,33 @@ body.page-shop {
 
 .cart-coupon__feedback--ok { color: var(--color-success-green, #16a34a); }
 .cart-coupon__feedback--err { color: var(--color-error, #c1124e); }
+
+/* Suggested-coupon chip inside the failure message
+   (traffic-conversion-jul2026 §5). Click-to-FILL, never click-to-apply — the
+   endpoint locks out after too many invalid attempts and we don't spend one on
+   a code the shopper didn't choose. Rendered inline in a sentence, so it is
+   styled as emphasised text with a hit area, not as a block button. */
+.cart-coupon__suggestion,
+.coupon-form__suggestion {
+    display: inline;
+    padding: 1px 6px;
+    margin: 0 1px;
+    border: 1px dashed currentColor;
+    border-radius: var(--radius-sm, 4px);
+    background: transparent;
+    font: inherit;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    color: inherit;
+    cursor: pointer;
+}
+.cart-coupon__suggestion:hover,
+.cart-coupon__suggestion:focus-visible,
+.coupon-form__suggestion:hover,
+.coupon-form__suggestion:focus-visible {
+    border-style: solid;
+    background: var(--color-background-alt, #F8FAFC);
+}
 
 /* ==========================================================================
    MOBILE PARITY — May 2026 — P2 polish

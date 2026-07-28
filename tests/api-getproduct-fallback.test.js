@@ -369,17 +369,22 @@ test('getProduct — fallback only fetches /api/search/smart, never anything els
 
 const API_SRC = fs.readFileSync(API_JS_PATH, 'utf8');
 
+// The signature grew an optional second parameter in Jul 2026 —
+// `getProduct(sku, { printerSlug })` forwards printer context so the backend can
+// return `bought_for_this_printer` (traffic-conversion-jul2026 §3). The matcher
+// below tolerates it; the guarantees these tests pin are unchanged.
+
 test('api.js — getProduct URL-encodes the SKU on the primary path', () => {
     // Pin against future drift: someone "simplifying" back to `/api/products/${sku}`
     // (no encode) would silently break SKUs with reserved URL characters.
-    const m = API_SRC.match(/async getProduct\(sku\)[\s\S]+?\n {4}\}/);
+    const m = API_SRC.match(/async getProduct\(sku(?:,\s*opts)?\)[\s\S]+?\n {4}\}/);
     assert.ok(m, 'expected getProduct definition in api.js');
     assert.match(m[0], /encodeURIComponent\(sku\)/,
         'getProduct must encodeURIComponent the SKU before substituting into the URL');
 });
 
 test('api.js — getProduct fallback hits /api/search/smart, not any other endpoint', () => {
-    const m = API_SRC.match(/async getProduct\(sku\)[\s\S]+?\n {4}\}/);
+    const m = API_SRC.match(/async getProduct\(sku(?:,\s*opts)?\)[\s\S]+?\n {4}\}/);
     assert.match(m[0], /\/api\/search\/smart\?q=/,
         'fallback is documented to use /api/search/smart — pin against drift');
     assert.doesNotMatch(m[0], /\/api\/products\/by-slug/,
@@ -389,7 +394,7 @@ test('api.js — getProduct fallback hits /api/search/smart, not any other endpo
 });
 
 test('api.js — getProduct fallback requires exact SKU match (no fuzzy)', () => {
-    const m = API_SRC.match(/async getProduct\(sku\)[\s\S]+?\n {4}\}/);
+    const m = API_SRC.match(/async getProduct\(sku(?:,\s*opts)?\)[\s\S]+?\n {4}\}/);
     assert.match(m[0], /products\.find\(p => p && p\.sku === sku\)/,
         'fallback must use === for SKU match — fuzzy/startsWith/etc would surface neighbor products');
 });

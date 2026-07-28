@@ -296,6 +296,19 @@ const SeoMeta = {
     async getTrust() {
         const cached = this._readTrustCache();
         if (cached) return cached;
+        // TrustStats (js/utils.js) owns the shared /api/site/trust fetch and its
+        // session cache — the footer and homepage badge need the same payload on
+        // every page, and utils.js is loaded on 38 of 42 pages where this file is
+        // loaded on 3. Delegating means the pages that load BOTH issue one
+        // request instead of two. The local fetch below stays as the fallback for
+        // any page that somehow loads seo-meta.js without utils.js.
+        if (typeof TrustStats !== 'undefined' && TrustStats && typeof TrustStats.raw === 'function') {
+            try {
+                const trust = this._normalizeTrust(await TrustStats.raw());
+                this._writeTrustCache(trust);
+                return trust;
+            } catch { /* fall through to the local fetch */ }
+        }
         if (this._trustPromise) return this._trustPromise;
         this._trustPromise = (async () => {
             if (typeof fetch !== 'function') return this._emptyTrust();

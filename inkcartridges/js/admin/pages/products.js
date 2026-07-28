@@ -13,6 +13,11 @@ import {
   PRODUCT_TYPE_LABELS, RIBBON_PRODUCT_TYPES, typeFilterGroup, typeFilterOptions,
 } from '../utils/product-types.js';
 import { attachProductAutocomplete } from '../components/product-search.js';
+// Supplier + pack-origin rendering, shared verbatim with the Orders modal's
+// line-items table so the same product reads the same on both pages.
+import {
+  originBadge, originLabel, productOrigin, productSupplierCell, supplierLabel, supplierFilterOptions,
+} from '../utils/sourcing.js';
 
 const formatPrice = (v) => window.formatPrice ? window.formatPrice(v) : `$${Number(v).toFixed(2)}`;
 const MISSING = '\u2014';
@@ -78,6 +83,7 @@ let _sourceFilter = '';
 let _typeFilter = '';
 let _stockFilter = '';
 let _packFilter = '';   // '' | 'singles' | 'packs' — singles vs CMY/KCMY/Value Pack/Multipack
+let _supplierFilter = ''; // '' | a products.supplier slug ('dsnz' | 'augmento' | 'okin' | 'unknown')
 let _brands = [];
 let _diagnostics = null;
 let _bulkBar = null;
@@ -179,6 +185,26 @@ function buildColumns() {
     },
   });
 
+  // Sourcing pair — the same two columns the Orders modal shows per sold line,
+  // answered here per PRODUCT. Visible to all admins (the Orders modal doesn't
+  // owner-gate them either; only Cost/Margin/Profit are owner-only).
+  cols.push(
+    {
+      // Real `products.supplier` column (a slug: dsnz / augmento / okin /
+      // unknown), so this sorts server-side like any other column.
+      key: 'supplier', label: 'Supplier', sortable: true, className: 'col-w-supplier',
+      render: (r) => productSupplierCell(r),
+    },
+    {
+      // DERIVED from pack_type + supplier_sku (see utils/sourcing.js) — there is
+      // no product-level origin column to sort on, hence sortable:false. Sorting
+      // by Supplier then reading Origin gives the same grouping in practice.
+      key: 'origin', label: 'Origin', sortable: false, className: 'col-w-origin',
+      render: (r) => originBadge(productOrigin(r)),
+      align: 'center',
+    },
+  );
+
   cols.push(
     {
       key: 'is_active', label: 'Active', sortable: true, className: 'col-w-dot',
@@ -254,6 +280,8 @@ const COLUMN_PICKER_LABELS = {
   margin_pct: 'Margin %',
   profit_ex_gst: 'Profit $',
   source: 'Type',
+  supplier: 'Supplier',
+  origin: 'Pack origin (single / assembled / pre-boxed)',
   is_active: 'Active',
   import_locked: 'Import lock',
   compat: 'Compatible printers',
@@ -314,10 +342,66 @@ function renderColumnPickerPanel(panel) {
   `;
 }
 
+/**
+ * The px width each `col-w-*` / `cell-*` class declares in css/admin.css.
+ *
+ * Duplicated on purpose, and pinned by tests/admin-product-sourcing-columns.test.js
+ * so the two can't drift: CSS owns the rendering, but only JS knows which columns
+ * are currently VISIBLE, and the table's minimum width depends on that.
+ *
+ * Why a minimum is needed at all: under `table-layout: fixed` a cell's own
+ * min-width cannot widen the table. The browser spreads `width: 100%` over the
+ * declared column widths and hands the sole auto column (Name) whatever is left —
+ * which was 42px once Supplier + Origin joined a full owner table at a 1512px
+ * viewport (ERR-123). Publishing Σ(visible fixed widths) + NAME_MIN_PX as
+ * `--admin-table-min` lets the table outgrow its wrapper so
+ * `.admin-table-wrap` (overflow-x: auto) scrolls instead of Name disappearing.
+ */
+const COLUMN_WIDTH_PX = {
+  'cell-select': 40,      // DataTable's own checkbox column (selectable: true)
+  'cell-image': 60,
+  'col-w-sku': 96,
+  'col-w-brand': 88,
+  'col-w-price': 80,
+  'col-w-pct': 90,
+  'col-w-type': 110,
+  'col-w-dot': 60,
+  'col-w-compat': 110,
+  'col-w-fuin': 240,
+  'col-w-supplier': 100,
+  'col-w-origin': 96,
+};
+/** Name's floor, matching `.admin-table--colsized td.col-w-name { min-width }`. */
+const NAME_MIN_PX = 260;
+
+/**
+ * Minimum width the table needs for Name to stay readable, given the columns
+ * actually on screen. Unknown classes contribute 0 — a new column with no width
+ * rule is already a test failure ("every non-Name column carries an explicit
+ * width"), so it must not silently inflate this number too.
+ */
+function tableMinWidthPx(columns) {
+  let total = COLUMN_WIDTH_PX['cell-select'];   // the selection checkbox column
+  for (const col of columns) {
+    for (const cls of String(col.className || '').split(/\s+/)) {
+      total += COLUMN_WIDTH_PX[cls] || 0;
+    }
+  }
+  return total + NAME_MIN_PX;
+}
+
+/** Publish the computed minimum as a CSS var so it survives every re-render. */
+function applyTableMinWidth(columns) {
+  if (!_container) return;
+  _container.style.setProperty('--admin-table-min', `${tableMinWidthPx(columns)}px`);
+}
+
 /** Repaint the table with the current visible-column set + refill async cells. */
 function applyColumnVisibility() {
   if (!_table) return;
-  _table.setColumns(computeVisibleColumns(_allColumns, _hiddenColumns));
+  const visible = computeVisibleColumns(_allColumns, _hiddenColumns);
+  applyTableMinWidth(visible);
+  _table.setColumns(visible);
   loadRowExtras();
 }
 
@@ -487,6 +571,24 @@ function loadRowExtras() {
   loadForUseInBrands();
 }
 
+/**
+ * /api/admin/products (the margin-sort / image / stock path) doesn't return the
+ * sourcing columns. Their cells then show an em-dash, which reads as "this product
+ * has no supplier" when the truth is "this VIEW didn't fetch one". Say which it is
+ * — once per page visit, and only when a sourcing column is actually on screen.
+ */
+let _warnedSourcingUnavailable = false;
+/** Same one-shot idea for the CSV export note — see handleExport(). */
+let _warnedCsvSourcingColumns = false;
+function warnIfSourcingFieldsMissing(rows) {
+  if (_warnedSourcingUnavailable) return;
+  if (_hiddenColumns.has('supplier') && _hiddenColumns.has('origin')) return;
+  if (!Array.isArray(rows) || !rows.length) return;
+  if (rows.some((r) => r && ('supplier' in r || 'pack_type' in r))) return;
+  _warnedSourcingUnavailable = true;
+  Toast.warning('Supplier / Origin aren’t available on this filtered view — the dashes mean "not loaded", not "none".');
+}
+
 function productHasImage(p) {
   if (p.images && p.images.length > 0) return true;
   if (p.primary_image || p.image_url) return true;
@@ -613,9 +715,12 @@ async function loadProducts() {
   // The pack filter (singles vs CMY/KCMY/Value Pack/Multipack) is Supabase-only for
   // the same reason: /api/admin/products has no color param, so routing it to the
   // backend would silently return UNFILTERED rows while the dropdown says otherwise.
+  // The supplier filter is Supabase-only for exactly that reason too — there is no
+  // `supplier` param on /api/admin/products.
   const isMarginSort = _sort === 'margin_pct' || _sort === 'profit_ex_gst';
   const typeGroup = typeFilterGroup(_typeFilter);
-  const needsBackend = !typeGroup && !_packFilter && (isMarginSort || !!_imageFilter || !!_stockFilter);
+  const supabaseOnlyFilter = !!_packFilter || !!_supplierFilter;
+  const needsBackend = !typeGroup && !supabaseOnlyFilter && (isMarginSort || !!_imageFilter || !!_stockFilter);
   if (needsBackend) {
     const filters = { search: _search, sort: _sort, order: _sortDir };
     if (_brandFilter) filters.brand = _brandFilter;
@@ -630,6 +735,7 @@ async function loadProducts() {
     if (!data) { _table.setData([], null); return; }
     const rows = Array.isArray(data) ? data : (data.products || data.data || []);
     const pagination = data.pagination || { total: data.total || rows.length, page: _page, limit: LIMIT };
+    warnIfSourcingFieldsMissing(rows);
     _table.setData(rows, pagination);
     loadRowExtras();
     return;
@@ -639,7 +745,10 @@ async function loadProducts() {
   const sb = (typeof Auth !== 'undefined' && Auth.supabase) ? Auth.supabase : null;
   if (sb) {
     try {
-      const selectCols = 'id, sku, name, retail_price, cost_price, is_active, import_locked, is_reviewed, reviewed_at, reviewed_by_email, image_url, color, source, weight_kg, page_yield, category, product_type, brand_id, description, description_html, compatible_devices_html, compare_price, meta_title, meta_description, tags, internal_notes, brands(name, slug), product_images(path, is_primary, sort_order)';
+      // supplier / supplier_sku / pack_type feed the Supplier + Origin columns.
+      // pack_type and supplier_sku are BOTH required: origin is derived from the
+      // pair (a pack with no supplier code is one we assemble) — see utils/sourcing.js.
+      const selectCols = 'id, sku, name, retail_price, cost_price, is_active, import_locked, is_reviewed, reviewed_at, reviewed_by_email, image_url, color, source, supplier, supplier_sku, pack_type, weight_kg, page_yield, category, product_type, brand_id, description, description_html, compatible_devices_html, compare_price, meta_title, meta_description, tags, internal_notes, brands(name, slug), product_images(path, is_primary, sort_order)';
       let query = sb.from('products').select(selectCols, { count: 'exact' });
 
       // Brand filter
@@ -653,6 +762,12 @@ async function loadProducts() {
 
       // Source filter (genuine / compatible / remanufactured).
       if (_sourceFilter) query = query.eq('source', _sourceFilter);
+
+      // Supplier filter — a plain `supplier` column holding a slug. Every row has
+      // one; products with no known supplier hold the literal 'unknown', which the
+      // "No supplier recorded" option selects (it is a real stored value, so it is
+      // an .eq like any other, not an .is null).
+      if (_supplierFilter) query = query.eq('supplier', _supplierFilter);
 
       // Product type filter — one type, or a whole group ("All Ribbons").
       if (typeGroup) query = query.in('product_type', typeGroup);
@@ -678,21 +793,21 @@ async function loadProducts() {
       // leaked them into "No Images", ERR-091). The embed-null filters only
       // work because selectCols above embeds product_images(…); removing that
       // embed makes these throw 42703 (caught → backend fallback, which warns).
-      if ((typeGroup || _packFilter) && _imageFilter === 'has-images') {
+      if ((typeGroup || supabaseOnlyFilter) && _imageFilter === 'has-images') {
         query = query.or('image_url.not.is.null,product_images.not.is.null');
-      } else if ((typeGroup || _packFilter) && _imageFilter === 'no-images') {
+      } else if ((typeGroup || supabaseOnlyFilter) && _imageFilter === 'no-images') {
         query = query.is('image_url', null).is('product_images', null);
       }
 
       // Stock filter — products.stock_status is a direct column.
-      if ((typeGroup || _packFilter) && _stockFilter) query = query.eq('stock_status', _stockFilter);
+      if ((typeGroup || supabaseOnlyFilter) && _stockFilter) query = query.eq('stock_status', _stockFilter);
 
       // Sorting — map column keys to DB columns. Margin/markup/profit normally
       // route to backend; for the grouped-type path we sort client-side after
       // the fetch (see below).
       const sortMap = { brand: 'brand_id' };
       const sortCol = sortMap[_sort] || _sort || 'name';
-      const dbSort = ((typeGroup || _packFilter) && isMarginSort) ? 'name' : sortCol;
+      const dbSort = ((typeGroup || supabaseOnlyFilter) && isMarginSort) ? 'name' : sortCol;
       query = query.order(dbSort, { ascending: _sortDir !== 'desc' });
 
       // Pagination
@@ -706,7 +821,7 @@ async function loadProducts() {
       // Client-side margin/markup/profit sort for the grouped-type path
       // (we couldn't push it to Supabase because it's a computed value).
       let sortedRows = rows || [];
-      if ((typeGroup || _packFilter) && isMarginSort) {
+      if ((typeGroup || supabaseOnlyFilter) && isMarginSort) {
         const dir = _sortDir === 'desc' ? -1 : 1;
         sortedRows = [...sortedRows].sort((a, b) => {
           const ap = computeProfitability(a);
@@ -749,6 +864,9 @@ async function loadProducts() {
   // The backend has no color param — if the pack filter is active, say so
   // LOUDLY rather than presenting unfiltered rows as a filtered result.
   if (_packFilter) Toast.warning('Pack filter unavailable right now — showing unfiltered results');
+  // Same for the supplier filter: /api/admin/products has no `supplier` param, so
+  // these rows are NOT filtered by supplier. Never let the dropdown imply they are.
+  if (_supplierFilter) Toast.warning('Supplier filter unavailable right now — showing unfiltered results');
   const filters = { search: _search, sort: _sort, order: _sortDir };
   if (_brandFilter) filters.brand = _brandFilter;
   if (_activeFilter !== '') filters.active = _activeFilter;
@@ -3620,10 +3738,11 @@ function getProductExportParams() {
   if (typeGroup) p.set('product_type', typeGroup.join(','));
   else if (_typeFilter) p.set('product_type', _typeFilter);
   if (_stockFilter) p.set('stock_status', _stockFilter);
-  // Forward-compat: the backend export endpoint doesn't understand `pack` yet
-  // (harmless \u2014 unknown params are ignored). handleExport warns the admin so
-  // the mismatch is never silent.
+  // Forward-compat: the backend export endpoint doesn't understand `pack` or
+  // `supplier` yet (harmless \u2014 unknown params are ignored). handleExport warns
+  // the admin so the mismatch is never silent.
   if (_packFilter) p.set('pack', _packFilter);
+  if (_supplierFilter) p.set('supplier', _supplierFilter);
   if (_sort) p.set('sort', _sort);
   if (_sortDir) p.set('order', _sortDir);
   return p.toString();
@@ -3635,14 +3754,61 @@ async function handleExport(format = 'csv') {
       await exportProductsPDF();
       return;
     }
-    // The backend export has no pack/color filter \u2014 exporting silently
-    // unfiltered rows under an active filter would be a lie. Say so.
+    // The backend export has no pack/color or supplier filter \u2014 exporting
+    // silently unfiltered rows under an active filter would be a lie. Say so.
     if (_packFilter) Toast.warning(`Pack filter is not applied to ${format.toUpperCase()} exports \u2014 exporting all matching products`);
+    if (_supplierFilter) Toast.warning(`Supplier filter is not applied to ${format.toUpperCase()} exports \u2014 exporting all matching products`);
+    // The CSV/XLSX itself is built server-side, so it carries whatever columns
+    // the backend chooses \u2014 Supplier and Origin are NOT among them yet. The PDF
+    // export (built here) does include both. Said once per page visit: an admin
+    // who exports repeatedly doesn't need telling every time.
+    if (!_warnedCsvSourcingColumns) {
+      _warnedCsvSourcingColumns = true;
+      Toast.info('Supplier / Origin appear in the PDF export only \u2014 the CSV is generated by the backend.');
+    }
     Toast.info(`Preparing ${format.toUpperCase()} export\u2026`);
     await AdminAPI.exportData('products', format, getProductExportParams());
     Toast.success('Products exported');
   } catch (e) {
     Toast.error(`Export failed: ${e.message}`);
+  }
+}
+
+/**
+ * Back-fill `supplier` / `supplier_sku` / `pack_type` onto rows that came from
+ * /api/admin/products (which doesn't return them) using one batched Supabase read
+ * per 500 SKUs. Rows that already carry the fields are returned untouched.
+ *
+ * Best-effort by design: any failure returns the rows exactly as they came in, so
+ * the caller's "no supplier field" guard fires and the columns are dropped with a
+ * warning. Never invents a value.
+ */
+async function enrichSourcingFields(rows) {
+  if (!Array.isArray(rows) || !rows.length) return rows;
+  if (rows.some(r => r && ('supplier' in r || 'pack_type' in r))) return rows;
+  const sb = (typeof Auth !== 'undefined' && Auth.supabase) ? Auth.supabase : null;
+  if (!sb) return rows;
+
+  try {
+    const skus = [...new Set(rows.map(r => r && r.sku).filter(Boolean))];
+    const bySku = new Map();
+    const CHUNK = 500;
+    for (let i = 0; i < skus.length; i += CHUNK) {
+      const { data, error } = await sb.from('products')
+        .select('sku, supplier, supplier_sku, pack_type')
+        .in('sku', skus.slice(i, i + CHUNK));
+      if (error) throw error;
+      for (const row of (data || [])) bySku.set(row.sku, row);
+    }
+    if (!bySku.size) return rows;
+    return rows.map((r) => {
+      const extra = r && bySku.get(r.sku);
+      return extra
+        ? { ...r, supplier: extra.supplier, supplier_sku: extra.supplier_sku, pack_type: extra.pack_type }
+        : r;
+    });
+  } catch {
+    return rows;
   }
 }
 
@@ -3677,6 +3843,23 @@ async function exportProductsPDF() {
       all = all.filter(p =>
         _imageFilter === 'no-images' ? !productHasImage(p) : productHasImage(p)
       );
+    }
+
+    // The backend export payload may not carry the sourcing columns. Fill them
+    // in from Supabase (one batched read, keyed by SKU) so the PDF can show
+    // Supplier/Origin at all — and so the supplier filter below has something
+    // real to filter on. Best-effort: if it fails we warn and drop the columns
+    // rather than printing a page of dashes that reads as "no supplier".
+    all = await enrichSourcingFields(all);
+
+    // Apply client-side supplier filter if active. Same honesty guard as the
+    // pack filter below: no supplier field means we did NOT filter.
+    if (_supplierFilter) {
+      if (!all.some(p => p && p.supplier != null)) {
+        Toast.warning('Supplier filter not applied to PDF — export data has no supplier field');
+      } else {
+        all = all.filter(p => String(p.supplier || '') === _supplierFilter);
+      }
     }
 
     // Apply client-side pack filter if active. Guard: if the backend rows
@@ -3736,14 +3919,25 @@ async function exportProductsPDF() {
     if (_activeFilter !== '') filterParts.push(`Status: ${_activeFilter === 'true' ? 'Active' : 'Inactive'}`);
     if (_imageFilter) filterParts.push(`Images: ${_imageFilter === 'no-images' ? 'Missing' : 'Has images'}`);
     if (_packFilter) filterParts.push(`Packs: ${_packFilter === 'packs' ? 'Packs only' : 'Singles only'}`);
+    if (_supplierFilter) filterParts.push(`Supplier: ${supplierLabel(_supplierFilter) || 'No supplier recorded'}`);
     const summary = filterParts.length ? filterParts.join(' | ') : 'All products';
     doc.text(`${summary}  \u2022  ${all.length} products  \u2022  ${new Date().toLocaleDateString('en-NZ')}`, 14, 21);
     doc.setTextColor(0);
+
+    // The export rows come from /api/admin/products, which may not carry the
+    // sourcing columns at all. Printing a Supplier column of dashes would read as
+    // "none of these have a supplier" when the truth is "the export didn't fetch
+    // it" — same guard shape as the colour check above.
+    const hasSourcingFields = all.some(p => p && ('supplier' in p || 'pack_type' in p));
+    if (!hasSourcingFields) {
+      Toast.warning('Supplier / Origin omitted from the PDF — the export data has no supplier field');
+    }
 
     // Table columns
     const head = [
       'Name', 'SKU', 'Brand', 'Price',
       ...(isOwner ? ['Cost', 'Margin %', 'Profit $'] : []),
+      ...(hasSourcingFields ? ['Supplier', 'Origin'] : []),
       'Active',
     ];
     const body = all.map(p => {
@@ -3761,6 +3955,10 @@ async function exportProductsPDF() {
           p.cost_price != null ? formatPrice(p.cost_price) : MISSING,
           pctCell(prof.marginPct),
           dollarCell(prof.profitDollars),
+        ] : []),
+        ...(hasSourcingFields ? [
+          supplierLabel(p.supplier) || MISSING,
+          originLabel(productOrigin(p)),
         ] : []),
         p.is_active !== false ? 'Yes' : 'No',
       ];
@@ -4163,6 +4361,9 @@ async function renderProductsContent(contentEl) {
           <option value="singles">Singles Only</option>
           <option value="packs">Packs Only (CMY/KCMY)</option>
         </select>
+        <select class="admin-select" id="supplier-filter" title="Who we buy this product from (products.supplier)">
+          ${supplierFilterOptions(_supplierFilter)}
+        </select>
         <span style="flex:1 1 auto"></span>
         ${columnPickerMarkup()}
         ${ownerControls}
@@ -4246,8 +4447,13 @@ async function renderProductsContent(contentEl) {
     // Show skeleton diagnostics immediately (before data loads)
     renderDiagnostics(container);
 
+    const initialColumns = computeVisibleColumns(_allColumns, _hiddenColumns);
+    // Must be set before the first render, not only when the picker changes —
+    // otherwise the opening paint is the one with the collapsed Name column.
+    applyTableMinWidth(initialColumns);
+
     _table = new DataTable(tableContainer, {
-      columns: computeVisibleColumns(_allColumns, _hiddenColumns),
+      columns: initialColumns,
       rowKey: 'id',
       selectable: true,
       // Fixed table layout: honour the col-w-* widths exactly. Without this the
@@ -4344,6 +4550,9 @@ async function renderProductsContent(contentEl) {
     });
     header.querySelector('#pack-filter')?.addEventListener('change', (e) => {
       _packFilter = e.target.value; _page = 1; loadProducts();
+    });
+    header.querySelector('#supplier-filter')?.addEventListener('change', (e) => {
+      _supplierFilter = e.target.value; _page = 1; loadProducts();
     });
 
     // Export
@@ -4455,6 +4664,8 @@ export default {
     _typeFilter = '';
     _stockFilter = '';
     _packFilter = '';
+    _supplierFilter = '';
+    _warnedSourcingUnavailable = false;
     _brands = [];
     _diagnostics = null;
     _activeProductTab = 'products';

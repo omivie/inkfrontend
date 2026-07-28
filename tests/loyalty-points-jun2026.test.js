@@ -483,19 +483,56 @@ test('account/index.html: dashboard loyalty card has the balance element', () =>
 // Order confirmation: points earned + redemption applied (Jun 2026)
 // ─────────────────────────────────────────────────────────────────────────────
 
-test('order-confirmation-page.js: passes through loyalty fields and renders both totals rows', () => {
+// UPDATED Jul 2026. This test used to pin the earn-basis and the "≈" marker by
+// matching the IMPLEMENTATION TEXT inside order-confirmation-page.js:
+//
+//     assert.match(src, /Number\(total\)[\s\S]{0,40}Number\(shippingCost\)/)
+//     assert.match(src, /≈/)
+//
+// That arithmetic has moved into js/order-totals.js, which is now the ONE place
+// any order's money is read (DEC-006) — /order-confirmation, /account/order-detail
+// and the receipt PDF all render from OrderTotals.rows(). Matching the old text
+// here would fail for a refactor that PRESERVED the rule, and would have passed
+// for a rewrite that broke it. Same lesson as ERR-073: pin the RULE, not the
+// implementation.
+//
+// So the basis and the "≈" marker are now pinned BEHAVIOURALLY, against the real
+// module, in tests/order-totals-jul2026.test.js:
+//   - "estimate basis is order value EX-SHIPPING: total 57, shipping 7 -> 50 pts"
+//   - "UNKNOWN shipping collapses the estimate to null — it is NOT treated as free"
+//   - "estimated earn is marked with ~ AND carries an explanatory note"
+// What remains here is that this page still DELEGATES rather than reimplementing.
+test('order-confirmation-page.js: delegates loyalty money to OrderTotals and drives both rows', () => {
     const src = JS('order-confirmation-page.js');
-    // transformAPIOrder normalises the backend fields (defensive on naming).
-    assert.match(src, /loyaltyDiscount:/, 'transform must expose loyaltyDiscount');
-    assert.match(src, /pointsEarned:/, 'transform must expose pointsEarned');
-    assert.match(src, /loyalty_discount_amount/, 'must read loyalty_discount_amount');
-    assert.match(src, /points_earned/, 'must read points_earned');
+
+    assert.match(src, /OrderTotals\.normalise\(/, 'transform must normalise via the shared helper');
+    assert.match(src, /OrderTotals\.rows\(/, 'renderTotals must render from the shared row list');
+    assert.match(src, /loyaltyDiscount:/, 'transform must still expose loyaltyDiscount');
+    assert.match(src, /pointsEarned:/, 'transform must still expose pointsEarned');
+
     // renderTotals populates the rows.
     assert.match(src, /totals-loyalty-row/, 'must drive the applied-points row');
     assert.match(src, /totals-earned-row/, 'must drive the points-earned row');
-    // Earn estimate mirrors the backend basis: order value ex-shipping, not ex-GST subtotal.
-    assert.match(src, /Number\(total\)[\s\S]{0,40}Number\(shippingCost\)/, 'estimate basis is total − shipping');
-    assert.match(src, /≈/, 'estimated (non-backend) earn is marked with ≈');
+
+    // And must NOT have grown a second copy of the earn rule. A private
+    // reimplementation here is exactly the drift order-totals.js removed.
+    assert.doesNotMatch(src, /Math\.floor\([^)]*total/i,
+        'the earn estimate belongs to order-totals.js, not this page');
+});
+
+test('order-confirmation-page.js: no hand-rolled money fallbacks that read UNKNOWN as 0', () => {
+    // The three defects this file carried before Jul 2026 (ERR-124):
+    //   subtotal := order.subtotal || <sum of line items>   -> invented a subtotal
+    //   shippingCost := order.shippingCost || ... || 0      -> unknown shipping read as FREE,
+    //                                                          overstating every points estimate
+    //   total := order.total || (subtotal + shippingCost)   -> a total that ignored discounts
+    const src = JS('order-confirmation-page.js');
+    assert.doesNotMatch(src, /order\.shippingCost\s*\|\|\s*order\.shipping_cost\s*\|\|\s*0/,
+        'unknown shipping must not default to 0 — that is not free shipping');
+    assert.doesNotMatch(src, /order\.subtotal\s*\|\|\s*order\.items/,
+        'the subtotal must not be re-derived from line items');
+    assert.doesNotMatch(src, /order\.total\s*\|\|\s*\(\s*subtotal/,
+        'the total must not be re-derived as subtotal + shipping');
 });
 
 test('order-confirmation.html: totals has loyalty-applied and points-earned rows', () => {

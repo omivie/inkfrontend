@@ -1155,6 +1155,46 @@
                 hint.className = 'coupon-form__hint coupon-form__hint--' + (tone || 'neutral');
             };
 
+            /**
+             * Error hint + the optional "try this instead" nudge
+             * (traffic-conversion-jul2026 §5).
+             *
+             * Reads the suggestion off whichever shape arrived — `data.suggestion`
+             * on a 200 preview, `details.suggestion` on a 400 apply (returned
+             * envelope or thrown Error). CouponSuggestion.pick() refuses to read
+             * one out of a rate-limited response, so the lockout stays clean.
+             *
+             * The code is appended as a click-to-fill button, not applied
+             * automatically: the endpoint locks out after too many invalid
+             * attempts, and spending one on a code the shopper didn't choose is
+             * the wrong trade.
+             */
+            const setFailureHint = (text, source) => {
+                setHint(text, 'error');
+                if (typeof CouponSuggestion === 'undefined') return;
+                const suggestion = CouponSuggestion.pick(source);
+                const nudge = suggestion && CouponSuggestion.text(suggestion);
+                if (!nudge) return;
+                const hint = ensureHintEl();
+                // Built from DOM nodes so a backend-supplied code or label can
+                // never inject markup into the checkout page.
+                hint.textContent = '';
+                const parts = nudge.split(suggestion.code);
+                hint.appendChild(document.createTextNode(parts[0] || ''));
+                const btn = document.createElement('button');
+                btn.type = 'button';
+                btn.className = 'coupon-form__suggestion';
+                btn.textContent = suggestion.code;
+                btn.setAttribute('aria-label', 'Use coupon code ' + suggestion.code);
+                btn.addEventListener('click', () => {
+                    couponInput.value = suggestion.code;
+                    couponInput.focus();
+                    setHint('', 'neutral');
+                });
+                hint.appendChild(btn);
+                hint.appendChild(document.createTextNode(parts.slice(1).join(suggestion.code) || ''));
+            };
+
             // Debounced preview — calls /api/cart/coupon/preview without mutating cart state.
             // Backend returns { valid, discount_amount, new_total, reason?, message } so we can
             // inline-correct the user (e.g. "Add $15 more to use this coupon.") before they click
@@ -1182,7 +1222,7 @@
                         } else if (res.code === 'EMAIL_NOT_VERIFIED') {
                             setHint('Verify your email to use coupons.', 'error');
                         } else {
-                            setHint(API.extractErrorMessage(res, 'Coupon not valid for this cart'), 'error');
+                            setFailureHint(API.extractErrorMessage(res, 'Coupon not valid for this cart'), res);
                         }
                         return;
                     }
@@ -1198,11 +1238,11 @@
                     } else if (data.reason && data.message) {
                         // Backend gives actionable message verbatim for known reasons:
                         // minimum_order_required / account_too_new / already_used / unavailable
-                        setHint(data.message, 'error');
+                        setFailureHint(data.message, data);
                     } else if (data.message) {
-                        setHint(data.message, 'error');
+                        setFailureHint(data.message, data);
                     } else {
-                        setHint('Coupon not valid for this cart', 'error');
+                        setFailureHint('Coupon not valid for this cart', data);
                     }
                 } catch (err) {
                     // Map RATE_LIMITED to a friendly inline hint per spec §6.
@@ -1231,12 +1271,18 @@
             couponBtn.addEventListener('click', async () => {
                 const code = couponInput.value.trim();
                 if (!code) {
-                    alert('Please enter a coupon code');
+                    setHint('Please enter a coupon code', 'error');
                     return;
                 }
 
                 couponBtn.disabled = true;
                 couponBtn.textContent = 'Applying...';
+
+                // The failure path below re-throws a plain Error to reach the
+                // shared catch, which drops the structured `details` carrying
+                // the coupon suggestion. Stash the original response so the
+                // catch can still read it (traffic-conversion-jul2026 §5).
+                let failureSource = null;
 
                 try {
                     const response = await API.applyCoupon(code);
@@ -1286,9 +1332,13 @@
                         couponBtn.textContent = 'Applied';
                         couponBtn.style.background = '#10b981';
 
-                        alert(response.message || `Coupon applied! You saved ${formatPrice(this.totals.discount)}`);
+                        // Inline hint, not alert(): the preview above already
+                        // reports into #coupon-preview-hint, so success and
+                        // failure now land in the same place instead of one
+                        // inline and one in a modal dialog.
+                        setHint(response.message || `Coupon applied! You saved ${formatPrice(this.totals.discount)}`, 'success');
                     } else if (response.code === 'EMAIL_NOT_VERIFIED') {
-                        alert('Please verify your email address before applying coupons. Check your inbox for a verification link.');
+                        setHint('Please verify your email address before applying coupons. Check your inbox for a verification link.', 'error');
                         couponBtn.textContent = 'Apply';
                         couponBtn.disabled = false;
                         return;
@@ -1298,6 +1348,7 @@
                         const fieldMsg = Array.isArray(response.details) && response.details[0]?.message
                             ? response.details[0].message
                             : null;
+                        failureSource = response;
                         throw new Error(fieldMsg || API.extractErrorMessage(response, 'Invalid coupon code'));
                     }
                 } catch (error) {
@@ -1337,7 +1388,17 @@
                         DebugLog.warn('Cart resync after coupon failure failed:', syncErr);
                     }
 
-                    alert(error.message || 'Invalid coupon code');
+                    // `failureSource` is the returned envelope when the branch
+                    // above re-threw; otherwise the thrown Error itself carries
+                    // .details (api.js attaches it). Either way the suggestion
+                    // is reachable — and CouponSuggestion.pick() suppresses it
+                    // for a COUPON_LOCKED / RATE_LIMITED lockout.
+                    const source = failureSource || error;
+                    if (source && (source.code === 'COUPON_LOCKED' || source.code === 'RATE_LIMITED')) {
+                        setHint('Too many tries — wait a minute and retry.', 'error');
+                    } else {
+                        setFailureHint(error.message || 'Invalid coupon code', source);
+                    }
                     couponBtn.textContent = 'Apply';
                     couponBtn.disabled = false;
                 }

@@ -1673,6 +1673,332 @@ function canonicalizeCategory(raw) {
 }
 if (typeof window !== 'undefined') window.canonicalizeCategory = canonicalizeCategory;
 
+/**
+ * TRUST STATS  (traffic-conversion-jul2026 §2)
+ * ============================================
+ * Sitewide social-proof counts from `GET /api/site/trust` → `data.stats`:
+ *
+ *     { customers_served, orders_shipped, cartridges_sold,
+ *       founded_year, refreshed_at }
+ *
+ * The counts are FLOORED TO HONEST BANDS server-side, so they render with a
+ * trailing "+" ("47+ customers served"). Any count may be `null` — that means
+ * "not computed yet", NOT zero, and the slot must be HIDDEN rather than shown
+ * as "0+" or "null+". As of 2026-07-28 production returns null for all three
+ * (the nightly sweep has never run), so every consumer of this module must
+ * look correct in the all-null state — that is the state that ships today.
+ *
+ * WHY THIS LIVES IN utils.js
+ * --------------------------
+ * js/seo-meta.js already fetches the same endpoint, but it is loaded on only
+ * 3 of 42 HTML pages (index, shop, ribbons). The footer renders on 36. utils.js
+ * is loaded on 38, so it is the only existing sitewide home — and adding a new
+ * /js/*.js file would need a matching `?v=` token in every page that loads it
+ * (tests/asset-cache-tokens.test.js §1/§2). SeoMeta.getTrust() delegates here
+ * so the shared pages issue ONE request, not two.
+ *
+ * Fail-open by design: a dead endpoint must never block or blank a page, so
+ * every failure resolves to `{}` and every consumer hides its slot.
+ */
+const TrustStats = {
+    ENDPOINT: '/api/site/trust',
+    CACHE_KEY: 'ic_trust_raw_v1',
+    TTL_MS: 60 * 60 * 1000,   // 1h — the backend refreshes nightly
+
+    _promise: null,
+
+    _apiUrl() {
+        const base = (typeof Config !== 'undefined' && Config.API_URL != null) ? Config.API_URL : '';
+        return `${base}${this.ENDPOINT}`;
+    },
+
+    _readCache() {
+        try {
+            const raw = sessionStorage.getItem(this.CACHE_KEY);
+            if (!raw) return null;
+            const parsed = JSON.parse(raw);
+            if (!parsed || (Date.now() - parsed.ts) > this.TTL_MS) return null;
+            return parsed.payload;
+        } catch { return null; }
+    },
+
+    _writeCache(payload) {
+        try {
+            sessionStorage.setItem(this.CACHE_KEY, JSON.stringify({ ts: Date.now(), payload }));
+        } catch { /* private mode / quota — ignore */ }
+    },
+
+    /**
+     * The whole `data` object from /api/site/trust, session-cached and
+     * in-flight-deduped. Resolves to `{}` on any failure (fail-open).
+     * @returns {Promise<Object>}
+     */
+    async raw() {
+        const cached = this._readCache();
+        if (cached) return cached;
+        if (this._promise) return this._promise;
+        this._promise = (async () => {
+            if (typeof fetch !== 'function') return {};
+            try {
+                const res = await fetch(this._apiUrl(), { headers: { 'Accept': 'application/json' } });
+                if (!res.ok) return {};
+                const json = await res.json();
+                // Envelope is { ok, data } — but tolerate a bare object.
+                const data = (json && typeof json === 'object' && 'data' in json) ? json.data : json;
+                const payload = (data && typeof data === 'object') ? data : {};
+                this._writeCache(payload);
+                return payload;
+            } catch {
+                return {};
+            } finally {
+                this._promise = null;
+            }
+        })();
+        return this._promise;
+    },
+
+    /**
+     * Just the `stats` sub-object, normalised to numbers-or-null. Never throws.
+     * @returns {Promise<{customersServed:number|null, ordersShipped:number|null,
+     *                    cartridgesSold:number|null, foundedYear:number|null,
+     *                    refreshedAt:string|null}>}
+     */
+    async stats() {
+        const data = await this.raw();
+        return this.normalize(data && data.stats);
+    },
+
+    normalize(stats) {
+        const n = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
+        const s = (stats && typeof stats === 'object') ? stats : {};
+        return {
+            customersServed: n(s.customers_served),
+            ordersShipped: n(s.orders_shipped),
+            cartridgesSold: n(s.cartridges_sold),
+            foundedYear: n(s.founded_year),
+            refreshedAt: typeof s.refreshed_at === 'string' ? s.refreshed_at : null,
+        };
+    },
+
+    /**
+     * Format a count as an honest band: 47 → "47+". Returns null — never a
+     * string — for null / non-finite / <= 0, so callers hide the slot instead
+     * of painting "0+" or "null+". Absence is NOT zero.
+     * @param {*} value
+     * @returns {string|null}
+     */
+    band(value) {
+        if (typeof value !== 'number' || !Number.isFinite(value)) return null;
+        const floored = Math.floor(value);
+        if (floored <= 0) return null;
+        return `${floored.toLocaleString('en-NZ')}+`;
+    },
+
+    /**
+     * The three social-proof lines, in display order, already banded and with
+     * the null slots dropped. Empty array = render nothing at all.
+     * @param {Object} stats - output of normalize()
+     * @returns {Array<{key:string, value:string, label:string}>}
+     */
+    lines(stats) {
+        const s = stats || {};
+        return [
+            { key: 'customers', value: this.band(s.customersServed), label: 'customers served' },
+            { key: 'orders', value: this.band(s.ordersShipped), label: 'orders shipped' },
+            { key: 'cartridges', value: this.band(s.cartridgesSold), label: 'cartridges sold' },
+        ].filter(row => row.value !== null);
+    },
+};
+if (typeof window !== 'undefined') window.TrustStats = TrustStats;
+
+/**
+ * DISPATCH COUNTDOWN  (traffic-conversion-jul2026 §4)
+ * ===================================================
+ * "Order within 1h 59m for same-day dispatch", ticking client-side.
+ *
+ * Seeded from `delivery_estimate.cutoff_remaining_seconds`, which the backend
+ * describes as a POINT-IN-TIME value — PDP responses are briefly cached, so it
+ * must never be trusted to the exact second. The client clock owns the tick.
+ *
+ * The seed is converted ONCE into an ABSOLUTE deadline (`Date.now() + s*1000`)
+ * and every tick recomputes `deadline - Date.now()`. That matters more than it
+ * looks: a decrement-a-counter timer drifts badly when the tab is backgrounded
+ * (browsers clamp setInterval to ~1/minute) and is flat wrong after a laptop
+ * sleeps or a bfcache restore. Recomputing from an absolute deadline is
+ * self-correcting in all three cases — the number is right the instant the
+ * user looks at it again.
+ *
+ * `same_day_eligible === false` (incl. weekends) renders NOTHING; the static
+ * "Order before 2pm NZT for same-day dispatch" copy already on the page is the
+ * fallback framing, and it stays untouched.
+ */
+const DispatchCountdown = {
+    /**
+     * Human form of a remaining duration.
+     *   >= 1h  → "1h 59m"   (seconds are noise at that range)
+     *   <  1h  → "9m 05s"   (zero-padded so the string does not jitter in width)
+     *   <  1m  → "45s"
+     * @param {number} totalSeconds
+     * @returns {string}
+     */
+    format(totalSeconds) {
+        const s = Math.max(0, Math.floor(Number(totalSeconds) || 0));
+        const hours = Math.floor(s / 3600);
+        const minutes = Math.floor((s % 3600) / 60);
+        const seconds = s % 60;
+        if (hours > 0) return `${hours}h ${String(minutes).padStart(2, '0')}m`;
+        if (minutes > 0) return `${minutes}m ${String(seconds).padStart(2, '0')}s`;
+        return `${seconds}s`;
+    },
+
+    /**
+     * True when the payload says an order placed right now still makes today's
+     * courier. Requires BOTH the flag and a positive seed — a `true` flag with
+     * 0 seconds left is an expired cache, not an opportunity.
+     * @param {Object} deliveryEstimate
+     * @returns {boolean}
+     */
+    isEligible(deliveryEstimate) {
+        const d = deliveryEstimate || {};
+        if (d.same_day_eligible !== true) return false;
+        const secs = Number(d.cutoff_remaining_seconds);
+        return Number.isFinite(secs) && secs > 0;
+    },
+
+    /**
+     * Mount a live countdown into `el`. Returns a handle with `.stop()`.
+     * Calling mount() again on the same element stops the previous timer
+     * first (Cart.renderCartSignals re-runs on every mutation — without this
+     * the timers would stack and the number would tick multiple times a
+     * second).
+     *
+     * @param {Element} el              - target element (hidden when not eligible)
+     * @param {Object}  deliveryEstimate
+     * @param {Object} [opts]
+     * @param {Function} [opts.setInterval] - injectable for tests
+     * @param {Function} [opts.clearInterval]
+     * @param {Function} [opts.now]         - injectable clock for tests
+     * @returns {{stop: Function}|null}
+     */
+    mount(el, deliveryEstimate, opts) {
+        if (!el) return null;
+        const o = opts || {};
+        const now = typeof o.now === 'function' ? o.now : () => Date.now();
+        const setI = typeof o.setInterval === 'function' ? o.setInterval : ((fn, ms) => setInterval(fn, ms));
+        const clearI = typeof o.clearInterval === 'function' ? o.clearInterval : ((id) => clearInterval(id));
+
+        // Always stop whatever was previously mounted here.
+        if (el._dispatchTimer) {
+            clearI(el._dispatchTimer);
+            el._dispatchTimer = null;
+        }
+
+        if (!this.isEligible(deliveryEstimate)) {
+            el.textContent = '';
+            el.hidden = true;
+            return null;
+        }
+
+        const deadline = now() + (Number(deliveryEstimate.cutoff_remaining_seconds) * 1000);
+
+        const paint = () => {
+            const remaining = Math.floor((deadline - now()) / 1000);
+            if (remaining <= 0) {
+                // Cutoff passed while the page was open — retire silently back
+                // to the static framing rather than claiming a dispatch we
+                // can no longer honour.
+                stop();
+                el.textContent = '';
+                el.hidden = true;
+                return;
+            }
+            el.textContent = `Order within ${this.format(remaining)} for same-day dispatch`;
+            el.hidden = false;
+        };
+
+        const stop = () => {
+            if (el._dispatchTimer) {
+                clearI(el._dispatchTimer);
+                el._dispatchTimer = null;
+            }
+        };
+
+        paint();
+        el._dispatchTimer = setI(paint, 1000);
+        return { stop };
+    },
+};
+if (typeof window !== 'undefined') window.DispatchCountdown = DispatchCountdown;
+
+/**
+ * COUPON SUGGESTION  (traffic-conversion-jul2026 §5)
+ * ==================================================
+ * When a coupon fails the API may nudge toward a currently-valid public one:
+ *
+ *     { code: "SAVE10", label: "10% off", condition: "on orders over $50" }
+ *
+ * `condition` is optional. Two transports carry it, and callers must read BOTH:
+ *   - POST /api/cart/coupon          → HTTP 400 → `error.details.suggestion`
+ *   - POST /api/cart/coupon/preview  → HTTP 200 → `data.suggestion`
+ *
+ * NEVER surface WHY the tried code failed — anti-enumeration is deliberate.
+ * The 429 lockout (`COUPON_LOCKED`) intentionally carries no suggestion, and
+ * `pick()` refuses to read one out of a rate-limited response even if a future
+ * backend accidentally includes it.
+ */
+const CouponSuggestion = {
+    /** Codes whose responses must never yield a suggestion (security lockout). */
+    LOCKED_CODES: ['COUPON_LOCKED', 'RATE_LIMITED'],
+
+    /**
+     * Pull the suggestion out of whichever shape we were handed: a resolved
+     * error envelope, a thrown Error with `.details`, or a 200 preview body.
+     * Returns null when absent, malformed, or when the response is a lockout.
+     * @param {*} source
+     * @returns {{code:string, label:string|null, condition:string|null}|null}
+     */
+    pick(source) {
+        if (!source || typeof source !== 'object') return null;
+        const code = source.code;
+        if (typeof code === 'string' && this.LOCKED_CODES.includes(code)) return null;
+
+        const candidate =
+            (source.details && source.details.suggestion)          // thrown Error / returned envelope
+            || (source.error && source.error.details && source.error.details.suggestion) // raw envelope
+            || (source.data && source.data.suggestion)             // preview body under `data`
+            || source.suggestion                                   // already-unwrapped preview body
+            || null;
+
+        if (!candidate || typeof candidate !== 'object') return null;
+        const suggestedCode = typeof candidate.code === 'string' ? candidate.code.trim() : '';
+        if (!suggestedCode) return null;
+        return {
+            code: suggestedCode,
+            label: typeof candidate.label === 'string' && candidate.label.trim() ? candidate.label.trim() : null,
+            condition: typeof candidate.condition === 'string' && candidate.condition.trim() ? candidate.condition.trim() : null,
+        };
+    },
+
+    /**
+     * Plain-text nudge. No reason for the failure, ever.
+     *   full  → 'That code didn’t work — try SAVE10 for 10% off on orders over $50.'
+     *   no condition → 'That code didn’t work — try SAVE10 for 10% off.'
+     *   no label     → 'That code didn’t work — try SAVE10.'
+     * @param {Object} suggestion - output of pick()
+     * @returns {string|null}
+     */
+    text(suggestion) {
+        if (!suggestion || !suggestion.code) return null;
+        let tail = suggestion.code;
+        if (suggestion.label) {
+            tail += ` for ${suggestion.label}`;
+            if (suggestion.condition) tail += ` ${suggestion.condition}`;
+        }
+        return `That code didn’t work — try ${tail}.`;
+    },
+};
+if (typeof window !== 'undefined') window.CouponSuggestion = CouponSuggestion;
+
 // Export for module use (if needed in future)
 if (typeof module !== 'undefined' && module.exports) {
     module.exports = {
@@ -1686,6 +2012,9 @@ if (typeof module !== 'undefined' && module.exports) {
         ProductSort,
         ProductName,
         SeriesCodes,
-        canonicalizeCategory
+        canonicalizeCategory,
+        TrustStats,
+        DispatchCountdown,
+        CouponSuggestion
     };
 }

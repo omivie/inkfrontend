@@ -107,8 +107,12 @@ test('destroy() resets _packFilter like the other filters', () => {
 test('an active pack filter is forced down the Supabase path', () => {
   // /api/admin/products has no color param — routing an active pack filter to
   // the backend would show unfiltered rows while the dropdown says otherwise.
-  assert.match(PRODUCTS, /const\s+needsBackend\s*=\s*!typeGroup\s*&&\s*!_packFilter\s*&&/,
-    'needsBackend must AND with !_packFilter');
+  // Jul 2026: the supplier filter joined the same club (no `supplier` param
+  // either), so the two share one `supabaseOnlyFilter` flag.
+  assert.match(PRODUCTS, /const\s+supabaseOnlyFilter\s*=\s*!!_packFilter\s*\|\|\s*!!_supplierFilter/,
+    'supabaseOnlyFilter must cover the pack filter');
+  assert.match(PRODUCTS, /const\s+needsBackend\s*=\s*!typeGroup\s*&&\s*!supabaseOnlyFilter\s*&&/,
+    'needsBackend must AND with !supabaseOnlyFilter');
 });
 
 test('"packs" queries .in("color", PACKS); "singles" keeps NULL colors', () => {

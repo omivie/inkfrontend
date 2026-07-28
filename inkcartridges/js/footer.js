@@ -340,6 +340,18 @@
                         </span>
                     </li>
                 </ul>
+                <!--
+                  Sitewide social proof (traffic-conversion-jul2026 §2), filled
+                  asynchronously by renderTrustStats() from /api/site/trust →
+                  data.stats. A separate line rather than a 5th <li> because
+                  .footer-trust__list is a hard repeat(4, 1fr) grid.
+
+                  Ships hidden and STAYS hidden unless at least one count comes
+                  back non-null — which is production's current state, so this
+                  is invisible today and lights up on its own once the backend's
+                  nightly sweep first runs.
+                -->
+                <p class="footer-stats" id="footer-trust-stats" data-testid="footer-trust-stats" hidden></p>
             </div>
         </div>
 
@@ -539,6 +551,12 @@
     // does (Ink · Toner · Drum Units · Ribbons) — anti-cloaking §2c, closing the
     // divergence in readfirst/footer-redesign-backend-jul2026.md.
 
+    // Sitewide social-proof counts. Deliberately AFTER the synchronous footer
+    // paint and deliberately not awaited — the footer must never wait on a
+    // network call, and TrustStats fails open to {} so a dead endpoint leaves
+    // the line hidden rather than blanking anything.
+    renderTrustStats();
+
     // Google Customer Reviews - badge + opt-in survey loader
     (function () {
       window.___gcfg = { lang: 'en_NZ' };
@@ -576,6 +594,34 @@
         });
       }
     })();
+  }
+
+  /**
+   * Sitewide trust stats in the footer (traffic-conversion-jul2026 §2).
+   *
+   * Counts are floored to honest bands server-side, so they read with a
+   * trailing "+" — "47+ customers served". A null count means NOT COMPUTED,
+   * not zero: its slot is dropped entirely rather than painted as "0+".
+   * When every count is null (production's state as of 2026-07-28, because the
+   * backend's nightly sweep has never run) the whole line stays hidden and the
+   * footer is byte-identical to before this feature existed.
+   *
+   * Fail-open: TrustStats.raw() resolves to {} on any error, so there is no
+   * catch-and-log path to get wrong.
+   */
+  async function renderTrustStats() {
+    const el = document.getElementById('footer-trust-stats');
+    if (!el || typeof TrustStats === 'undefined') return;
+    const lines = TrustStats.lines(await TrustStats.stats());
+    if (!lines.length) {
+      el.hidden = true;
+      el.textContent = '';
+      return;
+    }
+    // textContent, not innerHTML — these are backend-supplied numbers rendered
+    // into a sentence, and there is no reason for markup to be possible here.
+    el.textContent = lines.map(row => `${row.value} ${row.label}`).join(' · ');
+    el.hidden = false;
   }
 
   function syncFooterAccordions() {

@@ -21,10 +21,10 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link rel="stylesheet" href="/css/base.css?v=e9b82f71">
-    <link rel="stylesheet" href="/css/layout.css?v=ea114dc3">
+    <link rel="stylesheet" href="/css/layout.css?v=e79b9859">
     <link rel="stylesheet" href="/css/components.css?v=79d69fe3">
     <link rel="stylesheet" href="/css/modern-effects.css?v=afe20f45">
-    <link rel="stylesheet" href="/css/pages.css?v=6c51f041">
+    <link rel="stylesheet" href="/css/pages.css?v=e78ff2a3">
     <meta name="twitter:card" content="summary_large_image">
     <meta name="twitter:title" content="Verify Your Email | InkCartridges.co.nz">
     <meta name="twitter:description" content="Verify your email address to complete registration">
@@ -90,15 +90,22 @@
 
     <script defer src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.98.0" integrity="sha384-Sm2s7OXxsAMTyJ4iIyRBgVpeGUvMPk2lRQnnZhE78Wej7oggIoolKt+SCt0XJbUB" crossorigin="anonymous"></script>
     <script defer src="/js/config.js?v=57d2621d"></script>
-    <script defer src="/js/api.js?v=8d65d14d"></script>
+    <!-- utils.js defines DebugLog, which auth.js calls from its accountSync and
+         init CATCH blocks. Without it, a sync failure on this page threw a
+         second ReferenceError that swallowed the first, so the real error never
+         surfaced (ERR-126). security.js keeps the canonical prefix consistent
+         with every other account page. -->
+    <script defer src="/js/security.js?v=790f00f3"></script>
+    <script defer src="/js/utils.js?v=b34749fa"></script>
+    <script defer src="/js/api.js?v=104d4cb2"></script>
     <script defer src="/js/schema.js?v=dd78df4e"></script>
-    <script defer src="/js/auth.js?v=d8e7f6f2"></script>
+    <script defer src="/js/auth.js?v=b166bd02"></script>
     <script defer src="/js/business.js?v=891bfd2f"></script>
     <script defer src="/js/verify-email-page.js?v=6dd2c6a7"></script>
     <script defer src="/js/modern-effects.js?v=ad8bff1e"></script>
     <script defer src="/js/analytics.js?v=8c9ee196"></script>
     <script defer src="/js/legal-config.js?v=2db8a49b"></script>
-    <script defer src="/js/footer.js?v=cb9f19a6"></script>
+    <script defer src="/js/footer.js?v=f18a760a"></script>
     <script defer src="/js/site-guard.js?v=e0b0e4ba"></script>
 </body>
 </html>

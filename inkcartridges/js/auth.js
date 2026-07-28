@@ -56,6 +56,10 @@ const Auth = {
                         try {
                             const turnstileToken = await this.getTurnstileToken();
                             const syncResult = await API.accountSync(turnstileToken);
+                            // A converting guest's prior orders are claimed and their
+                            // points awarded DURING this call. Stash the result so the
+                            // dashboard can tell them (see captureRetroClaim).
+                            this.captureRetroClaim(syncResult);
                             if (syncResult && !syncResult.ok && syncResult.code === 'DISPOSABLE_EMAIL') {
                                 if (typeof showToast === 'function') {
                                     showToast('This email provider is not supported. Please use a permanent email address.', 'error', 0);
@@ -117,6 +121,113 @@ const Auth = {
             this.initialized = true; // Mark initialized even on error so we don't hang
             if (this._resolveReady) this._resolveReady();
             return false;
+        }
+    },
+
+    // Retroactive loyalty claim ─────────────────────────────────────────────
+    // When a guest signs up with an email that has prior guest orders, the
+    // backend claims those orders and awards their points DURING
+    // POST /api/account/sync. That used to happen on a nightly cron (~24h lag);
+    // it is now immediate. The customer's balance and order history jump the
+    // moment they land on the dashboard — and before this, nothing told them why.
+    RETRO_STASH_KEY: 'ic_retro_claim',
+    RETRO_SEEN_KEY: 'ic_retro_claim_seen',
+
+    /**
+     * Stash a retro-claim result for the dashboard to announce.
+     *
+     * STRICTLY BACKEND-DRIVEN. If the sync response carries no `retro` block, or
+     * carries one with nothing actually awarded, this does NOTHING. It never
+     * infers a claim from a balance, a ledger diff, or an order count — an
+     * inferred "we found your orders" banner that is wrong is worse than no
+     * banner, and every input here is a number we did not compute.
+     *
+     * Uses sessionStorage because the OAuth round-trip is a same-tab redirect and
+     * signOut() is the only thing that clears it (see signOut below), so the
+     * stash survives exactly as long as the session that earned it.
+     *
+     * @param {object|null} syncResult  the raw POST /api/account/sync envelope
+     */
+    captureRetroClaim(syncResult) {
+        try {
+            const retro = syncResult && syncResult.data && syncResult.data.retro;
+            if (!retro || typeof retro !== 'object') return;
+
+            const orders = Number(retro.orders_claimed);
+            const points = Number(retro.points_awarded);
+            // Both must be real, positive numbers. `{orders_claimed: 0}` is the
+            // backend saying "nothing happened" — never render that as an event.
+            if (!Number.isFinite(orders) || !Number.isFinite(points)) return;
+            if (orders <= 0 || points <= 0) return;
+
+            const uid = this.user && this.user.id ? this.user.id : null;
+            if (!uid) return;
+
+            const signature = `${uid}:${orders}:${points}`;
+            if (this._retroAlreadySeen(signature)) return;
+
+            sessionStorage.setItem(this.RETRO_STASH_KEY, JSON.stringify({
+                v: 1,
+                uid: uid,
+                orders: Math.round(orders),
+                points: Math.round(points),
+                claimId: typeof retro.claim_id === 'string' ? retro.claim_id : null,
+                signature: signature
+            }));
+        } catch (e) {
+            // Storage can throw in private mode / when full. A missed banner is
+            // a cosmetic loss; never let it break the login flow.
+            DebugLog.warn('captureRetroClaim failed:', e.message);
+        }
+    },
+
+    /**
+     * Has this exact claim already been announced on this device?
+     * Guards against a backend that re-sends the same block on later syncs.
+     */
+    _retroAlreadySeen(signature) {
+        try {
+            const raw = localStorage.getItem(this.RETRO_SEEN_KEY);
+            if (!raw) return false;
+            const seen = JSON.parse(raw);
+            return !!seen && seen.signature === signature;
+        } catch {
+            return false;
+        }
+    },
+
+    /** Record a claim as announced, so it is shown exactly once per device. */
+    markRetroClaimSeen(signature) {
+        try {
+            localStorage.setItem(this.RETRO_SEEN_KEY, JSON.stringify({ v: 1, signature: signature }));
+        } catch { /* non-critical */ }
+    },
+
+    /**
+     * Read and CONSUME the stash. Delete-on-read, so two callers in the same page
+     * load (the dashboard calls this both immediately and after its own sync)
+     * cannot render the banner twice.
+     * @returns {object|null}
+     */
+    takeRetroClaim() {
+        try {
+            const raw = sessionStorage.getItem(this.RETRO_STASH_KEY);
+            if (!raw) return null;
+            sessionStorage.removeItem(this.RETRO_STASH_KEY);
+
+            const stash = JSON.parse(raw);
+            if (!stash || stash.v !== 1) return null;
+            // Shared-device guard: a stash belonging to a different user is
+            // discarded rather than shown to whoever is signed in now.
+            const uid = this.user && this.user.id ? this.user.id : null;
+            if (!uid || stash.uid !== uid) return null;
+            if (!(stash.orders > 0) || !(stash.points > 0)) return null;
+
+            this.markRetroClaimSeen(stash.signature);
+            return stash;
+        } catch (e) {
+            DebugLog.warn('takeRetroClaim failed:', e.message);
+            return null;
         }
     },
 

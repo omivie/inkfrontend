@@ -254,7 +254,13 @@ test('renderProductsContent resolves the saved layout before building the table'
   const render = extractFunction(PRODUCTS_SRC, 'async function renderProductsContent(');
   assert.match(render, /await AdminAPI\.getUiPrefs\(\)/, 'must load this admin\'s prefs');
   assert.match(render, /uiPrefs\[COLUMN_PREF_KEY\]/, 'must read the products.columns pref');
-  assert.match(render, /columns:\s*computeVisibleColumns\(_allColumns, _hiddenColumns\)/,
+  // Jul 2026: the visible set is held in a local so the table's min-width can be
+  // published from the same value before the first paint (ERR-123). The binding
+  // that matters is unchanged — what DataTable receives IS computeVisibleColumns'
+  // output, never _allColumns.
+  assert.match(render, /const initialColumns = computeVisibleColumns\(_allColumns, _hiddenColumns\)/,
+    'the visible set must come from computeVisibleColumns');
+  assert.match(render, /columns:\s*initialColumns\b/,
     'the DataTable must be built from the visible column set');
 });
 
@@ -275,7 +281,9 @@ test('toggling a column persists via setUiPref and repaints the table', () => {
   assert.match(persist, /AdminAPI\.setUiPref\(COLUMN_PREF_KEY/, 'persist must call setUiPref');
 
   const apply = extractFunction(PRODUCTS_SRC, 'function applyColumnVisibility(');
-  assert.match(apply, /_table\.setColumns\(computeVisibleColumns\(/, 'apply must swap the columns');
+  assert.match(apply, /const visible = computeVisibleColumns\(_allColumns, _hiddenColumns\)/,
+    'apply must recompute the visible set');
+  assert.match(apply, /_table\.setColumns\(visible\)/, 'apply must swap the columns');
   assert.match(apply, /loadRowExtras\(\)/, 'apply must refill async cells');
 });
 

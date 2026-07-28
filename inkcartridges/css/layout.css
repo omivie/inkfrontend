@@ -1663,6 +1663,18 @@
     list-style: none;
 }
 
+/* Sitewide social-proof line under the 4-up trust grid
+   (traffic-conversion-jul2026 §2). Ships hidden; only unhides when at least
+   one count comes back non-null, so it never reserves empty space. */
+.footer-stats {
+    margin: var(--spacing-lg) 0 0;
+    text-align: center;
+    font-size: var(--font-size-sm);
+    font-weight: 600;
+    color: var(--steel-300, #cbd5e1);
+    font-variant-numeric: tabular-nums;
+}
+
 .footer-trust__item {
     display: flex;
     align-items: center;

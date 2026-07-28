@@ -2757,6 +2757,32 @@ button.admin-active-dot--clickable:hover::after { opacity: 1; }
 .margin-badge--warning  { background: var(--yellow-dim); color: var(--yellow-text); }
 .margin-badge--healthy  { background: var(--cyan-dim);   color: var(--cyan-text); }
 .margin-badge--excellent { background: var(--success-dim); color: var(--success); }
+/* profitability.js has always emitted this class for a null margin, but it had no
+   rule — the em-dash fell through to the bare badge and read like a value. */
+.margin-badge--unknown { background: var(--surface-hover); color: var(--text-muted); }
+
+/* -- Orders list: Profit column --------------------------------------------
+   Two-line cell: take-home dollars over a net-margin badge. The non-numeric
+   states are styled apart on purpose — "cost lookup failed" (amber) must never
+   be mistaken for "no cost on record" (muted), and neither for $0. */
+.order-profit {
+  display: inline-flex; flex-direction: column; align-items: flex-end; gap: 2px;
+  font-variant-numeric: tabular-nums;
+}
+.order-profit__amt { font-family: var(--font-mono); font-size: 13px; font-weight: 600; color: var(--success); }
+.order-profit__amt--loss { color: var(--danger); }
+.order-profit--none, .order-profit--pending { color: var(--text-muted); }
+.order-profit--failed { color: var(--yellow-text); font-weight: 600; }
+
+/* Order modal: profit can't be stated because a line has no supplier cost.
+   Occupies the slot the Profit Breakdown would have used, rather than leaving
+   it blank (which would read as "this order type has no profit data"). */
+.om-profit-unknown {
+  border: 1px solid var(--yellow-dim); background: var(--yellow-dim);
+  border-radius: 8px; padding: 10px 12px; margin-top: 4px;
+}
+.om-profit-unknown__title { font-size: 13px; font-weight: 700; color: var(--yellow-text); margin-bottom: 4px; }
+.om-profit-unknown__text { font-size: 12px; line-height: 1.55; color: var(--text-secondary); }
 
 /* Per-product exact-price override (manual_retail_price) in the edit drawer.
    Write-only: the admin API doesn't return the field, so the input is blank and
@@ -2793,7 +2819,14 @@ button.admin-active-dot--clickable:hover::after { opacity: 1; }
    that opt into `.admin-table--colsized` switch to table-layout:fixed so the
    widths below are honoured to the pixel; the Name column is left width:auto
    and is the sole absorber of any surplus width. */
-.admin-table--colsized { table-layout: fixed; }
+/* min-width is what stops Name collapsing. Under table-layout:fixed a CELL's
+   min-width cannot widen the TABLE — the browser distributes `width:100%` across
+   the declared column widths and gives the sole auto column whatever is left,
+   which can be nothing. Adding two columns to a full table squeezed Name to 42px
+   at 1512px viewport (ERR-123). The page sets --admin-table-min to
+   Σ(visible fixed widths) + Name's minimum, so the table can outgrow its wrapper
+   and .admin-table-wrap (overflow-x:auto) scrolls instead of Name vanishing. */
+.admin-table--colsized { table-layout: fixed; min-width: var(--admin-table-min, 0px); }
 
 /* Name — the elastic column. Fixed-layout tables leave it width:auto so it
    soaks up surplus and the title text uses that room (instead of leaving the
@@ -2820,6 +2853,15 @@ button.admin-active-dot--clickable:hover::after { opacity: 1; }
 .admin-table td.col-w-compat,.admin-table th.col-w-compat{ width: 110px; min-width: 110px; }
 .admin-table td.col-w-check, .admin-table th.col-w-check { width: 48px;  min-width: 48px; max-width: 48px; }
 .admin-table td.col-w-fuin,  .admin-table th.col-w-fuin  { width: 240px; min-width: 240px; max-width: 240px; white-space: normal; vertical-align: middle; }
+/* Supplier — 100px holds the longest supplier label we render ("Augmento" ≈ 62px)
+   with room for a longer one; overflow ellipsizes rather than widening the row.
+   Origin — 96px clears the widest origin badge ("Pre-boxed" ≈ 70px + padding). */
+.admin-table td.col-w-supplier, .admin-table th.col-w-supplier { width: 100px; min-width: 100px; max-width: 100px; }
+.admin-table td.col-w-supplier > span {
+  display: inline-block; max-width: 100%;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom;
+}
+.admin-table td.col-w-origin,   .admin-table th.col-w-origin   { width: 96px;  min-width: 96px; max-width: 96px; }
 
 /* ---- "For Use In" column — device-brand chips ---- */
 .admin-fuin-cell {

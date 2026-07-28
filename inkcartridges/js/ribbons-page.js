@@ -554,6 +554,9 @@ const RibbonsPage = {
                 </div>
                 <div class="product-card__content">
                     <h3 class="product-card__title">${Security.escapeHtml(displayName)}</h3>
+                    ${(ribbon.average_rating && ribbon.review_count > 0 && typeof Products !== 'undefined' && Products._miniStars)
+                        ? `<div class="product-card__rating">${Products._miniStars(Math.round(parseFloat(ribbon.average_rating)))} <span class="product-card__review-count">(${parseInt(ribbon.review_count, 10)})</span></div>`
+                        : ''}
                     <div class="product-card__footer">
                         <div class="product-card__footer-row">
                             ${color ? `<span class="product-card__color">${Security.escapeHtml(color)}</span>` : '<span></span>'}

@@ -134,24 +134,35 @@
             }
 
             // Render summary
+            //
+            // Money comes from the ONE shared helper (js/order-totals.js), the
+            // same array /order-confirmation and the receipt PDF walk, so the
+            // three surfaces cannot disagree. See DEC-006.
+            //
+            // What this replaced (ERR-127): `order.subtotal || order.total`
+            // printed the TOTAL under the "Subtotal" label whenever subtotal was
+            // absent, there was no discount row at all, and GST was a hardcoded
+            // "Included" literal. On any order with a loyalty redemption the
+            // three visible figures did not add up.
             const summaryContainer = document.querySelector('.order-summary');
             if (summaryContainer) {
-                const subtotal = order.subtotal || order.total;
-                const shipping = order.shipping_fee || order.shipping_cost || 0;
-                const total = order.total;
-                const email = order.customer_email || '';
                 const esc3 = typeof Security !== 'undefined' ? Security.escapeHtml : (s) => s;
+                const email = order.customer_email || '';
 
-                summaryContainer.innerHTML = `
-                    <h2>Order Summary</h2>
-                    <dl class="order-summary__list">
-                        ${email ? `<dt>Email</dt><dd>${esc3(email)}</dd>` : ''}
-                        <dt>Subtotal</dt><dd>${formatPrice(subtotal)}</dd>
-                        <dt>Shipping</dt><dd>${shipping === 0 ? 'FREE' : formatPrice(shipping)}</dd>
-                        <dt>GST (15%)</dt><dd>Included</dd>
-                        <dt class="order-summary__total">Total</dt><dd class="order-summary__total">${formatPrice(total)}</dd>
-                    </dl>
-                `;
+                if (typeof OrderTotals === 'undefined') {
+                    // order-totals.js is a defer script ahead of this one, so this
+                    // is unreachable in practice. Fail LOUD rather than silently
+                    // reverting to the wrong-subtotal arithmetic. Deliberately NOT
+                    // an early return — the items, address and breadcrumb below
+                    // are still worth rendering.
+                    DebugLog.error('order-totals.js missing — cannot render the order summary');
+                    summaryContainer.innerHTML = `
+                        <h2>Order Summary</h2>
+                        <p class="order-summary__error">We couldn't load this order's totals. Please refresh the page.</p>
+                    `;
+                } else {
+                    this.renderSummary(summaryContainer, order, esc3, email);
+                }
             }
 
             // Render shipping address
@@ -182,6 +193,64 @@
             // Update breadcrumb
             const breadcrumb = document.querySelector('.breadcrumb__item--current');
             if (breadcrumb) breadcrumb.textContent = `Order #${order.order_number}`;
+        },
+
+        /**
+         * The money block. Every figure comes from OrderTotals.rows() — the same
+         * array /order-confirmation and the receipt PDF walk (DEC-006). Nothing
+         * here computes or substitutes a number.
+         */
+        renderSummary(summaryContainer, order, esc3, email) {
+            const t = OrderTotals.normalise(order);
+
+            // Consistency gate (the ERR-113 habit): if the rows cannot foot,
+            // that is a payload problem. We still show the customer exactly
+            // what they were charged — never a recomputed figure — but it is
+            // loud to us instead of silently wrong on screen.
+            if (t.footing.checkable && !t.footing.reconciles) {
+                DebugLog.warn(
+                    `order ${t.orderNumber}: summary does not foot — ` +
+                    `expected ${t.footing.expected}, backend total ${t.total} (delta ${t.footing.delta})`
+                );
+            }
+
+            const rowsHtml = OrderTotals.rows(t).map((r) => {
+                const dtCls = r.kind === 'total' ? ' class="order-summary__total"' : '';
+                let ddCls = '';
+                if (r.kind === 'total') ddCls = ' class="order-summary__total"';
+                else if (r.kind === 'negative') ddCls = ' class="order-summary__value--negative"';
+                else if (r.kind === 'free') ddCls = ' class="order-summary__value--free"';
+                else if (r.kind === 'points') ddCls = ' class="order-summary__value--points"';
+                else if (r.kind === 'unknown') ddCls = ' class="order-summary__value--unknown"';
+                return `<dt${dtCls}>${esc3(r.label)}</dt><dd${ddCls}>${esc3(r.value)}</dd>`;
+            }).join('');
+
+            const earned = OrderTotals.rows(t).find((r) => r.key === 'earned');
+            const noteHtml = (earned && earned.note)
+                ? `<p class="order-summary__note">${esc3(earned.note)}</p>`
+                : '';
+
+            summaryContainer.innerHTML = `
+                <h2>Order Summary</h2>
+                <dl class="order-summary__list">
+                    ${email ? `<dt>Email</dt><dd>${esc3(email)}</dd>` : ''}
+                    ${rowsHtml}
+                </dl>
+                ${noteHtml}
+            `;
+
+            // Receipt download — offered only when there is a real total and
+            // real line items to put on it. A PDF full of em-dashes would look
+            // authoritative and say nothing.
+            const receiptBtn = document.getElementById('download-receipt-btn');
+            if (receiptBtn && typeof OrderReceipt !== 'undefined') {
+                if (t.total !== null && t.items.length > 0) {
+                    receiptBtn.hidden = false;
+                    OrderReceipt.attach(receiptBtn, () => this.orderData);
+                } else {
+                    receiptBtn.hidden = true;
+                }
+            }
         },
 
         // Tracking-on-demand (May 2026): renderTimeline() was removed. The

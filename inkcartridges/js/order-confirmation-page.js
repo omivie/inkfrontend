@@ -180,6 +180,16 @@
         },
 
         transformAPIOrder(apiOrder) {
+            // Every money figure comes from the shared normaliser so this page,
+            // /account/order-detail and the receipt PDF read the payload the same
+            // way. `null` here means NOT REPORTED and must never become 0.
+            const money = (typeof OrderTotals !== 'undefined')
+                ? OrderTotals.normalise(apiOrder)
+                : {
+                    loyaltyDiscount: null, loyaltyPoints: null, b2bDiscount: null,
+                    b2bMeta: null, otherDiscount: null, couponCode: null, pointsEarned: null
+                };
+
             // Build shipping address from flat fields (backend returns shipping_recipient_name, etc.)
             const shippingAddress = apiOrder.shipping_address || {
                 recipient_name: apiOrder.shipping_recipient_name || '',
@@ -223,32 +233,23 @@
                 invoiceNumber: apiOrder.invoice?.invoice_number || null,
                 invoiceDate: apiOrder.invoice?.invoice_date || null,
                 googleCustomerReviews: apiOrder.google_customer_reviews || null,
-                // loyalty-points-jun2026 — backend field name confirmed during
-                // live verification; read several candidates defensively. Discount
-                // is the points redeemed on this order; earned is points credited.
-                loyaltyDiscount: Number(
-                    apiOrder.loyalty_discount_amount
-                    ?? apiOrder.loyalty?.discount_amount
-                    ?? 0
-                ) || 0,
-                // Business-account (B2B) discount applied to this order. Read
-                // several candidates: the order row may carry a flat column or
-                // the same nested b2b_discount block the cart summary uses.
-                b2bDiscount: Number(
-                    apiOrder.b2b_discount_amount
-                    ?? apiOrder.b2b_discount?.discount_amount
-                    ?? apiOrder.business_discount_amount
-                    ?? 0
-                ) || 0,
-                b2bMeta: apiOrder.b2b_discount && typeof apiOrder.b2b_discount === 'object'
-                    ? apiOrder.b2b_discount
-                    : null,
-                pointsEarned: Number(
-                    apiOrder.points_earned
-                    ?? apiOrder.loyalty_points_earned
-                    ?? apiOrder.loyalty?.points_earned
-                    ?? 0
-                ) || 0
+                // Money is normalised by the ONE shared helper (js/order-totals.js)
+                // rather than by hand-rolled `?? 0` chains here — see DEC-006.
+                // Those chains collapsed UNKNOWN into 0, which is how the points
+                // estimate came to treat unreported shipping as free shipping and
+                // overstate every figure it produced (ERR-127).
+                //
+                // renderTotals() re-normalises from this object rather than
+                // trusting these fields, so the offline sessionStorage path gets
+                // the identical treatment. They are kept on the transform output
+                // because analytics and the header total read them.
+                loyaltyDiscount: money.loyaltyDiscount,
+                loyaltyPoints: money.loyaltyPoints,
+                b2bDiscount: money.b2bDiscount,
+                b2bMeta: money.b2bMeta,
+                otherDiscount: money.otherDiscount,
+                couponCode: money.couponCode,
+                pointsEarned: money.pointsEarned
             };
         },
 
@@ -525,78 +526,105 @@
             </svg>`;
         },
 
+        /**
+         * The money block.
+         *
+         * Every figure comes from OrderTotals.rows() (js/order-totals.js) — the
+         * SAME array /account/order-detail and the receipt PDF walk, so the three
+         * surfaces cannot drift apart (DEC-006). Nothing here computes a number.
+         *
+         * The old version derived a subtotal from line items when the backend
+         * omitted one, defaulted unknown shipping to 0, and reimplemented the
+         * backend's points-earn rule inline — all three are gone.
+         */
         renderTotals(order) {
-            const subtotal = order.subtotal || order.items?.reduce((sum, item) => sum + (item.price * item.quantity), 0) || 0;
-            const shippingCost = order.shippingCost || order.shipping_cost || 0;
-            const total = order.total || (subtotal + shippingCost);
-
-            // Update individual elements
-            const subtotalEl = document.getElementById('totals-subtotal');
-            const shippingEl = document.getElementById('totals-shipping');
-            const totalEl = document.getElementById('totals-total');
-
-            if (subtotalEl) {
-                subtotalEl.textContent = `$${parseFloat(subtotal).toFixed(2)}`;
+            if (typeof OrderTotals === 'undefined') {
+                DebugLog.error('order-totals.js missing — cannot render order totals');
+                return;
             }
 
+            const t = OrderTotals.normalise(order);
+
+            // Consistency gate (the ERR-113 habit): the customer always sees the
+            // backend's figures verbatim, but if they cannot foot we say so in the
+            // console rather than letting the mismatch sit silently on screen.
+            if (t.footing.checkable && !t.footing.reconciles) {
+                DebugLog.warn(
+                    `order ${t.orderNumber}: totals do not foot — ` +
+                    `expected ${t.footing.expected}, backend total ${t.total} (delta ${t.footing.delta})`
+                );
+            }
+
+            const byKey = {};
+            OrderTotals.rows(t).forEach((r) => { byKey[r.key] = r; });
+
+            const setText = (id, value) => {
+                const el = document.getElementById(id);
+                if (el) el.textContent = value;
+            };
+            /** Show or hide an optional row, filling its value element. */
+            const setOptional = (rowId, valueId, row) => {
+                const rowEl = document.getElementById(rowId);
+                const valEl = document.getElementById(valueId);
+                if (!rowEl || !valEl) return;
+                if (row) {
+                    valEl.textContent = row.value;
+                    rowEl.hidden = false;
+                } else {
+                    rowEl.hidden = true;
+                }
+            };
+
+            setText('totals-subtotal', byKey.subtotal.value);
+
+            const shippingEl = document.getElementById('totals-shipping');
             if (shippingEl) {
-                if (shippingCost === 0) {
+                if (byKey.shipping.kind === 'free') {
                     shippingEl.innerHTML = '<span class="text-success">FREE</span>';
                 } else {
-                    shippingEl.textContent = `$${parseFloat(shippingCost).toFixed(2)}`;
+                    shippingEl.textContent = byKey.shipping.value;
                 }
             }
 
-            if (totalEl) {
-                totalEl.textContent = `$${parseFloat(total).toFixed(2)} NZD`;
-            }
+            setOptional('totals-loyalty-row', 'totals-loyalty', byKey.loyalty);
+            if (byKey.loyalty) setText('totals-loyalty-label', byKey.loyalty.label);
 
-            // loyalty-points-jun2026 — points redeemed on this order (only if used)
-            const loyaltyRow = document.getElementById('totals-loyalty-row');
-            const loyaltyEl = document.getElementById('totals-loyalty');
-            const loyaltyDiscount = Number(order.loyaltyDiscount) || 0;
-            if (loyaltyRow && loyaltyEl) {
-                if (loyaltyDiscount > 0) {
-                    loyaltyEl.textContent = `-$${loyaltyDiscount.toFixed(2)}`;
-                    loyaltyRow.hidden = false;
+            setOptional('totals-b2b-row', 'totals-b2b', byKey.b2b);
+            if (byKey.b2b) setText('totals-b2b-label', byKey.b2b.label);
+
+            setOptional('totals-coupon-row', 'totals-coupon', byKey.coupon);
+            if (byKey.coupon) setText('totals-coupon-label', byKey.coupon.label);
+
+            // GST: the reported dollar component, or the "Included" fail-soft.
+            // Never the hardcoded literal this replaced.
+            setText('totals-gst', byKey.gst.value);
+
+            setText('totals-total', byKey.total.kind === 'unknown'
+                ? byKey.total.value
+                : `${byKey.total.value} NZD`);
+
+            // Points earned. `rows()` marks an estimate with ≈ and supplies the
+            // sentence explaining why — a lone glyph is not a disclosure.
+            setOptional('totals-earned-row', 'totals-earned', byKey.earned);
+            const noteEl = document.getElementById('totals-earned-note');
+            if (noteEl) {
+                if (byKey.earned && byKey.earned.note) {
+                    noteEl.textContent = byKey.earned.note;
+                    noteEl.hidden = false;
                 } else {
-                    loyaltyRow.hidden = true;
+                    noteEl.hidden = true;
                 }
             }
 
-            // Business-account discount applied to this order (only if any).
-            const b2bRow = document.getElementById('totals-b2b-row');
-            const b2bEl = document.getElementById('totals-b2b');
-            const b2bDiscount = Number(order.b2bDiscount) || 0;
-            if (b2bRow && b2bEl) {
-                if (b2bDiscount > 0) {
-                    b2bEl.textContent = `-$${b2bDiscount.toFixed(2)}`;
-                    b2bRow.hidden = false;
-                    const label = document.getElementById('totals-b2b-label');
-                    if (label && typeof businessDiscountLabel === 'function') {
-                        label.textContent = businessDiscountLabel(order.b2bMeta);
-                    }
+            // Receipt download — only when there is a real total and real line
+            // items to put on it.
+            const receiptBtn = document.getElementById('download-receipt-btn');
+            if (receiptBtn && typeof OrderReceipt !== 'undefined') {
+                if (t.total !== null && t.items.length > 0) {
+                    receiptBtn.hidden = false;
+                    OrderReceipt.attach(receiptBtn, () => this.orderData);
                 } else {
-                    b2bRow.hidden = true;
-                }
-            }
-
-            // Points earned on this order. Prefer the backend's figure; otherwise
-            // estimate at 1pt/$1 on the order value ex-shipping (the backend earns on
-            // order_total − shipping, GST-inclusive — see the loyalty ledger metadata)
-            // and mark it ≈ so it reads as an estimate.
-            const earnedRow = document.getElementById('totals-earned-row');
-            const earnedEl = document.getElementById('totals-earned');
-            if (earnedRow && earnedEl) {
-                const exact = Number(order.pointsEarned) || 0;
-                const earnBasis = Math.max(0, (Number(total) || 0) - (Number(shippingCost) || 0));
-                const earned = exact > 0 ? exact : Math.floor(earnBasis);
-                if (earned > 0) {
-                    const prefix = exact > 0 ? '+' : '≈ +';
-                    earnedEl.textContent = `${prefix}${earned.toLocaleString('en-NZ')} pts`;
-                    earnedRow.hidden = false;
-                } else {
-                    earnedRow.hidden = true;
+                    receiptBtn.hidden = true;
                 }
             }
         },

@@ -2,6 +2,241 @@
 
 Log every error encountered here. Before editing a file, scan for known issues. When a familiar error reappears, apply the known fix immediately.
 
+## Numbering — read before allocating an ERR number
+
+There are **two** error logs, and they are one log with two audiences:
+
+| File | Audience | Committed? |
+|---|---|---|
+| `errors.md` (this file) | narrative postmortems, for humans | **yes** |
+| `.claude/memory/errors.md` | compact agent-facing index | **no** — `.claude/` is gitignored, local only |
+
+**ERR-113 … ERR-123 are AMBIGUOUS.** The two files were numbered independently through that
+range, so the same number means different incidents depending on which file you read:
+
+- `ERR-119` = "dashboard reload had no visible signal" (memory) vs "order line-items table
+  invisible" (here).
+- `ERR-120` = "bulk delete offered on orders the backend refuses" (memory) vs "no admin surface
+  for page copy" (here).
+- `ERR-113`–`ERR-118` exist only here; `ERR-121`–`ERR-123` exist only in memory.
+
+**Never cite a number in that range without naming the file.** History is deliberately NOT
+renumbered: source comments reference ERR numbers directly (`js/account.js`, `js/legal-config.js`,
+`js/cart.js`, several tests), and renumbering would silently rot every one of them.
+
+**One further historical collision, also not renumbered: `ERR-035` is used twice in this file**,
+for two unrelated incidents on the same day — the admin analytics `42501 permission denied for
+function` grant outage (line ~1437) and clean-URL 404s in local dev (line ~1702). Cite it by
+description, not by number alone. It is left as-is for the same reason as the fork above.
+
+**From ERR-124 onward there is ONE shared allocator.** A new entry takes the next number unused
+in *both* files and is written to *both* under the same number and the same title. ERR-124 and
+ERR-125 are transitional (124 is in both with different wording; 125 was written to the memory log
+only), so automated enforcement starts at **ERR-126**, the first pair authored together.
+
+`tests/err-numbering-jul2026.test.js` enforces what it portably can: no reuse of a number from
+ERR-126 onward, that this preamble still exists, and — only when the local memory log is present,
+since `.claude/` is gitignored and absent in a fresh clone — that ERR-126+ appears in both files
+describing the same incident.
+
+---
+
+## ERR-127 — Three customer money surfaces each had their own arithmetic; one printed the TOTAL as the SUBTOTAL, another read unknown shipping as free (2026-07-28)
+
+**Trigger:** a backend handoff asked us to add a loyalty points line to "the customer-facing
+downloadable invoice PDF". Verifying that ask found there was no such PDF — and, on the way,
+found that the pages it would have been generated from did not agree with each other.
+
+**What was actually wrong, three separate defects:**
+
+1. **`/account/order-detail` printed the total under the "Subtotal" label.**
+   `order-detail-page.js:139` was `const subtotal = order.subtotal || order.total;`. Whenever the
+   payload omitted `subtotal`, the page rendered the **total** as the subtotal. The page also had
+   **no discount row of any kind** and a hardcoded `<dt>GST (15%)</dt><dd>Included</dd>`, so on any
+   order with a loyalty redemption the three visible figures did not add up — Subtotal + Shipping
+   ≠ Total, with nothing on screen to explain the gap.
+
+2. **`/order-confirmation` read unknown shipping as free.**
+   `renderTotals` did `order.shippingCost || order.shipping_cost || 0`, then estimated points as
+   `floor(total − shipping)`. An order whose shipping we couldn't read estimated off the **full
+   total** and overstated the points by the shipping amount. Same file also invented a subtotal
+   from line items (`order.subtotal || order.items?.reduce(...)`) and a total from
+   `subtotal + shippingCost` — a total that ignores every discount.
+
+3. **The earn rule lived in the client at all.** Reimplementing a backend pricing rule in JS is a
+   DEC-004 violation on its face; doing it with `|| 0` fallbacks is how it became wrong.
+
+**Root cause.** Three surfaces, three private copies of "how do you read an order's money". No
+shared helper existed, so each grew its own fallbacks, and the fallbacks all made the same
+mistake: **collapsing UNKNOWN into 0**. This is the sixth incident in that family
+(ERR-063/068/073/075/076).
+
+**Fix.** One module, `js/order-totals.js`, is now the only place an order's money is read:
+
+- `normalise(order)` — `null` means NOT REPORTED, `0` means REPORTED AS ZERO, and nothing collapses
+  one into the other. Accepts both the raw API row and the camelCase sessionStorage snapshot.
+- `rows(t)` — the ordered, labelled row list. Row order, labels and visibility exist **once**.
+  Unknown subtotal/total render an em-dash; unknown shipping renders an em-dash (not "FREE");
+  unreported GST fail-softs to "Included" (not `$0.00`); loyalty/B2B/coupon rows are omitted
+  entirely below $0.01.
+- The points estimate now collapses to **nothing** when either input is unknown, and carries a
+  written caveat rather than a bare `≈`.
+- `footing` cross-checks that the rows add up (the ERR-113 consistency-gate habit). The customer
+  always sees the backend's figures verbatim; a mismatch is logged, never silently rendered.
+
+`/order-confirmation`, `/account/order-detail` and the new receipt PDF all render from the same
+`rows()` array, so they are now structurally incapable of disagreeing (DEC-006).
+
+**The premise correction.** There was no customer-facing PDF. jsPDF loaded only on `/admin`; the
+only builder was `buildInvoiceDoc()`, the operator's B2B tax invoice. Customers had no receipt at
+all. Built `js/order-receipt.js` — lazy-loaded jsPDF, downloadable from both order surfaces.
+
+**Two bugs in the admin builder deliberately not copied:** it walks a y cursor with no bound check
+against A4's 841.89 pt (long orders write the totals off the page), and it never calls `setPage()`
+after `autoTable`, so a multi-page items table gets its totals drawn on page 1. Both are still
+present in `js/admin/pages/invoices.js` — **not fixed here**, logged as a follow-up.
+
+**Verified:** `tests/order-totals-jul2026.test.js` (39) and `tests/order-receipt-jul2026.test.js`
+(41) — the latter drives the real builder against a recording fake jsPDF and asserts nothing is
+drawn past the page box at any table-end position, that the doc is re-anchored after `autoTable`,
+and that every string reaching the PDF is cp1252-safe. Full suite 3078 pass / 0 fail.
+
+**Lesson.** When the same concept is rendered on N surfaces, the drift is not a question of
+discipline — each copy will independently grow the *same* convenient fallback, and `|| 0` is
+always the convenient one. The fix is not "be careful", it is one function returning one row list
+that every surface walks. And when a handoff describes something you own, verify it exists before
+planning around it: two of the three premises here were wrong.
+
+---
+
+## ERR-126 — An expired password-reset link rendered NOTHING: the page called `Security.escapeHtml` without loading `security.js` (2026-07-28)
+
+**Symptom.** Open `/account/reset-password` from an expired or malformed reset email link. Expected
+"Reset Link Invalid" with a "Request a New Link" button. Actual: the unchanged password form, no
+message, no explanation — and a `ReferenceError` in the console.
+
+**Root cause.** `html/account/reset-password.html` loaded neither `/js/security.js` nor
+`/js/utils.js`, but `js/reset-password-page.js` calls `Security.escapeHtml(message)` to build that
+very message (`:30`) and `DebugLog.error(...)` in all three catch blocks (`:55`, `:63`, `:170`).
+So the **only** code path that reports a bad link was the one path guaranteed to throw.
+
+The happy path never touched either global, which is exactly why this survived: every successful
+password reset worked perfectly. Only users already having a bad day hit it.
+
+**Second instance, same shape.** `html/account/verify-email.html` loads `auth.js` without
+`utils.js`, and `auth.js` calls `DebugLog` from its `accountSync`/`init` **catch** blocks — so a
+sync failure there threw a second `ReferenceError` that swallowed the first.
+
+**Fix.** Added `security.js` + `utils.js` to both pages, in the canonical prefix order every other
+account page uses.
+
+**Deliberately NOT done: adding `auth.js` to the reset page.** The obvious "every session page
+should load auth.js" tidy-up would have been a regression. `Auth.init()` creates a Supabase client
+with `detectSessionInUrl`, which would race this page for the recovery tokens in the URL hash and
+could consume them before the handler reads them — breaking password reset outright. The account
+sync it would trigger is unnecessary anyway: a password reset is for an **existing** account, and
+the user's next navigation fires the sync regardless. The reason is documented in the HTML and
+pinned by a test, so it does not get "fixed" later.
+
+**Fix is a test, not a list.** `tests/session-page-globals-jul2026.test.js` reads each page's own
+script tags, reads those scripts, works out which globals they reference **unguarded**
+(`typeof X !== 'undefined'` counts as an optional dependency and is skipped), and asserts the
+defining module is on the page. Derived, never an allowlist — an allowlist that forgets a file is
+what let banned copy ship twice (ERR-063).
+
+Reverting the fix makes it name the bug exactly: *"reset-password.html: loads
+reset-password-page.js, which uses `Security` unguarded, but never loads security.js"*.
+
+**One thing the test does NOT assert: script ORDER.** The first version did, and reported ~40
+pages. All false: `defer` order only matters for references that execute at load time, and nearly
+every reference here sits in a function that runs on `DOMContentLoaded` or later. A test that
+cries wolf is a test people learn to skip, so ordering is asserted only in the two specific cases
+where it was verified to matter.
+
+**Verified:** `tests/session-page-globals-jul2026.test.js` (8), including a sanity assertion that
+the page sweep found 30+ pages so the derivation cannot silently collapse to zero.
+
+**Lesson.** A missing dependency that only the error path touches is invisible to every happy-path
+test and every manual check — the feature works right up until it needs to tell you it didn't.
+Grep for what a file *uses*, not for what it *is*.
+
+---
+
+## ERR-124 — Backend said "no FE changes required" for the new edge cache; verifying it found a bearer token that does NOT bust the cache key, and four duplicate cache keys of our own (2026-07-28)
+
+**Handed over:** `catalog-edge-caching-fe-notes-jul2026.md` — Cloudflare now edge-caches catalog GETs;
+TL;DR *"Response shapes are unchanged — no FE code changes required."* Rather than take that on trust,
+every claim was measured against the live API. The caching is real and excellent (`cf-cache-status: HIT`,
+**44 ms cached vs 205 ms uncached**). Three of the note's claims are wrong, and we had real defects the
+note assumed we didn't.
+
+**The finding that mattered.** The note says logged-in users bypass the edge "by design". Measured:
+
+- `Authorization: Bearer <token>` → **`cf-cache-status: HIT`**. The token does **not** change the cache key.
+- `Cookie: sb-*` → `MISS`. The cookie bypass works — but supabase-js here stores the session in
+  **localStorage**, and `api.inkcartridges.co.nz` sends **no `Set-Cookie` at all**, so no cookie ever rides
+  along. **Nothing was bypassing.**
+
+Meanwhile `api.js:206` attached `Authorization` to *every* request whenever a session existed. So every
+logged-in visitor's catalog reads were served from — and eligible to be written into — the **shared
+anonymous cache entry**. A token that changes the response but not the key is the classic cache-poisoning
+shape. `product-detail-page.js` made it concrete: it deliberately `await`ed the session so a token would
+ride on `/api/products/:sku` "for admin-gated products", i.e. we knew that response varies by identity.
+
+**Root cause (ours), four ways the cache key was being fragmented:**
+- `_productsForCode()` appended `brand,category,code,limit`; `getShopData()` appended `…limit` **before**
+  `code`. Identical question, two URLs, two edge entries — on the codes-drilldown hot path (shop-page
+  drilldown + PDP related products). **Actively duplicating a key we had just warmed.**
+- Three separate `/api/products` serializers with three different param orders.
+- Four `new URLSearchParams(obj)` sites inheriting the *caller's object literal key order*.
+- `getProducts()` had dead code: `if (filters.limit) params.append('limit', filters.limit || Config.ITEMS_PER_PAGE)` — the guard makes the fallback unreachable, quietly implying "no limit" and `limit=20` are one request. At the edge they are two keys.
+
+**Fix.** (1) ONE canonical serializer — `API.catalogQuery`/`catalogEndpoint` driven by
+`CATALOG_PARAM_ORDER`. Its leading seven keys deliberately reproduce `getShopData`'s historical order so
+the storefront's hottest URLs kept the edge entries they already held — the deploy did not cold-start the
+catalog. Params outside the list are **preserved**, sorted, after the known ones: silently dropping
+`include_unavailable` would give a wrong-but-plausible result set (the ERR-075 failure mode), which is far
+worse than one extra cache key. (2) An explicit `{ anonymous: true }` contract on `request()`: no token, no
+cookies, no `X-Guest-Session`, no 401 refresh-retry, and an anonymous response may never seed a
+guest-session id — a shared cached response carrying `X-Guest-Session` would hand **every** visitor the
+same guest cart. (3) `credentials` now comes from that explicit intent, never from sniffing the
+Authorization header; the old inference welded the two knobs together so neither could be changed alone.
+
+**Deliberate trade:** admins lose in-storefront preview of admin-gated products until the backend ships an
+uncached `/api/admin/products/:sku` (BF-013). Leaking an unpublished product into a public cache entry is
+the worse outcome. The PDP's `await Auth.readyPromise` went with it — pure latency on every product page.
+
+**Also fixed:** `cart.js` cross-sell fetch sent `credentials: 'include'` unconditionally on a public
+catalog read (the one FE fetch that could bypass the edge for *every* visitor); `getBrands()` had no client
+cache at all despite eight admin controllers calling it — now SWR, 5 min.
+
+**Two traps hit while building this.** A comment containing the literal `/api/products/*` opened a fake
+block comment for `stripComments()` in two existing tests (`/*` … next `*/` ate the whole file, so every
+assertion silently passed against an empty string). And fixed-width `slice(start, start + 700)` windows in
+source-scanning tests turn vacuous the moment a method grows a doc comment — replaced with a
+`methodBody()` helper that slices to the real method close.
+
+**Verified:** `node --check` clean on all three modules. New `tests/catalog-edge-cache-jul2026.test.js`
+(25) — mutation-tested: reverting the param order, re-attaching the token, and hand-rolling
+`_productsForCode`'s query each fail 3/1/2 tests respectively, so the suite is not decoration. Two existing
+tests updated to pin the *new, stronger* contract rather than the mechanism they used to pin
+(`api-subdomain-cutover-may2026`, `product-surface-consistency-may2026`). Full suite **2880 pass / 1 fail**,
+the single failure being a stray `products-sourcing-columns.png` left at repo root by concurrent work in
+another session, not this change.
+
+**Backend (PENDING):** `catalog-edge-caching-backend-brief-jul2026.md` — BF-011 make `Authorization` a
+cache-rule bypass condition (or `Vary: Authorization`); BF-012 confirm whether `/api/products/:sku` and
+`/api/shop` vary by identity (admin-gated products, B2B pricing) — if yes, BF-011 is a correctness bug;
+BF-013 uncached admin preview endpoint; BF-014 `/api/site/*` is documented as cached but returns
+`max-age=3600` with no `s-maxage` and is `DYNAMIC` on every repeat; BF-018 `/api/schema/*` asks for
+`s-maxage=3600` but the rule doesn't match it, and **404s are cached 5 min + 10 min SWR** so a
+newly-published SKU can stay a hard 404 for 15 minutes.
+
+**Lesson:** a handover note saying "no changes required on your side" is a hypothesis, not a result. Ten
+minutes of `curl` against the live edge disproved three of its claims — including one that made every
+signed-in visitor share the anonymous cache. When someone hands you a performance change, measure the
+thing they said you don't need to measure.
+
 ---
 
 ## ERR-120 — No admin surface for page copy; the safe rebuild, and the two traps it had to walk around (2026-07-27)

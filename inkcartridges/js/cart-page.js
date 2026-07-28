@@ -94,6 +94,56 @@ function initCouponForm() {
         else if (kind === 'err') feedback.classList.add('cart-coupon__feedback--err');
     };
 
+    /**
+     * Failure feedback + the optional "try this instead" nudge
+     * (traffic-conversion-jul2026 §5).
+     *
+     * The suggested code is rendered as a click-to-FILL button rather than
+     * click-to-apply. Auto-submitting would spend one of the shopper's limited
+     * coupon attempts without them asking, and the endpoint locks out after too
+     * many invalid tries — one wasted attempt on a code they didn't choose is a
+     * bad trade for one saved click.
+     *
+     * CouponSuggestion.pick() returns null for a rate-limited/locked response,
+     * so the lockout can never carry a nudge even if a future backend adds one.
+     */
+    const setFailure = (msg, source) => {
+        setFeedback(msg, 'err');
+        if (!feedback || typeof CouponSuggestion === 'undefined') return;
+        const suggestion = CouponSuggestion.pick(source);
+        const text = suggestion && CouponSuggestion.text(suggestion);
+        if (!text) return;
+
+        // textContent above already escaped the message; build the nudge with
+        // DOM nodes so the backend-supplied code/label can never inject markup.
+        feedback.textContent = '';
+        const parts = text.split(suggestion.code);
+        feedback.appendChild(document.createTextNode(parts[0] || ''));
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'cart-coupon__suggestion';
+        btn.textContent = suggestion.code;
+        btn.setAttribute('aria-label', `Use coupon code ${suggestion.code}`);
+        btn.addEventListener('click', () => {
+            input.value = suggestion.code;
+            input.focus();
+            setFeedback('', null);
+        });
+        feedback.appendChild(btn);
+        feedback.appendChild(document.createTextNode(parts.slice(1).join(suggestion.code) || ''));
+    };
+
+    /**
+     * True when the response is the coupon-attempt security lockout. Handled
+     * separately because it must NEVER show a suggestion and its copy is about
+     * waiting, not about the code. `COUPON_LOCKED` is the documented code;
+     * `RATE_LIMITED` is what api.js normalises a bare 429 to.
+     */
+    const isLockout = (source) => {
+        const code = source && source.code;
+        return code === 'COUPON_LOCKED' || code === 'RATE_LIMITED';
+    };
+
     const reasonText = (data) => {
         if (data && data.message) return data.message;
         switch (data && data.reason) {
@@ -120,8 +170,12 @@ function initCouponForm() {
                         : 'Coupon looks good — tap Apply.'),
                     'ok'
                 );
+            } else if (isLockout(res)) {
+                setFeedback('Too many tries — wait a minute and retry.', 'err');
             } else {
-                setFeedback(reasonText(data), 'err');
+                // Preview failure is HTTP 200 with data.valid === false, so the
+                // suggestion rides on `data`, not on an error envelope.
+                setFailure(reasonText(data), data);
             }
         } catch (_) { /* network — stay quiet until submit */ }
     };
@@ -153,11 +207,24 @@ function initCouponForm() {
                         : 'Coupon applied.',
                     'ok'
                 );
+            } else if (isLockout(res)) {
+                // The cart had no 429 branch at all before Jul 2026 — a lockout
+                // fell through to the generic "isn't valid" copy, which told the
+                // shopper their code was wrong when it was actually their pace.
+                setFeedback('Too many tries — wait a minute and retry.', 'err');
             } else {
-                setFeedback(res?.error || reasonText(res && res.data), 'err');
+                setFailure(res?.error || reasonText(res && res.data), res);
             }
         } catch (err) {
-            setFeedback('Couldn’t apply that coupon right now. Please try again.', 'err');
+            // A plain 400 THROWS (request() only returns envelopes for a known
+            // set of codes), so the suggestion arrives on err.details here and
+            // on res.details above. Both shapes must be read or the nudge is
+            // invisible on whichever path the backend happens to take.
+            if (isLockout(err)) {
+                setFeedback('Too many tries — wait a minute and retry.', 'err');
+            } else {
+                setFailure('Couldn’t apply that coupon right now. Please try again.', err);
+            }
         }
     });
 }

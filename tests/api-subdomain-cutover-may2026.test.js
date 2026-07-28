@@ -153,19 +153,44 @@ test('§4 the shared fetch wrapper does not hard-code credentials:include', () =
   );
 });
 
-test('§4 _fetchWithAuth gates credentials on the Authorization header', () => {
+// §4 originally pinned `credentials: hasAuthHeader ? 'include' : 'omit'` — the
+// cookie mode INFERRED from whether an Authorization header happened to be
+// present. ERR-124 replaced that with explicit intent, because inference welded
+// the two knobs together: you could not stop sending the bearer token on a
+// public catalog read without also silently changing cookie behaviour. The
+// invariant these tests protect (anonymous reads drop cookies so they hit the
+// Cloudflare edge) is unchanged and now stated directly.
+
+test('§4 _fetchWithAuth takes credentials from explicit intent, never from the headers', () => {
   const api = read('js/api.js');
+  assert.match(
+    api,
+    /credentials:\s*opts\.credentials\s*\|\|\s*['"]omit['"]/,
+    'credentials must come from opts.credentials (set by request()), defaulting to omit'
+  );
   assert.ok(
-    /credentials:\s*hasAuthHeader\s*\?\s*['"]include['"]\s*:\s*['"]omit['"]/.test(api),
-    'anonymous reads must use credentials:omit (cookies dropped cross-origin → cache HIT); authed → include'
+    !/credentials:\s*hasAuthHeader\s*\?/.test(api),
+    'must NOT re-derive credentials by sniffing the Authorization header — that coupling is exactly what ERR-124 removed'
+  );
+  assert.match(
+    api,
+    /credentials:\s*\(!anonymous\s*&&\s*token\)\s*\?\s*['"]include['"]\s*:\s*['"]omit['"]/,
+    'request() decides: cookies only for a genuinely authenticated call, never for a declared-anonymous read'
   );
 });
 
-test('§4 the raw JSON read also omits credentials when anonymous', () => {
+test('§4 the raw JSON read is anonymous by contract — no token, no cookies', () => {
   const api = read('js/api.js');
+  const fn = api.slice(api.indexOf('async _rawJsonFetch'), api.indexOf('async getProductsByPrinter'));
+  assert.ok(fn.length > 0, '_rawJsonFetch must still exist');
+  assert.match(
+    fn,
+    /credentials:\s*['"]omit['"]/,
+    '_rawJsonFetch must unconditionally omit cookies — /api/products/:sku is edge-cached'
+  );
   assert.ok(
-    /credentials:\s*token\s*\?\s*['"]include['"]\s*:\s*['"]omit['"]/.test(api),
-    '_rawJsonFetch must omit cookies for the anonymous read path'
+    !/Authorization/.test(fn),
+    '_rawJsonFetch must not attach a bearer token: it does not change Cloudflare\'s cache key, so an authed body could land in the SHARED public entry (ERR-124)'
   );
 });
 

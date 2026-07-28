@@ -56,23 +56,30 @@ const SHOP_CODE = stripComments(SHOP_PAGE_JS);
 // Bug #1 — compat-recovery sidecar must hit /api/products, not /api/shop
 // ─────────────────────────────────────────────────────────────────────────────
 
+// The sidecar's query used to be hand-appended into a local `fbQs`. ERR-124
+// routed every catalog URL through API.catalogEndpoint so all call sites emit
+// one canonical param order (Cloudflare keys its edge cache on the full query
+// string, and does not normalise order). The invariant below is unchanged —
+// /api/products, filtered to brand+category+source=compatible+limit=200 — it is
+// just asserted on the endpoint the code now builds rather than on the appends.
+
 test('getShopData sidecar fires against /api/products (recovers value-packs)', () => {
-    // Find the eligibleForRecovery sidecarPromise assignment block and assert
-    // it points at /api/products.
     const idx = API_CODE.indexOf('eligibleForRecovery');
     assert.ok(idx !== -1, 'eligibleForRecovery branch not found in api.js');
     const slice = API_CODE.slice(idx, idx + 1500);
-    assert.match(slice, /sidecarPromise\s*=\s*this\.getWithSWR\(`\/api\/products\?\$\{/,
+    assert.match(slice, /catalogEndpoint\(\s*['"]\/api\/products['"]/,
         'sidecar must fetch /api/products (was /api/shop, which drops pack_type=value_pack rows)');
+    assert.match(slice, /sidecarPromise\s*=\s*this\.getWithSWR\(fbEndpoint/,
+        'sidecar must go through the SWR layer so the drilldown pays for it once per session');
 });
 
 test('getShopData sidecar still passes brand+category+source=compatible+limit', () => {
     const idx = API_CODE.indexOf('eligibleForRecovery');
     const slice = API_CODE.slice(idx, idx + 1500);
-    assert.match(slice, /fbQs\.append\(['"]brand['"],\s*params\.brand\)/);
-    assert.match(slice, /fbQs\.append\(['"]category['"],\s*params\.category\)/);
-    assert.match(slice, /fbQs\.append\(['"]source['"],\s*['"]compatible['"]\)/);
-    assert.match(slice, /fbQs\.append\(['"]limit['"],\s*['"]200['"]\)/);
+    assert.match(slice, /brand:\s*params\.brand/, 'sidecar must still filter by brand');
+    assert.match(slice, /category:\s*params\.category/, 'sidecar must still filter by category');
+    assert.match(slice, /source:\s*['"]compatible['"]/, 'sidecar exists to fetch compatibles specifically');
+    assert.match(slice, /limit:\s*200/, 'sidecar must still lift the default page size');
 });
 
 test('_enrichSeriesCodes derives PGI650 from CPGI650KCMY value-pack', () => {

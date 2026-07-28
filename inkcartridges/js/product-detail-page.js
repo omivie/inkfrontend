@@ -62,6 +62,22 @@
             let sku = params.get('sku');
             this._productType = params.get('type') || null; // 'ribbon' or null
 
+            // Printer context (traffic-conversion-jul2026 §3). Shop cards append
+            // ?printer_slug= when the shopper is browsing a specific printer, and
+            // the backend uses it to return `bought_for_this_printer`.
+            //
+            // Captured HERE, before any history rewrite runs. The /p/:sku
+            // resolver below rewrites to `/products/:slug/:sku` with NO query
+            // string, so reading this later would lose it. The value then lives
+            // on the controller for the lifetime of the page.
+            //
+            // The canonical-path normaliser does preserve window.location.search,
+            // so the URL bar generally keeps ?printer_slug= — which is fine and
+            // mildly useful (a shared link carries the same context). SEO is
+            // unaffected: <link rel=canonical> comes from the backend's
+            // canonical_url, which never includes it.
+            this._printerSlug = (params.get('printer_slug') || '').trim() || null;
+
             // Handle clean URL: /ribbon/:sku
             const ribbonPath = window.location.pathname.match(/^\/ribbon\/(.+)$/);
             if (ribbonPath) {
@@ -113,10 +129,15 @@
                 return;
             }
 
-            // Wait for auth so the Bearer token is available for admin-gated products
-            if (typeof Auth !== 'undefined' && Auth.readyPromise) {
-                await Auth.readyPromise;
-            }
+            // No auth wait here (ERR-124). This used to `await Auth.readyPromise`
+            // so a bearer token would be attached for admin-gated products. That
+            // is now actively wrong: /api/products/:sku is edge-cached by
+            // Cloudflare and a bearer token does NOT change the cache key, so an
+            // admin's view of an unpublished product could be stored in the
+            // SHARED public entry and served to shoppers. The product read is
+            // anonymous by contract (API._rawJsonFetch), so waiting bought
+            // nothing — and dropping the wait takes a session round-trip off the
+            // critical path of every product page's first paint.
 
             try {
                 let response;
@@ -130,7 +151,7 @@
                         if (r.active == null) r.active = r.is_active !== false;
                     }
                 } else {
-                    response = await API.getProduct(sku);
+                    response = await API.getProduct(sku, { printerSlug: this._printerSlug });
                 }
 
                 if (!response.ok || !response.data) {
@@ -557,6 +578,15 @@
             // carries a complete, sane suggestion.
             this.renderPackSuggestion(info);
 
+            // Pack-vs-singles savings, out-of-stock waitlist proof, and
+            // printer-scoped purchase proof (traffic-conversion-jul2026 §3).
+            // Each is driven by an OPTIONAL backend field that is absent unless
+            // its condition is met, so each renderer hides its own element and
+            // the page looks identical to today when nothing qualifies.
+            this.renderPackSavingsVsSingles(info);
+            this.renderWaitlistProof(info);
+            this.renderPrinterPurchaseProof(info);
+
             // Compare price & savings — prefer backend-derived original_price/discount_percent;
             // fall back to local compare_price math for legacy responses.
             const originalPrice = info.original_price != null
@@ -890,6 +920,22 @@
                     + ` <span class="buy-box__sep" aria-hidden="true">·</span> `
                     + `<a class="buy-box__returns-link" href="${Security.escapeAttr(rUrl)}">Policy <span aria-hidden="true">›</span></a>`;
             }
+
+            // Same-day dispatch countdown (traffic-conversion-jul2026 §4).
+            // STRICTLY ADDITIVE — it lives in its own element after the buy-box
+            // <dl> and the locked "Order before ${cutoff} NZT for same-day
+            // dispatch" copy above is untouched. That matters twice over: the
+            // copy is pinned by tests/product-buybox-may2026.test.js, and it is
+            // the string the backend prerender ships, so rewriting it here would
+            // desync the SPA from what bots see.
+            //
+            // When same_day_eligible is false (weekends, after cutoff) this
+            // renders nothing and the locked row is the fallback framing, which
+            // is exactly the behaviour the handoff asks for.
+            const countdownEl = document.getElementById('product-dispatch-countdown');
+            if (countdownEl && typeof DispatchCountdown !== 'undefined') {
+                DispatchCountdown.mount(countdownEl, delivery);
+            }
         },
 
         /**
@@ -1056,6 +1102,118 @@
                 +     `</span>`
                 +     `<span class="pack-upsell__arrow" aria-hidden="true">›</span>`
                 + `</a>`;
+            el.hidden = false;
+        },
+
+        /**
+         * Pack-vs-singles savings (traffic-conversion-jul2026 §3).
+         *
+         * Backend field `pack_savings_vs_singles`, present ONLY on packs and
+         * ONLY when the pack actually beats buying the constituent singles:
+         *
+         *   { individual_total, pack_price, savings_amount, savings_percent,
+         *     cartridge_count, savings_per_cartridge }
+         *
+         * This is the mirror image of renderPackSuggestion() above: that one
+         * runs on a SINGLE and points at the pack; this one runs on the PACK and
+         * proves the pack was the right call. They can never both fire.
+         *
+         * DOLLARS ONLY. The payload carries `savings_percent` and the backend
+         * handoff's example copy used it — we deliberately drop it. Every
+         * pack-savings surface on this site suppresses the percent
+         * (value-pack-savings-no-percent.test.js pins products.js, shop-page.js
+         * and the PDP price line), because the "Value Pack" ribbon already
+         * broadcasts the bulk discount and a second percent on the same screen
+         * reads as duplicate copy. A new surface that showed it would be the
+         * only one — inconsistency is worse than a missing number.
+         */
+        renderPackSavingsVsSingles(info) {
+            const el = document.getElementById('product-pack-savings');
+            if (!el) return;
+            const ps = info && info.pack_savings_vs_singles;
+            const savings = ps ? parseFloat(ps.savings_amount) : NaN;
+            const count = ps ? parseInt(ps.cartridge_count, 10) : NaN;
+            if (!ps || typeof ps !== 'object'
+                || !Number.isFinite(savings) || savings <= 0
+                || !Number.isFinite(count) || count <= 1) {
+                el.hidden = true;
+                el.innerHTML = '';
+                return;
+            }
+            // "…all 3 individually" only reads correctly with a real count; the
+            // guard above guarantees one, so no generic fallback is needed.
+            let html = `<span class="product-info__pack-savings-headline">`
+                + `Save ${Security.escapeHtml(formatPrice(savings))} vs buying all ${count} individually`
+                + `</span>`;
+            const perCartridge = parseFloat(ps.savings_per_cartridge);
+            if (Number.isFinite(perCartridge) && perCartridge > 0) {
+                html += `<span class="product-info__pack-savings-sub">`
+                    + `${Security.escapeHtml(formatPrice(perCartridge))} per cartridge`
+                    + `</span>`;
+            }
+            el.innerHTML = html;
+            el.hidden = false;
+        },
+
+        /**
+         * Out-of-stock social proof (traffic-conversion-jul2026 §3).
+         *
+         * Backend field `waitlist_count` — an integer present only when the
+         * product is out of stock AND at least 5 people are waiting.
+         *
+         * PROOF ONLY. The handoff asked for this "next to the notify-me /
+         * waitlist CTA", but there is no such CTA and reinstating one would
+         * reverse a deliberate decision: contact-button-may2026.md retired the
+         * waitlist UI sitewide so every OOS product has exactly ONE call to
+         * action, "Contact us" → /contact. The waitlist API wrappers in api.js
+         * stay mounted and stay uncalled. This line sits ABOVE that button and
+         * tells the shopper the demand is real; the button still does the work.
+         */
+        renderWaitlistProof(info) {
+            const el = document.getElementById('product-waitlist-proof');
+            if (!el) return;
+            const raw = info && info.waitlist_count;
+            const count = typeof raw === 'number' ? raw : parseInt(raw, 10);
+            // Backend gates at >= 5; we re-check > 0 so a future loosening (or a
+            // stray 0) can never paint "0 people are waiting".
+            if (!Number.isFinite(count) || count <= 0) {
+                el.hidden = true;
+                el.textContent = '';
+                return;
+            }
+            el.textContent = count === 1
+                ? '1 person is waiting for this to come back'
+                : `${count} people are waiting for this to come back`;
+            el.hidden = false;
+        },
+
+        /**
+         * Printer-scoped recent-purchase proof (traffic-conversion-jul2026 §3).
+         *
+         * Backend field `bought_for_this_printer`, returned only when the PDP
+         * was requested with ?printer_slug=, the product actually fits that
+         * printer, and at least 10 were bought in the window:
+         *
+         *   { count: 14, printer_name: "Brother MFC-J5330DW", window_days: 90 }
+         *
+         * `printer_name` is backend-supplied but rendered as untrusted text.
+         */
+        renderPrinterPurchaseProof(info) {
+            const el = document.getElementById('product-printer-proof');
+            if (!el) return;
+            const bp = info && info.bought_for_this_printer;
+            const count = bp ? parseInt(bp.count, 10) : NaN;
+            const windowDays = bp ? parseInt(bp.window_days, 10) : NaN;
+            if (!bp || typeof bp !== 'object' || !Number.isFinite(count) || count <= 0) {
+                el.hidden = true;
+                el.textContent = '';
+                return;
+            }
+            const days = Number.isFinite(windowDays) && windowDays > 0 ? windowDays : 90;
+            const printerName = typeof bp.printer_name === 'string' ? bp.printer_name.trim() : '';
+            el.textContent = printerName
+                ? `${count} bought in the last ${days} days for the ${printerName}`
+                : `${count} bought in the last ${days} days`;
             el.hidden = false;
         },
 

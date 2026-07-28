@@ -80,23 +80,34 @@ const API = {
 
         try {
             const cacheMode = method === 'GET' ? 'default' : 'no-store';
-            // Cross-origin cache safety (api-subdomain cutover, May 2026):
-            // The storefront now calls https://api.inkcartridges.co.nz cross-origin.
-            // Cloudflare's cache rule BYPASSES the edge cache whenever an sb-* /
-            // __ink_auth cookie rides along, so sending cookies on public catalog
-            // reads would defeat the whole cutover (a MISS for every visitor).
-            // Auth is carried by the Authorization: Bearer header and guest carts
-            // by the X-Guest-Session header — never by cookies — so we only attach
-            // credentials when the request is actually authenticated. Anonymous
-            // reads use 'omit' → cookies dropped cross-origin → cache HIT.
-            const reqHeaders = fetchOptions.headers;
-            const hasAuthHeader = reqHeaders instanceof Headers
-                ? reqHeaders.has('Authorization')
-                : !!(reqHeaders && (reqHeaders.Authorization || reqHeaders.authorization));
+            // Cross-origin cache safety (api-subdomain cutover May 2026, hardened
+            // ERR-124 Jul 2026):
+            //
+            // The storefront calls https://api.inkcartridges.co.nz cross-origin,
+            // and Cloudflare edge-caches catalog GETs there. The May 2026 note
+            // assumed only cookies defeat that cache. Measured live 2026-07-28,
+            // that premise is HALF WRONG and the half that's wrong is the
+            // dangerous half:
+            //   • `Cookie: sb-*`          → cf-cache-status: MISS  (bypass works)
+            //   • `Authorization: Bearer` → cf-cache-status: HIT   (NO bypass!)
+            // A bearer token changes what the ORIGIN returns but NOT the edge
+            // cache key, so an authenticated catalog response can be stored into
+            // — and served from — the shared anonymous cache.
+            //
+            // Hence `credentials` is now driven by the caller's EXPLICIT intent,
+            // never inferred from whether an Authorization header happens to be
+            // present. Inferring coupled the two knobs: you could not stop
+            // sending the token without silently changing cookie behaviour, and
+            // vice versa. request() decides and passes `opts.credentials`:
+            //   • { anonymous: true } catalog read → 'omit' (no token, no cookies)
+            //   • authenticated request           → 'include'
+            //   • guest/unauthenticated request   → 'omit' (unchanged from 2026-05)
+            // Public catalog reads therefore mint ONE shared cache entry per
+            // logical query and edge-HIT for signed-in and anonymous alike.
             const response = await fetch(url, {
                 ...fetchOptions,
                 signal: controller.signal,
-                credentials: hasAuthHeader ? 'include' : 'omit',
+                credentials: opts.credentials || 'omit',
                 cache: cacheMode
             });
             clearTimeout(timeoutId);
@@ -137,8 +148,14 @@ const API = {
                 return this._fetchWithAuth(url, fetchOptions, { ...opts, transientRetry: transientRetry + 1 });
             }
 
-            // Handle unauthorized — refresh token and retry with backoff
-            if (response.status === 401 && retryCount < this.MAX_AUTH_RETRIES) {
+            // Handle unauthorized — refresh token and retry with backoff.
+            // Skipped for declared-anonymous reads (ERR-124): they carry no token
+            // by contract, so a 401 from a public catalog endpoint is a server
+            // problem, not a stale session. Re-attaching a refreshed bearer here
+            // would smuggle auth back onto the exact requests we just made
+            // anonymous — and, because the token does NOT change Cloudflare's
+            // cache key, could store an authenticated body in the public cache.
+            if (response.status === 401 && retryCount < this.MAX_AUTH_RETRIES && !opts.anonymous) {
                 if (typeof Auth !== 'undefined') {
                     // Backoff: 500ms, 1000ms
                     const delay = 500 * (retryCount + 1);
@@ -154,7 +171,13 @@ const API = {
                         } else {
                             headers['Authorization'] = `Bearer ${Auth.session.access_token}`;
                         }
-                        return this._fetchWithAuth(url, { ...fetchOptions, headers }, { timeoutMs, retryCount: retryCount + 1 });
+                        // Spread `opts` so the retry keeps the original request's
+                        // credentials mode and noRetry flag. Before ERR-124 this
+                        // object was rebuilt from scratch, which was harmless only
+                        // because credentials was inferred from the headers; now
+                        // that it is explicit, dropping it would silently downgrade
+                        // an authenticated retry to 'omit'.
+                        return this._fetchWithAuth(url, { ...fetchOptions, headers }, { ...opts, timeoutMs, retryCount: retryCount + 1, credentials: 'include' });
                     }
                 }
                 throw new Error('Please sign in to continue.');
@@ -191,12 +214,29 @@ const API = {
     /**
      * Make an API request
      * @param {string} endpoint - API endpoint (e.g., '/api/products')
-     * @param {object} options - Fetch options
+     * @param {object} options - Fetch options. `options.anonymous` marks the
+     *   request as a PUBLIC read: no bearer token, no cookies, no guest-session
+     *   header — see the ERR-124 note below and getPublic().
      * @returns {Promise<object>} API response data
      */
     async request(endpoint, options = {}) {
         const url = `${Config.API_URL}${endpoint}`;
-        const token = await this.getToken();
+
+        // Declared-anonymous public reads (ERR-124, Jul 2026).
+        //
+        // Catalog GETs are edge-cached by Cloudflare keyed on the full URL. A
+        // bearer token does NOT alter that key (measured live 2026-07-28:
+        // `Authorization: Bearer …` still returns cf-cache-status: HIT), so a
+        // signed-in visitor's catalog response can be written into — and read
+        // out of — the SHARED anonymous cache. Attaching a token to a public
+        // read therefore buys nothing and risks everything.
+        //
+        // `anonymous: true` is the contract that this endpoint's response does
+        // not and must not vary by identity. It is declared per-helper rather
+        // than sniffed from the URL so that adding a new catalog method is a
+        // deliberate decision, not an accident of path matching.
+        const anonymous = !!options.anonymous;
+        const token = anonymous ? null : await this.getToken();
 
         const headers = {
             'Content-Type': 'application/json',
@@ -207,9 +247,11 @@ const API = {
             headers['Authorization'] = `Bearer ${token}`;
         }
 
-        // Send guest session ID via header (survives cross-origin cookie blocking)
+        // Send guest session ID via header (survives cross-origin cookie blocking).
+        // Never on anonymous reads: it is per-visitor, so it would fragment the
+        // edge cache key the moment the backend started varying on it.
         const guestSession = this.getGuestSessionId();
-        if (!token && guestSession) {
+        if (!token && !anonymous && guestSession) {
             headers['X-Guest-Session'] = guestSession;
         }
 
@@ -221,13 +263,27 @@ const API = {
             // amplified one keystroke into up to 6 requests while both address
             // providers were down, draining the global limiter that also covers
             // POST /api/user/address).
-            const { noRetry, ...fetchOpts } = options;
-            const response = await this._fetchWithAuth(url, { ...fetchOpts, headers }, noRetry ? { noRetry: true } : {});
+            const { noRetry, anonymous: _anon, ...fetchOpts } = options;
+            const response = await this._fetchWithAuth(url, { ...fetchOpts, headers }, {
+                ...(noRetry ? { noRetry: true } : {}),
+                anonymous,
+                // Explicit, never inferred from headers — see _fetchWithAuth.
+                credentials: (!anonymous && token) ? 'include' : 'omit'
+            });
 
-            // Capture guest session ID from response header
-            const respSessionId = response.headers.get('X-Guest-Session');
-            if (respSessionId) {
-                this.setGuestSessionId(respSessionId);
+            // Capture guest session ID from response header.
+            //
+            // NEVER from an anonymous read (ERR-124): those responses come off a
+            // SHARED Cloudflare edge entry, so if one ever carried an
+            // X-Guest-Session header every visitor served that cached copy would
+            // adopt the same guest session id — and with it, the same guest cart.
+            // Guest sessions are minted on cart/checkout calls, which are not
+            // anonymous, so nothing legitimate is lost by ignoring it here.
+            if (!anonymous) {
+                const respSessionId = response.headers.get('X-Guest-Session');
+                if (respSessionId) {
+                    this.setGuestSessionId(respSessionId);
+                }
             }
 
             // Capture x-request-id for log correlation. Backend (Render) sets this
@@ -346,20 +402,30 @@ const API = {
                     });
                 }
 
-                // Build detailed error message
+                // Build detailed error message.
+                //
+                // A structured `details` OBJECT is machine-readable payload, not
+                // user copy — it is attached to the Error below and must never be
+                // JSON.stringify'd into the message. It used to be: when the
+                // backend started returning `error.details.suggestion` on a failed
+                // coupon (traffic-conversion-jul2026 §5, a plain 400 that lands on
+                // this branch), the message became
+                //     Invalid coupon: {"suggestion":{"code":"SAVE10",…}}
+                // and checkout-page.js put that straight into an alert().
+                // Arrays (per-field validation lists) and primitives keep their
+                // append behaviour — those ARE user-readable and callers rely on it.
                 let fullMsg = errorMsg;
                 if (errorDetails) {
                     if (Array.isArray(errorDetails)) {
                         fullMsg += ': ' + errorDetails.map(d => d.message || d).join(', ');
-                    } else if (typeof errorDetails === 'object') {
-                        fullMsg += ': ' + JSON.stringify(errorDetails);
-                    } else {
+                    } else if (typeof errorDetails !== 'object') {
                         fullMsg += ': ' + errorDetails;
                     }
                 }
                 const e = new Error(fullMsg);
                 e.code = errorCode;
                 e.status = response.status;
+                if (errorDetails !== undefined) e.details = errorDetails;
                 if (requestId) e.request_id = requestId;
                 throw e;
             }
@@ -544,6 +610,18 @@ const API = {
     },
 
     /**
+     * GET a PUBLIC endpoint — never sends a bearer token, cookies, or the
+     * guest-session header (ERR-124).
+     *
+     * Use for anything Cloudflare edge-caches: the response must be identical
+     * for every visitor, because they all share one cache entry. If a response
+     * legitimately varies by identity, it is NOT a public read — use get().
+     */
+    async getPublic(endpoint, options = {}) {
+        return this.request(endpoint, { ...options, method: 'GET', anonymous: true });
+    },
+
+    /**
      * POST request helper
      */
     async post(endpoint, body) {
@@ -571,6 +649,88 @@ const API = {
     },
 
     // =========================================================================
+    // CANONICAL CATALOG QUERY STRINGS (ERR-124)
+    // =========================================================================
+
+    /**
+     * The ONE param order for every catalog URL this frontend emits.
+     *
+     * Cloudflare keys its edge cache on the full URL *including the query
+     * string*, and it does not normalise param order: `?brand=x&category=ink`
+     * and `?category=ink&brand=x` are two separate cache entries (verified live
+     * 2026-07-28 — the swapped order MISSes against a warm entry). Every extra
+     * spelling of the same logical query therefore halves the hit rate and
+     * doubles origin load.
+     *
+     * Before this list existed there were four hand-rolled serializers with
+     * four different orders, and `_productsForCode()` was actively minting a
+     * duplicate of a URL `getShopData()` had already warmed.
+     *
+     * The order below deliberately preserves `getShopData()`'s historical
+     * sequence for its params, so the highest-traffic storefront URLs keep the
+     * cache keys they already hold at the edge — this change does not cold-start
+     * them. `type` is appended last-but-one because only /api/products ever
+     * sent it.
+     *
+     * RULES:
+     *  1. Only real filter params belong here. Never add a cache-buster
+     *     (`_t`, `_`, `cb`, `v`), a tracking param (`utm_*`, `gclid`, `fbclid`),
+     *     or anything else unique-per-request/visitor — it makes every call a
+     *     guaranteed MISS.
+     *  2. New params go at the END, so existing keys stay warm.
+     *  3. Never build a catalog query any other way. Use catalogQuery().
+     */
+    CATALOG_PARAM_ORDER: ['brand', 'category', 'source', 'page', 'limit', 'search', 'code', 'color', 'type', 'sort'],
+
+    /**
+     * Serialize catalog filter params into a canonical query string.
+     *
+     * Order is fixed by CATALOG_PARAM_ORDER regardless of the caller's object
+     * key order, so two call sites asking the same question always produce the
+     * same URL — and therefore share one edge-cache entry and one SWR entry.
+     *
+     * Empty values (undefined/null/'') are dropped rather than serialized as
+     * `key=`, matching the historical `if (params.x)` guards. `0` and `false`
+     * are also dropped for the same reason: no catalog param has a meaningful
+     * falsy value, and treating them as present would fork the key.
+     *
+     * Params NOT in CATALOG_PARAM_ORDER are still emitted — sorted
+     * alphabetically, after the known ones. Dropping them would be far worse
+     * than a cache miss: endpoint-specific filters like `include_unavailable`
+     * (color-packs) would vanish silently and the caller would get a
+     * wrong-but-plausible result set, which is exactly the failure mode that
+     * bit us in ERR-075. Sorting keeps them deterministic, so an unknown param
+     * costs at most one extra cache key, never a wrong answer.
+     *
+     * @param {Object} params - e.g. { brand: 'canon', category: 'ink', code: 'PG510' }
+     * @returns {string} e.g. "brand=canon&category=ink&code=PG510" (no leading '?')
+     */
+    catalogQuery(params = {}) {
+        const isEmpty = (v) => v === undefined || v === null || v === '' || v === false || v === 0;
+        const qs = new URLSearchParams();
+        for (const key of this.CATALOG_PARAM_ORDER) {
+            if (isEmpty(params[key])) continue;
+            qs.append(key, String(params[key]));
+        }
+        const known = new Set(this.CATALOG_PARAM_ORDER);
+        const extras = Object.keys(params).filter(k => !known.has(k) && !isEmpty(params[k])).sort();
+        for (const key of extras) {
+            qs.append(key, String(params[key]));
+        }
+        return qs.toString();
+    },
+
+    /**
+     * Build a full canonical catalog endpoint (path + '?' + canonical query).
+     * Omits the '?' entirely when no params survive, so `/api/products` and
+     * `/api/products?` never both exist as cache keys.
+     */
+    catalogEndpoint(path, params = {}) {
+        const qs = this.catalogQuery(params);
+        return qs ? `${path}?${qs}` : path;
+    },
+
+    // =========================================================================
     // SWR (stale-while-revalidate) in-memory cache for catalog GETs
     // =========================================================================
 
@@ -590,9 +750,14 @@ const API = {
         catch (e) { return data; }
     },
 
-    async getWithSWR(endpoint, { ttl = this.SWR_TTL_MS } = {}) {
+    async getWithSWR(endpoint, { ttl = this.SWR_TTL_MS, anonymous = false } = {}) {
         const now = Date.now();
         const cached = this._swrCache.get(endpoint);
+        // Public reads skip auth entirely (ERR-124). Resolved once here so every
+        // branch below — fresh, stale-revalidate, miss — uses the same fetcher;
+        // a background revalidation that quietly re-attached the token would
+        // reintroduce exactly the bug this flag exists to prevent.
+        const fetcher = anonymous ? (ep) => this.getPublic(ep) : (ep) => this.get(ep);
 
         if (cached && (now - cached.timestamp) < ttl) {
             return this._swrClone(cached.data);
@@ -601,7 +766,7 @@ const API = {
         if (cached) {
             // Stale — return stale immediately, revalidate in background (dedupe concurrent).
             if (!this._swrInflight.has(endpoint)) {
-                const p = this.get(endpoint)
+                const p = fetcher(endpoint)
                     .then(fresh => {
                         this._swrCache.set(endpoint, { data: fresh, timestamp: Date.now() });
                         try {
@@ -619,7 +784,7 @@ const API = {
         // Miss — dedupe concurrent misses too.
         let inflight = this._swrInflight.get(endpoint);
         if (!inflight) {
-            inflight = this.get(endpoint)
+            inflight = fetcher(endpoint)
                 .then(data => {
                     this._swrCache.set(endpoint, { data, timestamp: Date.now() });
                     return data;
@@ -639,22 +804,17 @@ const API = {
      * @param {object} filters - Filter parameters
      */
     async getProducts(filters = {}) {
-        const params = new URLSearchParams();
-
-        if (filters.page) params.append('page', filters.page);
-        if (filters.limit) params.append('limit', filters.limit || Config.ITEMS_PER_PAGE);
-        if (filters.category) params.append('category', filters.category);
-        if (filters.brand) params.append('brand', filters.brand);
-        if (filters.source) params.append('source', filters.source);
-        if (filters.type) params.append('type', filters.type);
-        if (filters.color) params.append('color', filters.color);
-        if (filters.sort) params.append('sort', filters.sort);
-        if (filters.search) params.append('search', filters.search);
-
-        const queryString = params.toString();
-        const endpoint = `/api/products${queryString ? '?' + queryString : ''}`;
-
-        return this.getWithSWR(endpoint);
+        // Canonical serialization (ERR-124). This used to hand-roll its own
+        // param order (page, limit, category, brand, …), which differed from
+        // both /api/shop's order and the two recovery fetches below — four
+        // spellings of the same query, four edge-cache entries.
+        //
+        // The old `filters.limit || Config.ITEMS_PER_PAGE` fallback was dead
+        // code: the `if (filters.limit)` guard already required it truthy, so
+        // the default never applied. Removing it changes nothing at runtime but
+        // stops implying that omitting `limit` and passing `limit=20` are the
+        // same request — at the edge they are two different keys.
+        return this.getWithSWR(this.catalogEndpoint('/api/products', filters), { anonymous: true });
     },
 
     /**
@@ -688,16 +848,10 @@ const API = {
      * @param {Object} params - Query parameters
      */
     async getShopData(params = {}) {
-        const qs = new URLSearchParams();
-        if (params.brand) qs.append('brand', params.brand);
-        if (params.category) qs.append('category', params.category);
-        if (params.source) qs.append('source', params.source);
-        if (params.page) qs.append('page', params.page);
-        if (params.limit) qs.append('limit', params.limit);
-        if (params.search) qs.append('search', params.search);
-        if (params.code) qs.append('code', params.code);
-        if (params.color) qs.append('color', params.color);
-        if (params.sort) qs.append('sort', params.sort);
+        // Canonical serialization (ERR-124) — CATALOG_PARAM_ORDER preserves the
+        // exact sequence this method used to hand-roll, so the storefront's
+        // hottest URLs keep the edge-cache entries they already hold.
+        const shopEndpoint = this.catalogEndpoint('/api/shop', params);
 
         // Eligibility for compat-recovery sidecar — decided BEFORE awaiting so
         // primary and sidecar fire in parallel (halves cold-start latency on
@@ -710,14 +864,15 @@ const API = {
             && params.source !== 'genuine'
             && !params.search);
 
-        const primaryPromise = this.getWithSWR(`/api/shop?${qs.toString()}`);
+        const primaryPromise = this.getWithSWR(shopEndpoint, { anonymous: true });
         let sidecarPromise = null;
         if (eligibleForRecovery) {
-            const fbQs = new URLSearchParams();
-            fbQs.append('brand', params.brand);
-            fbQs.append('category', params.category);
-            fbQs.append('source', 'compatible');
-            fbQs.append('limit', '200');
+            const fbEndpoint = this.catalogEndpoint('/api/products', {
+                brand: params.brand,
+                category: params.category,
+                source: 'compatible',
+                limit: 200
+            });
             // Sidecar fires against /api/products, NOT /api/shop. The /api/shop
             // endpoint drops `pack_type=value_pack` rows on the source=compatible
             // filter — the bug surfaced for PGI650 (verified 2026-05-11):
@@ -730,7 +885,7 @@ const API = {
             // the black single, even when the catalog ships a colour pack.
             // .catch absorbs sidecar failure so it can never reject the
             // top-level Promise.all below.
-            sidecarPromise = this.getWithSWR(`/api/products?${fbQs.toString()}`).catch(() => null);
+            sidecarPromise = this.getWithSWR(fbEndpoint, { anonymous: true }).catch(() => null);
         }
 
         // Await both. The primary may still throw (no try/catch around
@@ -950,14 +1105,19 @@ const API = {
         }
     },
 
-    /** Fetch one code's products off /api/shop. Never throws. */
+    /**
+     * Fetch one code's products off /api/shop. Never throws.
+     *
+     * Uses catalogEndpoint (ERR-124). This method used to append its params in
+     * the order brand, category, code, limit — while getShopData emitted
+     * …limit BEFORE code for the identical query. Two URLs, two Cloudflare
+     * entries, two SWR entries, for one question. The codes drilldown
+     * (shop-page.js) and PDP related-products (product-detail-page.js) both ask
+     * it, so the duplicate was on a hot path; they now share one key.
+     */
     async _productsForCode(brand, category, code) {
-        const qs = new URLSearchParams();
-        qs.append('brand', brand);
-        qs.append('category', category);
-        qs.append('code', code);
-        qs.append('limit', '200');
-        const res = await this.getWithSWR(`/api/shop?${qs.toString()}`).catch(() => null);
+        const endpoint = this.catalogEndpoint('/api/shop', { brand, category, code, limit: 200 });
+        const res = await this.getWithSWR(endpoint, { anonymous: true }).catch(() => null);
         return (res && res.ok && res.data && Array.isArray(res.data.products))
             ? res.data.products
             : [];
@@ -1349,11 +1509,15 @@ const API = {
                     const present = new Set(products.map(p => p && p.id).filter(Boolean));
                     const missing = new Set(manualIds.filter(id => !present.has(id)));
                     if (missing.size) {
-                        const fbQs = new URLSearchParams();
-                        fbQs.append('brand', params.brand);
-                        fbQs.append('category', params.category);
-                        fbQs.append('limit', '200');
-                        const pool = await this.getWithSWR(`/api/products?${fbQs.toString()}`).catch(() => null);
+                        // Canonical (ERR-124) — this pool is the same shape the
+                        // compat sidecar asks for minus `source`, so sharing the
+                        // serializer keeps both on predictable keys.
+                        const poolEndpoint = this.catalogEndpoint('/api/products', {
+                            brand: params.brand,
+                            category: params.category,
+                            limit: 200
+                        });
+                        const pool = await this.getWithSWR(poolEndpoint, { anonymous: true }).catch(() => null);
                         const poolProducts = (pool && pool.ok && pool.data && Array.isArray(pool.data.products))
                             ? pool.data.products : [];
                         // One batched read of every recoverable product's codes.
@@ -1537,18 +1701,33 @@ const API = {
      * shadow server-side errors, never legitimate "this SKU doesn't exist"
      * results.
      *
+     * Printer context (traffic-conversion-jul2026 §3): pass
+     * `{ printerSlug }` when the shopper arrived from a printer page. The
+     * backend then MAY return `bought_for_this_printer` — recent-purchase
+     * social proof scoped to that machine. It is only ever added to the
+     * PRIMARY request; the search-smart fallback has no such field, and
+     * silently degrading to "no proof" is the correct behaviour there.
+     *
      * @param {string} sku - Product SKU
+     * @param {Object} [opts]
+     * @param {string} [opts.printerSlug] - printer the shopper came from
      * @returns {Promise<{ ok: boolean, data?: object, error?: string, source?: string }>}
      */
-    async getProduct(sku) {
+    async getProduct(sku, opts) {
         if (sku == null || sku === '') {
             return { ok: false, error: 'No SKU provided' };
         }
         const encoded = encodeURIComponent(sku);
 
+        // Printer context is optional and additive — an absent/blank slug must
+        // produce the byte-identical URL we sent before this feature existed,
+        // so the CDN keeps hitting one cache key for the common case.
+        const printerSlug = opts && typeof opts.printerSlug === 'string' ? opts.printerSlug.trim() : '';
+        const primaryPath = this.catalogEndpoint(`/api/products/${encoded}`, { printer_slug: printerSlug });
+
         // Use a raw fetch (not this.get) so we can distinguish 404 from 5xx.
         // request() throws on both; we need to fall back only on 5xx/network.
-        const primary = await this._rawJsonFetch(`/api/products/${encoded}`);
+        const primary = await this._rawJsonFetch(primaryPath);
 
         // Happy path: primary returned a healthy envelope.
         if (primary.kind === 'ok' && primary.body && primary.body.ok && primary.body.data) {
@@ -1612,22 +1791,24 @@ const API = {
      *
      * Bypasses request() because that helper throws on every non-ok envelope
      * and collapses the distinction between 404-genuine-missing and 500-broken.
-     * Honors the same Authorization + X-Guest-Session headers so behavior in
-     * authed contexts matches request() byte-for-byte.
+     *
+     * ANONYMOUS BY CONTRACT (ERR-124). This is the product-detail read, and
+     * /api/products/:sku is edge-cached by Cloudflare — verified live, including
+     * its 404s. It used to attach a bearer token (so admins could see
+     * admin-gated products), but a token does NOT change Cloudflare's cache key,
+     * so that made an admin's view of an unpublished product eligible to be
+     * stored in the SHARED public cache and served to anonymous shoppers. It now
+     * sends no token, no cookies, and no guest-session header, exactly like
+     * every other public catalog read. Admin preview of unlisted products needs
+     * an uncached /api/admin/ endpoint — see the backend brief.
      */
     async _rawJsonFetch(endpoint) {
         const url = `${Config.API_URL}${endpoint}`;
-        const token = await this.getToken();
         const headers = { 'Content-Type': 'application/json' };
-        if (token) headers['Authorization'] = `Bearer ${token}`;
-        const guestSession = this.getGuestSessionId();
-        if (!token && guestSession) headers['X-Guest-Session'] = guestSession;
 
         let res;
         try {
-            // Public read: omit cookies when anonymous so it hits the Cloudflare
-            // edge cache (see api-subdomain cutover note in _fetchWithAuth).
-            res = await fetch(url, { method: 'GET', headers, credentials: token ? 'include' : 'omit' });
+            res = await fetch(url, { method: 'GET', headers, credentials: 'omit' });
         } catch (err) {
             return { kind: 'network-error', error: err && err.message };
         }
@@ -1651,9 +1832,12 @@ const API = {
      * @param {object} [params] - Optional { page, limit, type, source }
      */
     async getProductsByPrinter(printerSlug, params = {}) {
-        const query = new URLSearchParams(params).toString();
-        const url = `/api/products/printer/${encodeURIComponent(printerSlug)}${query ? `?${query}` : ''}`;
-        return this.get(url);
+        // catalogEndpoint, not `new URLSearchParams(params)` (ERR-124): the
+        // latter serializes in the CALLER's object-literal key order, so two
+        // call sites passing the same filters in a different literal order mint
+        // two edge-cache entries for one result set.
+        const url = this.catalogEndpoint(`/api/products/printer/${encodeURIComponent(printerSlug)}`, params);
+        return this.getPublic(url);
     },
 
     /**
@@ -1661,7 +1845,7 @@ const API = {
      * @param {string} sku - Product SKU
      */
     async getRelatedProducts(sku) {
-        return this.get(`/api/products/${encodeURIComponent(sku)}/related`);
+        return this.getPublic(`/api/products/${encodeURIComponent(sku)}/related`);
     },
 
     /**
@@ -1669,7 +1853,7 @@ const API = {
      * @param {string} sku - Product SKU
      */
     async getBoughtTogether(sku) {
-        return this.get(`/api/products/${encodeURIComponent(sku)}/bought-together`);
+        return this.getPublic(`/api/products/${encodeURIComponent(sku)}/bought-together`);
     },
 
     /**
@@ -1678,9 +1862,10 @@ const API = {
      * @param {object} [params] - Optional query params (include_unavailable, source)
      */
     async getColorPacks(printerSlug, params = {}) {
-        const query = new URLSearchParams(params).toString();
-        const url = `/api/products/printer/${encodeURIComponent(printerSlug)}/color-packs${query ? `?${query}` : ''}`;
-        return this.get(url);
+        // catalogEndpoint keeps `include_unavailable`/`source` (they fall through
+        // the alphabetical extras tail) while making the order deterministic.
+        const url = this.catalogEndpoint(`/api/products/printer/${encodeURIComponent(printerSlug)}/color-packs`, params);
+        return this.getPublic(url);
     },
 
     /**
@@ -1799,10 +1984,16 @@ const API = {
     // =========================================================================
 
     /**
-     * Get all brands
+     * Get all brands.
+     *
+     * SWR-cached (ERR-124): the brand list is one of the most-requested reads in
+     * the admin console — eight page controllers call it — and it was the only
+     * catalog helper with no client cache at all, so every one of them paid a
+     * full round-trip. 5-minute TTL matches getSiteNav, the other pure-taxonomy
+     * feed. Anonymous so it shares the edge entry with every visitor.
      */
     async getBrands() {
-        return this.get('/api/brands');
+        return this.getWithSWR('/api/brands', { ttl: 5 * 60 * 1000, anonymous: true });
     },
 
     // =========================================================================
@@ -1815,15 +2006,12 @@ const API = {
      * @param {object} params - { brand?, category? }
      */
     async getCollectionSchema(params = {}) {
-        const qs = new URLSearchParams();
-        if (params.brand) qs.append('brand', params.brand);
-        if (params.category) qs.append('category', params.category);
-        const query = qs.toString();
+        const query = this.catalogQuery({ brand: params.brand, category: params.category });
         if (!query) return { ok: false, error: 'brand or category required' };
         // SWR (5-min TTL) so the init + popstate + pageshow burst on the same
         // brand/category URL collapses to one request instead of tripping the
         // backend rate limiter (429). FE audit Jun 2026, ERR-049.
-        return this.getWithSWR(`/api/schema/collection?${query}`, { ttl: 5 * 60 * 1000 });
+        return this.getWithSWR(`/api/schema/collection?${query}`, { ttl: 5 * 60 * 1000, anonymous: true });
     },
 
     /**
@@ -1832,7 +2020,7 @@ const API = {
      */
     async getPrinterSchema(printerSlug) {
         // SWR for the same burst-on-navigation reason as getCollectionSchema.
-        return this.getWithSWR(`/api/schema/printer/${encodeURIComponent(printerSlug)}`, { ttl: 5 * 60 * 1000 });
+        return this.getWithSWR(`/api/schema/printer/${encodeURIComponent(printerSlug)}`, { ttl: 5 * 60 * 1000, anonymous: true });
     },
 
     /**
@@ -1840,7 +2028,7 @@ const API = {
      * page <head> per spec §5.6. Use SWR so repeated page loads don't re-fetch.
      */
     async getSiteSchema() {
-        return this.getWithSWR('/api/schema/site', { ttl: 5 * 60 * 1000 });
+        return this.getWithSWR('/api/schema/site', { ttl: 5 * 60 * 1000, anonymous: true });
     },
 
     /**
@@ -1851,7 +2039,7 @@ const API = {
      * (ERR-049). Consumers fail open to their static markup on any error.
      */
     async getSiteNav() {
-        return this.getWithSWR('/api/site/nav', { ttl: 5 * 60 * 1000 });
+        return this.getWithSWR('/api/site/nav', { ttl: 5 * 60 * 1000, anonymous: true });
     },
 
     /**
@@ -1860,7 +2048,7 @@ const API = {
      * endpoint is the canonical source per spec §5.6 — embed verbatim.
      */
     async getProductJsonLd(sku) {
-        return this.get(`/api/products/${encodeURIComponent(sku)}/jsonld`);
+        return this.getPublic(`/api/products/${encodeURIComponent(sku)}/jsonld`);
     },
 
     // =========================================================================
@@ -2552,8 +2740,14 @@ const API = {
         return this.post('/api/auth/resend-verification');
     },
 
+    /**
+     * Public business settings (GST rate, free-shipping threshold, stock
+     * thresholds). Identical for every visitor, so it is an anonymous read
+     * (ERR-124) — matching Config.loadSettings(), which has always fetched this
+     * same endpoint with a bare, tokenless fetch.
+     */
     async getSettings() {
-        return this.request('/api/settings', { method: 'GET' });
+        return this.getPublic('/api/settings');
     },
 
     // =========================================================================
@@ -2915,8 +3109,11 @@ const API = {
      * @param {string} productId - Product UUID
      */
     async getProductReviews(productId, params = {}) {
-        const query = new URLSearchParams(params).toString();
-        return this.get(`/api/products/${productId}/reviews${query ? `?${query}` : ''}`);
+        // Approved reviews only — identical for every visitor, and the path sits
+        // under the edge-cached `/api/products/` prefix, so it is an anonymous
+        // read (ERR-124). A signed-in shopper's own pending review comes from
+        // getUserReviews(), which is authenticated and uncached.
+        return this.getPublic(this.catalogEndpoint(`/api/products/${productId}/reviews`, params));
     },
 
     /**
@@ -2924,7 +3121,7 @@ const API = {
      * Separate endpoint from the list — not embedded in getProductReviews.
      */
     async getReviewSummary(productId) {
-        return this.get(`/api/products/${productId}/reviews/summary`);
+        return this.getPublic(`/api/products/${productId}/reviews/summary`);
     },
 
     /**
@@ -2932,7 +3129,7 @@ const API = {
      * @param {string} productId - Product UUID
      */
     async getProductReviewSummary(productId) {
-        return this.get(`/api/products/${productId}/reviews/summary`);
+        return this.getPublic(`/api/products/${productId}/reviews/summary`);
     },
 
     /**
@@ -3102,13 +3299,14 @@ const API = {
 
     /** Filter-badge counts per filter option. Uses same query params as /products. */
     async getProductCounts(filters = {}) {
-        const qs = new URLSearchParams(filters).toString();
-        return this.get(`/api/products/counts${qs ? '?' + qs : ''}`);
+        // Canonical + anonymous (ERR-124) — same filter vocabulary as
+        // /api/products, so it must serialize identically or it forks the key.
+        return this.getPublic(this.catalogEndpoint('/api/products/counts', filters));
     },
 
     /** Other colors / variants sharing a series code. */
     async getProductSeries(code) {
-        return this.get(`/api/products/series/${encodeURIComponent(code)}`);
+        return this.getPublic(`/api/products/series/${encodeURIComponent(code)}`);
     }
 };
 

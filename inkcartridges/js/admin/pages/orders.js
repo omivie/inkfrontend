@@ -6,7 +6,16 @@ import { DataTable } from '../components/table.js';
 import { Drawer } from '../components/drawer.js';
 import { Toast } from '../components/toast.js';
 import { Modal } from '../components/modal.js';
-import { computeLineProfits, computeProfitBreakdown, NO_PAYMENT_FEES } from '../utils/profitability.js';
+import { marginBadge } from '../utils/profitability.js';
+import { orderProfitFromDetail, isInvoiceOrder, PROFIT_STATE } from '../utils/order-profit.js';
+// Supplier/Origin rendering is shared with the Products page — see utils/sourcing.js.
+// A second copy of the origin vocabulary is how the two surfaces would drift apart.
+import { originBadge, supplierCell } from '../utils/sourcing.js';
+
+// Re-exported so existing importers of orders.js keep working; the definition now
+// lives in utils/order-profit.js (utils must never import a page — that would be
+// circular). pages/dashboard.js keeps its own documented mirror.
+export { isInvoiceOrder };
 
 const formatPrice = (v) => window.formatPrice ? window.formatPrice(v) : `$${Number(v).toFixed(2)}`;
 const MISSING = '\u2014';
@@ -46,6 +55,136 @@ function lookupOrder(id) {
   return (_table?.data || []).find(r => r.id === id) || _seenOrders.get(id) || null;
 }
 
+/**
+ * Profit column state.
+ *
+ * The orders LIST endpoint does not return `supplier_cost_snapshot` or
+ * `shipping_absorbed` — those exist only on GET /api/admin/orders/:id (ERR-039).
+ * So the column can't be rendered from the list payload; it fans out one cheap
+ * detail GET per visible row AFTER the table has painted, and patches the cells
+ * in as they land. Results are cached by order id, so paging back and forth
+ * costs nothing.
+ *
+ * 20 rows/page minus the cancelled ones (which need no fetch at all), in batches
+ * of 6 against the backend's 60/min limiter — the same budget reasoning as the
+ * dashboard's missing-cost scan. Orders has no per-page selector wired, so the
+ * 20 is fixed; if that ever changes this fan-out needs a cap.
+ */
+const _profitCache = new Map();   // orderId -> orderProfitFromDetail(...) result
+let _profitAbort = null;
+const PROFIT_BATCH = 6;
+
+function forgetProfit(id) {
+  if (id) _profitCache.delete(id);
+}
+
+/**
+ * One renderer for both the initial paint and the async patch, so a cell can
+ * never look different depending on which path produced it.
+ *
+ * The five non-numeric states are deliberately distinguishable. "We haven't
+ * asked yet", "we asked and the call failed", "there is no cost on record",
+ * "this order was cancelled" and "this order has no lines" are four different
+ * facts about the business, and collapsing any of them into $0 — or into each
+ * other — is exactly how the dashboard once reported a clean bill of health off
+ * a scan that never ran (ERR-074).
+ */
+function profitCellHtml(row, info) {
+  const id = esc(row.id);
+  const open = (cls, title) =>
+    `<span class="order-profit${cls ? ' ' + cls : ''}" data-order-profit="${id}" title="${esc(title)}">`;
+
+  if (!info || info.state === PROFIT_STATE.PENDING) {
+    return `${open('order-profit--pending', 'Loading cost data…')}·</span>`;
+  }
+  switch (info.state) {
+    case PROFIT_STATE.CANCELLED:
+      return `${open('order-profit--none', 'Cancelled — no profit realised.')}${MISSING}</span>`;
+    case PROFIT_STATE.NO_ITEMS:
+      return `${open('order-profit--none', 'No line items recorded on this order, so there is nothing to cost.')}${MISSING}</span>`;
+    case PROFIT_STATE.UNKNOWN: {
+      const n = info.missingCostCount;
+      const tip = `${n} of ${info.itemCount} item${info.itemCount === 1 ? '' : 's'} `
+        + `${n === 1 ? 'has' : 'have'} no recorded supplier cost — profit can't be computed. `
+        + `It is UNKNOWN, not $0.`;
+      return `${open('order-profit--none', tip)}${MISSING}</span>`;
+    }
+    case PROFIT_STATE.FAILED:
+      return `${open('order-profit--failed', 'Cost lookup failed — reload to retry. This is NOT $0.')}${MISSING}</span>`;
+    default:
+      break;
+  }
+
+  const tip = (info.isInvoice
+    ? 'Take-home profit (GST-neutral): ex-GST revenue minus ex-GST supplier cost. Invoiced sale paid by bank transfer, so no card fee.'
+    : 'Take-home profit (GST-neutral): ex-GST revenue minus ex-GST supplier cost minus Stripe fee (2.65% + $0.30) on the full charged amount.')
+    + (info.absorbedApplies ? ' Absorbed courier cost (free shipping) is subtracted.' : '')
+    + ' Open the order for the full breakdown.';
+  const lossCls = info.netProfit < 0 ? ' order-profit__amt--loss' : '';
+  return `${open('', tip)}`
+    + `<span class="order-profit__amt${lossCls}">${formatPrice(info.netProfit)}</span>`
+    + marginBadge(info.netMarginPct)
+    + `</span>`;
+}
+
+// Swap a single cell in place. Deliberately NOT _table.setData/setColumns: those
+// re-render the whole table, which would drop keyboard row focus and re-bind
+// every handler each time one of ~20 in-flight fetches lands.
+function patchProfitCell(row) {
+  if (!_table?.container || !row?.id) return;
+  const cell = _table.container.querySelector(`[data-order-profit="${CSS.escape(String(row.id))}"]`);
+  if (cell) cell.outerHTML = profitCellHtml(row, _profitCache.get(row.id));
+}
+
+/**
+ * Fill in the Profit column for the rows now on screen.
+ *
+ * Called AFTER _table.setData — never awaited before it, so the table paints
+ * immediately and profit arrives progressively (the dashboard first-paint rule,
+ * ERR-121). Superseded loads abort their predecessor so leaving the page or
+ * paging fast doesn't burn the rate limiter on rows nobody is looking at.
+ */
+async function hydrateProfits(rows) {
+  _profitAbort?.abort();
+  _profitAbort = null;
+  if (!AdminAuth.isOwner() || !Array.isArray(rows) || !rows.length) return;
+
+  const ctrl = new AbortController();
+  _profitAbort = ctrl;
+
+  const todo = [];
+  for (const row of rows) {
+    if (_profitCache.has(row.id)) { patchProfitCell(row); continue; }
+    // Cancelled orders are resolvable from the list row alone — no revenue was
+    // realised, so there is nothing to fetch. On a page like the current one
+    // that's a third of the requests saved.
+    const fromListRow = orderProfitFromDetail(row);
+    if (fromListRow.state === PROFIT_STATE.CANCELLED) {
+      _profitCache.set(row.id, fromListRow);
+      patchProfitCell(row);
+      continue;
+    }
+    todo.push(row);
+  }
+
+  for (let i = 0; i < todo.length; i += PROFIT_BATCH) {
+    if (ctrl.signal.aborted || !_table) return;
+    const batch = todo.slice(i, i + PROFIT_BATCH);
+    const results = await Promise.allSettled(batch.map(r => AdminAPI.getOrder(r.id, ctrl.signal)));
+    if (ctrl.signal.aborted || !_table) return;
+    results.forEach((res, j) => {
+      const row = batch[j];
+      // A detail call we couldn't make is not $0 and not "no cost recorded" — it
+      // is a question we failed to ask. Cache it as FAILED so the cell says so.
+      const info = (res.status === 'fulfilled' && res.value)
+        ? orderProfitFromDetail(res.value)
+        : { state: PROFIT_STATE.FAILED };
+      _profitCache.set(row.id, info);
+      patchProfitCell(row);
+    });
+  }
+}
+
 function orderLabel(id) {
   const o = lookupOrder(id);
   return o?.order_number || String(id || '').slice(0, 8) || 'order';
@@ -67,25 +206,6 @@ function partitionSelection(selected) {
   return { deletable, blocked };
 }
 
-/**
- * Is this order an invoiced sale (phone / walk-in / B2B) rather than a website order?
- *
- * The backend materialises a saved invoice as a shadow `orders` row. It sets
- * `payment_method: 'invoice'` and numbers it `INV-<n>`. NB it does NOT expose the
- * `orders.channel` column on the API (the spec asked for it; it isn't there), so
- * payment_method is the contract and the order-number prefix is the belt-and-braces
- * fallback. If `channel` ever appears, it wins.
- *
- * This matters for money: an invoiced sale is paid by bank transfer, so it carries
- * NO card processing fee. Charging it the Stripe 2.65% + $0.30 understates its profit.
- */
-export function isInvoiceOrder(o) {
-  if (!o) return false;
-  if (o.channel) return String(o.channel).toLowerCase() === 'invoice';
-  if (o.payment_method) return String(o.payment_method).toLowerCase() === 'invoice';
-  return /^INV-/i.test(String(o.order_number || ''));
-}
-
 function channelBadge(o) {
   return isInvoiceOrder(o)
     ? `<span class="admin-badge admin-badge--invoice" title="Invoiced sale \u2014 phone, walk-in or B2B. Paid by bank transfer, so no card fee.">Invoice</span>`
@@ -104,36 +224,9 @@ function titleCaseZone(zone) {
     .join(' ');
 }
 
-/**
- * How a line item's pack was produced. The backend resolves this from `pack_type`
- * plus a pre-boxed-vs-assembled sourcing flag and sends the already-decided value \u2014
- * the frontend never computes it. Absent/unknown renders a LOUD em-dash, never a
- * silent "single" default (see the "fail-soft must be loud" convention).
- */
-function originBadge(origin) {
-  const map = {
-    in_house_pack: ['in-house', 'Assembled', 'Assembled in-house from multiple single products.'],
-    supplier_pack: ['supplier-pack', 'Pre-boxed', 'Bought pre-boxed as a single pack from one supplier.'],
-    single: ['single', 'Single', 'A single product (not a pack).'],
-  };
-  const m = map[origin];
-  if (!m) return `<span class="admin-text-muted">${MISSING}</span>`;
-  return `<span class="admin-badge admin-badge--${m[0]}" title="${Security.escapeAttr(m[2])}">${esc(m[1])}</span>`;
-}
-
-/**
- * Supplier(s) a line item was sourced from. For an in-house pack the backend sends one
- * `suppliers[]` entry per constituent single; we show the DISTINCT supplier names and
- * map each constituent -> supplier in the hover tooltip. Absent/empty renders MISSING
- * (loud fail-soft) so an existing order never looks silently "supplier-less".
- */
-function supplierCell(item) {
-  const list = Array.isArray(item.suppliers) ? item.suppliers.filter((s) => s && s.name) : [];
-  if (!list.length) return `<span class="admin-text-muted">${MISSING}</span>`;
-  const distinct = [...new Set(list.map((s) => s.name))];
-  const tip = list.map((s) => `${s.color || s.sku || '?'} \u2192 ${s.name}`).join('\n');
-  return `<span title="${Security.escapeAttr(tip)}">${distinct.map(esc).join(', ')}</span>`;
-}
+// originBadge() and supplierCell() moved to utils/sourcing.js (imported above) when
+// the Products page gained the same two columns. Both render exactly as before \u2014
+// the util owns the origin vocabulary now so the two pages cannot drift.
 
 let _container = null;
 let _table = null;
@@ -211,6 +304,16 @@ const COLUMNS = [
     align: 'right',
   },
   {
+    // Owner-only — filtered out of the column list for everyone else, exactly
+    // like the modal's Cost/Profit columns. NOT sortable: the backend's sort enum
+    // is only newest|oldest|total-high|total-low (api.js) and silently falls back
+    // to newest for anything else, and sorting client-side would order 20 of N
+    // rows while looking like a full sort. Both are lies, so the header is inert.
+    key: '_profit', label: 'Profit',
+    render: (r) => profitCellHtml(r, _profitCache.get(r.id)),
+    align: 'right',
+  },
+  {
     key: '_actions', label: '',
     render: (r) => {
       const st = (r.status || '').toLowerCase();
@@ -271,6 +374,9 @@ async function loadOrders() {
   };
   rememberOrders(rows);
   _table.setData(rows, pagination);
+  // Deliberately NOT awaited: the table must paint from the list payload alone,
+  // and the per-row cost fetches fill the Profit column in behind it (ERR-121).
+  hydrateProfits(rows);
 }
 
 // ---- Bulk bar ----
@@ -373,7 +479,7 @@ async function bulkDelete() {
         const batch = ids.slice(i, i + 5);
         const results = await Promise.allSettled(batch.map(id => AdminAPI.deleteOrder(id)));
         results.forEach((r, j) => {
-          if (r.status === 'fulfilled') done++;
+          if (r.status === 'fulfilled') { done++; forgetProfit(batch[j]); }
           else failures.push({ label: orderLabel(batch[j]), message: r.reason?.message || 'Delete failed' });
         });
       }
@@ -514,6 +620,12 @@ function buildOrderModalContent(modal, o, events, breakdown, { detailLoadFailed 
   // metaSection is assembled after the items section (below) — the top-right
   // column shows the owner-only Profit Breakdown, which needs the order totals.
 
+  // Every profit figure in this modal comes from ONE call, shared with the Orders
+  // list's Profit column, so the two can never quote different numbers (ERR-113).
+  // The breakdown endpoint's total is the more precise card-fee base, so pass it;
+  // the helper falls back to the order's own total when it's absent.
+  const profitInfo = orderProfitFromDetail(o, { customerPaidInclGst: breakdown?.total_incl_gst });
+
   // Items section
   let itemsHtml = '';
   let orderProfitBreakdown = null;  // populated below; consumed by the Profit Breakdown section
@@ -523,15 +635,10 @@ function buildOrderModalContent(modal, o, events, breakdown, { detailLoadFailed 
     itemsHtml += `<th>Product</th><th>SKU</th><th>Qty</th><th>Supplier</th><th>Origin</th><th>Price <span class="admin-text-muted" style="font-weight:400">(excl. GST)</span></th>`;
     if (showCost) itemsHtml += `<th>Cost <span class="admin-text-muted" style="font-weight:400">(excl. GST)</span></th><th>Profit <span class="admin-text-muted" style="font-weight:400">(net)</span></th>`;
     itemsHtml += `</tr></thead><tbody>`;
-    let totalPrice = 0, totalCost = 0;
+    const { lineProfits, missingCostCount, itemCount } = profitInfo;
     const itemRows = [];
     for (const item of o.items) {
       const itemPrice = item.sell_price ?? item.unit_price ?? item.price;
-      const qty = item.qty ?? item.quantity ?? 0;
-      const lineRevenue = (itemPrice ?? 0) * qty;
-      totalPrice += lineRevenue;
-      const hasCost = showCost && item.supplier_cost_snapshot != null;
-      if (showCost) totalCost += (item.supplier_cost_snapshot ?? 0) * qty;
       // Prefer backend-supplied canonical_url; fall back to slug/sku reconstruction.
       let itemHref = '';
       if (item.canonical_url) {
@@ -542,43 +649,28 @@ function buildOrderModalContent(modal, o, events, breakdown, { detailLoadFailed 
       } else if (item.sku) {
         itemHref = `/p/${encodeURIComponent(item.sku)}`;
       }
-      itemRows.push({ item, itemPrice, qty, lineRevenue, hasCost, itemHref });
+      itemRows.push({ item, itemPrice, itemHref });
     }
-    const customerPaidInclGst = breakdown?.total_incl_gst ?? o.total_amount ?? o.total ?? null;
-    // Absorbed courier on a free-shipping order (owner-only backend field). When it
-    // applies, this order-level cost is subtracted from both the per-line Profit
-    // column and the Profit Breakdown take-home, so every figure agrees. Absent /
-    // { applies:false } / non-owner ⇒ no effect.
-    const absorbedShipping = o.shipping_absorbed || null;
-    // An invoiced sale is settled by bank transfer — there is no card processor, so
-    // NO fee. Charging it Stripe's 2.65% + $0.30 (the website default) understates
-    // its profit and invents a payment it never made.
-    const feeOpts = isInvoiceOrder(o)
-      ? { customerPaidInclGst, absorbedShipping, ...NO_PAYMENT_FEES }
-      : { customerPaidInclGst, absorbedShipping };
-    // Per-line net profit — the order's payment fee (incl. the fixed $0.30, where one
-    // applies) is allocated across lines by revenue share, so the line column sums to
-    // the foot total exactly.
-    const { lineProfits, totalProfit: profit } = computeLineProfits(
-      itemRows.map(({ lineRevenue, hasCost, item, qty }) => ({
-        revenueExGst: lineRevenue,
-        costExGst: hasCost ? item.supplier_cost_snapshot * qty : null,
-      })),
-      feeOpts,
-    );
-    // Itemised order-level waterfall (revenue → every deduction → net profit).
-    if (showCost) {
-      orderProfitBreakdown = computeProfitBreakdown(totalPrice, totalCost, feeOpts);
-    }
-    profitFootTip = isInvoiceOrder(o)
+    // Itemised order-level waterfall (revenue → every deduction → net profit). Null
+    // unless every line carries a cost — see the foot-total note below.
+    if (showCost) orderProfitBreakdown = profitInfo.breakdown;
+    profitFootTip = profitInfo.isInvoice
       ? 'Net profit (GST-neutral): ex-GST revenue minus ex-GST supplier cost. This is an invoiced sale paid by bank transfer, so there is no card fee. GST is a pass-through — see the Profit Breakdown section.'
       : 'Net profit (GST-neutral): ex-GST revenue minus ex-GST supplier cost minus Stripe fee (2.65% + $0.30) on the full charged amount. GST is a pass-through — see the Profit Breakdown section.';
     // Free-shipping order where we absorbed the courier: that cost is allocated
     // across the lines (by revenue share) too, so say so in the foot tooltip.
-    if (absorbedShipping && absorbedShipping.applies === true && Number(absorbedShipping.amount_incl_gst) > 0) {
+    if (profitInfo.absorbedApplies) {
       profitFootTip += ' Absorbed courier cost (free shipping) is subtracted — see the Profit Breakdown.';
     }
-    itemRows.forEach(({ item, itemPrice, hasCost, itemHref }, idx) => {
+    // A line with no recorded supplier cost makes the ORDER total unknowable — its
+    // cost would otherwise count as $0 and the foot would print a confident,
+    // over-stated profit (ERR-122; the ERR-028/068 class). The per-line figures
+    // above stay valid: each is its own revenue minus its own cost minus its
+    // revenue share of the order fee, which doesn't depend on the missing line.
+    const unknownFootTip = `${missingCostCount} of ${itemCount} item${itemCount === 1 ? '' : 's'} `
+      + `${missingCostCount === 1 ? 'has' : 'have'} no recorded supplier cost — this order's total profit can't be computed. `
+      + `It is UNKNOWN, not $0.`;
+    itemRows.forEach(({ item, itemPrice, itemHref }, idx) => {
       const profitCell = showCost
         ? `<td class="mono" style="color:var(--success-text,#15803d)">${lineProfits[idx] != null ? formatPrice(lineProfits[idx]) : MISSING}</td>`
         : '';
@@ -592,10 +684,16 @@ function buildOrderModalContent(modal, o, events, breakdown, { detailLoadFailed 
         ${showCost ? `<td class="mono">${item.supplier_cost_snapshot != null ? formatPrice(item.supplier_cost_snapshot) : MISSING}</td>${profitCell}` : ''}
       </tr>`;
     });
+    const costFoot = missingCostCount > 0
+      ? `<td class="mono admin-text-muted" title="${esc(unknownFootTip)}"><strong>${MISSING}</strong></td>`
+      : `<td class="mono"><strong>${formatPrice(profitInfo.totalCostExGst)}</strong></td>`;
+    const profitFoot = profitInfo.netProfit != null
+      ? `<td class="mono" style="color:var(--success-text,#15803d)" title="${esc(profitFootTip)}"><strong>${formatPrice(profitInfo.netProfit)}</strong></td>`
+      : `<td class="mono admin-text-muted" title="${esc(unknownFootTip)}"><strong>${MISSING}</strong></td>`;
     itemsHtml += `</tbody><tfoot><tr class="admin-order-items__total">
       <td colspan="5"></td>
-      <td class="mono"><strong>${formatPrice(totalPrice)}</strong></td>
-      ${showCost ? `<td class="mono"><strong>${formatPrice(totalCost)}</strong></td><td class="mono" style="color:var(--success-text,#15803d)" title="${esc(profitFootTip)}"><strong>${profit != null ? formatPrice(profit) : MISSING}</strong></td>` : ''}
+      <td class="mono"><strong>${formatPrice(profitInfo.totalRevenueExGst)}</strong></td>
+      ${showCost ? `${costFoot}${profitFoot}` : ''}
     </tr></tfoot></table></div>`;
   } else {
     // No line items to render. Two very different reasons live here and must NOT look
@@ -655,8 +753,34 @@ function buildOrderModalContent(modal, o, events, breakdown, { detailLoadFailed 
       'color:var(--success-text,#15803d)');
     profitBreakdownInner += pbRow(`Net margin ${muted('(take-home ÷ ex-GST revenue)')}`, `${b.netMarginPct.toFixed(1)}%`);
   }
+  // An owner opened an order we cannot price. Saying nothing here would read as
+  // "no profit data for this order type"; printing a partial waterfall would read
+  // as the truth. Name the gap and what to do about it (ERR-122).
+  let profitUnknownInner = '';
+  if (showCost && !profitBreakdownInner && profitInfo.state === PROFIT_STATE.UNKNOWN) {
+    const uncostedSkus = (o.items || [])
+      .filter(it => it.supplier_cost_snapshot == null)
+      .map(it => it.sku || it.product_sku)
+      .filter(Boolean);
+    const n = profitInfo.missingCostCount;
+    profitUnknownInner = `
+      <div class="om-meta-addr-label">Profit breakdown</div>
+      <div class="om-profit-unknown">
+        <div class="om-profit-unknown__title">Profit can't be computed</div>
+        <div class="om-profit-unknown__text">
+          ${n} of ${profitInfo.itemCount} item${profitInfo.itemCount === 1 ? '' : 's'}
+          ${n === 1 ? 'has' : 'have'} no recorded supplier cost, so take-home is
+          <strong>unknown</strong> — not $0.
+          ${uncostedSkus.length ? `Missing: <span class="mono">${esc(uncostedSkus.slice(0, 4).join(', '))}</span>${uncostedSkus.length > 4 ? ` +${uncostedSkus.length - 4} more` : ''}.` : ''}
+          ${isInvoiceOrder(o)
+            ? 'Set "Our Cost" on the invoice to fix it.'
+            : 'Set the product’s cost price to fix it for future orders.'}
+        </div>
+      </div>`;
+  }
+
   // Top-right meta column: Profit Breakdown for owners, order dates otherwise.
-  const metaRight = profitBreakdownInner || datesRows;
+  const metaRight = profitBreakdownInner || profitUnknownInner || datesRows;
   const metaSection = `<div class="om-meta-grid${metaMiddle ? ' om-meta-grid--3col' : ''}"><div>${metaLeft}</div>${metaMiddle ? `<div>${metaMiddle}</div>` : ''}<div>${metaRight}</div></div>`;
 
   // Financial breakdown section (from order-breakdown endpoint)
@@ -689,7 +813,7 @@ function buildOrderModalContent(modal, o, events, breakdown, { detailLoadFailed 
   // Profit Breakdown occupies the top-right meta column, the order dates move
   // down to their own section. Non-owners keep the dates in the meta grid.
   let datesHtml = '';
-  if (orderProfitBreakdown) {
+  if (metaRight !== datesRows) {
     datesHtml += `<div class="om-section-title">Dates</div>`;
     datesHtml += `<div style="max-width:440px">${datesRows}</div>`;
   }
@@ -771,6 +895,7 @@ function bindModalActions(modal, order) {
         onConfirm: async () => {
           try {
             await AdminAPI.deleteOrder(order.id);
+            forgetProfit(order.id);
             Toast.success('Order deleted');
             closeOrderModal();
             loadOrders();
@@ -863,6 +988,9 @@ function showStatusModal(order) {
         await AdminAPI.updateOrderStatus(order.id, 'processing', { status: 'processing' });
       }
       await AdminAPI.updateOrderStatus(order.id, newStatus, body);
+      // Cancelling an order changes its Profit cell from a figure to "no profit
+      // realised", so the cached answer is stale the moment the status moves.
+      forgetProfit(order.id);
       Toast.success(`Order updated to ${newStatus}`);
       Modal.close();
       closeOrderModal();
@@ -1148,7 +1276,9 @@ async function renderOrdersTab(container) {
   container.appendChild(tableContainer);
 
   _table = new DataTable(tableContainer, {
-    columns: COLUMNS,
+    // Profit is owner-only, same gate as the modal's Cost/Profit columns. A
+    // non-owner never sees the column AND never triggers the detail fan-out.
+    columns: AdminAuth.isOwner() ? COLUMNS : COLUMNS.filter(c => c.key !== '_profit'),
     rowKey: 'id',
     selectable: true,
     onSelectionChange: (sel) => updateBulkBar(sel),
@@ -1175,6 +1305,12 @@ async function renderOrdersTab(container) {
 }
 
 function destroyOrdersTab() {
+  // Cancel any in-flight profit fetches — that is precisely what AdminAPI.getOrder
+  // takes a signal for. Leaving them running would spend the 60/min limiter on a
+  // page the admin has already left.
+  _profitAbort?.abort();
+  _profitAbort = null;
+  _profitCache.clear();
   if (_table) _table.destroy();
   _table = null;
   if (_activeModal) closeOrderModal();

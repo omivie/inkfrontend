@@ -484,6 +484,9 @@ const Favourites = {
                         <h3 class="favourite-item__name">${Security.escapeHtml(item.name)}</h3>
                         ${item.brand ? `<p class="favourite-item__brand">${Security.escapeHtml(item.brand)}</p>` : ''}
                         ${(item.color || (typeof ProductColors !== 'undefined' ? ProductColors.detectFromName(item.name) : '')) ? `<p class="favourite-item__color">${Security.escapeHtml(item.color || ProductColors.detectFromName(item.name))}</p>` : ''}
+                        ${(item.average_rating && item.review_count > 0 && typeof Products !== 'undefined' && Products._miniStars)
+                            ? `<div class="product-card__rating">${Products._miniStars(Math.round(parseFloat(item.average_rating)))} <span class="product-card__review-count">(${parseInt(item.review_count, 10)})</span></div>`
+                            : ''}
                         <p class="favourite-item__price">${typeof formatPrice === 'function' ? formatPrice(item.price) : '$' + item.price.toFixed(2)}</p>
                     </div>
                 </a>

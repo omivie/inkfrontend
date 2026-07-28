@@ -14,6 +14,8 @@
  *   - js/products.js                  (Products.renderCard discount badge)
  *   - js/shop-page.js                 (Shop.createProductCard savings pill)
  *   - js/product-detail-page.js       (PDP price line)
+ *   - js/product-detail-page.js       (PDP pack_savings_vs_singles block,
+ *                                      added Jul 2026 — see below)
  *
  * Run with: node --test tests/value-pack-savings-no-percent.test.js
  */
@@ -70,6 +72,26 @@ test('static: product-detail-page.js PDP savings line gates the percent on pack_
     // the rule by accident.
     assert.match(src, /_packType[\s\S]{0,50}pack_type/, 'must derive _packType from info.pack_type');
     assert.match(src, /_isPack[\s\S]{0,200}value_pack[\s\S]{0,80}multipack/, 'must check both value_pack and multipack');
+});
+
+test('static: the PDP pack-vs-singles block never emits a percent', () => {
+    // Added Jul 2026 for the backend's `pack_savings_vs_singles` field
+    // (traffic-conversion-jul2026 §3). The field CARRIES `savings_percent`
+    // and the backend handoff's example copy used it — "Save $14.97 (19%) vs
+    // buying all 4 individually" — so this is a standing temptation, not a
+    // hypothetical one. The block is packs-only by definition, so the rule in
+    // this file applies to all of it.
+    const src = fs.readFileSync(JS('product-detail-page.js'), 'utf8');
+    const start = src.indexOf('renderPackSavingsVsSingles(info) {');
+    assert.ok(start !== -1, 'renderPackSavingsVsSingles must exist on the PDP');
+    const end = src.indexOf('\n        },', start);
+    const method = src.slice(start, end);
+    assert.doesNotMatch(method, /savings_percent/,
+        'the pack-vs-singles block must not read savings_percent at all');
+    assert.doesNotMatch(method, /%/,
+        'the pack-vs-singles copy must be dollars only');
+    assert.match(method, /Save \$\{Security\.escapeHtml\(formatPrice\(savings\)\)\}/,
+        'savings must render through formatPrice as a dollar amount');
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -30,6 +30,9 @@ const vm = require('node:vm');
 
 const ADMIN = path.resolve(__dirname, '..', 'inkcartridges', 'js', 'admin');
 const ordersSrc = fs.readFileSync(path.join(ADMIN, 'pages', 'orders.js'), 'utf8');
+// isInvoiceOrder and the fee-branching moved into utils/order-profit.js (Jul 2026)
+// so the Orders list column and the order modal share one derivation (ERR-113).
+const profitSrc = fs.readFileSync(path.join(ADMIN, 'utils', 'order-profit.js'), 'utf8');
 
 function stripEsm(src) {
   const exposed = new Set();
@@ -124,22 +127,26 @@ test('a website order still pays its Stripe fee — NO_PAYMENT_FEES has not leak
 
 // ─── 3. The page actually wires it up ────────────────────────────────────────
 test('orders.js exports isInvoiceOrder and renders a Channel column', () => {
-  assert.ok(/export function isInvoiceOrder/.test(ordersSrc));
+  // The definition moved to utils/order-profit.js (Jul 2026) so the order-profit
+  // helper could use it without importing a page; orders.js re-exports it, so
+  // every existing importer of orders.js still resolves.
+  assert.ok(/export \{ isInvoiceOrder \}/.test(ordersSrc), 'orders.js must still export it');
+  assert.ok(/export function isInvoiceOrder/.test(profitSrc), 'and it must be defined exactly once');
   assert.ok(/key: 'channel', label: 'Channel'/.test(ordersSrc),
     'invoiced sales sit in the Orders list — without a Channel column they are indistinguishable');
   assert.ok(/admin-badge--invoice/.test(ordersSrc) && /admin-badge--web/.test(ordersSrc));
 });
 
-test('orders.js passes NO_PAYMENT_FEES for an invoiced order', () => {
-  assert.ok(/NO_PAYMENT_FEES/.test(ordersSrc), 'must import and use NO_PAYMENT_FEES');
+test('the order-profit helper passes NO_PAYMENT_FEES for an invoiced order', () => {
+  assert.ok(/NO_PAYMENT_FEES/.test(profitSrc), 'must import and use NO_PAYMENT_FEES');
   // absorbedShipping (free-ship courier) rides alongside on both branches — see
   // order-profit-absorbed-shipping-jul2026.test.js. It must not displace NO_PAYMENT_FEES.
-  assert.ok(/isInvoiceOrder\(o\)\s*\n?\s*\?\s*\{ customerPaidInclGst, absorbedShipping, \.\.\.NO_PAYMENT_FEES \}/.test(ordersSrc),
-    'the fee options must branch on isInvoiceOrder(o) and still spread NO_PAYMENT_FEES');
+  assert.ok(/isInvoice\s*\n?\s*\?\s*\{ customerPaidInclGst, absorbedShipping, \.\.\.NO_PAYMENT_FEES \}/.test(profitSrc),
+    'the fee options must branch on isInvoice and still spread NO_PAYMENT_FEES');
   // Both the per-line profits AND the waterfall must use the branched options.
-  assert.ok(/computeLineProfits\([\s\S]{0,220}?feeOpts,/.test(ordersSrc),
+  assert.ok(/computeLineProfits\(lines, feeOpts\)/.test(profitSrc),
     'computeLineProfits must receive feeOpts, not a hard-coded { customerPaidInclGst }');
-  assert.ok(/computeProfitBreakdown\(totalPrice, totalCost, feeOpts\)/.test(ordersSrc),
+  assert.ok(/computeProfitBreakdown\(totalRevenueExGst, totalCostExGst, feeOpts\)/.test(profitSrc),
     'computeProfitBreakdown must receive feeOpts');
 });
 

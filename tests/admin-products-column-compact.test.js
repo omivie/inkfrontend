@@ -131,6 +131,7 @@ test('every non-Name column carries an explicit width', () => {
   const widthClasses = [
     'col-w-sku', 'col-w-brand', 'col-w-price', 'col-w-pct',
     'col-w-type', 'col-w-dot', 'col-w-compat', 'col-w-fuin',
+    'col-w-supplier', 'col-w-origin',
   ];
   for (const cls of widthClasses) {
     const re = new RegExp(`\\.admin-table td\\.${cls}[^{]*\\{[^}]*width:\\s*\\d+px`);

@@ -3737,13 +3737,28 @@
             // path so router-based navigation stays in-app, falling back to the
             // legacy slug/sku reconstruction when canonical_url is missing.
             const cardHref = (() => {
-                if (product.canonical_url) {
-                    try { return new URL(product.canonical_url).pathname; }
-                    catch (_) { return product.canonical_url; }
-                }
-                return product.slug && product.sku
-                    ? `/products/${encodeURIComponent(product.slug)}/${encodeURIComponent(product.sku)}`
-                    : `/p/${encodeURIComponent(product.sku || '')}`;
+                const base = (() => {
+                    if (product.canonical_url) {
+                        try { return new URL(product.canonical_url).pathname; }
+                        catch (_) { return product.canonical_url; }
+                    }
+                    return product.slug && product.sku
+                        ? `/products/${encodeURIComponent(product.slug)}/${encodeURIComponent(product.sku)}`
+                        : `/p/${encodeURIComponent(product.sku || '')}`;
+                })();
+                // Carry printer context through to the PDP
+                // (traffic-conversion-jul2026 §3). When the shopper is browsing
+                // /shop?brand=…&printer_slug=…, the PDP can ask the backend for
+                // `bought_for_this_printer` — "14 bought in the last 90 days for
+                // your Brother MFC-J5330DW" — which is only computable if it
+                // knows WHICH printer the shopper came from. Nothing carried it
+                // before this, so the field could never have been returned.
+                //
+                // Safe for SEO: the PDP's <link rel=canonical> is built from the
+                // backend's canonical_url, which never includes the param.
+                const ctx = this.state && this.state.printer;
+                if (!ctx || base.indexOf('?') !== -1) return base;
+                return `${base}?printer_slug=${encodeURIComponent(ctx)}`;
             })();
 
             // Info-row pills (rendered as a tight horizontal strip beneath the
@@ -3756,6 +3771,24 @@
             // FREE SHIPPING is rendered first so it always sits on the top
             // line of the info-row — gives a consistent visual baseline across
             // cards that have both pills vs only one.
+            // Aggregate review stars (traffic-conversion-jul2026 §1). The shop
+            // grid is the highest-traffic card surface on the site and was the
+            // ONLY renderer without them — Products.renderCard (search dropdown,
+            // PDP related, recovery rail) has carried this block since Jun 2026.
+            //
+            // The gate is deliberately byte-identical to js/products.js: render
+            // ONLY when review_count > 0. A product with no reviews shows
+            // nothing at all — no empty star row, no "0 reviews". Review volume
+            // is low today, so almost every card takes the empty branch; this
+            // lights up on its own as the review-request emails land.
+            //
+            // _miniStars is reused rather than re-implemented so the two
+            // renderers cannot drift; products.js loads before shop-page.js on
+            // every page that has a grid, but the guard keeps this defensive.
+            const ratingHTML = (product.average_rating && product.review_count > 0 && typeof Products !== 'undefined')
+                ? `<div class="product-card__rating">${Products._miniStars(Math.round(parseFloat(product.average_rating)))} <span class="product-card__review-count">(${parseInt(product.review_count, 10)})</span></div>`
+                : '';
+
             const infoRowHTML = (showSavingsPill || showFreeShipPill)
                 ? `<div class="product-card__info-row">
                         ${showFreeShipPill ? '<span class="product-card__free-shipping">Free Shipping</span>' : ''}
@@ -3773,6 +3806,7 @@
                     <div class="product-card__content">
                         ${infoRowHTML}
                         <h3 class="product-card__title" title="${Security.escapeAttr(displayName)}">${Security.escapeHtml(displayName)}</h3>
+                        ${ratingHTML}
                         <div class="product-card__footer">
                             <div class="product-card__footer-row">
                                 ${color ? `<span class="product-card__color">${Security.escapeHtml(color)}</span>` : '<span></span>'}

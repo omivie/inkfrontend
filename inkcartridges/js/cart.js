@@ -1405,7 +1405,13 @@ const Cart = {
                 }
             });
             try {
-                const res = await fetch(payload.url, { credentials: 'include' });
+                // credentials: 'omit' (ERR-124). This is a public catalog read
+                // — the backend-supplied frequently_bought_together_url — and it
+                // lives under the Cloudflare-edge-cached `/api/products/` prefix.
+                // Sending cookies unconditionally was the one catalog fetch in
+                // the codebase that could bypass the edge for every visitor,
+                // signed in or not. Nothing here needs an identity.
+                const res = await fetch(payload.url, { credentials: 'omit' });
                 if (!res.ok) return;
                 const json = await res.json();
                 products = json?.data?.bought_together || json?.data?.products || [];
@@ -2091,6 +2097,19 @@ const Cart = {
             } else {
                 deliveryEl.hidden = true;
             }
+        }
+
+        // Same-day dispatch countdown (traffic-conversion-jul2026 §4) — the
+        // urgency line right where the shopper decides to check out.
+        //
+        // renderCartSignals re-runs after EVERY cart mutation, so mount() must
+        // stop the previous timer before starting a new one; it keys the handle
+        // off the element itself so repeated calls can't stack intervals (which
+        // would tick the number down several times a second). An empty cart
+        // passes null and the element hides.
+        const dispatchEl = document.getElementById('cart-dispatch-countdown');
+        if (dispatchEl && typeof DispatchCountdown !== 'undefined') {
+            DispatchCountdown.mount(dispatchEl, hasItems ? meta.delivery_estimate : null);
         }
 
         // Trust signals — guarantee / returns / shipping badges.

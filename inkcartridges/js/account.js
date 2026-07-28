@@ -20,7 +20,20 @@ const AccountPage = {
 
         // Check authentication - redirect to login if not authenticated
         if (!Auth.isAuthenticated()) {
-            window.location.href = '/account/login?redirect=' + encodeURIComponent(window.location.pathname);
+            // Signup intent passthrough. The guest-invoice email's
+            // "Sign up & claim your points" CTA points at /account; without this
+            // the visitor lands on the SIGN IN tab, which is the wrong ask for
+            // someone who has no account. `?intent=signup` opens the register tab
+            // instead — the same `tab=register` param rewards-nudge.js already
+            // uses, so both entry points converge (BF-011 asks the backend to
+            // append it to the email link).
+            //
+            // Strict equality, and the value is never reflected into the URL:
+            // this must not become an open redirect or a reflection sink.
+            const intent = new URLSearchParams(window.location.search).get('intent');
+            const tab = intent === 'signup' ? '&tab=register' : '';
+            window.location.href = '/account/login?redirect='
+                + encodeURIComponent(window.location.pathname) + tab;
             return;
         }
 
@@ -812,8 +825,13 @@ const AccountPage = {
     },
 
     async loadDashboard() {
-        // Sync profile to backend (fire-and-forget, non-blocking)
-        this.syncProfileToBackend();
+        // Retro loyalty claim: check for a stash written by auth.js BEFORE the
+        // redirect landed here...
+        this.renderRetroClaimBanner();
+        // ...and again once this page's own sync answers, because login-page.js
+        // navigates away on SIGNED_IN and can cancel auth.js's sync mid-flight.
+        // Safe to call twice — takeRetroClaim() is delete-on-read.
+        this.syncProfileToBackend().then(() => this.renderRetroClaimBanner());
         // Load lifetime savings (non-blocking)
         this.loadSavingsBanner();
         // Load loyalty points balance for the dashboard card (non-blocking)
@@ -912,9 +930,60 @@ const AccountPage = {
         try {
             // Use accountSync (creates profile if missing, fills empty fields from OAuth metadata)
             const turnstileToken = typeof Auth !== 'undefined' ? await Auth.getTurnstileToken() : null;
-            await API.accountSync(turnstileToken);
+            const syncResult = await API.accountSync(turnstileToken);
+            // Same capture as auth.js. Doing it here too is not redundancy for its
+            // own sake: login-page.js navigates away on SIGNED_IN, which can kill
+            // auth.js's in-flight sync, so this is often the call that actually
+            // returns the retro block.
+            if (typeof Auth !== 'undefined' && Auth.captureRetroClaim) {
+                Auth.captureRetroClaim(syncResult);
+            }
         } catch (error) {
             // Non-critical - auth.js onAuthStateChange also calls accountSync
+        }
+    },
+
+    /**
+     * Announce a retroactive loyalty claim on the dashboard.
+     *
+     * When a guest signs up with an email that already has guest orders, the
+     * backend claims those orders and awards their points during
+     * POST /api/account/sync. Their balance and order history are non-zero the
+     * instant they arrive — this is the only thing that explains why.
+     *
+     * FAIL-SOFT AND SILENT: renders nothing at all unless the backend actually
+     * reported a claim. It never infers one. Absence is not zero and it is not
+     * an event either.
+     */
+    renderRetroClaimBanner() {
+        const banner = document.getElementById('account-retro-banner');
+        if (!banner || typeof Auth === 'undefined' || !Auth.takeRetroClaim) return;
+
+        const claim = Auth.takeRetroClaim();
+        if (!claim) return;   // nothing reported — render NOTHING
+
+        const esc = typeof Security !== 'undefined' ? Security.escapeHtml : (s) => s;
+        const orders = Number(claim.orders);
+        const points = Number(claim.points);
+        const orderWord = orders === 1 ? 'order' : 'orders';
+
+        const titleEl = document.getElementById('account-retro-title');
+        const bodyEl = document.getElementById('account-retro-body');
+        if (titleEl) {
+            titleEl.textContent = `${points.toLocaleString('en-NZ')} points added to your account`;
+        }
+        if (bodyEl) {
+            bodyEl.innerHTML =
+                `We matched ${esc(String(orders.toLocaleString('en-NZ')))} previous ${orderWord} to your new account ` +
+                `and credited the points you earned on ${orders === 1 ? 'it' : 'them'}. ` +
+                `<a href="/account/loyalty">View your points</a>.`;
+        }
+        banner.hidden = false;
+
+        const dismiss = document.getElementById('account-retro-dismiss');
+        if (dismiss && dismiss.dataset.bound !== '1') {
+            dismiss.dataset.bound = '1';
+            dismiss.addEventListener('click', () => { banner.hidden = true; });
         }
     },
 

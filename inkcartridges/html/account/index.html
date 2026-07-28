@@ -21,10 +21,10 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link rel="stylesheet" href="/css/base.css?v=e9b82f71">
-    <link rel="stylesheet" href="/css/layout.css?v=ea114dc3">
+    <link rel="stylesheet" href="/css/layout.css?v=e79b9859">
     <link rel="stylesheet" href="/css/components.css?v=79d69fe3">
     <link rel="stylesheet" href="/css/modern-effects.css?v=afe20f45">
-    <link rel="stylesheet" href="/css/pages.css?v=6c51f041">
+    <link rel="stylesheet" href="/css/pages.css?v=e78ff2a3">
     <link rel="stylesheet" href="/css/search.css?v=5caba86a">
     <meta name="twitter:card" content="summary_large_image">
     <meta name="twitter:title" content="My Account | InkCartridges.co.nz">
@@ -259,6 +259,23 @@
                         <h1 class="account-content__heading">My Account</h1>
                         <p class="account-content__welcome" id="welcome-msg">Welcome back<span id="welcome-name"></span></p>
 
+                        <!-- Retroactive loyalty claim. Shown ONLY when POST /api/account/sync
+                             reported that prior guest orders were claimed and points awarded
+                             (BF-011). Never inferred — if the backend says nothing, this
+                             stays hidden. Filled by AccountPage.renderRetroClaimBanner(). -->
+                        <div id="account-retro-banner" class="account-retro-banner" role="status" hidden>
+                            <div class="account-retro-banner__icon" aria-hidden="true">
+                                <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+                            </div>
+                            <div class="account-retro-banner__text">
+                                <div class="account-retro-banner__title" id="account-retro-title"></div>
+                                <div class="account-retro-banner__body" id="account-retro-body"></div>
+                            </div>
+                            <button type="button" class="account-retro-banner__dismiss" id="account-retro-dismiss" aria-label="Dismiss">
+                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                            </button>
+                        </div>
+
                         <div id="account-savings-banner" class="account-savings-banner" hidden>
                             <div class="account-savings-banner__icon" aria-hidden="true">
                                 <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
@@ -375,23 +392,23 @@
     <script defer src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.98.0" integrity="sha384-Sm2s7OXxsAMTyJ4iIyRBgVpeGUvMPk2lRQnnZhE78Wej7oggIoolKt+SCt0XJbUB" crossorigin="anonymous"></script>
     <script defer src="/js/config.js?v=57d2621d"></script>
     <script defer src="/js/security.js?v=790f00f3"></script>
-    <script defer src="/js/utils.js?v=0df5c010"></script>
-    <script defer src="/js/api.js?v=8d65d14d"></script>
+    <script defer src="/js/utils.js?v=b34749fa"></script>
+    <script defer src="/js/api.js?v=104d4cb2"></script>
     <script defer src="/js/schema.js?v=dd78df4e"></script>
-    <script defer src="/js/auth.js?v=d8e7f6f2"></script>
+    <script defer src="/js/auth.js?v=b166bd02"></script>
     <script defer src="/js/business.js?v=891bfd2f"></script>
     <script defer src="/js/products.js?v=68f52ea8"></script>
     <script defer src="/js/search.js?v=be6f2323"></script>
     <script defer src="/js/main.js?v=f6b7b932"></script>
     <script defer src="/js/legal-config.js?v=2db8a49b"></script>
-    <script defer src="/js/footer.js?v=cb9f19a6"></script>
+    <script defer src="/js/footer.js?v=f18a760a"></script>
     <script defer src="/js/mega-nav.js?v=9a073f70"></script>
     <script defer src="/js/rewards-nudge.js?v=f5a2df30"></script>
     <script defer src="/js/modern-effects.js?v=ad8bff1e"></script>
-    <script defer src="/js/cart.js?v=ba4981e0"></script>
-    <script defer src="/js/favourites.js?v=cb9c5483"></script>
+    <script defer src="/js/cart.js?v=138b2c66"></script>
+    <script defer src="/js/favourites.js?v=8ab82f45"></script>
     <script defer src="/js/printer-data.js?v=2431d3ae"></script>
-    <script defer src="/js/account.js?v=e3388efc"></script>
+    <script defer src="/js/account.js?v=b25509ba"></script>
     <script defer src="/js/account-page.js?v=4a5f96a9"></script>
     <script defer src="/js/analytics.js?v=8c9ee196"></script>
     <script defer src="/js/site-guard.js?v=e0b0e4ba"></script>
