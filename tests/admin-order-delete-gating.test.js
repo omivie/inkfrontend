@@ -148,9 +148,11 @@ test('cache-busting tokens were bumped so the edited modules re-fetch', () => {
   const appVer = appJs.match(/const APP_VERSION = '([^']+)'/)[1];
   assert.notEqual(appVer, '2026.07.24-order-items-visible-fix', 'APP_VERSION must advance (pages/orders.js changed)');
   assert.match(appVer, /^\d{4}\.\d{2}\.\d{2}-[a-z0-9-]+$/, 'APP_VERSION keeps the date-prefixed format');
-  // api.js is imported by app.js with its own token — editing api.js requires bumping it.
-  const apiTok = appJs.match(/from '\.\/api\.js\?v=([^']+)'/)[1];
-  assert.notEqual(apiTok, 'traffic-timeseries-jul2026', 'the api.js import token must advance');
+  // ERR-124: api.js is no longer imported with a per-call-site token — that forked
+  // AdminAPI into two module instances. It is bare, and stays bare; consistency is
+  // pinned by tests/asset-cache-tokens.test.js §4.
+  assert.doesNotMatch(appJs, /from '\.\/api\.js\?v=/,
+    'the api.js import must stay bare so AdminAPI is a single module instance');
 });
 
 test('no raw console.* was introduced (ERR-035)', () => {

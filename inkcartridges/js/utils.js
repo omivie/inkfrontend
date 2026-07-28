@@ -1740,7 +1740,8 @@ const TrustStats = {
         this._promise = (async () => {
             if (typeof fetch !== 'function') return {};
             try {
-                const res = await fetch(this._apiUrl(), { headers: { 'Accept': 'application/json' } });
+                // Public trust-stats read — cookies explicitly omitted (ERR-124).
+            const res = await fetch(this._apiUrl(), { headers: { 'Accept': 'application/json' }, credentials: 'omit' });
                 if (!res.ok) return {};
                 const json = await res.json();
                 // Envelope is { ok, data } — but tolerate a bare object.

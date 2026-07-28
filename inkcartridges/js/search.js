@@ -52,7 +52,9 @@
                 return;
             }
             const base = (typeof Config !== 'undefined' && Config.API_URL) ? Config.API_URL : '';
-            const res = await fetch(`${base}/api/printers/trending?limit=5`);
+            // credentials: 'omit' is explicit (ERR-124) — public catalog read, must stay
+            // eligible for the Cloudflare edge cache rather than rely on the default.
+            const res = await fetch(`${base}/api/printers/trending?limit=5`, { credentials: 'omit' });
             const json = await res.json();
             if (json && json.ok && json.data && Array.isArray(json.data.printers) && json.data.printers.length) {
                 TRENDING_MODELS = json.data.printers;
@@ -143,7 +145,8 @@
     async function fetchSuggest(query, signal) {
         const base = (typeof Config !== 'undefined' && Config.API_URL) ? Config.API_URL : '';
         const url = `${base}${ENDPOINT}?q=${encodeURIComponent(query)}&limit=${LIMIT}`;
-        const res = await fetch(url, { signal });
+        // Public search read — cookies explicitly omitted (ERR-124).
+        const res = await fetch(url, { signal, credentials: 'omit' });
         let json = null;
         try { json = await res.json(); } catch (_) { /* non-JSON body — leave null */ }
         if (!res.ok || !json || !json.ok) {

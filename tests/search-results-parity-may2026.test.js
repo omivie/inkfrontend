@@ -310,7 +310,11 @@ test('API.searchSuggest — exists and is async', () => {
 test('API.searchSuggest — hits /api/search/suggest and returns the rows array', async () => {
     const sb = loadApi();
     let calledUrl = null;
-    sb.API.get = async (url) => {
+    // Stubs getPublic, not get: /api/search/suggest is a public, identity-invariant
+    // read and was moved onto the anonymous path in ERR-124 (a bearer token does
+    // not change Cloudflare's cache key, so sending one buys nothing and risks
+    // storing an authed body in the shared entry).
+    sb.API.getPublic = async (url) => {
         calledUrl = url;
         return { ok: true, data: { suggestions: SUGGEST_511 } };
     };

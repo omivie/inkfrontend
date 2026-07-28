@@ -205,3 +205,83 @@ test('§3 a staged js/css change must also have its cache token bumped', (t) => 
     assert.deepEqual(offenders, [],
         'Changed asset(s) without a cache-token bump:\n' + offenders.join('\n'));
 });
+
+// ─────────────────────────────────────────────────────────────────────────
+// §4  MODULE IDENTITY — a given ES module is imported under exactly ONE URL.
+//
+//     §1 asserts this for HTML <script src>/<link href>. The same hazard
+//     exists on the ES-module axis and was completely unguarded: a module's
+//     identity in the browser IS its URL, so `./api.js` and `./api.js?v=x`
+//     are two DIFFERENT modules — both fetched, both evaluated, exports not
+//     identical. Found 2026-07-28 (ERR-124): AdminAPI was loaded twice
+//     (app.js tokened vs pages/planner.js bare), components/table.js twice
+//     (27 bare importers vs one tokened), rich-text-editor.js twice.
+//
+//     Today that costs duplicate bytes and parse time. It becomes a
+//     correctness bug the moment a module gains shared state or anything
+//     does an `instanceof` across the two copies.
+//
+//     Note this asserts CONSISTENCY, not the absence of tokens — the file's
+//     whole thesis is that pinning a literal is what made the suite
+//     permanently red. Tokens on static imports are allowed, as long as
+//     every importer of that module agrees on the spelling.
+// ─────────────────────────────────────────────────────────────────────────
+
+function allJs(dir, out = []) {
+    for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+        if (e.name === 'node_modules' || e.name.startsWith('.')) continue;
+        const abs = path.join(dir, e.name);
+        if (e.isDirectory()) allJs(abs, out);
+        else if (e.name.endsWith('.js')) out.push(abs);
+    }
+    return out;
+}
+
+// Static `import … from '<relative path>.js[?…]'`. Only local relative
+// specifiers — bare/CDN specifiers have no cache-token axis.
+const IMPORT_RX = /\bfrom\s+['"](\.{1,2}\/[A-Za-z0-9_.\-/]+\.js)(\?[^'"]*)?['"]/g;
+
+test('§4 every local ES module is imported under exactly one URL', () => {
+    const spellings = new Map();   // resolved module path -> Map(spelling -> [importers])
+
+    for (const file of allJs(path.join(INK, 'js'))) {
+        const src = fs.readFileSync(file, 'utf8');
+        for (const m of src.matchAll(IMPORT_RX)) {
+            const [, spec, query] = m;
+            // Resolve so '../components/table.js' and './table.js' compare equal.
+            const resolved = path.relative(INK, path.resolve(path.dirname(file), spec));
+            const spelling = query === undefined ? '<no token>' : query;
+            if (!spellings.has(resolved)) spellings.set(resolved, new Map());
+            const bySpelling = spellings.get(resolved);
+            if (!bySpelling.has(spelling)) bySpelling.set(spelling, []);
+            bySpelling.get(spelling).push(path.relative(ROOT, file));
+        }
+    }
+
+    const offenders = [];
+    for (const [module, bySpelling] of spellings) {
+        if (bySpelling.size < 2) continue;
+        const detail = [...bySpelling.entries()]
+            .map(([spelling, importers]) => `      ${spelling}  <- ${importers.join(', ')}`)
+            .join('\n');
+        offenders.push(
+            `  ${module} is imported under ${bySpelling.size} different URLs, so the browser `
+            + `loads and evaluates it ${bySpelling.size} times and its exports are not identical:\n${detail}`
+        );
+    }
+
+    assert.deepEqual(offenders, [],
+        'ES modules imported under more than one URL:\n' + offenders.join('\n'));
+});
+
+test('§4 the lazily-loaded admin page modules still go through APP_VERSION', () => {
+    // The counterpart to the rule above: static imports are bare, and the ONE
+    // place a token belongs is the dynamic page import, where it is built from
+    // a single constant rather than hand-written per call site. Deleting this
+    // would leave the admin SPA's lazy chunks with no busting mechanism at all.
+    const app = fs.readFileSync(path.join(INK, 'js', 'admin', 'app.js'), 'utf8');
+    assert.match(app, /const APP_VERSION = '[^']+';/,
+        'admin/app.js must declare APP_VERSION');
+    assert.match(app, /import\(`\.\/pages\/\$\{name\}\.js\?v=\$\{APP_VERSION\}`\)/,
+        'admin page modules must be imported with ?v=${APP_VERSION} — one constant, not per-call-site literals');
+});

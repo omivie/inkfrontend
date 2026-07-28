@@ -445,3 +445,116 @@ test('§8 the measured Cloudflare behaviour is written down next to the code tha
         'the measured evidence (a bearer token still HITs) must stay recorded in api.js');
     assert.match(API_SRC, /ERR-124/, 'the error-log reference must stay linkable');
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// §9 — the gaps the first pass missed (audit, 2026-07-28)
+//
+// The original sweep converted the obvious catalog helpers. A follow-up audit
+// found three classes it had walked past: a duplicate brands reader in the
+// admin layer, ~15 public reads that were never in the original list, and bare
+// fetches that were anonymous only by accident of fetch()'s default.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const ADMIN_API_SRC = READ(JS(path.join('admin', 'api.js')));
+
+test('§9 nothing calls API.get() directly on an edge-cached path', () => {
+    // The regression that motivated this section: AdminAPI.getBrands() called
+    // window.API.get('/api/brands') itself instead of API.getBrands(), so eight
+    // admin controllers sent a bearer token to an edge-cached endpoint. A
+    // repo-wide scan is what stops the next one being added silently.
+    const CACHED = /\bAPI\.(get|request)\(\s*[`'"]\/api\/(shop|products|brands|site|schema|settings|ribbons|printers|search|compatibility|color-packs)/;
+    const offenders = [];
+    for (const file of ALL_JS) {
+        const rel = path.relative(ROOT, file);
+        // api.js defines getPublic/get themselves; its own internals are covered by §5.
+        if (rel.endsWith(path.join('js', 'api.js'))) continue;
+        for (const [i, line] of stripLineComments(READ(file)).split('\n').entries()) {
+            if (CACHED.test(line)) offenders.push(`${rel}:${i + 1}: ${line.trim()}`);
+        }
+    }
+    assert.deepEqual(offenders, [],
+        'edge-cached endpoints must be reached through the anonymous helpers (API.getPublic / API.getBrands / …), never a raw authenticated API.get');
+});
+
+test('§9 AdminAPI.getBrands delegates to the anonymous, SWR-cached reader', () => {
+    const body = stripLineComments(ADMIN_API_SRC.slice(
+        ADMIN_API_SRC.indexOf('async getBrands()'),
+        ADMIN_API_SRC.indexOf('// ---- Ribbons (admin CRUD) ----')));
+    assert.ok(body.length > 0, 'AdminAPI.getBrands must still exist');
+    assert.match(body, /window\.API\.getBrands\(\)/,
+        'must delegate so it inherits both anonymity and the 5-minute SWR cache that eight admin controllers share');
+    assert.ok(!/window\.API\.get\(/.test(body),
+        'must not reach for the raw authenticated getter');
+});
+
+test('§9 every public catalog/search/ribbon read uses getPublic', () => {
+    // These are all identity-invariant. They were left on the authenticated path
+    // by the first sweep simply because they were not on the list.
+    const publicReads = [
+        'async getColorPackConfig', 'async getRibbonDeviceBrands', 'async getRibbonDeviceModels',
+        'async getRibbonBrands(', 'async getRibbonModels', 'async getRibbons(', 'async getRibbon(',
+        'async searchPrinters(', 'async smartSearch', 'async searchSuggest',
+        'async getPrintersByBrand', 'async getCompatiblePrinters', 'async searchByPrinter',
+        'async searchByPart', 'async getCompatibility',
+    ];
+    for (const sig of publicReads) {
+        const body = stripLineComments(methodBody(API_SRC, sig));
+        assert.match(body, /this\.getPublic\(/,
+            `${sig} is a public read on a path Cloudflare may cache — it must not attach a bearer token`);
+        assert.ok(!/this\.get\(/.test(body),
+            `${sig} must not also use the authenticated getter`);
+    }
+});
+
+test('§9 waitlistStatus stays mounted but is never CALLED, and says why', () => {
+    // GET /api/products/:sku/waitlist/status is PER-USER but sits under the
+    // edge-cached /api/products/ prefix. Verified live 2026-07-28: it returns
+    // `public, …, s-maxage=300` and a repeat request is `cf-cache-status: HIT`.
+    // Since a bearer token does not change the cache key, calling it would let
+    // one shopper's waitlist state be served to everyone.
+    //
+    // The wrapper is NOT deleted — tests/traffic-conversion-jul2026.test.js §3
+    // requires the waitlist wrappers stay mounted so cached bundles can't 404.
+    // So the invariant enforced here is "mounted, documented, and never called".
+    assert.match(API_SRC, /async waitlistStatus\s*\(/,
+        'the wrapper stays mounted so cached bundles do not 404 on it');
+    assert.match(API_SRC, /DO NOT CALL waitlistStatus[\s\S]{0,1400}BF-020/,
+        'and must carry the hazard note explaining the shared-cache leak and naming the backend ask');
+
+    for (const file of ALL_JS) {
+        const rel = path.relative(ROOT, file);
+        if (rel.endsWith(path.join('js', 'api.js'))) continue; // the definition itself
+        assert.ok(!/waitlistStatus\s*\(/.test(stripLineComments(READ(file))),
+            `${rel} must not call waitlistStatus — it would publish one shopper's waitlist state into the shared edge cache (BF-020)`);
+    }
+});
+
+test('§9 every bare fetch to the API sets credentials explicitly', () => {
+    // Relying on fetch()'s `same-origin` default happens to be correct today
+    // only because Config.API_URL is a different origin. That is an accident of
+    // configuration, not a stated intent, and it is invisible to a reader.
+    const offenders = [];
+    for (const file of ALL_JS) {
+        const rel = path.relative(ROOT, file);
+        const lines = stripLineComments(READ(file)).split('\n');
+        for (const [i, line] of lines.entries()) {
+            if (!/\bfetch\(/.test(line)) continue;
+            // Only calls that target the API origin.
+            const window3 = lines.slice(i, i + 3).join(' ');
+            if (!/(Config\.API_URL|\$\{base\}\/api\/|_apiUrl\(|BACKEND_URL)/.test(window3)) continue;
+            if (!/credentials\s*:/.test(window3)) offenders.push(`${rel}:${i + 1}: ${line.trim()}`);
+        }
+    }
+    assert.deepEqual(offenders, [],
+        'state the credentials mode on every API fetch — an unstated default is how a cookie silently starts bypassing the edge cache');
+});
+
+test('§9 the dormant admin-preview gate is kept and explained, not deleted', () => {
+    // The gate's positive case is unreachable while the product read is
+    // anonymous. Deleting it would ship unlisted products to shoppers the moment
+    // admin preview returns via BF-013.
+    assert.match(PDP_SRC, /_isTestProduct\(this\.product\)\s*&&\s*!this\.product\.active/,
+        'the inactive test-product gate must remain in place');
+    assert.match(PDP_SRC, /DORMANT since ERR-124[\s\S]{0,900}BF-013/,
+        'and must carry the note explaining why it is currently unreachable and when it becomes live again');
+});

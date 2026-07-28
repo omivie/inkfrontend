@@ -212,7 +212,19 @@
                     }
                 } catch (_) { /* non-critical — fall back to the backend series_codes */ }
 
-                // Gate test products — active test products are visible to all; inactive only to super admins
+                // Gate test products — active test products are visible to all; inactive only to super admins.
+                //
+                // DORMANT since ERR-124 (2026-07-28), deliberately kept. The product
+                // read is now anonymous, so the backend never returns an inactive
+                // TEST-/admin_only product in the first place and this branch's
+                // positive case is unreachable — a super admin can no longer preview
+                // one here. That is the accepted trade: /api/products/:sku is
+                // edge-cached and a bearer token does NOT change the cache key, so
+                // fetching one with admin rights could store it in the SHARED public
+                // entry. The gate stays because it costs nothing and must be live
+                // again the moment admin preview returns via the uncached
+                // /api/admin/products/:sku endpoint (BF-013) — deleting it would
+                // silently ship unlisted products to shoppers when that lands.
                 if (this._isTestProduct(this.product) && !this.product.active && typeof isCachedSuperAdmin === 'function' && !isCachedSuperAdmin()) {
                     this.showError('Product not found');
                     return;
@@ -2399,7 +2411,9 @@
             // /api/products/<sku> 500s, breaking the read of res.ok — that's
             // what the search-smart fallback below catches.
             try {
-                const res = await fetch(`${base}/api/products/by-slug/${encodeURIComponent(slug)}`);
+                // Public catalog read, and genuinely edge-cached (verified MISS->HIT).
+                // credentials stated explicitly rather than left to the default (ERR-124).
+                const res = await fetch(`${base}/api/products/by-slug/${encodeURIComponent(slug)}`, { credentials: 'omit' });
                 if (res.ok) {
                     const json = await res.json();
                     if (json && json.ok && json.data && json.data.sku) return json.data.sku;
@@ -2412,7 +2426,8 @@
             // the slug-only URL path working when /api/products/<sku> is broken.
             try {
                 const q = String(slug).replace(/-/g, ' ').trim();
-                const res2 = await fetch(`${base}/api/search/smart?q=${encodeURIComponent(q)}&limit=20`);
+                // Public search read — cookies explicitly omitted (ERR-124).
+                const res2 = await fetch(`${base}/api/search/smart?q=${encodeURIComponent(q)}&limit=20`, { credentials: 'omit' });
                 if (res2.ok) {
                     const json = await res2.json();
                     const products = (json && json.ok && json.data && Array.isArray(json.data.products))

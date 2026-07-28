@@ -232,6 +232,80 @@ BF-013 uncached admin preview endpoint; BF-014 `/api/site/*` is documented as ca
 `s-maxage=3600` but the rule doesn't match it, and **404s are cached 5 min + 10 min SWR** so a
 newly-published SKU can stay a hard 404 for 15 minutes.
 
+**Follow-up audit, same day — the first sweep missed three classes.** Asked "anything else needed?", so the
+codebase was re-audited rather than declared done. It found: (1) `AdminAPI.getBrands()` calling
+`window.API.get('/api/brands')` directly instead of the now-anonymous `API.getBrands()` — eight admin
+controllers were sending a token to an edge-cached endpoint and each paying a full round-trip; (2) **fifteen**
+more public reads still on the authenticated path (all seven ribbon helpers, `searchPrinters`, `smartSearch`,
+`searchSuggest`, `getPrintersByBrand`, `getCompatiblePrinters`, `searchByPrinter`, `searchByPart`,
+`getCompatibility`, `getColorPackConfig`) — none currently cached (`private, no-store`), so latent rather than
+live; (3) seven bare `fetch()` calls that were anonymous only by accident of `fetch()`'s `same-origin` default
+against a cross-origin API — correct today by configuration, not by statement, and invisible to a reader.
+All converted; `credentials` is now stated on every API fetch in the codebase.
+
+**And one genuine hole, the worst finding of the whole engagement:** `GET /api/products/:sku/waitlist/status`
+returns **per-user** state but sits under the `/api/products/` prefix Cloudflare's Cache Rule matches. Verified
+live — it returns `public, max-age=0, s-maxage=300, stale-while-revalidate=600` and a repeat request is
+`cf-cache-status: HIT` (the 401 itself was cached). With a bearer token not changing the cache key, one
+signed-in shopper's waitlist state can be stored in the shared entry and served to everyone for 5 minutes.
+**Not exploitable through our frontend** — the waitlist UI was retired for the "Contact us" OOS CTA and
+`waitlistStatus()` has zero callers. The wrapper is deliberately NOT deleted (concurrent work in
+`tests/traffic-conversion-jul2026.test.js` §3 requires the waitlist wrappers stay mounted so cached bundles
+can't 404); instead it is marked **DO NOT CALL** with the measurement inline, and §9 fails the build if
+anything starts calling it. Raised as **BF-020**. The general lesson for the backend: a path-prefix cache rule
+over a resource tree that mixes public and per-user sub-paths will eventually cache the wrong one — `/reviews`
+and `/jsonld` are fine, `/waitlist/status` is not.
+
+**Deliberately left dormant, not deleted:** the PDP's inactive-test-product gate
+(`product-detail-page.js`, `_isTestProduct && !active && !isCachedSuperAdmin`). Its positive case is now
+unreachable — the anonymous read means the backend never returns such a product — but removing it would
+silently ship unlisted products to shoppers the moment admin preview returns via BF-013. It now carries a
+comment saying exactly that.
+
+**Follow-up verified:** 6 new tests (§9) covering the direct-`API.get` scan, the admin delegation, all fifteen
+converted helpers, the waitlist hazard, explicit credentials on every bare API fetch, and the dormant gate —
+mutation-tested at 2/1/1 failures. Two existing tests updated: `search-results-parity-may2026` (stub moved
+from `API.get` to `API.getPublic`) and the waitlist assertion reconciled with concurrent work rather than
+overridden. Full suite **3076 pass / 0 fail**. Live browser, signed in: eleven newly-converted public reads
+all send no `Authorization`, while `/api/cart`, `/api/user/reviews` and `/api/user/favourites` still do.
+Also raised **BF-019** (public catalog endpoints marked `private, no-store` — `/api/ribbons`,
+`/api/printers/trending`, `/api/color-packs/config` — free latency the backend can claim).
+
+**Third pass — the split-module finding.** Asked a second time whether anything remained. The catalog-cache
+work itself was confirmed complete (an audit of all fifteen converted helpers returned a clean bill of health:
+no admin surface depends on authenticated-only visibility; admin ribbon CRUD goes through `/api/admin/ribbons`
++ Supabase RLS, never `API.getRibbons`; the five admin callers of `searchPrinters`/`getCompatiblePrinters` are
+cosmetic or self-heal via the existing 409-duplicate path). But checking exposed a pre-existing hazard on an
+axis nothing tested: **a module's identity in the browser is its URL**, so `./api.js` and `./api.js?v=token`
+are two DIFFERENT modules — both fetched, both evaluated, exports not identical. Three modules were split that
+way: `admin/api.js` (app.js tokened vs pages/planner.js bare), `components/table.js` (ONE of 28 importers
+tokened), `components/rich-text-editor.js` (one of two).
+
+**Correction to the instinct this started from.** The first read was "my admin/api.js change won't reach cached
+clients". That is wrong, and worth recording so nobody re-derives it: `vercel.json` serves `/js/(.*)` with
+`Cache-Control: public, max-age=0, must-revalidate` (confirmed live), so browsers revalidate every module on
+every load and pick up changes with or without a query string. The tokens were never load-bearing for busting —
+they were only forking modules. Impact was therefore duplicate bytes and parse time, not staleness and not a
+correctness bug (`table.js` has no module state beyond an `esc` helper, and nothing does `instanceof DataTable`).
+It is fixed anyway because it turns into a correctness bug the day someone adds shared state.
+
+**Fix:** the three stray tokens are gone; every static ES import is now bare and each module resolves to one
+URL. `APP_VERSION` still versions the dynamic `./pages/*.js` imports — that mechanism is systematic (one
+constant, not per-call-site literals) and is deliberately kept. A new **§4** in
+`tests/asset-cache-tokens.test.js` pins both halves: every local static import resolves to exactly one URL
+repo-wide, and the dynamic page import still goes through `APP_VERSION`.
+
+**Six older tests had to be re-pointed**, and this is the interesting part: each asserted that these static
+imports *must carry* a `?v=` token — i.e. they were pinning the very convention that was creating the split.
+They are the same anti-pattern `asset-cache-tokens.test.js` was written to retire (its docblock: nine files
+each pinned a moving token to their own era's literal, all nine went red, "a test that cannot ever be green is
+worse than no test"). Each is now re-pointed at the invariant ("imported under one URL") instead of the
+mechanism, with their still-valid `APP_VERSION` assertions left intact.
+
+**Verified:** §4 mutation-tested — re-adding any one of the three tokens fails it, and deleting the dynamic
+`APP_VERSION` import fails it. Full suite **3078 pass / 0 fail**. Live admin console in bundled Chromium: no
+module is requested under more than one URL, and `admin/api.js` resolves to a single `/js/admin/api.js`.
+
 **Lesson:** a handover note saying "no changes required on your side" is a hypothesis, not a result. Ten
 minutes of `curl` against the live edge disproved three of its claims — including one that made every
 signed-in visitor share the anonymous cache. When someone hands you a performance change, measure the

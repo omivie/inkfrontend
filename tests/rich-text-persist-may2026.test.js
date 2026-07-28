@@ -197,12 +197,18 @@ test('the retag helper moves child nodes, not just text', () => {
 // 5. Cache busting — the new modules must actually ship
 // ─────────────────────────────────────────────────────────────────────────────
 
-test('app.js imports admin/api.js with a cache-bust query', () => {
-  // The admin/api.js import key is module-specific — it moves whenever
-  // admin/api.js changes so the browser never serves a stale AdminAPI module.
-  // Pin the SHAPE (a non-empty ?v= query), not a frozen slug (see ERR-032).
-  assert.match(APP_SRC, /from\s+['"]\.\/api\.js\?v=[a-z0-9.-]+['"]/,
-    'admin/api.js import must carry a ?v= cache-bust query');
+test('app.js imports admin/api.js under exactly one URL', () => {
+  // ERR-124: static ES imports deliberately carry NO ?v= token. A module's
+  // identity is its URL, so `X.js` and `X.js?v=t` are two modules — both
+  // fetched, both evaluated, exports not identical. The old token here had
+  // products.js loading its own copy while 27 other pages shared another.
+  // Busting is handled by `/js/*` being `max-age=0, must-revalidate` plus
+  // APP_VERSION on the dynamic page imports. Consistency is pinned by
+  // tests/asset-cache-tokens.test.js §4.
+  assert.match(APP_SRC, /from\s+['"]\.\/api\.js['"]/,
+    'admin/api.js must be imported bare so AdminAPI is a single module instance');
+  assert.doesNotMatch(APP_SRC, /from\s+['"]\.\/api\.js\?v=/,
+    're-adding a token here forks AdminAPI in two (pages/planner.js imports it bare)');
 });
 
 test('app.js APP_VERSION is a valid bumped build tag', () => {
@@ -216,9 +222,18 @@ test('app.js APP_VERSION is a valid bumped build tag', () => {
     'APP_VERSION must advance off the pre-May-18 build so the shell reloads');
 });
 
-test('products.js imports rich-text-editor.js with the new cache key', () => {
-  assert.match(PRODUCTS_SRC, /from\s+['"]\.\.\/components\/rich-text-editor\.js\?v=rich-text-persist-may2026['"]/,
-    'rich-text-editor.js import must carry the rich-text-persist cache-bust query');
+test('products.js imports rich-text-editor.js under the same URL as page-copy.js', () => {
+  // ERR-124: static ES imports deliberately carry NO ?v= token. A module's
+  // identity is its URL, so `X.js` and `X.js?v=t` are two modules — both
+  // fetched, both evaluated, exports not identical. The old token here had
+  // products.js loading its own copy while 27 other pages shared another.
+  // Busting is handled by `/js/*` being `max-age=0, must-revalidate` plus
+  // APP_VERSION on the dynamic page imports. Consistency is pinned by
+  // tests/asset-cache-tokens.test.js §4.
+  assert.match(PRODUCTS_SRC, /from\s+['"]\.\.\/components\/rich-text-editor\.js['"]/,
+    'must import rich-text-editor.js bare, matching pages/page-copy.js');
+  assert.doesNotMatch(PRODUCTS_SRC, /rich-text-editor\.js\?v=/,
+    'a token here loads the editor twice — once for products, once for page-copy');
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

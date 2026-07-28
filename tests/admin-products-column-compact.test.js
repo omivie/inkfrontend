@@ -194,8 +194,11 @@ test('admin.css cache token is shared and current across admin pages', () => {
 });
 
 test('products page imports the bumped table.js token; APP_VERSION advanced', () => {
-  assert.match(PRODUCTS_SRC, /components\/table\.js\?v=col-compact-may2026/,
-    'products.js must import the bumped table.js version');
+  // ERR-124: was `table.js?v=col-compact-may2026`. products.js was the ONLY one of
+  // 28 importers carrying a token, so DataTable was loaded twice under two URLs.
+  // Now bare, like the other 27; pinned by tests/asset-cache-tokens.test.js §4.
+  assert.doesNotMatch(PRODUCTS_SRC, /components\/table\.js\?v=/,
+    'products.js must import table.js bare so DataTable is one module instance');
   const APP_SRC = READ('inkcartridges/js/admin/app.js');
   // APP_VERSION advances every time the SPA ships (so page modules re-fetch).
   // Assert it's a date-stamped token at or after the col-compact bump rather than

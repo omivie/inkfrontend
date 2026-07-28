@@ -476,7 +476,8 @@
     function fetchSmartItems(q, signal) {
         var base = (typeof Config !== 'undefined' && Config.API_URL) ? Config.API_URL : '';
         var url = base + '/api/search/smart?q=' + encodeURIComponent(q) + '&limit=6';
-        return fetch(url, { signal: signal }).then(function (res) {
+        // Public search read — cookies explicitly omitted (ERR-124).
+    return fetch(url, { signal: signal, credentials: 'omit' }).then(function (res) {
             return res.json().then(function (json) {
                 if (!res.ok || !json || !json.ok) return [];
                 var data = json.data || {};

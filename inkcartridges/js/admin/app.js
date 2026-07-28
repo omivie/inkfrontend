@@ -3,9 +3,27 @@
  */
 const APP_VERSION = '2026.07.28-sourcing-columns-order-profit';
 
+// STATIC IMPORTS CARRY NO `?v=` TOKEN — do not add one (ERR-124).
+//
+// A module's identity in the browser IS its URL. `./api.js` and
+// `./api.js?v=anything` are two different modules: both get fetched, both get
+// evaluated, and their exports are distinct objects. That is exactly what was
+// happening here — app.js imported `./api.js?v=dash-async-scan-jul2026` while
+// pages/planner.js imported the bare `../api.js`, so AdminAPI existed twice.
+// Same split had `components/table.js` loaded twice (27 bare importers vs one
+// tokened) and `rich-text-editor.js` twice.
+//
+// The token bought nothing anyway: vercel.json serves `/js/(.*)` with
+// `Cache-Control: public, max-age=0, must-revalidate`, so the browser
+// revalidates every module on every load and picks up changes without any
+// query string. Cache-busting for the lazily-loaded page modules is handled
+// separately and deliberately by APP_VERSION on the dynamic import below —
+// that mechanism is systematic and stays.
+//
+// Pinned by tests/asset-cache-tokens.test.js §4.
 import { AdminAuth } from './auth.js';
 import { FilterState } from './filters.js';
-import { AdminAPI } from './api.js?v=dash-async-scan-jul2026';
+import { AdminAPI } from './api.js';
 
 const esc = (s) => Security.escapeHtml(String(s));
 

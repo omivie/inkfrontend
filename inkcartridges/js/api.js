@@ -1872,7 +1872,7 @@ const API = {
      * Get color pack configuration constants
      */
     async getColorPackConfig() {
-        return this.get('/api/color-packs/config');
+        return this.getPublic('/api/color-packs/config');
     },
 
     // =========================================================================
@@ -1885,7 +1885,7 @@ const API = {
      */
     async getRibbonDeviceBrands(params = {}) {
         const query = new URLSearchParams(params).toString();
-        return this.get(`/api/ribbons/device-brands${query ? '?' + query : ''}`);
+        return this.getPublic(`/api/ribbons/device-brands${query ? '?' + query : ''}`);
     },
 
     /**
@@ -1894,7 +1894,7 @@ const API = {
      */
     async getRibbonDeviceModels(params = {}) {
         const query = new URLSearchParams(params).toString();
-        return this.get(`/api/ribbons/device-models${query ? '?' + query : ''}`);
+        return this.getPublic(`/api/ribbons/device-models${query ? '?' + query : ''}`);
     },
 
     /**
@@ -1903,7 +1903,7 @@ const API = {
      */
     async getRibbonBrands(params = {}) {
         const query = new URLSearchParams(params).toString();
-        return this.get(`/api/ribbons/brands${query ? '?' + query : ''}`);
+        return this.getPublic(`/api/ribbons/brands${query ? '?' + query : ''}`);
     },
 
     /**
@@ -1959,7 +1959,7 @@ const API = {
      */
     async getRibbonModels(params = {}) {
         const query = new URLSearchParams(params).toString();
-        return this.get(`/api/ribbons/models${query ? '?' + query : ''}`);
+        return this.getPublic(`/api/ribbons/models${query ? '?' + query : ''}`);
     },
 
     /**
@@ -1968,7 +1968,7 @@ const API = {
      */
     async getRibbons(params = {}) {
         const query = new URLSearchParams(params).toString();
-        return this.get(`/api/ribbons${query ? '?' + query : ''}`);
+        return this.getPublic(`/api/ribbons${query ? '?' + query : ''}`);
     },
 
     /**
@@ -1976,7 +1976,7 @@ const API = {
      * @param {string} sku - Ribbon SKU
      */
     async getRibbon(sku) {
-        return this.get(`/api/ribbons/${encodeURIComponent(sku)}`);
+        return this.getPublic(`/api/ribbons/${encodeURIComponent(sku)}`);
     },
 
     // =========================================================================
@@ -2072,7 +2072,7 @@ const API = {
         const params = new URLSearchParams({ q: query || '*' });
         if (brand) params.append('brand', brand);
 
-        return this.get(`/api/printers/search?${params}`);
+        return this.getPublic(`/api/printers/search?${params}`);
     },
 
     async searchPrintersBulk(queries) {
@@ -2093,15 +2093,27 @@ const API = {
         const opts = typeof limitOrOpts === 'object' && limitOrOpts !== null
             ? limitOrOpts
             : { limit: limitOrOpts };
-        const params = new URLSearchParams({ q: query });
-        params.set('limit', String(opts.limit ?? 24));
-        if (opts.page) params.set('page', String(opts.page));
-        // Default include: compat (printer-compat expansion) + description (for cards)
-        params.set('include', opts.include || 'compat,description');
+        // PUBLIC read + canonical serialization (ERR-124).
+        //
+        // /api/search/smart already returns the shared-cacheable header
+        // `public, max-age=0, s-maxage=300, stale-while-revalidate=600` — the
+        // same shape the edge-cached catalog endpoints carry. It is not matched
+        // by the Cache Rule *today* (cf-cache-status: DYNAMIC), but the moment
+        // it is, an authenticated search response becomes storable in the shared
+        // public entry. The other two call paths to this endpoint —
+        // search.js's fetchSuggest and _rawJsonFetch's SKU fallback — are
+        // already tokenless; this was the odd one out.
+        //
         // (Previously: `typeof searchConfig !== 'undefined' ? searchConfig.apiUrl : '/api/search/smart'` —
         //  `searchConfig` was never defined anywhere; the fallback was the
         //  only branch ever taken. Inlined to its actual value.)
-        return this.get(`/api/search/smart?${params}`);
+        const endpoint = this.catalogEndpoint('/api/search/smart', {
+            q: query,
+            limit: opts.limit ?? 24,
+            page: opts.page,
+            include: opts.include || 'compat,description'
+        });
+        return this.getPublic(endpoint);
     },
 
     /**
@@ -2129,7 +2141,7 @@ const API = {
         if (!query || String(query).trim().length < 2) return [];
         try {
             const params = new URLSearchParams({ q: query, limit: String(limit) });
-            const res = await this.get(`/api/search/suggest?${params}`);
+            const res = await this.getPublic(`/api/search/suggest?${params}`);
             if (res && res.ok && res.data && Array.isArray(res.data.suggestions)) {
                 return res.data.suggestions;
             }
@@ -2166,7 +2178,7 @@ const API = {
         const qs = grouped
             ? 'grouped=true&exclude_non_ink=true'
             : 'grouped=false&exclude_non_ink=true';
-        return this.get(`/api/printers/by-brand/${slug}?${qs}`);
+        return this.getPublic(`/api/printers/by-brand/${slug}?${qs}`);
     },
 
     /**
@@ -2174,7 +2186,7 @@ const API = {
      * @param {string} sku - Product SKU
      */
     async getCompatiblePrinters(sku) {
-        return this.get(`/api/search/compatible-printers/${encodeURIComponent(sku)}`);
+        return this.getPublic(`/api/search/compatible-printers/${encodeURIComponent(sku)}`);
     },
 
     /**
@@ -2198,7 +2210,7 @@ const API = {
         const params = new URLSearchParams({ q: query });
         if (options.limit) params.append('limit', options.limit);
         if (options.page) params.append('page', options.page);
-        const res = await this.get(`/api/search/by-printer?${params}`);
+        const res = await this.getPublic(`/api/search/by-printer?${params}`);
         return _normalizeRpcSearchResponse(res);
     },
 
@@ -2216,7 +2228,7 @@ const API = {
         const params = new URLSearchParams({ q: query });
         if (options.limit) params.append('limit', options.limit);
         if (options.page) params.append('page', options.page);
-        const res = await this.get(`/api/search/by-part?${params}`);
+        const res = await this.getPublic(`/api/search/by-part?${params}`);
         return _normalizeRpcSearchResponse(res);
     },
 
@@ -3183,7 +3195,7 @@ const API = {
      * @param {string} printerId - Printer UUID
      */
     async getCompatibility(printerId) {
-        return this.get(`/api/compatibility/${printerId}`);
+        return this.getPublic(`/api/compatibility/${printerId}`);
     },
 
     // =========================================================================
@@ -3271,7 +3283,7 @@ const API = {
      */
     async healthCheck() {
         try {
-            const response = await fetch(`${Config.API_URL}/health`);
+            const response = await fetch(`${Config.API_URL}/health`, { credentials: 'omit' });
             return response.ok;
         } catch {
             return false;
@@ -3280,7 +3292,7 @@ const API = {
 
 
     // =========================================================================
-    // Customer P2 wrappers — waitlist, product counts, product series
+    // Customer P2 wrappers — product counts, product series
     // =========================================================================
 
     /** Back-in-stock waitlist: subscribe. Auth optional (guest passes {email}). */
@@ -3290,9 +3302,32 @@ const API = {
     async waitlistUnsubscribe(sku) {
         return this.delete(`/api/products/${encodeURIComponent(sku)}/waitlist`);
     },
+
+    // ⚠ DO NOT CALL waitlistStatus UNTIL BF-020 IS FIXED (ERR-124, 2026-07-28).
+    //
+    // GET /api/products/:sku/waitlist/status returns PER-USER state, but the
+    // path sits under the `/api/products/` prefix that Cloudflare's Cache Rule
+    // matches. Verified live 2026-07-28: the response carries
+    // `public, max-age=0, s-maxage=300, stale-while-revalidate=600` and a
+    // repeat request returns `cf-cache-status: HIT`.
+    //
+    // Because a bearer token does NOT change Cloudflare's cache key (the core
+    // ERR-124 finding), calling this would let ONE signed-in shopper's waitlist
+    // state be stored in the SHARED edge entry and served to every other
+    // visitor. There is no client-side fix — a per-user cache-buster would
+    // work but is exactly the anti-pattern this whole change removed. The
+    // backend must exclude the path from the rule.
+    //
+    // The three wrappers stay mounted so cached bundles can't 404 on them
+    // (tests/traffic-conversion-jul2026.test.js §3). They have zero callers,
+    // and tests/catalog-edge-cache-jul2026.test.js §9 fails the build if that
+    // ever changes for this one. The two above are POST/DELETE, so they are not
+    // cacheable and carry no such hazard.
     async waitlistStatus(sku) {
         return this.get(`/api/products/${encodeURIComponent(sku)}/waitlist/status`);
     },
+
+    // Unaffected: /api/account/* is outside the edge-cached prefixes.
     async getAccountWaitlist() {
         return this.get('/api/account/waitlist');
     },

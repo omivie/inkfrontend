@@ -1235,9 +1235,18 @@ const AdminAPI = {
   },
 
   // ---- Brands (for filter options) ----
+  //
+  // Delegates to window.API.getBrands() rather than calling
+  // window.API.get('/api/brands') itself (ERR-124). Two reasons, both real:
+  //   1. /api/brands is Cloudflare edge-cached. A direct .get() attaches the
+  //      admin's bearer token, and a token does NOT change the cache key — so
+  //      an admin response is eligible to land in the SHARED public entry.
+  //   2. API.getBrands() is SWR-cached (5 min). Eight admin controllers call
+  //      this; each was paying a full round-trip for an identical brand list.
+  // The try/catch + `?.data ?? null` shape is preserved so no caller changes.
   async getBrands() {
     try {
-      const resp = await window.API.get('/api/brands');
+      const resp = await window.API.getBrands();
       return resp?.data ?? null;
     } catch (e) {
       adminApiWarn('Failed to load brands', e);
@@ -2606,6 +2615,7 @@ const AdminAPI = {
       const token = window.Auth?.session?.access_token;
       if (!token) throw new Error('Not authenticated');
       const resp = await fetch(`${Config.API_URL}/api/admin/audit/invoice-preview/${encodeURIComponent(orderId)}`, {
+      credentials: 'omit',
         headers: { 'Authorization': `Bearer ${token}` },
       });
       if (!resp.ok) throw new Error(`Invoice fetch failed: ${resp.status}`);
@@ -2982,6 +2992,7 @@ const AdminAPI = {
     const token = window.Auth?.session?.access_token;
     if (!token) throw new Error('Not authenticated');
     const resp = await fetch(`${Config.API_URL}/api/admin/invoices/${encodeURIComponent(invoiceId)}/pdf`, {
+      credentials: 'omit',
       headers: { 'Authorization': `Bearer ${token}` },
     });
     if (!resp.ok) throw new Error(`Invoice PDF fetch failed: ${resp.status}`);

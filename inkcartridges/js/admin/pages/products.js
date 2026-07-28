@@ -2,11 +2,11 @@
  * Products & SKUs Page — Full CRUD with image management
  */
 import { AdminAuth, FilterState, AdminAPI, icon, esc, exportDropdown, bindExportDropdown } from '../app.js';
-import { DataTable } from '../components/table.js?v=col-compact-may2026';
+import { DataTable } from '../components/table.js';
 import { Drawer } from '../components/drawer.js';
 import { Toast } from '../components/toast.js';
 import { Modal } from '../components/modal.js';
-import { RichTextEditor } from '../components/rich-text-editor.js?v=rich-text-persist-may2026';
+import { RichTextEditor } from '../components/rich-text-editor.js';
 import { computeProfitability, marginBadge, formatProfitDollars } from '../utils/profitability.js';
 import { PRODUCT_TYPE_TO_SHOP_CATEGORY, describeCodesWriteError, describeScopes, paginate, pagerHtml } from '../utils/product-codes.js';
 import {

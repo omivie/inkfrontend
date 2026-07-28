@@ -315,6 +315,7 @@ const SeoMeta = {
             try {
                 const res = await fetch(this._apiUrl(this.TRUST_ENDPOINT), {
                     headers: { 'Accept': 'application/json' },
+                    credentials: 'omit',
                 });
                 if (!res.ok) return this._emptyTrust();
                 const json = await res.json();
@@ -510,7 +511,8 @@ const SeoMeta = {
         if (!head) {
             if (typeof fetch !== 'function') return false;
             try {
-                const res = await fetch(this._apiUrl(prerenderPath), { headers: { 'Accept': 'text/html' } });
+                // Public prerender read — cookies explicitly omitted (ERR-124).
+            const res = await fetch(this._apiUrl(prerenderPath), { headers: { 'Accept': 'text/html' }, credentials: 'omit' });
                 if (!res.ok) return false;
                 const html = await res.text();
                 head = this.extractHead(html);

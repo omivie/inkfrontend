@@ -363,8 +363,11 @@ test('module cache keys are bumped so the new code ships', () => {
     'APP_VERSION must be a dated build tag (YYYY.MM.DD-slug)');
   assert.notEqual(m[1], '2026.05.17-cogs',
     'APP_VERSION must change off the pre-column-customize build');
-  assert.match(APP_SRC, /from '\.\/api\.js\?v=col-customize-may2026'|from '\.\/api\.js\?v=[a-z0-9-]+'/,
-    'api.js import must carry a cache-bust query');
-  assert.match(PRODUCTS_SRC, /from '\.\.\/components\/table\.js\?v=[a-z0-9-]+'/,
-    'table.js import must be cache-busted');
+  // ERR-124: static ES imports carry NO token — one URL per module, or the browser
+  // evaluates it twice. Busting is the `max-age=0, must-revalidate` header on /js/*
+  // plus APP_VERSION above. Pinned by tests/asset-cache-tokens.test.js §4.
+  assert.doesNotMatch(APP_SRC, /from '\.\/api\.js\?v=/,
+    'api.js import must stay bare (pages/planner.js imports it bare too)');
+  assert.doesNotMatch(PRODUCTS_SRC, /components\/table\.js\?v=/,
+    'table.js import must stay bare — 27 other admin pages import it bare');
 });

@@ -123,6 +123,7 @@
                     } catch (_) { /* fall back to recoveryAccessToken */ }
 
                     const res = await fetch(`${Config.API_URL}/api/auth/update-password`, {
+                        credentials: 'omit',
                         method: 'POST',
                         headers: {
                             'Content-Type': 'application/json',

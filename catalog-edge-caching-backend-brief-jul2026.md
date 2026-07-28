@@ -1,7 +1,7 @@
 # Catalog edge caching — FE verification results + backend asks (Jul 2026)
 
 **Re:** `catalog-edge-caching-fe-notes-jul2026.md`
-**From:** frontend · **Date:** 2026-07-28 · **Tracking:** ERR-124 (FE), BF-011…BF-018 (backend)
+**From:** frontend · **Date:** 2026-07-28 · **Tracking:** ERR-124 (FE), BF-011…BF-020 (backend)
 
 First — thank you, this works and it is a big win. Verified independently:
 `cf-cache-status: HIT`, **44 ms cached vs 205 ms uncached** on
@@ -142,6 +142,61 @@ A SKU that 404s once — because it was requested seconds before the product wen
 live — stays a hard 404 for up to 15 minutes, and the admin price/stock purge
 won't clear it (there was no product to purge). **Ask:** don't cache 4xx, or cap
 negative TTL at ~10 s.
+
+
+## 🚨 BF-020 — A per-user endpoint is being edge-cached publicly
+
+**This is the one to look at first.** `GET /api/products/:sku/waitlist/status`
+returns **per-user** state, but the path sits under the `/api/products/` prefix
+your Cache Rule matches — so it is being cached as public, shared content:
+
+```bash
+curl -sI "https://api.inkcartridges.co.nz/api/products/CPG512/waitlist/status" \
+     -H "Origin: https://www.inkcartridges.co.nz" | grep -iE 'HTTP|cf-cache-status|cache-control'
+# HTTP/2 401
+# cache-control: public, max-age=0, s-maxage=300, stale-while-revalidate=600
+# cf-cache-status: MISS      ← first call
+# (repeat) cf-cache-status: HIT
+```
+
+Combined with BF-011 (a bearer token does not change the cache key), a signed-in
+shopper's waitlist state can be stored in the shared entry and served to every
+other visitor for up to 5 minutes. The cached `401` above is the same bug in its
+harmless direction: an anonymous request poisons the entry so a *legitimately*
+signed-in user then gets a 401.
+
+**Not currently exploitable through our frontend** — the waitlist UI was retired
+in favour of the "Contact us" OOS CTA, so `API.waitlistStatus()` has zero
+callers. We have left the wrapper mounted (cached bundles must not 404 on it),
+marked it **DO NOT CALL**, and added a test that fails the build if anything
+starts calling it. But anything else that hits this URL — a future feature, a
+direct API consumer — leaks today.
+
+**Ask:** exclude `/api/products/*/waitlist*` from the Cache Rule (and audit the
+prefix for any other per-user sub-resource). Path-prefix cache rules over a
+resource tree that mixes public and per-user sub-paths is the general hazard
+here; `/reviews` and `/jsonld` are fine, `/waitlist/status` is not.
+
+## 💸 BF-019 — Public catalog endpoints marked `private, no-store` (free win)
+
+These hold nothing per-user, yet are excluded from caching entirely — verified
+`cf-cache-status: DYNAMIC` with `cache-control: private, no-store, no-cache,
+must-revalidate, proxy-revalidate`:
+
+- `/api/ribbons` (and `/api/ribbons/brands`, `/device-brands`, `/device-models`, `/models`, `/:sku`)
+- `/api/printers/trending`
+- `/api/color-packs/config`
+
+`/api/ribbons` backs the whole ribbons category and is queried from the mega-nav
+and shop page; `/api/printers/trending` fires on **every** page load from the
+search dropdown. All are now anonymous on our side, so they are ready to be
+cached the moment you flip the headers.
+
+**Related ambiguity worth settling:** `/api/search/smart` already returns
+`public, max-age=0, s-maxage=300, stale-while-revalidate=600` — the exact
+edge-cached shape — but is `cf-cache-status: DYNAMIC` on every request. So either
+the rule is meant to cover it and doesn't, or the header is misleading. We have
+made all three of our call paths to it anonymous either way.
 
 ---
 

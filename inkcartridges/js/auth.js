@@ -391,6 +391,7 @@ const Auth = {
     async resetPassword(email) {
         try {
             const res = await fetch(`${Config.API_URL}/api/auth/request-password-reset`, {
+            credentials: 'omit',
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ email })
