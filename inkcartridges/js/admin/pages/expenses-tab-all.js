@@ -23,6 +23,7 @@ import { Toast } from '../components/toast.js';
 import { categoryLabel, operatingCategories, orderLinkedCategories } from '../utils/expense-categories.js';
 import { describeRecurrence, parseUtcDate } from '../utils/expense-recurrence.js';
 import { pnlCost, gstCredit } from '../utils/expense-math.js';
+import { GST_INCL, GST_CLAIM, GST_AMOUNT } from '../utils/gst-basis.js';
 
 let _host = null;
 let _ctx = null;
@@ -44,7 +45,7 @@ const DEFAULT_HIDDEN = ['paid_date', 'method', 'ex_gst', 'gst_amt', 'reference',
 const COLUMN_LABELS = {
   date: 'Date', name: 'Expense', category: 'Category', amount: 'Amount', gst: 'GST',
   status: 'Status', due_date: 'Due', recurrence: 'Repeats', next: 'Next',
-  paid_date: 'Paid on', method: 'Method', ex_gst: 'Ex-GST', gst_amt: 'GST $',
+  paid_date: 'Paid on', method: 'Method', ex_gst: 'P&L cost', gst_amt: 'GST $',
   reference: 'Reference', created: 'Created', actions: 'Actions',
 };
 
@@ -58,7 +59,7 @@ function buildColumns(ctx) {
     { key: 'date', label: BASIS_LABEL[basis] || 'Date', sortable: true, render: (r) => esc(fmtDate(basisDateOf(r, basis) || r.expense_date)) },
     { key: 'name', label: 'Expense', sortable: true, render: (r) => `<div class="exp-cell-name"><strong>${esc(r.name || categoryLabel(r.category))}</strong>${r.payee ? `<span class="cell-muted">${esc(r.payee)}</span>` : ''}</div>` },
     { key: 'category', label: 'Category', sortable: true, render: (r) => `${esc(categoryLabel(r.category))} ${r.kind === 'order_linked' ? `<span class="exp-tag exp-tag--linked" title="Already counted in per-order costs — excluded from operating expenses">order-linked</span>` : ''}` },
-    { key: 'amount', label: 'Amount', align: 'right', sortable: true, render: (r) => `<span class="cell-mono" title="GST-inclusive">${esc(money(r.amount))}</span>` },
+    { key: 'amount', label: 'Amount', align: 'right', sortable: true, gst: GST_INCL, render: (r) => `<span class="cell-mono" title="GST-inclusive">${esc(money(r.amount))}</span>` },
     { key: 'gst', label: 'GST', align: 'center', render: (r) => r.gst_claimable ? `<span class="cell-muted" title="Claimable NZ GST — netted from profit">incl</span>` : `<span class="cell-muted" title="No GST credit">—</span>` },
     { key: 'status', label: 'Status', render: (r) => statusBadge(r._status) },
     { key: 'due_date', label: 'Due', sortable: true, render: (r) => r.due_date ? esc(fmtDate(r.due_date)) : '<span class="cell-muted">—</span>' },
@@ -66,8 +67,11 @@ function buildColumns(ctx) {
     { key: 'next', label: 'Next', sortable: true, render: (r) => r._next ? esc(fmtDate(r._next)) : '<span class="cell-muted">—</span>' },
     { key: 'paid_date', label: 'Paid on', sortable: true, render: (r) => r.paid_date ? esc(fmtDate(r.paid_date)) : '<span class="cell-muted">—</span>' },
     { key: 'method', label: 'Method', render: (r) => esc(ctx.fmt.methodLabel(r.method)) },
-    { key: 'ex_gst', label: 'Ex-GST', align: 'right', sortable: true, render: (r) => `<span class="cell-mono" title="P&L cost — GST netted out when claimable">${esc(money(pnlCost(r.amount, !!r.gst_claimable)))}</span>` },
-    { key: 'gst_amt', label: 'GST $', align: 'right', sortable: true, render: (r) => `<span class="cell-mono" title="Reclaimable GST input credit">${esc(money(gstCredit(r.amount, !!r.gst_claimable)))}</span>` },
+    // Renamed from "Ex-GST": the sub-line now carries the basis, and the old
+    // label both duplicated it and overstated it — a non-claimable row (foreign
+    // SaaS, no NZ GST to reclaim) sits in this column at full gross.
+    { key: 'ex_gst', label: 'P&L cost', align: 'right', sortable: true, gst: GST_CLAIM, render: (r) => `<span class="cell-mono" title="P&L cost — GST netted out when claimable">${esc(money(pnlCost(r.amount, !!r.gst_claimable)))}</span>` },
+    { key: 'gst_amt', label: 'GST $', align: 'right', sortable: true, gst: GST_AMOUNT, render: (r) => `<span class="cell-mono" title="Reclaimable GST input credit">${esc(money(gstCredit(r.amount, !!r.gst_claimable)))}</span>` },
     { key: 'reference', label: 'Reference', render: (r) => esc(r.reference || r.invoice_number || '—') },
     { key: 'created', label: 'Created', sortable: true, render: (r) => r.created_at ? esc(fmtDate(String(r.created_at).slice(0, 10))) : '<span class="cell-muted">—</span>' },
     {
@@ -143,13 +147,13 @@ function summaryHtml(ctx, rows) {
   const unpaid = rows.filter(r => r._status === 'overdue' || r._status === 'due' || r._status === 'scheduled')
     .reduce((s, r) => s + (Number(r.amount) || 0), 0);
   const items = [
-    ['Matching', String(rows.length)],
-    ['Total (incl GST)', money(total)],
-    ['Paid (incl GST)', money(paid)],
-    ['Unpaid (incl GST)', money(unpaid)],
+    ['Matching', String(rows.length), ''],
+    ['Total', money(total), GST_INCL],
+    ['Paid', money(paid), GST_INCL],
+    ['Unpaid', money(unpaid), GST_INCL],
   ];
-  return `<div class="exp-kpi-strip exp-kpi-strip--table" id="exp-table-summary">${items.map(([l, v]) =>
-    `<div class="exp-kpi-strip__item"><span class="exp-kpi-strip__label">${esc(l)}</span><span class="exp-kpi-strip__value">${esc(v)}</span></div>`).join('')}</div>`;
+  return `<div class="exp-kpi-strip exp-kpi-strip--table" id="exp-table-summary">${items.map(([l, v, basis]) =>
+    `<div class="exp-kpi-strip__item"><span class="exp-kpi-strip__label">${esc(l)}${basis ? `<span class="exp-kpi-strip__basis">${esc(basis)}</span>` : ''}</span><span class="exp-kpi-strip__value">${esc(v)}</span></div>`).join('')}</div>`;
 }
 
 // ─── toolbar ─────────────────────────────────────────────────────────────────

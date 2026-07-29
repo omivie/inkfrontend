@@ -491,6 +491,17 @@
   font-size: 9.5px; font-weight: 600; text-transform: uppercase;
   letter-spacing: 0.06em; color: var(--text-muted); margin-bottom: 4px;
 }
+/* GST basis, directly under a KPI's LABEL. Distinct from .admin-kpi__sub below,
+   which sits under the VALUE and carries commentary ("σ daily revenue") rather
+   than provenance. The negative top margin eats the label's own 4px gap so the
+   two read as one block. */
+.admin-kpi__basis {
+  font-size: 9px; font-weight: 500;
+  text-transform: none; letter-spacing: normal;
+  color: var(--text-muted); opacity: 0.75;
+  margin: -3px 0 4px;
+}
+.admin-kpi--compact .admin-kpi__basis { font-size: 8.5px; margin: -1px 0 2px; }
 .admin-kpi__value {
   font-size: 20px; font-weight: 700; font-family: var(--font-mono);
   letter-spacing: -0.02em; line-height: 1.1; margin-bottom: 4px;
@@ -602,6 +613,24 @@
 }
 .admin-table th.sort-asc .sort-arrow,
 .admin-table th.sort-desc .sort-arrow { opacity: 1; color: var(--cyan); }
+/* GST-basis sub-line under a money column header ("incl. GST" / "excl. GST").
+   Deliberately a STANDALONE class, not nested under `.admin-table th` — the
+   same span is emitted into .admin-dash-table, .admin-order-items,
+   .cc2-pricing__table and margin.js's .margin-table, and that last one has no
+   CSS of its own anywhere. So it must neutralise the host header's transform
+   and tracking itself rather than rely on inheriting a reset.
+   Pattern borrowed from .inv-doc__cost-note (printed invoice) further down. */
+.admin-th-sub {
+  display: block;
+  font-size: max(9px, 0.8em);  /* host headers run 9.5px → ~13px unstyled */
+  font-weight: 400;            /* .admin-table th is 600, 700 in light theme */
+  text-transform: none;        /* th is uppercase; "EXCL. GST" shouts */
+  letter-spacing: normal;      /* th tracks 0.06em */
+  line-height: 1.15;
+  margin-top: 1px;
+  opacity: 0.65;
+  white-space: nowrap;
+}
 .admin-table td {
   padding: 5px 10px; border-bottom: 1px solid var(--border); vertical-align: middle;
 }
@@ -5115,6 +5144,9 @@ button.admin-active-dot--clickable:hover::after { opacity: 1; }
 .exp-kpi--good { border-left: 3px solid var(--success); }
 .exp-kpi--muted { opacity: 0.82; }
 .exp-kpi__label { font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.03em; }
+/* GST basis under an expenses KPI label — see .admin-kpi__basis. Separate rule
+   because .exp-kpi__label runs 11px, not the 9.5px of .admin-kpi__label. */
+.exp-kpi__basis { font-size: 9.5px; color: var(--text-muted); opacity: 0.8; text-transform: none; letter-spacing: normal; margin-top: -2px; }
 .exp-kpi__value { font-size: 22px; font-weight: 700; color: var(--text); font-variant-numeric: tabular-nums; }
 .exp-kpi__sub { font-size: 11px; color: var(--text-secondary); }
 .exp-kpi__delta--good { color: var(--success); }
@@ -5246,6 +5278,7 @@ button.admin-active-dot--clickable:hover::after { opacity: 1; }
 }
 .exp-kpi-strip__item { display: flex; gap: 8px; align-items: baseline; min-width: 0; }
 .exp-kpi-strip__label { color: var(--text-muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; white-space: nowrap; }
+.exp-kpi-strip__basis { display: block; color: var(--text-muted); font-size: 9.5px; opacity: 0.8; text-transform: none; letter-spacing: normal; white-space: nowrap; }
 .exp-kpi-strip__value { font-size: 13px; font-weight: 700; white-space: nowrap; }
 .exp-basis-label { display: inline-flex; align-items: center; gap: 6px; color: var(--text-muted); font-size: 12px; white-space: nowrap; }
 .exp-kpi-strip--table { margin-bottom: 10px; }

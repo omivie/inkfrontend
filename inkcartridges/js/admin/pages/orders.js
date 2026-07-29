@@ -8,6 +8,7 @@ import { Toast } from '../components/toast.js';
 import { Modal } from '../components/modal.js';
 import { marginBadge } from '../utils/profitability.js';
 import { orderProfitFromDetail, isInvoiceOrder, PROFIT_STATE } from '../utils/order-profit.js';
+import { GST_INCL, GST_EXCL, GST_NET, gstSub } from '../utils/gst-basis.js';
 // Supplier/Origin rendering is shared with the Products page — see utils/sourcing.js.
 // A second copy of the origin vocabulary is how the two surfaces would drift apart.
 import { originBadge, supplierCell } from '../utils/sourcing.js';
@@ -299,7 +300,7 @@ const COLUMNS = [
     align: 'center',
   },
   {
-    key: 'total', label: 'Total', sortable: true,
+    key: 'total', label: 'Total', sortable: true, gst: GST_INCL,
     render: (r) => `<span class="cell-mono cell-right">${(r.total_amount ?? r.total) != null ? formatPrice(r.total_amount ?? r.total) : MISSING}</span>`,
     align: 'right',
   },
@@ -309,7 +310,7 @@ const COLUMNS = [
     // is only newest|oldest|total-high|total-low (api.js) and silently falls back
     // to newest for anything else, and sorting client-side would order 20 of N
     // rows while looking like a full sort. Both are lies, so the header is inert.
-    key: '_profit', label: 'Profit',
+    key: '_profit', label: 'Profit', gst: GST_NET,
     render: (r) => profitCellHtml(r, _profitCache.get(r.id)),
     align: 'right',
   },
@@ -582,8 +583,11 @@ function buildOrderModalContent(modal, o, events, breakdown, { detailLoadFailed 
   // Meta grid
   let metaLeft = omRow('Customer', esc(custName));
   metaLeft += omRow('Email', esc(custEmail));
-  if (orderTotal != null) metaLeft += omRow('Total <span class="admin-text-muted" style="font-weight:400">(incl. GST)</span>', `<strong>${formatPrice(orderTotal)}</strong>`);
-  if (o.shipping_fee != null) metaLeft += omRow('Shipping', formatPrice(o.shipping_fee));
+  if (orderTotal != null) metaLeft += omRow(`Total${gstSub(GST_INCL)}`, `<strong>${formatPrice(orderTotal)}</strong>`);
+  // shipping_rates stores fees GST-INCLUSIVE (GST inside = fee × 3/23), so this
+  // row is incl. GST like the Total above it — it was the one unlabelled money
+  // row in this block.
+  if (o.shipping_fee != null) metaLeft += omRow(`Shipping${gstSub(GST_INCL)}`, formatPrice(o.shipping_fee));
   if (o.shipping_tier) metaLeft += omRow('Tier', esc(o.shipping_tier));
   if (o.delivery_zone) metaLeft += omRow('Zone', esc(o.delivery_zone));
   if (o.source) metaLeft += omRow('Source', esc(o.source));
@@ -632,8 +636,8 @@ function buildOrderModalContent(modal, o, events, breakdown, { detailLoadFailed 
   let profitFootTip = '';           // fee wording differs for an invoiced (bank-transfer) sale
   if (o.items?.length) {
     itemsHtml += `<div class="admin-order-items-scroll"><table class="admin-order-items"><thead><tr>`;
-    itemsHtml += `<th>Product</th><th>SKU</th><th>Qty</th><th>Supplier</th><th>Origin</th><th>Price <span class="admin-text-muted" style="font-weight:400">(excl. GST)</span></th>`;
-    if (showCost) itemsHtml += `<th>Cost <span class="admin-text-muted" style="font-weight:400">(excl. GST)</span></th><th>Profit <span class="admin-text-muted" style="font-weight:400">(net)</span></th>`;
+    itemsHtml += `<th>Product</th><th>SKU</th><th>Qty</th><th>Supplier</th><th>Origin</th><th>Price${gstSub(GST_EXCL)}</th>`;
+    if (showCost) itemsHtml += `<th>Cost${gstSub(GST_EXCL)}</th><th>Profit${gstSub(GST_NET)}</th>`;
     itemsHtml += `</tr></thead><tbody>`;
     const { lineProfits, missingCostCount, itemCount } = profitInfo;
     const itemRows = [];
@@ -789,10 +793,10 @@ function buildOrderModalContent(modal, o, events, breakdown, { detailLoadFailed 
     breakdownHtml += `<div class="om-section-title">Financial Breakdown</div>`;
     breakdownHtml += `<div class="om-meta-grid">`;
     let bLeft = '';
-    if (breakdown.subtotal_excl_gst != null) bLeft += omRow('Subtotal (excl. GST)', formatPrice(breakdown.subtotal_excl_gst));
+    if (breakdown.subtotal_excl_gst != null) bLeft += omRow(`Subtotal${gstSub(GST_EXCL)}`, formatPrice(breakdown.subtotal_excl_gst));
     if (breakdown.gst_amount != null) bLeft += omRow('GST (15%)', formatPrice(breakdown.gst_amount));
-    if (breakdown.total_incl_gst != null) bLeft += omRow('Total (incl. GST)', `<strong>${formatPrice(breakdown.total_incl_gst)}</strong>`);
-    if (breakdown.shipping_fee != null) bLeft += omRow('Shipping', formatPrice(breakdown.shipping_fee));
+    if (breakdown.total_incl_gst != null) bLeft += omRow(`Total${gstSub(GST_INCL)}`, `<strong>${formatPrice(breakdown.total_incl_gst)}</strong>`);
+    if (breakdown.shipping_fee != null) bLeft += omRow(`Shipping${gstSub(GST_INCL)}`, formatPrice(breakdown.shipping_fee));
     let bRight = '';
     if (breakdown.payment_method) {
       const pm = breakdown.payment_method;

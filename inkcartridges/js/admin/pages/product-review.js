@@ -5,6 +5,7 @@ import { AdminAPI, FilterState, icon, esc, updateReviewBadge } from '../app.js';
 import { DataTable } from '../components/table.js';
 import { Drawer } from '../components/drawer.js';
 import { Toast } from '../components/toast.js';
+import { GST_INCL } from '../utils/gst-basis.js';
 
 const formatPrice = (v) => window.formatPrice ? window.formatPrice(v) : `$${Number(v).toFixed(2)}`;
 const MISSING = '\u2014';
@@ -51,7 +52,7 @@ function buildColumns() {
       },
     },
     {
-      key: 'retail_price', label: 'Price', sortable: true,
+      key: 'retail_price', label: 'Price', sortable: true, gst: GST_INCL,
       render: (r) => `<span class="cell-mono cell-right">${r.retail_price != null ? formatPrice(r.retail_price) : MISSING}</span>`,
       align: 'right',
     },

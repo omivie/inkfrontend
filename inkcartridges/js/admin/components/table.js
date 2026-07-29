@@ -8,7 +8,14 @@ class DataTable {
   /**
    * @param {HTMLElement} container
    * @param {Object} config
-   * @param {Array<{key, label, sortable?, render?, className?, align?}>} config.columns
+   * @param {Array<{key, label, sortable?, render?, className?, align?, gst?}>} config.columns
+   *   `gst` is a GST-basis sub-line for money columns — one of the frozen
+   *   constants in utils/gst-basis.js, rendered as a muted second line under
+   *   the header. ABSENT/EMPTY MEANS "basis not documented", never "no GST":
+   *   ~25 admin money fields are backend passthrough nobody has proven, and
+   *   they stay blank on purpose. See gst-basis-backend-brief-jul2026.md.
+   *   Do not repurpose this slot for non-GST sub-labels — the moment anything
+   *   else can live here, a blank stops meaning "undocumented".
    * @param {Function} config.onRowClick
    * @param {Function} config.onSort
    * @param {Function} config.onPageChange
@@ -118,7 +125,12 @@ class DataTable {
       const arrow = col.sortable ? `<span class="sort-arrow">${this.sortKey === col.key ? (this.sortDir === 'asc' ? '\u25B2' : '\u25BC') : '\u25BD'}</span>` : '';
       const alignCls = col.align === 'right' ? ' cell-right' : '';
       const thExtra = col.className ? ` ${col.className}` : '';
-      html += `<th class="${sortCls}${activeCls}${alignCls}${thExtra}" data-sort-key="${col.key || ''}">${esc(col.label)}${arrow}</th>`;
+      // GST basis, if this column's is documented. Sits AFTER the sort arrow so
+      // the arrow stays inline with the label; .admin-th-sub is display:block
+      // and drops to a second line. Escaped even though the inputs are frozen
+      // constants — cheap, and it keeps the whole <th> render uniformly safe.
+      const gstSub = col.gst ? `<span class="admin-th-sub">${esc(col.gst)}</span>` : '';
+      html += `<th class="${sortCls}${activeCls}${alignCls}${thExtra}" data-sort-key="${col.key || ''}">${esc(col.label)}${arrow}${gstSub}</th>`;
     }
     html += '</tr></thead><tbody>';
 

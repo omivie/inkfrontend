@@ -19,6 +19,7 @@
 import { icon, esc } from '../app.js';
 import { Charts } from '../components/charts.js';
 import { bucketExpenses, pnlCost } from '../utils/expense-math.js';
+import { GST_INCL, GST_MIXED, GST_AMOUNT } from '../utils/gst-basis.js';
 import { categoryLabel } from '../utils/expense-categories.js';
 import { parseUtcDate } from '../utils/expense-recurrence.js';
 
@@ -54,31 +55,38 @@ function kpiGrid(ctx) {
   const cards = [
     {
       label: `Operating spend · ${range.periodLabel}`, value: money(k.spend || 0), go: 'paid',
+      // GST_MIXED, not GST_EXCL: claimable rows are netted, non-claimable ones
+      // (foreign SaaS with no NZ GST to reclaim) enter at full gross.
+      basis: GST_MIXED,
       sub: `${deltaHtml(k, range)}<span class="exp-kpi__note" title="Cash basis: only expenses marked paid, on their paid date, GST-netted, operating only — the same figure Finance → P&amp;L books.">${esc(grossSub)}</span>`,
       tone: '',
     },
-    { label: 'Overdue', value: money(k.overdue || 0), go: 'overdue', sub: k.overdue > 0 ? 'needs paying now — by due date' : 'all clear', tone: k.overdue > 0 ? 'bad' : 'good' },
-    { label: 'Due (unpaid)', value: money(k.unpaid || 0), go: 'unpaid', sub: 'open amounts by due date — not period-scoped', tone: k.unpaid > 0 ? 'warn' : '' },
-    { label: 'Recurring commitment', value: money(k.recurringMonthly || 0), go: 'recurring-tab', sub: 'per month, active series only', tone: '' },
+    { label: 'Overdue', value: money(k.overdue || 0), go: 'overdue', basis: GST_INCL, sub: k.overdue > 0 ? 'needs paying now — by due date' : 'all clear', tone: k.overdue > 0 ? 'bad' : 'good' },
+    { label: 'Due (unpaid)', value: money(k.unpaid || 0), go: 'unpaid', basis: GST_INCL, sub: 'open amounts by due date — not period-scoped', tone: k.unpaid > 0 ? 'warn' : '' },
+    { label: 'Recurring commitment', value: money(k.recurringMonthly || 0), go: 'recurring-tab', basis: GST_INCL, sub: 'per month, active series only', tone: '' },
   ];
   const secondary = [
-    { id: 'ratio', label: '% of revenue', value: '…', title: 'Period spend (GST-netted) ÷ revenue (ex-GST) of the P&L months overlapping the window — approximate, monthly P&L granularity.' },
-    { label: 'Upcoming (next 30d)', value: money(k.upcoming30 || 0), title: 'Open amounts due in the next 30 days, gross.' },
-    { label: 'Largest category', value: k.largestCategory ? `${categoryLabel(k.largestCategory.key)} · ${money(k.largestCategory.total)}` : '—', title: 'Biggest paid operating category in the period, GST-netted.' },
-    { label: 'Avg expense', value: k.avgExpense != null ? money(k.avgExpense) : '—', title: `Average paid operating expense in the period (${k.txnCount || 0} transactions), GST-netted.` },
-    { label: 'GST reclaim', value: money(k.gstReclaim || 0), title: 'GST input credits embedded in the period\'s paid claimable expenses.' },
-    { label: 'Order-linked (excluded)', value: money(k.orderLinked || 0), title: 'Already counted in per-order costs — never added to operating spend.' },
+    // No basis: expense-math.js asserts the denominator is ex-GST, but
+    // financial-health.js proves with live arithmetic that pnl.revenue is
+    // INCL-GST. Two files, opposite claims — see the backend brief.
+    { id: 'ratio', label: '% of revenue', value: '…', title: 'Period spend (GST-netted) ÷ revenue of the P&L months overlapping the window — approximate, monthly P&L granularity. Revenue basis unconfirmed.' },
+    { label: 'Upcoming (next 30d)', value: money(k.upcoming30 || 0), basis: GST_INCL, title: 'Open amounts due in the next 30 days, gross.' },
+    { label: 'Largest category', value: k.largestCategory ? `${categoryLabel(k.largestCategory.key)} · ${money(k.largestCategory.total)}` : '—', basis: GST_MIXED, title: 'Biggest paid operating category in the period, GST-netted.' },
+    { label: 'Avg expense', value: k.avgExpense != null ? money(k.avgExpense) : '—', basis: GST_MIXED, title: `Average paid operating expense in the period (${k.txnCount || 0} transactions), GST-netted.` },
+    { label: 'GST reclaim', value: money(k.gstReclaim || 0), basis: GST_AMOUNT, title: 'GST input credits embedded in the period\'s paid claimable expenses.' },
+    { label: 'Order-linked (excluded)', value: money(k.orderLinked || 0), basis: GST_INCL, title: 'Already counted in per-order costs — never added to operating spend.' },
   ];
   return `
     <div class="exp-kpi-grid exp-kpi-grid--primary">${cards.map(c => `
       <button class="exp-kpi exp-kpi--${c.tone || 'plain'} exp-kpi--click" data-kpi-go="${c.go}" title="Open the matching view">
         <div class="exp-kpi__label">${esc(c.label)}</div>
+        ${c.basis ? `<div class="exp-kpi__basis">${esc(c.basis)}</div>` : ''}
         <div class="exp-kpi__value">${esc(c.value)}</div>
         <div class="exp-kpi__sub">${c.sub}</div>
       </button>`).join('')}</div>
     <div class="exp-kpi-strip">${secondary.map(s => `
       <div class="exp-kpi-strip__item" ${s.id ? `id="exp-strip-${s.id}"` : ''} title="${escA(s.title)}">
-        <span class="exp-kpi-strip__label">${esc(s.label)}</span>
+        <span class="exp-kpi-strip__label">${esc(s.label)}${s.basis ? `<span class="exp-kpi-strip__basis">${esc(s.basis)}</span>` : ''}</span>
         <span class="exp-kpi-strip__value">${esc(s.value)}</span>
       </div>`).join('')}</div>`;
 }

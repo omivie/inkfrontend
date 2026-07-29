@@ -22,6 +22,7 @@ import {
   validateTierMap, tierMidpoint, sortTierKeys, snapPriceCeil,
   coarsePreset, normalizeTierResponse,
 } from '../utils/pricingCalculator.js';
+import { GST_INCL, GST_EXCL, gstSub } from '../utils/gst-basis.js';
 
 const COPY = {
   title: 'Margin simulator',
@@ -377,9 +378,13 @@ function renderResults() {
           <thead>
             <tr>
               <th>SKU</th><th>Brand</th>
-              <th class="num">Cost</th><th class="num">Retail (was → new)</th>
+              <th class="num">Cost${gstSub(GST_EXCL)}</th><th class="num">Retail (was → new)${gstSub(GST_INCL)}</th>
+              <!-- Δ profit/unit and Net margin both fold in the Stripe fee, and
+                   this file's fee convention (rate × 1.15) is one of three in
+                   the tree that disagree by 15% (ERR-114). Basis stays blank
+                   until that is settled — see the GST backend brief. -->
               <th class="num">Δ profit/unit</th>
-              <th class="num">Gross markup</th>
+              <th class="num">Gross markup${gstSub(GST_EXCL)}</th>
               <th class="num">Net margin</th>
             </tr>
           </thead>

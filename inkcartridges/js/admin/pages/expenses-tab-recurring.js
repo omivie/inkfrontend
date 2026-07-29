@@ -16,6 +16,7 @@ import { Modal } from '../components/modal.js';
 import { categoryLabel } from '../utils/expense-categories.js';
 import { describeRecurrence, expandExpenseOccurrences, parseUtcDate } from '../utils/expense-recurrence.js';
 import { monthlyCommitment, recurringMonthlyCommitment } from '../utils/expense-math.js';
+import { GST_INCL } from '../utils/gst-basis.js';
 
 let _host = null;
 let _ctx = null;
@@ -46,14 +47,16 @@ function kpiRow(ctx) {
   const paused = all.filter(t => t.series_state === 'paused');
   const monthly = recurringMonthlyCommitment(all, ctx.fmt.todayUtcMs());
   const cards = [
-    { label: 'Monthly commitment', value: money(monthly), sub: 'active series, normalised to monthly', tone: '' },
-    { label: 'Annualised', value: money(monthly * 12), sub: 'monthly commitment × 12', tone: '' },
+    // Gross cash out, not GST-netted — see the panel note further down.
+    { label: 'Monthly commitment', value: money(monthly), basis: GST_INCL, sub: 'active series, normalised to monthly', tone: '' },
+    { label: 'Annualised', value: money(monthly * 12), basis: GST_INCL, sub: 'monthly commitment × 12', tone: '' },
     { label: 'Active series', value: String(active.length), sub: active.length ? 'projecting occurrences' : 'none yet', tone: active.length ? 'good' : 'plain' },
     { label: 'Paused', value: String(paused.length), sub: paused.length ? 'not counted in commitment' : 'none', tone: paused.length ? 'warn' : 'plain' },
   ];
   return `<div class="exp-kpi-grid exp-kpi-grid--primary">${cards.map(c => `
     <div class="exp-kpi exp-kpi--${c.tone || 'plain'}">
       <div class="exp-kpi__label">${esc(c.label)}</div>
+      ${c.basis ? `<div class="exp-kpi__basis">${esc(c.basis)}</div>` : ''}
       <div class="exp-kpi__value">${esc(c.value)}</div>
       <div class="exp-kpi__sub">${esc(c.sub)}</div>
     </div>`).join('')}</div>`;
@@ -118,8 +121,9 @@ function buildColumns(ctx) {
   const { money, fmtDate, statusBadge, escA } = ctx.fmt;
   return [
     { key: 'name', label: 'Series', sortable: true, render: (r) => `<div class="exp-cell-name"><strong>${esc(r.name || categoryLabel(r.category))}</strong>${r.payee ? `<span class="cell-muted">${esc(r.payee)}</span>` : ''}</div>` },
-    { key: 'amount', label: 'Amount', align: 'right', sortable: true, render: (r) => `<span class="cell-mono">${esc(money(r.amount))}</span>` },
-    { key: 'monthly', label: '≈ Monthly', align: 'right', sortable: true, render: (r) => `<span class="cell-mono" title="Normalised to a monthly figure for the commitment KPI">${esc(money(monthlyCommitment(r)))}</span>` },
+    // Gross cash out, NOT GST-netted — same basis as the commitment KPI above.
+    { key: 'amount', label: 'Amount', align: 'right', sortable: true, gst: GST_INCL, render: (r) => `<span class="cell-mono">${esc(money(r.amount))}</span>` },
+    { key: 'monthly', label: '≈ Monthly', align: 'right', sortable: true, gst: GST_INCL, render: (r) => `<span class="cell-mono" title="Normalised to a monthly figure for the commitment KPI">${esc(money(monthlyCommitment(r)))}</span>` },
     { key: 'recurrence', label: 'Schedule', render: (r) => esc(describeRecurrence(r)) },
     { key: 'category', label: 'Category', sortable: true, render: (r) => esc(categoryLabel(r.category)) },
     { key: 'started', label: 'Started', sortable: true, render: (r) => esc(fmtDate(r.expense_date)) },

@@ -8,6 +8,7 @@ import { Toast } from '../components/toast.js';
 import { Modal } from '../components/modal.js';
 import { RichTextEditor } from '../components/rich-text-editor.js';
 import { computeProfitability, marginBadge, formatProfitDollars } from '../utils/profitability.js';
+import { GST_INCL, GST_EXCL, GST_BASE } from '../utils/gst-basis.js';
 import { PRODUCT_TYPE_TO_SHOP_CATEGORY, describeCodesWriteError, describeScopes, paginate, pagerHtml } from '../utils/product-codes.js';
 import {
   PRODUCT_TYPE_LABELS, RIBBON_PRODUCT_TYPES, typeFilterGroup, typeFilterOptions,
@@ -142,6 +143,7 @@ function buildColumns() {
     },
     {
       key: 'retail_price', label: 'Price', sortable: true, className: 'col-w-price',
+      gst: GST_INCL,
       render: (r) => {
         const price = r.retail_price ?? r.cost_price;
         return `<span class="cell-mono cell-right">${price != null ? formatPrice(price) : MISSING}</span>`;
@@ -153,16 +155,24 @@ function buildColumns() {
   if (isOwner) {
     cols.push({
       key: 'cost_price', label: 'Cost', sortable: true, className: 'col-w-price',
+      gst: GST_EXCL,
       render: (r) => `<span class="cell-mono cell-right">${r.cost_price != null ? formatPrice(r.cost_price) : MISSING}</span>`,
       align: 'right',
     });
     cols.push({
       key: 'margin_pct', label: 'Margin %', sortable: true, className: 'col-w-pct',
+      gst: GST_BASE,
       render: (r) => marginCell(r),
       align: 'right',
     });
     cols.push({
       key: 'profit_ex_gst', label: 'Profit $', sortable: true, className: 'col-w-pct',
+      // Both paths are ex-GST: the backend's `profit_incl_fixed_ex_gst` and the
+      // local computeProfitability() fallback, which divides retail by 1.15
+      // before subtracting an ex-GST cost. The two differ by cents on the
+      // Stripe-fee convention (ERR-114, unsettled) — the label makes no claim
+      // about the fee, only about the GST basis, which is the same either way.
+      gst: GST_EXCL,
       render: (r) => {
         // Prefer the backend's $0.30-inclusive profit; fall back to local compute
         // on the Supabase fast-path (which doesn't carry the server fields).
@@ -1394,7 +1404,7 @@ function buildProductModalTabs(modal, full, isOwner) {
         <input type="checkbox" id="edit-clear-manual-retail"> Clear existing override
       </label>
       <p class="manual-price-override__hint">
-        Forces an <strong>exact</strong> retail price (incl GST), bypassing the pricing engine and the competitor market-cap (<code>manual_retail_price</code>). Leave blank to keep current pricing — the current override isn't shown here because the admin API doesn't return it. Tick <em>Clear existing override</em> to remove one.
+        Forces an <strong>exact</strong> retail price (incl. GST), bypassing the pricing engine and the competitor market-cap (<code>manual_retail_price</code>). Leave blank to keep current pricing — the current override isn't shown here because the admin API doesn't return it. Tick <em>Clear existing override</em> to remove one.
       </p>
     </div>` : ''}
   `;

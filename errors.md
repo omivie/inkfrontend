@@ -41,6 +41,140 @@ describing the same incident.
 
 ---
 
+## ERR-129 — Admin money columns never said whether they were GST-inclusive; Price and Cost sat two columns apart on opposite bases (2026-07-29)
+
+**Trigger:** owner screenshot of `/admin#products` — "add a small incl. gst or excl. gst wherever
+there is a price/cost/number amount… just so we know whether the prices or costs incl or excl GST
+when I look at them."
+
+**What was wrong.** NZ GST is 15%, and the admin shows money on both sides of it in **adjacent
+columns** with nothing on screen to distinguish them. On the Products list `retail_price` is
+GST-inclusive and `cost_price` is GST-exclusive — `$11.49` and `$5.41` two columns apart, on
+different bases, and the only way to know was to read `js/admin/utils/profitability.js`. The same
+ambiguity ran through Orders (Total incl. / line Price excl.), Invoices, Expenses and the
+Dashboard KPIs. This is a tax-return-grade ambiguity, not a cosmetic one.
+
+**What the audit found.** Two things worse than the missing labels:
+
+1. **Four spellings of the basis were already live** — `(excl. GST)`, `(incl GST)`, `(ex GST)`,
+   `(ex-GST)`/`Ex-GST` — because each page that bothered to state it invented its own wording.
+   Four spellings is how a fifth gets added.
+2. **~25 money fields have no provable basis at all.** All of Price Monitor, Customers
+   `total_spent`, the Finance top KPI strip, the Dashboard's margin-by-brand/category charts,
+   refunds, promotions, coupons — pure backend passthrough, no GST arithmetic anywhere in the
+   frontend, no field name asserting it, no note recording it. And two are actively *contradicted*
+   between our own files: `pnl.revenue` is asserted ex-GST by `utils/expense-math.js` and proven
+   incl-GST by `pages/financial-health.js` (which shows the arithmetic), and Stripe fees carry
+   three mutually incompatible conventions (ERR-114, still unsettled).
+
+**The trap this had to avoid.** The obvious move — label everything from the most plausible
+reading — is the one that does real damage. A *wrong* GST basis on an admin money figure is worse
+than no basis, because it is how a wrong GST return gets filed. So the rule is: **a blank sub-line
+is a deliberate signal meaning "nobody has proven this"**, and `tests/admin-gst-basis-labels.test.js`
+§5 fails the build if a future PR quietly labels one of the unknowns from a guess.
+
+**Fix.** One vocabulary module, `js/admin/utils/gst-basis.js`, exporting seven frozen strings
+(`incl. GST`, `excl. GST`, `excl. GST base`, `net of GST`, `GST-netted (mixed basis)`,
+`excl. GST when claimable`, `GST amount`) plus a `gstSub()` helper for hand-written headers.
+`components/table.js` gained one column property, `col.gst`, rendered as a muted second line —
+that single edit covers all ~27 DataTable pages. `col.label` is HTML-escaped, which is precisely
+why a new property was needed rather than markup in the label. Everywhere the basis was already
+stated inline, the inline text was **removed in the same commit** as the sub-line was added, or the
+header would print it twice.
+
+Profit says **"net of GST"**, never "excl. GST": order and invoice profit is GST-*neutral* — ex-GST
+on the revenue side and the cost side, so GST passes through and nets to zero. "excl. GST" would
+imply a further 15% is still to come off.
+
+`gst-basis-backend-brief-jul2026.md` is the register of every blank, what the backend must confirm
+per field, and the response-field naming (`<field>_incl_gst` / `<field>_excl_gst`, or a sibling
+`gst_basis` enum map) that would let us fill them without another round trip. A payload-level
+"everything here is incl. GST" flag is explicitly rejected — the Finance P&L already proves one
+payload mixes bases row by row.
+
+**Verified:** 19 new tests pass; measured in headless Chromium against the real `admin.css` that
+the sub-line drops to its own line, neutralises the header's uppercase + 0.06em tracking, keeps
+`font-weight:400` against the light theme's `700` rule, and does **not** clip inside the shipped
+`.col-w-price` (80px) / `.col-w-pct` (90px) widths. Header rows grow ~11px.
+
+---
+
+## ERR-128 — The cart's "Proceed to Checkout" sat ~900px down a sticky sidebar that was too tall to ever stick (2026-07-29)
+
+**Trigger:** owner screenshots of `/cart` — "the proceed to checkout button is way too far down…
+is everything in the order summary sidebar necessary?"
+
+**What was wrong.** `.cart-summary` had grown by accretion. Every conversion feature shipped since
+May 2026 — free-shipping nudge and progress bar, free-ship unlock upsell, delivery promise,
+same-day dispatch countdown, saved-until, loyalty earn chip, loyalty redeem widget, coupon
+disclosure, trust chips — appended itself **above** the checkout button, because at the time each
+one was written that was simply the end of the list. Nobody ever owned the question *"what must a
+buyer see before the button?"*, so the answer defaulted to *everything*. Measured on a 4-item
+cart: the CTA sat **618px** into an **811px** aside, below the fold at 1440×900.
+
+**The second-order effect is the interesting part.** `.cart-summary` carries
+`position: sticky; top: var(--spacing-lg)`, which had been **inert since the day it was written**.
+A sticky element taller than its scrollport is scrolled fully into view before it can ever pin. So
+the mechanism intended to keep the button reachable and the reason the button was unreachable were
+the same fact — the sidebar was too tall. No amount of CSS debugging on the sticky rule would have
+found it; the fix was to make the box shorter.
+
+**Two content defects the reorder surfaced:**
+
+1. **The sidebar contradicted itself about shipping.** `Shipping: Calculated at checkout` rendered
+   four lines above a green `Your order qualifies for free shipping`. The reason nobody had
+   reconciled them: **nothing ever wrote `#cart-shipping`**. No JS assigned it, no test referenced
+   it, and `#cart-shipping-tier` beside it was equally inert — both had been dead markup since the
+   page was built, so the "Calculated at checkout" text was a hardcoded string that no code owned.
+
+2. **Coupon and loyalty points each took a full block to offer two discounts the server rejects in
+   combination.** `renderCartLoyaltyControl` already disabled each when the other was applied —
+   the mutual exclusivity was known, just not expressed in the layout.
+
+**Fix.** The CTA and the SSL reassurance line moved to directly under the Total and the
+free-shipping state; everything promotional was demoted below them. Coupon and points merged into
+one `<details id="cart-discount">` — deliberately a **shared wrapper** with the inner markup moved
+byte-for-byte, so `initCouponForm` and `initLoyaltyControl` (which resolve by id only) needed no
+rewiring at all. `#cart-shipping` now reads "Free", gated **strictly** on
+`serverSummary.qualifies_for_free_shipping === true`, and that gate also suppresses the duplicate
+banner; the local `Shipping.getSpendMore` fallback is a frontend threshold calculation and is
+**never** allowed to write the money row — unknown shipping stays "Calculated at checkout" and is
+never shown as free (DEC-006). GST dropped from a full row to a caption under the Total, which
+incidentally revived `#cart-gst`: two lines in `cart.js` had been writing to an element that did
+not exist. Result: CTA at **325px**, above the fold, and the sticky pins for the first time.
+
+**`syncDiscountAccordion()` — auto-open is correctness, not polish.** A closed `<details>` does not
+render its contents, so with the drawer shut `#cart-loyalty-feedback` (`role="status"
+aria-live="polite"`) would never announce *"Points applied to this order."* and the "Remove points"
+button would be unreachable. It therefore opens itself whenever a code or points are actually
+applied — behind a one-shot `dataset.autoOpened` latch, because the renderer runs on every cart
+mutation and would otherwise re-open the drawer in the face of a shopper who just collapsed it.
+The coupon-lock notice is owned via a `dataset.lockNotice` marker so that removing the points
+clears it again **without** clobbering a preview/apply result showing in the same element.
+
+**Verified.** Ten guard suites run per-file (mobile-parity, loyalty-points, mobile-ux-audit,
+business-account-pricing, traffic-conversion, merchant-center-readiness, text-fit,
+google-ads-compliance, asset-cache-tokens, console-debuglog-audit) all green; full suite 3077 pass.
+Playwright: the shipping row across `serverSummary` null / `{}` / not-qualifying / qualifying; the
+latch across apply → collapse → remove → re-apply; and `checkout.html`'s `.cart-loyalty` card
+chrome confirmed byte-identical, since the flattening override is scoped to `.cart-discount`, a
+class no other page ships.
+
+**Lessons.**
+
+- A sticky sidebar is a **height budget**, not a decoration. If nobody owns what goes above the
+  CTA, every new feature goes there, and the sticky quietly stops working long before anyone
+  notices the button moved.
+- When two elements state contradictory things, check whether either is written by any code at all
+  before trying to reconcile them. Here one of them was dead markup.
+- When taking a "did I break this?" measurement, let the layout settle first. A
+  `getBoundingClientRect` read racing a viewport resize reported a phantom 52px mobile overflow;
+  re-measuring after the reflow showed the element matched the pre-change build exactly. The
+  comparison method was sound — serving the `git show HEAD:` copies of the four touched files on a
+  second port — but a single racy sample nearly turned it into a false positive.
+
+---
+
 ## ERR-127 — Three customer money surfaces each had their own arithmetic; one printed the TOTAL as the SUBTOTAL, another read unknown shipping as free (2026-07-28)
 
 **Trigger:** a backend handoff asked us to add a loyalty points line to "the customer-facing

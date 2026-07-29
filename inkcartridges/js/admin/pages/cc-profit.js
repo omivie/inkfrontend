@@ -7,6 +7,7 @@ import { DataTable } from '../components/table.js';
 import { Modal } from '../components/modal.js';
 import { Toast } from '../components/toast.js';
 import { normalizeTierResponse, sortTierKeys } from '../utils/pricingCalculator.js';
+import { GST_INCL, GST_EXCL } from '../utils/gst-basis.js';
 
 const formatPrice = (v) => window.formatPrice ? window.formatPrice(v) : `$${Number(v).toFixed(2)}`;
 const TIERS = ['<$10', '$10-30', '$30-60', '$60-100', '$100+'];
@@ -281,8 +282,11 @@ const COLUMNS = [
   { key: 'sku', label: 'SKU', render: (r) => `<span class="cell-mono">${esc(r.sku)}</span>` },
   { key: 'name', label: 'Product', sortable: true, render: (r) => `<span class="cell-truncate" style="max-width:220px">${esc(r.name)}</span>` },
   { key: 'brand', label: 'Brand', sortable: true },
-  { key: 'cost_price', label: 'Cost', align: 'right', sortable: true, render: (r) => `<span class="cell-mono">${formatPrice(r.cost_price)}</span>` },
-  { key: 'retail_price', label: 'Retail', align: 'right', sortable: true, render: (r) => `<span class="cell-mono">${formatPrice(r.retail_price)}</span>` },
+  // Same two products columns as the Products page, so the same proven bases.
+  { key: 'cost_price', label: 'Cost', align: 'right', sortable: true, gst: GST_EXCL, render: (r) => `<span class="cell-mono">${formatPrice(r.cost_price)}</span>` },
+  { key: 'retail_price', label: 'Retail', align: 'right', sortable: true, gst: GST_INCL, render: (r) => `<span class="cell-mono">${formatPrice(r.retail_price)}</span>` },
+  // Margin% and Gap deliberately carry NO basis: both are backend passthrough
+  // with no consistency gate and no documented denominator. See the brief.
   { key: 'net_margin', label: 'Margin%', align: 'right', sortable: true, render: (r) => {
     const color = r.net_margin < 5 ? 'var(--danger)' : r.net_margin < 15 ? 'var(--yellow)' : 'var(--success)';
     return `<span class="cell-mono" style="color:${color}">${r.net_margin.toFixed(1)}%</span>`;

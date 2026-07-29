@@ -24,6 +24,7 @@ import { cashMs, pnlCost } from '../utils/expense-math.js';
 // Robustly parse the traffic time-series (array | {data|series|points}) into
 // [{ date, sessions, pageviews }] for the Performance overview overlay.
 import { normalizeSeries } from '../utils/traffic-analytics.js';
+import { GST_INCL, GST_EXCL, GST_BASE } from '../utils/gst-basis.js';
 
 const formatPrice = (v) => window.formatPrice ? window.formatPrice(v) : `$${Number(v || 0).toFixed(2)}`;
 const MISSING = '—';
@@ -1709,6 +1710,9 @@ function renderKpiTile(t, extraClass = '', noDelta = false) {
   const tipAttr = t.tooltip ? ` data-tooltip="${esc(t.tooltip)}"` : '';
   let h = `<div class="admin-kpi admin-kpi--compact${alertCls}${extraClass}">`;
   h += `<div class="admin-kpi__label"${tipAttr}>${esc(t.label)}</div>`;
+  // GST basis under the label. Absent = basis not documented (Refund Rate's
+  // numerator, for one) — never assume "no line" means "no GST".
+  if (t.gst) h += `<div class="admin-kpi__basis">${esc(t.gst)}</div>`;
   if (t.value != null) {
     h += `<div class="admin-kpi__value">${esc(t.value)}</div>`;
     // In all-time view every "previous" is 0, so deltas read "↑ new" everywhere — noise.
@@ -2010,32 +2014,36 @@ function renderKpiStrip(d) {
 
   const tiles = [
     { label: 'Revenue', value: cur.revenue != null ? formatPrice(cur.revenue) : null, raw: cur.revenue, prev: prev.revenue,
+      gst: GST_INCL,
       tooltip: 'Total sales (incl. GST) for the selected range. Includes invoiced (phone / walk-in / B2B) sales.' },
     {
       label: 'Gross Profit', value: grossProfit != null ? formatPrice(grossProfit) : null,
-      raw: grossProfit, prev: prev.gross_profit, stackNext: true,
+      raw: grossProfit, prev: prev.gross_profit, stackNext: true, gst: GST_EXCL,
       tooltip: `Revenue (ex-GST) − cost of goods (ex-GST), computed by the backend.${grossNote}`,
     },
     {
       label: 'Gross Margin', value: fmtPct(grossMarginPct), raw: grossMarginPct, prev: grossMarginPctPrev,
+      gst: GST_BASE,
       tooltip: 'Gross profit ÷ revenue, both ex-GST. Profit quality, not size.',
     },
     {
       label: 'Net Profit', value: netProfit != null ? formatPrice(netProfit) : null,
       raw: netProfit, prev: prev.net_profit, alert: netProfit != null && netProfit < 0, stackNext: true,
+      gst: GST_EXCL,
       // No separate "− GST" term: since migration 118 every figure below revenue is ex-GST,
       // so GST is already outside this calculation rather than a line item inside it.
       tooltip: `Gross profit − Stripe fees − operating expenses, all ex-GST, computed by the backend. Invoiced sales carry no card fee (bank transfer).${netNote}`,
     },
     {
       label: 'Net Margin', value: fmtPct(netMarginPct), raw: netMarginPct, prev: netMarginPctPrev,
-      alert: netMarginPct != null && netMarginPct < 0,
+      alert: netMarginPct != null && netMarginPct < 0, gst: GST_BASE,
       tooltip: 'Net profit ÷ revenue, both ex-GST. What you actually keep.',
     },
     { label: 'Orders', value: cur.orders != null ? String(cur.orders) : null, raw: cur.orders, prev: prev.orders,
       tooltip: 'Paid orders placed in the selected range. Includes invoiced sales.' },
     { label: 'Avg Order Value', value: aov != null ? formatPrice(aov) : null, raw: aov, prev: aovPrev,
-      tooltip: 'Revenue ÷ orders.' },
+      gst: GST_INCL,  // inherits revenue's basis
+      tooltip: 'Revenue ÷ orders, both incl. GST.' },
     { label: 'New Customers', value: newCustomers != null ? String(newCustomers) : null, raw: newCustomers, prev: newCustomersPrev,
       tooltip: 'First-time buyers in the range.' },
     {
@@ -2043,6 +2051,8 @@ function renderKpiStrip(d) {
       raw: cc.returning_pct, prev: cp.returning_pct, tooltip: 'Share of buyers who had ordered before. Requires analytics_customer_stats.',
     },
     {
+      // No `gst`: the denominator is incl-GST revenue but no basis is documented
+      // anywhere for the refund amounts on top, so the ratio's basis is unknown.
       label: 'Refund Rate', value: refundPct != null ? `${refundPct.toFixed(1)}%` : null,
       alert: refundPct != null && refundPct > 3, tooltip: 'Refunded value ÷ revenue. Flagged above 3%.',
     },

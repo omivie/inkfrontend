@@ -26,6 +26,7 @@ import { Toast } from '../components/toast.js';
 import { attachAutocomplete } from '../components/autocomplete.js';
 import { attachProductAutocomplete, productCostExGst, resolveSkus } from '../components/product-search.js';
 import { costOrNull } from '../utils/invoice-math.js';
+import { GST_INCL, GST_EXCL, gstSub } from '../utils/gst-basis.js';
 import { codesToVerify, applyResolvedCodes, unresolvedLineErrors } from '../utils/line-codes.js';
 import { buildQuickOrderPrefill } from '../utils/quick-order-bridge.js';
 
@@ -183,7 +184,7 @@ const COLUMNS = [
     render: (r) => `<span class="cell-truncate cell-muted">${esc(r.customer_email || r.customer_phone || r.bill_to?.email || r.bill_to?.phone || MISSING)}</span>`,
   },
   { key: 'items', label: 'Items', render: (r) => itemsSummary(r) },
-  { key: 'total', label: 'Total (incl GST)', align: 'right', sortable: true, render: (r) => money(r.total_incl_gst ?? r.total ?? 0) },
+  { key: 'total', label: 'Total', align: 'right', sortable: true, gst: GST_INCL, render: (r) => money(r.total_incl_gst ?? r.total ?? 0) },
   {
     key: 'actions', label: '', align: 'right',
     render: (r) => `
@@ -411,7 +412,7 @@ function editorBodyHtml(d) {
       <section class="inv-section">
         <div class="inv-section__title">Products</div>
         <div class="inv-lines-head qo-lines-head${canSeeCost() ? '' : ' inv-line--nocost'}">
-          <span>Product Code</span><span>Description</span><span>Qty</span><span>Unit Price (excl. GST)</span>${canSeeCost() ? '<span>Our Cost (excl. GST)</span>' : ''}<span></span>
+          <span>Product Code</span><span>Description</span><span>Qty</span><span>Unit Price${gstSub(GST_EXCL)}</span>${canSeeCost() ? `<span>Our Cost${gstSub(GST_EXCL)}</span>` : ''}<span></span>
         </div>
         <div id="qo-lines"></div>
         ${canSeeCost() ? `<p class="inv-section__hint">“Our Cost” is internal — it auto-fills from the product’s cost price and can be typed over. It never appears on the invoice this order becomes.</p>` : ''}

@@ -21,6 +21,10 @@ function delta(current, previous) {
   return `<span class="admin-kpi__delta admin-kpi__delta--${dir}">${arrow} ${Math.abs(pct)}%</span>`;
 }
 
+// No GST-basis slot here yet, unlike dashboard.js's renderKpiTile(): these
+// tiles come from getDashboardKPIs/getRevenueSeries — a different path from the
+// P&L, with no basis stated anywhere for revenue/AOV/volatility. Blank is the
+// honest answer until the backend confirms. See gst-basis-backend-brief-jul2026.md.
 function kpiCard({ label, value, raw, prevRaw, missingTip, sub }) {
   let html = `<div class="admin-kpi">`;
   html += `<div class="admin-kpi__label">${esc(label)}</div>`;

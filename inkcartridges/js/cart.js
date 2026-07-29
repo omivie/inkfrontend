@@ -1951,6 +1951,17 @@ const Cart = {
             const shippingBarEl = document.getElementById('cart-shipping-bar');
             const barFillEl = document.getElementById('shipping-bar-fill');
 
+            // Shipping row. Only the SERVER may put a price in a money row: the
+            // local Shipping.getSpendMore fallback below is a frontend threshold
+            // calc, fine for nudge copy but never good enough to print. Unknown
+            // shipping stays "Calculated at checkout" and is never shown as free.
+            const shipEl = document.getElementById('cart-shipping');
+            const serverQualifies = !!(this.serverSummary
+                && this.serverSummary.qualifies_for_free_shipping === true);
+            if (shipEl) {
+                shipEl.textContent = serverQualifies ? 'Free' : 'Calculated at checkout';
+            }
+
             if (shippingMsgEl) {
                 const summary = this.serverSummary || {};
                 const hasServerNudge = summary.free_shipping_message !== undefined
@@ -1960,7 +1971,12 @@ const Cart = {
                     // Compose a message ourselves when the backend provides
                     // numbers but no copy — keeps the nudge useful on every
                     // cart state.
-                    let copy = summary.free_shipping_message;
+                    // Once the shipping row itself reads "Free", a banner saying the
+                    // same thing is pure duplication — and the two used to read as a
+                    // contradiction ("Calculated at checkout" above "you qualify").
+                    // The "add $X more" nudge is the half worth keeping.
+                    let copy = summary.qualifies_for_free_shipping
+                        ? '' : summary.free_shipping_message;
                     if (!copy && !summary.qualifies_for_free_shipping
                         && typeof summary.free_shipping_remaining === 'number'
                         && summary.free_shipping_remaining > 0) {
@@ -1968,8 +1984,6 @@ const Cart = {
                             ? formatPrice(summary.free_shipping_remaining)
                             : '$' + summary.free_shipping_remaining.toFixed(2);
                         copy = 'Add ' + priceStr + ' more for FREE shipping';
-                    } else if (!copy && summary.qualifies_for_free_shipping) {
-                        copy = "You've qualified for FREE shipping!";
                     }
 
                     if (copy) {
@@ -2003,9 +2017,13 @@ const Cart = {
                     const spendMore = (typeof Shipping !== 'undefined') ? Shipping.getSpendMore(subtotal) : null;
 
                     if (spendMore && spendMore.qualifies) {
+                        // Suppress only when the shipping row already says "Free" —
+                        // i.e. the server confirmed it but withheld the nudge fields.
+                        // Otherwise this banner is the only free-shipping signal the
+                        // shopper gets, since the row can't be trusted to print it.
                         shippingMsgEl.querySelector('span').textContent = "You've qualified for FREE shipping!";
                         shippingMsgEl.className = 'cart-summary__shipping-message cart-summary__shipping-message--success';
-                        shippingMsgEl.hidden = false;
+                        shippingMsgEl.hidden = serverQualifies;
                         if (shippingBarEl) shippingBarEl.hidden = true;
                     } else if (spendMore) {
                         const priceStr = (typeof formatPrice === 'function') ? formatPrice(spendMore.needed) : '$' + spendMore.needed.toFixed(2);

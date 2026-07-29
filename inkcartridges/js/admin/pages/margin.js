@@ -3,6 +3,9 @@
  */
 import { AdminAuth, AdminAPI, esc } from '../app.js';
 import { computeProfitability, marginBadge, markupBadge, formatProfitDollars } from '../utils/profitability.js';
+// Margin %/Markup %/Gap columns deliberately carry NO basis: this page is 100%
+// backend passthrough with no documented denominator. See the GST backend brief.
+import { GST_INCL, GST_EXCL, gstSub } from '../utils/gst-basis.js';
 
 const formatPrice = (v) => window.formatPrice ? window.formatPrice(v) : `$${Number(v).toFixed(2)}`;
 const MISSING = '\u2014';
@@ -145,7 +148,7 @@ async function loadOverview(el) {
       <h3 style="margin:1.5rem 0 0.75rem;font-size:1rem">Top Profit Products</h3>
       <table class="margin-table">
         <thead><tr>
-          <th>SKU</th><th>Source</th><th>Cost</th><th>Retail</th><th>Profit (ex GST)</th><th>Margin %</th><th>Markup %</th>
+          <th>SKU</th><th>Source</th><th>Cost${gstSub(GST_EXCL)}</th><th>Retail${gstSub(GST_INCL)}</th><th>Profit${gstSub(GST_EXCL)}</th><th>Margin %</th><th>Markup %</th>
         </tr></thead>
         <tbody>
           ${d.top_profit_products.map(p => `<tr>
@@ -172,7 +175,7 @@ async function loadRecommended(el) {
   el.innerHTML = `
     <table class="margin-table">
       <thead><tr>
-        <th>SKU</th><th>Name</th><th>Source</th><th>Current</th><th>Recommended</th><th>Current Margin %</th><th>Current Markup %</th><th title="Gap vs 30% target margin">Margin Gap</th><th>Action</th>
+        <th>SKU</th><th>Name</th><th>Source</th><th>Current${gstSub(GST_INCL)}</th><th>Recommended${gstSub(GST_INCL)}</th><th>Current Margin %</th><th>Current Markup %</th><th title="Gap vs 30% target margin">Margin Gap</th><th>Action</th>
       </tr></thead>
       <tbody>
         ${items.map(p => {
@@ -230,7 +233,7 @@ async function loadChanges(el) {
   el.innerHTML = `
     <table class="margin-table">
       <thead><tr>
-        <th>SKU</th><th>Name</th><th>Source</th><th>Previous Cost</th><th>Current Cost</th><th>Cost Change</th><th>Current Margin %</th><th>Markup: Before → After</th><th>Detected</th>
+        <th>SKU</th><th>Name</th><th>Source</th><th>Previous Cost${gstSub(GST_EXCL)}</th><th>Current Cost${gstSub(GST_EXCL)}</th><th>Cost Change${gstSub(GST_EXCL)}</th><th>Current Margin %</th><th>Markup: Before → After</th><th>Detected</th>
       </tr></thead>
       <tbody>
         ${items.map(p => {
@@ -281,7 +284,7 @@ async function loadOutOfStock(el) {
     </div>
     <table class="margin-table">
       <thead><tr>
-        <th>SKU</th><th>Name</th><th>Brand</th><th>Type</th><th>Cost</th><th>Retail</th>
+        <th>SKU</th><th>Name</th><th>Brand</th><th>Type</th><th>Cost${gstSub(GST_EXCL)}</th><th>Retail${gstSub(GST_INCL)}</th>
       </tr></thead>
       <tbody>
         ${items.map(p => `<tr>
@@ -316,7 +319,7 @@ async function loadTopProfit(el) {
     </div>
     <table class="margin-table">
       <thead><tr>
-        <th>SKU</th><th>Name</th><th>Source</th><th>Cost</th><th>Retail</th><th>Profit $ (ex GST)</th><th>Margin %</th><th>Markup %</th>
+        <th>SKU</th><th>Name</th><th>Source</th><th>Cost${gstSub(GST_EXCL)}</th><th>Retail${gstSub(GST_INCL)}</th><th>Profit $${gstSub(GST_EXCL)}</th><th>Margin %</th><th>Markup %</th>
       </tr></thead>
       <tbody>
         ${items.map(p => `<tr>

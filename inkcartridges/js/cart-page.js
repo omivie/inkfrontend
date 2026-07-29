@@ -305,8 +305,83 @@ async function removeLoyaltyPointsFromCart() {
 /**
  * Re-render the cart loyalty control from Cart.loyalty. Called on every cart
  * render (via cart.js renderCartPage) and once at init. Idempotent.
+ *
+ * Wraps the renderer so the merged discount drawer is synced on EVERY path,
+ * including the guest early-return inside renderCartLoyaltyControlInner.
  */
 function renderCartLoyaltyControl() {
+    renderCartLoyaltyControlInner();
+    syncDiscountAccordion();
+}
+
+/**
+ * Keep the merged coupon/points drawer honest: a live hint on the collapsed
+ * row, an auto-open once a discount is actually applied, and the coupon side
+ * locked while points are on (mirroring the coupon->points lock below).
+ *
+ * The auto-open is a ONE-SHOT latch. This runs on every cart mutation, so
+ * re-opening unconditionally would fight a shopper who deliberately collapsed
+ * the drawer after applying. The latch clears when the discount is removed, so
+ * a later re-apply opens it again.
+ *
+ * It is not cosmetic: a closed <details> does not render its contents, so
+ * #cart-loyalty-feedback (role="status" aria-live="polite") would never
+ * announce "Points applied to this order." and "Remove points" would be
+ * unreachable without first guessing to expand the drawer.
+ */
+function syncDiscountAccordion() {
+    const det = document.getElementById('cart-discount');
+    if (!det) return;
+
+    const lo = (typeof Cart !== 'undefined') ? Cart.loyalty : null;
+    const applied = (lo && lo.points_applied) || 0;
+    const coupon = (typeof Cart !== 'undefined' && Cart.appliedCoupon) || '';
+    const isAuthed = (typeof Auth !== 'undefined') && Auth.isAuthenticated && Auth.isAuthenticated();
+
+    const hint = document.getElementById('cart-discount-hint');
+    if (hint) {
+        // textContent only — the coupon code is user/backend supplied.
+        let text = '';
+        if (coupon) {
+            text = `${coupon} applied`;
+        } else if (applied > 0) {
+            text = `${applied.toLocaleString('en-NZ')} pts applied`;
+        } else if (isAuthed && lo && (lo.max_redeemable_points || 0) > 0) {
+            text = `${(lo.points_balance || 0).toLocaleString('en-NZ')} pts available`;
+        }
+        hint.textContent = text;
+    }
+
+    // The server rejects coupon + points together; saying so up front is kinder
+    // than spending one of the shopper's limited coupon attempts to find out.
+    const pointsOn = applied > 0;
+    const couponInput = document.getElementById('cart-coupon-input');
+    const couponApply = document.getElementById('cart-coupon-apply');
+    const couponFeedback = document.getElementById('cart-coupon-feedback');
+    if (couponInput) couponInput.disabled = pointsOn;
+    if (couponApply) couponApply.disabled = pointsOn;
+    if (couponFeedback) {
+        // Own only this one message via a marker, so removing the points clears
+        // it again without ever clobbering a preview/apply result from
+        // initCouponForm that happens to be showing in the same element.
+        if (pointsOn && !couponFeedback.textContent) {
+            couponFeedback.textContent = 'Remove your points to use a coupon.';
+            couponFeedback.dataset.lockNotice = '1';
+        } else if (!pointsOn && couponFeedback.dataset.lockNotice) {
+            couponFeedback.textContent = '';
+            delete couponFeedback.dataset.lockNotice;
+        }
+    }
+
+    const active = pointsOn || !!coupon;
+    if (active && !det.dataset.autoOpened) {
+        det.open = true;
+        det.dataset.autoOpened = '1';
+    }
+    if (!active) delete det.dataset.autoOpened;
+}
+
+function renderCartLoyaltyControlInner() {
     const root = document.getElementById('cart-loyalty');
     if (!root) return;
 
@@ -458,10 +533,28 @@ async function autoApplyCouponFromUrl() {
                 ? `Coupon ${code} applied — you saved ${formatPrice(saved)}!`
                 : `Coupon ${code} applied!`;
             if (typeof showToast === 'function') showToast(msg, 'success', 5000);
-        } else if (typeof showToast === 'function') {
-            showToast(res?.error || 'Coupon could not be applied', 'warning', 5000);
+            // Cart.updateUI is typeof-guarded above and may have been a no-op.
+            syncDiscountAccordion();
+        } else {
+            if (typeof showToast === 'function') {
+                showToast(res?.error || 'Coupon could not be applied', 'warning', 5000);
+            }
+            revealCouponForRetry(code);
         }
     } catch (err) {
         if (typeof DebugLog !== 'undefined') DebugLog.warn('Auto-apply coupon failed:', err && err.message);
+        revealCouponForRetry(code);
     }
+}
+
+/**
+ * A ?coupon= link that failed leaves the shopper with a toast and no obvious
+ * next step — the field is behind a collapsed drawer. Open it and prefill the
+ * code so retrying is one tap rather than a hunt.
+ */
+function revealCouponForRetry(code) {
+    const det = document.getElementById('cart-discount');
+    if (det) { det.open = true; det.dataset.autoOpened = '1'; }
+    const input = document.getElementById('cart-coupon-input');
+    if (input && !input.value) input.value = code;
 }

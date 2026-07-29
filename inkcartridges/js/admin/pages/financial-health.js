@@ -251,13 +251,16 @@ function renderPnLTable() {
   // NOT subtract down the column, and the footnote below says so — otherwise the owner
   // reads "8342 − 5663 = 2679" and gets the pre-118 over-stated figure back.
   const rows = [
+    // Basis is per ROW here, not per column — which is exactly why the header
+    // row above carries no sub-line and each label spells its own out. Wording
+    // is the canon from utils/gst-basis.js so it matches every other surface.
     ['Revenue (incl. GST)', cur.revenue, prev.revenue],
-    ['Cost of Goods Sold (ex-GST)', cur.cogs, prev.cogs, true],
-    ['Gross Profit', cur.gross_profit, prev.gross_profit],
+    ['Cost of Goods Sold (excl. GST)', cur.cogs, prev.cogs, true],
+    ['Gross Profit (excl. GST)', cur.gross_profit, prev.gross_profit],
     // Invoiced sales settle by bank transfer, so they add exactly $0 of card fees.
-    ['Stripe Fees (ex-GST)', cur.stripe_fees, prev.stripe_fees, true],
-    ['Operating Expenses (ex-GST)', cur.operating_expenses, prev.operating_expenses, true],
-    ['Net Profit', cur.net_profit, prev.net_profit, false, true],
+    ['Stripe Fees (excl. GST)', cur.stripe_fees, prev.stripe_fees, true],
+    ['Operating Expenses (excl. GST)', cur.operating_expenses, prev.operating_expenses, true],
+    ['Net Profit (excl. GST)', cur.net_profit, prev.net_profit, false, true],
   ];
 
   // COGS HONESTY (ERR-028 / ERR-063). The backend returns cogs / gross_profit /

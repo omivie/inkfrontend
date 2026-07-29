@@ -31,6 +31,7 @@ import {
   normalizeInvoice, invoiceDocRows,
 } from '../utils/invoice-math.js';
 import { marginBadge, formatProfitDollars } from '../utils/profitability.js';
+import { GST_INCL, GST_EXCL, GST_NET, gstSub } from '../utils/gst-basis.js';
 
 const GST_RATE = 0.15;
 
@@ -488,9 +489,9 @@ const COLUMNS = [
   { key: 'invoice_number', label: 'Invoice #', sortable: true, render: (r) => `<span class="cell-mono"><strong>${esc(r.invoice_number || '—')}</strong></span>` },
   { key: 'issue_date', label: 'Date', sortable: true, render: (r) => esc(formatInvoiceDate((r.issue_date || r.date || '').slice(0, 10))) },
   { key: 'customer', label: 'Customer', render: (r) => esc(r.customer_name || r.customer?.name || '—') },
-  { key: 'total', label: 'Total (incl GST)', align: 'right', sortable: true, render: (r) => money(r.total_incl_gst ?? r.total ?? 0) },
+  { key: 'total', label: 'Total', align: 'right', sortable: true, gst: GST_INCL, render: (r) => money(r.total_incl_gst ?? r.total ?? 0) },
   {
-    key: 'profit', label: 'Profit', align: 'right', ownerOnly: true,
+    key: 'profit', label: 'Profit', align: 'right', ownerOnly: true, gst: GST_NET,
     // Internal. Renders "—" whenever any line's cost is unknown — including the
     // whole period before the backend persists supplier_cost_excl_gst at all, when
     // every saved invoice will read as unknown. That is the honest answer, not a bug.
@@ -1182,13 +1183,13 @@ function editorBodyHtml(d) {
       <section class="inv-section">
         <div class="inv-section__title">Line items</div>
         <div class="inv-lines-head${canSeeCost() ? '' : ' inv-line--nocost'}">
-          <span>Product Code</span><span>Description</span><span>Number</span><span>Unit Price (excl. GST)</span>${canSeeCost() ? '<span>Our Cost (excl. GST)</span>' : ''}<span></span>
+          <span>Product Code</span><span>Description</span><span>Number</span><span>Unit Price${gstSub(GST_EXCL)}</span>${canSeeCost() ? `<span>Our Cost${gstSub(GST_EXCL)}</span>` : ''}<span></span>
         </div>
         <div id="inv-lines"></div>
         ${canSeeCost() ? `<p class="inv-section__hint">“Our Cost” is internal — it auto-fills from the product’s cost price, can be typed over, and <strong>never appears on the invoice, the preview, the PDF or the customer’s email</strong>. It exists so invoiced sales carry a real COGS into your profit figures.</p>` : ''}
         <div id="inv-cogs"></div>
         <button class="admin-btn admin-btn--ghost admin-btn--sm" data-form-action="add-line">${icon('plus', 13, 13)} Add line</button>
-        <label class="inv-field inv-field--freight"><span class="inv-field__label">Freight (excl. GST — 0 shows as “Free”)</span>
+        <label class="inv-field inv-field--freight"><span class="inv-field__label">Freight — 0 shows as “Free”${gstSub(GST_EXCL)}</span>
           <input class="admin-input" type="number" step="0.01" min="0" data-field="freight" value="${escA(d.freight)}">
         </label>
       </section>

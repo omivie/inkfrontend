@@ -50,6 +50,7 @@ import {
 import {
   computePeriodKpis, categoryBreakdownDetailed, pnlCost,
 } from '../utils/expense-math.js';
+import { GST_INCL, gstSub } from '../utils/gst-basis.js';
 import {
   PRESET_KEY, MAX_PRESETS, toPreset, applyPresetToDraft, upsertPreset, removePreset,
   normalizePresetList, validatePreset, presetNameExists,
@@ -1156,7 +1157,7 @@ function editorBody(m) {
       <div id="e-linked-note" class="exp-linked-note" style="display:none">${icon('lock', 12, 12)} This is an order-linked cost — it's already counted in per-order profit, so it won't be added to operating expenses. Kept here for cash-flow visibility.</div>
 
       <div class="exp-form__grid2">
-        <div class="exp-field"><label>Amount (NZD, incl GST) <span class="req">*</span></label><input class="admin-input" type="number" step="0.01" min="0" id="e-amount" value="${escA(m.amount)}" placeholder="0.00"><span class="exp-hint" id="e-exgst-hint"></span></div>
+        <div class="exp-field"><label>Amount (NZD) <span class="req">*</span>${gstSub(GST_INCL)}</label><input class="admin-input" type="number" step="0.01" min="0" id="e-amount" value="${escA(m.amount)}" placeholder="0.00"><span class="exp-hint" id="e-exgst-hint"></span></div>
         <div class="exp-field exp-field--check"><label class="exp-check"><input type="checkbox" id="e-gst" ${gstChecked ? 'checked' : ''}> Claim NZ GST input credit</label><span class="exp-hint">Off for foreign SaaS / GST-free spend.</span></div>
       </div>
 

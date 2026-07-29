@@ -4317,9 +4317,13 @@ body.filter-sort-open { overflow: hidden; }
 }
 
 /* Cart Summary */
+/* Keep this short. The sticky only pins if the aside fits the viewport — before
+   the Jul 2026 CTA lift it was ~900px tall and the browser scrolled it fully
+   into view instead. Do NOT add max-height/overflow to force the issue: that
+   clips the payment icons and nests a scroller inside the page scroller. */
 .cart-summary {
     background-color: var(--color-background-alt);
-    padding: var(--spacing-xl);
+    padding: var(--spacing-lg);
     border-radius: var(--radius-xl);
     border: 1px solid var(--color-border);
     position: sticky;
@@ -4360,18 +4364,21 @@ body.filter-sort-open { overflow: hidden; }
 }
 
 .cart-summary__actions {
-    margin-top: var(--spacing-xl);
+    margin-top: var(--spacing-lg);
     display: flex;
     flex-direction: column;
     gap: var(--spacing-md);
 }
 
+/* Sibling of __actions, never a child — __actions is a column flex with a gap,
+   so nesting would stack that gap on top of this margin-top. */
 .cart-summary__secure {
     display: flex;
     align-items: center;
     justify-content: center;
     gap: var(--spacing-sm);
-    margin-top: var(--spacing-md);
+    margin-top: var(--spacing-sm);
+    margin-bottom: var(--spacing-md);
     color: var(--color-text-muted);
     font-size: var(--font-size-sm);
 }
@@ -4913,25 +4920,33 @@ body.filter-sort-open { overflow: hidden; }
     font-variant-numeric: tabular-nums;
 }
 
+/* Compacted in the Jul 2026 CTA lift: three full-width stacked chips became a
+   wrapped row. The labels are backend-supplied and can be long, so this shrinks
+   them to fit rather than forcing a single row — wrapping, never clipping
+   (ERR-094). Expect one or two rows in the 380px sidebar. */
 .cart-trust-signals {
     display: flex;
     flex-wrap: wrap;
-    gap: var(--tap-gap);
+    gap: 6px;
     margin-bottom: var(--spacing-md);
 }
 .cart-trust-badge {
     display: inline-flex;
     align-items: center;
-    gap: 6px;
-    padding: 6px 10px;
+    gap: 4px;
+    min-width: 0;
+    padding: 4px 8px;
     border-radius: var(--radius-full, 999px);
     background: var(--color-background-alt, #F8FAFC);
     border: 1px solid var(--color-border, #e2e8f0);
     font-size: var(--font-size-xs);
     font-weight: 600;
+    line-height: 1.25;
     color: var(--color-heading, #0F172A);
 }
-.cart-trust-badge svg { flex-shrink: 0; color: var(--color-success-green, #16a34a); }
+/* Overrides the width/height presentation attributes cart.js writes on the SVG. */
+.cart-trust-badge svg { flex-shrink: 0; width: 12px; height: 12px; color: var(--color-success-green, #16a34a); }
+.cart-trust-badge > span { overflow-wrap: anywhere; }
 
 .cart-free-ship-unlock {
     padding: var(--spacing-md);
@@ -5015,23 +5030,27 @@ body.filter-sort-open { overflow: hidden; }
     .cart-line-pack { min-height: 44px; }
 }
 
-/* Loyalty message chip (earn nudge / applied summary) */
+/* Loyalty message chip (earn nudge / applied summary). Tightened in the Jul 2026
+   CTA lift — the copy is backend-supplied and can run to two sentences, so it is
+   never truncated, just set smaller so it wraps to one or two lines instead of
+   four. align-items:flex-start keeps the ★ on the first line when it wraps. */
 .cart-summary__loyalty-chip {
     display: inline-flex;
-    align-items: center;
+    align-items: flex-start;
     gap: 6px;
-    padding: 8px 12px;
-    margin: 0 0 var(--spacing-md);
+    padding: 6px 10px;
+    margin: 0 0 var(--spacing-sm);
     background: linear-gradient(135deg, #ecfdf5 0%, #d1fae5 100%);
     color: #065f46;
-    border-radius: 999px;
-    font-size: 0.875rem;
+    border-radius: var(--radius-md, 10px);
+    font-size: var(--font-size-xs);
     font-weight: 600;
-    line-height: 1.2;
+    line-height: 1.35;
 }
 .cart-summary__loyalty-chip::before {
     content: "★";
-    font-size: 1rem;
+    font-size: 0.875rem;
+    line-height: 1.35;
 }
 
 /* Loyalty points redemption control (cart + checkout) */
@@ -5041,6 +5060,19 @@ body.filter-sort-open { overflow: hidden; }
     border: 1px solid var(--color-border, #e2e8f0);
     border-radius: var(--radius-sm, 8px);
     background: #fff;
+}
+
+/* On checkout.html the redeem control is a standalone card; inside the cart's
+   merged discount drawer it is just a section, and the card chrome would draw a
+   box inside a box. Scoped to .cart-discount — a class no other page ships — so
+   checkout's .cart-loyalty stays byte-for-byte identical. Never put a modifier
+   class on #cart-loyalty itself: the two pages' markup is copy-pasted, and the
+   modifier would eventually be copied across with it. */
+.cart-discount .cart-loyalty {
+    margin: 0;
+    padding: 0;
+    border: 0;
+    background: transparent;
 }
 .cart-loyalty__head {
     display: flex;
@@ -13903,36 +13935,101 @@ body.page-shop {
 }
 
 /* S3.2 — coupon entry disclosure. Compact, full-width on mobile. */
-.cart-coupon {
+/* Merged coupon + loyalty-points drawer. Renamed from .cart-coupon in the
+   Jul 2026 CTA lift — the two discounts are mutually exclusive server-side and
+   now share one disclosure below the checkout button. The inner form classes
+   (.cart-coupon__form/__input/__apply/__feedback) are unchanged: those class
+   names still live on the moved elements, and __suggestion is shared with
+   checkout's .coupon-form__suggestion. */
+.cart-discount {
     margin: var(--spacing-md) 0;
     border: 1px solid var(--color-border);
     border-radius: var(--radius-md);
     padding: var(--spacing-2) var(--spacing-3);
 }
 
-.cart-coupon__summary {
+/* Grid, not flex: the label and the state hint both vary in length (a long
+   coupon code, a six-figure balance), and side-by-side they fight for a 330px
+   column. Stacking them in column 1 with the +/- spanning both rows means
+   neither ever truncates, and an empty hint collapses the row back to one line. */
+.cart-discount__summary {
     cursor: pointer;
     font-weight: var(--font-weight-semibold);
     font-size: var(--font-size-sm);
     list-style: none;
     min-height: 44px;
-    display: flex;
+    display: grid;
+    grid-template-columns: 1fr auto;
     align-items: center;
+    column-gap: var(--spacing-2);
 }
 
-.cart-coupon__summary::-webkit-details-marker {
+.cart-discount__summary::-webkit-details-marker {
     display: none;
 }
 
-.cart-coupon__summary::after {
+.cart-discount__summary::after {
     content: '+';
-    margin-left: auto;
+    grid-column: 2;
+    grid-row: 1 / -1;
     font-size: 1.2em;
     color: var(--color-text-muted);
 }
 
-.cart-coupon[open] .cart-coupon__summary::after {
+.cart-discount[open] .cart-discount__summary::after {
     content: '\2212'; /* minus */
+}
+
+/* Live state under the label — "SAVE10 applied" / "1,600 pts available".
+   Kept out of the flow entirely when empty so the summary stays one line. */
+.cart-discount__summary > span:first-child {
+    grid-column: 1;
+    min-width: 0;
+}
+
+.cart-discount__hint {
+    grid-column: 1;
+    min-width: 0;
+    font-size: var(--font-size-xs);
+    font-weight: var(--font-weight-normal, 400);
+    color: var(--color-text-muted);
+    overflow-wrap: anywhere;
+}
+
+.cart-discount__hint:empty {
+    display: none;
+}
+
+.cart-discount__body {
+    padding-top: var(--spacing-2);
+}
+
+/* Deliberately NOT .cart-summary__coupon-label — that class is checkout-only
+   (checkout.html), and reusing it would couple the two pages for three lines. */
+.cart-discount__label {
+    display: block;
+    font-size: var(--font-size-sm);
+    font-weight: var(--font-weight-semibold);
+    margin-bottom: var(--spacing-2);
+}
+
+.cart-discount__or {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-2);
+    margin: var(--spacing-3) 0;
+    font-size: var(--font-size-xs);
+    color: var(--color-text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.cart-discount__or::before,
+.cart-discount__or::after {
+    content: '';
+    flex: 1 1 auto;
+    height: 1px;
+    background: var(--color-border);
 }
 
 .cart-coupon__form {
