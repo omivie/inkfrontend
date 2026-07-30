@@ -3,6 +3,7 @@
  * Uses window.API for REST calls + Supabase RPC for analytics
  */
 import { PRODUCT_TYPE_TO_SHOP_CATEGORY } from './utils/product-codes.js';
+import { normalisePurgeResult } from './utils/order-deletability.js';
 
 // Direct RPC via Supabase REST — avoids creating a second GoTrueClient
 async function rpc(fnName, params = {}, signal = null) {
@@ -77,6 +78,44 @@ function invoiceError(resp, fallback) {
 // order, so it lives on POST /:id/void; the backend rejects it here with a 400
 // precisely so a paid/unpaid toggle can never cancel an order as a side effect.
 const INVOICE_STATUSES = Object.freeze(['draft', 'unpaid', 'paid']);
+
+// Orders per POST /api/admin/orders/purge call. The selection that feeds a purge
+// survives pagination, so it is unbounded; every purge also writes an audit-log
+// snapshot per order against the backend's 60/min limiter. The endpoint's own cap
+// would have been in the contract doc that was never delivered, so we chunk
+// conservatively and sequentially rather than assume there is no ceiling.
+const PURGE_CHUNK = 25;
+
+/**
+ * Turn a non-ok `{ ok:false, error, code, status, request_id }` envelope into an
+ * Error that KEEPS its code.
+ *
+ * `js/api.js` request() does not throw for 401/403/404/429/5xx — it RETURNS that
+ * envelope so callers can render targeted UI. Every AdminAPI method that unwraps
+ * one used to do it as `new Error(resp.error || '…')`, which discarded the
+ * machine-readable code and left English prose as the only thing left to branch
+ * on. That is the ERR-077 trap, and the "there is no err.code" folklore it
+ * produced was written into BF-010 and into a test comment before anyone checked
+ * (ERR-132). The message is unchanged, so no existing caller sees a difference —
+ * there is simply now a `.code` to branch on instead of a sentence to parse.
+ *
+ * Never construct a bare Error from an envelope again.
+ */
+function errorFromEnvelope(resp, fallbackMessage) {
+  // `resp.error` is a STRING on the envelopes js/api.js builds, but a few admin
+  // endpoints pass the backend's `{code, message}` object straight through. Both
+  // shapes must yield a readable message and a branchable code — `new Error(obj)`
+  // would have produced the literal "[object Object]".
+  const err = resp?.error;
+  const message = (err && typeof err === 'object' ? err.message : (typeof err === 'string' ? err : null))
+    || fallbackMessage;
+  const e = new Error(message);
+  e.code = resp?.code || (err && typeof err === 'object' ? err.code : null) || null;
+  e.status = resp?.status ?? null;
+  if (resp?.request_id) e.request_id = resp.request_id;
+  return e;
+}
+
 
 // Rich-text product columns that the backend's HTML sanitiser mangles.
 //
@@ -316,7 +355,7 @@ const AdminAPI = {
       const payload = { ...body, status };
       const resp = await window.API.put(`/api/admin/orders/${orderId}`, payload);
       if (resp && resp.ok === false) {
-        throw new Error(resp.error || 'Update failed');
+        throw errorFromEnvelope(resp, 'Update failed');
       }
       return resp?.data ?? null;
     } catch (e) {
@@ -384,12 +423,97 @@ const AdminAPI = {
   async deleteOrder(orderId) {
     try {
       const resp = await window.API.delete(`/api/admin/orders/${encodeURIComponent(orderId)}`);
-      if (resp && resp.ok === false) throw new Error(resp.error || 'Delete failed');
+      if (resp && resp.ok === false) throw errorFromEnvelope(resp, 'Delete failed');
       return true;
     } catch (e) {
-      DebugLog.warn('[AdminAPI] deleteOrder failed:', e.message);
+      DebugLog.warn(`[AdminAPI] deleteOrder failed (${e.code || 'no code'}):`, e.message);
       throw e;
     }
+  },
+
+  /**
+   * Owner-only hard purge — `POST /api/admin/orders/purge` with `{ order_ids }`.
+   *
+   * Three things about this endpoint drive the whole shape of this method:
+   *
+   * 1. **It returns 200 even on partial failure.** The body carries
+   *    `data.deleted` and `data.failed[] {id, code, message}`. A resolved
+   *    response is therefore NEVER an error — branch on `failed[].code`.
+   * 2. **It is irreversible.** So an id the server did not mention comes back as
+   *    `unaccounted`, never as a success. See normalisePurgeResult().
+   * 3. **It is super_admin only.** A non-owner gets 403, which js/api.js delivers
+   *    as a resolved `{ok:false, code:'FORBIDDEN'}` envelope, not a rejection.
+   *    Missing that check would turn "you are not allowed" into "outcome unknown".
+   *
+   * Chunked at 25 and sequential: the selection survives pagination so it is
+   * unbounded, every purge writes audit rows, and the backend runs a 60/min
+   * limiter — the same budget reasoning as the orders list's PROFIT_BATCH. The
+   * server's own cap would have been in the contract doc that was never
+   * delivered, so we pick a conservative one rather than assume none.
+   *
+   * Throws ONLY when nothing was accomplished (first-chunk refusal / network /
+   * auth) so the caller can abort the whole operation. Once any chunk has come
+   * back, a later failure degrades into `failed[]` entries carrying the transport
+   * code — throwing then would destroy the record of what was already
+   * irreversibly purged.
+   *
+   * @param {string[]} orderIds
+   * @returns {Promise<{deleted: string[], failed: Array<{id,code,message}>,
+   *                    unaccounted: string[], unexpected: string[]}>}
+   */
+  async purgeOrders(orderIds) {
+    // Dedupe first: a doubled id would come back once and read as unaccounted.
+    const ids = [...new Set((orderIds || []).map((id) => String(id ?? '')).filter(Boolean))];
+    const out = { deleted: [], failed: [], unaccounted: [], unexpected: [] };
+    if (ids.length === 0) return out;
+
+    let anySucceeded = false;
+
+    for (let i = 0; i < ids.length; i += PURGE_CHUNK) {
+      const chunk = ids.slice(i, i + PURGE_CHUNK);
+      let resp;
+      try {
+        resp = await window.API.post('/api/admin/orders/purge', { order_ids: chunk });
+      } catch (e) {
+        if (!anySucceeded) {
+          DebugLog.warn(`[AdminAPI] purgeOrders failed (${e.code || 'no code'}):`, e.message);
+          throw e;
+        }
+        for (const id of chunk) {
+          out.failed.push({ id, code: e.code || 'REQUEST_FAILED', message: e.message || 'Request failed' });
+        }
+        continue;
+      }
+
+      if (!resp || resp.ok === false) {
+        const err = errorFromEnvelope(resp, 'Purge failed');
+        if (!anySucceeded) {
+          DebugLog.warn(`[AdminAPI] purgeOrders refused (${err.code || 'no code'}):`, err.message);
+          throw err;
+        }
+        for (const id of chunk) {
+          out.failed.push({ id, code: err.code || 'REQUEST_FAILED', message: err.message });
+        }
+        continue;
+      }
+
+      anySucceeded = true;
+      const part = normalisePurgeResult(chunk, resp.data);
+      out.deleted.push(...part.deleted);
+      out.failed.push(...part.failed);
+      out.unaccounted.push(...part.unaccounted);
+      out.unexpected.push(...part.unexpected);
+    }
+
+    // Loud, in the return value AND in the log — an unaccounted id after a
+    // destructive call is a fact the operator has to see, not a rounding error.
+    if (out.unaccounted.length) {
+      DebugLog.warn(`[AdminAPI] purgeOrders: ${out.unaccounted.length} id(s) in neither deleted nor failed`, out.unaccounted);
+    }
+    if (out.unexpected.length) {
+      DebugLog.warn('[AdminAPI] purgeOrders: server named ids we never requested', out.unexpected);
+    }
+    return out;
   },
 
   // ---- Refunds ----
@@ -721,7 +845,7 @@ const AdminAPI = {
 
   async adjustCustomerPoints(customerId, { points, reason, type = 'adjust' }) {
     const resp = await window.API.post(`/api/admin/customers/${customerId}/loyalty/adjust`, { points, reason, type });
-    if (resp && resp.ok === false) throw new Error(resp.error?.message || resp.error || 'Adjustment failed');
+    if (resp && resp.ok === false) throw errorFromEnvelope(resp, 'Adjustment failed');
     return resp?.data?.loyalty ?? resp?.data ?? null;
   },
 
@@ -732,7 +856,7 @@ const AdminAPI = {
   // is echoed back on the customer row as `invoicing` (tolerant if absent).
   async updateCustomerInvoicing(customerId, payload) {
     const resp = await window.API.put(`/api/admin/customers/${customerId}/invoicing`, payload);
-    if (resp && resp.ok === false) throw new Error(resp.error?.message || resp.error || 'Save invoicing details failed');
+    if (resp && resp.ok === false) throw errorFromEnvelope(resp, 'Save invoicing details failed');
     return resp?.data?.customer ?? resp?.data ?? null;
   },
 
@@ -768,19 +892,19 @@ const AdminAPI = {
 
   async createContact(payload) {
     const resp = await window.API.post('/api/admin/contacts', payload);
-    if (resp && resp.ok === false) throw new Error(resp.error?.message || resp.error || 'Create contact failed');
+    if (resp && resp.ok === false) throw errorFromEnvelope(resp, 'Create contact failed');
     return resp?.data?.contact ?? resp?.data ?? null;
   },
 
   async updateContact(contactId, payload) {
     const resp = await window.API.put(`/api/admin/contacts/${encodeURIComponent(contactId)}`, payload);
-    if (resp && resp.ok === false) throw new Error(resp.error?.message || resp.error || 'Update contact failed');
+    if (resp && resp.ok === false) throw errorFromEnvelope(resp, 'Update contact failed');
     return resp?.data?.contact ?? resp?.data ?? null;
   },
 
   async deleteContact(contactId) {
     const resp = await window.API.delete(`/api/admin/contacts/${encodeURIComponent(contactId)}`);
-    if (resp && resp.ok === false) throw new Error(resp.error?.message || resp.error || 'Delete contact failed');
+    if (resp && resp.ok === false) throw errorFromEnvelope(resp, 'Delete contact failed');
     return resp?.data ?? null;
   },
 
@@ -851,7 +975,7 @@ const AdminAPI = {
   async generateProductSEO(sku) {
     try {
       const resp = await window.API.post(`/api/admin/products/${encodeURIComponent(sku)}/generate-seo`, {});
-      if (resp && resp.ok === false) throw new Error(resp.error || 'Generate SEO failed');
+      if (resp && resp.ok === false) throw errorFromEnvelope(resp, 'Generate SEO failed');
       return resp?.data ?? resp;
     } catch (e) {
       DebugLog.warn('[AdminAPI] generateProductSEO failed:', e.message);
@@ -900,7 +1024,7 @@ const AdminAPI = {
   async updateProductOverrides(productId, overrides) {
     try {
       const resp = await window.API.put(`/api/admin/products/${productId}/overrides`, { overrides });
-      if (resp && resp.ok === false) throw new Error(resp.error || 'Update overrides failed');
+      if (resp && resp.ok === false) throw errorFromEnvelope(resp, 'Update overrides failed');
       return resp?.data ?? null;
     } catch (e) {
       DebugLog.warn('[AdminAPI] updateProductOverrides failed:', e.message);
@@ -911,7 +1035,7 @@ const AdminAPI = {
   async toggleImportLock(productId) {
     try {
       const resp = await window.API.put(`/api/admin/products/${productId}/import-lock`);
-      if (resp && resp.ok === false) throw new Error(resp.error || 'Toggle import lock failed');
+      if (resp && resp.ok === false) throw errorFromEnvelope(resp, 'Toggle import lock failed');
       return resp?.data ?? null;
     } catch (e) {
       DebugLog.warn('[AdminAPI] toggleImportLock failed:', e.message);
@@ -922,7 +1046,7 @@ const AdminAPI = {
   async toggleProductReviewed(productId) {
     try {
       const resp = await window.API.put(`/api/admin/products/${productId}/reviewed`);
-      if (resp && resp.ok === false) throw new Error(resp.error || 'Toggle reviewed failed');
+      if (resp && resp.ok === false) throw errorFromEnvelope(resp, 'Toggle reviewed failed');
       return resp?.data ?? null;
     } catch (e) {
       DebugLog.warn('[AdminAPI] toggleProductReviewed failed:', e.message);
@@ -1149,7 +1273,7 @@ const AdminAPI = {
   async bulkQuarantineImages(productIds) {
     try {
       const resp = await window.API.post('/api/admin/image-audit/bulk-quarantine', { product_ids: productIds });
-      if (resp && resp.ok === false) throw new Error(resp.error || 'Bulk quarantine failed');
+      if (resp && resp.ok === false) throw errorFromEnvelope(resp, 'Bulk quarantine failed');
       return resp?.data ?? null;
     } catch (e) {
       DebugLog.warn('[AdminAPI] bulkQuarantineImages failed:', e.message);
@@ -1170,7 +1294,7 @@ const AdminAPI = {
         `/api/admin/image-audit/${encodeURIComponent(productId)}/status`,
         { status }
       );
-      if (resp && resp.ok === false) throw new Error(resp.error || 'Update status failed');
+      if (resp && resp.ok === false) throw errorFromEnvelope(resp, 'Update status failed');
       return resp?.data ?? null;
     } catch (e) {
       DebugLog.warn('[AdminAPI] setImageAuditStatus failed:', e.message);
@@ -1215,7 +1339,7 @@ const AdminAPI = {
       const body = { decisions };
       if (note) body.note = note;
       const resp = await window.API.post(`/api/admin/pending-changes/${id}/review`, body);
-      if (resp && resp.ok === false) throw new Error(resp.error || 'Review failed');
+      if (resp && resp.ok === false) throw errorFromEnvelope(resp, 'Review failed');
       return resp?.data ?? null;
     } catch (e) {
       DebugLog.warn('[AdminAPI] reviewPendingChange failed:', e.message);
@@ -1228,7 +1352,7 @@ const AdminAPI = {
       const body = { ids, action };
       if (note) body.note = note;
       const resp = await window.API.post('/api/admin/pending-changes/bulk-review', body);
-      if (resp && resp.ok === false) throw new Error(resp.error || 'Bulk review failed');
+      if (resp && resp.ok === false) throw errorFromEnvelope(resp, 'Bulk review failed');
       return resp?.data ?? null;
     } catch (e) {
       DebugLog.warn('[AdminAPI] bulkReviewPendingChanges failed:', e.message);
@@ -1391,7 +1515,7 @@ const AdminAPI = {
         method: 'POST',
         body: JSON.stringify(payload),
       });
-      if (resp && resp.ok === false) throw new Error(resp.error || 'Create failed');
+      if (resp && resp.ok === false) throw errorFromEnvelope(resp, 'Create failed');
       return resp?.data || resp;
     } catch (e) {
       DebugLog.warn('[AdminAPI] createRibbonProduct failed:', e.message);
@@ -1407,7 +1531,7 @@ const AdminAPI = {
         method: 'PUT',
         body: JSON.stringify(payload),
       });
-      if (resp && resp.ok === false) throw new Error(resp.error || 'Update failed');
+      if (resp && resp.ok === false) throw errorFromEnvelope(resp, 'Update failed');
       return resp?.data || resp;
     } catch (e) {
       DebugLog.warn('[AdminAPI] updateRibbonProduct failed:', e.message);
@@ -2816,7 +2940,7 @@ const AdminAPI = {
   // =========================================================================
   async resendInvoice(orderId) {
     const resp = await window.API.post(`/api/admin/orders/${orderId}/resend-invoice`, {});
-    if (resp && resp.ok === false) throw new Error(resp.error || 'Resend failed');
+    if (resp && resp.ok === false) throw errorFromEnvelope(resp, 'Resend failed');
     return resp?.data ?? null;
   },
 
@@ -3051,17 +3175,17 @@ const AdminAPI = {
   },
   async createShippingRate(payload) {
     const resp = await window.API.post('/api/admin/shipping/rates', payload);
-    if (resp && resp.ok === false) throw new Error(resp.error || 'Create failed');
+    if (resp && resp.ok === false) throw errorFromEnvelope(resp, 'Create failed');
     return resp?.data ?? null;
   },
   async updateShippingRate(id, payload) {
     const resp = await window.API.put(`/api/admin/shipping/rates/${id}`, payload);
-    if (resp && resp.ok === false) throw new Error(resp.error || 'Update failed');
+    if (resp && resp.ok === false) throw errorFromEnvelope(resp, 'Update failed');
     return resp?.data ?? null;
   },
   async deleteShippingRate(id) {
     const resp = await window.API.delete(`/api/admin/shipping/rates/${id}`);
-    if (resp && resp.ok === false) throw new Error(resp.error || 'Delete failed');
+    if (resp && resp.ok === false) throw errorFromEnvelope(resp, 'Delete failed');
     return true;
   },
 
@@ -3075,17 +3199,17 @@ const AdminAPI = {
   },
   async createPromotion(payload) {
     const resp = await window.API.post('/api/admin/promotions', payload);
-    if (resp && resp.ok === false) throw new Error(resp.error || 'Create failed');
+    if (resp && resp.ok === false) throw errorFromEnvelope(resp, 'Create failed');
     return resp?.data ?? null;
   },
   async updatePromotion(id, payload) {
     const resp = await window.API.put(`/api/admin/promotions/${id}`, payload);
-    if (resp && resp.ok === false) throw new Error(resp.error || 'Update failed');
+    if (resp && resp.ok === false) throw errorFromEnvelope(resp, 'Update failed');
     return resp?.data ?? null;
   },
   async deletePromotion(id) {
     const resp = await window.API.delete(`/api/admin/promotions/${id}`);
-    if (resp && resp.ok === false) throw new Error(resp.error || 'Delete failed');
+    if (resp && resp.ok === false) throw errorFromEnvelope(resp, 'Delete failed');
     return true;
   },
 
@@ -3120,7 +3244,7 @@ const AdminAPI = {
   async deleteCoupon(id, permanent = false) {
     const qs = permanent ? '?permanent=true' : '';
     const resp = await window.API.delete(`/api/admin/coupons/${id}${qs}`);
-    if (resp && resp.ok === false) throw new Error(resp.error?.message || resp.error || 'Delete failed');
+    if (resp && resp.ok === false) throw errorFromEnvelope(resp, 'Delete failed');
     return true;
   },
   async getCouponLogs(params = {}) {
@@ -3139,7 +3263,7 @@ const AdminAPI = {
   },
   async resolveAbuseFlag(id, notes = '') {
     const resp = await window.API.put(`/api/admin/abuse/flags/${id}/resolve`, { notes });
-    if (resp && resp.ok === false) throw new Error(resp.error || 'Resolve failed');
+    if (resp && resp.ok === false) throw errorFromEnvelope(resp, 'Resolve failed');
     return resp?.data ?? null;
   },
   async getCouponSignals(params = {}) {
@@ -3153,12 +3277,12 @@ const AdminAPI = {
   },
   async addBlockedDomain(domain, reason = '') {
     const resp = await window.API.post('/api/admin/abuse/blocked-domains', { domain, reason });
-    if (resp && resp.ok === false) throw new Error(resp.error || 'Block failed');
+    if (resp && resp.ok === false) throw errorFromEnvelope(resp, 'Block failed');
     return resp?.data ?? null;
   },
   async removeBlockedDomain(id) {
     const resp = await window.API.delete(`/api/admin/abuse/blocked-domains/${id}`);
-    if (resp && resp.ok === false) throw new Error(resp.error || 'Unblock failed');
+    if (resp && resp.ok === false) throw errorFromEnvelope(resp, 'Unblock failed');
     return true;
   },
 
@@ -3171,17 +3295,17 @@ const AdminAPI = {
   },
   async createSegment(payload) {
     const resp = await window.API.post('/api/admin/segments', payload);
-    if (resp && resp.ok === false) throw new Error(resp.error || 'Create failed');
+    if (resp && resp.ok === false) throw errorFromEnvelope(resp, 'Create failed');
     return resp?.data ?? null;
   },
   async assignSegmentUsers(segmentId, userIds) {
     const resp = await window.API.post(`/api/admin/segments/${segmentId}/users`, { user_ids: userIds });
-    if (resp && resp.ok === false) throw new Error(resp.error || 'Assign failed');
+    if (resp && resp.ok === false) throw errorFromEnvelope(resp, 'Assign failed');
     return resp?.data ?? null;
   },
   async sendAnnouncement(payload) {
     const resp = await window.API.post('/api/admin/email/send-announcement', payload);
-    if (resp && resp.ok === false) throw new Error(resp.error || 'Send failed');
+    if (resp && resp.ok === false) throw errorFromEnvelope(resp, 'Send failed');
     return resp?.data ?? null;
   },
 
@@ -3194,7 +3318,7 @@ const AdminAPI = {
   },
   async runDataIntegrityAudit() {
     const resp = await window.API.post('/api/admin/recovery/data-integrity-audit', {});
-    if (resp && resp.ok === false) throw new Error(resp.error || 'Audit failed');
+    if (resp && resp.ok === false) throw errorFromEnvelope(resp, 'Audit failed');
     return resp?.data ?? null;
   },
 
@@ -3233,17 +3357,17 @@ const AdminAPI = {
       const payload = { action, product_ids };
       if (undercut_amount != null) payload.undercut_amount = undercut_amount;
       const resp = await window.API.post('/api/admin/price-monitor/bulk-action', payload);
-      if (resp && resp.ok === false) throw new Error(resp.error || 'Bulk action failed');
+      if (resp && resp.ok === false) throw errorFromEnvelope(resp, 'Bulk action failed');
       return resp?.data ?? null;
     },
     async updatePrice(sku, target_price) {
       const resp = await window.API.post('/api/admin/price-monitor/update-price', { sku, target_price });
-      if (resp && resp.ok === false) throw new Error(resp.error || 'Update failed');
+      if (resp && resp.ok === false) throw errorFromEnvelope(resp, 'Update failed');
       return resp?.data ?? null;
     },
     async generateExport() {
       const resp = await window.API.post('/api/admin/price-monitor/exports/generate', {});
-      if (resp && resp.ok === false) throw new Error(resp.error || 'Generate failed');
+      if (resp && resp.ok === false) throw errorFromEnvelope(resp, 'Generate failed');
       return resp?.data ?? null;
     },
     async listExports() {
@@ -3324,7 +3448,7 @@ const AdminAPI = {
   },
   async addAdminAnalyticsExpense(expense) {
     const resp = await window.API.post('/api/admin/analytics/expenses', expense);
-    if (resp && resp.ok === false) throw new Error(resp.error?.message || resp.error || 'Save failed');
+    if (resp && resp.ok === false) throw errorFromEnvelope(resp, 'Save failed');
     return resp?.data ?? null;
   },
 

@@ -12,6 +12,15 @@ import { GST_INCL, GST_EXCL, GST_NET, gstSub } from '../utils/gst-basis.js';
 // Supplier/Origin rendering is shared with the Products page — see utils/sourcing.js.
 // A second copy of the origin vocabulary is how the two surfaces would drift apart.
 import { originBadge, supplierCell } from '../utils/sourcing.js';
+// Deletability is a SERVER answer, per order, per caller — never a status rule
+// re-implemented here. utils/order-deletability.js owns the whole vocabulary:
+// which door, why not, what the confirm dialog says, how a purge response reads.
+import {
+  DELETE_METHOD, UNACCOUNTED_COPY,
+  orderDeleteRight, resolveDeleteRight, deleteContractOf, hasDeleteContract,
+  groupSelectionForDelete, blockedSummary, deletePlanCopy, deleteActionLabel,
+  methodVerb, purgeFailureCopy,
+} from '../utils/order-deletability.js';
 
 // Re-exported so existing importers of orders.js keep working; the definition now
 // lives in utils/order-profit.js (utils must never import a page — that would be
@@ -22,38 +31,58 @@ const formatPrice = (v) => window.formatPrice ? window.formatPrice(v) : `$${Numb
 const MISSING = '\u2014';
 
 /**
- * Which order statuses the backend will actually let us DELETE.
+ * Delete gating. THE RULE IS NOT HERE.
  *
- * `DELETE /api/admin/orders/:id` enforces a cancelled-only guard server-side and
- * rejects anything else with "Only cancelled orders can be deleted" (ERR-119).
- * That string lives ONLY on the backend \u2014 never re-implement the rule inline.
- * This list is the single source of truth for BOTH the single-order Delete button
- * and the bulk bar, so the two can never drift apart again. When the backend ships
- * the owner-only hard purge (see backend-fixes.md), this is the only thing to change.
- */
-const DELETABLE_STATUSES = ['cancelled'];
-const NOT_DELETABLE_REASON = 'Only cancelled orders can be deleted \u2014 change the status first.';
-
-function isDeletable(order) {
-  return DELETABLE_STATUSES.includes(String(order?.status || '').toLowerCase());
-}
-
-/**
- * Selection survives pagination (DataTable.setData does not clear it), so the bulk
- * bar can hold ids whose rows are no longer in `_table.data`. Remember every order
- * we have seen this session so we can still read a selected order's status \u2014 and
- * therefore its deletability \u2014 after the admin has paged away from it.
+ * `GET /api/admin/orders` returns `deletable` / `delete_method` /
+ * `delete_blocked_reason` on every row, computed server-side from the caller's
+ * role AND the order. This page reads that answer and routes on it; it never
+ * derives deletability from `status` and never infers it from the admin's role.
+ * The whole vocabulary \u2014 the two doors, the block reasons, the copy, the confirm
+ * wording, the purge-response shape \u2014 lives in utils/order-deletability.js so the
+ * bulk bar and the single-order button cannot drift apart again (ERR-120).
+ *
+ * The old `DELETABLE_STATUSES = ['cancelled']` is gone. It survives only as
+ * `LEGACY_DELETABLE_STATUSES` inside that util, as the fallback for rows that
+ * carry no contract fields \u2014 and that fallback can never yield a purge.
+ *
+ * Selection survives pagination (DataTable.setData does not clear it), so the
+ * bulk bar can hold ids whose rows have left `_table.data`. `_seenOrders` keeps
+ * every row we have seen this session \u2014 including its delete contract, VERBATIM
+ * via deleteContractOf(), so absence stays absence and a cached pre-deploy row
+ * still resolves through the legacy path instead of reading as "server says no".
  */
 const _seenOrders = new Map();
 
 function rememberOrders(rows) {
   for (const r of rows || []) {
-    if (r && r.id) _seenOrders.set(r.id, { order_number: r.order_number, status: r.status });
+    if (r && r.id) {
+      _seenOrders.set(r.id, {
+        order_number: r.order_number,
+        status: r.status,
+        ...deleteContractOf(r),
+      });
+    }
   }
 }
 
 function lookupOrder(id) {
   return (_table?.data || []).find(r => r.id === id) || _seenOrders.get(id) || null;
+}
+
+/**
+ * Drop everything we remember about an order.
+ *
+ * Called for EVERY id we attempted \u2014 deleted, refused, and unknown-outcome
+ * alike. A refusal is newer information than our cache: if the row said
+ * `delete_method: 'purge'` and the server came back ORDER_HAS_INVOICE_LINK, the
+ * cached contract is provably wrong and must not gate the next click. Also
+ * called after a status change, which flips deletability under a selection the
+ * admin may still be holding.
+ */
+function forgetOrderCache(id) {
+  if (!id) return;
+  _seenOrders.delete(id);
+  forgetProfit(id);
 }
 
 /**
@@ -192,19 +221,15 @@ function orderLabel(id) {
 }
 
 /**
- * Split a bulk selection into what we can delete and what the backend would refuse.
- * An id we cannot resolve to a status counts as blocked: firing a request we know
- * may be rejected is worse than telling the admin we can't vouch for it.
+ * Split a bulk selection into its two doors plus the blocked remainder.
+ *
+ * Fail-CLOSED: an id we cannot resolve at all is blocked, and now says so in its
+ * own words (`fe_unresolved`) instead of borrowing the cancelled-only sentence.
+ * Firing a request we cannot vouch for is worse than admitting we cannot vouch
+ * for it — and under the purge door it would be irreversible.
  */
-function partitionSelection(selected) {
-  const deletable = [];
-  const blocked = [];
-  for (const id of selected) {
-    const order = lookupOrder(id);
-    if (order && isDeletable(order)) deletable.push(id);
-    else blocked.push(id);
-  }
-  return { deletable, blocked };
+function groupSelection(selected) {
+  return groupSelectionForDelete([...selected], lookupOrder);
 }
 
 function channelBadge(o) {
@@ -374,6 +399,14 @@ async function loadOrders() {
     limit: 20,
   };
   rememberOrders(rows);
+  // A backend that stops sending the delete contract would silently revert this
+  // whole surface to cancelled-only gating and nobody would find out — the UI
+  // would just quietly refuse to delete paid orders again, which is exactly the
+  // bug this replaced. Say it out loud, once per load.
+  if (rows.length > 0 && !rows.some(hasDeleteContract)) {
+    window.DebugLog?.warn?.('[orders] GET /api/admin/orders returned no deletable/delete_method fields — '
+      + 'falling back to the legacy cancelled-only rule. The hard purge is unreachable until the backend sends them.');
+  }
   _table.setData(rows, pagination);
   // Deliberately NOT awaited: the table must paint from the list payload alone,
   // and the per-row cost fetches fill the Profit column in behind it (ERR-121).
@@ -393,24 +426,45 @@ function updateBulkBar(selected) {
     _bulkBar.className = 'admin-bulk-bar';
     document.body.appendChild(_bulkBar);
   }
-  // Only offer a delete the backend can actually honour. Previously the bulk bar
-  // rendered Delete unconditionally while the single-order button was gated to
-  // cancelled-only, so selecting a paid order sent a request that always failed
-  // with "0 deleted, 1 failed: Only cancelled orders can be deleted" (ERR-119).
-  const { deletable, blocked } = partitionSelection(selected);
-  const nothingDeletable = deletable.length === 0;
-  const deleteLabel = blocked.length > 0 && !nothingDeletable
-    ? `Delete ${deletable.length} of ${count}`
-    : 'Delete';
+  // Every row stays selectable — a checkbox that silently refuses to tick is a
+  // worse answer than a bar that says why. The loudness lives here instead: the
+  // counts are broken out by DOOR, the button names the door it will open, and
+  // the tooltip rolls the blocked orders up by reason. Blocked ids are still
+  // never sent (ERR-120).
+  const groups = groupSelection(selected);
+  const nothingDeletable = groups.actionable === 0;
+  const summary = blockedSummary(groups.blocked);
+
+  // The method must be visible BEFORE the click. A button that just says
+  // "Delete" and fires an irreversible hard purge is the UX version of the very
+  // bug this surface exists to fix.
+  const actionLabel = deleteActionLabel(groups);
+  const isPurging = groups.purge.length > 0;
+
+  const parts = [`${count} selected`];
+  if (groups.purge.length) parts.push(`${groups.purge.length} purge`);
+  if (groups.delete.length) parts.push(`${groups.delete.length} delete`);
+
+  const blockedTitle = summary
+    .map(s => `${s.count} × ${s.copy}${s.hint ? ` ${s.hint}` : ''}`)
+    .join('\n');
+  const skipNote = blockedTitle ? `\n\nSkipped:\n${blockedTitle}` : '';
+  const actionTitle = nothingDeletable
+    ? (blockedTitle || 'Nothing in this selection can be deleted.')
+    : (isPurging
+      ? `Hard purge — permanent, cascades to line items / invoice links / loyalty / tracking, audit-logged first.${skipNote}`
+      : `Delete ${groups.delete.length} cancelled order${groups.delete.length === 1 ? '' : 's'}.${skipNote}`);
 
   _bulkBar.innerHTML = `
-    <span class="admin-bulk-bar__count">${count} selected${
-      blocked.length > 0 ? ` · <span style="color:var(--warning,#b45309)">${blocked.length} not deletable</span>` : ''
+    <span class="admin-bulk-bar__count">${esc(parts.join(' · '))}${
+      groups.blocked.length > 0
+        ? ` · <span style="color:var(--warning,#b45309)" title="${esc(blockedTitle)}">${groups.blocked.length} blocked</span>`
+        : ''
     }</span>
     <div class="admin-bulk-bar__actions">
       <button class="admin-btn admin-btn--sm admin-btn--danger" data-bulk="delete"${
-        nothingDeletable ? ' disabled' : ''
-      } title="${esc(nothingDeletable ? NOT_DELETABLE_REASON : `Delete ${deletable.length} cancelled order${deletable.length > 1 ? 's' : ''}`)}">${deleteLabel}</button>
+        nothingDeletable || _deleteInFlight ? ' disabled' : ''
+      } title="${esc(actionTitle)}">${esc(actionLabel)}</button>
       <button class="admin-btn admin-btn--sm admin-btn--ghost" data-bulk="clear">Clear</button>
     </div>
   `;
@@ -419,82 +473,262 @@ function updateBulkBar(selected) {
     if (_table) _table.clearSelection();
     updateBulkBar(new Set());
   });
+
+  // We do NOT gate on role here — the server owns that rule, and a second copy
+  // of it in the frontend is how the two would start disagreeing. But if they
+  // ever DO disagree, that is worth seeing here rather than discovering as a 403.
+  if (isPurging && typeof AdminAuth?.isOwner === 'function' && !AdminAuth.isOwner()) {
+    window.DebugLog?.warn?.('[orders] backend offered delete_method:"purge" to a non-owner session '
+      + '— the role gate and the delete contract disagree.');
+  }
 }
 
 /**
- * Report a partially-successful bulk delete LOUDLY: name every order that failed
- * and why, rather than collapsing N distinct rejections into one error string.
+ * The delete confirm dialog.
  *
- * Deferred behind a timeout because Modal.confirm calls Modal.close() *after* its
- * onConfirm resolves \u2014 opening this synchronously would have it closed instantly.
+ * Deliberately NOT Modal.confirm, for three independent reasons:
+ *   1. its `message` is escaped TEXT in a single <p> — no list, no per-door
+ *      counts, nowhere to put the purge warnings honestly;
+ *   2. it calls Modal.close() *after* onConfirm resolves, which is what forced
+ *      showDeleteResults behind a timeout in the first place;
+ *   3. it SWALLOWS exceptions thrown by onConfirm into a DebugLog line and then
+ *      closes — so a 403 from the purge endpoint would shut the dialog with no
+ *      message at all.
+ *
+ * Resolving a boolean and running the work OUTSIDE the callback fixes all three.
  */
-function showDeleteResults({ done, failures, skipped }) {
-  const rows = [
-    ...failures.map(f => `<li><strong>${esc(f.label)}</strong> \u2014 ${esc(f.message)}</li>`),
-    ...skipped.map(id => `<li><strong>${esc(orderLabel(id))}</strong> \u2014 ${esc(NOT_DELETABLE_REASON)}</li>`),
-  ].join('');
+function confirmDeletePlan(copy) {
+  return new Promise((resolve) => {
+    // Confirm-then-close fires onClose immediately after the click handler, so
+    // without this the promise would try to settle twice with opposite answers.
+    let settled = false;
+    const finish = (value) => {
+      if (settled) return;
+      settled = true;
+      resolve(value);
+    };
+
+    const lines = copy.lines.map(l => `<li>${esc(l)}</li>`).join('');
+    const warnings = copy.warnings.map(w => `<li>${esc(w)}</li>`).join('');
+    const skips = copy.skips.map(s => `<li>${esc(s)}</li>`).join('');
+
+    const modal = Modal.open({
+      title: copy.title,
+      body: `
+        <ul style="margin:0 0 14px;padding-left:18px;line-height:1.7;font-weight:600">${lines}</ul>
+        ${warnings ? `<ul style="margin:0 0 14px;padding-left:18px;color:var(--text-secondary);line-height:1.7">${warnings}</ul>` : ''}
+        ${skips ? `<div style="padding:10px 12px;border-radius:6px;background:rgba(180,83,9,.08)">
+          <div style="font-weight:600;margin-bottom:6px;color:var(--warning,#b45309)">Skipped</div>
+          <ul style="margin:0;padding-left:18px;color:var(--text-secondary);line-height:1.7">${skips}</ul>
+        </div>` : ''}
+      `,
+      footer: `
+        <button class="admin-btn admin-btn--ghost" data-action="cancel">Cancel</button>
+        <button class="admin-btn admin-btn--danger" data-action="confirm">${esc(copy.confirmLabel)}</button>
+      `,
+      // Backdrop click, the close button and Escape all land here. Every one of
+      // them means "no" — an unanswered destructive dialog is never a yes.
+      onClose: () => finish(false),
+    });
+
+    if (!modal) { finish(false); return; }
+    modal.footer.querySelector('[data-action="cancel"]')?.addEventListener('click', () => { finish(false); Modal.close(); });
+    modal.footer.querySelector('[data-action="confirm"]')?.addEventListener('click', () => { finish(true); Modal.close(); });
+  });
+}
+
+/**
+ * Report the outcome of a delete LOUDLY and per order.
+ *
+ * Five buckets, five headings, deliberately not collapsible into each other:
+ *
+ *   deleted       gone, confirmed by the server
+ *   failed        the server refused, and told us which code
+ *   unknown       we asked and the server never said. NOT a failure and NOT a
+ *                 success — folding it into either is the ERR-074 shape (absence
+ *                 rendered as a definite answer), and after an irreversible
+ *                 purge it is the most dangerous lie on offer
+ *   skipped       never sent, because we could not vouch for them
+ *   notAttempted  an earlier step failed hard enough that continuing would have
+ *                 meant acting on a permission model we had just disproved
+ *
+ * Every record carries its own `label`, captured BEFORE the list reloaded. The
+ * previous version called orderLabel() inside this timeout — i.e. after
+ * loadOrders() may already have swapped _table.data out from under it — so a
+ * successfully purged order would have printed as a truncated UUID.
+ *
+ * Still deferred behind a timeout (ERR-120): Modal.close() may be running from
+ * the confirm dialog's own click handler, and this stays defence-in-depth for
+ * any future caller that opens it from inside a Modal-owned callback.
+ */
+function showDeleteResults(outcome) {
+  const { deleted = [], failed = [], unknown = [], skipped = [], notAttempted = [] } = outcome;
+
+  const section = (heading, colour, items) => {
+    if (!items.length) return '';
+    const rows = items
+      .map(i => `<li><strong>${esc(i.label)}</strong>${i.message ? ` — ${esc(i.message)}` : ''}</li>`)
+      .join('');
+    return `<div style="margin:0 0 14px">
+      <div style="font-weight:600;margin-bottom:6px;color:${colour}">${esc(heading)} (${items.length})</div>
+      <ul style="margin:0;padding-left:18px;color:var(--text-secondary);line-height:1.7">${rows}</ul>
+    </div>`;
+  };
+
+  const problems = failed.length + unknown.length + skipped.length + notAttempted.length;
+  const body = [
+    section('Deleted', 'var(--success,#15803d)', deleted),
+    section('Refused by the server', 'var(--danger,#b91c1c)', failed),
+    section('Outcome unknown', 'var(--warning,#b45309)', unknown),
+    section('Skipped — never sent', 'var(--warning,#b45309)', skipped),
+    section('Not attempted', 'var(--text-muted)', notAttempted),
+  ].join('') || '<p style="margin:0;color:var(--text-secondary)">Nothing to report.</p>';
 
   setTimeout(() => {
     Modal.open({
-      title: 'Delete finished with problems',
-      body: `
-        <p style="margin:0 0 12px;color:var(--text-secondary)">
-          ${done} order${done === 1 ? '' : 's'} deleted.
-          ${failures.length + skipped.length} not deleted:
-        </p>
-        <ul style="margin:0;padding-left:18px;color:var(--text-secondary);line-height:1.7">${rows}</ul>
-      `,
+      title: problems === 0 ? 'Delete finished' : 'Delete finished with problems',
+      body,
       footer: `<button class="admin-btn admin-btn--ghost" data-action="dismiss">Close</button>`,
     })?.footer.querySelector('[data-action="dismiss"]')?.addEventListener('click', () => Modal.close());
   }, 320);
 }
 
+/**
+ * Guards a second click landing while the first delete is still in flight.
+ *
+ * Under the old cancelled-only door a double-submit was merely noisy. Under the
+ * purge door the second pass gets ORDER_NOT_FOUND for ids the first pass already
+ * destroyed, and the results modal would then report "3 not deleted" about three
+ * orders that were deleted perfectly.
+ */
+let _deleteInFlight = false;
+
 async function bulkDelete() {
-  if (!_table) return;
+  if (!_table || _deleteInFlight) return;
   const selected = _table.getSelected();
   if (selected.size === 0) return;
 
-  // Never send ids the backend's cancelled-only guard will reject (ERR-119) \u2014
-  // they are reported as skipped instead.
-  const { deletable: ids, blocked: skipped } = partitionSelection(selected);
-  if (ids.length === 0) {
-    Toast.error(NOT_DELETABLE_REASON);
+  // Blocked ids are never sent — they are reported, by reason (ERR-120).
+  const groups = groupSelection(selected);
+
+  // Capture every label UP FRONT. Once loadOrders() has run and the cache is
+  // evicted, orderLabel() can no longer resolve an order number for a row that
+  // has just been purged out of existence.
+  const attempted = [...groups.purge, ...groups.delete];
+  const labels = new Map(
+    [...attempted, ...groups.blocked.map(b => b.id)].map(id => [id, orderLabel(id)]),
+  );
+  const label = (id) => labels.get(id) || String(id || '').slice(0, 8) || 'order';
+  const skipped = groups.blocked.map(b => ({
+    id: b.id,
+    label: label(b.id),
+    message: b.hint ? `${b.copy} ${b.hint}` : b.copy,
+  }));
+
+  if (groups.actionable === 0) {
+    // Not a single toast: once the block reasons are mixed, one sentence is
+    // wrong for most of the selection. Name every order and every reason.
+    Toast.error(`${skipped.length} selected order${skipped.length === 1 ? '' : 's'} cannot be deleted`);
+    showDeleteResults({ skipped });
     return;
   }
 
-  const count = ids.length;
-  const skipNote = skipped.length > 0
-    ? ` ${skipped.length} selected order${skipped.length > 1 ? 's are' : ' is'} not cancelled and will be skipped.`
-    : '';
+  const plan = deletePlanCopy(groups);
+  if (!(await confirmDeletePlan(plan))) return;
 
-  Modal.confirm({
-    title: 'Delete Orders',
-    message: `Permanently delete ${count} cancelled order${count > 1 ? 's' : ''}? This cannot be undone.${skipNote}`,
-    confirmLabel: `Delete ${count}`,
-    confirmClass: 'admin-btn--danger',
-    onConfirm: async () => {
-      let done = 0;
-      const failures = [];
-      Toast.info(`Deleting ${count} order${count > 1 ? 's' : ''}\u2026`);
-      for (let i = 0; i < ids.length; i += 5) {
-        const batch = ids.slice(i, i + 5);
+  _deleteInFlight = true;
+  updateBulkBar(selected);
+
+  const deleted = [];
+  const failed = [];
+  const unknown = [];
+  const notAttempted = [];
+
+  try {
+    Toast.info(`${groups.purge.length ? 'Purging' : 'Deleting'} ${groups.actionable} order${groups.actionable === 1 ? '' : 's'}…`);
+
+    // ---- The purge door first ----
+    // The destructive, expensive call goes while the admin is still watching,
+    // and a hard refusal here stops us doing the cheap work on a false premise.
+    let authRevoked = false;
+    if (groups.purge.length > 0) {
+      try {
+        const res = await AdminAPI.purgeOrders(groups.purge);
+        for (const id of res.deleted) {
+          deleted.push({ id, label: label(id), method: DELETE_METHOD.PURGE });
+        }
+        for (const f of res.failed) {
+          failed.push({ id: f.id, label: label(f.id), code: f.code, message: purgeFailureCopy(f.code, f.message) });
+        }
+        for (const id of res.unaccounted) {
+          unknown.push({ id, label: label(id), message: UNACCOUNTED_COPY });
+        }
+      } catch (e) {
+        if (e?.code === 'FORBIDDEN' || e?.code === 'UNAUTHORIZED') {
+          // Our authority is in doubt. Running the per-id deletes now would mean
+          // acting on a permission model the server has just disproved.
+          authRevoked = true;
+          for (const id of groups.purge) {
+            failed.push({ id, label: label(id), code: e.code, message: purgeFailureCopy(e.code, e.message) });
+          }
+        } else {
+          // A timeout does NOT tell us the purge did not happen.
+          for (const id of groups.purge) {
+            unknown.push({ id, label: label(id), message: `${UNACCOUNTED_COPY} (${e?.message || 'request failed'})` });
+          }
+        }
+      }
+    }
+
+    // ---- Then the cancelled-only door, per id ----
+    if (groups.delete.length > 0 && authRevoked) {
+      for (const id of groups.delete) {
+        notAttempted.push({ id, label: label(id), message: 'Skipped after the purge call was refused — sign in again, then retry.' });
+      }
+    } else {
+      for (let i = 0; i < groups.delete.length; i += 5) {
+        const batch = groups.delete.slice(i, i + 5);
         const results = await Promise.allSettled(batch.map(id => AdminAPI.deleteOrder(id)));
         results.forEach((r, j) => {
-          if (r.status === 'fulfilled') { done++; forgetProfit(batch[j]); }
-          else failures.push({ label: orderLabel(batch[j]), message: r.reason?.message || 'Delete failed' });
+          const id = batch[j];
+          if (r.status === 'fulfilled') {
+            deleted.push({ id, label: label(id), method: DELETE_METHOD.DELETE });
+          } else {
+            // Branch on the CODE, never on the prose (ERR-077 / ERR-130).
+            failed.push({ id, label: label(id), code: r.reason?.code || null, message: purgeFailureCopy(r.reason?.code, r.reason?.message) });
+          }
         });
       }
-      if (_table) _table.clearSelection();
-      updateBulkBar(new Set());
-      if (failures.length > 0 || skipped.length > 0) {
-        Toast.error(`${done} deleted, ${failures.length + skipped.length} not deleted`);
-        showDeleteResults({ done, failures, skipped });
-      } else {
-        Toast.success(`${done} order${done > 1 ? 's' : ''} deleted`);
-      }
-      loadOrders();
-    },
-  });
+    }
+  } finally {
+    _deleteInFlight = false;
+  }
+
+  // Everything we touched is evicted, not just the successes: a refusal is newer
+  // information than the contract we had cached for that row.
+  for (const rec of [...deleted, ...failed, ...unknown]) forgetOrderCache(rec.id);
+
+  if (_table) _table.clearSelection();
+  updateBulkBar(new Set());
+
+  const problems = failed.length + unknown.length + skipped.length + notAttempted.length;
+  if (problems === 0) {
+    const purged = deleted.filter(d => d.method === DELETE_METHOD.PURGE).length;
+    const plain = deleted.length - purged;
+    const bits = [];
+    if (purged) bits.push(`${purged} purged`);
+    if (plain) bits.push(`${plain} deleted`);
+    Toast.success(bits.join(', ') || 'Nothing deleted');
+  } else {
+    // An unknown outcome never counts toward the success tally, and it is a
+    // warning rather than an error — nothing has been proven to have failed.
+    const msg = `${deleted.length} deleted, ${problems} not`;
+    if (unknown.length > 0 && failed.length + skipped.length + notAttempted.length === 0) Toast.warning(msg);
+    else Toast.error(msg);
+    showDeleteResults({ deleted, failed, unknown, skipped, notAttempted });
+  }
+
+  loadOrders();
 }
 
 // ---- Full-page order modal ----
@@ -561,14 +795,27 @@ async function openOrderModal(order) {
   const detailLoadFailed = !fullOrder;
   if (detailLoadFailed) Toast.error('Order detail failed to load — showing summary only');
 
+  // Deletability is resolved across BOTH payloads, not off `o`.
+  //
+  // The backend only promises `deletable` / `delete_method` /
+  // `delete_blocked_reason` on the LIST endpoint. `GET /api/admin/orders/:id`
+  // may not echo them — and gating on the detail payload alone would then take
+  // the legacy cancelled-only path, so an owner opening a paid order would find
+  // NO delete button at all: the whole feature gone, with no error anywhere.
+  // resolveDeleteRight picks whichever candidate actually carries the contract.
+  const deleteRight = resolveDeleteRight(fullOrder, lookupOrder(order.id), order);
+
   // Update header title (actions + badge will be set by buildOrderModalContent)
   modal.querySelector('.admin-product-modal__title').textContent = o.order_number || o.id?.slice(0, 8) || 'Order';
 
   // Build single-page content
-  buildOrderModalContent(modal, o, events || [], breakdown, { detailLoadFailed });
+  buildOrderModalContent(modal, o, events || [], breakdown, { detailLoadFailed, deleteRight });
 }
 
-function buildOrderModalContent(modal, o, events, breakdown, { detailLoadFailed = false } = {}) {
+function buildOrderModalContent(modal, o, events, breakdown, { detailLoadFailed = false, deleteRight = null } = {}) {
+  // Never fall back to a status rule here. An absent right is an UNRESOLVED
+  // right, and unresolved fails closed with a reason of its own.
+  const right = deleteRight || orderDeleteRight(o);
   const showCost = AdminAuth.isOwner();
   const omRow = (label, value) =>
     `<div class="om-meta-row"><span>${label}</span><span>${value}</span></div>`;
@@ -856,8 +1103,20 @@ function buildOrderModalContent(modal, o, events, breakdown, { detailLoadFailed 
     `<button class="admin-btn admin-btn--ghost admin-btn--sm" data-action="resend-invoice">${icon('mail', 13, 13)} Resend Invoice</button>`,
     `<button class="admin-btn admin-btn--danger admin-btn--sm" data-action="create-refund">${icon('refunds', 13, 13)} Refund</button>`,
   ];
-  if (isDeletable(o)) {
-    btns.push(`<button class="admin-btn admin-btn--ghost admin-btn--sm" style="color:var(--danger);border-color:var(--danger)" data-action="delete">${icon('trash', 13, 13)} Delete</button>`);
+  // Blocked orders keep a DISABLED button carrying the reason, rather than no
+  // button at all. "Linked to an invoice / quick order" is the one refusal an
+  // owner will actually meet, and hiding the control leaves that fact nowhere to
+  // be stated on the very surface showing that order.
+  if (right.deletable) {
+    btns.push(`<button class="admin-btn admin-btn--ghost admin-btn--sm" style="color:var(--danger);border-color:var(--danger)" data-action="delete" title="${
+      esc(right.method === DELETE_METHOD.PURGE
+        ? 'Hard purge — permanent, cascades to line items / invoice links / loyalty / tracking, audit-logged first.'
+        : 'Permanently delete this cancelled order.')
+    }">${icon('trash', 13, 13)} ${esc(methodVerb(right.method))}</button>`);
+  } else {
+    btns.push(`<button class="admin-btn admin-btn--ghost admin-btn--sm" data-action="delete-blocked" disabled title="${
+      esc(right.hint ? `${right.copy}\n${right.hint}` : right.copy)
+    }">${icon('trash', 13, 13)} Delete</button>`);
   }
   modal.querySelector('#om-header-actions').innerHTML =
     `<div class="om-header-btns">${btns.join('')}</div>${statusBadge(o.status)}`;
@@ -865,10 +1124,10 @@ function buildOrderModalContent(modal, o, events, breakdown, { detailLoadFailed 
   modal.querySelector('#om-content').innerHTML = [metaSection, itemsHtml, breakdownHtml, datesHtml, shippingHtml, timelineHtml]
     .filter(Boolean).join('');
 
-  bindModalActions(modal, o);
+  bindModalActions(modal, o, right);
 }
 
-function bindModalActions(modal, order) {
+function bindModalActions(modal, order, deleteRight = null) {
   modal.querySelector('[data-action="update-status"]')?.addEventListener('click', () => showStatusModal(order));
   modal.querySelector('[data-action="add-note"]')?.addEventListener('click', () => showNoteModal(order));
   modal.querySelector('[data-action="create-refund"]')?.addEventListener('click', () => showRefundModal(order));
@@ -889,25 +1148,56 @@ function bindModalActions(modal, order) {
     }
   });
 
-  if (isDeletable(order)) {
-    modal.querySelector('[data-action="delete"]')?.addEventListener('click', () => {
-      Modal.confirm({
-        title: 'Delete Order',
-        message: `Permanently delete ${esc(order.order_number || order.id?.slice(0, 8) || 'this order')}? This cannot be undone.`,
-        confirmLabel: 'Delete',
-        confirmClass: 'admin-btn--danger',
-        onConfirm: async () => {
-          try {
-            await AdminAPI.deleteOrder(order.id);
-            forgetProfit(order.id);
-            Toast.success('Order deleted');
-            closeOrderModal();
-            loadOrders();
-          } catch (e) {
-            Toast.error(`Delete failed: ${e.message}`);
-          }
-        },
-      });
+  // Same vocabulary as the button that rendered it, so the two cannot disagree.
+  const right = deleteRight || orderDeleteRight(order);
+  if (right.deletable) {
+    modal.querySelector('[data-action="delete"]')?.addEventListener('click', async () => {
+      // One-element plan through the shared copy, so a single purge carries the
+      // very same irreversible / cascade / audit-log warnings as a bulk one.
+      const groups = right.method === DELETE_METHOD.PURGE
+        ? { purge: [order.id], delete: [], blocked: [] }
+        : { purge: [], delete: [order.id], blocked: [] };
+      if (!(await confirmDeletePlan(deletePlanCopy(groups)))) return;
+
+      if (right.method === DELETE_METHOD.PURGE) {
+        let res;
+        try {
+          res = await AdminAPI.purgeOrders([order.id]);
+        } catch (e) {
+          Toast.error(`Purge failed: ${purgeFailureCopy(e?.code, e?.message)}`);
+          return;
+        }
+        forgetOrderCache(order.id);
+        // A refusal arrives as a RESOLVED response (200 + failed[]). Treating
+        // that as success is the easiest way to tell the owner an order is gone
+        // when it is still there.
+        if (res.failed.length > 0) {
+          const f = res.failed[0];
+          Toast.error(`Not purged: ${purgeFailureCopy(f.code, f.message)}`);
+          loadOrders();
+          return;   // modal stays open — the order still exists
+        }
+        if (res.unaccounted.length > 0) {
+          Toast.warning(UNACCOUNTED_COPY);
+          closeOrderModal();
+          loadOrders();
+          return;
+        }
+        Toast.success('Order purged');
+        closeOrderModal();
+        loadOrders();
+        return;
+      }
+
+      try {
+        await AdminAPI.deleteOrder(order.id);
+        forgetOrderCache(order.id);
+        Toast.success('Order deleted');
+        closeOrderModal();
+        loadOrders();
+      } catch (e) {
+        Toast.error(`Delete failed: ${purgeFailureCopy(e?.code, e?.message)}`);
+      }
     });
   }
 }
@@ -994,7 +1284,9 @@ function showStatusModal(order) {
       await AdminAPI.updateOrderStatus(order.id, newStatus, body);
       // Cancelling an order changes its Profit cell from a figure to "no profit
       // realised", so the cached answer is stale the moment the status moves.
-      forgetProfit(order.id);
+      // It also flips DELETABILITY — a cancelled order becomes deletable for
+      // every admin role — and the bulk bar may still be holding this id.
+      forgetOrderCache(order.id);
       Toast.success(`Order updated to ${newStatus}`);
       Modal.close();
       closeOrderModal();
@@ -1315,6 +1607,11 @@ function destroyOrdersTab() {
   _profitAbort?.abort();
   _profitAbort = null;
   _profitCache.clear();
+  // _seenOrders now caches a PERMISSION answer, computed for this admin's role.
+  // Keeping it for the lifetime of the session is both a leak and a staleness
+  // hazard; _table.destroy() has already discarded the selection it served.
+  _seenOrders.clear();
+  _deleteInFlight = false;
   if (_table) _table.destroy();
   _table = null;
   if (_activeModal) closeOrderModal();

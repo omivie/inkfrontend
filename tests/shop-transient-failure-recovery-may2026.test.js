@@ -349,11 +349,18 @@ test('shop-page.js: every loader-catch "Failed to load…" path uses showError, 
 test('shop-page.js loaders pass a retry callback that re-invokes themselves', () => {
     // Each loader catch should call showError with `() => this.loadX(...)` so
     // the Retry button reruns the failed loader (not just a generic refresh).
+    //
+    // loadPrinterModelProducts is deliberately NOT in this list any more
+    // (ERR-135). It stopped being a loader: it renders no products at all, it
+    // resolves the free-text printer model and redirects — to the canonical
+    // ?brand=&printer_slug= hub when it resolves, to /search?q= when it does
+    // not. It therefore has no failure surface to retry into. The test below
+    // pins that it really does redirect, so dropping it from this list cannot
+    // hide a loader that quietly lost its retry path.
     const LOADERS = [
         'loadProductCodes',
         'loadProducts',
         'loadPrinterProducts',
-        'loadPrinterModelProducts',
         'loadSearchResults',
     ];
     for (const fn of LOADERS) {
@@ -361,6 +368,17 @@ test('shop-page.js loaders pass a retry callback that re-invokes themselves', ()
         assert.match(SHOP_PAGE_SRC, re,
             `${fn} must pass a retry callback that re-invokes itself`);
     }
+});
+
+test('shop-page.js: loadPrinterModelProducts redirects rather than rendering', () => {
+    // The replacement obligation for its removal from LOADERS above (ERR-135).
+    const start = SHOP_PAGE_SRC.indexOf('async loadPrinterModelProducts(');
+    assert.notEqual(start, -1, 'loadPrinterModelProducts must still exist');
+    const body = SHOP_PAGE_SRC.slice(start, SHOP_PAGE_SRC.indexOf('\n        },', start));
+    assert.match(body, /location\.replace\(/,
+        'it must hand off via location.replace — that is why it has no retry path');
+    assert.doesNotMatch(body, /showError\s*\(/,
+        'it must not grow an error pane again without also regaining a retry callback');
 });
 
 test('shop-page.js hideAllLevels and pageshow handler hide the error pane', () => {

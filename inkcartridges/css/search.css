@@ -836,6 +836,25 @@ mark.smart-ac__mark {
 .smart-ac__grid .product-card__badge {
     display: none;
 }
+/* ERR-133 — one deliberate exception: the "Fits <model>" compat chip.
+   The hidden chips above are all nice-to-have context the shopper can get
+   elsewhere (the price shows the saving; the printer is what they searched).
+   This one answers a question the card otherwise cannot: "why is a correction
+   ribbon in my results for AP830?" Backend commit 1d43034 made "for use in"
+   matches additive across every printer-shaped query, so unexplained rows are
+   now common in the dropdown rather than rare. Scaled down and un-uppercased
+   to survive the tighter footprint the blanket hide was written for. */
+.smart-ac__grid .product-card__badge--compat-match {
+    display: inline-block;
+    font-size: 9px;
+    padding: 2px 5px;
+    text-transform: none;
+    letter-spacing: 0.01em;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
 
 .smart-ac__grid .product-card.is-highlighted,
 .smart-ac__grid .product-card:hover {

@@ -34,10 +34,10 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link rel="stylesheet" href="/css/base.css?v=e9b82f71">
     <link rel="stylesheet" href="/css/layout.css?v=e79b9859">
-    <link rel="stylesheet" href="/css/components.css?v=79d69fe3">
+    <link rel="stylesheet" href="/css/components.css?v=51f6dd56">
     <link rel="stylesheet" href="/css/modern-effects.css?v=afe20f45">
     <link rel="stylesheet" href="/css/pages.css?v=b29a1828">
-    <link rel="stylesheet" href="/css/search.css?v=5caba86a">
+    <link rel="stylesheet" href="/css/search.css?v=c28f09ef">
 
     <script type="application/ld+json">
     {
@@ -415,10 +415,15 @@
 
                     <div class="ink-finder__popular">
                         <span class="ink-finder__popular-label">Popular:</span>
-                        <a href="/shop?printer_model=Brother+MFC-J6945DW&printer_brand=brother" class="ink-finder__popular-chip">Brother MFC-J6945DW</a>
-                        <a href="/shop?printer_model=HP+ENVY+6020&printer_brand=hp" class="ink-finder__popular-chip">HP ENVY 6020</a>
-                        <a href="/shop?printer_model=Epson+XP-4100&printer_brand=epson" class="ink-finder__popular-chip">Epson XP-4100</a>
-                        <a href="/shop?printer_model=Canon+PIXMA+TS3360&printer_brand=canon" class="ink-finder__popular-chip">Canon PIXMA TS3360</a>
+                        <!-- Canonical printer-hub URLs (ERR-132). These four were the
+                             last ?printer_model= emissions in the codebase. That route
+                             now resolves and redirects here anyway, but linking straight
+                             to ?brand=&printer_slug= skips the round trip and is the only
+                             form the bot prerender middleware will serve. -->
+                        <a href="/shop?brand=brother&printer_slug=brother-mfc-j6945dw" class="ink-finder__popular-chip">Brother MFC-J6945DW</a>
+                        <a href="/shop?brand=hp&printer_slug=hp-envy-6020" class="ink-finder__popular-chip">HP ENVY 6020</a>
+                        <a href="/shop?brand=epson&printer_slug=epson-xp-4100" class="ink-finder__popular-chip">Epson XP-4100</a>
+                        <a href="/shop?brand=canon&printer_slug=canon-pixma-ts3360" class="ink-finder__popular-chip">Canon PIXMA TS3360</a>
                     </div>
 
                     <p class="ink-finder__help">
@@ -519,21 +524,21 @@
     <script defer src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.98.0" integrity="sha384-Sm2s7OXxsAMTyJ4iIyRBgVpeGUvMPk2lRQnnZhE78Wej7oggIoolKt+SCt0XJbUB" crossorigin="anonymous"></script>
     <script defer src="/js/config.js?v=57d2621d"></script>
     <script defer src="/js/security.js?v=790f00f3"></script>
-    <script defer src="/js/utils.js?v=1a361f84"></script>
-    <script defer src="/js/api.js?v=988cf5bf"></script>
+    <script defer src="/js/utils.js?v=0fab5ab7"></script>
+    <script defer src="/js/api.js?v=7ce1308e"></script>
     <script defer src="/js/schema.js?v=dd78df4e"></script>
     <script defer src="/js/auth.js?v=55cfdbef"></script>
     <script defer src="/js/business.js?v=891bfd2f"></script>
-    <script defer src="/js/products.js?v=68f52ea8"></script>
+    <script defer src="/js/products.js?v=bfec75ea"></script>
     <script defer src="/js/search.js?v=b69f1ae8"></script>
-    <script defer src="/js/main.js?v=f6b7b932"></script>
+    <script defer src="/js/main.js?v=0a63f0fd"></script>
     <script defer src="/js/legal-config.js?v=2db8a49b"></script>
     <script defer src="/js/footer.js?v=f18a760a"></script>
     <script defer src="/js/mega-nav.js?v=9a073f70"></script>
     <script defer src="/js/rewards-nudge.js?v=f5a2df30"></script>
     <script defer src="/js/landing.js?v=8fd8b9bc"></script>
     <script defer src="/js/modern-effects.js?v=ad8bff1e"></script>
-    <script defer src="/js/cart.js?v=6c426f07"></script>
+    <script defer src="/js/cart.js?v=3172d670"></script>
     <script defer src="/js/ink-finder.js?v=b1d1887e"></script>
     <script defer src="/js/printer-data.js?v=2431d3ae"></script>
     <script defer src="/js/analytics.js?v=8c9ee196"></script>

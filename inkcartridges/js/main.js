@@ -547,11 +547,22 @@ function initCurrentYear() {
  */
 
 function updateCartCount(count) {
-    const cartCounts = $$('.cart-count');
+    // The real header badge is `<span class="cart-badge" id="cart-count">`. This
+    // selected only `.cart-count`, a class that appears in ZERO of the 29 storefront
+    // headers — so this loop, and the initCartBadgeFromStorage() cold paint that
+    // depends on it, were both complete no-ops and the badge showed its hardcoded
+    // HTML value until Cart.init() finished (after up to 3s of waitForAuth).
+    // Selector kept in sync with cart.js's own writers. (ERR-136)
+    const cartCounts = $$('.cart-count, .cart-badge, #cart-count');
 
     cartCounts.forEach(function(el) {
         el.textContent = count;
-        el.setAttribute('aria-label', `${count} items in cart`);
+        // The header badge is deliberately aria-hidden (mobile-parity S0.1) — the
+        // accessible name lives on the enclosing link, set below. Labelling a hidden
+        // node is pointless and risks a duplicate announcement.
+        if (el.getAttribute('aria-hidden') !== 'true') {
+            el.setAttribute('aria-label', `${count} items in cart`);
+        }
 
         // Show/hide badge based on count
         if (count > 0) {

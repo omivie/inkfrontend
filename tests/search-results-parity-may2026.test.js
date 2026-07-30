@@ -56,9 +56,14 @@ const vm = require('node:vm');
 const ROOT = path.resolve(__dirname, '..');
 const SHOP_JS_PATH = path.join(ROOT, 'inkcartridges', 'js', 'shop-page.js');
 const API_JS_PATH  = path.join(ROOT, 'inkcartridges', 'js', 'api.js');
+const UTILS_JS_PATH = path.join(ROOT, 'inkcartridges', 'js', 'utils.js');
 
 const SHOP_SRC = fs.readFileSync(SHOP_JS_PATH, 'utf8');
 const API_SRC  = fs.readFileSync(API_JS_PATH, 'utf8');
+// queryCodeMatch delegates its boundary + yield-prose rules to CompatSource
+// (utils.js) as of ERR-135 — one implementation, shared with the PDP. The
+// sandbox below must therefore load utils.js the way every real page does.
+const UTILS_SRC = fs.readFileSync(UTILS_JS_PATH, 'utf8');
 
 // Strip comments so a literal inside a comment can't satisfy a source assertion.
 function stripComments(src) {
@@ -100,7 +105,16 @@ function loadShopHelpers() {
     };
     sandbox.window = sandbox;
     sandbox.globalThis = sandbox;
+    sandbox.self = sandbox;
+    sandbox.sessionStorage = { getItem() { return null; }, setItem() {}, removeItem() {} };
+    sandbox.navigator = { userAgent: 'node' };
+    sandbox.location.hostname = 'localhost';
+    sandbox.matchMedia = () => ({ matches: false, addEventListener() {} });
     const ctx = vm.createContext(sandbox);
+    // utils.js FIRST — queryCodeMatch reads window.CompatSource at call time
+    // (ERR-135). Real pages load utils.js on every surface that loads
+    // shop-page.js; §3 of tests/compat-wrong-family-jul2026.test.js pins that.
+    vm.runInContext(UTILS_SRC, ctx, { filename: 'utils.js' });
     vm.runInContext(SHOP_SRC, ctx, { filename: 'shop-page.js' });
     const helpers = sandbox.window._searchParityHelpers;
     assert.ok(helpers, 'shop-page.js must expose window._searchParityHelpers');
@@ -427,8 +441,20 @@ test('shop-page.js — suggest is fetched only on page 1', () => {
 });
 
 test('shop-page.js — taking the fallback nulls smartData (kills the bad banner)', () => {
-    const idx = SHOP_CODE.indexOf('shouldUseFallback');
-    const slice = SHOP_CODE.slice(idx, idx + 400);
+    // ERR-124's lesson: read the balanced `if (shouldUseFallback) { … }` body
+    // rather than a fixed-width window. ERR-133 added the compat-preservation
+    // line inside this block and pushed `smartData = null` past the old
+    // 400-char slice, failing a test whose invariant had not changed.
+    const at = SHOP_CODE.indexOf('if (shouldUseFallback)');
+    assert.notEqual(at, -1, 'the shouldUseFallback branch must exist');
+    const open = SHOP_CODE.indexOf('{', at);
+    let depth = 0, end = -1;
+    for (let i = open; i < SHOP_CODE.length; i++) {
+        if (SHOP_CODE[i] === '{') depth++;
+        else if (SHOP_CODE[i] === '}' && --depth === 0) { end = i; break; }
+    }
+    assert.notEqual(end, -1, 'the shouldUseFallback block must be balanced');
+    const slice = SHOP_CODE.slice(open + 1, end);
     assert.match(slice, /products\s*=\s*merged/);
     assert.match(slice, /smartData\s*=\s*null/);
 });

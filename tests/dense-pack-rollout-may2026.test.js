@@ -128,7 +128,10 @@ test('§2 drilldown per-code product fetch uses limit ≥ 200', () => {
 test('§2 PDP related products fetch uses limit ≥ 200', () => {
     // PDP renderRelatedProducts re-uses /api/shop with the matching code
     // chip. Same ceiling rationale as drilldown.
-    const m = PDP_CODE.match(/renderRelatedProducts\s*\([^)]*\)\s*\{[\s\S]*?API\.getShopData\s*\(\s*\{[^}]*code,\s*limit:\s*(\d+)/);
+    // The code is passed as `code: <expr>` since ERR-134 made the family fetch
+    // iterate every series_code (it was the `code,` shorthand before), so match
+    // the property, not one particular spelling of its value.
+    const m = PDP_CODE.match(/renderRelatedProducts\s*\([^)]*\)\s*\{[\s\S]*?API\.getShopData\s*\(\s*\{[^}]*code:\s*[A-Za-z_$][\w$]*,\s*limit:\s*(\d+)/);
     assert.ok(m, 'renderRelatedProducts must call API.getShopData with a limit');
     const limit = parseInt(m[1], 10);
     assert.ok(limit >= 200,
@@ -155,16 +158,19 @@ test('§2 recovery rails are slice-bounded (≤ 6 by-printer entries)', () => {
     // result pages. The cap must stay tight so layout doesn't grow with
     // denser pack data.
     const matches = SHOP_CODE.match(/API\.searchByPrinter\s*\([^)]*\{\s*limit:\s*(\d+)\s*\}/g) || [];
-    assert.ok(matches.length >= 2,
-        'expected at least 2 by-printer rail call sites in shop-page.js');
+    assert.ok(matches.length >= 1,
+        'expected at least 1 by-printer rail call site in shop-page.js');
     for (const call of matches) {
         const lim = parseInt(call.match(/limit:\s*(\d+)/)[1], 10);
-        // Rail caps live in the 6–10 range. The router-handoff path uses 100;
-        // we only check rail call sites by filtering out the >50 ones below.
-        if (lim <= 50) {
-            assert.ok(lim >= 4 && lim <= 12,
-                `recovery rail limit should be a small slice (4-12); saw ${lim}`);
-        }
+        // EVERY call site must now be rail-sized. This used to carve out
+        // limits > 50, because a second call site — Strategy 2 of the
+        // ?printer_model= ladder — asked for 100 products to render as
+        // "Compatible Products for <printer>". That whole ladder was deleted
+        // (ERR-135): the route resolves and redirects instead of rendering, so
+        // searchByPrinter is a recovery rail and nothing else. Dropping the
+        // carve-out makes this assertion strictly stronger than before.
+        assert.ok(lim >= 4 && lim <= 12,
+            `recovery rail limit should be a small slice (4-12); saw ${lim}`);
     }
 });
 

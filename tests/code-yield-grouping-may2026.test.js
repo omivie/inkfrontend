@@ -328,6 +328,55 @@ test('yieldTier: HP short-series 975X tiers XL via backend signal, 975A stays ST
     assert.equal(ProductSort.yieldTier({ name: 'HP Genuine 975X Ink Cartridge Black', color: 'Black', yield_tier: 'XL' }),  1);
 });
 
+// ─────────────────────────────────────────────────────────────────────────────
+// 2c. yieldTier — STRONGER SIGNAL WINS (ERR-134)
+//
+// Jul 2026: the backend now emits yield_tier on every endpoint including
+// /api/products/:sku — measured present on 3,910/3,910 products. That made the
+// FE detector dead code on every live path, and for 16 products the backend
+// says STD over a name (and page count) that plainly says high yield:
+//   Lexmark 708H Cyan 3,000pp vs 708 Cyan 1,000pp; also 808H, 236H, 333H,
+//   C333HY0; Canon CART069H/CART069HK, CART055H, PG660XLHY.
+// Those silently merged into the standard-yield row when the field arrived —
+// a regression caused by data, not by a code change.
+//
+// yieldTier now returns max(backend, detected): one-directional (it can only
+// raise a tier, so a correct backend value always survives) and self-disabling
+// (once detectYieldTier learns trailing-H, BF-022, both agree and it goes inert).
+// Verified across the full catalogue: 16 raised, 0 lowered.
+// ─────────────────────────────────────────────────────────────────────────────
+
+test('yieldTier: backend STD over a trailing-H high-yield name is RAISED to XL', () => {
+    // Lexmark 708H — 3,000 pages against the plain 708's 1,000.
+    assert.equal(
+        ProductSort.yieldTier({ name: 'Lexmark Genuine 708HC Toner Cartridge 708H Cyan (3,000 pages)', sku: 'G708HC', color: 'Cyan', yield_tier: 'STD' }),
+        1, '708H must not share a yield row with the 1,000-page 708');
+    // Canon CART069H — the SKU rule the detector was written for.
+    assert.equal(
+        ProductSort.yieldTier({ name: 'Canon Genuine CART069HC Toner Cartridge CART069H Cyan', sku: 'GCART069HC', color: 'Cyan', yield_tier: 'STD' }),
+        1, 'CART069H must tier XL despite the backend saying STD');
+    // Its plain sibling is untouched — the raise is not indiscriminate.
+    assert.equal(
+        ProductSort.yieldTier({ name: 'Canon Genuine CART069C Toner Cartridge CART069 Cyan', sku: 'GCART069C', color: 'Cyan', yield_tier: 'STD' }),
+        0, 'the standard CART069 must stay STD');
+});
+
+test('yieldTier: the merge NEVER lowers a tier — a stronger backend value wins', () => {
+    // Backend XXL, detector would say XL: keep XXL.
+    assert.equal(ProductSort.yieldTier({ name: 'Brother TN3480XL Toner Black', yield_tier: 'XXL' }), 2);
+    // Backend XL, name carries nothing the detector recognises: keep XL.
+    assert.equal(ProductSort.yieldTier({ name: 'Lexmark Genuine 808SC Toner Cartridge 808S Cyan', sku: 'G808SC', color: 'Cyan', yield_tier: 'XL' }), 1,
+        'bare-letter yields the FE deliberately cannot read must keep the backend answer');
+    // Backend STD, nothing detectable: stays STD.
+    assert.equal(ProductSort.yieldTier({ name: 'Brother TN2030BK Toner Cartridge TN2030 Black', sku: 'GTN2030BK', color: 'Black', yield_tier: 'STD' }), 0);
+});
+
+test('yieldTier: with no backend field the detector still stands alone (unchanged)', () => {
+    assert.equal(ProductSort.yieldTier({ name: 'Epson Genuine 200HYBK Ink Cartridge 200HY Black', color: 'Black' }), 1);
+    assert.equal(ProductSort.yieldTier({ name: 'Epson Genuine 200BK Ink Cartridge 200 Black', color: 'Black' }), 0);
+    assert.equal(ProductSort.yieldTier({}), 0, 'no name, no field → STD, never NaN or -1');
+});
+
 // ── FE detection stopgap (Jun 2026): the live API ships NO yield_tier, so
 //    yieldTier() must classify from name+sku+colour on its own. ───────────────
 test('yieldTier FE detection (no yield_tier field) classifies the digit-glued + short-series cases', () => {

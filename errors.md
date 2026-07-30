@@ -41,6 +41,581 @@ describing the same incident.
 
 ---
 
+## ERR-134 — Related Products: the backend fix landed, but a failed family fetch still looked exactly like "no siblings", and only `series_codes[0]` was ever tried (2026-07-30)
+
+**Trigger:** the backend dev shipped `series_codes` and `yield_tier` on `GET /api/products/:sku` and
+handed over `related-products-series-codes-fe-notes-jul2026.md`, headlined **"No frontend change
+required. This is a heads-up + verification note."** The reported symptom was the Epson 786XL Cyan
+PDP rendering no Related Products section at all.
+
+**The headline claim was true.** Measured before touching any code: `/api/products/G786XLC` returns
+`series_codes:["786"]` and `yield_tier:"XL"`; a 138-SKU stratified sample covering every brand ×
+category × source, plus sixteen forced edge cases, showed detail-vs-list parity at **100%** with zero
+mismatches on either field; and the live 786XL Cyan PDP renders its full 786 family. Across the whole
+catalogue — 3,910 products enumerated from `/api/shop` — **2,931 of 3,801 non-ribbon PDPs resolve
+their family**, and **767 hide correctly** because they genuinely have no sibling. The reported bug
+was fixed and needed nothing from us.
+
+Verifying it turned up three other defects, two of them **caused by the fields arriving**.
+
+**What was wrong (1) — a failed fetch was indistinguishable from an empty family.**
+`renderRelatedProducts` did `if (res.ok && res.data?.products)` and then
+`if (related.length === 0) return;`. A rate-limited, cold or offline read produced a page with no
+Related Products section at all — pixel-identical to a mono toner that really has no relatives. This
+was proven live by accident: the catalogue-enumeration script written to *verify* the handoff
+consumed the API rate limit, and the 786XL PDP came back with sixteen HTTP 429s and the section
+simply gone. A bare `catch (e) { /* optional */ }` swallowed every throw on top of that, with no log.
+The silent case is common and correct — 767 PDPs are in it — which is precisely why the failing case
+had to stop looking the same.
+
+**What was wrong (2) — only the first series code was ever tried.** `series_codes` is a list, and for
+a product spanning several models the first entry is not always the one carrying the family.
+Confirmed against the live API: `CB412DNBK-2` carries `['B412','B432','B512','3K']`, and
+`?code=B412` returns 1 product (itself) while `?code=B432` returns 3. `CB401BK`: `B401` → 1,
+`MB451` → 3. `C45ABK`: `45` → 1, `42` → 2. Three product pages lost their entire Related Products
+section to a dead first code.
+
+**What was wrong (3) — the new `yield_tier` field made the frontend detector dead code, and the
+detector was the more accurate of the two.** ERR-045 recorded `yield_tier` as `null` on every live
+endpoint, which is why a frontend detector exists at all. It is now present on **3,910 of 3,910**
+products, and `yieldTier()` returned it unconditionally. It agrees with the detector on 3,883 — but
+on **16** it says `STD` over a name and a page count that plainly say high yield: Lexmark `708H` Cyan
+at 3,000 pages against the plain `708` Cyan's 1,000, plus `808H`, `236H`, `333H` and `C333HY0`; Canon
+`CART069H`, `CART069HK`, `CART055H` and `PG660XLHY`. Those sixteen silently collapsed into the
+standard-yield row the moment the backend began populating the field — a regression caused by data,
+not by a code change, and one nothing would ever have raised an error about. The detector already
+caught all sixteen: its `\d{2,}h\b` and `CART\d{3,}H` rules were written for exactly these.
+
+**What was wrong (4) — category vocabulary gaps.** `normalizeProductType` had no case for
+`fax_film` or `fax_film_refill` (7 products, all filed under `?category=drums`), so the chain fell
+through to `normalizeCategory('CON-LASER')`, which returned `null` — it tested for ink, toner, drum
+and ribbon but not `laser`, the category code every toner arrives with — and then to
+`detectCategory()`, which answers `'default'`, for which `apiCategoryMap` has no key. The whole
+Related Products branch was skipped. The `CON-LASER` half is masked today only because
+`product_type` is always present and is checked first.
+
+**Fix.** `familyCodeCandidates(seriesCodes, extractedCode)` is a pure helper on the existing
+`window._pdpRelatedHelpers` (the ERR-084 precedent); the family fetch now loops it and stops at the
+first code that yields a sibling. `series_codes[0]` stays first, so the 2,931 pages that resolve on
+the first candidate send a byte-identical URL and keep their edge-cache entry — this is a fallback,
+never a re-ordering. A `fetchFailed` flag records an unhealthy response and breaks the loop, because
+hammering the next candidate against a backend that is down only multiplies failures; the
+empty-result guard renders the error state only when that flag is set, so genuine singletons still
+hide silently. The error pane reuses the shop page's `.drilldown-error` markup verbatim — the same
+component to a shopper, and no new CSS. The empty catch became `DebugLog.warn` plus the same error
+state. `yieldTier` now returns `Math.max(backendTier, detected)`. And `fax_film`/`fax_film_refill`
+map to `drum`, with `normalizeCategory` learning `laser` → `toner`.
+
+**A standing instruction reversed, deliberately.** `utils.js` carried the note *"Lexmark bare-letter
+yields stay STD — backend follow-up; do not work around here."* That was the right call while the
+detector was the only signal and could be wrong with nothing to check it against. With two signals we
+can cross-check, and move only in the direction that both the product name and the printed page count
+point. The merge is one-directional — it can only raise a tier, so a correct backend value always
+survives — and self-disabling, going inert the moment `detectYieldTier` learns the trailing-`H`
+convention. Measured across the full catalogue before shipping: **16 raised, 0 lowered.**
+
+**The trap this had to avoid — and did not, at first.** The first catalogue enumeration ended
+pagination on `if (page.length < limit) break`. But `/api/shop?limit=100` returns 99, 98, 99, 32 — so
+it stopped after page one and measured 1,908 products instead of 3,910. That produced a confident and
+completely wrong finding: "607 product pages are broken." Only an empty page ends pagination. What
+exposed it was spot-checking a single supposedly-broken SKU against the live API — `TN2030` returns 2
+products, not 1. A scary aggregate deserves a live spot-check before it is believed, let alone
+reported.
+
+**Verified:** new `tests/pdp-related-products-resolution-jul2026.test.js` (22 tests) plus three
+yield-merge tests in `code-yield-grouping-may2026.test.js`. All eight fixes were mutation-tested
+individually — reverted, confirmed red, restored — including a `min`-instead-of-`max` mutant to prove
+the yield merge is genuinely one-directional. `tests/dense-pack-rollout-may2026.test.js` §2 was
+re-pinned to the `code:` property rather than one particular spelling of its value; its `limit ≥ 200`
+invariant is unchanged. Full suite **3,351 tests, 0 failures** (18 pre-existing skips).
+`npm run build` restamped 963 asset refs. Live in bundled Chromium against a local serve and the real
+API: the 786XL family is intact; `CB412DNBK-2` now lists `GB432BK` and `GB432HYBK` where it showed
+nothing; Lexmark `?code=708` puts all three 3,000-page `708H` items on one row, where previously two
+of them merged into the 1,000-page row and `708HY` stood alone; the `GTN2130BK` singleton still hides
+with no error box; a routed 429 shows the retry pane and Retry recovers the full family in place;
+`/ribbon/307.11` is unchanged and still makes zero `/api/shop?…code=` calls (the ERR-085 guard); and
+`GPC201` now fires `category=drums&code=PC201` where it previously fired nothing at all.
+
+**Still open (backend):** BF-027, `detectYieldTier` misses the trailing-`H` high-yield convention —
+the 16 SKUs are listed in `related-products-backend-brief-jul2026.md`. BF-028, the `product_type`
+vocabulary carries `fax_film`/`fax_film_refill` with no documented category mapping. Their own open
+question is answered there too: **retire `GET /api/products/:sku/related`.** Measured, its payload
+omits `series_codes`, `yield_tier`, `pack_type`, `canonical_url`, `compare_price`, and the GST and
+review fields — everything the card renderer and the family grouping need — and it crosses families,
+returning a `788XXL` row on the 786 page.
+
+**Rule:** a backend note can be right about the bug and wrong about the blast radius. Populating a
+field that was previously `null` silently changes every downstream consumer that treated it as
+authoritative, and nothing errors. Where two signals exist for the same fact, prefer a one-directional
+merge over "the newer one always wins" — it keeps the correct value in both directions and dies on its
+own once the upstream is fixed. And an absent section is a claim: *nothing relates to this product*.
+Never let a failed read make that claim.
+
+**Pinned by:** `tests/pdp-related-products-resolution-jul2026.test.js`,
+`tests/code-yield-grouping-may2026.test.js`.
+
+---
+
+## ERR-136 — "Remove an item, refresh straight away, it's back": the backend fixed its latency, but the frontend could still lose a delete with no latency at all (2026-07-30)
+
+**Trigger:** customers reported that, signed in, removing a cart item and refreshing immediately left
+the item in the cart — but waiting a few seconds before refreshing made the removal stick. The cart
+also felt slow. The backend dev handed over `cart-remove-latency-fix-jul2026.md` with the backend half
+already fixed and deployed, plus three recommended frontend follow-ups.
+
+**What was wrong on the backend (already fixed).** Every cart request ran `optionalAuth`, which made a
+network round-trip to Supabase Auth (`auth.getUser`) *before* the delete SQL was even issued. That made
+`DELETE /api/cart/items/:productId` slow enough that an immediate page refresh **aborted the in-flight
+request before it committed**, so the follow-up `GET /api/cart` still returned the item. Cart routes now
+verify the access token locally against the project's JWKS (ES256 + WebCrypto), taking authenticated
+cart calls from roughly seconds to tens of milliseconds.
+
+**What the audit found.** The handoff's diagnosis was correct but incomplete, and the frontend had *two*
+independent defects, only one of which is a race.
+
+Verified against the live API before any code was written: `DELETE /api/cart/items/:id` returns
+`{message, removed: 1, guest_session_id}`, and repeating the same delete returns `{message, removed: 0}`
+**still with `ok: true`**. A genuine no-op is therefore indistinguishable from a success unless the
+frontend reads the count — and `data.removed` was read nowhere in the codebase. Measured guest latency
+from New Zealand: POST ~1.2s, DELETE ~0.44s, GET ~0.47s, so the race window is real rather than
+theoretical.
+
+The first defect was the race. `Cart.removeItem()` wrote the optimistic removal to `localStorage`
+*before* the server confirmed, and its in-flight guard was an in-memory `Set` that dies with the JS
+context. After a reload the mirror said "gone", the guard was empty, and `GET /api/cart` re-adopted the
+row — exactly the reported symptom.
+
+The second defect needed no latency at all. The guest branch of `loadCart()` re-pushes the localStorage
+mirror back to the server, one `addToCart` per row, as resilience against cross-origin cookie loss. A
+stale mirror could therefore resurrect a removed row **into** the server cart. Fixing only the race
+would have left that in place.
+
+**What shipped.** Three mechanisms, none of them redundant:
+
+- a **journal** in `localStorage` records the intent *before* the request leaves, so it survives an
+  unload, a tab crash, or being offline;
+- a **filter** subtracts unconfirmed removals from every paint and every re-push, because between the
+  journal write and the confirmation both localStorage *and* the server still hold the row;
+- an **epoch guard** stops a `GET` issued before a mutation from being adopted after it.
+
+`keepalive: true` on the DELETE is a fourth, purely latency-side measure. It is deliberately *not*
+load-bearing: `API.request()` awaits `getToken()` — which may sit inside `Auth.refreshSession()` —
+before `fetch` is ever called, so an unload during a token refresh loses the request *before dispatch*,
+where `keepalive` has nothing to protect. Only the journal covers that.
+
+**The trap this had to avoid.** The first design had only the journal and the filter, and it would have
+turned a deterministic bug into a flaky one. Replay and the load-time `GET` run concurrently; if replay
+confirms and drops the journal entry before an earlier in-flight `GET` resolves, that response still
+carries the item, the journal is now empty so the filter *correctly* no longer matches, and
+`this.items = parsed.items` puts the row straight back and re-saves it. Filtering cannot fix this,
+because by then the filter is right to be empty. Hence the epoch guard.
+
+Two further traps. `removed: 0` on a *fresh* delete is not a terminal answer — it can also mean the
+request resolved against a different cart (rotated guest session, expired token), which the count alone
+cannot distinguish, so it forces a verifying `GET` instead of a silent success. And a *replayed*
+`removed: 0` is the correct idempotent outcome, so treating zero as an error uniformly would raise a
+scary message on a perfectly good result.
+
+Identity had to be recorded per record. A removal belongs to one cart: a different user id is dropped
+rather than replayed, being signed out *defers* rather than drops (which is why `SIGNED_OUT` clears the
+cart mirror but must not purge the journal, or the row reappears at the next sign-in), and a rotated
+guest session is dropped quietly because that cart is unreachable from this browser — without a token
+the request sends `credentials: 'omit'`, so the backend's httpOnly guest cookie never rides along. The
+tempting alternative, re-sending the retired session id via a header override, was rejected as actively
+unsafe: the API writes any `X-Guest-Session` *response* header back into storage, so a replay could
+resurrect a session that checkout had deliberately retired.
+
+**Also repaired in the same code paths.** The in-flight guard was honoured in only one of four places
+that adopt a server cart. A double-click fired two DELETEs, and because a re-render rebuilds the item
+list via `innerHTML` between the two clicks, the second could land on a *different* row's button — so
+both an id guard and a pre-await button disable were needed. Whole-array rollback snapshots in
+`removeItem` and `addItem` meant that rolling back one removal after another had succeeded resurrected
+the *other* item; rollback is now surgical. A debounced quantity change followed by an immediate reload
+was silently lost, now flushed on `pagehide` and `visibilitychange` (not `beforeunload`, which prompts
+the shopper and which Chrome ignores without a prior gesture). `clear()` dropped the mirror before the
+server confirmed. Neither cart-item path percent-encoded its id, which the journal would have replayed
+into a *persistent* malformed request. `updateQuantity` clamped to 99 while six other sites used 100.
+`clearCart()` discarded the guest session id even when the delete had failed, orphaning a populated
+cart. And `updateCartCount()` selected a class present in zero of the 29 storefront headers, so it — and
+the cold-paint helper that depends on it — had never once updated the cart badge.
+
+**How it was verified.** A new 48-test suite executes the pure decision core for real rather than
+pattern-matching it, and was **mutation-tested with nine deliberate regressions**; each broke exactly
+the section that claims to guard it, so no section is vacuous. Signed in as the owner against the live
+backend, 22 of 23 browser checks passed, covering the reported bug, a journalled intent whose DELETE was
+never dispatched, offline deferral and replay, one DELETE per double-click, a silent `removed: 0`, and
+the quantity flush. First paint measured 95ms without a journal and 89ms with one — the journal read
+costs nothing.
+
+The single most useful finding came from the browser, not the tests. Routing the quantity cap through
+`this.MAX_QUANTITY` inside `this.items.map(function(item){…})` threw on every render, because the
+callback is unbound in strict mode, so the cart page painted **zero line items** — while all 47 static
+assertions still passed, since the constant *was* referenced exactly as required, just from the wrong
+receiver. The callback already closed over `self` for precisely this reason.
+
+**Lesson.** A "the backend was slow" handoff is not automatically a latency-only bug: measure it, then
+go looking for the version of the same symptom that needs no latency at all. When a fix has several
+interlocking mechanisms, write down why each one exists — the next reader's instinct is to delete one as
+redundant, and here that would quietly convert a fixed bug into a flaky one. And a static assertion can
+be satisfied by code that throws, so any change to a render path deserves a real browser.
+
+**Backend ask (BF-025).** The handoff cites `checkout-stale-cart-bug-jul2026.md` twice as prior
+guidance. That document has never existed in this repo and was never received — searched the working
+tree, all of `git log --all`, and both error logs, with zero hits. It should be sent, since this change
+was asked to follow guidance nobody here can read.
+
+---
+
+## ERR-135 — A cartridge that didn't fit: the backend fixed its data, and the frontend was still inventing compatibility of its own (2026-07-30)
+
+**Trigger:** a customer bought a cartridge that didn't fit their printer. The backend dev removed the
+bad `product_compatibility` rows for three Brother printers (commits `8fa43a0`, `7edb38e`) and handed
+over `compat-wrong-family-fix-FE-handoff-jul2026.md`, which said **"FE code change required: ❌ None
+— this is a data-only fix"** and asked for one Cloudflare cache purge.
+
+Both halves of that note were wrong. Verifying it against the live API found the requested action
+unnecessary and the un-requested one urgent.
+
+**The purge was a no-op.** Cloudflare does front the document host (`server: cloudflare`), but the
+printer prerender responses come back `cf-cache-status: DYNAMIC` — never cached — and the HTML was
+already clean: zero occurrences of `LC531`/`LC536` across all three printer pages, measured as
+Googlebot. This repo also has no purge capability whatsoever: no token, no zone ID, no script, no npm
+script. The static layer is deliberately `max-age=0, must-revalidate` + `CDN-Cache-Control: no-cache`
+(`vercel.json`) precisely so a deploy never needs one, and `tests/dense-pack-rollout-may2026.test.js`
+already pins that intent. Nothing to purge; nothing here that could.
+
+**"No FE change required" was false.** The frontend had its own wrong-family generator — live,
+customer-reachable, and fed by data that never touched `product_compatibility` at all.
+`/shop?printer_model=<free text>` is emitted by `js/account.js` for any saved printer without a slug.
+It ran a five-strategy ladder whose last two rungs invented compatibility outright:
+
+- **Strategy 4** called `getProducts({ search: <BRAND NAME> })` and merged up to 100 results.
+  Measured live: `?search=Brother&limit=100` returns **100 products across 71 distinct series
+  families** — label tapes (DK-11201), drum units (DR-2425), photo paper (BP71GA4), typewriter
+  ribbons. Every one of them was rendered under the heading *"Compatible Products for &lt;the
+  customer's printer&gt;"*.
+- **Strategy 5** looked the printer up in a hardcoded printer→code table and ran
+  `ilike('name', '%<code>%')` per code. Measured live against the anon key: `%200%` matched **141
+  products**, because "(9,200 pages)" contains "200"; `%85A%` returned `CB435A` where the table meant
+  `CE285A`. The table was stale on top of being unbounded — it had no entry for any printer in the
+  incident, and several of its mappings were simply wrong.
+
+The trigger condition was confirmed: Strategy 3 only accepts `/smart` results when the payload
+carries `matched_printer`, and for an unrecognised model `/smart` returns `matched_printer: null`.
+So any typo'd or unknown saved printer fell straight through to Strategy 4.
+
+**What the audit found.** Three more instances of the same shape:
+
+1. **The PDP borrowed a stranger's printers.** With no compatibility rows of its own, it picked a
+   "sibling" with the same unbounded `ilike('name','%code%')` — `%LC37%` returns `CIB3757CMY`, a
+   different family — and printed *that* product's printers as this one's "For Use In".
+2. **Printer models were being minted as cartridge codes.** `_enrichSeriesCodes`'s "for &lt;Brand&gt;
+   …" pattern and `familyKey`'s last-match-wins name scrape both read the tail of a compatible
+   cartridge's name — which is exactly where the *devices it fits* are listed — so
+   `…for Brother DCP-J1050DW` yielded `DCPJ1050DW` as a series code, keying a family on a printer.
+3. **A citation to nowhere.** `middleware.js` claimed its bare-`printer_slug` prerender gate was
+   "Pinned by tests/printer-url-canonical-may2026.test.js" — a file that has never existed in this
+   repo. The gate sat unpinned while advertising the opposite.
+
+**The trap.** The obvious fix is to make the substring matcher smarter. That is what the codebase had
+already done — twice correctly (shop-page's `queryCodeMatch`, the PDP's related-products filter) and
+twice incorrectly (the two `ilike`s). **Four implementations of one rule is why the broken pair
+survived.** And even the "correct" pair disagreed: the PDP's had the boundary rule but not the
+yield-prose rule, so a short numeric code still matched its own page count.
+
+The second trap was scope. Deleting the bad rungs leaves `?printer_model=` with nothing to render —
+and an empty page is a dead end for a customer who merely typo'd their printer.
+
+**Fix.** One rule, stated once, in `js/utils.js`:
+
+> **THE FRONTEND NEVER ASSERTS COMPATIBILITY.** Only `product_compatibility`, reached through the
+> backend, may put a product under a "fits your printer" heading. Everything else is a SEARCH RESULT
+> and must be labelled one.
+
+This is the same rule as *the frontend never computes prices*, and both failures had the same shape:
+the FE deriving an answer the backend owns, then presenting the derivation as fact.
+
+`CompatSource` (`js/utils.js`, on `window` so the earlier-loading `api.js`/`shop-page.js` can read it
+without a temporal-dead-zone throw) is now the single vocabulary: `printerKey` (separator-insensitive
+printer identity), `isPrinterModelToken`, and one whole-token matcher carrying **both** rules —
+boundaries, and rejecting `<code> page(s)`. All four call sites delegate to it.
+
+`?printer_model=` stopped being a second compatibility path and became a router: resolve the free
+text to a real printer, then `location.replace` to the canonical `?brand=&printer_slug=` hub; failing
+that, to `/search?q=`, where results are labelled as search results and `/smart`'s existing
+did-you-mean banner recovers the typo. It renders no product grid at all, so it cannot mislabel one.
+The hardcoded table, both wrong-family strategies, and the direct Supabase printer lookup are gone.
+
+Resolution is separator-insensitive because it had to be: `printer_models` holds
+`Brother DCP J1050DW` (spaces) beside `Brother DCP-J1260W` (dash), so every previous raw-string
+lookup missed a printer that was sitting right there in the table. The five backend spellings are
+probed **concurrently** — serially this left an unresolvable model on a blank page for ~6 s.
+
+**The guard was swept, not guessed.** `isPrinterModelToken` was run against all **977 distinct
+`series_codes` in the live catalogue**, which caught five collisions that would otherwise have
+shipped: OKI Microline ribbons are *named for the printer* (`ML182`, `ML590`, `ML720`), Fuji Xerox
+sells `IX105`/`IX305`/`IX315`/`IX405` toner, ribbon codes start `TD`, Sharp sells `MX-23` and Ricoh
+`MP 2014H`, and OKI ships a toner whose code is literally `332DN`. Each cost a prefix or suffix from
+the pattern. Final sweep: zero false positives, every incident shape still detected.
+
+**Verified.** `tests/compat-wrong-family-jul2026.test.js` (41 — 31 static + 10 live behind
+`LIVE_API=1`); full suite 3307/0. Playwright against the real backend:
+`?printer_model=Brother DCP-J1050DW` → canonical hub, 12 products, **all LC431, zero LC531**;
+`brother dcpj1050dw` (no separators) → same hub; `Brother MFC-J9999DW` → `/search?q=`, no
+compatibility heading; **`Epson XP-200` → `/search?q=` showing only Epson 200 products, none of the
+141 `%200%` collisions**. Two-way check on the PDPs: `CLC431XLBK` lists DCP J1050DW; the un-linked
+`CLC531XLBK` ($38.49) and `GLC536XLBK` ($130.79) still sell and list only their own printers.
+
+**Reported back to the backend dev** (BF-029, BF-030 — not FE work): the handoff's own verification steps cannot pass
+as written — `dcpj1050dw`, `dcpj4120dw`, `mfcj4620dw` (unseparated, i.e. how customers type)
+return **zero** products from `/api/search/smart`, with a `did_you_mean` and facets that contradict
+the empty result set. `/api/printers/search` is separator-intolerant the same way, and
+`printer_models.full_name` is internally inconsistent about separators.
+
+**Lesson.** A handoff that says "no frontend changes required" is a claim about the frontend made by
+someone who was not looking at it. Verify the claim, then audit the same failure *class* on your own
+side — the backend's bad rows were one instance of "something asserted compatibility it could not
+prove", and the frontend had four more.
+
+---
+
+## ERR-133 — A backend handoff said "No FE changes required" while two frontend paths silently deleted the rows it had just shipped (2026-07-30)
+
+**Trigger:** the backend dev handed over `ribbon-for-use-in-search-FE-handoff-jul2026.md`
+(commit `1d43034`). It made a product's admin-authored `compatible_devices_html` — the
+"FOR USE IN" machine list on ~90 ribbon / typewriter / correction-tape rows — searchable on
+**every** printer-shaped query, and made those matches **additive**: they now appear alongside
+any cartridges or toners that also match, instead of being suppressed whenever those existed.
+The note's headline was **"No FE changes required."** It asked us to sanity-check exactly one
+thing (its §5a): do the compat rows survive the results page's literal-search reconciliation?
+
+**All five of its acceptance checks reproduced exactly.** The backend work was right. The
+premise about our side was not, and §5a turned out to be the right question asked with the
+wrong expected answer — rows were being dropped on two independent paths.
+
+**Root cause.** The Jul-16 guard from ERR-083 protected compat rows by *suppressing* the
+reconciliation whenever any row carried `match_reason:"compatibility"`:
+
+```js
+const hasCompatMatch = hasCompatibilityMatch(products);
+const softMiss = queryHasDigits && … && !hasCompatMatch;
+const hijack   = smartCorrected && … && !hasCompatMatch;
+```
+
+That is only sound while a compat set is **mutually exclusive** with direct hits — which it was,
+because the blob search ran solely as a last-resort fallback. Then "any compat row" implied
+"every row is compat", and switching the repair off cost nothing. Commit `1d43034` deleted that
+implication without touching a line of frontend code. A guard phrased as *"switch the repair OFF
+when X is present"* silently changes meaning the moment X becomes additive.
+
+**Defect 1 — `?exact=1` discarded every compat row.** Exact mode ("Search instead for X" on the
+spelling-correction banner) takes the literal set unconditionally:
+
+```js
+const shouldUseFallback = exactMode ? true : …;
+if (shouldUseFallback) { products = mergedUsed; smartData = null; }
+```
+
+The literal union (`/api/products?search=` ∪ `/api/search/suggest`) matches on name and SKU only,
+so it **structurally cannot** contain a "for use in" match. The Jul-16 guard never covered exact
+mode at all. Measured live: **`/search?q=VP6000&exact=1` rendered a zero-results screen over
+three perfectly good ribbons**; `AP830` and `CE60` lost theirs the same way. Reachable by
+clicking, not just by hand-typed URL. ERR-083 reintroduced through a door built after it.
+
+**Defect 2 — one ribbon switched off the repair for the cartridges beside it.** With the veto
+live, the digit-noise repair never fired for any query carrying a compat row — and `smartCount`,
+which counts compat rows, was the bar the literal set had to beat, inflated with rows that set
+can never supply. Live:
+
+```
+q=CE50   /smart  → CCART319BK, GCE506A, C05XBK  +  154.11*, C143LOT*    (* = compatibility)
+         literal → GCE506A, C05XBK, CCART319BK, G05ABK, G05XBK
+```
+
+`G05ABK` and `G05XBK` are real HP 05A / 05X toners that `/smart` does not return at all for
+`CE50`. **Both were withheld from the shopper.** The handoff generalised from `AP830`, where
+`/api/products?search=` returns zero rows so the swap declines on its own; `CE50` and `CE60`
+have non-empty literal sets and behave the opposite way.
+
+**Fix.** `partitionCompatRows(products)` → `{ direct, compat }` — stable, pure, and never
+comparing two rows' `relevance_score`. The repair is judged against `directCount`, and compat
+rows are **carried across every swap** rather than protected by cancelling the swap:
+
+```js
+const preservedCompat = rowsNotAlreadyIn(compatRows, mergedUsed);
+products = mergedUsed.concat(preservedCompat);
+```
+
+Preservation is strictly stronger than suppression — the repair still runs *and* the ribbons
+survive — and it covers exact mode, which the veto never did. `hasCompatibilityMatch` remains as
+a predicate but is no longer a gate. De-duplication was extracted into one vocabulary,
+`productIdentityKeys` (id → upper-cased sku → normalized name), now shared with
+`mergeLiteralResults` so the two cannot drift apart.
+
+**Defect 3 — the dropdown showed the ribbons with no explanation.** `search.js` calls `/smart`
+too, so the typeahead receives the same compat rows, but it renders through
+`Products.renderCard`, which had no compat branch — and `search.css` blanket-hid every
+`.product-card__badge` inside `.smart-ac__grid` regardless. Typing `AP830` listed two correction
+tapes with nothing saying why. Added the badge byte-for-byte identical to the results-page card,
+plus a deliberately **scoped** CSS exception that re-shows only `--compat-match` at a smaller
+scale. ERR-125 is the precedent: these two card renderers are duplicated rather than shared, and
+the divergence always bites whichever surface ships the feature second.
+
+**Defect 4 — backend, still open.** The handoff states compat rows "append at the bottom" and
+"never displace or bury direct results". They do:
+
+```
+q=AP1000   G45BK      tier 2  score 131.93
+           155.11     tier 3  score 25
+           156.11     tier 3  score 25
+           C143LOT    tier 3  score 25
+           G45BK-2PK  tier 2  score 131.93   ← buried
+```
+
+The 2-pack variant of the top hit sits below three score-25 typewriter ribbons.
+
+**The first fix for this was wrong, and the browser is what caught it.** A stable partition was
+applied to the flat `/smart` array — direct rows, then compat rows — and 33 unit tests agreed it
+worked. Driving the real page proved it was a **measurable no-op**: `loadSearchResults`
+re-partitions the set by `product.source` into the Compatible and Genuine grids, renders
+Compatible first unconditionally, and re-sorts each grid with `byCodeThenColor`. API order never
+reaches the DOM, so nothing imposed upstream of that survives. The reorder moved into
+`renderProducts`, after the sort and before `rowBreakIndices` (so the yield-group break lines are
+computed against the final order), where it delivers a narrower but real guarantee: within either
+grid, a compat row always trails the direct hits. It returns the original array untouched when
+there are no compat rows, so every other surface funnelling through `renderProducts` is provably
+unaffected.
+
+Consequence worth recording: **the backend's ordering defect has no user-visible effect on this
+storefront**, because we never consumed its ordering. It is still reported in
+`ribbon-compat-search-FE-response-jul2026.md` §3 for other consumers, downgraded to low priority,
+along with two smaller asks — `matched_token` echoes spaced queries raw (`q=ap 830` → `"ap 830"`)
+while upper-casing compact ones, and we need the SKU list for the 19 ribbons whose
+`compatible_devices_html` is empty.
+
+**Pagination.** Appending compat rows makes the page a composite that the literal set's
+`fallback.meta` never counted, so adopting its `total` / `total_pages` would put the three
+figures into contradiction — the cross-field disagreement ERR-113 exists to prevent. Measured:
+every query that yields compat rows has a literal set of ≤5 rows (`total_pages ≤ 1`), so the
+pager is already hidden in all reachable cases. Gating on `preservedCompat.length === 0` keeps it
+fully functional whenever nothing was appended.
+
+**Verified.** `tests/ribbon-compat-search-additive-jul2026.test.js` — 33 tests across the
+primitive, the dedup vocabulary, the reconciliation wiring, end-to-end fixtures curl'd live on
+2026-07-30, the ordering pass, and dropdown/results badge parity. Every one of the six code
+changes was mutation-tested individually: revert it, confirm the suite goes red, restore. The
+three superseded pins in `compat-search-badge-jul2026.test.js` were rewritten to the new
+invariant rather than deleted, with the history left legible in the section header.
+
+**Two hazards this surfaced.** Fixed-width source windows (`slice(idx, idx + 3000)`) in
+`product-surface-consistency` and `search-results-parity` failed on this change for reasons
+having nothing to do with their invariants — the ERR-124 hazard, now converted to balanced-brace
+scans. And `assert/strict`'s `deepEqual` compares prototypes, so an array built by a literal
+*inside* a `vm` context fails against a test-realm literal despite identical contents: use
+`Array.from(rows, …)`, never `rows.map(…)`, on anything a sandbox hands back.
+
+**Lesson.** A guard written as "suppress the repair when X is present" encodes an assumption
+about X's *exclusivity*, not merely its presence — and it ages silently the moment X becomes
+additive, because nothing about it looks wrong. The durable shape is **partition, repair the part
+that needs repairing, preserve the rest**. And verify a handoff's claims about code you own: "No
+FE changes required" was wrong here, and the single item it did flag for checking, it flagged
+with the wrong expected answer.
+
+---
+
+## ERR-132 — The admin API wrapper threw the backend's error CODE away, so prose was the only thing left to branch on (2026-07-30)
+
+**Trigger:** the backend dev handed over `order-delete-not-deletable-fix-jul2026.md`. The owner
+still could not delete ~20 paid/shipped/completed test orders from `/admin#orders` — the bulk bar
+marked every non-`cancelled` selection "N not deletable" and never sent it.
+
+**The surface bug (expected, and small).** That gate was a hardcoded `DELETABLE_STATUSES =
+['cancelled']` in `js/admin/pages/orders.js`, correct while the only door was the cancelled-only
+`DELETE /api/admin/orders/:id`, and stale from the moment the owner-only hard purge shipped
+(`POST /api/admin/orders/purge`, requested as BF-010). The backend now returns an authoritative
+per-row, per-caller signal — `deletable` / `delete_method` / `delete_blocked_reason` — and the
+frontend simply had to read it instead of re-deriving the rule.
+
+**The real defect, found while implementing it.** `AdminAPI.deleteOrder` did:
+
+```js
+if (resp && resp.ok === false) throw new Error(resp.error || 'Delete failed');
+```
+
+`js/api.js` `request()` **does** attach `e.code` on its throw path (line ~426), and for
+401/403/404/429/5xx it does not throw at all — it *returns* an `{ok:false, code}` envelope so
+callers can render targeted UI. Every AdminAPI method that unwrapped one rebuilt it as a bare
+`Error`, dropping the code on the floor. **35 call sites** did this. Because the code never
+survived the wrapper, the conclusion drawn — and written down — was that `js/api.js` doesn't
+provide one:
+
+- `.claude/memory/backend-fixes.md` BF-010: *"`js/api.js` attaches no `err.code` on the generic
+  throw path, so prose-matching is currently the only way to branch (cf. ERR-077)."*
+- `tests/admin-order-delete-gating.test.js`: the same claim, in the comment justifying a test.
+- `~/Downloads/order-hard-purge-request-jul2026.md` §5 asked the backend for a machine-readable
+  code that the frontend was already being sent and then discarding.
+
+That is the ERR-077 trap reproduced one layer up, and it had hardened into documentation. It
+mattered here specifically: the purge endpoint returns **200 with a `failed[]` array**, and a
+403 arrives as a resolved envelope rather than a rejection — neither can be handled by reading
+English.
+
+**Fix.**
+
+- New ONE vocabulary `js/admin/utils/order-deletability.js` — pure, DOM-free, no imports, unit-
+  tested directly. It owns the two doors, the block reasons, the copy, the confirm wording and the
+  purge-response normalisation. `DELETABLE_STATUSES` is gone; it survives only as
+  `LEGACY_DELETABLE_STATUSES`, the fallback for rows carrying no contract fields — and that
+  fallback can **never** yield a purge, because the frontend must not infer a role.
+- One module-level `errorFromEnvelope(resp, fallback)` in `js/admin/api.js`, used at all 35 sites.
+  Same message everywhere, so no caller behaviour moved; there is now a `.code` to branch on. It
+  also handles the seven sites whose `resp.error` is a `{code, message}` object rather than a
+  string — those would have produced `new Error([object Object])` had the message ever been absent.
+- `AdminAPI.purgeOrders(ids)`: dedupes, chunks at 25 sequentially, treats a 200-with-`failed[]` as
+  the documented success shape, and throws **only when nothing was accomplished** — once a chunk
+  has returned, a later failure degrades into `failed[]` rather than discarding the record of what
+  was already irreversibly purged.
+- `bulkDelete` groups the selection by door, names both counts before the click (`Purge 9 · Delete
+  3` — never one number hiding a hard purge), and reports outcomes in five distinct buckets. The
+  fifth is the point: **`unaccounted`** — an id the purge response mentioned in neither `deleted`
+  nor `failed`. It is neither a success nor a failure, and after an irreversible operation, calling
+  it either one is the most dangerous lie available (the ERR-074 shape).
+- The order-detail modal resolves its right with `resolveDeleteRight(fullOrder, listRow, order)`.
+  The contract is only promised on the **list** endpoint — and this was **measured, not assumed**:
+  `GET /api/admin/orders/:id` returns all three fields as `undefined` while the same order's list
+  row carries them. Gating on the detail payload alone would therefore have legacy-resolved every
+  `paid`/`shipped` order to blocked and the owner would have found no delete button at all — the
+  whole feature silently deleted, with no error anywhere. Logged as BF-024 Q3.
+- A blocked order now keeps a **disabled** button carrying its reason instead of no button:
+  "linked to an invoice / quick order" is the one refusal an owner will actually meet, and hiding
+  the control left that fact nowhere to be stated on the surface showing that order.
+- `_seenOrders` now caches a role-dependent *permission*, so it is evicted for every attempted id
+  (refusals included — a refusal is newer information than the cached contract), on a status
+  change, and on tab destroy.
+- A page of rows arriving with no contract fields logs one `DebugLog.warn`. A backend rollback
+  would otherwise revert this whole surface in silence.
+
+**Verified:** `tests/admin-order-delete-gating.test.js` rewritten to 66 tests — the four contract
+rows verbatim, byte-exact copy, the loud-unknown battery, the legacy fallback proven never to yield
+a purge, purge-response normalisation including `deleted`-as-a-count and both-lists conflicts, and
+the source invariants. Endpoint deployment confirmed by probe (`POST /api/admin/orders/purge`
+returns `401 UNAUTHORIZED` unauthenticated where a bogus sibling path returns `404 NOT_FOUND`) and
+then **driven live in the admin as the owner**: 20/20 rows carry the contract, 18 offer `purge`
+(15 non-`cancelled`), 2 are blocked `invoice_link`; the bulk bar reads
+`20 selected · 18 purge · 2 blocked` / `Purge 18`; the confirm dialog carries all four warnings and
+fires **zero requests** on Cancel; a `shipped` order's modal button reads **Purge**, an
+invoice-linked one is **disabled** with the reason and its fix in the tooltip.
+Cache-bust `APP_VERSION 2026.07.30-order-hard-purge` + `npm run build`. Contract and the five open
+backend questions recorded in `order-hard-purge-contract-jul2026.md` (BF-024) — the handoff's
+referenced `docs/admin/order-hard-purge-backend-response-jul2026.md` was never delivered.
+
+**Lesson.** A wrapper that discards a field is indistinguishable, from the outside, from a backend
+that never sent it — and the wrong conclusion gets written into the docs, the tests and the next
+handoff, where it licenses exactly the fragile pattern it was supposed to prevent. Before asking a
+backend for something, check your own layer isn't already throwing it away. And when a rule moves
+from the client to the server, delete the client's copy rather than leaving it as a "fallback"
+that can still take the privileged path.
+
 ## ERR-131 — The Invoices PAID slider called a route that was never built, and the SENT column read three field names the backend never shipped (2026-07-30)
 
 **Trigger:** the backend dev handed over `invoice-paid-toggle-and-email-log-FE-handoff-jul2026.md`,

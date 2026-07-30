@@ -22,10 +22,10 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link rel="stylesheet" href="/css/base.css?v=e9b82f71">
     <link rel="stylesheet" href="/css/layout.css?v=e79b9859">
-    <link rel="stylesheet" href="/css/components.css?v=79d69fe3">
+    <link rel="stylesheet" href="/css/components.css?v=51f6dd56">
     <link rel="stylesheet" href="/css/modern-effects.css?v=afe20f45">
     <link rel="stylesheet" href="/css/pages.css?v=b29a1828">
-    <link rel="stylesheet" href="/css/search.css?v=5caba86a">
+    <link rel="stylesheet" href="/css/search.css?v=c28f09ef">
     <meta name="twitter:card" content="summary_large_image">
     <meta name="twitter:title" content="Shopping Cart | InkCartridges.co.nz">
     <meta name="twitter:description" content="Review your shopping cart - InkCartridges.co.nz">
@@ -210,6 +210,13 @@
 
                 <div class="cart-layout" id="cart-layout" hidden>
                     <div class="cart-main">
+                        <!-- Durable disclosure for a removal we could not complete
+                             (ERR-136). A toast auto-dismisses; a durable failure needs
+                             a durable statement. Written only by
+                             Cart._renderRemovalNotice(), and only after an attempt has
+                             actually failed — never while merely in flight. -->
+                        <p class="alert alert--warning" id="cart-removal-notice" role="status" aria-live="polite" hidden></p>
+
                         <div class="cart-items" id="cart-items">
                         </div>
 
@@ -455,20 +462,20 @@
     <script defer src="/js/config.js?v=57d2621d"></script>
     <script defer src="/js/security.js?v=790f00f3"></script>
     <script defer src="/js/shipping.js?v=f1875738"></script>
-    <script defer src="/js/utils.js?v=1a361f84"></script>
-    <script defer src="/js/api.js?v=988cf5bf"></script>
+    <script defer src="/js/utils.js?v=0fab5ab7"></script>
+    <script defer src="/js/api.js?v=7ce1308e"></script>
     <script defer src="/js/schema.js?v=dd78df4e"></script>
     <script defer src="/js/auth.js?v=55cfdbef"></script>
     <script defer src="/js/business.js?v=891bfd2f"></script>
-    <script defer src="/js/products.js?v=68f52ea8"></script>
+    <script defer src="/js/products.js?v=bfec75ea"></script>
     <script defer src="/js/search.js?v=b69f1ae8"></script>
-    <script defer src="/js/main.js?v=f6b7b932"></script>
+    <script defer src="/js/main.js?v=0a63f0fd"></script>
     <script defer src="/js/legal-config.js?v=2db8a49b"></script>
     <script defer src="/js/footer.js?v=f18a760a"></script>
     <script defer src="/js/mega-nav.js?v=9a073f70"></script>
     <script defer src="/js/rewards-nudge.js?v=f5a2df30"></script>
     <script defer src="/js/modern-effects.js?v=ad8bff1e"></script>
-    <script defer src="/js/cart.js?v=6c426f07"></script>
+    <script defer src="/js/cart.js?v=3172d670"></script>
     <script defer src="/js/cart-analytics.js?v=b2724a74"></script>
     <script defer src="/js/cart-page.js?v=c0739b5f"></script>
     <script defer src="/js/analytics.js?v=8c9ee196"></script>

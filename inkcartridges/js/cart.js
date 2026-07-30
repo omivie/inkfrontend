@@ -95,6 +95,324 @@ function businessDiscountLabel(b2bMeta) {
 }
 if (typeof window !== 'undefined') window.businessDiscountLabel = businessDiscountLabel;
 
+/**
+ * DURABLE CART REMOVALS (ERR-136)
+ * ===============================
+ * "Remove an item, refresh immediately, the item is back."
+ *
+ * Correctness here needs THREE independent mechanisms. Each covers a hole the
+ * other two cannot, so none of them is redundant — do not "simplify" one away:
+ *
+ *   1. JOURNAL (localStorage `inkcartridges_cart_pending_ops`)
+ *      Owns DURABILITY. The intent to remove is written down BEFORE the request
+ *      leaves, so it survives an unload, a tab crash, or being offline. This is
+ *      the only mechanism that covers a pre-dispatch abort: API.request() awaits
+ *      getToken() (and may sit inside Auth.refreshSession()) before fetch is
+ *      called, so `keepalive` has nothing to protect yet.
+ *
+ *   2. FILTER (`isPendingRemoved`, a pure predicate over the journal)
+ *      Owns CORRECTNESS OF EVERY PAINT while an intent is unconfirmed. Between
+ *      the journal write and the server's confirmation, localStorage and the
+ *      server BOTH still contain the row; every read path subtracts the journal
+ *      so no paint and no re-push can resurrect it.
+ *
+ *   3. EPOCH GUARD (`Cart._mutationEpoch`, in memory)
+ *      Owns ORDERING. A `GET /api/cart` issued before a mutation landed must
+ *      never be adopted after it. Without this the fix is FLAKY rather than
+ *      fixed: replay confirms, drops the journal entry, and then an in-flight
+ *      earlier GET resolves still carrying the item — the journal is now empty
+ *      so the filter correctly no longer matches, and `this.items =
+ *      parsed.items` puts it straight back and re-saves it.
+ *
+ * `keepalive: true` on the DELETE is a fourth, purely latency-side measure: it
+ * means the common case usually needs no replay at all. It is not load-bearing.
+ *
+ * All decision logic below is PURE (no DOM, no I/O, no clock) so it can be
+ * executed directly by tests instead of pattern-matched as source text.
+ */
+const PENDING_OPS_KEY = 'inkcartridges_cart_pending_ops';
+const PENDING_OP_VERSION = 1;
+/** Real attempts — the server answered, or the network failed while online. */
+const MAX_PENDING_OP_ATTEMPTS = 5;
+/** Deferrals (offline / 401 / 429) are not verdicts; the age cap is the real bound. */
+const MAX_PENDING_OP_DEFERRALS = 50;
+const PENDING_OP_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+const MAX_PENDING_OPS = 20;
+
+/**
+ * Build a pending-removal record.
+ *
+ * `idx` is stored so a rejected removal can be re-inserted exactly where it was
+ * WITHOUT a whole-array snapshot. A snapshot taken before the local filter is a
+ * time bomb: rolling back remove-A after remove-B succeeded resurrects B.
+ *
+ * @param {object} item  the cart line being removed
+ * @param {object} ctx   { idx, authenticated, uid, sid, now }
+ * @returns {object} record
+ */
+function makePendingRemoval(item, ctx) {
+    const c = ctx || {};
+    const it = item || {};
+    const qty = Number(it.quantity);
+    const idx = Number(c.idx);
+    const now = Number(c.now);
+    return {
+        v: PENDING_OP_VERSION,
+        // Reserved so a future 'setQty'/'clear' record can never be misread as a
+        // removal by an older build that only understands this shape.
+        op: 'remove',
+        id: it.id != null ? String(it.id) : null,
+        key: (typeof it.key === 'string' && it.key) ? it.key : null,
+        sku: typeof it.sku === 'string' ? it.sku : '',
+        name: typeof it.name === 'string' ? it.name : '',
+        qty: Number.isFinite(qty) && qty > 0 ? qty : 1,
+        idx: Number.isInteger(idx) && idx >= 0 ? idx : 0,
+        auth: !!c.authenticated,
+        uid: (c.authenticated && c.uid) ? String(c.uid) : null,
+        sid: (!c.authenticated && c.sid) ? String(c.sid) : null,
+        at: Number.isFinite(now) && now > 0 ? now : 0,
+        attempts: 0,
+        deferrals: 0,
+        lastAt: 0
+    };
+}
+
+/**
+ * Parse + validate + age-sweep the journal. Never throws.
+ *
+ * Anything unrecognised is DROPPED rather than guessed at, and the age sweep runs
+ * here so an expired intent can never be replayed even once.
+ *
+ * @param {string|object|null} raw  the raw localStorage value
+ * @param {number} now              Date.now() (0 disables the age sweep)
+ * @returns {{records: object[], dropped: {rec: object|null, reason: string}[]}}
+ */
+function readPendingOps(raw, now) {
+    const dropped = [];
+    let parsed = null;
+
+    if (typeof raw === 'string' && raw) {
+        try {
+            parsed = JSON.parse(raw);
+        } catch (e) {
+            // Corrupt journal: drop the whole thing. Never throw on a paint path.
+            return { records: [], dropped: [{ rec: null, reason: 'corrupt' }] };
+        }
+    } else if (raw && typeof raw === 'object') {
+        parsed = raw;
+    }
+    if (!parsed) return { records: [], dropped };
+
+    const list = Array.isArray(parsed)
+        ? parsed
+        : (Array.isArray(parsed.ops) ? parsed.ops : null);
+    if (!list) return { records: [], dropped: [{ rec: null, reason: 'corrupt' }] };
+
+    const nowMs = Number.isFinite(Number(now)) ? Number(now) : 0;
+    const records = [];
+
+    for (let i = 0; i < list.length; i++) {
+        const rec = list[i];
+        if (!rec || typeof rec !== 'object') { dropped.push({ rec: rec || null, reason: 'malformed' }); continue; }
+        if (rec.v !== PENDING_OP_VERSION) { dropped.push({ rec, reason: 'version' }); continue; }
+        if (rec.op !== 'remove') { dropped.push({ rec, reason: 'unsupported_op' }); continue; }
+        if (typeof rec.id !== 'string' || !rec.id) { dropped.push({ rec, reason: 'malformed' }); continue; }
+
+        const at = Number(rec.at);
+        if (!Number.isFinite(at) || at <= 0) { dropped.push({ rec, reason: 'malformed' }); continue; }
+        if (nowMs > 0 && (nowMs - at) > PENDING_OP_MAX_AGE_MS) { dropped.push({ rec, reason: 'expired' }); continue; }
+
+        const attempts = Number(rec.attempts);
+        const deferrals = Number(rec.deferrals);
+        if (Number.isFinite(attempts) && attempts >= MAX_PENDING_OP_ATTEMPTS) { dropped.push({ rec, reason: 'attempts_exhausted' }); continue; }
+        if (Number.isFinite(deferrals) && deferrals >= MAX_PENDING_OP_DEFERRALS) { dropped.push({ rec, reason: 'deferrals_exhausted' }); continue; }
+
+        records.push({
+            v: PENDING_OP_VERSION,
+            op: 'remove',
+            id: rec.id,
+            key: (typeof rec.key === 'string' && rec.key) ? rec.key : null,
+            sku: typeof rec.sku === 'string' ? rec.sku : '',
+            name: typeof rec.name === 'string' ? rec.name : '',
+            qty: Number.isFinite(Number(rec.qty)) && Number(rec.qty) > 0 ? Number(rec.qty) : 1,
+            idx: Number.isInteger(Number(rec.idx)) && Number(rec.idx) >= 0 ? Number(rec.idx) : 0,
+            auth: !!rec.auth,
+            uid: (typeof rec.uid === 'string' && rec.uid) ? rec.uid : null,
+            sid: (typeof rec.sid === 'string' && rec.sid) ? rec.sid : null,
+            at: at,
+            attempts: Number.isFinite(attempts) && attempts > 0 ? attempts : 0,
+            deferrals: Number.isFinite(deferrals) && deferrals > 0 ? deferrals : 0,
+            lastAt: Number.isFinite(Number(rec.lastAt)) ? Number(rec.lastAt) : 0
+        });
+    }
+
+    // A pathological loop must not eat the storage quota. Oldest go first.
+    if (records.length > MAX_PENDING_OPS) {
+        records.sort(function (a, b) { return a.at - b.at; });
+        while (records.length > MAX_PENDING_OPS) {
+            dropped.push({ rec: records.shift(), reason: 'overflow' });
+        }
+    }
+
+    return { records, dropped };
+}
+
+/**
+ * Is this cart line covered by an unconfirmed removal?
+ *
+ * Matching is KEY-FIRST. When both the record and the row name a specific line,
+ * the composite key is authoritative and there is NO id fallback — otherwise
+ * removing a `cross-sell:X` row would also hide the `core:X` row of the same
+ * product. When either side has no key the product id is the best available
+ * evidence, and filtering is the safer failure (it matches the shopper's intent).
+ *
+ * @param {object} item      a cart line
+ * @param {object[]} records journal records
+ * @returns {boolean}
+ */
+function isPendingRemoved(item, records) {
+    if (!item || !Array.isArray(records) || records.length === 0) return false;
+    const itemKey = (typeof item.key === 'string' && item.key) ? item.key : null;
+    const itemId = item.id != null ? String(item.id) : null;
+
+    for (let i = 0; i < records.length; i++) {
+        const rec = records[i];
+        if (!rec) continue;
+        if (rec.key && itemKey) {
+            if (rec.key === itemKey) return true;
+            continue;
+        }
+        if (itemId && rec.id === itemId) return true;
+    }
+    return false;
+}
+
+/**
+ * Decide, per record, whether this browser may replay it right now.
+ *
+ * A removal belongs to ONE cart. Replaying it against a different cart would
+ * delete a line somebody deliberately added, so a record that cannot be matched
+ * to the current identity is never replayed.
+ *
+ * For a guest, `X-Guest-Session` from localStorage is the ONLY handle on the
+ * cart: request() sends `credentials: 'omit'` whenever there is no token, so the
+ * backend's httpOnly guest cookie never rides along. Once the sid is gone that
+ * cart is unreachable from this browser forever — the intent is unsatisfiable
+ * AND harmless, so it is dropped quietly rather than surfaced.
+ *
+ * @param {object[]} records
+ * @param {object} ctx  { authenticated, uid, sid, retarget }
+ * @returns {{replay: object[], drop: {rec,reason}[], defer: {rec,reason}[]}}
+ */
+function planPendingReplay(records, ctx) {
+    const c = ctx || {};
+    const replay = [];
+    const drop = [];
+    const defer = [];
+    const list = Array.isArray(records) ? records : [];
+    const uid = c.uid != null ? String(c.uid) : null;
+    const sid = c.sid != null ? String(c.sid) : null;
+
+    for (let i = 0; i < list.length; i++) {
+        const rec = list[i];
+        if (!rec) continue;
+
+        if (rec.auth) {
+            // Authored while signed in. Still deliverable after a sign-out/sign-in
+            // round trip, so being signed out DEFERS rather than drops — which is
+            // why the SIGNED_OUT handler must not purge the journal.
+            if (!c.authenticated) { defer.push({ rec, reason: 'signed_out' }); continue; }
+            if (rec.uid && uid && rec.uid !== uid) { drop.push({ rec, reason: 'other_user' }); continue; }
+            if (rec.uid && !uid) { defer.push({ rec, reason: 'identity_unknown' }); continue; }
+            replay.push(rec);
+            continue;
+        }
+
+        // Authored as a guest.
+        if (c.authenticated) {
+            // The guest cart is about to be (or has just been) merged into the user
+            // cart, carrying the un-deleted row with it. Only replay once the merge
+            // has happened, and then as an authenticated delete.
+            if (c.retarget) replay.push(rec);
+            else defer.push({ rec, reason: 'awaiting_merge' });
+            continue;
+        }
+        if (!sid || !rec.sid || rec.sid !== sid) { drop.push({ rec, reason: 'guest_session_gone' }); continue; }
+        replay.push(rec);
+    }
+
+    return { replay, drop, defer };
+}
+
+/**
+ * Classify one DELETE outcome. Shared by the fresh path and the replay path so
+ * the two cannot drift apart.
+ *
+ * `removed` is read with NO coercion: `null` means "not reported" (HTTP 204, or a
+ * backend predating the field), never 0. Reading an unknown count as zero is the
+ * ERR-122 failure mode.
+ *
+ * A FRESH `removed: 0` is deliberately NOT terminal. It means the row was not
+ * there — but that could be "already gone" OR "the request resolved against a
+ * different cart" (guest sid rotated, session expired to anonymous), and the
+ * count alone cannot tell those apart. So it demands verification against a
+ * fresh GET. A REPLAYED `removed: 0` is the correct idempotent outcome.
+ *
+ * @param {object|null} response  the {ok,data} envelope, or null
+ * @param {Error|null} error      a thrown transport error, if any
+ * @param {object} opts           { replay: boolean, online: boolean }
+ * @returns {'confirmed'|'confirmed_unverified'|'absent'|'retry'|'defer'|'reject'}
+ */
+function classifyRemovalOutcome(response, error, opts) {
+    const o = opts || {};
+    const isReplay = !!o.replay;
+    const online = o.online !== false;
+
+    const verdictFor = function (code, status) {
+        if (code === 'NOT_FOUND' || status === 404) return 'absent';
+        if (code === 'UNAUTHORIZED' || code === 'EMAIL_NOT_VERIFIED' || status === 401) return 'defer';
+        if (code === 'FORBIDDEN' || status === 403) return 'reject';
+        if (code === 'RATE_LIMITED' || status === 429) return 'defer';
+        if (!online) return 'defer';
+        if (Number.isFinite(status) && status >= 500) return 'retry';
+        return null;
+    };
+
+    if (error) {
+        const v = verdictFor(
+            error.code ? String(error.code) : '',
+            Number(error.status)
+        );
+        // A TypeError/timeout/abort while online is transient — the replay owns it.
+        return v || (online ? 'retry' : 'defer');
+    }
+
+    if (!response) return online ? 'retry' : 'defer';
+
+    if (response.ok === false) {
+        const v = verdictFor(
+            response.code ? String(response.code) : '',
+            Number(response.status)
+        );
+        // Anything else the server rejected outright will not start working.
+        return v || 'reject';
+    }
+
+    const data = response.data;
+    const removed = (data && typeof data.removed === 'number') ? data.removed : null;
+    if (removed === null) return 'confirmed_unverified';
+    if (removed >= 1) return 'confirmed';
+    return isReplay ? 'absent' : 'confirmed_unverified';
+}
+
+if (typeof window !== 'undefined') {
+    window.makePendingRemoval = makePendingRemoval;
+    window.readPendingOps = readPendingOps;
+    window.isPendingRemoved = isPendingRemoved;
+    window.planPendingReplay = planPendingReplay;
+    window.classifyRemovalOutcome = classifyRemovalOutcome;
+}
+
 const Cart = {
     // Storage key for guest cart data
     STORAGE_KEY: 'inkcartridges_cart',
@@ -144,11 +462,51 @@ const Cart = {
     // Queued quantity values while an API call is in-flight
     _quantityQueued: {},
 
+    // Debounced-but-not-yet-dispatched quantity values, keyed by item, so an
+    // unload can flush them instead of losing them (ERR-136).
+    _quantityPending: {},
+
     // Guard against concurrent mergeGuestCartAndLoad calls
     _mergeInProgress: false,
 
-    // Set of item IDs/keys currently being removed (in-flight delete API calls)
+    // Set of item IDs/keys currently being removed (in-flight delete API calls).
+    // Covers THIS page only — it dies with the JS context, which is exactly why
+    // the durable journal below exists (ERR-136).
     _removingItems: new Set(),
+
+    // ── Durable removals (ERR-136) ──────────────────────────────────────────
+    // localStorage key for the pending-op journal. Declared ONCE at module scope;
+    // this is a reference, not a second literal.
+    PENDING_OPS_KEY: PENDING_OPS_KEY,
+
+    // Single quantity cap. Previously 99 in updateQuantity and 100 in the six
+    // other places, so a programmatic set-to-100 silently became 99.
+    MAX_QUANTITY: 100,
+
+    // In-memory mirror of the journal, refreshed on every read. Used as the paint
+    // filter. NEVER treat this as the source of truth across an await — two tabs
+    // share the key, so every add/drop is a read-modify-write against storage.
+    _pendingOps: [],
+
+    // False once a journal write has failed (quota, Safari private mode). The
+    // removal still proceeds — the shopper asked for it — but a later failure
+    // takes the loud path immediately instead of trusting a replay that can
+    // never happen.
+    _pendingOpsDurable: true,
+
+    // Bumped on every local mutation and every server confirmation. A GET
+    // captured at epoch N must not be adopted at epoch != N.
+    _mutationEpoch: 0,
+
+    // Shared in-flight promise so the init + auth-change + pageshow burst
+    // collapses into one replay pass.
+    _replayInFlight: null,
+
+    // Bounded re-fetch budget for stale snapshots, reset on a clean adoption.
+    _staleRefetches: 0,
+
+    // Idempotence latch for _bindDurabilityListeners().
+    _durabilityListenersBound: false,
 
     /**
      * Compute composite key for cart item identity.
@@ -265,6 +623,401 @@ const Cart = {
         });
     },
 
+    // ═══════════════════════════════════════════════════════════════════════
+    // DURABLE REMOVALS — journal, filter, epoch guard (ERR-136)
+    // See the module header for why all three are required.
+    // ═══════════════════════════════════════════════════════════════════════
+
+    /**
+     * Which cart do we currently hold the keys to?
+     * @returns {{authenticated: boolean, uid: string|null, sid: string|null}}
+     */
+    _cartIdentity() {
+        const authenticated = typeof Auth !== 'undefined' && Auth.isAuthenticated();
+        let uid = null;
+        if (authenticated && typeof Auth !== 'undefined' && typeof Auth.getUser === 'function') {
+            const user = Auth.getUser();
+            if (user && user.id) uid = String(user.id);
+        }
+        let sid = null;
+        if (typeof API !== 'undefined' && typeof API.getGuestSessionId === 'function') {
+            sid = API.getGuestSessionId() || null;
+        }
+        return { authenticated, uid, sid };
+    },
+
+    /**
+     * Read the journal from storage into `_pendingOps`. Synchronous and cheap —
+     * one read plus validation, no network — so it is safe on the first-paint path.
+     * @returns {object[]} the live records
+     */
+    _hydratePendingOps() {
+        let raw = null;
+        try {
+            raw = localStorage.getItem(PENDING_OPS_KEY);
+        } catch (e) {
+            DebugLog.warn('Cart: pending-op journal unreadable:', e);
+            this._pendingOps = [];
+            return this._pendingOps;
+        }
+        const { records, dropped } = readPendingOps(raw, Date.now());
+        this._pendingOps = records;
+        if (dropped.length > 0) {
+            // Anything swept here is an intent we can no longer honour. It is logged
+            // rather than toasted because a sweep on load has no actionable UI, and
+            // the reconciling GET that follows will show the truth either way.
+            DebugLog.warn('Cart: dropped ' + dropped.length + ' pending cart op(s): ' +
+                dropped.map(function (d) { return d.reason; }).join(', '));
+            this._persistPendingOps(records);
+        }
+        return this._pendingOps;
+    },
+
+    /**
+     * Write records to storage and refresh the in-memory mirror.
+     * @returns {boolean} whether the write is durable
+     */
+    _persistPendingOps(records) {
+        const list = Array.isArray(records) ? records : [];
+        this._pendingOps = list;
+        try {
+            if (list.length === 0) {
+                localStorage.removeItem(PENDING_OPS_KEY);
+            } else {
+                localStorage.setItem(PENDING_OPS_KEY, JSON.stringify({ v: PENDING_OP_VERSION, ops: list }));
+            }
+            return true;
+        } catch (e) {
+            // Quota exhausted or storage unavailable. The removal still proceeds, but
+            // nothing can replay it, so mark it non-durable and let the caller take
+            // the loud path on any failure rather than promising a replay.
+            DebugLog.warn('Cart: pending-op journal not writable — removals are not durable this session:', e);
+            this._pendingOpsDurable = false;
+            return false;
+        }
+    },
+
+    /**
+     * Read-modify-write the journal. Always re-reads storage first so a sibling
+     * tab's concurrent add/drop is not clobbered.
+     * @param {function(object[]): object[]} mutate
+     * @returns {boolean} durability of the write
+     */
+    _mutatePendingOps(mutate) {
+        this._hydratePendingOps();
+        const next = mutate(this._pendingOps.slice());
+        return this._persistPendingOps(Array.isArray(next) ? next : []);
+    },
+
+    /**
+     * Journal an intent to remove one line. Called BEFORE the local mutation and
+     * BEFORE the request, so a crash in between fails toward "we will replay".
+     * @returns {object|null} the stored record
+     */
+    _journalRemoval(item, idx) {
+        const id = this._cartIdentity();
+        const record = makePendingRemoval(item, {
+            idx: idx,
+            authenticated: id.authenticated,
+            uid: id.uid,
+            sid: id.sid,
+            now: Date.now()
+        });
+        if (!record.id) return null;
+        this._mutatePendingOps(function (ops) {
+            // Supersede any earlier intent for the same line.
+            const kept = ops.filter(function (rec) {
+                if (record.key && rec.key) return rec.key !== record.key;
+                return rec.id !== record.id;
+            });
+            kept.push(record);
+            return kept;
+        });
+        return record;
+    },
+
+    /**
+     * Drop journal entries matching a line — used on confirmation, and by addItem /
+     * quantity changes to cancel a superseded removal (otherwise "remove → re-add →
+     * refresh" replays a DELETE against the freshly re-added row).
+     */
+    _dropPendingOpsFor(idOrKey) {
+        if (!idOrKey) return;
+        const needle = String(idOrKey);
+        this._mutatePendingOps(function (ops) {
+            return ops.filter(function (rec) {
+                return rec.id !== needle && rec.key !== needle;
+            });
+        });
+    },
+
+    /** Replace one record in place (attempt/deferral bookkeeping). */
+    _updatePendingOp(record, changes) {
+        if (!record) return;
+        this._mutatePendingOps(function (ops) {
+            return ops.map(function (rec) {
+                const same = record.key && rec.key ? rec.key === record.key : rec.id === record.id;
+                return same ? Object.assign({}, rec, changes) : rec;
+            });
+        });
+    },
+
+    /**
+     * Discard the whole journal. Called when the cart it referred to no longer
+     * exists (confirmed clear, completed order) — a stale intent must never fire
+     * against a fresh cart.
+     */
+    purgePendingOps(reason) {
+        if (this._pendingOps.length > 0) {
+            DebugLog.log('Cart: purging ' + this._pendingOps.length + ' pending cart op(s) — ' + (reason || 'unspecified'));
+        }
+        this._persistPendingOps([]);
+    },
+
+    /** Is this line covered by an unconfirmed removal, or an in-flight one? */
+    _isPendingRemoved(item) {
+        if (!item) return false;
+        if (isPendingRemoved(item, this._pendingOps)) return true;
+        if (this._removingItems.size > 0) {
+            if (item.id != null && this._removingItems.has(item.id)) return true;
+            if (item.key && this._removingItems.has(item.key)) return true;
+        }
+        return false;
+    },
+
+    /**
+     * The ONE filter every cart-item list passes through — whether it came from the
+     * server, from localStorage, or is about to be pushed back to the server.
+     * Adding a new reader without this call is how the bug comes back.
+     */
+    _filterPendingRemovals(items) {
+        if (!Array.isArray(items) || items.length === 0) return Array.isArray(items) ? items : [];
+        const self = this;
+        return items.filter(function (item) { return !self._isPendingRemoved(item); });
+    },
+
+    /**
+     * Capture the mutation epoch before an `await API.getCart()`.
+     * @returns {number}
+     */
+    _beginSnapshot() {
+        return this._mutationEpoch;
+    },
+
+    /**
+     * Did anything change while that GET was in flight? If so the response is a
+     * view of the past and adopting it would resurrect what just changed.
+     */
+    _snapshotStale(epoch) {
+        return this._mutationEpoch !== epoch;
+    },
+
+    /**
+     * Finish any removals this browser promised but never confirmed.
+     *
+     * Collapses concurrent callers (init, auth change, pageshow, online) into one
+     * pass via a shared in-flight promise.
+     *
+     * @param {object} [opts] { retarget: boolean, reason: string }
+     * @returns {Promise<{attempted:number, confirmed:number, absent:number,
+     *                    deferred:number, dropped:number,
+     *                    failed:{id,sku,name,reason}[]}>}
+     */
+    async replayPendingOps(opts) {
+        if (this._replayInFlight) return this._replayInFlight;
+        const self = this;
+        this._replayInFlight = this._runPendingReplay(opts || {})
+            .catch(function (e) {
+                DebugLog.error('Cart: pending-op replay failed:', e);
+                return { attempted: 0, confirmed: 0, absent: 0, deferred: 0, dropped: 0, failed: [] };
+            })
+            .then(function (result) {
+                self._replayInFlight = null;
+                return result;
+            });
+        return this._replayInFlight;
+    },
+
+    /**
+     * Bind the unload flush and the replay re-kicks. Idempotent.
+     */
+    _bindDurabilityListeners() {
+        if (this._durabilityListenersBound) return;
+        this._durabilityListenersBound = true;
+        if (typeof window === 'undefined') return;
+
+        const flush = () => { this._flushPendingQuantityUpdates(); };
+
+        // pagehide, never beforeunload: beforeunload would prompt the shopper on a
+        // routine cart action, and Chrome ignores it without a prior gesture anyway.
+        window.addEventListener('pagehide', flush);
+        // iOS Safari is unreliable on pagehide.
+        document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'hidden') flush();
+        });
+
+        // Back-button into a bfcached /cart runs no DOMContentLoaded and no init(),
+        // so without this the page would look authoritative while the server
+        // disagrees. Mirrors the ribbons-page.js precedent.
+        window.addEventListener('pageshow', (event) => {
+            if (!event.persisted) return;
+            this._hydratePendingOps();
+            this.replayPendingOps({ reason: 'bfcache-restore' })
+                .then((r) => { this._renderRemovalNotice(r); })
+                .catch(() => {});
+        });
+
+        // Coming back online makes every deferred removal deliverable.
+        window.addEventListener('online', () => {
+            this.replayPendingOps({ reason: 'online' })
+                .then((r) => { this._renderRemovalNotice(r); })
+                .catch(() => {});
+        });
+    },
+
+    async _runPendingReplay(opts) {
+        // Partial-ness lives in the RETURN VALUE, not just a log line.
+        const summary = { attempted: 0, confirmed: 0, absent: 0, deferred: 0, dropped: 0, failed: [] };
+        if (typeof API === 'undefined') return summary;
+
+        this._hydratePendingOps();
+        if (this._pendingOps.length === 0) return summary;
+
+        const identity = this._cartIdentity();
+        const plan = planPendingReplay(this._pendingOps, {
+            authenticated: identity.authenticated,
+            uid: identity.uid,
+            sid: identity.sid,
+            retarget: !!opts.retarget
+        });
+
+        // Unsatisfiable intents are removed so they cannot be retried forever.
+        for (let i = 0; i < plan.drop.length; i++) {
+            const d = plan.drop[i];
+            summary.dropped++;
+            DebugLog.warn('Cart: dropping pending removal (' + d.reason + ') for ' + (d.rec.sku || d.rec.id));
+            this._dropPendingOpsFor(d.rec.key || d.rec.id);
+        }
+        summary.deferred += plan.defer.length;
+
+        let anyResolved = false;
+        // Rows we dropped WITHOUT proof they are gone (204, or a fresh-style 0).
+        // Verified against a real GET below rather than assumed.
+        const unverified = [];
+
+        // SEQUENTIAL, not parallel. The backend limiter is 60 req/min per IP, so
+        // firing N deletes at once is how one 429 becomes N deferrals.
+        for (let i = 0; i < plan.replay.length; i++) {
+            const rec = plan.replay[i];
+            summary.attempted++;
+            const online = typeof navigator === 'undefined' || navigator.onLine !== false;
+
+            let response = null;
+            let error = null;
+            try {
+                response = await API.removeFromCart(rec.id, { keepalive: true });
+            } catch (e) {
+                error = e;
+            }
+
+            const state = classifyRemovalOutcome(response, error, { replay: true, online: online });
+
+            if (state === 'confirmed' || state === 'absent' || state === 'confirmed_unverified') {
+                if (state === 'confirmed') summary.confirmed++;
+                else if (state === 'absent') summary.absent++;
+                else { summary.confirmed++; unverified.push(rec); }
+                anyResolved = true;
+                this._mutationEpoch++;
+                this._dropPendingOpsFor(rec.key || rec.id);
+                continue;
+            }
+
+            // A retargeted guest intent that did NOT resolve must be re-stamped as an
+            // authenticated one. Left as-authored it would read as guest on the next
+            // load, find the sid gone (the merge cleared it) and be dropped — silently
+            // losing a removal we had already decided to honour.
+            const reaim = (opts.retarget && !rec.auth && identity.authenticated)
+                ? { auth: true, uid: identity.uid, sid: null }
+                : {};
+
+            if (state === 'defer') {
+                // Offline / 401 / 429 — not a verdict. Never burns the attempt budget.
+                summary.deferred++;
+                this._updatePendingOp(rec, Object.assign({ deferrals: rec.deferrals + 1, lastAt: Date.now() }, reaim));
+                continue;
+            }
+
+            if (state === 'retry') {
+                const attempts = rec.attempts + 1;
+                if (attempts >= MAX_PENDING_OP_ATTEMPTS) {
+                    summary.failed.push({ id: rec.id, sku: rec.sku, name: rec.name, reason: 'attempts_exhausted' });
+                    this._dropPendingOpsFor(rec.key || rec.id);
+                } else {
+                    this._updatePendingOp(rec, Object.assign({ attempts: attempts, lastAt: Date.now() }, reaim));
+                }
+                continue;
+            }
+
+            // 'reject' — the server refused and will keep refusing.
+            summary.failed.push({ id: rec.id, sku: rec.sku, name: rec.name, reason: 'rejected' });
+            this._dropPendingOpsFor(rec.key || rec.id);
+        }
+
+        if (anyResolved || summary.failed.length > 0) {
+            this._mutationEpoch++;
+            await this.loadFromServer();
+            this.saveToLocalStorage();
+
+            // Contradiction check: we dropped these without proof. If the server still
+            // lists them, the removal did NOT happen and saying nothing would be a lie.
+            for (let i = 0; i < unverified.length; i++) {
+                const rec = unverified[i];
+                const stillThere = this.items.some(function (item) {
+                    return isPendingRemoved(item, [rec]);
+                });
+                if (stillThere) {
+                    summary.confirmed = Math.max(0, summary.confirmed - 1);
+                    summary.failed.push({ id: rec.id, sku: rec.sku, name: rec.name, reason: 'still_present' });
+                }
+            }
+            this.updateUI();
+        }
+
+        return summary;
+    },
+
+    /**
+     * Render the durable disclosure for a failed removal.
+     *
+     * A toast auto-dismisses; a durable failure needs a durable statement, so the
+     * inline notice is the primary channel and the toast is the attention-getter.
+     * Shown ONLY after an attempt has actually failed — never while merely in
+     * flight, or every normal removal flashes a warning for 300ms.
+     */
+    _renderRemovalNotice(result) {
+        const el = document.getElementById('cart-removal-notice');
+        if (!el) return;
+
+        const failed = (result && Array.isArray(result.failed)) ? result.failed : [];
+        if (failed.length === 0) {
+            el.hidden = true;
+            el.textContent = '';
+            return;
+        }
+
+        const names = failed.map(function (f) { return f.name || f.sku || 'An item'; });
+        const label = names.length === 1
+            ? Security.escapeHtml(names[0])
+            : Security.escapeHtml(names.length + ' items');
+        el.innerHTML = '<strong>We couldn\'t remove ' + label + '.</strong> ' +
+            'It\'s still in your cart — your cart below has been refreshed from our server. Please try again.';
+        el.hidden = false;
+
+        if (typeof showToast === 'function') {
+            showToast('We couldn\'t remove ' + names[0] + ' — it\'s still in your cart. Please try again.', 'warning', 6000);
+        }
+    },
+
     /**
      * Initialize cart - SERVER FIRST
      * Waits for Auth to initialize before loading cart
@@ -287,12 +1040,23 @@ const Cart = {
             Auth.onAuthStateChange(async (event, session) => {
                 if (event === 'SIGNED_IN') {
                     // Skip merge if already authenticated (session restore, not a real sign-in)
-                    if (this.isAuthenticated || this._mergeInProgress) return;
+                    if (this.isAuthenticated || this._mergeInProgress) {
+                        // Still worth a replay: a removal deferred while signed out (or
+                        // during an expired session) just became deliverable.
+                        this.replayPendingOps({ reason: 'session-restore' })
+                            .then((r) => { this._renderRemovalNotice(r); })
+                            .catch(() => {});
+                        return;
+                    }
                     // User just logged in - merge guest cart to server and load server cart
                     await this.mergeGuestCartAndLoad();
                 } else if (event === 'TOKEN_REFRESHED') {
                     // Just update auth flag, don't re-merge
                     this.isAuthenticated = true;
+                    // A 401-deferred removal is now deliverable.
+                    this.replayPendingOps({ reason: 'token-refresh' })
+                        .then((r) => { this._renderRemovalNotice(r); })
+                        .catch(() => {});
                 } else if (event === 'SIGNED_OUT') {
                     // User logged out - clear cart state and localStorage cache
                     this.items = [];
@@ -302,11 +1066,19 @@ const Cart = {
                     this.isAuthenticated = false;
                     this.validationState = 'unknown';
                     this.validationErrors = [];
+                    this._mutationEpoch++;
                     localStorage.removeItem(this.STORAGE_KEY);
+                    // The pending-op journal is deliberately NOT purged. An
+                    // authenticated removal that never confirmed is still sitting in
+                    // that user's SERVER cart; purging here would resurrect it the next
+                    // time they sign in. planPendingReplay() defers those records while
+                    // signed out rather than dropping them (ERR-136).
                     this.updateUI();
                 }
             });
         }
+
+        this._bindDurabilityListeners();
 
         await this.loadCart();
 
@@ -424,13 +1196,28 @@ const Cart = {
         this.loading = true;
         this.isAuthenticated = typeof Auth !== 'undefined' && Auth.isAuthenticated();
 
+        // Read the pending-op journal BEFORE the first paint. Synchronous — one
+        // storage read plus validation, no network — so this adds no latency and
+        // introduces no await ahead of the first render (ERR-121, ERR-136).
+        this._hydratePendingOps();
+
         // Load from localStorage first for instant display (fallback data)
         this.loadFromLocalStorage();
+        // Counted AFTER the journal filter: a cart the journal has already emptied
+        // must not make the skeleton wait on a server round trip.
         const localItemCount = this.items.length;
         this._localStorageHadItems = localItemCount > 0;
 
         // Show localStorage items immediately for visual feedback
         this.updateUI();
+
+        // Finish any removal this browser promised but never confirmed. NOT awaited —
+        // it must not sit between the first paint and the fan-out below. Correctness
+        // does not depend on it landing first; the filter above already hides the
+        // affected rows, and the epoch guard stops a stale GET adopting them.
+        this.replayPendingOps({ reason: 'load' })
+            .then((result) => { this._renderRemovalNotice(result); })
+            .catch(() => { /* replayPendingOps already logs */ });
 
         if (typeof API !== 'undefined') {
             try {
@@ -438,10 +1225,14 @@ const Cart = {
                     await this.syncWithServer();
                 } else {
                     // Guest users: Server-first with localStorage fallback
+                    const epoch = this._beginSnapshot();
                     try {
                         const response = await API.getCart();
-                        if (response.ok && response.data) {
+                        if (this._snapshotStale(epoch)) {
+                            await this._handleStaleSnapshot('loadCart(guest)');
+                        } else if (response.ok && response.data) {
                             const parsed = this._parseServerCart(response.data);
+                            parsed.items = this._filterPendingRemovals(parsed.items);
 
                             // If server has items, use them (with fresh prices)
                             if (parsed.items.length > 0) {
@@ -465,10 +1256,14 @@ const Cart = {
                                     }
                                 }
                                 // After syncing, reload from server to get fresh prices
+                                const refreshEpoch = this._beginSnapshot();
                                 try {
                                     const refreshResponse = await API.getCart();
-                                    if (refreshResponse.ok && refreshResponse.data) {
+                                    if (this._snapshotStale(refreshEpoch)) {
+                                        await this._handleStaleSnapshot('loadCart(guest refresh)');
+                                    } else if (refreshResponse.ok && refreshResponse.data) {
                                         const refreshed = this._parseServerCart(refreshResponse.data);
+                                        refreshed.items = this._filterPendingRemovals(refreshed.items);
                                         if (refreshed.items.length > 0) {
                                             this.items = refreshed.items;
                                             this.serverSummary = refreshed.summary;
@@ -508,7 +1303,11 @@ const Cart = {
     getGuestCartItems() {
         try {
             const stored = localStorage.getItem(this.STORAGE_KEY);
-            return stored ? JSON.parse(stored) : [];
+            const items = stored ? JSON.parse(stored) : [];
+            // Filtered because this feeds the guest re-push loop in loadCart(). An
+            // unfiltered mirror can re-addToCart a row the shopper just removed,
+            // resurrecting it INTO the server — the same symptom with no race at all.
+            return this._filterPendingRemovals(items);
         } catch (e) {
             return [];
         }
@@ -518,13 +1317,23 @@ const Cart = {
      * Sync cart with server (background operation for authenticated users)
      */
     async syncWithServer() {
+        const epoch = this._beginSnapshot();
         try {
             const response = await API.getCart();
+            if (this._snapshotStale(epoch)) {
+                return this._handleStaleSnapshot('syncWithServer');
+            }
             if (response.ok && response.data) {
                 const parsed = this._parseServerCart(response.data);
 
+                // Subtract unconfirmed removals BEFORE the empty-cart guard below.
+                // "The server had items but every one of them is a pending removal" is a
+                // LEGITIMATELY empty cart, not a suspicious one — filtering after the
+                // guard would take the fallback branch and resurrect the local copy.
+                parsed.items = this._filterPendingRemovals(parsed.items);
+
                 // Guard: don't clear local items if server unexpectedly returns empty
-                if (parsed.items.length === 0 && this.items.length > 0) {
+                if (parsed.items.length === 0 && this._filterPendingRemovals(this.items).length > 0) {
                     DebugLog.warn('Server returned empty cart — keeping local items as fallback');
                     this.serverSummary = null;
                     this.updateUI();
@@ -532,9 +1341,10 @@ const Cart = {
                 }
 
                 // Merge back any local core items the server doesn't know about yet
-                // (e.g. add-to-cart API call was in-flight during navigation)
+                // (e.g. add-to-cart API call was in-flight during navigation).
+                // Superseded by the epoch guard above; kept as defence in depth.
                 const serverIds = new Set(parsed.items.map(i => i.id));
-                const localOnly = this.items.filter(i => {
+                const localOnly = this._filterPendingRemovals(this.items).filter(i => {
                     return i.source === 'core' && !serverIds.has(i.id);
                 });
                 this.items = parsed.items;
@@ -585,24 +1395,28 @@ const Cart = {
      * Load cart from server (authenticated users)
      */
     async loadFromServer() {
+        const epoch = this._beginSnapshot();
         try {
             const response = await API.getCart();
+            if (this._snapshotStale(epoch)) {
+                // Something mutated while this GET was in flight, so the body we just
+                // received is a view of the past. Adopting it would resurrect whatever
+                // changed (ERR-136).
+                return this._handleStaleSnapshot('loadFromServer');
+            }
             if (response.ok && response.data) {
                 const parsed = this._parseServerCart(response.data);
 
-                // Filter out items that are currently being removed (in-flight deletes)
-                // to prevent them from reappearing while their delete API call is still in flight
-                if (this._removingItems.size > 0) {
-                    parsed.items = parsed.items.filter(function(item) {
-                        return !Cart._removingItems.has(item.id) && !Cart._removingItems.has(item.key);
-                    });
-                }
+                // Subtract unconfirmed removals — in-flight this page AND journaled
+                // across reloads.
+                parsed.items = this._filterPendingRemovals(parsed.items);
 
                 this.items = parsed.items;
                 this.serverSummary = parsed.summary;
                 this.appliedCoupon = parsed.couponCode;
                 this.discountAmount = parsed.discountAmount;
                 this.loyalty = parsed.loyalty;
+                this._staleRefetches = 0;
             }
         } catch (error) {
             DebugLog.error('Failed to load cart from server:', error);
@@ -612,12 +1426,34 @@ const Cart = {
     },
 
     /**
+     * A server snapshot arrived after the state it described had already changed.
+     *
+     * Re-fetch once (bounded), otherwise keep local state and drop `serverSummary`
+     * so the UI is honest about having no server pricing — `isUsingEstimatedPrices()`
+     * already surfaces that.
+     */
+    async _handleStaleSnapshot(where) {
+        DebugLog.warn('Cart: discarded a stale server cart snapshot in ' + where);
+        if (this._staleRefetches < 2) {
+            this._staleRefetches++;
+            return this.loadFromServer();
+        }
+        DebugLog.warn('Cart: stale-snapshot refetch budget exhausted — keeping local items without server totals');
+        this.serverSummary = null;
+    },
+
+    /**
      * Load cart from localStorage (guest users only)
      */
     loadFromLocalStorage() {
         try {
             const stored = localStorage.getItem(this.STORAGE_KEY);
-            this.items = stored ? JSON.parse(stored) : [];
+            const items = stored ? JSON.parse(stored) : [];
+            // First paint. The mirror still contains anything whose DELETE was
+            // interrupted, so it is filtered here — this is what stops the removed
+            // item flashing back before the server reconcile lands. Synchronous:
+            // no await is introduced ahead of the first render (ERR-121).
+            this.items = this._filterPendingRemovals(items);
             this.serverSummary = null; // localStorage has no server totals
         } catch (e) {
             DebugLog.error('Failed to load guest cart:', e);
@@ -650,6 +1486,10 @@ const Cart = {
             } catch (e) {
                 DebugLog.error('Failed to parse legacy cart:', e);
             }
+            // If the crash landed between the journal write and saveToLocalStorage,
+            // this snapshot still holds the removed row and the migration loop below
+            // would re-add it to the user cart (ERR-136).
+            legacyItems = this._filterPendingRemovals(legacyItems);
 
             // Step 1: Merge guest cookie cart into user cart FIRST
             if (typeof API !== 'undefined') {
@@ -666,6 +1506,16 @@ const Cart = {
                     DebugLog.error('Cart merge failed:', e);
                 }
             }
+
+            // Step 1b: the merge just copied the guest cart — INCLUDING any row whose
+            // DELETE was aborted — into the user cart. Without this, "guest removes →
+            // signs in" brings the item back permanently. Awaited on purpose: this is a
+            // post-sign-in flow, not the first-paint path, and the ordering (replay
+            // strictly after the merge, strictly before the reconciling GET below) is
+            // load-bearing. `retarget` re-aims guest-authored intents at the now
+            // authenticated cart.
+            this._mutationEpoch++;
+            await this.replayPendingOps({ reason: 'post-merge', retarget: true });
 
             // Step 2: Load server cart to see what's already there
             await this.loadFromServer();
@@ -926,7 +1776,7 @@ const Cart = {
                 const selector = increaseBtn.closest('.quantity-selector');
                 const input = selector.querySelector('.quantity-selector__input');
                 const itemId = selector.dataset.itemKey || selector.dataset.itemId;
-                const maxQty = 100;
+                const maxQty = this.MAX_QUANTITY;
                 const newValue = parseInt(input.value) + 1;
                 if (newValue <= maxQty) {
                     input.value = newValue;
@@ -954,6 +1804,16 @@ const Cart = {
                 const cartItem = removeBtn.closest('.cart-item');
                 if (cartItem) {
                     const itemId = cartItem.dataset.itemKey || cartItem.dataset.itemId;
+                    // Disable BEFORE the await. The id-level guard in removeItem() is
+                    // what actually protects the request, but it is not sufficient on
+                    // its own: updateUI() rebuilds #cart-items via innerHTML between the
+                    // two clicks of a double-click, so the second click can land on a
+                    // DIFFERENT item's button at the same coordinates and remove the
+                    // wrong line. The two guards cover both orderings.
+                    if (removeBtn.disabled) return;
+                    removeBtn.disabled = true;
+                    cartItem.classList.add('cart-item--removing');
+                    cartItem.setAttribute('aria-busy', 'true');
                     await this.removeItem(itemId);
                 }
             }
@@ -972,7 +1832,7 @@ const Cart = {
             if (e.target.matches('.quantity-selector__input')) {
                 const selector = e.target.closest('.quantity-selector');
                 const itemId = selector.dataset.itemKey || selector.dataset.itemId;
-                const maxQty = 100;
+                const maxQty = this.MAX_QUANTITY;
                 let newValue = parseInt(e.target.value);
 
                 // Clamp to valid range
@@ -1002,9 +1862,13 @@ const Cart = {
         const item = this.items.find(function(i) { return i.key === itemId || i.id === itemId; });
         if (!item) return;
 
-        const clampedQty = Math.min(quantity, 100);
+        // Changing a quantity supersedes an unconfirmed removal of the same line.
+        this._dropPendingOpsFor(item.key || item.id);
+
+        const clampedQty = Math.min(quantity, this.MAX_QUANTITY);
         const oldQty = item.quantity;
         item.quantity = clampedQty;
+        this._mutationEpoch++;
         this.saveToLocalStorage();
 
         // Apply price delta to server summary for responsive display
@@ -1021,10 +1885,51 @@ const Cart = {
         this._updateCartItemDOM(itemId);
         this._updateCartSummaryDOM();
 
+        // Remembered so an unload can dispatch the value the timer never got to.
+        this._quantityPending[itemId] = clampedQty;
+
         this._quantityDebounceTimers[itemId] = setTimeout(async () => {
             delete this._quantityDebounceTimers[itemId];
+            delete this._quantityPending[itemId];
             await this._executeQuantityUpdate(itemId, clampedQty);
         }, 400);
+    },
+
+    /**
+     * Dispatch every debounced quantity change immediately, with `keepalive` so it
+     * survives the unload that triggered this.
+     *
+     * Same bug class as the headline removal bug: a 400ms debounce plus an immediate
+     * refresh silently loses the change. Bound to `pagehide` AND
+     * `visibilitychange → hidden` because iOS Safari is unreliable on `pagehide`.
+     * Deliberately NOT `beforeunload` — that would prompt the shopper.
+     *
+     * Fire-and-forget by necessity: nothing can be awaited during unload. This is
+     * why the flush is a best-effort latency fix and not a durability guarantee —
+     * quantity intents are last-write-wins and are not journaled (see ERR-136).
+     */
+    _flushPendingQuantityUpdates() {
+        const ids = Object.keys(this._quantityPending);
+        if (ids.length === 0) return;
+        for (let i = 0; i < ids.length; i++) {
+            const itemId = ids[i];
+            const qty = this._quantityPending[itemId];
+            if (this._quantityDebounceTimers[itemId]) {
+                clearTimeout(this._quantityDebounceTimers[itemId]);
+                delete this._quantityDebounceTimers[itemId];
+            }
+            delete this._quantityPending[itemId];
+
+            const item = this.items.find(function(i) { return i.key === itemId || i.id === itemId; });
+            const isCore = !item || !item.source || item.source === 'core';
+            const actualId = item ? item.id : itemId;
+            if (!isCore || typeof API === 'undefined') continue;
+            try {
+                API.updateCartItem(actualId, qty, { keepalive: true }).catch(function () { /* unload */ });
+            } catch (e) {
+                DebugLog.warn('Cart: quantity flush failed on unload:', e);
+            }
+        }
     },
 
     /**
@@ -1257,9 +2162,6 @@ const Cart = {
      * Also saves to localStorage for cross-origin cookie fallback
      */
     async addItem(product) {
-        // Snapshot for rollback
-        const previousItems = JSON.parse(JSON.stringify(this.items));
-
         // The cart's `source` field is a SUBSYSTEM namespace — it tags where
         // the row was added from ('core' for the main catalog, 'cross-sell'
         // for upsell strips, etc.) and is part of the composite key so the
@@ -1281,10 +2183,20 @@ const Cart = {
         const key = this.cartItemKey({ source: source, sku: product.sku, slug: product.slug, id: product.id });
         const isCore = source === 'core';
 
+        // Re-adding supersedes any unconfirmed removal of the same line. Without
+        // this, "remove → re-add → refresh" replays a DELETE against the row that was
+        // just put back (ERR-136).
+        this._dropPendingOpsFor(key);
+        if (product.id) this._dropPendingOpsFor(product.id);
+
         // Update local cart first (instant feedback)
         const existingItem = this.items.find(function(item) {
             return (item.key || Cart.cartItemKey(item)) === key;
         });
+        // Recorded for a surgical rollback. A whole-array snapshot taken here would
+        // resurrect a DIFFERENT item whose removal landed while this add was in flight.
+        const hadExisting = !!existingItem;
+        const addedQty = product.quantity || 1;
 
         if (existingItem) {
             existingItem.quantity += product.quantity || 1;
@@ -1312,6 +2224,7 @@ const Cart = {
 
         // Invalidate server summary (will be refreshed after server confirms)
         this.serverSummary = null;
+        this._mutationEpoch++;
 
         // Always save to localStorage as backup (for cross-origin cookie issues)
         this.saveToLocalStorage();
@@ -1323,8 +2236,16 @@ const Cart = {
             try {
                 const response = await API.addToCart(product.id, product.quantity || 1);
                 if (!response.ok) {
-                    // Server rejected - rollback
-                    this.items = previousItems;
+                    // Server rejected — undo just this add, never a whole-array restore.
+                    const self = this;
+                    const at = this.items.findIndex(function(item) {
+                        return (item.key || self.cartItemKey(item)) === key;
+                    });
+                    if (at >= 0) {
+                        if (hadExisting) this.items[at].quantity = Math.max(0, this.items[at].quantity - addedQty);
+                        if (!hadExisting || this.items[at].quantity <= 0) this.items.splice(at, 1);
+                    }
+                    this._mutationEpoch++;
                     this.saveToLocalStorage();
                     this.updateUI();
                     if (typeof showToast === 'function') {
@@ -1509,10 +2430,18 @@ const Cart = {
         const isCore = !item || !item.source || item.source === 'core';
         const actualId = item ? item.id : itemId;
 
+        // Changing a quantity supersedes an unconfirmed removal of the same line.
+        if (item) {
+            this._dropPendingOpsFor(item.key || item.id);
+        }
+
         // Update locally first (instant feedback)
         if (item) {
-            item.quantity = Math.min(quantity, 99);
+            // Single cap. This clamped to 99 while the six other sites used 100, so a
+            // programmatic set-to-100 silently became 99.
+            item.quantity = Math.min(quantity, this.MAX_QUANTITY);
             this.serverSummary = null; // Invalidate until server confirms
+            this._mutationEpoch++;
             this.saveToLocalStorage();
             this.updateUI();
         }
@@ -1557,66 +2486,138 @@ const Cart = {
     },
 
     /**
-     * Remove item from cart - with rollback on server failure
-     * Syncs to server for both guest and authenticated users
+     * Remove item from cart — durable, with surgical rollback (ERR-136).
+     *
+     * Ordering is load-bearing: the intent is JOURNALED before the local mutation
+     * and before the request, so a crash anywhere after this point fails toward
+     * "we will replay" rather than "we forgot".
+     *
+     * A transient failure (offline, 5xx, timeout) does NOT roll back and does NOT
+     * toast. That used to say "Item not removed", which with a durable journal is a
+     * lie in the other direction — the removal WILL happen. Only exhaustion or an
+     * outright rejection puts the row back, and that path is loud.
+     *
+     * @returns {Promise<{ok: boolean, state: string, verified: boolean}>}
      */
     async removeItem(itemId) {
-        // Find item by key (composite) or fall back to id
-        const self = this;
-        const removedItem = this.items.find(function(item) {
+        const idx = this.items.findIndex(function(item) {
             return item.key === itemId || item.id === itemId;
         });
-        const previousItems = JSON.parse(JSON.stringify(this.items));
+        const removedItem = idx >= 0 ? this.items[idx] : null;
         const isCore = !removedItem || !removedItem.source || removedItem.source === 'core';
         const actualId = removedItem ? removedItem.id : itemId;
+        const itemKey = removedItem && removedItem.key ? removedItem.key : null;
 
-        // Remove locally first (instant feedback)
+        // Double-click guard. Without it two DELETEs fire for one row and the first
+        // `finally` clears the in-flight marker while the second is still running.
+        if (this._removingItems.has(actualId) || (itemKey && this._removingItems.has(itemKey))) {
+            return { ok: false, state: 'in_flight', verified: false };
+        }
+
+        // Journal FIRST — before this.items changes, before saveToLocalStorage().
+        // Non-core rows (cross-sell) never reach the server, so they are never
+        // journaled; journaling them would let a cross-sell removal hide the core
+        // row of the same product.
+        let record = null;
+        if (isCore && removedItem) {
+            record = this._journalRemoval(removedItem, idx >= 0 ? idx : 0);
+        }
+
+        // Remove locally (instant feedback)
         this.items = this.items.filter(function(item) {
             return item.key !== itemId && item.id !== itemId;
         });
         this.serverSummary = null; // Invalidate until server confirms
+        this._mutationEpoch++;
         this.saveToLocalStorage();
         this.updateUI();
 
         // Sync to server only for core items
         if (isCore && typeof API !== 'undefined') {
-            // Mark as in-flight so loadFromServer() won't re-add it
             this._removingItems.add(actualId);
-            if (removedItem && removedItem.key) this._removingItems.add(removedItem.key);
+            if (itemKey) this._removingItems.add(itemKey);
+
+            const online = typeof navigator === 'undefined' || navigator.onLine !== false;
+            let response = null;
+            let error = null;
             try {
-                const response = await API.removeFromCart(actualId);
-                if (response && !response.ok) {
-                    // Server rejected removal - rollback
-                    this._removingItems.delete(actualId);
-                    if (removedItem && removedItem.key) this._removingItems.delete(removedItem.key);
-                    this.items = previousItems;
+                // keepalive so an immediate refresh does not abort the request.
+                response = await API.removeFromCart(actualId, { keepalive: true });
+            } catch (e) {
+                error = e;
+                DebugLog.error('Failed to sync removal to server:', e);
+            }
+
+            const state = classifyRemovalOutcome(response, error, { replay: false, online: online });
+
+            try {
+                if (state === 'reject' || (!this._pendingOpsDurable && (state === 'retry' || state === 'defer'))) {
+                    // Either the server refused outright, or we could not journal the
+                    // intent so no replay can rescue it. Put the row back where it was —
+                    // surgically, never from a whole-array snapshot, which would
+                    // resurrect a DIFFERENT item removed in between.
+                    if (record) this._dropPendingOpsFor(record.key || record.id);
+                    if (removedItem) {
+                        const already = this.items.some(function(item) {
+                            return item.key === removedItem.key || item.id === removedItem.id;
+                        });
+                        if (!already) {
+                            const at = Math.min(Math.max(idx, 0), this.items.length);
+                            this.items.splice(at, 0, removedItem);
+                        }
+                    }
+                    this._mutationEpoch++;
                     this.saveToLocalStorage();
                     this.updateUI();
                     if (typeof showToast === 'function') {
                         showToast('Failed to remove item. Please try again.', 'error');
                     }
-                    return;
+                    return { ok: false, state: state, verified: true };
                 }
-                // Refresh from server for accurate totals
+
+                if (state === 'retry' || state === 'defer') {
+                    // The intent is durable. Leave the UI optimistic — the replay owns it.
+                    DebugLog.warn('Cart: removal not yet confirmed (' + state + '); journaled for replay');
+                    return { ok: true, state: state, verified: false };
+                }
+
+                // confirmed / confirmed_unverified / absent — the row is gone as far as
+                // this request can tell.
+                if (record) this._dropPendingOpsFor(record.key || record.id);
+                this._mutationEpoch++;
                 await this.loadFromServer();
-                this.updateUI();
-            } catch (error) {
-                DebugLog.error('Failed to sync removal to server:', error);
-                // Rollback on network error
-                this._removingItems.delete(actualId);
-                if (removedItem && removedItem.key) this._removingItems.delete(removedItem.key);
-                this.items = previousItems;
                 this.saveToLocalStorage();
                 this.updateUI();
-                if (typeof showToast === 'function') {
-                    showToast('Network error. Item not removed.', 'error');
+
+                if (state === 'confirmed_unverified' && removedItem) {
+                    // `removed: 0` on a FRESH delete, or a bodyless 204. Either the row was
+                    // already gone, or the request resolved against a DIFFERENT cart
+                    // (rotated guest sid, expired session) — the count cannot tell those
+                    // apart, so verify instead of assuming.
+                    const stillThere = this.items.some(function(item) {
+                        return item.key === removedItem.key || item.id === removedItem.id;
+                    });
+                    if (stillThere) {
+                        this._renderRemovalNotice({
+                            failed: [{ id: actualId, sku: removedItem.sku, name: removedItem.name, reason: 'still_present' }]
+                        });
+                        return { ok: false, state: 'still_present', verified: true };
+                    }
                 }
-                return;
+
+                this._renderRemovalNotice({ failed: [] });
             } finally {
-                // Always clear in-flight markers after API call completes
                 this._removingItems.delete(actualId);
-                if (removedItem && removedItem.key) this._removingItems.delete(removedItem.key);
+                if (itemKey) this._removingItems.delete(itemKey);
             }
+
+            if (typeof showToast === 'function') {
+                showToast('Item removed from cart', 'info');
+            }
+            if (typeof CartAnalytics !== 'undefined' && removedItem) {
+                CartAnalytics.trackRemoveFromCart(removedItem, removedItem.quantity);
+            }
+            return { ok: true, state: state, verified: true };
         }
 
         if (typeof showToast === 'function') {
@@ -1627,6 +2628,7 @@ const Cart = {
         if (typeof CartAnalytics !== 'undefined' && removedItem) {
             CartAnalytics.trackRemoveFromCart(removedItem, removedItem.quantity);
         }
+        return { ok: true, state: 'local_only', verified: true };
     },
 
     /**
@@ -1634,7 +2636,9 @@ const Cart = {
      * Syncs to server for both guest and authenticated users
      */
     async clear() {
-        // Snapshot for rollback
+        // Snapshot for rollback. Legitimate here, unlike in removeItem/addItem: a
+        // clear IS the whole array, so restoring the whole array cannot resurrect a
+        // row that some other operation removed in the meantime.
         const previousItems = JSON.parse(JSON.stringify(this.items));
         const previousCoupon = this.appliedCoupon;
         const previousDiscount = this.discountAmount;
@@ -1644,36 +2648,52 @@ const Cart = {
         this.appliedCoupon = null;
         this.discountAmount = 0;
         this.serverSummary = null;
-        localStorage.removeItem(this.STORAGE_KEY);
+        this._mutationEpoch++;
+        // NOTE: the localStorage mirror is NOT dropped here. It used to be, before
+        // the server had confirmed anything, so a failed clear left the rollback
+        // restoring in-memory state over an already-emptied mirror. It is written on
+        // confirmation, and rewritten from the snapshot on failure (ERR-136).
         this.updateUI();
 
         // Sync to server for both guest and authenticated users
         if (typeof API !== 'undefined') {
-            try {
-                const response = await API.clearCart();
-                if (response && !response.ok) {
-                    // Server rejected - rollback
-                    this.items = previousItems;
-                    this.appliedCoupon = previousCoupon;
-                    this.discountAmount = previousDiscount;
-                    this.saveToLocalStorage();
-                    this.updateUI();
-                    if (typeof showToast === 'function') {
-                        showToast('Failed to clear cart. Please try again.', 'error');
-                    }
-                }
-            } catch (error) {
-                DebugLog.error('Failed to sync cart clear to server:', error);
-                // Rollback on network error
+            const restore = () => {
                 this.items = previousItems;
                 this.appliedCoupon = previousCoupon;
                 this.discountAmount = previousDiscount;
+                this._mutationEpoch++;
                 this.saveToLocalStorage();
                 this.updateUI();
+            };
+            try {
+                const response = await API.clearCart();
+                if (response && !response.ok) {
+                    restore();
+                    if (typeof showToast === 'function') {
+                        showToast('Failed to clear cart. Please try again.', 'error');
+                    }
+                    return;
+                }
+                // Confirmed. A cleared cart subsumes every pending removal in it, and
+                // the mirror can now safely go.
+                try {
+                    localStorage.removeItem(this.STORAGE_KEY);
+                } catch (e) {
+                    DebugLog.warn('Cart: could not clear the localStorage mirror:', e);
+                }
+                this.purgePendingOps('cart cleared');
+                this._mutationEpoch++;
+            } catch (error) {
+                DebugLog.error('Failed to sync cart clear to server:', error);
+                restore();
                 if (typeof showToast === 'function') {
                     showToast('Network error. Cart not cleared.', 'error');
                 }
             }
+        } else {
+            try {
+                localStorage.removeItem(this.STORAGE_KEY);
+            } catch (e) { /* storage unavailable */ }
         }
     },
 
@@ -1890,7 +2910,7 @@ const Cart = {
                                         <line x1="5" y1="12" x2="19" y2="12"></line>\
                                     </svg>\
                                 </button>\
-                                <input type="number" class="quantity-selector__input" value="' + item.quantity + '" min="1" max="100" aria-label="Quantity">\
+                                <input type="number" class="quantity-selector__input" value="' + item.quantity + '" min="1" max="' + self.MAX_QUANTITY + '" aria-label="Quantity">\
                                 <button type="button" class="quantity-selector__btn quantity-selector__btn--increase" aria-label="Increase quantity"' + (item.quantity >= 100 ? ' disabled' : '') + '>\
                                     <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">\
                                         <line x1="12" y1="5" x2="12" y2="19"></line>\

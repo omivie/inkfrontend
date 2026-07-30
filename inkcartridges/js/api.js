@@ -633,9 +633,14 @@ const API = {
 
     /**
      * PUT request helper
+     *
+     * Forwards caller options into request() → fetch, same as get(). The cart's
+     * unload-time quantity flush needs `keepalive` here (ERR-136). Options are
+     * spread BEFORE `method`/`body` so a caller cannot override either.
      */
-    async put(endpoint, body) {
+    async put(endpoint, body, options = {}) {
         return this.request(endpoint, {
+            ...options,
             method: 'PUT',
             body: JSON.stringify(body)
         });
@@ -662,9 +667,24 @@ const API = {
 
     /**
      * DELETE request helper
+     *
+     * Supported options: `keepalive`, `signal`.
+     *
+     * `keepalive: true` tells the browser not to abort the request when the page
+     * goes away, so a cart removal issued milliseconds before a refresh still
+     * commits (ERR-136).
+     *
+     * It is a LATENCY optimisation, NOT the correctness mechanism. request()
+     * `await`s getToken() — which may sit inside Auth.refreshSession() — BEFORE
+     * fetch is ever called, so an unload during a token refresh loses the request
+     * before dispatch: nothing has been sent for keepalive to protect. Durability
+     * comes from Cart's pending-op journal. Do NOT delete that journal on the
+     * belief that keepalive already covers this.
+     *
+     * Options are spread BEFORE `method` so a caller cannot override the verb.
      */
-    async delete(endpoint) {
-        return this.request(endpoint, { method: 'DELETE' });
+    async delete(endpoint, options = {}) {
+        return this.request(endpoint, { ...options, method: 'DELETE' });
     },
 
     // =========================================================================
@@ -1681,6 +1701,17 @@ const API = {
                     if (!t) return;
                     if (!/\d/.test(t)) return;          // skip brand words
                     if (t.length < 2 || t.length > 12) return;
+                    // A PRINTER IS NOT A CARTRIDGE CODE (ERR-135). The "for
+                    // <Brand> …" tail is exactly where compatible-cartridge
+                    // names list the DEVICES they fit, so this loop would
+                    // happily add "DCPJ1050DW" as a series code — producing a
+                    // phantom chip and a family keyed on a printer. The one
+                    // vocabulary for that test is CompatSource (utils.js).
+                    // Read off `window` — utils.js loads AFTER api.js in doc
+                    // order, and a bare `typeof CompatSource` would throw from
+                    // the temporal dead zone rather than yield 'undefined'.
+                    const cs = (typeof window !== 'undefined' && window.CompatSource) || null;
+                    if (cs && cs.isPrinterModelToken(t)) return;
                     codes.add(t);
                 });
             }
@@ -2273,39 +2304,60 @@ const API = {
 
     /**
      * Update cart item quantity
+     *
+     * The id is percent-encoded: the unload-time flush and the pending-op journal
+     * both replay this path, so an unescaped id would be a PERSISTENT malformed
+     * request rather than a one-off (ERR-136).
+     *
      * @param {string} productId - Product UUID
      * @param {number} quantity - New quantity
+     * @param {object} options - forwarded to fetch (e.g. { keepalive: true })
      */
-    async updateCartItem(productId, quantity) {
-        return this.put(`/api/cart/items/${productId}`, { quantity });
+    async updateCartItem(productId, quantity, options = {}) {
+        return this.put(`/api/cart/items/${encodeURIComponent(productId)}`, { quantity }, options);
     },
 
     /**
      * Remove item from cart
+     *
+     * Returns `data.removed` (int) — the rows the server actually deleted. A
+     * `removed: 0` still comes back as `ok: true`, so a no-op is indistinguishable
+     * from a success unless the caller reads the count. See Cart.classify… (ERR-136).
+     *
      * @param {string} productId - Product UUID
+     * @param {object} options - forwarded to fetch (e.g. { keepalive: true })
      */
-    async removeFromCart(productId) {
-        return this.delete(`/api/cart/items/${productId}`);
+    async removeFromCart(productId, options = {}) {
+        return this.delete(`/api/cart/items/${encodeURIComponent(productId)}`, options);
     },
 
     /**
      * Clear entire cart
+     *
+     * The guest session id is dropped ONLY on a confirmed clear. Clearing it after
+     * a FAILED delete orphans a still-populated guest cart: the guest sid in
+     * localStorage is the only handle this browser has on that cart (request()
+     * sends `credentials: 'omit'` without a token, so the backend's httpOnly guest
+     * cookie never rides along), so losing it makes those rows unreachable
+     * forever (ERR-136).
+     *
+     * @param {object} options - forwarded to fetch (e.g. { keepalive: true })
      */
-    async clearCart() {
-        const result = await this.delete('/api/cart');
-        this.clearGuestSessionId();
+    async clearCart(options = {}) {
+        const result = await this.delete('/api/cart', options);
+        if (result && result.ok) {
+            this.clearGuestSessionId();
+        }
         return result;
     },
 
     /**
-     * Get cart item count (for header badge)
-     */
-    async getCartCount() {
-        return this.get('/api/cart/count');
-    },
-
-    /**
      * Merge guest cart into user cart (call immediately after sign-in)
+     *
+     * NOTE: unlike clearCart(), this drops the guest sid unconditionally. Left as
+     * it is deliberately — a partially-succeeded merge that KEPT its sid could
+     * double-merge on the next load, and we have no evidence about backend merge
+     * idempotency. Logged as a backend question rather than guessed at (ERR-136).
      */
     async mergeCart() {
         const result = await this.post('/api/cart/merge');

@@ -148,8 +148,12 @@ export default async function middleware(request) {
   // accepted as a back-compat alias for printer_slug, but only when paired
   // with brand.
   //
-  // Pinned by tests/printer-url-canonical-may2026.test.js (middleware gates
-  // section): bare printer_slug must NOT trigger printer prerender.
+  // Pinned by tests/compat-wrong-family-jul2026.test.js (§6, middleware gates):
+  // bare printer_slug must NOT trigger printer prerender.
+  //
+  // That citation used to name tests/printer-url-canonical-may2026.test.js,
+  // which has never existed in this repo — so this gate sat unpinned while
+  // claiming otherwise. Found during the wrong-family audit (ERR-135).
   //
   // The printer prerender endpoint is `/api/prerender/printer/:brand/:slug`
   // (the slug-only form 404s — see seo-meta-rewrite-may2026.md). A 404 here

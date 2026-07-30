@@ -152,8 +152,24 @@ const Products = {
         const fitsPrinterBadgeHTML = product._fitsPrinter
             ? `<span class="product-card__badge product-card__badge--fits-printer" title="Fits ${Security.escapeAttr(product._fitsPrinter)}">Fits Your Printer</span>`
             : '';
-        const chipStackHTML = (discountBadgeHTML || fitsPrinterBadgeHTML)
-            ? `<div class="product-card__chip-stack">${fitsPrinterBadgeHTML}${discountBadgeHTML}</div>`
+        // ERR-133 — "Fits <model>" when /smart surfaced this row via its
+        // free-text "for use in" compatibility list (match_reason:
+        // "compatibility" + matched_token:"<the machine searched>").
+        //
+        // Byte-identical to the results-page card in shop-page.js
+        // createProductCard, deliberately: this file renders the search
+        // DROPDOWN (search.js → /api/search/smart at limit 40), which receives
+        // the same compat rows the results grid does. Backend commit 1d43034
+        // made those rows additive across every printer-shaped query, so
+        // without this the dropdown lists a correction tape for q=AP830 with
+        // nothing at all explaining why it is there. ERR-125 is the precedent:
+        // these two card renderers are duplicated, not shared, and the
+        // divergence always bites on the surface that ships the feature second.
+        const compatMatchBadgeHTML = (product.match_reason === 'compatibility' && product.matched_token)
+            ? `<span class="product-card__badge product-card__badge--compat-match" title="Compatible with ${Security.escapeAttr(product.matched_token)}">Fits ${Security.escapeHtml(product.matched_token)}</span>`
+            : '';
+        const chipStackHTML = (discountBadgeHTML || fitsPrinterBadgeHTML || compatMatchBadgeHTML)
+            ? `<div class="product-card__chip-stack">${fitsPrinterBadgeHTML}${compatMatchBadgeHTML}${discountBadgeHTML}</div>`
             : '';
 
         // Brand eyebrow — suppressed when the product name already leads with

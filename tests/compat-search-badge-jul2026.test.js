@@ -130,25 +130,59 @@ test('hasCompatibilityMatch — safe on null / empty / malformed input', () => {
 });
 
 // ═════════════════════════════════════════════════════════════════════════════
-// Reconciliation wiring — the guard must gate BOTH swap paths
+// Reconciliation wiring — SUPERSEDED BY ERR-133
+//
+// This section used to pin the opposite invariant: that `hasCompatMatch` was a
+// term of both softMiss and hijack, i.e. that the presence of ANY compat row
+// SUPPRESSED the literal-search reconciliation entirely. That was correct while
+// the backend emitted compat rows only as a last-resort fallback, because then
+// "any compat row" implied "every row is compat" and there were no direct rows
+// whose repair could be collaterally switched off.
+//
+// Backend commit 1d43034 (2026-07-30) made compat matches ADDITIVE — they ride
+// along beside real cartridge/toner hits — and the implication broke. Measured
+// live: q=CE50 returned 3 direct + 2 compat, the veto killed softMiss, and two
+// cartridges /smart had missed (G05ABK, G05XBK) were never shown. The veto also
+// never covered exactMode, so /search?q=VP6000&exact=1 rendered a ZERO-RESULTS
+// screen over three good ribbons.
+//
+// The replacement invariant is strictly stronger — the repair RUNS and the
+// compat rows are PRESERVED across it — and is pinned in depth by
+// tests/ribbon-compat-search-additive-jul2026.test.js. What remains here is the
+// guard that the veto does not creep back in.
 // ═════════════════════════════════════════════════════════════════════════════
-test('loadSearchResults — computes hasCompatMatch from the /smart result set', () => {
-    assert.match(SHOP_CODE, /const\s+hasCompatMatch\s*=\s*hasCompatibilityMatch\(products\)/);
+test('loadSearchResults — partitions the set by provenance instead of vetoing', () => {
+    assert.match(SHOP_CODE,
+        /const\s*\{\s*direct:\s*directRows,\s*compat:\s*compatRows\s*\}\s*=\s*partitionCompatRows\(products\)/,
+        'the reconciliation must split /smart rows into direct vs compatibility groups');
+    assert.doesNotMatch(SHOP_CODE, /const\s+hasCompatMatch\s*=/,
+        'the blunt hasCompatMatch veto is retired — see ERR-133');
 });
 
-test('loadSearchResults — softMiss is gated by !hasCompatMatch', () => {
-    // Isolate the softMiss assignment and confirm the guard is one of its terms.
+test('loadSearchResults — softMiss is NOT vetoed by the presence of compat rows', () => {
     const m = SHOP_CODE.match(/const\s+softMiss\s*=([\s\S]*?);/);
     assert.ok(m, 'softMiss assignment must exist');
-    assert.match(m[1], /!hasCompatMatch/,
-        'softMiss must not fire when the set contains compatibility matches');
+    assert.doesNotMatch(m[1], /hasCompatMatch/,
+        'a compat row must not switch off the digit-noise repair for the direct rows (ERR-133)');
 });
 
-test('loadSearchResults — hijack is gated by !hasCompatMatch', () => {
+test('loadSearchResults — hijack is NOT vetoed by the presence of compat rows', () => {
     const m = SHOP_CODE.match(/const\s+hijack\s*=([\s\S]*?);/);
     assert.ok(m, 'hijack assignment must exist');
-    assert.match(m[1], /!hasCompatMatch/,
-        'hijack must not fire when the set contains compatibility matches');
+    assert.doesNotMatch(m[1], /hasCompatMatch/,
+        'a compat row must not switch off the autocorrect repair for the direct rows (ERR-133)');
+});
+
+test('loadSearchResults — compat rows are preserved across the swap, not dropped', () => {
+    // The replacement for the veto. The literal union matches name/SKU only, so
+    // assigning it raw is what deleted the ribbons (ERR-083, and again via
+    // exactMode in ERR-133).
+    assert.match(SHOP_CODE,
+        /products\s*=\s*mergedUsed\.concat\(\s*preservedCompat\s*\)/,
+        'the swap must re-append the compat rows the literal union cannot contain');
+    assert.match(SHOP_CODE,
+        /const\s+preservedCompat\s*=\s*rowsNotAlreadyIn\(\s*compatRows\s*,\s*mergedUsed\s*\)/,
+        'preserved rows must be de-duplicated against the literal set');
 });
 
 // ═════════════════════════════════════════════════════════════════════════════

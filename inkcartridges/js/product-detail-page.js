@@ -22,8 +22,49 @@
         const up = raw.toUpperCase();
         return [up, 'C' + up, 'G' + up];
     }
+    // ============================================
+    // RELATED-PRODUCT FAMILY CODE CANDIDATES
+    // ============================================
+    // Related Products fetches a product's family with
+    // `/api/shop?brand=…&category=…&code=<code>`, and the backend filters that
+    // strictly on `series_codes` contains. Historically we sent exactly ONE
+    // code — `extractProductCode(info)`, i.e. `series_codes[0]` — and if that
+    // code's family came back with no siblings the section silently hid.
+    //
+    // But `series_codes` is a LIST, and for a product that spans models the
+    // first entry is not always the one carrying the family. Measured live
+    // (ERR-132), three products lose their whole Related Products section this
+    // way even though another of their OWN codes resolves:
+    //   CB412DNBK-2  ['B412','B432','B512','3K'] → ?code=B412  = 1 (itself)
+    //                                            → ?code=B432  = 3
+    //   CB401BK      → ?code=B401  = 1           → ?code=MB451 = 3
+    //   C45ABK       → ?code=45    = 1           → ?code=42    = 2
+    //
+    // So try every code the product actually carries, in backend order, and
+    // take the first whose family has a sibling. Order matters: `series_codes[0]`
+    // stays FIRST so the overwhelming majority of products (2,931 of 3,801
+    // non-ribbon PDPs resolve on the first candidate) keep hitting the exact
+    // same edge-cache URL they already hit — this is a fallback, never a
+    // re-ordering. `extractProductCode`'s own answer is appended last so the
+    // brand-regex path still contributes when `series_codes` is absent.
+    //
+    // Pure — exposed on window._pdpRelatedHelpers for tests.
+    function familyCodeCandidates(seriesCodes, extractedCode) {
+        const out = [];
+        const seen = new Set();
+        const push = (raw) => {
+            const c = String(raw == null ? '' : raw).trim().replace(/-/g, '').toUpperCase();
+            if (!c || seen.has(c)) return;
+            seen.add(c);
+            out.push(c);
+        };
+        if (Array.isArray(seriesCodes)) seriesCodes.forEach(push);
+        push(extractedCode);
+        return out;
+    }
+
     if (typeof window !== 'undefined') {
-        window._pdpRelatedHelpers = { relatedSkuCandidates };
+        window._pdpRelatedHelpers = { relatedSkuCandidates, familyCodeCandidates };
     }
 
     // ============================================
@@ -317,6 +358,16 @@
                 case 'correction_tape': return 'ribbon';
                 case 'label_tape':      return 'label_tape';
                 case 'photo_paper':     return 'paper';
+                // Fax films are filed under /api/shop?category=drums (verified
+                // live: all 7 — Brother PC201/PC301/PC302RF/PC402RF/PC501 and
+                // Canon FX3/FX12). Without these cases the chain fell through
+                // to normalizeCategory('CON-LASER') → null → detectCategory(),
+                // which reads "Toner Cartridge" out of the Canon FX names and
+                // answers 'toner' (wrong category ⇒ empty family), or 'default'
+                // for the Brother ones — and apiCategoryMap has no 'default'
+                // key, so the whole Related Products branch was skipped. ERR-132.
+                case 'fax_film':
+                case 'fax_film_refill': return 'drum';
                 default:                return null;
             }
         },
@@ -336,6 +387,15 @@
             if (lower.includes('toner')) return 'toner';
             if (lower.includes('drum')) return 'drum';
             if (lower.includes('ribbon')) return 'ribbon';
+            // The detail endpoint only ever returns three category codes —
+            // verified live across a 138-SKU stratified sample: CON-INK,
+            // CON-LASER, CON-RIBBON. "CON-LASER" is how every toner arrives,
+            // and none of the tests above match it, so this returned null for
+            // the entire toner catalogue. Today that is masked because
+            // `product_type` is always present and normalizeProductType() runs
+            // first (getProductInfo), but the moment that field is absent from
+            // a payload every toner PDP loses its category. ERR-132.
+            if (lower.includes('laser')) return 'toner';
             return null;
         },
 
@@ -1251,27 +1311,13 @@
             }
         },
 
-        renderCompatPreview(printers) {
-            const wrap = document.getElementById('compat-preview');
-            const list = document.getElementById('compat-preview-list');
-            const more = document.getElementById('compat-preview-more');
-            if (!wrap || !printers || !printers.length) return;
-            const shown = printers.slice(0, 3);
-            list.textContent = shown.map(p => p.name || p).join(', ');
-            if (printers.length > 3) {
-                more.textContent = `+${printers.length - 3} more`;
-                more.hidden = false;
-                more.addEventListener('click', (e) => {
-                    e.preventDefault();
-                    const tabBtn = document.getElementById('tab-btn-compatibility');
-                    if (tabBtn) {
-                        tabBtn.click();
-                        tabBtn.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                    }
-                });
-            }
-            wrap.hidden = false;
-        },
+        // renderCompatPreview / renderCompatibilityTab were DELETED (ERR-135).
+        // Both were unreachable: renderCompatibilityTab had no caller, and every
+        // element the pair wrote to — #compat-preview, #compat-preview-list,
+        // #compat-preview-more, #compatible-printers-list, #tab-btn-compatibility
+        // — exists in zero HTML files. They were found during the wrong-family
+        // audit and removed rather than left to imply the PDP has a
+        // compatibility tab that it does not have.
 
         renderRibbonDescription(info) {
             if (!info.description_html) return;
@@ -1446,39 +1492,23 @@
             // Fast path 2 — flat compatible_printers[] with slug/brand_slug (§2).
             if (this._renderFlatPrinterCompat(info)) return;
 
-            // Fallback — legacy responses carrying neither field: resolve the
-            // printer list from Supabase, fanning out to sibling SKUs.
+            // Fallback — legacy responses carrying neither field: resolve THIS
+            // product's own printer list from Supabase.
+            //
+            // NEVER A SIBLING'S LIST (ERR-135). Until Jul 2026, an empty result
+            // here triggered a fan-out that picked a "sibling" with
+            // `ilike('name', '%<code>%')` and printed THAT product's printers as
+            // this one's "For Use In". The substring match crossed families —
+            // `%LC37%` returns `CIB3757CMY` — so the banner could tell a
+            // customer their cartridge fits a printer it has no compatibility
+            // row for. That is the same defect that sold someone the wrong
+            // cartridge, one surface over.
+            //
+            // Borrowed compatibility is never safe, and an absent list must not
+            // be filled in with an inferred one: when this product has no
+            // printers of its own, render NOTHING.
             try {
-                // Try current product SKU first
-                let printers = await this._fetchPrinters(info.sku);
-
-                // If empty, find a sibling product that has printer data via Supabase
-                if (printers.length === 0) {
-                    const sb = (typeof Auth !== 'undefined' && Auth.supabase) ? Auth.supabase : null;
-                    if (sb) {
-                        // Extract product code for sibling search (e.g. "LC38" from "LC38M")
-                        let code = this.extractProductCode(info);
-                        // If extractProductCode fails, try a looser extraction from SKU
-                        // e.g. G-BRO-LC38M-INK-MG → extract "LC38" by matching letter+digit patterns
-                        if (!code) {
-                            const skuMatch = info.sku.match(/([A-Z]{2,3}\d{2,4})/i);
-                            if (skuMatch) code = skuMatch[1].replace(/-/g, '').toUpperCase();
-                        }
-                        if (code) {
-                            const { data: siblings } = await sb.from('products')
-                                .select('sku')
-                                .ilike('name', `%${code}%`)
-                                .neq('sku', info.sku)
-                                .limit(15);
-                            if (siblings) {
-                                for (const sib of siblings) {
-                                    printers = await this._fetchPrinters(sib.sku);
-                                    if (printers.length > 0) break;
-                                }
-                            }
-                        }
-                    }
-                }
+                const printers = await this._fetchPrinters(info.sku);
 
                 if (printers.length === 0) return;
 
@@ -1544,29 +1574,6 @@
             }
         },
 
-        async renderCompatibilityTab(info) {
-            try {
-                const printers = await this._fetchPrinters(info.sku);
-                if (printers.length === 0) return;
-
-                const list = document.getElementById('compatible-printers-list');
-                const tabBtn = document.getElementById('tab-btn-compatibility');
-                if (!list || !tabBtn) return;
-
-                list.innerHTML = printers.map(p => {
-                    const slug = (p.name || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
-                    const label = (typeof ProductName !== 'undefined' && ProductName.compatModel)
-                        ? (ProductName.compatModel(p.name, p.brand) || p.name) : p.name;
-                    return `<li><a href="/shop?q=${encodeURIComponent(slug)}">${Security.escapeHtml(label)}</a></li>`;
-                }).join('');
-
-                tabBtn.hidden = false;
-                this.renderCompatPreview(printers);
-            } catch (e) {
-                // Compatibility tab is optional
-            }
-        },
-
         async renderCompatibleDevices(info) {
             try {
                 // Ribbon API returns compatible_printers: [{id, model_name, full_name, brand}]
@@ -1626,6 +1633,15 @@
 
                 let related = [];
                 const seenSkus = new Set([info.sku]);
+                // "The family fetch FAILED" and "this product genuinely has no
+                // siblings" used to be the same thing on screen: both ended at
+                // `related.length === 0` → return → section hidden. They are not
+                // the same thing. 767 of 3,801 non-ribbon PDPs legitimately have
+                // no sibling (mono toners, drums, label tapes) and SHOULD hide
+                // silently; a 429/5xx/offline must say so and offer a retry.
+                // Proven live: 16× HTTP 429 on the 786XL PDP deleted the whole
+                // section with no trace. Fail-soft has to be loud. ERR-132.
+                let fetchFailed = false;
 
                 const addProducts = (products) => {
                     for (const p of products) {
@@ -1701,32 +1717,63 @@
                         // then use a WHOLE-TOKEN test, never a bare substring, so a short
                         // series code (e.g. "45") can't match inside a model number
                         // (e.g. "C9452A") and divert Related Products to the wrong family.
+                        //
+                        // The test itself is CompatSource.textHasCodeToken (utils.js) —
+                        // one implementation, shared with shop-page (ERR-135). The
+                        // local regex this replaced had the boundary rule but not the
+                        // yield-prose rule, so a short numeric series code still
+                        // matched its own page count: "(9,200 pages)" satisfies
+                        // `[^A-Z0-9]200[^A-Z0-9]` and picked the wrong family.
                         let code = this.extractProductCode(info);
                         if (!code) {
                             const seriesRes = await API.getShopData({ brand: brandSlug, category: apiCategory });
                             const seriesList = seriesRes?.data?.series || [];
                             const haystack = [(info.name || ''), (info.manufacturer_part_number || ''), (info.sku || '')]
-                                .join(' ').toUpperCase();
+                                .join(' ');
+                            const cs = (typeof window !== 'undefined' && window.CompatSource) || null;
                             code = seriesList
                                 .map(s => s.code)
                                 .filter(Boolean)
-                                .filter(c => {
-                                    const esc = c.toUpperCase().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-                                    return new RegExp('(?:^|[^A-Z0-9])' + esc + '(?:[^A-Z0-9]|$)').test(haystack);
-                                })
+                                .filter(c => cs ? cs.textHasCodeToken(haystack, c) : false)
                                 .sort((a, b) => b.length - a.length)[0];
                         }
-                        if (code) {
-                            const res = await API.getShopData({ brand: brandSlug, category: apiCategory, code, limit: 200 });
-                            if (res.ok && res.data?.products) {
-                                addProducts(res.data.products.filter(p => p.sku !== info.sku));
+                        // Try every code the product actually carries, in backend
+                        // order, and stop at the first that yields a sibling.
+                        // `series_codes[0]` is first, so the common case sends the
+                        // identical URL it always did (edge-cache entry preserved)
+                        // and makes exactly ONE request — 2,931 of 3,801 non-ribbon
+                        // PDPs resolve on the first candidate. The extra requests
+                        // only happen for the rare product whose first code is a
+                        // dead end. ERR-134.
+                        const codeCandidates = familyCodeCandidates(info.series_codes, code);
+                        for (const candidate of codeCandidates) {
+                            const res = await API.getShopData({ brand: brandSlug, category: apiCategory, code: candidate, limit: 200 });
+                            if (!res.ok || !res.data?.products) {
+                                // Unhealthy response — api.js already retried the
+                                // retryable cases, so reaching here means the read
+                                // genuinely failed. Record it and STOP: hammering
+                                // the next candidate against a backend that is
+                                // down just multiplies the failures, and rendering
+                                // "no related products" here would be a lie.
+                                fetchFailed = true;
+                                break;
                             }
+                            addProducts(res.data.products.filter(p => p.sku !== info.sku));
+                            if (related.length) break;
                         }
                     }
                 }
 
-                // For non-ribbons, hide if no related products found
-                if (related.length === 0 && info.category !== 'ribbon') return;
+                // For non-ribbons with nothing to show, the two cases part ways:
+                //   fetch succeeded, no siblings → hide silently. Correct, and
+                //     the common case: 767 of 3,801 non-ribbon PDPs are genuine
+                //     singletons (mono toners, drums, label tapes).
+                //   fetch FAILED → say so and offer a retry. Hiding here would
+                //     claim "this product has no relatives", which we don't know.
+                if (related.length === 0 && info.category !== 'ribbon') {
+                    if (fetchFailed) this._renderRelatedError(section, info);
+                    return;
+                }
 
                 // Fill in missing image_url by fetching individual products
                 const missingImages = related.filter(p => !p.image_url);
@@ -1891,8 +1938,60 @@
 
                 section.hidden = false;
             } catch (e) {
-                // Related products are optional
+                // Related products are optional — but "optional" means the page
+                // survives without them, NOT that a failure leaves no trace.
+                // This catch used to be empty, so any throw in here produced a
+                // silently missing section and nothing to debug from. ERR-134.
+                DebugLog.warn('[ProductPage.renderRelatedProducts] failed:', e);
+                try {
+                    this._renderRelatedError(document.getElementById('related-products'), info);
+                } catch (_) { /* the error state itself must never throw */ }
             }
+        },
+
+        /**
+         * Recoverable error state for Related Products.
+         *
+         * Mirrors the shop page's transient-failure pane (shop-page.js
+         * `showError`): api.js has already retried the retryable 5xx/network
+         * cases on idempotent GETs, so reaching here means the read genuinely
+         * failed — a rate limit, a cold Render dyno, or an offline tab. Show
+         * that plainly with a Retry rather than rendering an absence that reads
+         * as "this product has no related items". ERR-134.
+         */
+        _renderRelatedError(section, info) {
+            if (!section) return;
+            const container = section.querySelector('.container');
+            if (!container) return;
+            // Reuses the shop page's `.drilldown-error` component verbatim
+            // (markup + classes) so the two transient-failure panes are the
+            // same object to a shopper and no new CSS is introduced.
+            container.innerHTML = `
+                <p class="related-products__title">Related Products</p>
+                <div class="drilldown-error" role="alert" aria-live="polite">
+                    <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+                        <path d="M21 12a9 9 0 1 1-3.5-7.1"/><path d="M21 4v6h-6"/>
+                    </svg>
+                    <h3>We couldn't load related products</h3>
+                    <p>The server may be warming up. Please try again.</p>
+                    <button type="button" class="drilldown-error__btn" data-related-retry>
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                            <polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/>
+                            <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10"/><path d="M20.49 15a9 9 0 0 1-14.85 3.36L1 14"/>
+                        </svg>
+                        Try again
+                    </button>
+                </div>
+            `;
+            const retry = container.querySelector('[data-related-retry]');
+            if (retry) {
+                retry.addEventListener('click', () => {
+                    container.innerHTML = '';
+                    section.hidden = true;
+                    this.renderRelatedProducts(info);
+                }, { once: true });
+            }
+            section.hidden = false;
         },
 
         _extractProductCode(modelNumber) {

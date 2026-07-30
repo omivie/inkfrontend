@@ -2069,6 +2069,14 @@ a.product-card__contact-btn {
     background-color: var(--color-error);
 }
 
+/* Three call sites already pass type 'warning' (cart removal failure, coupon
+   rejection, cart validation warnings) and were silently falling back to the
+   neutral base toast. Dark text because --color-warning is yellow. (ERR-136) */
+.toast--warning {
+    background-color: var(--color-warning);
+    color: var(--color-text);
+}
+
 .toast__close {
     margin-left: auto;
     padding: var(--spacing-1);

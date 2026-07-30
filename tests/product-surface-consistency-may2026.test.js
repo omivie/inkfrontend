@@ -52,6 +52,32 @@ function stripComments(src) {
 const API_CODE = stripComments(API_JS);
 const SHOP_CODE = stripComments(SHOP_PAGE_JS);
 
+// Return the balanced `{ … }` body of the first block at/after `anchor`.
+//
+// ERR-124's lesson, applied: these tests used to read a fixed-width window
+// (`slice(idx, idx + 3000)`) after an anchor string. That silently goes vacuous
+// the moment the code inside the block grows — the assertions still "pass" a
+// regex against a window that no longer reaches the line under test, or fail
+// for a reason that has nothing to do with the invariant. ERR-133 grew this
+// exact block and tripped it. A brace walk is bounded by the code's real
+// structure instead of a magic number.
+function blockBodyAt(src, anchor) {
+    const at = src.indexOf(anchor);
+    if (at === -1) return null;
+    const open = src.indexOf('{', at);
+    if (open === -1) return null;
+    let depth = 0;
+    for (let i = open; i < src.length; i++) {
+        const ch = src[i];
+        if (ch === '{') depth++;
+        else if (ch === '}') {
+            depth--;
+            if (depth === 0) return src.slice(open + 1, i);
+        }
+    }
+    return null;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Bug #1 — compat-recovery sidecar must hit /api/products, not /api/shop
 // ─────────────────────────────────────────────────────────────────────────────
@@ -219,23 +245,28 @@ test('soft-miss only swaps when the literal set strictly beats smart count', () 
     // Jul 2026 (search-ux-frontend §2): an `exactMode ? true :` arm was prepended
     // for the "Search instead" flow, but the hijack/hardMiss vs soft-miss
     // strict-beat structure below it is unchanged.
+    // Jul 30 2026 (ERR-133): the count compared against is now `directCount`,
+    // not `smartCount`. Compat rows ("for use in" matches) are in `smartCount`
+    // but can NEVER be in the literal set, so they inflated the bar with rows
+    // the literal set structurally cannot supply — q=CE50's 5-row literal set
+    // lost `> 5` and two cartridges went unshown. The strict-beat rule itself is
+    // unchanged; only the population it is measured against is now honest.
     assert.match(SHOP_CODE,
-        /shouldUseFallback\s*=\s*exactMode[\s\S]{0,80}\(hijack\s*\|\|\s*hardMiss\)[\s\S]{0,150}mergedUsed\.length\s*>\s*smartCount/);
+        /shouldUseFallback\s*=\s*exactMode[\s\S]{0,80}\(hijack\s*\|\|\s*hardMiss\)[\s\S]{0,150}mergedUsed\.length\s*>\s*directCount/);
 });
 
 test('fallback path still uses SEARCH_PAGE_SIZE + page so pagination keeps working', () => {
     // The fallback fetches /api/products with the same page+limit so a user
     // landing on page 3 of soft-miss results doesn't accidentally jump back
     // to page 1.
-    const idx = SHOP_CODE.indexOf('hardMiss || softMiss');
-    assert.ok(idx !== -1, 'fallback gate not found');
-    const slice = SHOP_CODE.slice(idx, idx + 1500);
+    const slice = blockBodyAt(SHOP_CODE, 'hardMiss || softMiss');
+    assert.ok(slice, 'fallback gate not found');
     assert.match(slice, /API\.getProducts\(\{\s*search:\s*searchQuery,\s*limit:\s*SEARCH_PAGE_SIZE,\s*page:\s*requestedPage\s*\}\)/);
 });
 
 test('fallback path normalises /api/products meta into the shared pagination shape', () => {
-    const idx = SHOP_CODE.indexOf('hardMiss || softMiss');
-    const slice = SHOP_CODE.slice(idx, idx + 3000);
+    const slice = blockBodyAt(SHOP_CODE, 'hardMiss || softMiss');
+    assert.ok(slice, 'fallback gate not found');
     assert.match(slice, /total_pages:\s*fallback\.meta\.total_pages/);
     assert.match(slice, /has_next:\s*!!fallback\.meta\.has_next/);
     assert.match(slice, /has_prev:\s*!!fallback\.meta\.has_prev/);

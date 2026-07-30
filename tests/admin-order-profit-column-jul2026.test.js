@@ -238,8 +238,17 @@ test('destroyOrdersTab aborts in-flight fetches and clears the cache', () => {
 });
 
 test('the cache is invalidated wherever an order status or existence changes', () => {
-  assert.ok((ordersSrc.match(/forgetProfit\(/g) || []).length >= 4,
-    'status update, single delete, bulk delete and the helper itself');
+  // Two eviction helpers now: forgetProfit() drops the profit answer, and
+  // forgetOrderCache() drops the profit answer AND the row's delete contract
+  // (it calls forgetProfit internally). Every call site that used to be a bare
+  // forgetProfit on a status change or a delete is now the wider one, because a
+  // status change flips deletability too. Count both — what the invariant cares
+  // about is that no path mutates an order without dropping its cached answers.
+  const evictions = (ordersSrc.match(/forget(Profit|OrderCache)\(/g) || []).length;
+  assert.ok(evictions >= 4,
+    `status update, single delete, bulk delete and the helper itself (found ${evictions})`);
+  assert.match(ordersSrc, /function forgetOrderCache\(id\)[\s\S]{0,200}forgetProfit\(id\)/,
+    'forgetOrderCache must still drop the profit cache, not just the delete contract');
 });
 
 test('a failed detail call is cached as FAILED, never as a zero or an unknown', () => {

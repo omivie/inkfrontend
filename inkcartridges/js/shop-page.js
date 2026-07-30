@@ -60,6 +60,39 @@
     // canonical_url + discount fields the /suggest payload omits) but keeps
     // the dropdown's position. Guarantees the results page is a superset of —
     // never a subset of — what the dropdown showed.
+    // The ONE product-identity vocabulary for de-duplication on the search
+    // path: id, then upper-cased sku, then normalized name. Two rows are the
+    // same product when they share ANY key — /suggest and /api/products
+    // disagree about which fields they populate, so a single key is not enough.
+    // Extracted (ERR-133) so mergeLiteralResults and the compat-row
+    // preservation below cannot drift into two different notions of "same
+    // product"; behaviour is byte-identical to the inline version it replaced.
+    function productIdentityKeys(product) {
+        const keys = [];
+        if (!product) return keys;
+        if (product.id != null && product.id !== '') keys.push('id:' + String(product.id));
+        if (product.sku) keys.push('sku:' + String(product.sku).toUpperCase());
+        const n = normalizeForMatch(product.name);
+        if (n) keys.push('name:' + n);
+        return keys;
+    }
+
+    // Rows from `candidates` that are not already present in `existing`, by
+    // productIdentityKeys. Order-preserving. Used to carry compat rows across a
+    // reconciliation swap without duplicating any row the literal set already
+    // supplied. Pinned by tests/ribbon-compat-search-additive-jul2026.test.js.
+    function rowsNotAlreadyIn(candidates, existing) {
+        if (!Array.isArray(candidates)) return [];
+        const seen = new Set();
+        for (const p of (Array.isArray(existing) ? existing : [])) {
+            for (const k of productIdentityKeys(p)) seen.add(k);
+        }
+        return candidates.filter((p) => {
+            if (!p) return false;
+            return !productIdentityKeys(p).some(k => seen.has(k));
+        });
+    }
+
     function mergeLiteralResults(suggestList, fallbackProducts) {
         const fallback = Array.isArray(fallbackProducts) ? fallbackProducts : [];
         const suggest = Array.isArray(suggestList) ? suggestList : [];
@@ -73,17 +106,9 @@
         const out = [];
         const used = new Set();
         const mark = (p) => {
-            if (p && p.id != null && p.id !== '') seen.add('id:' + String(p.id));
-            if (p && p.sku) seen.add('sku:' + String(p.sku).toUpperCase());
-            const n = normalizeForMatch(p && p.name);
-            if (n) seen.add('name:' + n);
+            for (const k of productIdentityKeys(p)) seen.add(k);
         };
-        const isSeen = (p) => {
-            if (p && p.id != null && p.id !== '' && seen.has('id:' + String(p.id))) return true;
-            if (p && p.sku && seen.has('sku:' + String(p.sku).toUpperCase())) return true;
-            const n = normalizeForMatch(p && p.name);
-            return !!n && seen.has('name:' + n);
-        };
+        const isSeen = (p) => productIdentityKeys(p).some(k => seen.has(k));
         for (const s of suggest) {
             const adapted = adaptSuggestProduct(s);
             const richer = (adapted.id != null && byId.get(String(adapted.id)))
@@ -114,31 +139,37 @@
     //      (optionally + a yield suffix), and is NOT followed by "page(s)".
     // Boundaries use the RAW text (not normalizeForMatch, which would collapse
     // "220 pages" → "220pages" and re-admit it).
+    //
+    // The two rules this encodes — respect token BOUNDARIES, and reject
+    // "<code> page(s)" — are the same two rules the PDP's related-products
+    // filter needs, and the same two that two `ilike('name','%code%')` call
+    // sites got wrong badly enough to sell a customer a cartridge that didn't
+    // fit their printer (ERR-135). They now live in exactly one place,
+    // CompatSource (utils.js). This function is the shop-page adapter that
+    // normalizes the query first; the matching itself is no longer local.
     function queryCodeMatch(product, query) {
         if (!product) return false;
         const q = normalizeForMatch(query);
         if (!q) return false;
-        const esc = q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-        const YIELD = '(?:xl|xxl|xxhy|ehy|hy|h)?';
-        // 1. series_codes (backend-canonical).
+        const cs = (typeof window !== 'undefined' && window.CompatSource) || null;
+        if (!cs) {
+            // utils.js is loaded on every page that loads shop-page.js, so this
+            // is unreachable in the browser. Say so out loud if it ever happens
+            // rather than silently answering "no match" — a mute false here
+            // would quietly strip the on-topic filter off every digit query.
+            DebugLog.error('queryCodeMatch: CompatSource unavailable — utils.js did not load');
+            return false;
+        }
+        // 1. series_codes (backend-canonical), normalized on both sides.
         const codes = Array.isArray(product.series_codes) ? product.series_codes : [];
-        const codeRe = new RegExp('^' + esc + YIELD + '$', 'i');
+        const codeRe = cs.codeExactRegex(q);
         for (const c of codes) {
             const nc = normalizeForMatch(c);
             if (nc && (nc === q || codeRe.test(nc))) return true;
         }
         // 2. bounded code token in name/sku, rejecting "<q> page(s)".
-        const tokenRe = new RegExp('(^|[^0-9a-z])(' + esc + YIELD + ')([^0-9a-z]|$)', 'gi');
         for (const field of [product.name, product.sku]) {
-            const text = String(field == null ? '' : field).toLowerCase();
-            if (!text) continue;
-            tokenRe.lastIndex = 0;
-            let m;
-            while ((m = tokenRe.exec(text)) !== null) {
-                const afterIdx = m.index + (m[1] ? m[1].length : 0) + m[2].length;
-                if (/^\s*pages?\b/.test(text.slice(afterIdx))) continue;
-                return true;
-            }
+            if (cs.textHasCodeToken(field, q)) return true;
         }
         return false;
     }
@@ -146,16 +177,58 @@
     // True when the /smart result set contains at least one COMPATIBILITY
     // match — a row the backend surfaced because the query names a machine in
     // the product's free-text "for use in" list (e.g. q=VP6000 → the AP800
-    // ribbon 307.11), tagged match_reason:"compatibility". Such a set is a
-    // deliberate backend "zero-strong-match" decision — a HIT, not a miss — so
-    // the digit-noise-strip (softMiss) and autocorrect (hijack) reconciliation
-    // paths below must NOT fire and swap it away for the literal name/SKU
-    // union (which by definition can't contain compat-only rows). Pure so it
-    // stays unit-testable via the window hook. Pinned by
+    // ribbon 307.11), tagged match_reason:"compatibility". Pure so it stays
+    // unit-testable via the window hook. Pinned by
     // tests/compat-search-badge-jul2026.test.js.
+    //
+    // NOTE (ERR-133): this is a *predicate*, no longer a veto. Until Jul 2026
+    // the backend emitted compat rows only as a last-resort fallback, so "any
+    // compat row" implied "the whole set is compat" and suppressing the
+    // reconciliation paths was a safe way to protect them. Backend commit
+    // 1d43034 made compat matches ADDITIVE — they now ride along beside real
+    // cartridge/toner hits — and that equivalence broke: one ribbon could
+    // switch off the literal repair for the direct rows next to it. Use
+    // partitionCompatRows below to reconcile the direct rows and PRESERVE the
+    // compat ones, which is strictly stronger than suppressing the repair.
     function hasCompatibilityMatch(products) {
         return Array.isArray(products)
             && products.some(p => p && p.match_reason === 'compatibility');
+    }
+
+    // Split a /smart result set into the rows that matched the query directly
+    // (name / SKU / tsvector / structured printer compat) and the rows the
+    // backend surfaced only because the query names a machine in their
+    // free-text "for use in" list (match_reason:"compatibility").
+    //
+    // The two groups obey different rules, which is the whole reason to
+    // separate them:
+    //   • direct rows are what the literal-search reconciliation below is
+    //     allowed to second-guess and replace;
+    //   • compat rows literally do NOT appear in name/SKU, so the literal
+    //     union (/api/products?search= ∪ /api/search/suggest) can never
+    //     contain them — replacing a set with that union therefore DELETES
+    //     them (ERR-083, and again via exact mode in ERR-133). They must
+    //     always be carried across a swap, never counted as rows the literal
+    //     set is competing to beat.
+    //
+    // STABLE: backend order is preserved within each group, so callers can
+    // concat direct+compat to get "direct hits first, then also-fits rows"
+    // without ever comparing two rows' relevance_score. That keeps the
+    // no-client-resort rule (see loadSearchResults) intact — this is a
+    // partition by provenance, not a re-rank.
+    //
+    // Pure + null-safe so it stays unit-testable via the window hook. Pinned
+    // by tests/ribbon-compat-search-additive-jul2026.test.js.
+    function partitionCompatRows(products) {
+        const direct = [];
+        const compat = [];
+        if (!Array.isArray(products)) return { direct, compat };
+        for (const p of products) {
+            if (!p) continue;
+            if (p.match_reason === 'compatibility') compat.push(p);
+            else direct.push(p);
+        }
+        return { direct, compat };
     }
 
     // search-ux-frontend-jul2026 §1 — tally the provenance tags /smart stamps on
@@ -192,13 +265,15 @@
         return summary;
     }
 
-    // Test hook — exercised by tests/search-results-parity-may2026.test.js
-    // and tests/compat-search-badge-jul2026.test.js.
+    // Test hook — exercised by tests/search-results-parity-may2026.test.js,
+    // tests/compat-search-badge-jul2026.test.js and
+    // tests/ribbon-compat-search-additive-jul2026.test.js.
     // Not a public surface; product code calls the locals directly.
     if (typeof window !== 'undefined') {
         window._searchParityHelpers = {
             normalizeForMatch, productMatchesQuery, adaptSuggestProduct, mergeLiteralResults,
             queryCodeMatch, hasCompatibilityMatch, summarizeMatchReasons,
+            partitionCompatRows, productIdentityKeys, rowsNotAlreadyIn,
         };
     }
 
@@ -2444,303 +2519,206 @@
             }
         },
 
-        // Mapping of printer models to compatible product codes
-        printerProductCodes: {
-            // Samsung
-            'CLP-365': ['CLT-406', 'K406', 'C406', 'M406', 'Y406'],
-            'CLP-415N': ['CLT-504', 'K504', 'C504', 'M504', 'Y504'],
-            'CLX-3305': ['CLT-406', 'K406', 'C406', 'M406', 'Y406'],
-            'CLX-4195FN': ['CLT-504', 'K504', 'C504', 'M504', 'Y504'],
-            'ML-2165': ['MLT-D101', 'D101'],
-            'ML-2955ND': ['MLT-D103', 'D103'],
-            'Xpress M2020': ['MLT-D111', 'D111'],
-            'Xpress M2070': ['MLT-D111', 'D111'],
-            'Xpress C460FW': ['CLT-406', 'K406', 'C406', 'M406', 'Y406'],
-            // Brother
-            'DCP-135C': ['LC37', 'LC-37'],
-            'DCP 135C': ['LC37', 'LC-37'],
-            'DCP-150C': ['LC37', 'LC-37'],
-            'DCP-330C': ['LC37', 'LC-37'],
-            'DCP-540CN': ['LC37', 'LC-37'],
-            'DCP-J140W': ['LC77', 'LC-77', 'LC73', 'LC-73'],
-            'DCP-J4110DW': ['LC133', 'LC-133'],
-            'DCP J4110DW': ['LC133', 'LC-133'],
-            'MFC-230C': ['LC37', 'LC-37'],
-            'MFC-240C': ['LC37', 'LC-37'],
-            'MFC-J615W': ['LC77', 'LC-77', 'LC73', 'LC-73'],
-            'MFC-J4510DW': ['LC133', 'LC-133'],
-            'MFC J4510DW': ['LC133', 'LC-133'],
-            'HL-2140': ['TN2150', 'TN-2150', 'DR2125', 'DR-2125'],
-            'HL-2240D': ['TN2250', 'TN-2250', 'DR2225', 'DR-2225'],
-            'HL-3040CN': ['TN240', 'TN-240'],
-            // Canon
-            'PIXMA iP4850': ['CLI-526', 'PGI-525'],
-            'PIXMA MG5150': ['CLI-526', 'PGI-525'],
-            'PIXMA MG5250': ['CLI-526', 'PGI-525'],
-            'MAXIFY MB2050': ['PGI-1600', 'PGI1600'],
-            'MAXIFY MB2350': ['PGI-1600', 'PGI1600'],
-            // HP
-            'DeskJet 1000': ['HP 61', '61XL', 'CH561', 'CH563'],
-            'DeskJet 2050': ['HP 61', '61XL', 'CH561', 'CH563'],
-            'ENVY 4500': ['HP 61', '61XL'],
-            'ENVY 5530': ['HP 564', '564XL'],
-            'OfficeJet 4630': ['HP 61', '61XL'],
-            'LaserJet P1102': ['CE285A', '85A'],
-            'LaserJet Pro M1212nf': ['CE285A', '85A'],
-            // Epson
-            'XP-200': ['200', 'T200'],
-            'XP-400': ['200', 'T200'],
-            'XP-600': ['277', 'T277'],
-            'WF-2520': ['200', 'T200'],
-            'WF-2540': ['200', 'T200'],
-            'WF-3520': ['252', 'T252'],
-            'WF-7510': ['252', 'T252']
+        // =====================================================================
+        // ?printer_model=<free text> — RESOLVE, THEN HAND OFF (ERR-135)
+        //
+        // This route used to be a second, much weaker compatibility path
+        // alongside the canonical `?brand=&printer_slug=` one, and it is how the
+        // frontend came to make wrong-family "compatible" claims of its own —
+        // independently of the bad `product_compatibility` rows the backend
+        // removed. Its five-strategy ladder ended in two rungs that invented
+        // compatibility out of nothing:
+        //
+        //   Strategy 4  ran `getProducts({ search: <BRAND NAME> })` and merged
+        //               up to 100 results. Measured on live data:
+        //               `?search=Brother&limit=100` → 100 products across 71
+        //               distinct series families — label tapes (DK-11201),
+        //               drums (DR-2425), photo paper (BP71GA4), ribbons — every
+        //               one of them rendered under the heading
+        //               "Compatible Products for <the customer's printer>".
+        //
+        //   Strategy 5  looked the printer up in a hardcoded printer→code table
+        //               and ran `ilike('name', '%<code>%')` per code. Measured:
+        //               `%200%` matched 141 products, because "(9,200 pages)"
+        //               contains "200"; `%85A%` returned CB435A when the table
+        //               meant CE285A. The table was stale on top of that — it
+        //               had no entry for any printer in the incident, and
+        //               several of its mappings were simply wrong.
+        //
+        // Both are deleted. Neither is replaced, because there is nothing to
+        // replace them with: the frontend cannot know what fits a printer.
+        //
+        //     THE FRONTEND NEVER ASSERTS COMPATIBILITY.
+        //
+        // What remains is a router. Resolve the free text to a real printer and
+        // hand off to the canonical URL, which has always done this correctly
+        // via `product_compatibility`; or, failing that, hand off to search,
+        // where results are labelled as search results and the existing
+        // did-you-mean banner offers the correct spelling. Either way this
+        // function never renders a product grid, so it can never mislabel one.
+        // =====================================================================
+
+        // Resolve free text to a real `printer_models` slug, or null.
+        //
+        // Every previous attempt at this compared raw strings and therefore
+        // missed: `printer_models` holds "Brother DCP J1050DW" (spaces) next to
+        // "Brother DCP-J1260W" (dash), and the customer types a third way again,
+        // so `full_name ilike '%Brother DCP-J1050DW%'` returns nothing for a
+        // printer that is sitting right there in the table. Comparison is on
+        // CompatSource.printerKey, which collapses separators and case.
+        async resolvePrinterModelSlug(printerModel) {
+            const cs = (typeof window !== 'undefined' && window.CompatSource) || null;
+            if (!cs) return null;
+
+            const wanted = cs.printerKey(printerModel);
+            if (!wanted) return null;
+            const wantedBare = cs.printerKey(cs.stripBrandPrefix(printerModel));
+
+            // Brand comes from ?printer_brand= / ?brand= when present, else from
+            // the leading manufacturer word in the model text itself.
+            let brandSlug = this.state.printerBrand || this.state.brand || null;
+            if (!brandSlug) {
+                const word = cs.brandPrefixOf(printerModel);
+                if (word) {
+                    brandSlug = (typeof slugifyBrand === 'function')
+                        ? slugifyBrand(word)
+                        : word.toLowerCase().replace(/[^a-z0-9]+/g, '');
+                }
+            }
+
+            const rowMatches = (row) => {
+                if (!row) return false;
+                const keys = [
+                    cs.printerKey(row.slug),
+                    cs.printerKey(row.full_name),
+                    cs.printerKey(row.model_name)
+                ];
+                // A slug carries its brand ("brother-dcp-j1050dw"), so also
+                // compare it with that prefix removed against the brand-stripped
+                // form of the query ("dcpj1050dw").
+                if (row.slug && brandSlug) {
+                    keys.push(cs.printerKey(String(row.slug).replace(brandSlug + '-', '')));
+                }
+                return keys.some(k => k && (k === wanted || (wantedBare && k === wantedBare)));
+            };
+
+            // Stage 1 — the brand's printer pool. One request, already
+            // edge-cached, and matching happens locally so every spelling of
+            // every separator resolves.
+            if (brandSlug) {
+                try {
+                    const resp = await API.getPrintersByBrand(brandSlug, { grouped: false });
+                    const d = (resp && resp.ok && resp.data) ? resp.data : null;
+                    const rows = d
+                        ? (d.printers || d.models
+                            || (Array.isArray(d.series_groups)
+                                ? d.series_groups.reduce((acc, g) => acc.concat(g.models || []), [])
+                                : [])
+                            || [])
+                        : [];
+                    const hit = rows.find(rowMatches);
+                    if (hit && hit.slug) return hit.slug;
+                } catch (e) {
+                    // Brand pool unavailable — fall through to stage 2.
+                }
+            }
+
+            // Stage 2 — ask the backend directly. `/api/printers/search` is
+            // separator-INTOLERANT (verified: "DCP J1050DW" hits, the identical
+            // "DCP-J1050DW" returns nothing), and stage 1's pool is capped
+            // server-side — HP came back at exactly 1000 rows — so a real
+            // printer can still be missing above. Try the spellings the backend
+            // is known to accept rather than trusting one of them.
+            const spellings = [];
+            const pushSpelling = (s) => {
+                const v = String(s || '').trim();
+                if (v && !spellings.includes(v)) spellings.push(v);
+            };
+            pushSpelling(printerModel);
+            pushSpelling(String(printerModel).replace(/-/g, ' ').replace(/\s+/g, ' '));
+            pushSpelling(String(printerModel).replace(/\s+/g, '-'));
+            pushSpelling(cs.stripBrandPrefix(printerModel));
+            pushSpelling(cs.stripBrandPrefix(printerModel).replace(/-/g, ' '));
+
+            // Fire the spellings CONCURRENTLY and keep preference order when
+            // reading the answers. Sequentially this cost one round trip per
+            // spelling: measured locally, an unresolvable model sat on a blank
+            // shop page for ~6 s before redirecting — five serial probes behind
+            // the brand-pool fetch. In parallel the whole stage is one round
+            // trip, and taking the first index with a hit preserves the
+            // preference (raw spelling wins over a rewritten one).
+            const settled = await Promise.allSettled(
+                spellings.map((spelling) => API.searchPrinters(spelling, brandSlug || null))
+            );
+            for (const outcome of settled) {
+                if (outcome.status !== 'fulfilled') continue;
+                try {
+                    const resp = outcome.value;
+                    const d = (resp && resp.ok && resp.data) ? resp.data : null;
+                    const rows = d ? (d.printers || d.results || (Array.isArray(d) ? d : [])) : [];
+                    const hit = (rows || []).find(rowMatches);
+                    if (hit && hit.slug) return hit.slug;
+                } catch (e) {
+                    // Try the next spelling.
+                }
+            }
+
+            return null;
         },
 
         async loadPrinterModelProducts(navVersion) {
             this.showLoading(true);
 
+            const printerModel = this.state.printerModel;
+            this.state.printerModelDisplay = printerModel;
+
+            let slug = null;
             try {
-                const printerModel = this.state.printerModel;
-                // Use printerBrand (from ink-finder) or fallback to brand parameter
-                const printerBrand = this.state.printerBrand || this.state.brand;
-                const brandName = this.brandInfo[printerBrand]?.name || printerBrand || '';
-
-                // Store printer model name for display
-                this.state.printerModelDisplay = printerModel;
-
-                let allProducts = [];
-                let inkCodes = []; // Ink codes to search for (e.g., "LC37")
-
-                // Get or create Supabase client - ensure it's properly initialized
-                let supabaseClient = null;
-                try {
-                    if (typeof Auth !== 'undefined' && Auth.supabase) {
-                        supabaseClient = Auth.supabase;
-                    } else if (typeof supabase !== 'undefined' && supabase.createClient && typeof Config !== 'undefined' && Config.SUPABASE_URL && Config.SUPABASE_ANON_KEY) {
-                        // Create our own client if Auth isn't ready
-                        supabaseClient = supabase.createClient(Config.SUPABASE_URL, Config.SUPABASE_ANON_KEY);
-                    }
-                } catch (clientError) {
-                    // Supabase client creation failed - will fall back to API search
-                }
-
-                // Strategy 1: Resolve printer slug, then use the dedicated printer-products
-                // endpoint which strictly filters via product_compatibility (no fuzzy name match).
-                let resolvedSlug = null;
-                if (supabaseClient) {
-                    try {
-                        let printerData = null;
-
-                        const exactResult = await supabaseClient
-                            .from('printer_models')
-                            .select('id, full_name, model_name, slug')
-                            .ilike('full_name', printerModel)
-                            .single();
-
-                        if (exactResult.data) {
-                            printerData = exactResult.data;
-                        } else {
-                            const partialResult = await supabaseClient
-                                .from('printer_models')
-                                .select('id, full_name, model_name, slug')
-                                .ilike('full_name', `%${printerModel}%`)
-                                .limit(1);
-
-                            if (partialResult.data && partialResult.data.length > 0) {
-                                printerData = partialResult.data[0];
-                            } else {
-                                const modelNameOnly = printerModel.replace(/^(BROTHER|CANON|EPSON|HP|SAMSUNG|LEXMARK|OKI|FUJI\s*XEROX|KYOCERA)\s+/i, '');
-
-                                const modelResult = await supabaseClient
-                                    .from('printer_models')
-                                    .select('id, full_name, model_name, slug')
-                                    .ilike('model_name', `%${modelNameOnly}%`)
-                                    .limit(1);
-
-                                if (modelResult.data && modelResult.data.length > 0) {
-                                    printerData = modelResult.data[0];
-                                }
-
-                                if (!printerData) {
-                                    const fullNamePartial = await supabaseClient
-                                        .from('printer_models')
-                                        .select('id, full_name, model_name, slug')
-                                        .ilike('full_name', `%${modelNameOnly}%`)
-                                        .limit(1);
-
-                                    if (fullNamePartial.data && fullNamePartial.data.length > 0) {
-                                        printerData = fullNamePartial.data[0];
-                                    }
-                                }
-                            }
-                        }
-
-                        if (printerData?.slug) resolvedSlug = printerData.slug;
-                    } catch (e) {
-                        // Printer lookup failed - will fall back below
-                    }
-                }
-
-                // Use canonical printer-products endpoint with the resolved slug —
-                // strict compatibility filter (no fuzzy name matching).
-                if (resolvedSlug) {
-                    try {
-                        const resp = await API.getProductsByPrinter(resolvedSlug, { limit: 200 });
-                        if (resp.ok && resp.data) {
-                            const list = resp.data.compatible_products || resp.data.products || [];
-                            if (Array.isArray(list) && list.length > 0) {
-                                // Belt-and-suspenders: the canonical endpoint returns
-                                // brand as { name, slug }, but legacy responses ship
-                                // brand as a bare string. Normalize so card rendering
-                                // (product.brand?.name) works uniformly.
-                                allProducts = list.map(p => {
-                                    const brandObj = (typeof p.brand === 'string')
-                                        ? { name: p.brand, slug: null }
-                                        : (p.brand || null);
-                                    return {
-                                        ...p,
-                                        brand: brandObj,
-                                        brand_name: brandObj?.name || p.brand_name || '',
-                                        brand_slug: brandObj?.slug || p.brand_slug || null
-                                    };
-                                });
-                            }
-                        }
-                    } catch (e) {
-                        // Dedicated endpoint failed - fall through to search fallbacks
-                    }
-                }
-
-                // Strategy 2: Fallback - search-by-printer endpoint (also uses product_compatibility)
-                if (allProducts.length === 0) {
-                    try {
-                        const printerResponse = await API.searchByPrinter(printerModel, { limit: 100 });
-                        if (printerResponse.ok && printerResponse.data?.products) {
-                            allProducts = printerResponse.data.products;
-                        }
-                    } catch (e) {
-                        // searchByPrinter failed - continue to generic search
-                    }
-                }
-
-                // Strategy 3: Fallback - smart search (backend now filters by matched_printer)
-                if (allProducts.length === 0) {
-                    try {
-                        const smart = await API.smartSearch(printerModel, 100);
-                        if (smart.ok && smart.data?.matched_printer && Array.isArray(smart.data.products)) {
-                            allProducts = smart.data.products;
-                        }
-                    } catch (e) {
-                        // smartSearch failed - fall through
-                    }
-                }
-
-                // Strategy 4: Fallback - search by printer model name via generic API
-                if (allProducts.length === 0) {
-
-                    // Search for the printer model name
-                    const searchResponse = await API.getProducts({ search: printerModel, limit: 100 });
-
-                    if (searchResponse.ok && searchResponse.data?.products) {
-                        allProducts = searchResponse.data.products;
-                    }
-
-                    // Also search for the brand name to get genuine products
-                    if (brandName) {
-                        const brandResponse = await API.getProducts({ search: brandName, limit: 100 });
-                        if (brandResponse.ok && brandResponse.data?.products) {
-                            // Merge and deduplicate by ID
-                            const existingIds = new Set(allProducts.map(p => p.id));
-                            const newProducts = brandResponse.data.products.filter(p => !existingIds.has(p.id));
-                            allProducts = [...allProducts, ...newProducts];
-                        }
-                    }
-                }
-
-                // Check if navigation changed during fetch
-                if (navVersion !== undefined && this.navigationVersion !== navVersion) return;
-
-                // Use static product code mapping only as a fallback when
-                // Strategies 1-3 returned no results from the database
-                let filteredProducts = allProducts;
-
-                if (allProducts.length === 0) {
-                    const modelNameOnly = printerModel.replace(/^(BROTHER|CANON|EPSON|HP|SAMSUNG|LEXMARK|OKI|FUJI\s*XEROX|KYOCERA)\s+/i, '');
-                    const compatibleCodes = this.printerProductCodes[printerModel]
-                        || this.printerProductCodes[modelNameOnly]
-                        || this.printerProductCodes[modelNameOnly.replace(/\s+/g, '-')]
-                        || [];
-
-                    if (compatibleCodes.length > 0 && supabaseClient) {
-                        try {
-                            for (const code of compatibleCodes) {
-                                const { data: codeProducts } = await supabaseClient
-                                    .from('products')
-                                    .select('*, brand:brands(name, slug)')
-                                    .ilike('name', `%${code}%`)
-                                    .eq('is_active', true)
-                                    .limit(100);
-
-                                if (codeProducts && codeProducts.length > 0) {
-                                    const existingIds = new Set(filteredProducts.map(p => p.id));
-                                    const newProducts = codeProducts
-                                        .filter(p => !existingIds.has(p.id))
-                                        .map(p => ({ ...p, brand_name: p.brand?.name, brand_slug: p.brand?.slug }));
-                                    filteredProducts = [...filteredProducts, ...newProducts];
-                                }
-                            }
-                        } catch (e) {
-                            // Static code search failed
-                        }
-                    }
-                }
-
-                if (filteredProducts.length > 0) {
-
-                    // Trust product.source — backend canonical field (search audit, 2026-05-03).
-                    const isCompatibleProduct = (product) => product.source === 'compatible';
-
-                    let genuine = filteredProducts.filter(p => !isCompatibleProduct(p));
-                    let compatible = filteredProducts.filter(p => isCompatibleProduct(p));
-
-                    // Apply type filter if specified (from URL parameter)
-                    if (this.state.type === 'genuine') {
-                        compatible = []; // Hide compatible products
-                    } else if (this.state.type === 'compatible') {
-                        genuine = []; // Hide genuine products
-                    }
-
-                    // Update section titles with printer model
-                    this.elements.compatibleTitleText.textContent = `Compatible Products for ${printerModel}`;
-                    this.elements.genuineTitleText.textContent = `Original Products for ${printerModel}`;
-
-                    // Render compatible first, then genuine
-                    this.renderProducts(compatible, this.elements.compatibleProducts, this.elements.compatibleSection, true);
-                    this.renderProducts(genuine, this.elements.genuineProducts, this.elements.genuineSection, false);
-
-                    if (genuine.length === 0 && compatible.length === 0) {
-                        this.showEmpty(`No compatible products found for ${printerModel}.`);
-                    } else {
-                        this.elements.levelProducts.hidden = false;
-                    }
-                } else {
-                    this.showError(
-                        `We couldn't load compatible products for ${this.state.printerModel}. The server may be warming up — please try again.`,
-                        (v) => this.loadPrinterModelProducts(v)
-                    );
-                }
+                slug = await this.resolvePrinterModelSlug(printerModel);
             } catch (error) {
-                DebugLog.error('Failed to load printer model products:', error);
-                // Check if navigation changed
-                if (navVersion !== undefined && this.navigationVersion !== navVersion) return;
-                this.showError(
-                    "We couldn't load products for this printer model. The server may be warming up — please try again.",
-                    (v) => this.loadPrinterModelProducts(v)
-                );
+                DebugLog.error('Printer-model resolution failed:', error);
             }
 
-            this.showLoading(false);
+            // Navigation moved on while we were resolving — do not redirect the
+            // user away from wherever they went (async-after-destroy guard).
+            if (navVersion !== undefined && this.navigationVersion !== navVersion) return;
+
+            const cs = (typeof window !== 'undefined' && window.CompatSource) || null;
+
+            if (slug) {
+                // Canonical printer hub. `product_compatibility` decides what
+                // renders, the URL is prerenderable and edge-cacheable, and this
+                // route stops being a separate code path. `replace` (not
+                // `assign`) so Back returns to wherever the customer came from
+                // rather than bouncing through this redirect again.
+                let brandSlug = this.state.printerBrand || this.state.brand || null;
+                if (!brandSlug && cs) {
+                    const word = cs.brandPrefixOf(printerModel);
+                    if (word) {
+                        brandSlug = (typeof slugifyBrand === 'function')
+                            ? slugifyBrand(word)
+                            : word.toLowerCase().replace(/[^a-z0-9]+/g, '');
+                    }
+                }
+                const url = (typeof buildPrinterUrl === 'function')
+                    ? buildPrinterUrl({ slug, brand_slug: brandSlug }, { allowUnbranded: true })
+                    : null;
+                window.location.replace(url || `/shop?printer_slug=${encodeURIComponent(slug)}`);
+                return;
+            }
+
+            // Unresolved. There is no honest product list to show here, so send
+            // the customer to search: the results are labelled as search results
+            // rather than as things that fit their printer, and /smart's
+            // did-you-mean banner recovers the common case, which is a typo or a
+            // slightly-off model name ("Brother MFC-J9999DW" → "Did you mean
+            // Brother MFC J475DW?"). A dead end would be honest but useless.
+            if (printerModel) {
+                window.location.replace(`/search?q=${encodeURIComponent(printerModel)}`);
+                return;
+            }
+
+            window.location.replace('/shop');
         },
 
         async loadSearchResults(navVersion) {
@@ -2859,29 +2837,45 @@
                     const queryHasDigits = /\d/.test(String(searchQuery || ''));
                     const smartCount = products.length;
                     const SOFT_MISS_THRESHOLD = 50;
+                    // Scanning the whole set is safe: by backend contract a row is
+                    // tagged match_reason:"compatibility" only when it matched via
+                    // the "for use in" blob and NOT via name/SKU/tsvector, so a
+                    // compat row can never satisfy productMatchesQuery anyway.
                     const smartHasLiteralMatch = products.some(p => productMatchesQuery(p, searchQuery));
                     const smartCorrected = !!(smartData?.corrected_from || smartData?.did_you_mean);
-                    // compat-search-jul2026 — a compatibility result set (q names
-                    // a machine in a product's "for use in" list, e.g. q=VP6000 →
-                    // the AP800 ribbon) is a real backend hit that literally does
-                    // NOT appear in name/sku, so smartHasLiteralMatch is false and
-                    // the query is digit-shaped. Left ungated it would trip
-                    // softMiss/hijack and get swapped for the literal union (which
-                    // can't contain compat rows), silently dropping the very
-                    // products the customer asked for. Treat it as authoritative.
-                    const hasCompatMatch = hasCompatibilityMatch(products);
+                    // compat-search-jul2026 / ERR-133 — split the set by provenance.
+                    // A compat row (q names a machine in a product's "for use in"
+                    // list, e.g. q=VP6000 → the AP800 ribbon) is a real backend hit
+                    // that literally does NOT appear in name/sku, so the literal
+                    // union below can never contain it. Two consequences, and they
+                    // are the entire point of this partition:
+                    //   1. compat rows must NOT be counted among the rows the
+                    //      literal set has to out-number — they inflate the bar with
+                    //      rows that set structurally cannot supply. Measured live
+                    //      2026-07-30: q=CE50 returned 3 direct + 2 compat, and the
+                    //      5-row literal set (which had two cartridges /smart missed,
+                    //      G05ABK + G05XBK) failed `> 5` and was declined. Compare
+                    //      against directCount and it correctly wins `> 3`.
+                    //   2. compat rows must SURVIVE a swap. Until ERR-133 they were
+                    //      protected by suppressing softMiss/hijack outright, which
+                    //      only worked while compat sets were mutually exclusive with
+                    //      direct hits (backend 1d43034 made them additive) and never
+                    //      covered exactMode at all — so /search?q=VP6000&exact=1
+                    //      rendered a ZERO-RESULTS screen over three good ribbons.
+                    //      Preserving them across the swap is strictly stronger than
+                    //      suppressing the repair, and it covers every path.
+                    const { direct: directRows, compat: compatRows } = partitionCompatRows(products);
+                    const directCount = directRows.length;
                     const hardMiss = products.length === 0 && !smartData?.matched_printer;
                     const softMiss = queryHasDigits
                         && smartCount > 0
-                        && smartCount < SOFT_MISS_THRESHOLD
+                        && directCount < SOFT_MISS_THRESHOLD
                         && !smartData?.matched_printer
-                        && !smartData?.did_you_mean
-                        && !hasCompatMatch;
+                        && !smartData?.did_you_mean;
                     const hijack = smartCorrected
                         && smartCount > 0
                         && !smartHasLiteralMatch
-                        && !smartData?.matched_printer
-                        && !hasCompatMatch;
+                        && !smartData?.matched_printer;
                     if (hardMiss || softMiss || hijack || exactMode) {
                         // /api/products?search= → the full, paginated literal
                         // set. /api/search/suggest → the dropdown's exact
@@ -2923,20 +2917,49 @@
                         // zero-result screen shows instead of a re-correction.
                         // hijack / hardMiss: any literal hit beats /smart's set
                         // (it is empty or provably wrong). softMiss: only swap
-                        // when the literal set strictly out-counts /smart, so
-                        // we never trade away a good ranking for a flat one.
+                        // when the literal set strictly out-counts the DIRECT
+                        // rows, so we never trade away a good ranking for a flat
+                        // one — and never lose the comparison to compat rows the
+                        // literal set could not have contained (ERR-133).
                         const shouldUseFallback = exactMode
                             ? true
                             : (hijack || hardMiss)
                                 ? mergedUsed.length > 0
-                                : mergedUsed.length > smartCount;
+                                : mergedUsed.length > directCount;
                         if (shouldUseFallback) {
-                            products = mergedUsed;
+                            // ERR-133 — carry the compat rows across. The literal
+                            // union matches on name/SKU only, so it structurally
+                            // cannot contain a "for use in" match; assigning it
+                            // raw is what deleted the ribbons on every swap path,
+                            // exactMode included. rowsNotAlreadyIn keeps the union
+                            // authoritative for any row it does supply (it carries
+                            // richer fields), and re-appends only the genuinely
+                            // absent compat rows, after the direct results.
+                            //
+                            // The "Fits <model>" chip keeps rendering on them even
+                            // though smartData is nulled below: createProductCard
+                            // reads match_reason/matched_token off the row itself,
+                            // not off the envelope.
+                            const preservedCompat = rowsNotAlreadyIn(compatRows, mergedUsed);
+                            products = mergedUsed.concat(preservedCompat);
                             smartData = null;
                             // A filtered set is a curated single page — the
                             // backend's total_pages counts the unfiltered union,
                             // so suppress the pager to avoid phantom pages.
-                            if (!mergedFiltered && fallback.meta && fallback.meta.total_pages != null) {
+                            //
+                            // Re-appending compat rows curates the page the same
+                            // way (ERR-133): the rows are not in the literal set
+                            // fallback.meta counted, so `total` would under-report
+                            // what is on screen, and adjusting it would put total /
+                            // limit / total_pages into contradiction — the exact
+                            // cross-field disagreement ERR-113 exists to prevent.
+                            // Measured 2026-07-30: every query that yields compat
+                            // rows has a literal set of ≤5 rows (total_pages ≤ 1),
+                            // so the pager is already hidden in all reachable
+                            // cases; gating on preservedCompat.length keeps it fully
+                            // functional whenever nothing was appended.
+                            if (!mergedFiltered && preservedCompat.length === 0
+                                && fallback.meta && fallback.meta.total_pages != null) {
                                 pagination = {
                                     total: fallback.meta.total,
                                     page: fallback.meta.page,
@@ -2951,7 +2974,6 @@
                         }
                     }
                 }
-
 
                 // Spec §2.2 — banners for did-you-mean / corrected_from /
                 // matched_printer must show on results AND on the empty state,
@@ -3071,6 +3093,13 @@
                     // server-side (May 2026 catalog hierarchy + relevance
                     // tiebreak), and bundle-pack pinning when matched_printer
                     // is set is also server-side. No client resort.
+                    //
+                    // The one exception is ERR-133's provenance partition, applied
+                    // inside renderProducts: "for use in" compat rows trail the
+                    // direct hits within each section. Not a resort — it never
+                    // compares two rows' relevance_score. Note these two sections
+                    // are rendered Compatible-then-Genuine regardless of API order,
+                    // so /smart's row order never reaches the DOM anyway.
                     this.renderProducts(compatible, this.elements.compatibleProducts, this.elements.compatibleSection, true);
                     this.renderProducts(genuine, this.elements.genuineProducts, this.elements.genuineSection, false);
 
@@ -3574,16 +3603,40 @@
 
             section.hidden = false;
 
+            // ERR-133 — direct hits first, "also fits your machine" rows after,
+            // applied AFTER the sort because this is the only place row order is
+            // actually decided. A "for use in" row (match_reason:"compatibility")
+            // is a weaker answer than a name/SKU hit, so it must never sit above
+            // one inside the same section.
+            //
+            // This has to live here, not on the flat /smart array: loadSearchResults
+            // re-partitions rows by `source` into the Compatible and Genuine
+            // sections and each section is re-sorted below, so ANY ordering imposed
+            // upstream is discarded before it reaches the DOM. Verified in a real
+            // browser 2026-07-30 — an earlier attempt to order the flat array was a
+            // measurable no-op.
+            //
+            // Still not the client re-rank the search path forbids: it never
+            // compares two rows' relevance_score, and byCodeThenColor's ordering is
+            // preserved inside each group. Runs before rowBreakIndices so the
+            // yield-group breaks are computed against the final order. A no-op on
+            // every surface that has no compat rows, which is all of them except
+            // search.
+            const compatLast = (rows) => {
+                const split = partitionCompatRows(rows);
+                return split.compat.length ? split.direct.concat(split.compat) : rows;
+            };
+
             const sortMode = this.state.sort || 'recommended';
             let sortedProducts;
             let breaks;
             if (sortMode !== 'recommended') {
-                sortedProducts = this._sortProductsBy(products, sortMode);
+                sortedProducts = compatLast(this._sortProductsBy(products, sortMode));
                 breaks = new Set(); // flat sorted run — no yield-group row breaks
             } else {
-                sortedProducts = (typeof ProductSort !== 'undefined' && ProductSort.byCodeThenColor)
+                sortedProducts = compatLast((typeof ProductSort !== 'undefined' && ProductSort.byCodeThenColor)
                     ? ProductSort.byCodeThenColor(products)
-                    : products;
+                    : products);
                 breaks = (typeof ProductSort !== 'undefined' && ProductSort.rowBreakIndices)
                     ? new Set(ProductSort.rowBreakIndices(sortedProducts))
                     : new Set();

@@ -1,7 +1,7 @@
 /**
  * Admin SPA — Entry point, router, shell
  */
-const APP_VERSION = '2026.07.30-invoice-status-email-log';
+const APP_VERSION = '2026.07.30-order-hard-purge';
 
 // STATIC IMPORTS CARRY NO `?v=` TOKEN — do not add one (ERR-124).
 //

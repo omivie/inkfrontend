@@ -36,6 +36,9 @@
                 }
                 if (typeof Cart !== 'undefined') {
                     Cart.items = [];
+                    // A pending removal refers to a cart that no longer exists. Leaving
+                    // it would fire a DELETE against the shopper's NEXT cart (ERR-136).
+                    if (typeof Cart.purgePendingOps === 'function') Cart.purgePendingOps('order completed');
                     document.querySelectorAll('.cart-count, .cart-badge, #cart-count').forEach(el => { el.textContent = '0'; });
                 }
                 localStorage.removeItem('inkcartridges_cart');

@@ -744,19 +744,39 @@ const ProductSort = (function() {
     // ─── yield + accessory + source ──────────────────────────────────────
 
     function yieldTier(product) {
-        // PRIMARY: the backend signal yield_tier: 'STD'|'XL'|'XXL' (from
-        // detectYieldTier()). As of the Jun 2026 backend release this is now
-        // emitted on every product-list endpoint (/api/shop, /api/products,
-        // /api/search/{smart,by-printer,by-part}, /api/printers/:slug/products)
-        // with correct values (verified live: Epson 200=STD/200HY=XL with the
-        // colour-Y guard, HP 975A=STD/975X=XL). It always wins; the FE detector
-        // below is now only a fallback for any pre-release cached payload that
-        // still lacks the field. (Lexmark bare-letter yields stay STD — backend
-        // follow-up; do not work around here.)
+        // Two signals, and we take the STRONGER of the two.
+        //
+        // The backend `yield_tier` ('STD'|'XL'|'XXL' from detectYieldTier) is
+        // now emitted on every product-list endpoint AND, since Jul 2026, on
+        // /api/products/:sku. Measured live across the full 3,910-product
+        // catalogue: present on 3,910/3,910, and it agrees with the detector
+        // below on 3,883. Of the 27 that differ, 11 have a STRONGER backend
+        // value (it sees data we can't) — those keep the backend answer.
+        //
+        // The other 16 are backend STD over a name that plainly says high
+        // yield, and the page counts confirm it:
+        //   Lexmark 708H  Cyan 3,000pp  vs  708  Cyan 1,000pp   (also 808H)
+        //   Lexmark 236H / 333H / C333HY0 packs
+        //   Canon CART069H (+HK), CART055H, PG660XLHY
+        // The detector already catches all 16 — `\d{2,}h\b` and
+        // `CART\d{3,}H` below were written for exactly these. But this
+        // function used to return the backend value unconditionally, so the
+        // moment the backend started populating the field those 16 silently
+        // collapsed into the standard-yield row beside cartridges holding a
+        // third of the ink. A regression caused by a field arriving, not by
+        // code changing.
+        //
+        // max() is one-directional and self-disabling: it can only ever RAISE
+        // a tier, never lower one, so a correct backend value always survives;
+        // and once detectYieldTier learns the trailing-H convention (BF-027)
+        // both signals agree and this merge goes inert on its own. The earlier
+        // note here said "do not work around here" — that was right while the
+        // detector was the only signal and could be wrong on its own; it is
+        // the wrong call now that we can cross-check the two and only ever
+        // move in the direction both the name and the page count point.
+        // ERR-134.
         const yt = (product && product.yield_tier || '').toString().toUpperCase();
-        if (yt === 'XXL') return 2;
-        if (yt === 'XL')  return 1;
-        if (yt === 'STD') return 0;
+        const backendTier = yt === 'XXL' ? 2 : yt === 'XL' ? 1 : yt === 'STD' ? 0 : -1;
 
         // ---- FE detection (mirror of backend detectYieldTier) ----
         // The old fallback only read XL/XXL/HY as whole words, so it silently
@@ -766,20 +786,28 @@ const ProductSort = (function() {
         // trailing colour Y ("220Y" Yellow) is never mistaken for a yield marker.
         const n = (product && product.name || '').toLowerCase();
         const sku = (product && product.sku || '').toUpperCase();
+        let detected = 0;
         // XXL / super-high-yield.
         if (n.includes('xxl') || n.includes('super high')
-            || /\bxll\b/.test(n) || /\bshy\b/.test(n) || /\d{2,}xxhy/i.test(n)) return 2;
+            || /\bxll\b/.test(n) || /\bshy\b/.test(n) || /\d{2,}xxhy/i.test(n)) {
+            detected = 2;
         // XL / high-yield, incl. digit-glued HY/EHY ("200HY", "220HYBK"),
         // digit-glued single H ("220H", "CART069H"), and HP short-series X
         // ("975X"). None of these match a bare trailing colour Y.
-        if (n.includes('xl') || n.includes('high yield') || /\bhy\b/.test(n)
-            || /\d{2,}e?hy/i.test(n) || /\d{2,}h\b/i.test(n) || /\b\d{3,}x\b/i.test(n)) return 1;
-        if (/CART\d{3,}H(?=[A-Z]|-|$)/.test(sku) || /\d{2,}E?HY/.test(sku)) return 1;
+        } else if (n.includes('xl') || n.includes('high yield') || /\bhy\b/.test(n)
+            || /\d{2,}e?hy/i.test(n) || /\d{2,}h\b/i.test(n) || /\b\d{3,}x\b/i.test(n)) {
+            detected = 1;
+        } else if (/CART\d{3,}H(?=[A-Z]|-|$)/.test(sku) || /\d{2,}E?HY/.test(sku)) {
+            detected = 1;
+        }
         // NOTE (stopgap limit): HP short-series Y → XXL and Lexmark bare-letter
-        // yields (503H/808S/503U) are intentionally NOT detected here — the
+        // yields (503U/808S) are intentionally NOT detected here — the
         // trailing-Y/letter cases collide with colour/model data the FE can't
-        // disambiguate. Those stay STD until the backend yield_tier ships.
-        return 0;
+        // disambiguate. Those stay at whatever the backend says.
+        //
+        // Stronger signal wins. With no backend field, backendTier is -1 and
+        // the detector stands alone exactly as it used to.
+        return Math.max(backendTier, detected);
     }
 
     // accessoryTier: cartridges first (0), drums (1), other consumable units —
@@ -1002,12 +1030,29 @@ const ProductSort = (function() {
         //            975A, not 450.
         // Both passes use `\d+` so single-digit codes (Canon BCI6, BCI3, …)
         // resolve here instead of falling to the colour-stripped name fallback.
-        const letterMatches = [...name.matchAll(/\b([A-Z]{1,6})(\d+)([A-Z]{0,8})\b/g)];
+        //
+        // PRINTER MODELS ARE NOT CARTRIDGE CODES (ERR-135). A compatible
+        // cartridge's name ends with the devices it fits — "…Replacement for
+        // Brother DCP-J1050DW MFC-J1010DW" — and because pass 1 is
+        // LAST-match-wins, the token it picked was the trailing PRINTER, keying
+        // the family to a device instead of a cartridge and silently forking or
+        // merging families. Drop printer-shaped tokens before choosing.
+        // This only ever runs when the backend shipped no `series_codes`;
+        // PRIORITY 0 above already returned for everything else.
+        // Reached via the window property, not the bare binding: `CompatSource`
+        // is a `const` declared further down this same file, so a bare
+        // `typeof CompatSource` would THROW (temporal dead zone) rather than
+        // return 'undefined' if this ever ran mid-evaluation.
+        const cs = (typeof window !== 'undefined' && window.CompatSource) || null;
+        const isPrinterTok = cs ? (t) => cs.isPrinterModelToken(t) : () => false;
+        const letterMatches = [...name.matchAll(/\b([A-Z]{1,6})(\d+)([A-Z]{0,8})\b/g)]
+            .filter(mm => !isPrinterTok(mm[0]));
         let m;
         if (letterMatches.length > 0) {
             m = letterMatches[letterMatches.length - 1];
         } else {
-            const numMatches = [...name.matchAll(/\b()(\d+)([A-Z]{0,8})\b/g)];
+            const numMatches = [...name.matchAll(/\b()(\d+)([A-Z]{0,8})\b/g)]
+                .filter(mm => !isPrinterTok(mm[0]));
             if (numMatches.length > 0) m = numMatches[0];
         }
         let base;
@@ -1644,6 +1689,213 @@ const SeriesCodes = (function () {
 })();
 
 if (typeof window !== 'undefined') window.SeriesCodes = SeriesCodes;
+
+// ---------------------------------------------------------------------------
+// COMPATIBILITY PROVENANCE — one vocabulary (ERR-135)
+//
+// A customer bought a cartridge that didn't fit their printer. The backend
+// removed the bad `product_compatibility` rows, but an audit of the frontend
+// found it was generating wrong-family "compatible" claims of its own, from
+// data that never touched `product_compatibility`:
+//
+//   • /shop?printer_model=<text> fell through to a BRAND-NAME keyword search
+//     and rendered up to 100 results under "Compatible Products for <printer>".
+//     Measured: `?search=Brother&limit=100` → 100 products across 71 series
+//     families (label tapes, drums, photo paper).
+//   • A hardcoded printer→code table then ran `ilike('name', '%<code>%')`.
+//     Measured: `%200%` → 141 products, because "(9,200 pages)" contains 200.
+//   • The PDP borrowed a sibling's printer list when a product had none of its
+//     own, picking the sibling by the same unbounded substring match.
+//
+// The rule this module exists to enforce, and the reason it is ONE module:
+//
+//     THE FRONTEND NEVER ASSERTS COMPATIBILITY.
+//
+// Only `product_compatibility`, reached through the backend, may put a product
+// under a "fits your printer" heading. Anything else is a SEARCH RESULT and
+// must be labelled as one. This mirrors the older, load-bearing rule that the
+// frontend never computes prices.
+//
+// Every compatibility decision in the storefront routes through here so there
+// is a single place to audit. Two independent substring matchers is how the
+// first one got away with being wrong for months.
+const CompatSource = (function () {
+    // The only two answers. There is deliberately no third value for "probably"
+    // — an unproven product is UNPROVEN and may not be labelled compatible.
+    //
+    // PROVEN is earned by exactly three backend surfaces, all of which read
+    // `product_compatibility` server-side:
+    //   • /api/products/printer/:slug   → data.compatible_products[]
+    //   • /api/search/by-printer        → data.products[]
+    //   • /api/search/smart             → data.products[] ONLY when the payload
+    //                                     also carries a truthy matched_printer
+    const PROVEN = 'proven';
+    const UNPROVEN = 'unproven';
+
+    // Printer identity, separator-insensitive.
+    //
+    // `printer_models` is not internally consistent about separators — it holds
+    // "Brother DCP J1050DW" (spaces) alongside "Brother DCP-J1260W" (dash) — and
+    // customers type a third way again. Every FE lookup that compared raw
+    // strings therefore missed: `full_name ilike '%Brother DCP-J1050DW%'`
+    // returns nothing for a printer that is right there in the table. Collapse
+    // to alphanumerics and the three spellings become one key.
+    //
+    //   "Brother DCP-J1050DW" ┐
+    //   "Brother DCP J1050DW" ├→ "brotherdcpj1050dw"
+    //   "brother dcpj1050dw"  ┘
+    function printerKey(value) {
+        return String(value == null ? '' : value).toLowerCase().replace(/[^a-z0-9]+/g, '');
+    }
+
+    // Leading manufacturer word, so a free-text model can be routed to the
+    // right brand pool. Kept here rather than duplicated at each call site
+    // because the list has to agree with `slugifyBrand` to be useful.
+    const BRAND_PREFIX = /^(brother|canon|epson|hewlett[\s-]*packard|hp|samsung|lexmark|oki|fuji[\s-]*xerox|xerox|kyocera|ricoh|dell|sharp|toshiba)\b[\s-]*/i;
+
+    function brandPrefixOf(value) {
+        const m = String(value == null ? '' : value).match(BRAND_PREFIX);
+        return m ? m[1] : null;
+    }
+
+    function stripBrandPrefix(value) {
+        return String(value == null ? '' : value).replace(BRAND_PREFIX, '').trim();
+    }
+
+    // Printer-model-shaped tokens, which must never be mistaken for cartridge
+    // codes. This is the wrong-family bug running in the other direction: when
+    // the backend ships an empty `series_codes`, both `familyKey()` here and
+    // `_enrichSeriesCodes()` in api.js fall back to scraping a code out of the
+    // product NAME — and a compatible cartridge's name ends with the printers
+    // it fits ("...Replacement for Brother DCP-J1050DW MFC-J1010DW"). Scraping
+    // that yields "DCPJ1050DW" as a cartridge series code, which then forks or
+    // merges families keyed on a printer.
+    //
+    // Two independent signals, either sufficient:
+    //   • a known printer-line prefix (DCP, MFC, PIXMA, WorkForce, …)
+    //   • a Brother/Canon-style device suffix (DW, CDW, FDW, …), which no
+    //     cartridge code in the catalogue carries
+    //
+    // The prefix must be followed by an optional single letter and then a DIGIT
+    // (`DCP-J1050DW` → `DCP` + `J1` ✓, `XP-4100` → `XP` + `4` ✓). Without that
+    // lookahead the short entries eat real consumables — `ML` would swallow
+    // Samsung's `MLT-D101S` toner, whose prefix is two letters deep before any
+    // digit. `L` is spelled separately as `L(?=\d)` because Epson's EcoTank
+    // L3110 is a printer, but the shared `[A-Z]?\d` lookahead would let a bare
+    // `L` swallow Brother's entire `LC431` ink family (`L` + `C4`).
+    //
+    // THE ABSENCES ARE THE INTERESTING PART. Every candidate was swept against
+    // all 977 distinct `series_codes` in the live catalogue; these were removed
+    // because a product we actually sell collides with them:
+    //   • ML  — OKI Microline ribbons are NAMED for the printer, so `ML182`,
+    //           `ML590` and `ML720` are series codes, not devices.
+    //   • IX  — Fuji Xerox toners `IX105` / `IX305` / `IX315` / `IX405`.
+    //   • TD  — ribbon codes `TD455X25`, `TD490X29`, `TD4100X149`.
+    //   • FS  — collides with OKI/Kyocera consumable spellings.
+    //   • MX  — Sharp `MX-23` toner.    • MP — Ricoh `MP 2014H` toner.
+    // `DN`/`CDN` are likewise absent from the suffix test: OKI ships a toner
+    // whose series code is literally `332DN`.
+    //
+    // For an ambiguous token, calling a cartridge a printer is the WORSE
+    // failure here — it would fork a real family — so ambiguity resolves to
+    // "not a printer" and the guard simply declines to fire. Dropping these
+    // costs nothing on the incident shapes, which are all `DCP`/`MFC` + `DW`.
+    const PRINTER_LINE_PREFIX = /^(?:L(?=\d)|(?:DCP|MFC|HL|FAX|PIXMA|MAXIFY|IMAGECLASS|IMAGERUNNER|LBP|SELPHY|XP|WF|ET|SURECOLOR|WORKFORCE|ECOTANK|EXPRESSION|STYLUS|DESKJET|OFFICEJET|ENVY|LASERJET|PAGEWIDE|PHOTOSMART|SMARTTANK|NEVERSTOP|CLP|CLX|SCX|SL|XPRESS|ECOSYS|TASKALFA|AFICIO|VERSALINK|PHASER|WORKCENTRE|DOCUPRINT|QL|PT|RJ|TS|TR|MG|IP|GX)(?=[A-Z]?\d))/i;
+    const DEVICE_SUFFIX = /(?:C?DWF?|FDW|DWE|NW|TN?W)$/i;
+
+    function isPrinterModelToken(token) {
+        const t = String(token == null ? '' : token).toUpperCase().replace(/[^A-Z0-9]/g, '');
+        if (!t) return false;
+        // Both signals require digits — a bare colour or yield word must not trip
+        // them, and a device suffix on a letters-only token means nothing.
+        if (!/\d/.test(t)) return false;
+        if (PRINTER_LINE_PREFIX.test(t)) return true;
+        return DEVICE_SUFFIX.test(t);
+    }
+
+    // Whole-token code matching. The single implementation.
+    //
+    // Two correct versions of this already existed (shop-page's queryCodeMatch
+    // and the PDP's related-products series filter) and two incorrect ones
+    // (`ilike('name','%code%')`, twice). The correct ones both agreed on the two
+    // rules that matter, so those rules live here now:
+    //
+    //   1. BOUNDARIES, never substrings. `LC431` must not match `LC4310`, and
+    //      `61XL` must not match `961XL`. Boundaries are tested against the RAW
+    //      text — normalising first would collapse "9,200 pages" to "9200pages"
+    //      and re-admit it.
+    //   2. REJECT YIELD PROSE. A code followed by "page"/"pages" is a page
+    //      count, not a code. This one rule is what stops `%200%` from matching
+    //      141 products via "(9,200 pages)".
+    //
+    // A trailing yield marker is still a match, because LC431XL genuinely
+    // belongs to the LC431 family.
+    const YIELD_ALTERNATION = '(?:XL|XXL|XXHY|EHY|HY|H)?';
+
+    function escapeForRegex(value) {
+        return String(value == null ? '' : value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    }
+
+    // Anchored: for testing one candidate code against one known code.
+    function codeExactRegex(code) {
+        return new RegExp('^' + escapeForRegex(code) + YIELD_ALTERNATION + '$', 'i');
+    }
+
+    // Bounded: for finding a code inside free text (a product name or SKU).
+    // Global, so callers can walk every occurrence and apply rule 2 to each.
+    function codeTokenRegex(code) {
+        return new RegExp('(^|[^0-9A-Za-z])(' + escapeForRegex(code) + YIELD_ALTERNATION + ')([^0-9A-Za-z]|$)', 'gi');
+    }
+
+    // True when `code` appears in `text` as a real code token — boundaries
+    // respected, page counts rejected. This is the function that replaces every
+    // `ilike('name', '%code%')` the audit found.
+    function textHasCodeToken(text, code) {
+        const haystack = String(text == null ? '' : text);
+        if (!haystack || !code) return false;
+        const re = codeTokenRegex(code);
+        let m;
+        while ((m = re.exec(haystack)) !== null) {
+            const afterIdx = m.index + (m[1] ? m[1].length : 0) + m[2].length;
+            // Rule 2 — "<code> page(s)" is a yield, not a code.
+            if (/^\s*pages?\b/i.test(haystack.slice(afterIdx))) continue;
+            return true;
+        }
+        return false;
+    }
+
+    // Does this product belong to `code`'s family? Backend `series_codes` first
+    // (authoritative), then a bounded name/SKU scan. Never a substring.
+    function productMatchesCode(product, code) {
+        if (!product || !code) return false;
+        const exact = codeExactRegex(code);
+        const codes = Array.isArray(product.series_codes) ? product.series_codes : [];
+        for (const c of codes) {
+            const nc = String(c == null ? '' : c).replace(/[^0-9A-Za-z]/g, '');
+            if (nc && exact.test(nc)) return true;
+        }
+        for (const field of [product.name, product.sku]) {
+            if (textHasCodeToken(field, code)) return true;
+        }
+        return false;
+    }
+
+    return {
+        PROVEN,
+        UNPROVEN,
+        printerKey,
+        brandPrefixOf,
+        stripBrandPrefix,
+        isPrinterModelToken,
+        codeExactRegex,
+        codeTokenRegex,
+        textHasCodeToken,
+        productMatchesCode,
+        BRAND_PREFIX_PATTERN: BRAND_PREFIX
+    };
+})();
+
+if (typeof window !== 'undefined') window.CompatSource = CompatSource;
 
 // ---------------------------------------------------------------------------
 // Category slug canonicalization (IA reorg, Jul 2026)

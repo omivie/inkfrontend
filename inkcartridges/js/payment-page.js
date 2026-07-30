@@ -1382,6 +1382,10 @@
                             try { await API.clearCart(); } catch (e) { DebugLog.warn('Could not clear cart:', e); }
                             if (typeof Cart !== 'undefined') {
                                 Cart.items = [];
+                                // A pending removal refers to a cart that no longer
+                                // exists — purge it so it cannot fire against the
+                                // shopper's next cart (ERR-136).
+                                if (typeof Cart.purgePendingOps === 'function') Cart.purgePendingOps('order completed');
                                 document.querySelectorAll('.cart-count, .cart-badge, #cart-count').forEach(el => { el.textContent = '0'; });
                             }
                             localStorage.removeItem('inkcartridges_cart');
