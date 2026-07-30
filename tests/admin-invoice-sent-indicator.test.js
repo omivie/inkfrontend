@@ -10,22 +10,28 @@
  *
  * The contract pinned here:
  *
- *   1. The backend owns the send history — `last_emailed_at`,
- *      `last_emailed_to`, `email_count`. Those fields are READ-ONLY to the
- *      frontend: `draftFromInvoice()` carries them through, `buildPayload()`
- *      must never send them back (a PUT would otherwise reset the history on
- *      every edit).
+ *   1. The backend owns the send history. It is READ-ONLY to the frontend:
+ *      `draftFromInvoice()` carries the fields through, `buildPayload()` must
+ *      never send them back (a PUT would otherwise reset the history on every
+ *      edit).
  *
- *   2. Until the backend ships them, a successful send is recorded in
- *      localStorage under `inv_emailed_v1` so the indicator is useful
- *      immediately. `sentInfo()` prefers the server value, so the local cache
- *      retires itself the moment the API starts returning `last_emailed_at`.
+ *   2. A successful send is also recorded in localStorage under
+ *      `inv_emailed_v1`, as a backstop. `sentInfo()` prefers the server value,
+ *      so the local map only shows through when the row carries no server
+ *      timestamp at all.
  *
  *   3. `writeSent()` runs ONLY after `AdminAPI.emailInvoice()` resolves — a
  *      failed send must leave the row unmarked.
  *
  *   4. localStorage can throw (private mode, quota); every access is guarded
  *      and degrades to "no local record", never to an exception.
+ *
+ * UPDATED 2026-07-30 (ERR-131): the server field is `emailed_at`, not
+ * `last_emailed_at`, and a server `email_count` of 0 means "unknown" (a legacy
+ * send predating the log table), NOT one send. Both were wrong here. The
+ * field-name and count-defaulting assertions moved to
+ * tests/admin-invoice-status-email-log-jul2026.test.js, which owns the new
+ * contract end to end; what stays below is what did not change.
  *
  * Run: node --test tests/admin-invoice-sent-indicator.test.js
  */
@@ -45,6 +51,7 @@ const INVOICES_SRC = READ('js/admin/pages/invoices.js');
 const APP_SRC = READ('js/admin/app.js');
 const CSS_SRC = READ('css/admin.css');
 const SHELL_SRC = READ('html/admin/index.html');
+const TABLE_SRC = READ('js/admin/components/table.js');
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Load the send-record helpers for real.
@@ -99,8 +106,8 @@ test('sentInfo() prefers the server fields over any local record', () => {
   writeSent('inv-1', 'local@example.com');
   const info = sentInfo({
     id: 'inv-1',
-    last_emailed_at: '2026-07-08T02:15:00Z',
-    last_emailed_to: 'server@example.com',
+    emailed_at: '2026-07-08T02:15:00Z',
+    emailed_to: 'server@example.com',
     email_count: 3,
   });
   assert.equal(info.at, '2026-07-08T02:15:00Z', 'server timestamp wins');
@@ -116,11 +123,6 @@ test('sentInfo() falls back to the local record when the backend omits the field
   assert.equal(info.to, 'ian@mcgrath.co.nz');
   assert.equal(info.count, 1);
   assert.match(info.at, /^\d{4}-\d{2}-\d{2}T/, 'local record stamps an ISO timestamp');
-});
-
-test('sentInfo() defaults a server email_count of 0/absent to 1', () => {
-  const { sentInfo } = loadHelpers();
-  assert.equal(sentInfo({ id: 'x', last_emailed_at: '2026-07-08T00:00:00Z' }).count, 1);
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -178,11 +180,12 @@ test('sentShort() renders a compact day + month, and tolerates junk', () => {
 test('sentTitle() names the recipient, the full date, and only pluralises past one send', () => {
   const { sentTitle } = loadHelpers();
   const once = sentTitle({ at: '2026-07-08T02:15:00Z', to: 'ian@mcgrath.co.nz', count: 1 });
-  assert.match(once, /Emailed to ian@mcgrath\.co\.nz on 8th July 2026$/);
+  assert.match(once, /Emailed to ian@mcgrath\.co\.nz on 8th July 2026 · click for the send log$/);
   assert.doesNotMatch(once, /sent 1 times/, 'a single send must not read "sent 1 times"');
 
   assert.match(sentTitle({ at: '2026-07-08T02:15:00Z', to: '', count: 4 }),
-    /^Emailed on 8th July 2026 · sent 4 times$/, 'no recipient => no dangling "to"');
+    /^Emailed on 8th July 2026 · sent 4 times · click for the send log$/,
+    'no recipient => no dangling "to"');
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -203,6 +206,11 @@ test('the Sent cell escapes its tooltip and its date', () => {
   assert.match(cell, /title="\$\{escA\(sentTitle\(info\)\)\}"/, 'tooltip goes through escA()');
   assert.match(cell, /\$\{esc\(sentShort\(info\.at\)\)\}/, 'date goes through esc()');
   assert.match(cell, /inv-sent__none/, 'the never-sent state renders the muted placeholder');
+});
+
+test('draftFromInvoice() carries the server field the backend actually returns', () => {
+  const from = INVOICES_SRC.slice(INVOICES_SRC.indexOf('function draftFromInvoice'), INVOICES_SRC.indexOf('function computeTotals'));
+  assert.match(from, /d\.emailed_at = rec\.emailed_at/, 'the drawer hint needs emailed_at, not just the legacy alias');
 });
 
 test('writeSent() is called only AFTER emailInvoice() resolves', () => {
@@ -227,7 +235,7 @@ test('draftFromInvoice() carries the send history; buildPayload() never sends it
   }
   const payload = INVOICES_SRC.slice(INVOICES_SRC.indexOf('function buildPayload'));
   const body = payload.slice(0, payload.indexOf('\n}\n'));
-  for (const f of ['last_emailed_at', 'last_emailed_to', 'email_count']) {
+  for (const f of ['emailed_at', 'last_emailed_at', 'last_emailed_to', 'email_count']) {
     assert.ok(!body.includes(f), `buildPayload() must NOT write ${f} — the backend owns the send history`);
   }
 });
@@ -253,6 +261,17 @@ test('APP_VERSION advanced so the edited invoices.js module is re-fetched', () =
     'APP_VERSION must be a current date-stamped token');
   assert.doesNotMatch(APP_SRC, /APP_VERSION\s*=\s*'2026\.07\.08-invoice-cost-gst'/,
     'APP_VERSION must change off the previous build');
+});
+
+test('the Sent marker is a button, so the row-click guard suppresses the editor', () => {
+  // components/table.js skips onRowClick for `closest('button, a, input')`. If the
+  // cell ever goes back to a <span>, clicking "Sent" opens the invoice editor
+  // instead of the send history, and the history becomes unreachable.
+  const cell = INVOICES_SRC.slice(INVOICES_SRC.indexOf("key: 'sent'"), INVOICES_SRC.indexOf("key: 'actions'"));
+  assert.match(cell, /<button type="button" class="inv-sent"/, 'the sent state is a button');
+  assert.match(cell, /<button type="button" class="inv-sent__none"/, 'the never-sent state is a button too');
+  assert.match(TABLE_SRC, /closest\('button, a, input'\)/,
+    'the guard the buttons rely on must still exist in components/table.js');
 });
 
 test('the shell busts BOTH the admin.css and admin/app.js tokens', () => {

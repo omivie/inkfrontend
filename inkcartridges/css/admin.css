@@ -4796,14 +4796,63 @@ button.admin-active-dot--clickable:hover::after { opacity: 1; }
 .inv-paid input:disabled { cursor: progress; }
 .inv-paid__void { color: var(--text-muted); font-size: 12px; }
 
-/* "Sent" column — has this invoice's PDF been emailed to the customer? */
+/* "Sent" column — has this invoice's PDF been emailed to the customer?
+   Both states are <button>s (they open the send-history modal), so they need the
+   button chrome stripped back to what the <span>s used to look like. */
+.inv-sent,
+.inv-sent__none {
+  background: none; border: 0; padding: 0; margin: 0; font: inherit;
+  cursor: pointer; border-radius: 4px;
+}
 .inv-sent { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; font-weight: 600; color: var(--success); white-space: nowrap; }
 .inv-sent__none { color: var(--text-muted); font-size: 12px; }
+.inv-sent:hover, .inv-sent__none:hover { text-decoration: underline; }
+.inv-sent:focus-visible,
+.inv-sent__none:focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; }
+/* Send count, only rendered past one send. */
+.inv-sent__times { color: var(--text-muted); font-weight: 500; }
 /* --success is tuned for the dark deck; it under-contrasts on the light surface. */
 .admin[data-theme="light"] .inv-sent { color: #15803d; }
 /* Drawer footer note, pushed left of the action buttons. */
 .inv-sent-hint { margin-right: auto; align-self: center; font-size: 12px; color: var(--text-muted); }
 .inv-sent-hint:empty { display: none; }
+.inv-sent-hint__btn {
+  background: none; border: 0; padding: 0; font: inherit; color: inherit;
+  cursor: pointer; text-decoration: underline dotted; text-underline-offset: 3px;
+}
+.inv-sent-hint__btn:hover { color: var(--text); }
+.inv-sent-hint__btn:focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; border-radius: 4px; }
+
+/* Send history modal — every recorded send of one invoice, newest first. */
+.admin-modal--invoice-history { max-width: 520px; }
+.inv-hist { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.inv-hist__row {
+  padding: 10px 12px; border-radius: 8px;
+  background: var(--surface-raised); border: 1px solid var(--border);
+}
+.inv-hist__when {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  font-size: 13px; font-weight: 600; color: var(--success);
+}
+.admin[data-theme="light"] .inv-hist__when { color: #15803d; }
+.inv-hist__to { margin-top: 2px; font-size: 13px; color: var(--text); overflow-wrap: anywhere; }
+.inv-hist__subject { margin-top: 2px; font-size: 12px; color: var(--text-muted); overflow-wrap: anywhere; }
+.inv-hist__status {
+  font-size: 10px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase;
+  padding: 2px 6px; border-radius: 999px; background: var(--danger); color: #fff;
+}
+.inv-hist__status--queued,
+.inv-hist__status--pending { background: var(--yellow); color: var(--key); }
+/* A non-"sent" status is the reason to open this panel, so the row heading drops
+   the success green — the chip beside it is the real state. */
+.inv-hist__row:has(.inv-hist__status) .inv-hist__when,
+.admin[data-theme="light"] .inv-hist__row:has(.inv-hist__status) .inv-hist__when { color: var(--text); }
+.inv-hist__note { margin: 10px 0 0; font-size: 12px; color: var(--text-muted); }
+.inv-hist__empty p,
+.inv-hist__error p { margin: 0 0 8px; font-size: 13px; color: var(--text-secondary); }
+.inv-hist__empty p strong,
+.inv-hist__error p strong { color: var(--text); font-size: 14px; }
+.inv-hist__error { border-left: 3px solid var(--danger); padding-left: 12px; }
 
 /* Required-field validation cue (invoice editor) */
 .admin-input--error,

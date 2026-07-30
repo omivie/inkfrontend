@@ -642,6 +642,25 @@ const API = {
     },
 
     /**
+     * PATCH request helper — a partial update of one field or state, as opposed
+     * to put()'s whole-resource replacement.
+     *
+     * Reach for this when the resource has a heavy full-body PUT and you only
+     * want to move one thing: the admin invoice paid/unpaid toggle sends
+     * `{status}` to PATCH /api/admin/invoices/:id/status rather than round-
+     * tripping every line item just to flip a bookkeeping flag.
+     *
+     * Like post()/put(), a 429 is NOT retried — _fetchWithAuth only replays
+     * idempotent GETs, because replaying a mutation can double-apply it.
+     */
+    async patch(endpoint, body) {
+        return this.request(endpoint, {
+            method: 'PATCH',
+            body: JSON.stringify(body)
+        });
+    },
+
+    /**
      * DELETE request helper
      */
     async delete(endpoint) {

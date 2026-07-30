@@ -41,6 +41,88 @@ describing the same incident.
 
 ---
 
+## ERR-131 — The Invoices PAID slider called a route that was never built, and the SENT column read three field names the backend never shipped (2026-07-30)
+
+**Trigger:** the backend dev handed over `invoice-paid-toggle-and-email-log-FE-handoff-jul2026.md`,
+opening with two operator reports: "PAID slider did nothing" and "SENT column always showed —".
+
+**What was wrong.** Two independent failures, one shared cause: the frontend was addressing an API
+that had been *agreed* rather than *observed*.
+
+1. **The PAID toggle POSTed to a 404.** `AdminAPI.markInvoicePaid()` called
+   `POST /api/admin/invoices/:id/paid`. That route never existed. Probed live before writing a line
+   of code:
+
+   ```
+   POST  /api/admin/invoices/<id>/paid   → {"ok":false,"error":{"code":"NOT_FOUND",…}}
+   PATCH /api/admin/invoices/<id>/status → {"ok":false,"error":{"code":"UNAUTHORIZED",…}}
+   ```
+
+   (401 = the route is there and wants a token; 404 = it isn't.) Every flip landed in the
+   `NOT_FOUND` branch, sprang the checkbox back, and toasted *"Mark-paid isn't available yet
+   (backend endpoint pending)"* — which reads as a known-pending feature rather than a wrong URL.
+   **That reassuring message is why it sat broken for a month.** A fail-soft that names a plausible
+   innocent cause is worse than a raw error: it stops anyone looking.
+
+2. **The SENT column read field names that were never shipped.** `sentInfo()` looked for
+   `last_emailed_at` / `last_emailed_to` / `email_count`, the names written into the Jul-10 handoff.
+   The backend shipped `emailed_at` + `email_count` and **no recipient field**. Nothing matched, so
+   every row silently fell through to the per-browser `localStorage` backstop — invisible to a
+   second operator, empty on a fresh browser, and indistinguishable from "never emailed".
+
+**What the audit found.** A third defect, and it is the one that would have shipped broken:
+
+**The backend forbids PATCH at the CORS layer.** The new route is PATCH-only, and the API answers a
+PATCH preflight with `Access-Control-Allow-Methods: GET,POST,PUT,DELETE,OPTIONS` — **no PATCH** —
+from the production origin as well as localhost. So the browser kills the request before it is
+sent. Confirmed there is no frontend way around it: `POST`/`PUT` on `/status` both 404, and
+`X-HTTP-Method-Override` is not honoured. PATCH had never been used against this API before (the
+HTTP client didn't even have a `patch()` helper), which is exactly why the gap went unnoticed.
+Tracked as **BF-021**; it is a one-line change on the backend.
+
+**The trap this had to avoid.** Two of them:
+
+- **Coercing an unknown count to a fact.** A legacy invoice comes back with a real `emailed_at` and
+  `email_count: 0`, because the send predates the log table. The old code read `num(x) || 1`, which
+  would have printed "sent 1 times" as though it were known. 0 here means *unknown*, so the count
+  phrase is suppressed instead of invented.
+- **Rendering a failed read as "never emailed".** `listInvoiceEmails()` returns `null` on failure
+  and `{count:0, emails:[]}` when the server genuinely has nothing. Collapsing those two prints
+  "this invoice hasn't been emailed yet" over a backend hiccup — which is precisely how an operator
+  double-sends an invoice. They are separate branches with separate copy, and a test asserts the
+  error branch can never contain the empty-state sentence. Seventh incident in the
+  absence-as-zero family (ERR-063/068/073/075/076/127).
+
+**Fix.** `js/api.js` gained the missing `patch()` verb. `markInvoicePaid()` was **deleted** — a dead
+route must not survive as a second way to do the thing — and replaced by `setInvoiceStatus()`
+(`PATCH /:id/status`, with a frozen `INVOICE_STATUSES` list that excludes `void`, because voiding
+also cancels the shadow order and must stay on `POST /:id/void`). `sentInfo()` reads `emailed_at`
+with the old name kept as an alias. The SENT cell became a `<button>` — which also keeps the editor
+shut on click for free, since DataTable's row-click guard already skips
+`closest('button, a, input')` — opening a send-history modal built on the existing `Modal`
+component (an anchored popover inside the table's scroll container would have been clipped, ERR-107).
+The toggle now repaints the row from `data.invoice.status` rather than from the checkbox, and
+reloads instead when an active status filter no longer matches. A blocked preflight surfaces as
+copy naming the actual suspect instead of a bare `Failed to fetch`.
+
+**Verified:** 42 new tests plus 20 updated (`admin-invoice-status-email-log-jul2026.test.js`,
+`admin-invoice-sent-indicator.test.js`); full suite **3139 pass / 0 fail**. Five mutations
+(count-0 coerced back to 1, read-error branch removed, cell reverted to a `<span>`, `void` admitted
+to the status list, `null` collapsed to an empty result) each turn the suite red. Driven live in
+headless Chromium signed in as the owner: SENT now renders real server dates on every row (all five
+were "—" before), the history modal loads over a real 200, blocking the read shows the error branch
+with a retry and never claims never-sent, and hostile `recipient_email` / `subject` values render as
+inert text with no `alert()` and no injected node. The toggle's success path was proven by stubbing
+only the transport — including the case where the server disagrees with the click, where the
+server's status wins.
+
+**Lesson.** A handoff document records an intention; only a probe records an API. Both halves of
+this failed the same way — a field name and a route path, each taken on trust from a doc, each
+wrong, each failing silently for a month. Curl the endpoint before wiring it, and again before
+believing it works from a browser: a route that answers curl can still be unreachable from the page.
+
+---
+
 ## ERR-129 — Admin money columns never said whether they were GST-inclusive; Price and Cost sat two columns apart on opposite bases (2026-07-29)
 
 **Trigger:** owner screenshot of `/admin#products` — "add a small incl. gst or excl. gst wherever

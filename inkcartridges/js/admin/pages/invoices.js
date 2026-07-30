@@ -88,10 +88,12 @@ function orderDateShort(iso) {
 }
 
 // ---- "emailed" record ---------------------------------------------------
-// The backend owns last_emailed_at / last_emailed_to / email_count. Until those
-// fields ship, a successful send is recorded here so the list can still show a
-// Sent marker. A local record is per-browser: it says a send was recorded on
-// THIS machine, not that no send happened on another one.
+// The backend owns the send history and returns `emailed_at` + `email_count` on
+// every list row. This localStorage map stays as a BACKSTOP only: it records a
+// send made from this browser so the marker is right the instant the send
+// resolves, and so a row never reads "never emailed" just because one list
+// response came back without the fields. A local record is per-browser: it says
+// a send was recorded on THIS machine, not that no send happened on another one.
 const SENT_KEY = 'inv_emailed_v1';
 const SENT_CAP = 200;
 
@@ -117,15 +119,26 @@ function writeSent(id, to) {
   } catch (err) { warn('could not record the send locally', err); }
 }
 
-// Server wins when present, so the local cache retires itself the moment the
-// backend starts returning last_emailed_at. null = never emailed, as far as we know.
+// Server wins when present; the local map is only consulted when the row carries
+// no server timestamp at all. null = never emailed, as far as we know.
+//
+// ERR-131: the field is `emailed_at`. `last_emailed_at`/`last_emailed_to` were the
+// names agreed in the Jul-10 handoff and the backend shipped different ones, so
+// this read matched nothing for three weeks and every row fell through to the
+// per-browser cache. Both spellings are read now — the alias costs one `||`.
+//
+// `count` is NOT defaulted to 1. An invoice emailed before the send log existed
+// comes back with a real `emailed_at` and `email_count: 0`, and "0" there means
+// "we don't know how many", not "zero sends" — so the count phrase is suppressed
+// rather than invented (see sentTitle).
 function sentInfo(rec) {
   if (!rec) return null;
-  if (rec.last_emailed_at) {
-    return { at: rec.last_emailed_at, to: rec.last_emailed_to || '', count: num(rec.email_count) || 1 };
+  const at = rec.emailed_at || rec.last_emailed_at;
+  if (at) {
+    return { at, to: rec.emailed_to || rec.last_emailed_to || '', count: num(rec.email_count) || 0, source: 'server' };
   }
   const local = readSentMap()[rec.id];
-  return local?.at ? local : null;
+  return local?.at ? { ...local, source: 'local' } : null;
 }
 
 const MONTHS_SHORT = MONTHS.map((m) => m.slice(0, 3));
@@ -134,10 +147,24 @@ function sentShort(iso) {
   const d = new Date(iso);
   return isNaN(d.getTime()) ? '' : `${d.getDate()} ${MONTHS_SHORT[d.getMonth()]}`;
 }
+// ISO timestamp -> "8th July 2026 · 4:23 pm" for a send-history row. '' if unparseable.
+// The empty/null guard is NOT redundant with the isNaN check below: `new Date(null)`
+// is the epoch and `new Date('')` is Invalid, so without it a send row with no
+// timestamp would confidently print "1st January 1970" instead of "Date unknown".
+function sentDateTime(iso) {
+  if (iso == null || iso === '') return '';
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return '';
+  const h24 = d.getHours();
+  const h = h24 % 12 === 0 ? 12 : h24 % 12;
+  const mm = String(d.getMinutes()).padStart(2, '0');
+  return `${formatInvoiceDate(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`)} · ${h}:${mm} ${h24 < 12 ? 'am' : 'pm'}`;
+}
 function sentTitle(info) {
   const who = info.to ? ` to ${info.to}` : '';
+  // count 0 = unknown (a legacy send that predates the log), so say nothing.
   const times = info.count > 1 ? ` · sent ${info.count} times` : '';
-  return `Emailed${who} on ${formatInvoiceDate(String(info.at).slice(0, 10))}${times}`;
+  return `Emailed${who} on ${formatInvoiceDate(String(info.at).slice(0, 10))}${times} · click for the send log`;
 }
 
 // The "Date order placed" line always shows on the invoice. Until the operator
@@ -290,7 +317,11 @@ function draftFromInvoice(rec) {
   d.payment_due_pref = rec.payment_due_pref || '20';
   d.show_due_date = rec.show_due_date !== false;   // absent/true => keep showing the due date
   d.source_order_id = rec.source_order_id ?? null;
-  // Server-owned send history — read-only, deliberately absent from buildPayload().
+  // Server-owned send history — read-only, deliberately absent from buildPayload()
+  // (a full-payload PUT would otherwise wipe it on every edit). `emailed_at` is
+  // the name the backend actually returns; the last_emailed_* pair is the older
+  // alias sentInfo() still tolerates. See ERR-131.
+  d.emailed_at = rec.emailed_at ?? null;
   d.last_emailed_at = rec.last_emailed_at ?? null;
   d.last_emailed_to = rec.last_emailed_to ?? null;
   d.email_count = rec.email_count ?? 0;
@@ -521,11 +552,20 @@ const COLUMNS = [
     key: 'sent', label: 'Sent', align: 'center',
     // Has the PDF been emailed to the customer? Voided invoices are not special-cased —
     // a void invoice may well have gone out before it was voided.
+    //
+    // Both states are <button>s so the cell opens the per-send history. That also
+    // keeps the editor shut on click for free: DataTable's row-click guard skips
+    // `closest('button, a, input')` (components/table.js).
     render: (r) => {
       const info = sentInfo(r);
-      return info
-        ? `<span class="inv-sent" title="${escA(sentTitle(info))}">${icon('check', 13, 13)}${esc(sentShort(info.at))}</span>`
-        : `<span class="inv-sent__none" title="Not emailed yet">—</span>`;
+      const attrs = `data-row-action="sent-history" data-id="${escA(r.id)}" data-num="${escA(r.invoice_number)}"`;
+      if (!info) {
+        return `<button type="button" class="inv-sent__none" ${attrs} title="Not emailed yet — click for the send log">—</button>`;
+      }
+      // ×N only past one send: a legacy row reports count 0 (unknown), and
+      // printing "×0" or "×1" over it would be inventing a fact.
+      const times = info.count > 1 ? `<span class="inv-sent__times">×${esc(info.count)}</span>` : '';
+      return `<button type="button" class="inv-sent" ${attrs} title="${escA(sentTitle(info))}">${icon('check', 13, 13)}${esc(sentShort(info.at))}${times}</button>`;
     },
   },
   {
@@ -556,20 +596,21 @@ async function onRowAction(e) {
   const action = btn.dataset.rowAction;
   if (action === 'toggle-paid') {
     // The checkbox has already flipped by click time — read its new state.
-    const paid = btn.checked;
+    const wanted = btn.checked ? 'paid' : 'unpaid';
     btn.disabled = true;
     try {
-      await AdminAPI.markInvoicePaid(id, paid);
-      Toast.success(paid ? 'Marked paid.' : 'Marked unpaid.');
-      // Optimistic: the toggle already reflects the new state, no reload needed.
+      const inv = await AdminAPI.setInvoiceStatus(id, wanted);
+      Toast.success(wanted === 'paid' ? 'Marked paid.' : 'Marked unpaid.');
+      // Not optimistic-only: repaint from what the server says the status IS.
+      applyRowStatus(id, inv, wanted);
     } catch (err) {
-      btn.checked = !paid;   // revert the optimistic flip
-      Toast.error(err.code === 'NOT_FOUND'
-        ? 'Mark-paid isn’t available yet (backend endpoint pending).'
-        : (err.message || 'Could not update.'));
+      btn.checked = wanted === 'unpaid';   // revert to the last known-good value
+      Toast.error(statusErrorMessage(err));
     } finally {
-      btn.disabled = false;
+      btn.disabled = false;   // no-op if applyRowStatus already replaced the node
     }
+  } else if (action === 'sent-history') {
+    openSentHistory(id, btn.dataset.num, _table?.data?.find((r) => String(r.id) === String(id)) || null);
   } else if (action === 'download') {
     const rec = await AdminAPI.getInvoice(id);
     if (rec) downloadPdf(draftFromInvoice(rec));
@@ -607,6 +648,144 @@ async function onRowAction(e) {
       },
     });
   }
+}
+
+// Repaint one row from the status the SERVER reports, not from the checkbox the
+// operator just clicked. `inv` is the re-serialised invoice from PATCH /:id/status;
+// `wanted` is the fallback for a backend that answers 200 with no body.
+//
+// When a status filter is active and the row no longer belongs in it, reload
+// instead — otherwise "Unpaid" keeps listing an invoice you just marked paid.
+function applyRowStatus(id, inv, wanted) {
+  if (!_table) return;                       // destroyed mid-flight
+  const status = inv?.status || wanted;
+  const row = _table.data.find((r) => String(r.id) === String(id));
+  if (!row) { loadData(); return; }
+  Object.assign(row, inv || {}, { status });
+  if (_filters.status && _filters.status !== status) { loadData(); return; }
+  _table.setData(_table.data, _table.pagination);
+}
+
+// One place to turn a PATCH /:id/status failure into something an operator can act
+// on. invoiceError() attaches `code` from the envelope; js/api.js attaches
+// 'RATE_LIMITED' on a 429 (the route shares the 10/min/operator invoice write limiter).
+function statusErrorMessage(err) {
+  switch (err?.code) {
+    case 'CONFLICT': return 'This invoice is void — a void invoice can’t be marked paid or unpaid.';
+    case 'NOT_FOUND': return 'That invoice no longer exists. Refresh the list.';
+    case 'RATE_LIMITED': return 'Too many status changes at once. Give it a few seconds and try again.';
+    default: break;
+  }
+  // A blocked CORS preflight and a dead connection both surface as an opaque
+  // "Failed to fetch" with no status and no code — the browser deliberately hides
+  // which. Verified 2026-07-30: the API answers a PATCH preflight with
+  // `Access-Control-Allow-Methods: GET,POST,PUT,DELETE,OPTIONS`, i.e. no PATCH,
+  // so this is the expected failure until the backend adds it (BF-021). Say so
+  // rather than painting the raw TypeError at the operator.
+  if (isNetworkFailure(err)) {
+    return 'Couldn’t reach the server to save that. If it keeps happening, the invoice status endpoint is being blocked before it is reached — the backend needs to allow the PATCH method.';
+  }
+  return err?.message || 'Could not update the invoice status.';
+}
+
+// fetch() rejects with a bare TypeError for DNS/offline/CORS-preflight failures.
+// There is no status and no code to branch on, so the message is all we have.
+function isNetworkFailure(err) {
+  return !err?.code && /failed to fetch|networkerror|load failed|network request failed/i.test(err?.message || '');
+}
+
+// =========================================================================
+//  Send history ("what we sent", GET /api/admin/invoices/:id/emails)
+// =========================================================================
+// Bumped on every open/close so a slow response can't paint into a modal that
+// has since been closed or replaced (Modal is a singleton). Same idiom as
+// _editorToken — see project_admin_async_after_destroy_guard_jun2026.
+let _historyToken = 0;
+
+function openSentHistory(id, invoiceNumber, row) {
+  if (!id) { Toast.warning('Save the invoice before checking its send history.'); return; }
+  const token = ++_historyToken;
+  const modal = Modal.open({
+    title: `Send history — invoice ${invoiceNumber || ''}`.trim(),
+    className: 'admin-modal--invoice-history',
+    body: '<div class="admin-loader"><div class="admin-loading__spinner"></div></div>',
+    footer: `
+      <button class="admin-btn admin-btn--ghost" data-action="close">Close</button>
+      <button class="admin-btn admin-btn--primary" data-action="resend">${icon('mail', 14, 14)} Send again</button>`,
+    onClose: () => { _historyToken++; },
+  });
+  if (!modal) return;
+
+  modal.footer.querySelector('[data-action="close"]').addEventListener('click', () => Modal.close());
+  modal.footer.querySelector('[data-action="resend"]').addEventListener('click', async () => {
+    // Reuse the one composer rather than growing a second one here.
+    Modal.close();
+    const rec = await AdminAPI.getInvoice(id);
+    if (rec) openEmailDialog(draftFromInvoice(rec));
+    else Toast.error('Could not load invoice to email.');
+  });
+
+  const fill = async () => {
+    const payload = await AdminAPI.listInvoiceEmails(id);
+    if (token !== _historyToken) return;             // closed or superseded
+    modal.body.innerHTML = renderSentHistory(payload, sentInfo(row));
+    const retry = modal.body.querySelector('[data-action="retry-history"]');
+    if (retry) {
+      retry.addEventListener('click', () => {
+        modal.body.innerHTML = '<div class="admin-loader"><div class="admin-loading__spinner"></div></div>';
+        fill();
+      });
+    }
+  };
+  fill();
+}
+
+// Pure: (payload, fallbackInfo) -> HTML. Kept free of DOM access so the three
+// branches can be exercised directly in tests.
+//
+// `payload === null` means the READ FAILED and is never allowed to render as
+// "no sends" — that mistake is how an operator double-sends an invoice. An empty
+// list with a known emailed_at is the third, distinct case: the send predates the
+// log table, so the date is real but the per-send detail was never captured.
+function renderSentHistory(payload, fallbackInfo) {
+  if (payload === null) {
+    return `<div class="inv-hist__error">
+        <p><strong>Couldn’t load the send history.</strong></p>
+        <p>This is a read error, not proof that nothing went out — don’t read it as a clean history.</p>
+        <button type="button" class="admin-btn admin-btn--ghost admin-btn--sm" data-action="retry-history">Try again</button>
+      </div>`;
+  }
+
+  const rows = payload.emails || [];
+  if (!rows.length) {
+    if (fallbackInfo?.at) {
+      return `<div class="inv-hist__empty">
+          <p><strong>Emailed ${esc(formatInvoiceDate(String(fallbackInfo.at).slice(0, 10)))}.</strong></p>
+          <p>Sends made before July 2026 weren’t logged individually, so there’s no per-send detail for this one.</p>
+        </div>`;
+    }
+    return `<div class="inv-hist__empty"><p><strong>This invoice hasn’t been emailed yet.</strong></p>
+        <p>Use “Send again” below to email the PDF to the customer.</p></div>`;
+  }
+
+  const items = rows.map((e) => {
+    const when = sentDateTime(e.sent_at);
+    const status = String(e.status || 'sent').toLowerCase();
+    // A delivery status other than "sent" is the whole reason to open this panel,
+    // so it gets a chip; a plain successful send stays quiet.
+    const chip = status === 'sent' ? '' : `<span class="inv-hist__status inv-hist__status--${esc(status.replace(/[^a-z]/g, '')) || 'unknown'}">${esc(status)}</span>`;
+    return `<li class="inv-hist__row">
+        <div class="inv-hist__when">${esc(when || 'Date unknown')}${chip}</div>
+        <div class="inv-hist__to">${esc(e.recipient_email || 'Recipient not recorded')}</div>
+        ${e.subject ? `<div class="inv-hist__subject">“${esc(e.subject)}”</div>` : ''}
+      </li>`;
+  }).join('');
+
+  // count can exceed the logged rows when earlier sends predate the log table.
+  const extra = payload.count > rows.length
+    ? `<p class="inv-hist__note">Earlier sends aren’t logged individually — only the ${esc(rows.length)} above were recorded.</p>`
+    : '';
+  return `<ul class="inv-hist">${items}</ul>${extra}`;
 }
 
 // The backend echoes supplier_cost_excl_gst on GET /invoices/:id (verified live,
@@ -688,11 +867,14 @@ function openEditor(draft) {
 
 // "Last emailed 8th July 2026 to itc@mcgrath.co.nz" — '' for a draft that has
 // never been sent (or has never been saved, so it has no id to look up).
+// Rendered as a button so it opens the same send-history modal as the list cell;
+// returning '' (not an empty button) keeps the `.inv-sent-hint:empty` collapse working.
 function sentHintHtml(d) {
   const info = (d && d.id) ? sentInfo(d) : null;
   if (!info) return '';
   const who = info.to ? ` to ${info.to}` : '';
-  return esc(`Last emailed ${formatInvoiceDate(String(info.at).slice(0, 10))}${who}`);
+  const label = `Last emailed ${formatInvoiceDate(String(info.at).slice(0, 10))}${who}`;
+  return `<button type="button" class="inv-sent-hint__btn" data-ed-action="sent-history" data-id="${escA(d.id)}" data-num="${escA(d.invoice_number)}" title="See every send of this invoice">${esc(label)}</button>`;
 }
 
 // The drawer footer is built once in openEditor() and survives rebuildEditor(),
@@ -783,9 +965,11 @@ function onFormClick(e) {
 }
 
 async function onEditorFooterClick(e) {
-  const act = e.target.closest('[data-ed-action]')?.dataset.edAction;
+  const el = e.target.closest('[data-ed-action]');
+  const act = el?.dataset.edAction;
   if (!act) return;
   if (act === 'cancel') { Drawer.close(); return; }
+  if (act === 'sent-history') { openSentHistory(el.dataset.id, el.dataset.num, _draft); return; }
   if (act === 'download') { downloadPdf(_draft); return; }
   if (act === 'save') { await saveInvoice(); return; }
   if (act === 'email') {

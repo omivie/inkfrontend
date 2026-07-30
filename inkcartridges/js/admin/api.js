@@ -71,6 +71,13 @@ function invoiceError(resp, fallback) {
   return err;
 }
 
+// The only three states PATCH /api/admin/invoices/:id/status accepts.
+//
+// `void` is deliberately absent. Voiding also has to cancel the invoice's shadow
+// order, so it lives on POST /:id/void; the backend rejects it here with a 400
+// precisely so a paid/unpaid toggle can never cancel an order as a side effect.
+const INVOICE_STATUSES = Object.freeze(['draft', 'unpaid', 'paid']);
+
 // Rich-text product columns that the backend's HTML sanitiser mangles.
 //
 // The backend's `PUT/POST /api/admin/products` runs an allowlist sanitiser
@@ -2891,13 +2898,48 @@ const AdminAPI = {
     return resp?.data ?? null;
   },
 
-  // Flip an invoice's internal paid/unpaid status from the list (inline toggle).
-  // Mirrors the /void sub-route shape; backend route POST /api/admin/invoices/:id/paid
-  // is pending — a 404 surfaces as err.code 'NOT_FOUND' so the caller fails soft.
-  async markInvoicePaid(invoiceId, paid) {
-    const resp = await window.API.post(`/api/admin/invoices/${encodeURIComponent(invoiceId)}/paid`, { paid: !!paid });
-    if (resp && resp.ok === false) throw invoiceError(resp, 'Mark invoice paid/unpaid failed');
-    return resp?.data ?? null;
+  // Flip an invoice's internal status from the list toggle, without re-sending
+  // the whole invoice body (that's updateInvoice's job).
+  //
+  // ERR-131: this used to POST /api/admin/invoices/:id/paid — a route that was
+  // specced but NEVER built, so every flip 404'd and the slider silently sprang
+  // back. The real route is PATCH /:id/status.
+  //
+  // Returns the full re-serialised invoice, and the caller must re-render from
+  // ITS status rather than from the optimistic checkbox state.
+  async setInvoiceStatus(invoiceId, status) {
+    if (!INVOICE_STATUSES.includes(status)) {
+      // Fail here rather than let the backend 400 — the only way to reach this
+      // is a coding mistake, and 'void' in particular has a different route.
+      const err = new Error(`Invalid invoice status "${status}" — use voidInvoice() to void an invoice.`);
+      err.code = 'VALIDATION_FAILED';
+      throw err;
+    }
+    const resp = await window.API.patch(`/api/admin/invoices/${encodeURIComponent(invoiceId)}/status`, { status });
+    if (resp && resp.ok === false) throw invoiceError(resp, 'Update invoice status failed');
+    return resp?.data?.invoice ?? resp?.data ?? null;
+  },
+
+  // Per-invoice send log — every time the PDF was emailed, newest first.
+  //
+  // Read-soft like every other read, BUT the null it returns on failure is
+  // load-bearing: `null` means "we could not find out", `{count:0, emails:[]}`
+  // means "the backend says it has never been sent". Collapsing those two would
+  // print "never emailed" over a read error, which is how an operator double-
+  // sends an invoice (ERR-063/068/073 family).
+  async listInvoiceEmails(invoiceId) {
+    try {
+      const resp = await window.API.get(`/api/admin/invoices/${encodeURIComponent(invoiceId)}/emails`);
+      const d = resp?.data;
+      if (!d) return null;
+      return {
+        count: Number(d.count) || 0,
+        emails: Array.isArray(d.emails) ? d.emails : [],
+      };
+    } catch (e) {
+      adminApiWarn('Load invoice send history', e);
+      return null;
+    }
   },
 
   // Hard-delete (permanent removal) — for operator cleanup of test/erroneous

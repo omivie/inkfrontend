@@ -188,8 +188,10 @@ export function normalizeInvoice(recOrDraft) {
  *                     book the same sale twice. True even when it's paid.
  *   unpaid          → counts. We recognise on an ACCRUAL basis: the sale
  *                     happened on the invoice's order date whether or not the
- *                     money has landed yet. (Handy side-effect: this does not
- *                     depend on POST /invoices/:id/paid, which is still a 404.)
+ *                     money has landed yet. (Handy side-effect: analytics do not
+ *                     depend on the paid flag at all, so the paid/unpaid toggle —
+ *                     PATCH /invoices/:id/status since ERR-131 — is pure operator
+ *                     bookkeeping and can never move revenue.)
  */
 export function countsForAnalytics(rec) {
   if (!rec) return false;
