@@ -41,6 +41,80 @@ describing the same incident.
 
 ---
 
+## ERR-137 — "Printer Models" scrolled the ink finder to a spot the header then covered (2026-07-31)
+
+**Trigger:** two owner screenshots of the same page. In one, clicking **PRINTER MODELS** landed on the
+finder with the "Find ink for your printer" title, the subtitle and half the tab row hidden behind the
+pinned site header. In the other, the identical journey landed perfectly. Same code path both times.
+
+**Two correct behaviours that never consulted each other.** `js/main.js` centred
+`.ink-finder__wrapper` in the **full viewport** — `wrapperTop - (innerHeight - height) / 2` — and the
+same math was duplicated verbatim at both entry points, the `?scroll=ink-finder` nav deep link and the
+`#ink-finder-heading` hero CTA. Independently, `js/landing.js` runs an IntersectionObserver that adds
+`.site-header--sticky` (`css/pages.css` → `position: sticky; top: 0`) the moment `.hero` leaves the
+viewport — which is exactly what that scroll causes. The desktop header is ~155–200px of contact,
+logo and nav rows, and its base rule is `position: relative`, so nothing reserves the space.
+
+Whether the bug appeared depended on whether the centred position happened to fall past the hero's
+bottom edge. The good screenshot stopped a few pixels short of the threshold; the bad one crossed it.
+**The intermittency was the signature of a knife-edge between two modules**, not a race in either one.
+
+Mobile was worse and not intermittent at all: below 1100px the header is `position: sticky` at *every*
+scroll position, so the centred card sat under it always — measured at 102px card-top against a 167px
+header.
+
+**The subtle part: whether to reserve the header's height depends on where you land, and where you
+land depends on whether you reserve.** The fix solves for the self-consistent answer of three:
+
+- `bare` — centre in the full viewport. Valid when it lands *above* the pin threshold, i.e. the hero
+  is still on screen and the header is not pinned there. This is the common desktop case.
+- `reserved` — centre in the space below a measured header. Valid when the destination is in pinned
+  territory either way (mobile sticky, or a card far enough down the page).
+- `edge` — `heroBottom - 8`, used when neither is consistent: reserving would land us *short* of the
+  threshold, where the header isn't pinned, cropping the card's bottom for chrome that never appears.
+
+Skipping the reservation only ever happens where the header is provably unpinned, so no branch can
+leave the title under the chrome. The header height is **measured** (`getBoundingClientRect().height`),
+never hardcoded and never read from `--header-h` — a stale mobile-only 56px token that no JS writes
+and that describes nothing about the desktop header.
+
+**The target also moves after the scroll begins:** the header only pins partway down, the mobile
+header collapses (`.site-header--scrolled` shrinks the document), and `#trust-stats` can un-hide from
+`/api/site/trust`. So a settle pass re-measures on `scrollend` — with a 900ms timeout because Safari
+has no such event — and nudges if the target drifted more than 8px. It cancels on `wheel`,
+`touchstart` or `keydown`, and when the page settles more than 200px from where it aimed, so it can
+never fight a user who has taken over the viewport.
+
+**Where the code lives.** The geometry went into `js/landing.js`, next to the observer that causes the
+pin and on exactly the two pages that have the finder (`index.html`, `html/index.html`), published as
+`window.InkFinderScroll`. `main.js` keeps a thin `scrollToInkFinder()` that delegates and falls back to
+`scrollIntoView` if landing.js is absent. That placement also matters mechanically: the naive inline
+version pushed `main.js` from 747 to 824 lines and tripped the 750-line budget in
+`tests/search-thin-frontend.test.js` — a tripwire against re-growing deleted search logic, which is
+not something to raise for an unrelated feature.
+
+**Verified** in bundled Chromium against a local serve. At 1512×1080, the owner's window size: 243px
+of air above and below, the whole card visible, header unpinned, URL back to a clean `/` with no hash.
+At 1400×900: 152/154. At 390×844 mobile: card top at 185px against a 167px sticky header, where the
+old math put it at 102px — buried. At 1400×620: lands 8px short of the pin threshold with the title,
+tabs and brand grid visible rather than cropped for a header that never appears. The hero CTA and the
+nav link now land byte-identically. `tests/ink-finder-scroll-offset-jul2026.test.js` (19 tests)
+executes the real functions lifted out of `landing.js` against stubbed geometry — including a sweep of
+74 viewport heights × pinned/unpinned asserting the "title is never under the chrome" invariant — and
+pins the contracts. Full suite 3,354 passing, 0 failing. `npm run build` restamped both files.
+
+Two repo hygiene guards caught my own debris on the way: the suite fails on ad-hoc screenshots at the
+repo root and on a `.playwright-mcp/` directory. Browser artifacts have to be cleaned up before
+claiming green.
+
+**Lesson:** a scroll target and a sticky header are one layout decision pretending to be two. When one
+module decides where the viewport lands and another decides what covers it, neither is wrong in
+isolation and the bug presents as intermittent. Put the compensating geometry next to the thing that
+causes the overlap — and when a value depends on a state that depends on that value, don't guess the
+state, solve for the consistent one.
+
+---
+
 ## ERR-134 — Related Products: the backend fix landed, but a failed family fetch still looked exactly like "no siblings", and only `series_codes[0]` was ever tried (2026-07-30)
 
 **Trigger:** the backend dev shipped `series_codes` and `yield_tier` on `GET /api/products/:sku` and

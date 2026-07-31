@@ -648,6 +648,25 @@ function removeToast(toast) {
 
 
 /**
+ * INK FINDER SCROLL TARGET (ERR-137)
+ * ==================================
+ * The geometry lives in js/landing.js (window.InkFinderScroll) — right next
+ * to the IntersectionObserver that pins .site-header, which is what made the
+ * old full-viewport centring bury the card title behind ~200px of chrome.
+ * landing.js ships on exactly the two pages that have the finder, so this
+ * file only needs the delegating hook and a no-landing.js fallback.
+ */
+function scrollToInkFinder(behavior) {
+    if (window.InkFinderScroll) {
+        window.InkFinderScroll.scrollTo(behavior || 'smooth');
+        return;
+    }
+    const heading = document.getElementById('ink-finder-heading');
+    if (heading) heading.scrollIntoView({ behavior: behavior || 'smooth', block: 'center' });
+}
+
+
+/**
  * SMOOTH SCROLL
  * =============
  * Handle anchor links with smooth scrolling
@@ -664,27 +683,10 @@ document.addEventListener('click', function(e) {
         if (target) {
             e.preventDefault();
 
-            // For ink-finder, center the entire wrapper box on screen
+            // For ink-finder, centre the whole wrapper box in the space left
+            // under the pinned header (scrollToInkFinder, ERR-137).
             if (targetId === '#ink-finder-heading') {
-                const wrapper = document.querySelector('.ink-finder__wrapper');
-                if (wrapper) {
-                    const wrapperRect = wrapper.getBoundingClientRect();
-                    const wrapperHeight = wrapperRect.height;
-                    const windowHeight = window.innerHeight;
-                    const wrapperTop = window.pageYOffset + wrapperRect.top;
-                    // If wrapper is taller than viewport, align to top with small offset.
-                    // Otherwise, center it vertically.
-                    const scrollTop = wrapperHeight >= windowHeight
-                        ? wrapperTop - 16
-                        : wrapperTop - (windowHeight - wrapperHeight) / 2;
-
-                    window.scrollTo({
-                        top: Math.max(0, scrollTop),
-                        behavior: 'smooth'
-                    });
-                } else {
-                    target.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                }
+                scrollToInkFinder('smooth');
             } else {
                 target.scrollIntoView({
                     behavior: 'smooth',
@@ -714,18 +716,7 @@ if (window.location.hash === '#ink-finder-heading') {
 // the fragment in some setups — a query param survives redirects cleanly.)
 if (new URLSearchParams(window.location.search).get('scroll') === 'ink-finder') {
     const scrollToFinder = () => {
-        const wrapper = document.querySelector('.ink-finder__wrapper');
-        const target = document.getElementById('ink-finder-heading');
-        if (wrapper) {
-            const rect = wrapper.getBoundingClientRect();
-            const wrapperTop = window.pageYOffset + rect.top;
-            const scrollTop = rect.height >= window.innerHeight
-                ? wrapperTop - 16
-                : wrapperTop - (window.innerHeight - rect.height) / 2;
-            window.scrollTo({ top: Math.max(0, scrollTop), behavior: 'smooth' });
-        } else if (target) {
-            target.scrollIntoView({ behavior: 'smooth', block: 'start' });
-        }
+        scrollToInkFinder('smooth');
         // Strip the param so a later reload still lands at top.
         const params = new URLSearchParams(window.location.search);
         params.delete('scroll');
