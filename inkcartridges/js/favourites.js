@@ -474,7 +474,7 @@ const Favourites = {
                     : `/p/${encodeURIComponent(item.sku || '')}`;
             })();
             return `
-            <article class="favourite-item" data-item-id="${Security.escapeAttr(item.id)}">
+            <article class="favourite-item" data-item-id="${Security.escapeAttr(item.id)}" data-sku="${Security.escapeAttr(item.sku || '')}">
                 <a href="${Security.escapeAttr(itemHref)}" class="favourite-item__link">
                     <div class="favourite-item__image">
                         ${this.getItemImageHTML(item)}
@@ -516,6 +516,15 @@ const Favourites = {
         // Bind image error fallbacks
         if (typeof Products !== 'undefined' && Products.bindImageFallbacks) {
             Products.bindImageFallbacks(grid);
+        }
+
+        // Business bulk-price overlay. Favourites is a REORDER list for a trade
+        // account — the surface most likely to be bought in tens — so it gets
+        // the volume ladder like every other grid. Guests and retail shoppers
+        // short-circuit without a request.
+        if (typeof Business !== 'undefined') {
+            Business.decorateCards(grid).catch(e =>
+                DebugLog.warn('[Favourites] business pricing overlay failed:', e && e.message));
         }
 
         // Bind add to cart buttons

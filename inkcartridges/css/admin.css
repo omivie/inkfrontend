@@ -4794,6 +4794,11 @@ button.admin-active-dot--clickable:hover::after { opacity: 1; }
 .inv-paid input:checked + .inv-paid__slider { background: var(--cyan); }
 .inv-paid input:checked + .inv-paid__slider::before { transform: translateX(18px); }
 .inv-paid input:disabled { cursor: progress; }
+/* The <input> is opacity:0, so its own focus ring is invisible — without this the
+   toggle is unreachable-looking to a keyboard operator even though Tab lands on it
+   and Space works. Paint the ring on the visible slider instead (cf. .inv-sent). */
+.inv-paid input:focus-visible + .inv-paid__slider { outline: 2px solid var(--cyan); outline-offset: 2px; }
+.admin[data-theme="light"] .inv-paid input:focus-visible + .inv-paid__slider { outline-color: #0e7490; }
 .inv-paid__void { color: var(--text-muted); font-size: 12px; }
 
 /* "Sent" column — has this invoice's PDF been emailed to the customer?

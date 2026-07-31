@@ -176,7 +176,8 @@ async function openCustomerDrawer(customer) {
         customer.invoicing = payload; // keep in-memory row in sync for re-open
         Toast.success('Invoicing details saved');
       } catch (e) {
-        Toast.error(e.message || 'Could not save — the invoicing backend may not be live yet.');
+        // PUT /api/admin/customers/:id/invoicing is live (probed 401, 2026-07-31).
+        Toast.error(e.message || 'Could not save those invoicing details. Try again.');
       } finally {
         if (drawer.el.isConnected) { invSaveBtn.disabled = false; invSaveBtn.textContent = orig; }
       }

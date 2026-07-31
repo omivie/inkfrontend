@@ -599,8 +599,9 @@ async function onRowAction(e) {
     const wanted = btn.checked ? 'paid' : 'unpaid';
     btn.disabled = true;
     try {
-      const inv = await AdminAPI.setInvoiceStatus(id, wanted);
+      const { invoice: inv, via } = await setStatusWithFallback(id, wanted);
       Toast.success(wanted === 'paid' ? 'Marked paid.' : 'Marked unpaid.');
+      if (via === 'put-fallback') announceFallbackOnce();
       // Not optimistic-only: repaint from what the server says the status IS.
       applyRowStatus(id, inv, wanted);
     } catch (err) {
@@ -627,8 +628,10 @@ async function onRowAction(e) {
       confirmLabel: 'Void',
       confirmClass: 'admin-btn--danger',
       onConfirm: async () => {
+        // POST /:id/void is live (probed 401, not 404, 2026-07-31) — so a failure
+        // here is a real failure. Never dress it as an unbuilt feature (ERR-131).
         try { await AdminAPI.voidInvoice(id); Toast.success('Invoice voided.'); loadData(); }
-        catch (err) { Toast.error(err.message || 'Void failed (backend pending).'); }
+        catch (err) { Toast.error(err.message || 'Could not void that invoice. Try again.'); }
       },
     });
   } else if (action === 'delete') {
@@ -641,13 +644,163 @@ async function onRowAction(e) {
       onConfirm: async () => {
         try { await AdminAPI.deleteInvoice(id); Toast.success('Invoice deleted.'); loadData(); }
         catch (err) {
+          // DELETE /api/admin/invoices/:id is live (probed 401, not 404,
+          // 2026-07-31). A 404 therefore means THIS INVOICE is gone, not that the
+          // route is unbuilt — the old "backend pending" copy was the same
+          // reassuring-but-wrong excuse that hid the paid bug for a month (ERR-131).
           Toast.error(err.code === 'NOT_FOUND'
-            ? 'Delete isn’t available yet (backend endpoint pending).'
-            : (err.message || 'Delete failed.'));
+            ? 'That invoice no longer exists — someone may have deleted it already. Refresh the list.'
+            : (err.message || 'Could not delete that invoice. Try again.'));
         }
       },
     });
   }
+}
+
+// =========================================================================
+//  Setting a paid status — and the BF-021 compatibility path
+// =========================================================================
+//
+// The route the toggle WANTS is PATCH /api/admin/invoices/:id/status: one
+// request, no read-modify-write, and the backend answers with the re-serialised
+// invoice. That route is live — curl gets a 401, not a 404 (ERR-131).
+//
+// It is also unreachable from a browser. The API answers a PATCH preflight with
+//   Access-Control-Allow-Methods: GET,POST,PUT,DELETE,OPTIONS
+// — no PATCH — from the production origin and from localhost alike. Chrome kills
+// the request before it is sent, so fetch() rejects with a bare TypeError. That
+// is BF-021, re-measured warm ×3 on 2026-07-31 and STILL OPEN, after a handoff
+// doc declared the backend "shipped & live — no further backend change needed".
+// A route that answers curl can still be unreachable from the page (ERR-138).
+//
+// PUT /api/admin/invoices/:id IS on that allow-list, and it already carries
+// `status` — it is the exact request the editor drawer's Save makes. So when the
+// preflight is blocked, do by code what the operator can already do by hand:
+// read the invoice, flip one field, write it back.
+//
+// This path is deliberately SECOND. PATCH stays the preferred call, so the day
+// BF-021 lands the fallback stops running on its own, with no code change.
+async function setStatusWithFallback(id, wanted) {
+  try {
+    return { invoice: await AdminAPI.setInvoiceStatus(id, wanted), via: 'patch' };
+  } catch (err) {
+    // ONLY an opaque transport failure earns a second attempt. A coded rejection
+    // (CONFLICT / NOT_FOUND / RATE_LIMITED / VALIDATION_FAILED) is the server
+    // saying no — replaying that through a different, heavier write route would
+    // be trying to talk the backend out of an answer it already gave.
+    if (!isNetworkFailure(err)) throw err;
+    warn('PATCH /:id/status blocked (BF-021) — falling back to a full PUT', err);
+    return { invoice: await setStatusViaFullUpdate(id, wanted), via: 'put-fallback' };
+  }
+}
+
+// Flip `status` through the full-update route, reusing the editor's own
+// record → draft → payload round-trip so this can never drift from what Save does.
+//
+// An invoice is a legal document. Every guard below ABORTS the flip rather than
+// risk writing back a rewritten record: a toggle that refuses is an inconvenience,
+// a silently renumbered or emptied invoice is not recoverable.
+async function setStatusViaFullUpdate(id, wanted) {
+  // getInvoice() fails soft to null. Absence is NOT an empty invoice — PUTting a
+  // fresh draft here would blank the record (ERR-063/068/073/075/076/127).
+  const rec = await AdminAPI.getInvoice(id);
+  if (!rec) throw new Error('Couldn’t read that invoice back to update it. Check your connection and try again.');
+
+  // The PATCH route 409s on a void invoice, because voiding also cancelled its
+  // shadow order. PUT holds no such opinion and would happily un-void it. Check
+  // the SERVER's copy, not the row that was clicked.
+  if (rec.status === 'void') throw Object.assign(new Error('Invoice is void'), { code: 'CONFLICT' });
+
+  const draft = draftFromInvoice(rec);
+
+  // buildPayload sends `invoice_number: d.invoice_number || null`, and null tells
+  // the backend to ASSIGN THE NEXT NUMBER IN SERIES. A status flip that renumbered
+  // an invoice the customer already holds is silent corruption of a document.
+  if (!draft.invoice_number) {
+    throw new Error('That invoice has no number on the server, so re-saving it could renumber it — refusing to change its status. Open the invoice, give it a number and save it first.');
+  }
+
+  // A lossy record → draft mapping must never blank an invoice's contents.
+  if ((rec.line_items || rec.lines || []).length && !realLines(draft).length) {
+    throw new Error('That invoice’s line items couldn’t be read back, so re-saving it could empty it — refusing to change its status.');
+  }
+
+  draft.status = wanted;
+  const payload = buildPayload(draft);
+
+  // buildPayload is an EDITOR payload: it fills gaps the way an operator editing
+  // the form would want them filled. That is wrong here. Caught live on the first
+  // real flip — invoice #3267 stored `payment_due: null`, and `effectiveDueDate()`
+  // helpfully DERIVED 2026-08-20 from `payment_due_pref`, so flicking a switch
+  // silently gave a sent invoice a due date it never had. `order_date` and
+  // `issue_date` have the same shape of default.
+  //
+  // So: the server's record wins for every field it stores. Only `status` comes
+  // from the draft. buildPayload is kept for the SHAPE (key names, line mapping,
+  // the deliberate omission of server-owned send history) — not for its values.
+  for (const key of Object.keys(payload)) {
+    if (key === 'status' || key === 'line_items') continue;
+    if (key in rec) payload[key] = rec[key];
+  }
+
+  // Belt and braces: prove it. `drift` re-derives the comparison from the payload's
+  // own keys, so a future field added to buildPayload is checked even though the
+  // loop above knows nothing about it. Refuse rather than write a rewritten record.
+  const drift = documentDrift(rec, payload);
+  if (drift.length) {
+    throw new Error(`Refusing to change the status — re-saving this invoice would also change ${drift.join(', ')}. `
+      + 'Open the invoice and save it yourself if that is what you want.');
+  }
+
+  return AdminAPI.updateInvoice(id, payload);
+}
+
+/**
+ * Which document fields the PUT would change, other than `status`.
+ *
+ * The rule is: **you can only contradict a value you were given.** The comparison
+ * walks the SERVER's record and checks each field the payload also carries. That
+ * makes it immune to the two harmless differences measured on real invoices —
+ * key ORDER (which plain JSON.stringify treats as significant, and which differs
+ * on every nested object the backend returns) and server-computed extras like a
+ * line's `line_total_excl_gst`, which the payload deliberately omits — while
+ * still catching any stored value the round-trip would actually overwrite.
+ */
+function documentDrift(rec, payload) {
+  // `status` is the point of the write. `show_due_date` and `preview_totals` are
+  // client-side presentation the backend does not store, so there is no stored
+  // value for them to contradict.
+  const NOT_DOCUMENT = new Set(['status', 'show_due_date', 'preview_totals']);
+  return Object.keys(payload)
+    .filter((k) => !NOT_DOCUMENT.has(k) && k in rec && differs(rec[k], payload[k]));
+}
+
+/** Deep compare, walking only what the record actually contains. */
+function differs(stored, outgoing) {
+  if (Array.isArray(stored)) {
+    if (!Array.isArray(outgoing) || stored.length !== outgoing.length) return true;
+    return stored.some((v, i) => differs(v, outgoing[i]));
+  }
+  if (stored && typeof stored === 'object') {
+    if (!outgoing || typeof outgoing !== 'object') return true;
+    // A key the payload doesn't send can't be overwritten by it; a key the record
+    // doesn't have has no stored value to lose.
+    return Object.keys(stored).some((k) => k in outgoing && differs(stored[k], outgoing[k]));
+  }
+  return JSON.stringify(stored ?? null) !== JSON.stringify(outgoing ?? null);
+}
+
+// The fallback is a DEGRADED path, and a degraded path nobody can see stays
+// degraded forever — no one chases a backend fix they don't know is needed
+// (feedback_fail_soft_must_be_loud). The success toast is unchanged, because the
+// flip genuinely worked; this says the rest of the truth, once per session.
+let _fallbackAnnounced = false;
+function announceFallbackOnce() {
+  if (_fallbackAnnounced) return;
+  _fallbackAnnounced = true;
+  Toast.info('Heads up: the Paid switch is running on a compatibility path — it re-saves the whole '
+    + 'invoice because the API still blocks the PATCH method (BF-021). Your change saved fine; the '
+    + 'backend fix is one line.', 9000);
 }
 
 // Repaint one row from the status the SERVER reports, not from the checkbox the
@@ -678,12 +831,13 @@ function statusErrorMessage(err) {
   }
   // A blocked CORS preflight and a dead connection both surface as an opaque
   // "Failed to fetch" with no status and no code — the browser deliberately hides
-  // which. Verified 2026-07-30: the API answers a PATCH preflight with
-  // `Access-Control-Allow-Methods: GET,POST,PUT,DELETE,OPTIONS`, i.e. no PATCH,
-  // so this is the expected failure until the backend adds it (BF-021). Say so
-  // rather than painting the raw TypeError at the operator.
+  // which. Since setStatusWithFallback() now absorbs the blocked-PATCH case
+  // (BF-021) by re-routing through PUT, reaching here means the CORS-allowed PUT
+  // failed to connect TOO — i.e. genuine connectivity loss, not the method gap.
+  // Don't blame PATCH for it; say what happened and that nothing was saved.
   if (isNetworkFailure(err)) {
-    return 'Couldn’t reach the server to save that. If it keeps happening, the invoice status endpoint is being blocked before it is reached — the backend needs to allow the PATCH method.';
+    return 'Couldn’t reach the server, so that change wasn’t saved. Both the status update and the '
+      + 'full-invoice fallback failed to connect — check your connection, then reload the page.';
   }
   return err?.message || 'Could not update the invoice status.';
 }
@@ -1027,7 +1181,8 @@ function openEmailDialog(d) {
       refreshSentHint();            // editor footer, when the drawer is open behind the modal
       if (_table) loadData();       // repaint the Sent cell (picks up the server value once it ships)
     } catch (err) {
-      Toast.error(err.message || 'Email failed (backend pending).');
+      // POST /:id/email is live (probed 401, 2026-07-31) — a failure is a failure.
+      Toast.error(err.message || 'Could not email that invoice. Try again.');
       sendBtn.disabled = false;
     }
   });
@@ -1180,7 +1335,9 @@ async function persistDraft() {
     if (st) _draft._serverTotals = st;
     // Push the rendered PDF up so the backend serves/emails the same document.
     try { await syncStoredPdf(); }
-    catch (err) { warn('stored-PDF sync skipped (backend endpoint pending?)', err); }
+    // POST /:id/pdf is live (probed 401, 2026-07-31); this stays non-fatal because
+    // the invoice itself saved, but don't log it as an unbuilt endpoint.
+    catch (err) { warn('stored-PDF sync failed (invoice itself saved)', err); }
     // Only now that the invoice truly exists: flip its source quick order (if any)
     // to status='invoiced' so the sale isn't counted twice.
     await flipSourceQuickOrder();
@@ -1244,6 +1401,38 @@ function surfaceUnresolvedCodes(err, token) {
   return true;
 }
 
+/**
+ * What the operator is told when a save is rejected.
+ *
+ * The backend's own words come first — `error.message`, plus `error.details.reason`
+ * and any per-field `details` entries. That text is the only thing that can tell an
+ * operator what to FIX (an unresolvable product code, a blank customer name), and
+ * it was previously dropped for everything except the `details.unresolved` shape.
+ *
+ * The old fallback read "the invoicing backend may not be live yet". It IS live —
+ * POST and PUT /api/admin/invoices both answer 401, not 404 (probed 2026-07-31) —
+ * so that line invented an innocent explanation for a real rejection and stopped
+ * anyone from looking further. Exactly how ERR-131 stayed hidden for a month.
+ * When the server says nothing, say THAT; never guess at a cause.
+ */
+function saveErrorMessage(err) {
+  const parts = [];
+  const add = (t) => {
+    const s = String(t ?? '').trim();
+    if (s && !parts.some((p) => p.includes(s))) parts.push(s);
+  };
+  add(err?.message);
+  add(err?.details?.reason);
+  // `details` also arrives as a bare array (or `details.errors`) for multi-field
+  // validation failures — surface those instead of dropping them on the floor.
+  const list = Array.isArray(err?.details) ? err.details
+    : (Array.isArray(err?.details?.errors) ? err.details.errors : []);
+  for (const d of list) add(typeof d === 'string' ? d : (d?.message || d?.reason || ''));
+
+  return parts.length ? parts.join(' — ')
+    : 'Could not save this invoice, and the server didn’t say why. Try again — if it keeps failing, check the customer name and every line’s product code.';
+}
+
 async function saveInvoice() {
   // Block the save until all essentials are filled; highlight what's missing.
   if (!ensureInvoiceValid()) return;
@@ -1262,7 +1451,7 @@ async function saveInvoice() {
   } catch (err) {
     warn('save failed', err);
     if (surfaceUnresolvedCodes(err, token)) return;
-    Toast.error(err.message || 'Could not save invoice — the invoicing backend may not be live yet.');
+    Toast.error(saveErrorMessage(err));
   } finally {
     if (btn) { btn.disabled = false; btn.textContent = 'Save invoice'; }
   }

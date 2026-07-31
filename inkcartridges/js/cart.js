@@ -24,25 +24,29 @@
  * summary rows, so each must be netted out of the generic "You Save" line or
  * the shopper sees the same dollars counted twice.
  *
- * The B2B block is computed per line WITH the loss floor, so `discount_amount`
- * may be less than `discount_percent x subtotal`. That is expected and it is
- * authoritative — never recompute it. See business.js and
- * business-account-pricing-FE-handoff.md.
+ * The B2B block is computed PER LINE from the volume ladder and WITH the loss
+ * floor, so `discount_amount` is the sum of each line's floored savings and can
+ * be far less than any headline percentage of the subtotal. That is expected and
+ * it is authoritative — never recompute it. See business.js.
  *
- * TWO PAYLOAD SHAPES, both handled (verified live 2026-07-20).
+ * TWO PAYLOAD SHAPES, both handled (verified live 2026-07-20, re-verified
+ * unchanged under volume pricing 2026-07-31).
  * The handoff documents `summary.b2b_discount` as the metadata OBJECT. The live
  * API actually sends:
- *     summary.b2b_discount  ->  4.68                       (a NUMBER, the amount)
- *     response.b2b_discount ->  { pricing_tier, discount_percent,
- *                                 effective_percent, discount_amount,
- *                                 floored_line_count, source }   (the OBJECT)
- * Reading only the documented shape rendered NOTHING, because `typeof 4.68`
+ *     summary.b2b_discount  ->  4.88                       (a NUMBER, the amount)
+ *     response.b2b_discount ->  { company_name, effective_percent,
+ *                                 discount_amount, floored_line_count,
+ *                                 source: 'volume' }        (the OBJECT)
+ * Reading only the documented shape rendered NOTHING, because `typeof 4.88`
  * is not 'object'. So both are accepted: whichever carries the object becomes
  * the metadata, whichever carries a number becomes the amount. If the backend
  * later moves the object into `summary`, this keeps working unchanged.
  *
+ * `pricing_tier` and `discount_percent` are GONE from that block as of v2 —
+ * the ceiling now varies per line, so there is no single cart-wide rate.
+ *
  * Also verified live: `summary.discount` INCLUDES the B2B amount (a cart with
- * only a B2B discount reported discount === b2b_discount === 4.68), so the B2B
+ * only a B2B discount reported discount === b2b_discount === 4.88), so the B2B
  * row must be netted out of "You Save" exactly like loyalty.
  *
  * Pure: no DOM, no I/O. Shared by cart.js, checkout-page.js, payment-page.js
@@ -82,16 +86,22 @@ function computeDiscountBreakdown(summary, total, b2bBlock) {
 if (typeof window !== 'undefined') window.computeDiscountBreakdown = computeDiscountBreakdown;
 
 /**
- * Label for a B2B summary row, e.g. "Business account (Gold tier)".
- * Falls back to a plain label when the tier is absent or unrecognised.
- * @param {object|null} b2bMeta  summary.b2b_discount
+ * Label for a B2B summary row, e.g. "Business account — Acme Print Co".
+ *
+ * v1 named the pricing TIER here ("Business account (Gold tier)"). Volume
+ * pricing retired tiers entirely — the live `b2b_discount` block carries
+ * `company_name` and no tier at all — and there is deliberately no replacement
+ * percentage in this label: the block's `effective_percent` is the realised rate
+ * across the WHOLE cart (0.7% on a live cart whose one qualifying line was
+ * discounted 5%), so putting it beside the word "account" would read as the
+ * customer's discount rate and be wrong on every mixed cart.
+ *
+ * @param {object|null} b2bMeta  the cart response's b2b_discount block
  * @returns {string}
  */
 function businessDiscountLabel(b2bMeta) {
-    const tier = b2bMeta && typeof b2bMeta.pricing_tier === 'string' ? b2bMeta.pricing_tier : '';
-    if (!tier) return 'Business account';
-    const label = tier.charAt(0).toUpperCase() + tier.slice(1).toLowerCase();
-    return `Business account (${label} tier)`;
+    const company = b2bMeta && typeof b2bMeta.company_name === 'string' ? b2bMeta.company_name.trim() : '';
+    return company ? `Business account — ${company}` : 'Business account';
 }
 if (typeof window !== 'undefined') window.businessDiscountLabel = businessDiscountLabel;
 
@@ -2049,6 +2059,36 @@ const Cart = {
         if (priceMobile) {
             priceMobile.textContent = formatPrice(item.price);
         }
+
+        // The volume nudge is a function of the quantity that just changed, so
+        // the surgical path has to repaint it too. Skipping this here is exactly
+        // how the loyalty row drifted between the two renderers (ERR-110): the
+        // full paint would be right and the quantity-change path stale.
+        cartItemEl.setAttribute('data-quantity', String(item.quantity));
+        this.decorateVolumeNudges(cartItemEl.parentElement || cartItemEl);
+    },
+
+    /**
+     * Business volume nudges on cart lines: "Add 1 more to reach 5+ — $32.19
+     * each, saving $14.00 on this line."
+     *
+     * Fire-and-forget and additive: the retail lines are already painted and
+     * correct for everyone. Guests and retail accounts short-circuit inside
+     * Business.decorateCartLines without a network request.
+     *
+     * This cannot come from the cart payload. Cart lines carry retail
+     * `price_snapshot` / `line_total` and no per-line B2B figure at all — the
+     * discount surfaces only as one cart-level `b2b_discount.discount_amount` —
+     * so the ladder is the only route from "you saved $4.88" to "here is how to
+     * save more", which is the entire point of a volume scheme.
+     *
+     * @param {Element} container
+     */
+    decorateVolumeNudges: function(container) {
+        if (typeof Business === 'undefined' || !container) return;
+        Business.decorateCartLines(container, this.MAX_QUANTITY).catch(function(e) {
+            DebugLog.warn('[Cart] volume nudges failed:', e && e.message);
+        });
     },
 
     /**
@@ -2083,14 +2123,18 @@ const Cart = {
         setRow('cart-loyalty-row', 'cart-loyalty-discount', loyalty);
         setRow('cart-b2b-row', 'cart-b2b-discount', b2b);
 
-        // Tier label on the B2B row. Always the realised `effective_percent`,
-        // never the tier ceiling — on a floored cart the ceiling is not what
-        // the customer actually got.
+        // Company label on the B2B row — never a percentage. See
+        // businessDiscountLabel().
         const b2bLabel = document.getElementById('cart-b2b-label');
         if (b2bLabel && b2b > 0) b2bLabel.textContent = businessDiscountLabel(b2bMeta);
 
         // When the loss floor bit on one or more lines, say so plainly rather
-        // than letting the shopper wonder why 15% off didn't produce 15%.
+        // than letting the shopper wonder why the ladder didn't pay out in full.
+        //
+        // `effective_percent` is stated as "across your cart" on purpose: it is
+        // the realised rate over the WHOLE cart including lines below their
+        // entry rung, so an unqualified "you saved 0.7%" would read as the
+        // customer's discount rate rather than an average over their basket.
         const note = document.getElementById('cart-b2b-note');
         if (note) {
             const flooredLines = b2bMeta && Number(b2bMeta.floored_line_count) > 0;
@@ -2099,7 +2143,7 @@ const Cart = {
                     ? Number(b2bMeta.effective_percent)
                     : null;
                 const realised = pct != null && typeof Business !== 'undefined'
-                    ? ` You saved ${Business.formatPercent(pct)} overall.`
+                    ? ` That works out at ${Business.formatPercent(pct)} across your cart.`
                     : '';
                 note.textContent = 'Some items are already at their best possible price.' + realised;
                 note.hidden = false;
@@ -2885,7 +2929,7 @@ const Cart = {
                     }
 
                     return '\
-                    <article class="cart-item" data-item-id="' + item.id + '" data-item-key="' + Security.escapeAttr(itemKey) + '">\
+                    <article class="cart-item" data-item-id="' + item.id + '" data-item-key="' + Security.escapeAttr(itemKey) + '" data-sku="' + Security.escapeAttr(item.sku || '') + '" data-quantity="' + Security.escapeAttr(String(item.quantity)) + '">\
                         <div class="cart-item__image">\
                             ' + self.getItemImageHTML(item) + '\
                         </div>\
@@ -2932,6 +2976,7 @@ const Cart = {
                 }).join('');
                 // Bind image error fallbacks (replaces inline onerror)
                 this.bindImageFallbacks(cartItems);
+                this.decorateVolumeNudges(cartItems);
             }
 
             const subtotal = this.getSubtotal();

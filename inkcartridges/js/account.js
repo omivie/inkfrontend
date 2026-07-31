@@ -843,26 +843,49 @@ const AccountPage = {
     /**
      * Show the business-account panel on the dashboard.
      *
-     * business-account-pricing (Jul 2026). Retail customers and guests never
+     * business-account-pricing v2 (Jul 2026). Retail customers and guests never
      * see this — the panel ships hidden and only unhides for an active business
-     * account. The tier % is described as "up to" on purpose: it is a CEILING,
-     * and the backend's loss floor reduces it on thin-margin items, so promising
-     * a flat percentage here would contradict the PDP and the cart.
+     * account.
+     *
+     * There is no pricing tier to name any more: volume pricing replaced the
+     * flat bronze/silver/gold tiers and `pricing_tier` is gone from the API. The
+     * panel names the COMPANY instead, and surfaces the account terms the status
+     * endpoint has always sent and v1 threw away — Net 30 and the credit limit.
+     *
+     * No percentage appears here on purpose. Every rung's % is a ceiling the
+     * loss floor can reduce, and the rate varies by price band and quantity, so
+     * any single number on this panel would contradict some product page.
+     *
+     * An ABSENT credit limit is not a $0 credit limit (ERR-063/068): the chip
+     * stays hidden unless the API actually reported a figure.
+     *
      * Silent no-op if the element isn't present or the call fails.
      */
     async loadBusinessStatus() {
         const panel = document.getElementById('dash-business-panel');
         if (!panel || typeof Business === 'undefined') return;
         try {
-            const { active, tier } = await Business.getStatus();
-            if (!active) return;
+            const status = await Business.getStatus();
+            if (!status.active) return;
 
-            const tierEl = document.getElementById('dash-business-tier');
-            if (tierEl) {
-                tierEl.textContent = tier
-                    ? `${Business.tierLabel(tier)} tier`
-                    : 'Active';
+            const companyEl = document.getElementById('dash-business-company');
+            if (companyEl) companyEl.textContent = status.companyName || 'Active';
+
+            const net30El = document.getElementById('dash-business-net30');
+            if (net30El && status.net30Approved) {
+                net30El.textContent = 'Net 30 approved';
+                net30El.hidden = false;
             }
+
+            const creditEl = document.getElementById('dash-business-credit');
+            if (creditEl && status.creditLimit != null && status.creditLimit > 0) {
+                const remaining = status.creditRemaining != null
+                    ? ` · ${formatPrice(status.creditRemaining)} available`
+                    : '';
+                creditEl.textContent = `${formatPrice(status.creditLimit)} credit limit${remaining}`;
+                creditEl.hidden = false;
+            }
+
             panel.hidden = false;
         } catch (e) {
             DebugLog.warn('[Account] business status unavailable:', e && e.message);

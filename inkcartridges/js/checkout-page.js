@@ -1104,6 +1104,63 @@
         },
 
         // Setup coupon code handler
+        /**
+         * True when a coupon response is the business-account exclusion.
+         *
+         * Two shapes: apply answers `400 { code: 'B2B_COUPON_EXCLUDED' }` (an
+         * envelope from api.js, or a thrown Error carrying .code), preview
+         * answers `200 { valid:false, reason:'b2b_volume_pricing' }`. Both are
+         * read so neither channel can go dark.
+         *
+         * It must never reach setFailureHint(), which would attach a
+         * "try this code instead" nudge for a code that also cannot be
+         * combined — a wasted attempt against an endpoint that locks out.
+         */
+        isB2BCouponExcluded(source) {
+            if (!source) return false;
+            if (source.code === 'B2B_COUPON_EXCLUDED') return true;
+            const data = source.data && typeof source.data === 'object' ? source.data : source;
+            return !!data && data.reason === 'b2b_volume_pricing';
+        },
+
+        /** The backend's own wording when it sent some, ours otherwise. */
+        b2bCouponText(source) {
+            const data = source && source.data && typeof source.data === 'object' ? source.data : source;
+            const msg = (data && data.message) || (source && source.error);
+            return typeof msg === 'string' && msg.trim()
+                ? msg.trim()
+                : 'Business accounts get automatic volume pricing — promo codes can’t be combined. Your loyalty points still work.';
+        },
+
+        /**
+         * Disable the promo-code field for an active business account and say
+         * why, mirroring the guest lock. Loyalty points are deliberately left
+         * alone — only coupons are excluded (handoff §3).
+         */
+        async lockCouponForBusinessAccount(couponInput, couponBtn) {
+            if (typeof Business === 'undefined') return;
+            let active = false;
+            try {
+                active = await Business.isActive();
+            } catch (_) {
+                // A failed status check must never lock a retail customer out.
+                return;
+            }
+            if (!active) return;
+
+            couponInput.disabled = true;
+            couponBtn.disabled = true;
+            const host = couponInput.closest('.coupon-form') || couponInput.parentElement;
+            if (host && host.parentElement && !document.getElementById('coupon-b2b-blocked')) {
+                const msg = document.createElement('p');
+                msg.className = 'form-hint coupon-form__blocked';
+                msg.id = 'coupon-b2b-blocked';
+                msg.setAttribute('data-testid', 'coupon-b2b-blocked');
+                msg.textContent = this.b2bCouponText(null);
+                host.parentElement.insertBefore(msg, host.nextSibling);
+            }
+        },
+
         setupCouponHandler() {
             const couponInput = document.querySelector('.coupon-form__input');
             const couponBtn = document.querySelector('.coupon-form__btn');
@@ -1121,6 +1178,15 @@
                 hint.appendChild(msg);
                 return;
             }
+
+            // Business accounts get automatic volume pricing and cannot also
+            // apply a promo coupon — a coupon isn't floor-clamped, so stacking
+            // could sell a line below cost. Same treatment as the guest lock
+            // above (disable + say why), except it is async, so it runs
+            // alongside rather than short-circuiting: the 400
+            // B2B_COUPON_EXCLUDED is still handled on all three paths below in
+            // case the status call is slow, fails, or the tab is stale.
+            this.lockCouponForBusinessAccount(couponInput, couponBtn);
 
             // Surface any coupon already applied on the server cart, with a Remove control
             this.refreshAppliedCouponUI();
@@ -1221,6 +1287,8 @@
                             setHint('Too many tries — wait a minute and retry.', 'error');
                         } else if (res.code === 'EMAIL_NOT_VERIFIED') {
                             setHint('Verify your email to use coupons.', 'error');
+                        } else if (this.isB2BCouponExcluded(res)) {
+                            setHint(this.b2bCouponText(res), 'error');
                         } else {
                             setFailureHint(API.extractErrorMessage(res, 'Coupon not valid for this cart'), res);
                         }
@@ -1228,7 +1296,11 @@
                     }
                     const data = res?.data || res;
                     if (!data) { setHint('', 'neutral'); return; }
-                    if (data.valid === true) {
+                    if (this.isB2BCouponExcluded(data)) {
+                        // reason:'b2b_volume_pricing' — a rule, not a bad code,
+                        // so no suggestion nudge.
+                        setHint(this.b2bCouponText(data), 'error');
+                    } else if (data.valid === true) {
                         const saved = data.discount_amount != null ? formatPrice(data.discount_amount) : '';
                         const newTotal = data.new_total != null ? formatPrice(data.new_total) : '';
                         let copy = 'Coupon is valid';
@@ -1250,6 +1322,8 @@
                         setHint('Too many tries — wait a minute and retry.', 'error');
                     } else if (err && err.code === 'EMAIL_NOT_VERIFIED') {
                         setHint('Verify your email to use coupons.', 'error');
+                    } else if (this.isB2BCouponExcluded(err)) {
+                        setHint(this.b2bCouponText(err), 'error');
                     } else {
                         DebugLog.warn('Coupon preview failed:', err && err.message);
                         setHint('', 'neutral');
@@ -1396,6 +1470,8 @@
                     const source = failureSource || error;
                     if (source && (source.code === 'COUPON_LOCKED' || source.code === 'RATE_LIMITED')) {
                         setHint('Too many tries — wait a minute and retry.', 'error');
+                    } else if (this.isB2BCouponExcluded(source)) {
+                        setHint(this.b2bCouponText(source), 'error');
                     } else {
                         setFailureHint(error.message || 'Invalid coupon code', source);
                     }

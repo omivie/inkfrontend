@@ -336,7 +336,7 @@
                     ? `<div class="product-card__rating">${Products._miniStars(Math.round(parseFloat(p.average_rating)))} <span class="product-card__review-count">(${parseInt(p.review_count, 10)})</span></div>`
                     : '';
                 return `
-                    <a href="${Security.escapeAttr(cardHref)}" class="product-card">
+                    <a href="${Security.escapeAttr(cardHref)}" class="product-card" data-sku="${Security.escapeAttr(p.sku || '')}">
                         <div class="product-card__image-wrapper">${imageHtml}</div>
                         <div class="product-card__info">
                             <span class="product-card__brand">${Security.escapeHtml(brandName)}</span>
@@ -350,6 +350,13 @@
             // Bind image error fallbacks
             if (typeof Products !== 'undefined' && Products.bindImageFallbacks) {
                 Products.bindImageFallbacks(grid);
+            }
+
+            // Business bulk-price overlay — additive, and a no-op without a
+            // network request for guests and retail shoppers, so this public
+            // marketing strip is byte-for-byte unchanged for everyone else.
+            if (typeof Business !== 'undefined') {
+                Business.decorateCards(grid).catch(() => { /* featured strip is optional */ });
             }
 
             section.hidden = false;

@@ -16,7 +16,52 @@ document.addEventListener('DOMContentLoaded', () => {
     initStickyCheckoutBar();
     initCouponForm();
     initLoyaltyControl();
+    // Async and additive: a business account gets the promo field disabled with
+    // its reason. Guests and retail shoppers fire no request and see no change.
+    initBusinessCouponLock();
 });
+
+/**
+ * Copy for the business-account coupon exclusion, used when the backend does
+ * not supply its own. Module-level because three call sites need it: the
+ * preview, the apply, and the ?coupon= recovery-link path.
+ */
+const B2B_COUPON_COPY = 'Business accounts get automatic volume pricing — promo codes can’t be combined. Your loyalty points still work.';
+
+/**
+ * True when a response is the business-account coupon exclusion.
+ *
+ * Two shapes, because the backend answers on two different channels:
+ *   apply   -> 400 { code: 'B2B_COUPON_EXCLUDED' }  (an envelope from api.js,
+ *              or a thrown Error carrying .code on any path api.js still
+ *              throws — both are read, so neither can go dark)
+ *   preview -> 200 { valid: false, reason: 'b2b_volume_pricing' }
+ *
+ * This is a RULE, not a bad code: the customer already has a better discount.
+ * It must never reach setFailure(), which would attach a "try SAVE10 instead"
+ * nudge for a code that also cannot be combined — one wasted attempt against an
+ * endpoint that locks out, and a contradiction on screen.
+ *
+ * @param {object|Error|null} source
+ * @returns {boolean}
+ */
+function isB2BCouponExcluded(source) {
+    if (!source) return false;
+    if (source.code === 'B2B_COUPON_EXCLUDED') return true;
+    const data = source.data && typeof source.data === 'object' ? source.data : source;
+    return !!data && data.reason === 'b2b_volume_pricing';
+}
+
+/**
+ * The backend's own wording when it sent some, ours otherwise.
+ * @param {object|Error|null} source
+ * @returns {string}
+ */
+function b2bCouponText(source) {
+    const data = source && source.data && typeof source.data === 'object' ? source.data : source;
+    const msg = (data && data.message) || (source && source.error);
+    return typeof msg === 'string' && msg.trim() ? msg.trim() : B2B_COUPON_COPY;
+}
 
 /**
  * mobile-parity-may2026 S3.1 — sticky checkout bar.
@@ -170,6 +215,8 @@ function initCouponForm() {
                         : 'Coupon looks good — tap Apply.'),
                     'ok'
                 );
+            } else if (isB2BCouponExcluded(res) || isB2BCouponExcluded(data)) {
+                setFeedback(b2bCouponText(data), 'err');
             } else if (isLockout(res)) {
                 setFeedback('Too many tries — wait a minute and retry.', 'err');
             } else {
@@ -207,6 +254,8 @@ function initCouponForm() {
                         : 'Coupon applied.',
                     'ok'
                 );
+            } else if (isB2BCouponExcluded(res)) {
+                setFeedback(b2bCouponText(res), 'err');
             } else if (isLockout(res)) {
                 // The cart had no 429 branch at all before Jul 2026 — a lockout
                 // fell through to the generic "isn't valid" copy, which told the
@@ -219,8 +268,13 @@ function initCouponForm() {
             // A plain 400 THROWS (request() only returns envelopes for a known
             // set of codes), so the suggestion arrives on err.details here and
             // on res.details above. Both shapes must be read or the nudge is
-            // invisible on whichever path the backend happens to take.
-            if (isLockout(err)) {
+            // invisible on whichever path the backend happens to take. The same
+            // reasoning applies to the B2B exclusion: api.js gives it an
+            // envelope now, but the throw path is still read so a change there
+            // degrades to the right copy instead of the generic one.
+            if (isB2BCouponExcluded(err)) {
+                setFeedback(b2bCouponText(err), 'err');
+            } else if (isLockout(err)) {
                 setFeedback('Too many tries — wait a minute and retry.', 'err');
             } else {
                 setFailure('Couldn’t apply that coupon right now. Please try again.', err);
@@ -354,16 +408,26 @@ function syncDiscountAccordion() {
 
     // The server rejects coupon + points together; saying so up front is kinder
     // than spending one of the shopper's limited coupon attempts to find out.
+    //
+    // A business account is locked out of coupons for the whole session for the
+    // same reason and by a stronger rule — volume pricing and promo codes are
+    // mutually exclusive server-side — so the two locks are OR'd and the B2B one
+    // never lifts. It is set by initBusinessCouponLock() and read off the
+    // <details> so this function stays synchronous.
+    const b2bLocked = det.dataset.b2bLocked === '1';
     const pointsOn = applied > 0;
+    const locked = pointsOn || b2bLocked;
     const couponInput = document.getElementById('cart-coupon-input');
     const couponApply = document.getElementById('cart-coupon-apply');
     const couponFeedback = document.getElementById('cart-coupon-feedback');
-    if (couponInput) couponInput.disabled = pointsOn;
-    if (couponApply) couponApply.disabled = pointsOn;
-    if (couponFeedback) {
+    if (couponInput) couponInput.disabled = locked;
+    if (couponApply) couponApply.disabled = locked;
+    if (couponFeedback && !b2bLocked) {
         // Own only this one message via a marker, so removing the points clears
         // it again without ever clobbering a preview/apply result from
         // initCouponForm that happens to be showing in the same element.
+        // Skipped entirely under the B2B lock, whose explanation lives in its
+        // own element and must not be argued with by a points notice.
         if (pointsOn && !couponFeedback.textContent) {
             couponFeedback.textContent = 'Remove your points to use a coupon.';
             couponFeedback.dataset.lockNotice = '1';
@@ -379,6 +443,46 @@ function syncDiscountAccordion() {
         det.dataset.autoOpened = '1';
     }
     if (!active) delete det.dataset.autoOpened;
+}
+
+/**
+ * Lock the promo-code field for a signed-in business account.
+ *
+ * Business accounts receive automatic volume pricing and cannot also apply a
+ * coupon: a coupon is not floor-clamped, so stacking the two could sell a line
+ * below cost. The backend enforces it with a 400 `B2B_COUPON_EXCLUDED`, and
+ * initCouponForm() handles that response — but letting a trade customer type a
+ * code and press Apply just to be told no spends one of their limited attempts
+ * against an endpoint that locks out, to teach them a rule we already knew.
+ *
+ * So the field is disabled with the reason stated, and the 400 stays handled as
+ * the backstop for the paths that skip the field entirely (the `?coupon=`
+ * recovery-email link, a stale tab, a status call that failed).
+ *
+ * LOYALTY POINTS ARE NOT BLOCKED — only coupons are (handoff §3). This function
+ * touches nothing in the loyalty control.
+ */
+async function initBusinessCouponLock() {
+    const det = document.getElementById('cart-discount');
+    if (!det || typeof Business === 'undefined') return;
+
+    let active = false;
+    try {
+        active = await Business.isActive();
+    } catch (_) {
+        // A failed status check must not lock a retail customer out of coupons.
+        return;
+    }
+    if (!active) return;
+
+    det.dataset.b2bLocked = '1';
+
+    const note = document.getElementById('cart-coupon-blocked');
+    if (note) {
+        note.textContent = 'Business accounts get automatic volume pricing — promo codes can’t be combined. Your loyalty points still work.';
+        note.hidden = false;
+    }
+    syncDiscountAccordion();
 }
 
 function renderCartLoyaltyControlInner() {
@@ -535,6 +639,15 @@ async function autoApplyCouponFromUrl() {
             if (typeof showToast === 'function') showToast(msg, 'success', 5000);
             // Cart.updateUI is typeof-guarded above and may have been a no-op.
             syncDiscountAccordion();
+        } else if (isB2BCouponExcluded(res)) {
+            // A recovery email reached a business account. The code is not
+            // broken and retrying will never work, so say why once and do NOT
+            // reveal + prefill the field: it is disabled by
+            // initBusinessCouponLock(), and opening a dead form under a toast
+            // that just explained the rule is an invitation to argue with it.
+            if (typeof showToast === 'function') {
+                showToast(b2bCouponText(res), 'info', 7000);
+            }
         } else {
             if (typeof showToast === 'function') {
                 showToast(res?.error || 'Coupon could not be applied', 'warning', 5000);
@@ -543,6 +656,10 @@ async function autoApplyCouponFromUrl() {
         }
     } catch (err) {
         if (typeof DebugLog !== 'undefined') DebugLog.warn('Auto-apply coupon failed:', err && err.message);
+        if (isB2BCouponExcluded(err)) {
+            if (typeof showToast === 'function') showToast(b2bCouponText(err), 'info', 7000);
+            return;
+        }
         revealCouponForRetry(code);
     }
 }

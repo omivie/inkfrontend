@@ -41,6 +41,253 @@ describing the same incident.
 
 ---
 
+## ERR-139 — Business pricing had been dark on every page for days, and the failure looked exactly like success (2026-07-31)
+
+**Trigger:** a backend handoff, `business-account-pricing-FE-handoff (1).md`, describing v2 of B2B
+pricing: the flat bronze/silver/gold account tiers are gone, replaced by a per-line **volume**
+discount whose percentage is a function of the product's price band multiplied by the line quantity.
+Buy more of an item to save more; cheaper items discount deeper. Still floor-clamped so no line ever
+sells below a 5% net margin.
+
+**It read as a feature request. It was a live outage.** Before writing anything, the two endpoints
+were probed against production with a real approved business account. `/api/business/pricing` no
+longer returns `business_price`, `savings_amount`, `effective_percent` or `floored` at the top level
+of an item — every one of those moved inside a new `quantity_breaks[]` array. `js/business.js`
+still read them from the top level, got `undefined`, and returned `null`.
+
+And `null`, by this module's own deliberate contract, means *"this customer has no business
+discount — render standard retail."* So the PDP price panel and every product-card overlay simply
+stopped existing, on every page, for every business customer, with a clean console and no error
+anywhere. `pricing_tier` had vanished from `/api/business/status` too, which killed the account
+dashboard's tier line and degraded the cart's row label to a bare "Business account".
+
+Nothing was broken in the sense anyone would notice. The absence of a discount and the absence of an
+answer render identically, which is precisely the failure mode
+`business.js`'s own header comment warns about. It happened to `business.js`.
+
+**The hazard the handoff does not mention: flooring produces duplicate rungs.** A sweep of all 1,197
+catalog SKUs found 8 where the loss floor bites, and on those the ladder flattens:
+
+- `GDR2025BK` — 3+ $186.04 · 5+ $182.20 · **10+ $180.79 · 20+ $180.79**
+- `GTN2530XLBK-2PK` — 3+ $274.50 · **5+, 10+ and 20+ all $271.49**
+
+Rendering that verbatim tells a customer to buy ten more units for nothing. `describeLadder()` now
+**collapses any rung that is not strictly cheaper than the one before it** — four rungs become three
+and two respectively — and reports how many it dropped, so a test asserts the collapse rather than
+inferring it. Every rung the frontend renders is a real, distinct improvement.
+
+**The consequence that reshaped the UI: at quantity 1 a business account pays full retail.** The
+entry rung is 3+ in all four live bands, so "the business price of a SKU" is no longer a thing that
+exists — there is only the price *at a quantity*. v1's PDP wrote a single business price into the
+sticky buy-bar and locked it; under v2 that is a price the checkout refuses to honour on the qty-1
+purchase the button is offering. The bar now tracks `#qty-input`: the applicable rung's unit price
+when one applies, and retail below the entry rung, because retail is genuinely what gets charged.
+`#product-price` and its `itemprop="price"` microdata are still untouched — a per-account price
+there would be cloaking and would poison the Merchant Center feed.
+
+The ladder itself renders as a row of tappable break chips above the quantity selector, the active
+chip resolved against the live quantity, a status line reading *"At 4 you pay $33.24 each — saving
+$7.00. Add 1 more → $32.19 each."*, and a tap on any chip writing that quantity into the box through
+its own clamp.
+
+**Four live price bands, every one of them starting at 3+:**
+
+| band | ladder | SKUs |
+|---|---|---|
+| under $20 | 3:6, 5:10, 10:14, 20:18 | 113 |
+| $20–$50 | 3:5, 5:8, 10:11, 20:14 | 358 |
+| $51–$99 | 3:4, 5:6, 10:9, 20:12 | 206 |
+| $100+ | 3:3, 5:5, 10:7, 20:10 | 520 |
+
+The handoff's TL;DR says *"Buy 5+ … Buy 10+"* and its worked example uses a ladder that matches no
+live band at all. Rendering the API's numbers verbatim — rather than the document's — is the whole
+discipline here.
+
+**The coupon path was worse than unhandled.** Business accounts cannot combine a promo code with
+volume pricing, and the backend enforces it with a plain `400 B2B_COUPON_EXCLUDED`. But `api.js`
+only returns a structured envelope for a whitelisted set of error codes; everything else **throws**.
+So the cart landed in its generic catch and told the customer *"Couldn't apply that coupon right
+now. Please try again."* — about a code that can never work — and then attached a "try SAVE10
+instead" suggestion nudge for a code that also cannot be combined, spending one of a strictly
+limited attempt budget against an endpoint that locks out. Three lies in one message.
+
+`B2B_COUPON_EXCLUDED` now gets its own envelope branch in `api.js`. The cart and checkout both
+recognise the exclusion on all three channels the backend answers on — preview (`200
+{valid:false, reason:'b2b_volume_pricing'}`), apply-response, and apply-throw — and route it to plain
+inline feedback, never to the suggestion renderer. The field is disabled up front with the reason
+stated, so a trade customer never spends an attempt learning a rule we already knew, and the
+`?coupon=` recovery-email path no longer re-opens and prefills a form that cannot submit. Loyalty
+points are untouched: only coupons are excluded.
+
+**Two more things the payload will not tell you, learned by reading it.** `b2b_discount.effective_percent`
+is the realised rate across the *whole cart* — 0.7% on a live cart whose one qualifying line was
+discounted 5% — so it is never presented as the customer's rate; the row names the company instead,
+and the floored note says "across your cart". And cart lines carry **no** per-line B2B figure at all:
+`price_snapshot` and `line_total` stay at retail, and the discount surfaces only as one cart-level
+amount. That is why the "add 1 more to reach 5+" nudges need a second `/api/business/pricing` call,
+and why a `b2b_unit_price` on cart lines is now a written backend ask.
+
+**Verified** against the live API and pinned by a **consistency gate**: summing
+`offerAtQuantity(ladder, qty).savings × qty` across the live cart's lines reproduces the server's own
+`b2b_discount.discount_amount` to the cent — `$1.22 × 4 = $4.88`. If the frontend's reading of the
+ladder ever diverges from what the server actually charges, the suite fails rather than the customer
+finding out. The B2B contract file grew from 53 tests to **74**, every fixture captured live rather
+than copied from the handoff. Repo suite 3,373 passing in scope. `npm run build` restamped.
+
+Four grids were also found painting product cards and never decorating them — `filters.js`,
+`ribbons-page.js`, `favourites.js` and `landing.js`. Favourites is the one that mattered: for a trade
+account it is the reorder list, the single surface most likely to be bought in tens.
+
+**Lesson:** a fail-soft path and a backend schema change are a silent-failure machine. When "no data"
+and "no entitlement" render identically, the day the shape changes the feature dies with a clean
+console — so the shape you do *not* recognise has to be loud even when the outcome is the same as a
+shape you do. `describeLadder()` now warns by name when it sees the retired v1 payload, and
+`getPricing()` warns when `source` is anything but `"volume"`. Neither changes what the customer
+sees; both turn the next model change from an outage into a five-minute diagnosis.
+
+---
+
+## ERR-138 — A handoff said the invoice PAID backend was "shipped & live"; the route answered curl and was still unreachable from the browser (2026-07-31)
+
+**Trigger:** the backend dev handed over `invoice-paid-slider-FE-patch-jul2026.md`, opening with the
+operator report "Paid slider in invoices not working" and a table assigning it to the **frontend** —
+*"Backend: shipped & live — no further backend change needed for the slider."* It supplied a
+ready-to-paste React handler for a codebase that has no React.
+
+**What was actually true.** Both halves of that framing were wrong, and both were checkable in about
+ninety seconds.
+
+1. **There was no frontend bug to fix.** ERR-131 had already rewired the toggle the previous day, to
+   the letter of the patch: `PATCH /:id/status`, `{status:'paid'|'unpaid'}`, `void` excluded from a
+   frozen `INVOICE_STATUSES`, the row repainted from `data.invoice.status` rather than the checkbox,
+   revert-on-error, per-code copy. 42 tests pinned it. The patch prescribed, line for line, code that
+   was already in `main`.
+
+2. **The backend change the patch said wasn't needed was the only thing that was.** Re-probed warm,
+   three times, against both hosts and both origins:
+
+   ```
+   OPTIONS /api/admin/invoices/:id/status   (Access-Control-Request-Method: PATCH)
+     → 204, Access-Control-Allow-Methods: GET,POST,PUT,DELETE,OPTIONS      ← no PATCH
+   PATCH  /api/admin/invoices/:id/status  → 401   (route live, browser can't reach it)
+   PUT    /api/admin/invoices/:id/status  → 404   (no alternate verb)
+   POST   /api/admin/invoices/:id/status  → 404
+   PUT    /api/admin/invoices/:id         → 401   (live AND on the allow-list)
+   ```
+
+   `X-HTTP-Method-Override` is not in `Access-Control-Allow-Headers`, so a POST carrying it fails the
+   preflight too. **BF-021, open since 2026-07-30, was still open** — still a one-line backend change.
+   The slider had never once reached the server.
+
+**The measurement trap, and how it nearly repeated.** An early sweep, fired while the Render instance
+was cold, returned `404 Endpoint not found` for `GET /api/admin/invoices`, `POST /api/admin/invoices`
+and `GET /:id/emails` — routes the admin page demonstrably uses. Taken at face value that reads as
+"the invoice API doesn't exist", which would have been a spectacular and completely fictitious bug
+report. Warm re-probes returned `401` for every one. **A single probe against a cold serverless host
+is not a measurement.** Probe warm, probe repeatedly, and distrust a result that contradicts a
+feature you can watch working.
+
+**Fix.** Ship the flip through a route the browser is actually allowed to use, without ever pretending
+PATCH is fine. `setStatusWithFallback()` tries `PATCH /:id/status` first; **only** on a bare transport
+failure (`isNetworkFailure`, i.e. no status and no code) does it fall back to
+`setStatusViaFullUpdate()`, which reuses the editor's own `getInvoice → draftFromInvoice →
+buildPayload → PUT /api/admin/invoices/:id` round-trip — the identical request the drawer's Save has
+always made. PATCH stays the preferred call, so **the fallback retires itself the day BF-021 lands,
+with no code change.**
+
+A coded rejection (`CONFLICT`/`NOT_FOUND`/`RATE_LIMITED`/`VALIDATION_FAILED`) is rethrown untouched:
+the server already answered, and re-asking through a heavier write route is trying to talk it out of
+that answer.
+
+**The traps this had to avoid.** An invoice is a legal document, and the fallback rewrites the whole
+record to change one field. Four guards abort the flip rather than write a mangled one:
+
+- **Renumbering.** `buildPayload` sends `invoice_number: d.invoice_number || null`, and **null tells
+  the backend to assign the next number in series.** A round-trip that dropped the number would
+  silently renumber an invoice the customer already holds. Missing number ⇒ refuse.
+- **Un-voiding.** PATCH 409s on a void invoice because voiding also cancelled its shadow order; PUT
+  holds no such opinion. The void check re-reads the **server's** copy, not the clicked row.
+- **Blanking.** If the server had line items and the record→draft mapping yields none, refuse rather
+  than PUT an empty invoice.
+- **Absence read as emptiness.** `getInvoice()` fails soft to `null`; treating that as "an invoice
+  with no fields" would PUT a fresh draft over a real record. Eighth in the family
+  (ERR-063/068/073/075/076/127/131).
+
+**And the guard the tests did not think of — caught by the live gate, on the very first real flip.**
+36 passing tests, every one of them green, and invoice **#3267** still came back changed in a way
+nothing had asserted: `payment_due` moved from `null` to `2026-08-20`. `buildPayload` is an *editor*
+payload — it fills gaps the way an operator editing the form would want them filled — so
+`effectiveDueDate()` obligingly derived a due date from `payment_due_pref: '20'`. Flicking a switch
+gave an invoice that had **already been emailed to a customer** a payment due date it never had.
+`order_date` and `issue_date` have the same shape of default.
+
+The fix is a change of principle, not a patch: **the server's record wins for every field it
+stores**, and only `status` comes from the draft. `buildPayload` is kept for the *shape* — key names,
+line mapping, the deliberate omission of server-owned send history — never for its values. On top of
+that, `documentDrift()` re-derives the comparison from the payload's own keys and **refuses the write**
+if any stored field would change, so a field added to `buildPayload` in future is checked even though
+the pin loop knows nothing about it.
+
+Getting that comparison right needed the live data too. The naive version — `JSON.stringify(a) !==
+JSON.stringify(b)` — called *four* fields changed on a real invoice: `seller`, `customer` and
+`footer` come back with different **key order**, and each line carries a server-computed
+`line_total_excl_gst` the payload correctly omits. That version would have refused every toggle on
+every invoice. The rule it became: **you can only contradict a value you were given** — walk the
+server's record, compare only fields the payload also carries.
+
+**And the degraded path is loud.** A fallback nobody can see makes BF-021 permanent — so the route
+used is in the **return value** (`via: 'patch' | 'put-fallback'`), every use is logged naming BF-021,
+and the operator is told once per session. Not once per click: a nag gets trained away.
+
+**The third recurrence of the reassuring lie.** ERR-131's real damage was not the wrong URL — it was
+the toast reading *"Mark-paid isn't available yet (backend endpoint pending)"*, which made a broken
+feature look like an unbuilt one and stopped anyone looking for a month. Probing found **eight more
+live instances of that same sentence**, every one over a route that answers `401`:
+
+| Screen | Copy | Route (probed 2026-07-31) |
+|---|---|---|
+| Invoices | "Delete isn't available yet (backend endpoint pending)" | `DELETE /invoices/:id` → 401 |
+| Invoices | "Void failed (backend pending)" | `POST /:id/void` → 401 |
+| Invoices | "Email failed (backend pending)" | `POST /:id/email` → 401 |
+| Invoices | "…the invoicing backend may not be live yet" | `POST`/`PUT /invoices` → 401 |
+| Quick orders | "Delete isn't available yet (backend endpoint pending)" | `DELETE /quick-orders/:id` → 401 |
+| Quick orders | "…the quick-order backend may not be live yet" | `POST`/`PUT /quick-orders` → 401 |
+| Quick orders | "couldn't save the contact (backend pending)" | `POST /contacts` → 401 |
+| Contacts ×2 | "…the contacts backend may not be live yet" | `POST`/`DELETE /contacts` → 401 |
+| Customers | "…the invoicing backend may not be live yet" | `PUT /customers/:id/invoicing` → 401 |
+
+All rewritten to say what actually happened — a `NOT_FOUND` on delete now means *this record is gone,
+refresh* — and a repo-wide scan now fails the suite if the phrasing returns. Comments are stripped
+before the scan, so the postmortem and the code notes can still quote the copy they retired.
+
+Separately, `saveInvoice()` surfaced only the `details.unresolved` shape and swallowed everything
+else behind that "may not be live yet" line; it now surfaces `error.message`, `error.details.reason`
+and per-field `details[]`, and when the server truly says nothing it **says that** instead of
+inventing a cause.
+
+**Also fixed:** `.inv-paid input` is `opacity: 0`, so the toggle had **no visible keyboard focus** at
+all — Tab landed on it and Space worked, invisibly. The ring is now painted on the slider the
+operator can actually see, with a light-deck contrast override.
+
+**Verified:** 41 tests (`admin-invoice-paid-fallback-jul2026.test.js`) plus 2 updated in
+`admin-invoice-status-email-log-jul2026.test.js`. The round-trip is run **for real** — the actual
+`draftFromInvoice` → `buildPayload` chain in a `vm`, not a mock of it — because a mocked payload
+builder would happily "preserve" a number the real one drops. Driven live in headless Chromium as
+the owner against invoice #3267: the PATCH rejecting with `TypeError: Failed to fetch` (BF-021 in a
+real browser), then `GET` 200 + `PUT` 200; the record re-fetched and diffed field by field, **before
+the fix** showing `payment_due` silently invented, and **after** showing only `status` and the
+server's own `updated_at` — `invoice_number` 3267, line items, `$150.79` total and `emailed_at` all
+intact. Flipped back to unpaid and re-diffed: **byte-identical to the pristine record.** Stubbing the
+transport so PATCH resolves fires **zero** GET/PUT, proving the fallback retires itself. Keyboard Tab
+lands on the toggle with a real `solid 2px` ring. Full suite green.
+
+**Lesson.** ERR-131 closed on *"curl proves a route exists; only a browser proves it is reachable."*
+That exact lesson was then re-learned four weeks later — not because it was forgotten, but because a
+confident handoff document was believed **again**. A doc records an intention. The only thing that
+records an API is a probe, warm and repeated, from the origin that will actually make the call.
+
+---
+
 ## ERR-137 — "Printer Models" scrolled the ink finder to a spot the header then covered (2026-07-31)
 
 **Trigger:** two owner screenshots of the same page. In one, clicking **PRINTER MODELS** landed on the

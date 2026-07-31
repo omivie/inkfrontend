@@ -61,7 +61,7 @@
     <link rel="stylesheet" href="/css/layout.css?v=e79b9859">
     <link rel="stylesheet" href="/css/components.css?v=51f6dd56">
     <link rel="stylesheet" href="/css/modern-effects.css?v=afe20f45">
-    <link rel="stylesheet" href="/css/pages.css?v=b29a1828">
+    <link rel="stylesheet" href="/css/pages.css?v=284df57f">
     <link rel="stylesheet" href="/css/search.css?v=c28f09ef">
 </head>
 <body>
@@ -319,6 +319,26 @@
                         <p class="product-info__waitlist-proof" id="product-waitlist-proof"
                            data-testid="waitlist-proof" hidden></p>
 
+                        <!--
+                          Business-account VOLUME price breaks (business-account-pricing v2,
+                          Jul 2026). Ships hidden and stays hidden for guests and retail
+                          shoppers; ProductPage.renderVolumePricing() fills it only for a
+                          signed-in business account.
+
+                          It sits HERE — above .product-info__actions — on purpose: the
+                          ladder is what the quantity box is for, so it has to be read
+                          before the quantity is chosen, and tapping a break writes into
+                          #qty-input directly below it.
+
+                          It is deliberately OUTSIDE <dl class="buy-box">: that markup
+                          mirrors the backend prerender and carries the itemprop="price"
+                          microdata feeding Merchant Center. A per-account price in there
+                          would be cloaking.
+                        -->
+                        <section class="volume-pricing" id="volume-pricing"
+                                 data-testid="volume-pricing" hidden
+                                 aria-label="Business account volume pricing"></section>
+
                         <div class="product-info__actions">
                             <div class="quantity-selector">
                                 <button type="button" class="quantity-selector__btn" id="qty-decrease" aria-label="Decrease quantity">
@@ -450,13 +470,13 @@
     <script defer src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.98.0" integrity="sha384-Sm2s7OXxsAMTyJ4iIyRBgVpeGUvMPk2lRQnnZhE78Wej7oggIoolKt+SCt0XJbUB" crossorigin="anonymous"></script>
     <script defer src="/js/config.js?v=57d2621d"></script>
     <script defer src="/js/security.js?v=790f00f3"></script>
-    <script defer src="/js/api.js?v=7ce1308e"></script>
+    <script defer src="/js/api.js?v=c40a8e6b"></script>
     <script defer src="/js/schema.js?v=dd78df4e"></script>
     <script defer src="/js/utils.js?v=0fab5ab7"></script>
     <script defer src="/js/auth.js?v=55cfdbef"></script>
-    <script defer src="/js/business.js?v=891bfd2f"></script>
-    <script defer src="/js/cart.js?v=3172d670"></script>
-    <script defer src="/js/favourites.js?v=8ab82f45"></script>
+    <script defer src="/js/business.js?v=6e193c48"></script>
+    <script defer src="/js/cart.js?v=49f84157"></script>
+    <script defer src="/js/favourites.js?v=e454f463"></script>
     <script defer src="/js/products.js?v=bfec75ea"></script>
     <script defer src="/js/search.js?v=b69f1ae8"></script>
     <script defer src="/js/main.js?v=b4060fa8"></script>
@@ -466,7 +486,7 @@
     <script defer src="/js/rewards-nudge.js?v=f5a2df30"></script>
     <script defer src="/js/modern-effects.js?v=ad8bff1e"></script>
 
-    <script defer src="/js/product-detail-page.js?v=94b0b959"></script>
+    <script defer src="/js/product-detail-page.js?v=a6a7f2de"></script>
     <script defer src="/js/analytics.js?v=8c9ee196"></script>
     <script defer src="/js/site-guard.js?v=e0b0e4ba"></script>
 </body>

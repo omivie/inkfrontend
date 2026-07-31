@@ -164,7 +164,9 @@ function openContactDrawer(contact) {
             Drawer.close();
             loadContacts();
           } catch (err) {
-            Toast.error(err.message || 'Could not delete — the contacts backend may not be live yet.');
+            // DELETE /api/admin/contacts/:id is live (probed 401, 2026-07-31).
+            // Never dress a real failure as an unbuilt backend (ERR-131/138).
+            Toast.error(err.message || 'Could not delete that contact. Try again.');
           }
         },
       });
@@ -185,7 +187,7 @@ function openContactDrawer(contact) {
         Drawer.close();
         loadContacts();
       } catch (err) {
-        Toast.error(err.message || 'Could not save — the contacts backend may not be live yet.');
+        Toast.error(err.message || 'Could not save that contact. Try again.');
         btn.disabled = false; btn.textContent = orig;
       }
     }

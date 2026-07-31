@@ -483,6 +483,13 @@ const RibbonsPage = {
             container.insertBefore(grid, pagination);
         });
 
+        // Business bulk-price overlay — additive, and a no-op without a network
+        // request for guests and retail shoppers.
+        if (typeof Business !== 'undefined') {
+            Business.decorateCards(container).catch(e =>
+                DebugLog.warn('[Ribbons] business pricing overlay failed:', e && e.message));
+        }
+
         // Image fallback listeners
         container.querySelectorAll('img[data-fallback]').forEach(img => {
             img.addEventListener('error', function() {
@@ -504,6 +511,8 @@ const RibbonsPage = {
     createRibbonCard(ribbon) {
         const card = document.createElement('article');
         card.className = 'product-card';
+        // Business bulk-price overlay finds cards by SKU (Business.decorateCards).
+        if (ribbon.sku) card.dataset.sku = ribbon.sku;
         if (ribbon.source) card.dataset.source = ribbon.source;
         if (ribbon.device_models) {
             card.dataset.deviceModels = JSON.stringify(

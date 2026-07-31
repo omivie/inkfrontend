@@ -340,9 +340,19 @@ const TOGGLE = INVOICES_SRC.slice(
   INVOICES_SRC.indexOf("} else if (action === 'download')"),
 );
 
-test('§8 the toggle calls setInvoiceStatus with paid/unpaid, never a boolean', () => {
-  assert.match(TOGGLE, /AdminAPI\.setInvoiceStatus\(id, wanted\)/);
+test('§8 the toggle sets a paid/unpaid STATUS, never a boolean', () => {
+  // The direct AdminAPI.setInvoiceStatus() call moved one level down, into
+  // setStatusWithFallback(), when BF-021 stayed open and the toggle gained a
+  // PUT fallback (ERR-138). That wrapper still tries PATCH first — asserted in
+  // tests/admin-invoice-paid-fallback-jul2026.test.js §1 — and the vocabulary
+  // the checkbox maps to is unchanged, which is what this section is about.
+  assert.match(TOGGLE, /setStatusWithFallback\(id, wanted\)/);
   assert.match(TOGGLE, /btn\.checked \? 'paid' : 'unpaid'/, 'the checkbox maps to the status vocabulary');
+  assert.match(
+    fnBody(INVOICES_SRC, 'async function setStatusWithFallback(id, wanted)'),
+    /AdminAPI\.setInvoiceStatus\(id, wanted\)/,
+    'and PATCH /:id/status is still the call that is actually attempted',
+  );
 });
 
 test('§8 the row is repainted from the server response, not from the checkbox', () => {
@@ -376,26 +386,31 @@ test('§8 each failure code gets copy the operator can act on', () => {
     'the "pending" excuse is retired — the route exists now, so a 404 means something else');
 });
 
-test('§8 an opaque network/CORS failure is named, not shown as "Failed to fetch"', () => {
-  // Measured 2026-07-30: the API answers a PATCH preflight with
-  // Access-Control-Allow-Methods: GET,POST,PUT,DELETE,OPTIONS — no PATCH — from
-  // BOTH localhost and the production origin, so the browser kills the request
-  // before it is sent and fetch rejects with a bare TypeError. Until BF-021 lands
-  // that is the failure an operator will actually hit, and "Failed to fetch" tells
-  // them nothing.
+test('§8 an opaque network/CORS failure is explained, not shown as "Failed to fetch"', () => {
+  // Measured 2026-07-30 and STILL TRUE on 2026-07-31: the API answers a PATCH
+  // preflight with Access-Control-Allow-Methods: GET,POST,PUT,DELETE,OPTIONS —
+  // no PATCH — from BOTH localhost and the production origin, so the browser
+  // kills the request before it is sent and fetch rejects with a bare TypeError.
+  //
+  // That case no longer reaches the operator: setStatusWithFallback() absorbs it
+  // by re-routing through the CORS-allowed PUT (ERR-138). So arriving in this
+  // branch now means the PUT failed to connect TOO — real connectivity loss —
+  // and the copy must stop blaming a method that is no longer the obstacle.
   const statusErrorMessage = new Function(
     'isNetworkFailure',
     `${fnBody(INVOICES_SRC, 'function statusErrorMessage(err)')}; return statusErrorMessage;`,
   )(new Function(`${fnBody(INVOICES_SRC, 'function isNetworkFailure(err)')}; return isNetworkFailure;`)());
 
   const out = statusErrorMessage(new TypeError('Failed to fetch'));
-  assert.match(out, /PATCH/, 'the message names the actual suspect');
   assert.doesNotMatch(out, /^Failed to fetch$/, 'the raw TypeError must not be the whole message');
+  assert.match(out, /wasn’t saved|was not saved/, 'it states plainly that nothing was written');
+  assert.doesNotMatch(out, /PATCH/,
+    'the blocked-PATCH case is handled by the fallback now — naming it here would misdirect');
 
   // A coded envelope error must NOT be swallowed by the network branch.
   const coded = Object.assign(new Error('Invoice is void'), { code: 'CONFLICT' });
   assert.match(statusErrorMessage(coded), /void/);
-  assert.doesNotMatch(statusErrorMessage(coded), /PATCH/, 'a real API error keeps its own message');
+  assert.doesNotMatch(statusErrorMessage(coded), /connection/i, 'a real API error keeps its own message');
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

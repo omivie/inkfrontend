@@ -61,7 +61,9 @@ function invoiceError(resp, fallback) {
   const err = new Error(msg);
   if (e && typeof e === 'object') { err.code = e.code; err.details = e.details; }
   // String-error envelopes (e.g. 404 "Endpoint not found") carry the machine
-  // code at the top level — keep it so callers can branch (e.g. "backend pending").
+  // code at the top level — keep it so callers can branch on NOT_FOUND. Branch on
+  // it to say "this record is gone", never "this endpoint isn't built": every
+  // admin invoice/contact/quick-order route was probed live on 2026-07-31 (ERR-138).
   if (!err.code && resp?.code) err.code = resp.code;
   // The shared client FLATTENS a VALIDATION_FAILED envelope to a string `error`
   // plus a top-level `details` (js/api.js) — so `e` above is a string and the
@@ -3068,7 +3070,8 @@ const AdminAPI = {
 
   // Hard-delete (permanent removal) — for operator cleanup of test/erroneous
   // invoices. Normal lifecycle is void (kept for records). Backend route
-  // DELETE /api/admin/invoices/:id is pending; a 404 surfaces as a clean toast.
+  // DELETE /api/admin/invoices/:id is LIVE (probed 401, not 404, 2026-07-31), so a
+  // 404 from here means the invoice is gone — not that the route is unbuilt (ERR-138).
   async deleteInvoice(invoiceId) {
     const resp = await window.API.delete(`/api/admin/invoices/${encodeURIComponent(invoiceId)}`);
     if (resp && resp.ok === false) throw invoiceError(resp, 'Delete invoice failed');
@@ -3153,7 +3156,9 @@ const AdminAPI = {
 
   // Backend-rendered PDF — returns a Blob object URL (mirrors
   // getInvoicePreviewUrl). The page falls back to client-side jsPDF when this
-  // endpoint isn't available yet, so a 404/network error is expected pre-backend.
+  // endpoint can't be reached. GET /:id/pdf answers 401 (probed 2026-07-31), so it
+  // IS live — treat a 404 here as "this invoice has no stored PDF", not as an
+  // unbuilt route (ERR-138).
   async downloadInvoicePdf(invoiceId) {
     const token = window.Auth?.session?.access_token;
     if (!token) throw new Error('Not authenticated');
@@ -3541,7 +3546,10 @@ const AdminAPI = {
       } catch (e) { adminApiWarn('expenses/categories', e); return null; }
     },
 
-    // ---- Writes (throw with .code; NOT_FOUND ⇒ "backend pending") ----
+    // ---- Writes (throw with .code; NOT_FOUND ⇒ retry the LEGACY route) ----
+    // NB /api/admin/expenses answers 401 (probed 2026-07-31), so the modern route
+    // is live and these legacy retries should no longer fire. Kept as a net, not
+    // as evidence the endpoint is unbuilt (ERR-138).
     async create(payload) {
       const resp = await window.API.post('/api/admin/expenses', payload);
       if (this._notFound(resp)) {

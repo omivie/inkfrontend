@@ -222,9 +222,12 @@ async function onRowAction(e) {
       onConfirm: async () => {
         try { await AdminAPI.deleteQuickOrder(id); Toast.success('Quick order deleted.'); loadData(); }
         catch (err) {
+          // DELETE /api/admin/quick-orders/:id is live (probed 401, 2026-07-31),
+          // so a 404 means THIS quick order is gone — not that the route is
+          // unbuilt. The old copy was the excuse that hid ERR-131 for a month.
           Toast.error(err.code === 'NOT_FOUND'
-            ? 'Delete isn’t available yet (backend endpoint pending).'
-            : (err.message || 'Delete failed.'));
+            ? 'That quick order no longer exists — it may already have been deleted. Refresh the list.'
+            : (err.message || 'Could not delete that quick order. Try again.'));
         }
       },
     });
@@ -659,7 +662,8 @@ async function saveQuickOrder() {
         if (editorAlive(token) && created?.id) _draft.contact_id = created.id;
       } catch (err) {
         warn('save-as-contact skipped', err);
-        Toast.warning('Saved the order, but couldn’t save the contact (backend pending).');
+        Toast.warning('Saved the order, but the contact couldn’t be saved'
+          + (err?.message ? ` — ${err.message}` : '.'));
       }
     }
     const payload = buildPayload(_draft);
@@ -676,7 +680,8 @@ async function saveQuickOrder() {
   } catch (err) {
     warn('save failed', err);
     if (surfaceUnresolvedCodes(err, token)) return;
-    Toast.error(err.message || 'Could not save — the quick-order backend may not be live yet.');
+    // POST/PUT /api/admin/quick-orders are live (probed 401, 2026-07-31).
+    Toast.error(err.message || 'Could not save this quick order. Try again.');
   } finally {
     if (btn && editorAlive(token)) { btn.disabled = false; btn.textContent = _draft?.id ? 'Save changes' : 'Save quick order'; }
   }

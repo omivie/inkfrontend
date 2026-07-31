@@ -700,11 +700,11 @@
                 }
             }
 
-            // Business-account price panel. Async and additive: the retail price
-            // above is rendered and correct for everyone, and this panel appears
-            // afterwards only for a signed-in business customer. Guests and
-            // retail shoppers fire no request at all.
-            this.renderBusinessPrice(info);
+            // Business-account VOLUME price breaks. Async and additive: the
+            // retail price above is rendered and correct for everyone, and the
+            // ladder appears afterwards only for a signed-in business customer.
+            // Guests and retail shoppers fire no request at all.
+            this.renderVolumePricing(info);
 
             // GST trust signal lives in the static "Incl. GST" badge rendered
             // beside the price (html/product/index.html). The dollar breakdown
@@ -1055,78 +1055,176 @@
         },
 
         /**
-         * Business-account price panel (business-account-pricing handoff, Jul 2026).
+         * Business-account VOLUME price breaks (business-account-pricing v2,
+         * Jul 2026).
          *
-         * For a signed-in business customer, GET /api/business/pricing returns
-         * the price checkout will ACTUALLY charge for this SKU — already capped
-         * by the "never sell at a loss" floor. We render that number verbatim.
-         * We never compute `retail x (1 - tier%)`: on a thin-margin item the
-         * floor reduces the discount (`floored:true`) and the computed figure
-         * would be a promise the checkout does not keep.
+         * For a signed-in business customer, GET /api/business/pricing returns a
+         * ladder of quantity breaks, each already capped by the "never sell at a
+         * loss" floor. Every number here is rendered verbatim. We never compute
+         * `retail x (1 - discount_percent)`: `discount_percent` is a CEILING, and
+         * on a thin-margin item the floor reduces the realised discount
+         * (`floored:true`), so the computed figure would be a promise checkout
+         * does not keep.
+         *
+         * WHY THIS IS A LADDER AND NOT A PRICE. Under v2 there is no such thing
+         * as "the business price" of a product: the entry rung is 3+ across every
+         * live band, so at quantity 1 a business account pays full retail. A
+         * single business price with no quantity beside it — which is what v1
+         * rendered — is now simply wrong.
          *
          * Deliberately NOT touched: #product-price and its itemprop="price"
          * `content` attribute. That microdata mirrors the backend prerender and
          * feeds Google Merchant Center — writing a per-account price into it
          * would be cloaking and would break the buy-box parity test. The public
-         * retail price stays the public retail price; the business price is an
-         * additive panel outside the buy-box <dl>.
+         * retail price stays the public retail price; the ladder is an additive
+         * section outside the buy-box <dl>.
          *
          * Fail-soft: guests and retail accounts fire no request; any error, any
-         * unfound SKU and any zero-savings item leave the page exactly as it is.
+         * unfound SKU and any SKU whose band has no ladder leave the page exactly
+         * as it is.
          */
-        async renderBusinessPrice(info) {
+        async renderVolumePricing(info) {
             const sku = info && info.sku;
-            if (!sku || typeof Business === 'undefined') return;
+            const section = document.getElementById('volume-pricing');
+            if (!sku || !section || typeof Business === 'undefined') return;
 
-            const pricingEl = document.querySelector('.product-info__pricing');
-            if (!pricingEl) return;
-
-            let item;
+            let ladder;
             try {
-                item = await Business.getPricingFor(sku);
+                ladder = await Business.getLadderFor(sku);
             } catch (e) {
                 DebugLog.warn('[PDP] business pricing unavailable:', e && e.message);
                 return;
             }
 
             // The shopper may have navigated to another product while the
-            // request was in flight — never paint a stale price.
+            // request was in flight — never paint a stale ladder.
             if (!this.product || this.product.sku !== sku) return;
+            if (!ladder) return;
 
-            const offer = Business.describeOffer(item);
-            if (!offer) return;
+            this._volumeLadder = ladder;
 
-            const existing = document.getElementById('business-price');
-            if (existing) existing.remove();
+            const qtyInput = document.getElementById('qty-input');
+            const maxQty = this._qtyMax();
 
-            const pct = offer.percent != null
-                ? ` <span class="business-price__pct">(${Security.escapeHtml(Business.formatPercent(offer.percent))})</span>`
+            const chips = ladder.breaks.map(rung => {
+                // A break beyond the quantity box's own cap can be shown but must
+                // not be tappable — silently setting a different number than the
+                // chip advertises is the kind of small lie this whole module
+                // exists to avoid.
+                const reachable = rung.minQuantity <= maxQty;
+                const pct = rung.percent != null
+                    ? `<span class="volume-pricing__chip-pct">&minus;${Security.escapeHtml(Business.formatPercent(rung.percent))}</span>`
+                    : '';
+                return (
+                    `<${reachable ? 'button' : 'span'} class="volume-pricing__chip"` +
+                        (reachable ? ` type="button" data-qty="${rung.minQuantity}"` : ' aria-disabled="true"') +
+                        ` data-testid="volume-chip"` +
+                        (rung.floored ? ' data-floored="1"' : '') + '>' +
+                        `<span class="volume-pricing__chip-qty">${Security.escapeHtml(Business.breakLabel(rung))}</span>` +
+                        `<span class="volume-pricing__chip-price">${Security.escapeHtml(formatPrice(rung.businessPrice))}</span>` +
+                        pct +
+                    `</${reachable ? 'button' : 'span'}>`
+                );
+            }).join('');
+
+            // Shown only when the floor actually bit on this SKU. `collapsed`
+            // says how many rungs the API sent that buy nothing extra — they are
+            // not rendered, so the customer is never told to buy 20 for the price
+            // they already get at 10.
+            const flooredNote = ladder.anyFloored
+                ? `<p class="volume-pricing__note">This item is already close to cost, so its bulk pricing stops earlier than usual — the prices above are the lowest we can go.</p>`
                 : '';
 
-            // A floored line gets an explicit reason rather than a silently
-            // smaller-than-advertised discount.
-            const note = offer.floored
-                ? `<p class="business-price__note">This item is already close to cost, so it is priced as low as we can go — below your usual tier discount.</p>`
-                : '';
+            section.innerHTML =
+                `<p class="volume-pricing__eyebrow">Business volume pricing</p>` +
+                `<div class="volume-pricing__chips" role="group" aria-label="Quantity price breaks">${chips}</div>` +
+                `<p class="volume-pricing__status" id="volume-pricing-status" data-testid="volume-status" role="status" aria-live="polite"></p>` +
+                flooredNote;
+            section.hidden = false;
 
-            pricingEl.insertAdjacentHTML('afterend',
-                `<section class="business-price" id="business-price" data-testid="business-price" aria-label="Your business account price">
-                    <p class="business-price__eyebrow">Your business price</p>
-                    <p class="business-price__row">
-                        <span class="business-price__amount">${Security.escapeHtml(formatPrice(offer.businessPrice))}</span>
-                        <span class="business-price__retail">retail <s>${Security.escapeHtml(formatPrice(offer.retailPrice))}</s></span>
-                    </p>
-                    <p class="business-price__save">Save ${Security.escapeHtml(formatPrice(offer.savings))}${pct}</p>
-                    ${note}
-                </section>`);
+            section.querySelectorAll('.volume-pricing__chip[data-qty]').forEach(chip => {
+                chip.addEventListener('click', () => {
+                    if (!qtyInput) return;
+                    qtyInput.value = chip.getAttribute('data-qty');
+                    // Go through the box's own change handler so the shared clamp
+                    // (and everything else listening) runs exactly as if the
+                    // shopper had typed it.
+                    qtyInput.dispatchEvent(new Event('change', { bubbles: true }));
+                    qtyInput.focus();
+                });
+            });
+
+            this.syncVolumePricing();
+        },
+
+        /**
+         * The quantity box's real ceiling. setupEventListeners() clamps to
+         * min(product stock, 99); before it runs, fall back to the input's own
+         * max attribute. Read rather than duplicated so the chips and the clamp
+         * cannot disagree about what is reachable.
+         * @returns {number}
+         */
+        _qtyMax() {
+            const qtyInput = document.getElementById('qty-input');
+            const max = qtyInput ? Number(qtyInput.max) : NaN;
+            return Number.isFinite(max) && max > 0 ? max : 99;
+        },
+
+        /**
+         * Repaint everything that depends on the CURRENT quantity: which chip is
+         * active, the live "at this quantity you pay X" line, and the sticky
+         * buy-bar's price.
+         *
+         * Called after the ladder renders and again on every quantity change.
+         * Cheap, synchronous, and a no-op when there is no ladder — so the
+         * quantity handlers can call it unconditionally.
+         */
+        syncVolumePricing() {
+            const ladder = this._volumeLadder;
+            const section = document.getElementById('volume-pricing');
+            const stickyPrice = document.getElementById('sticky-atc-price');
+            if (!ladder || !section || typeof Business === 'undefined') return;
+
+            const qtyInput = document.getElementById('qty-input');
+            const qty = Math.max(1, parseInt(qtyInput && qtyInput.value, 10) || 1);
+            const rung = Business.offerAtQuantity(ladder, qty);
+
+            section.querySelectorAll('.volume-pricing__chip').forEach(chip => {
+                const at = Number(chip.getAttribute('data-qty'));
+                const isActive = !!rung && at === rung.minQuantity;
+                chip.classList.toggle('volume-pricing__chip--active', isActive);
+                if (isActive) chip.setAttribute('aria-current', 'true');
+                else chip.removeAttribute('aria-current');
+            });
+
+            const status = document.getElementById('volume-pricing-status');
+            if (status) {
+                const next = Business.nextBreak(ladder, qty);
+                const parts = [];
+                if (rung) {
+                    parts.push(
+                        `At ${qty} you pay ${formatPrice(rung.businessPrice)} each — ` +
+                        `saving ${formatPrice(Business.lineSavings(ladder, qty))}.`
+                    );
+                } else {
+                    parts.push(`At ${qty} you pay the standard ${formatPrice(ladder.retailPrice)} each.`);
+                }
+                if (next && next.quantityAtBreak <= this._qtyMax()) {
+                    const units = next.unitsAway === 1 ? '1 more' : `${next.unitsAway} more`;
+                    parts.push(`Add ${units} → ${formatPrice(next.rung.businessPrice)} each.`);
+                }
+                status.textContent = parts.join(' ');
+            }
 
             // The sticky mobile buy-bar mirrors #product-price, which stays at
-            // public retail for the microdata. Hand it the business price and
-            // lock it, so the price on the buy button matches the price the
-            // cart will charge.
-            const stickyPrice = document.getElementById('sticky-atc-price');
+            // public retail for the microdata. Under v2 the price it should show
+            // is a function of the quantity in the box, so it is driven from the
+            // ladder rather than locked once: a rung applies -> that rung's unit
+            // price; below the entry rung -> retail, because that is genuinely
+            // what this add-to-cart will charge. The lock flag still keeps the
+            // generic #product-price mirror from stomping the value.
             if (stickyPrice) {
-                stickyPrice.textContent = formatPrice(offer.businessPrice);
+                stickyPrice.textContent = formatPrice(rung ? rung.businessPrice : ladder.retailPrice);
                 stickyPrice.dataset.businessLocked = '1';
             }
         },
@@ -2008,9 +2106,15 @@
             const maxQty = 99;
             qtyInput.max = maxQty;
             const qtyIncreaseBtn = document.getElementById('qty-increase');
+            // Business volume pricing is a function of THIS number, so every
+            // path that moves it repaints the ladder. One call site each rather
+            // than a single listener, because the decrease/increase buttons set
+            // .value directly and never fire a `change` event.
+            const onQtyChanged = () => this.syncVolumePricing();
             document.getElementById('qty-decrease').addEventListener('click', () => {
                 if (qtyInput.value > 1) qtyInput.value = parseInt(qtyInput.value) - 1;
                 qtyIncreaseBtn.disabled = false;
+                onQtyChanged();
             });
             qtyIncreaseBtn.addEventListener('click', () => {
                 const next = parseInt(qtyInput.value) + 1;
@@ -2018,6 +2122,7 @@
                     qtyInput.value = next;
                     if (next >= maxQty) qtyIncreaseBtn.disabled = true;
                 }
+                onQtyChanged();
             });
             qtyInput.addEventListener('change', () => {
                 let val = parseInt(qtyInput.value);
@@ -2025,6 +2130,7 @@
                 if (val > maxQty) val = maxQty;
                 qtyInput.value = val;
                 qtyIncreaseBtn.disabled = val >= maxQty;
+                onQtyChanged();
             });
 
             // Add to cart using Cart.addItem (server-first for authenticated users)
@@ -2685,13 +2791,14 @@
 
         // Mirror price from product info.
         //
-        // EXCEPT when a business account owns this bar: renderBusinessPrice()
-        // sets data-business-locked and writes the customer's real (floored)
-        // price here. #product-price must keep showing PUBLIC retail because it
+        // EXCEPT when a business account owns this bar: syncVolumePricing()
+        // sets data-business-locked and writes the price this add-to-cart will
+        // ACTUALLY charge at the quantity currently in the box — the applicable
+        // rung's unit price, or retail when the quantity is below the entry
+        // rung. #product-price must keep showing PUBLIC retail because it
         // carries the itemprop="price" microdata that feeds Merchant Center, so
-        // without this lock the sticky bar would contradict the business panel
-        // sitting directly above it — retail on the buy button, business price
-        // in the panel. (ERR-110)
+        // without this lock the mirror would stomp the ladder-driven value the
+        // moment anything re-rendered the price. (ERR-110, ERR-139)
         const priceEl = document.getElementById('product-price');
         if (priceEl && stickyPrice) {
             const mirror = () => {

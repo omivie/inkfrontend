@@ -373,6 +373,19 @@ const API = {
                     return withRid({ ok: false, error: errorMsg, code: errorCode, details: errorDetails });
                 }
 
+                // A business account tried to apply a promo coupon. Volume
+                // pricing and coupons are mutually exclusive server-side (a
+                // coupon is not floor-clamped, so stacking could sell below
+                // cost). This is a plain 400, which without this branch would
+                // THROW and land in the coupon field's generic catch — telling
+                // the customer "couldn't apply that coupon right now, please try
+                // again" about a code that can never work, and offering them a
+                // different code that also can't. It is a rule, not a failure,
+                // so it gets an envelope and its own copy. (ERR-139)
+                if (errorCode === 'B2B_COUPON_EXCLUDED') {
+                    return withRid({ ok: false, error: errorMsg, code: errorCode });
+                }
+
                 // Forbidden — caller decides between "verify email", "B2B only",
                 // or generic deny. Backend's specific code wins when present.
                 if (response.status === 403 || errorCode === 'FORBIDDEN') {
