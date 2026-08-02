@@ -113,8 +113,12 @@ test('§1 no categories-mega anywhere; shared headers stay byte-identical', () =
     // the /quote trade-quote landing page, and /account/reviews (the review-
     // flywheel "My Reviews" page + one-click-rating fallback landing) all ship
     // the shared header.
-    assert.equal(PAGES_WITH_NAV.length, 29,
-        `expected 29 pages with the shared nav, got ${PAGES_WITH_NAV.length}`);
+    // 30 since Aug 2026: /business, the Business Centre. It is a FLAT file
+    // (html/business.html) rather than html/business/ on purpose — four parity
+    // walkers skip a directory named `business`, so a folder would silently
+    // exempt it from this very check.
+    assert.equal(PAGES_WITH_NAV.length, 30,
+        `expected 30 pages with the shared nav, got ${PAGES_WITH_NAV.length}`);
     const hashes = new Set(PAGES_WITH_NAV.map(({ file, html }) => {
         const header = extractSiteHeader(html);
         assert.ok(header, `${file} has a nav but no site-header block`);

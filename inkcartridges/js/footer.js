@@ -265,6 +265,17 @@
                                 <li><a href="/faq">FAQ</a></li>
                                 <li><a href="/contact">Contact Us</a></li>
                                 <li><a href="/quote">Request a Quote</a></li>
+                                <!-- The ONLY site-wide entry point to /business.
+                                     Without it the Business Centre is an orphan:
+                                     every other B2B surface is gated behind a
+                                     signed-in approved account, so a prospective
+                                     business customer has no way to discover that
+                                     volume pricing exists at all.
+                                     Labelled "Business & Bulk Pricing", never the
+                                     retired "Business Accounts" wording — there is
+                                     no account-level rate under a volume model, and
+                                     legal-pages §7 still bans the old label. -->
+                                <li><a href="/business">Business &amp; Bulk Pricing</a></li>
                             </ul>
                         </details>
                     </nav>

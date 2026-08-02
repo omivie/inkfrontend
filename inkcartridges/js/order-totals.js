@@ -329,7 +329,9 @@
             });
         }
 
-        // Business account (B2B) tier discount.
+        // Business account (B2B) volume discount. Not a "tier" — the flat
+        // bronze/silver/gold tiers were retired with v2 (ERR-139); this is a
+        // per-line quantity discount and the label names the COMPANY.
         if (positive(o.b2bDiscount)) {
             const label = (typeof window !== 'undefined' && typeof window.businessDiscountLabel === 'function')
                 ? window.businessDiscountLabel(o.b2bMeta)

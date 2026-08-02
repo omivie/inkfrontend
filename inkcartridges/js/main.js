@@ -114,9 +114,13 @@ function initActiveNavLink() {
  * The Admin link is NO LONGER shipped in static page markup. It used to sit
  * `hidden` in every page's header, but that exposed `href="/admin"` in the
  * public HTML source of every customer-facing page — a Google Merchant Center
- * "site quality" flag. It is now created and inserted into `.header-actions`
+ * "site quality" flag. It is now created and inserted into `.header-lead`
  * by this function ONLY after the account is verified as admin, so guests and
  * ordinary customers never receive the element at all (Jul 2026, MC audit).
+ *
+ * It lands on the LEFT of the brand row — after the phone/email contact block,
+ * hard against the logo — not in the right-hand `.header-actions` cluster. That
+ * cluster is reserved for the customer-facing Business account button (Aug 2026).
  *
  * Security model is unchanged: this is UI sugar, not an access gate. The
  * /admin route re-verifies the role server-side on every visit (middleware +
@@ -143,8 +147,8 @@ function initAdminHeaderLink() {
     function ensureLink() {
         var existing = document.getElementById('header-admin-link');
         if (existing) return existing;
-        var actions = document.querySelector('.header-actions');
-        if (!actions) return null;
+        var lead = document.querySelector('.header-lead');
+        if (!lead) return null;
         var a = document.createElement('a');
         a.href = '/admin';
         a.className = 'header-actions__item header-actions__item--admin';
@@ -153,9 +157,9 @@ function initAdminHeaderLink() {
         a.innerHTML = '<span class="header-actions__icon">' +
             '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>' +
             '</span><span>Admin</span>';
-        // Insert as the first action so it sits before Account, matching the
-        // previous markup order.
-        actions.insertBefore(a, actions.firstElementChild);
+        // Append so it sits AFTER the contact block — i.e. hard against the
+        // logo — at the inner edge of the header's left column.
+        lead.appendChild(a);
         return a;
     }
 

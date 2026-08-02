@@ -186,7 +186,13 @@ const COLUMNS = {
     // Drum Units (/shop?category=drums) matches the bot footer's fourth category,
     // so a crawler and a human see the same four-category set — anti-cloaking §2c.
     Shop: ['/ink-cartridges', '/toner-cartridges', '/shop?category=drums', '/ribbons', '/shop'],
-    Help: ['/track-order', '/shipping', '/returns', '/faq', '/contact', '/quote'],
+    // /business (Aug 2026) is the ONLY site-wide entry point to the Business
+    // Centre. Every other B2B surface — PDP ladders, card overlays, cart nudges,
+    // the account panel — renders only for a signed-in APPROVED account, so
+    // without this link a prospective business customer has no way to discover
+    // that volume pricing exists. It sits last in Help, next to /quote, because
+    // /quote is the intake it hands off to.
+    Help: ['/track-order', '/shipping', '/returns', '/faq', '/contact', '/quote', '/business'],
     Company: ['/about', '/genuine-vs-compatible', '/terms', '/privacy'],
 };
 

@@ -1,5 +1,17 @@
 # Business Account pricing — Frontend handoff (Jul 2026, v2: volume discount)
 
+> **⚠️ THE NUMBERS IN THIS DOCUMENT ARE SUPERSEDED (2026-08-02).**
+> The **mechanism** described below is still exactly right. The **matrix is not**:
+> the backend re-seeded it on 2026-08-02 (migration 127, commit `a9bff6d`) — top
+> discount 18% → **10%**, breaks 3/5/10/20 → **3/4/7/8** (under $100) and
+> **2/3/6/7** ($100+), and 4 bands → **6**. Every "Buy 5+ / Buy 10+ / 20+" example
+> below is stale, and this document's original worked example matched no live band
+> even when it was written.
+>
+> Current matrix: [`business-volume-discount-range-update-aug2026.md`](./business-volume-discount-range-update-aug2026.md).
+> Live truth: `npm run sweep:b2b` → `tests/fixtures/business-pricing-sweep.json`.
+> See ERR-140.
+
 **What changed from v1:** the flat bronze/silver/gold account tiers are **gone**. A business account's discount is now a per-line **volume discount** whose % depends on **(the product's unit price band × the line quantity)** — buy more of an item to save more, and cheaper items discount deeper. It is still floor-clamped so no line is ever sold below a 5% net margin, and it is still computed by one backend helper so the shown price always equals the charged price.
 
 ## TL;DR for the FE

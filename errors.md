@@ -41,6 +41,155 @@ describing the same incident.
 
 ---
 
+## ERR-140 — The B2B matrix was re-banded and every one of the 74 tests pinning it stayed green (2026-08-02)
+
+**The handoff.** `business-volume-discount-range-update-aug2026.md`: the backend re-seeded the
+volume-discount matrix (migration 127, backend commit `a9bff6d`). Top discount **18% → 10%**,
+break quantities **3/5/10/20 → 3/4/7/8** (under $100) and **2/3/6/7** ($100–$499.99), and the
+single `$100+` band **split into three** at $300 and $500. Mechanism unchanged: per-line
+`price band × quantity` ceiling, floor-clamped to a 5% net margin.
+
+**The handoff contradicts itself, and only the sweep could settle it.** Its prose says the $100+
+bands are `2/3/6/7`; its own matrix table says the **$500+** band is `2/3/5/6`. The table is
+right — verified across all 709 SKUs in that band. Nothing in this repo was typed from that
+document; every number below came off the wire.
+
+**The frontend needed no change, and that is the problem.** Every rung, price and percent on the
+storefront is rendered verbatim from `GET /api/business/pricing`. A sweep of every HTML, JS, CSS,
+meta and JSON-LD file found **zero** hardcoded business-pricing numbers, so the handoff's entire
+"static copy" table — "change 18% to 10%", "change the break quantities" — had **nothing to act
+on**. Running the real `describeLadder()` over all 4,015 live payloads: 4,002 ladders rendered, 13
+correct retail fallbacks, 21 non-improving rungs collapsed, percent range 0.5%–10%, **zero
+warnings**. The shipped code absorbed a complete re-band perfectly.
+
+**What rotted instead was the frontend's RECORDED KNOWLEDGE of the matrix.** ERR-139 left 74 tests
+whose fixtures were inline literals captured live on 2026-07-31 — `3:6,5:10,10:14,20:18` and the
+rest. After the re-seed every one of those numbers was false, and **all 74 tests stayed green**,
+because an inline literal asserted against itself. Being data-driven made the storefront immune to
+the re-band and made its test suite silently obsolete. A suite that cannot fail when the world
+changes is not protecting anything.
+
+**The six live bands** (full 4,015-SKU sweep, 2026-08-02, real approved account). Half-open
+`[min, max)` on the GST-inclusive unit price:
+
+| Ladder (`qty:discount_percent`) | Retail range | SKUs |
+|---|---|---|
+| `3:4,4:5,7:8,8:10`   | $5.49 – $19.99     | 312 |
+| `3:3,4:4,7:7,8:9`    | $20.49 – $49.99    | 811 |
+| `3:2,4:3,7:6,8:8`    | $50.49 – $99.99    | 618 |
+| `2:2,3:3,6:6,7:8`    | $100.49 – $299.99  | 1100 |
+| `2:1,3:2,6:5,7:7`    | $300.49 – $497.49  | 452 |
+| `2:0.5,3:1,5:3,6:5`  | $500.49 – $7654.49 | 709 |
+
+(709 + 13 SKUs that floor away to no ladder = 722 carrying that signature; 4,002 + 13 = 4,015.)
+
+**Four things the handoff does not mention, all found by sweeping rather than reading:**
+
+1. **The entry rung is now 2+ in the three $100+ bands** — 2,261 of 4,015 SKUs. `business.js`
+   asserted in prose that "the entry rung is 3+ across every live band", and so did this log and
+   the project memory. Qty 1 is still full retail everywhere, which is the claim the UI actually
+   depends on, but the stated *reason* was wrong and would have been inherited. The
+   `minQuantity < 2` guard in `describeLadder()` went from decorative to **load-bearing**:
+   tightening it to `< 3` would now delete the entry rung of over half the catalog.
+2. **13 SKUs floor all the way to nothing** — all four rungs priced AT retail, `effective_percent:
+   0`, `savings_amount: 0`. Every rung is dropped, `describeLadder()` returns null, the product
+   renders plain retail with no B2B surface. Correct, silent, and previously impossible — the
+   shallowest rung used to be 3%.
+3. **Fractional percents are live** — `0.5%` across 722 SKUs. `formatPercent(0.5)` → `"0.5%"`
+   already worked; nothing pinned it, and a `Math.round` tidy-up would have printed `0%` or `1%`.
+   It did **not** work below `0.05%`: `Math.round(pct * 10) / 10` yields `0`, and the PDP chip
+   prefixes `&minus;`, so the chip would have read **"−0%" beside a genuinely discounted price**.
+   Unreachable while the shallowest rung was 3%; reachable the moment the entry rung became 0.5%
+   and the loss floor clamps a thin-margin unit below it. Now returns `"<0.1%"` — deliberately
+   not `""`, because an empty string is falsy and the chip's ternary would drop the badge
+   entirely, which is absence-read-as-zero all over again. No live SKU hits it today; the guard
+   is one supplier price change from mattering, and it costs three lines.
+4. **Flooring is UP, not down: 39 SKUs (was 8), 21 rungs collapsed.** The new bands put the
+   deepest two rungs a single unit apart (6→7, 7→8), so the collapse rule does more work than
+   before, and a duplicate rung now asks the customer to buy *one* more unit for nothing.
+
+Also: the 42 rungs where `effective_percent < discount_percent` but `floored:false` are
+**cent-rounding** (9.937% → 9.9%), not flooring. Recorded so the next person doesn't chase it.
+
+**The fix — a live oracle, not more literals.** `scripts/sweep-business-pricing.mjs`
+(`npm run sweep:b2b`, `npm run sweep:b2b:check`) sweeps the whole catalog against production,
+normalises every item through the **real shipped `describeLadder()`** rather than a
+reimplementation, and writes `tests/fixtures/business-pricing-sweep.json`. The suite keeps its
+readable inline band literals — a literal is what makes a re-band show up in `git diff` — and
+**cross-checks them against the swept record**, so the readable copy cannot drift from the true
+one. `--check` fails on drift without writing. A re-band is now a failing command and a visible
+diff, not a discovery six weeks later.
+
+**NOT under `inkcartridges/`.** Vercel serves that tree as the site root —
+`https://www.inkcartridges.co.nz/scripts/fit-audit.js` returns **200** right now. A sweep script
+living there would have published a full per-account price list for the catalog.
+
+**A record can lie too.** Mid-task a sweep record appeared claiming a `8:12` top rung (12%) while
+its own derived `top_percent` field said 10 and the live API said 10 — i.e. the JSON had been
+edited after the script wrote it. A hand-edited record is indistinguishable from a genuine re-band
+unless something checks. So the suite now also asserts the record is **self-consistent**:
+`entry_quantity` / `top_quantity` / `top_percent` are derived from the `ladder` string by the
+sweep, so in a real capture they agree by construction, and the band counts must add up to
+`totals.answered`. Both guards were verified to FAIL on the tampered record and pass on a fresh one.
+
+**Copy: nothing changed, deliberately.** The handoff asks for "Save up to 10%". The site has never
+advertised a business-pricing percentage and still doesn't. Only 312 of 4,015 SKUs can reach 10%,
+and only at qty 8+; 722 top out at 5% and 13 get 0% — a headline number would contradict the live
+PDP ladder on 92% of the catalog, which is the cloaking/parity risk the handoff's own last section
+warns about. Existing tests already assert no `%` appears on the account panel; that stance holds.
+
+**The discovery gap — and the link that led to a login form.** Every B2B surface on the site
+renders only for a signed-in **approved** account: PDP ladders, card overlays, cart nudges, the
+account panel. So a prospective business customer had no way to learn that volume pricing exists
+at all. `/business` is the answer, but it shipped with two holes: **nothing linked to it** (an
+orphan page), and `business-page.js` redirected unauthenticated visitors to
+`/account/login?redirect=/business` — a sign-in form that explains nothing. Both fixed: the footer
+Help column now carries "Business & Bulk Pricing" (the label is deliberately not the retired
+"Business Accounts" — under a volume model there is no account-level rate to advertise), and a
+guest now gets the `#business-denied` explainer, which is not account-specific and already
+carried the real `/quote` intake. An **already-approved customer who is simply signed out** gets a
+"Sign in to see your prices" link injected for guests only — until now the site showed them plain
+retail everywhere and explained nothing.
+
+**Four test walkers were skipping any directory named `business`** —
+`navbar-parity`, `mobile-parity`, `mobile-ux-audit`, `admin-header-link`, plus a dead
+`inkcartridges/business` root in `search-enter-key`. Fossils of `html/business/{index,apply}.html`,
+deleted in `68ab525` (2026-04-22, "remove all B2B functionality site-wide"). A new page could
+have opted out of byte-identical-header parity and the mobile audits **by living in a folder**.
+All five removed; `html/business.html` is flat and now genuinely walked (69 assertions, green).
+`legal-pages` §7 was rewritten in the same pass: it claimed those pages "never existed" and that a
+business CTA "implied a product surface we don't actually run" — both false, and the second is the
+premise that would have blocked this work. It now guards what actually matters (no
+`/business/apply`, no `?subject=Business` alias, no application `<form>`, both rewrites present,
+footer link present).
+
+- **Verified**: B2B suite **84 tests** (was 74), all fixtures re-captured live; repo suite
+  **3,473 tests, 0 failing** (baseline before this work: 3,437/0); sweep re-run clean (6 bands /
+  4,015 answered / 0 unanswered); `--check` proven to exit **1** on a tampered record and **0** on
+  a matching one. **21/21 live browser checks** against production data in an isolated Chromium,
+  signed in as a real approved account: PDP ladder renders `2+ $108.77 / 3+ $107.66 / 6+ $104.33 /
+  7+ $102.11` matching the API verbatim, entry rung 2+ on a $100+ SKU, qty 1 says "standard",
+  qty 2 quotes the business price, `#product-price` microdata still public retail (110.99),
+  cart row "Business account — Home = −$3.92" equal to the swept `discount_amount`, per-line
+  nudges, coupon field disabled with its reason, no `−0%` anywhere, no page errors; and as a
+  guest: no ladder, no login bounce, explainer + sign-in route, account body hidden.
+- **Backend note**: `/api/products` `meta.total` says **4022** while its 21 pages serve **4015**
+  rows — no null SKUs, no duplicates. The sweep records the shortfall rather than silently
+  reconciling it, and hard-fails if it ever exceeds 1%. Worth a backend look.
+- **Trap, again**: a second Claude session was editing this repo concurrently on the same handoff —
+  it authored the sweep script, added `droppedAtOrAboveRetail` and the `formatPercent` `<0.1%`
+  floor to `business.js`, and later a header "Business" shortcut. Two of its changes broke
+  assertions in the B2B suite that pinned *syntax* rather than *behaviour* (an arrow-expression
+  regex on the `onAuthStateChange` callback, and a blanket `sessionStorage` ban). Both were the
+  tests' fault, not the code's. Same lesson as ERR-139's ERR-138 collision: **check `git status`
+  and both logs before assuming you are alone in the repo.**
+- **Lesson**: being data-driven moves the rot from the code to the record. Any number a codebase
+  writes down about a system it does not control needs a machine that can re-derive it and a test
+  that fails when the two disagree — otherwise "no code change needed" quietly means "no way left
+  to notice". See [[project_business_account_pricing_jul2026]].
+
+---
+
 ## ERR-139 — Business pricing had been dark on every page for days, and the failure looked exactly like success (2026-07-31)
 
 **Trigger:** a backend handoff, `business-account-pricing-FE-handoff (1).md`, describing v2 of B2B

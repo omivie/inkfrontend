@@ -36,23 +36,38 @@
  * `effective_percent`, never the ceiling — one rule that is honest when floored
  * and identical when not.
  *
- * THE HAZARD THE HANDOFF DOES NOT MENTION: FLOORING PRODUCES DUPLICATE RUNGS
- * -------------------------------------------------------------------------
+ * THE HAZARD NO HANDOFF MENTIONS: FLOORING PRODUCES DUPLICATE RUNGS
+ * -----------------------------------------------------------------
  * When the floor bites, the ladder flattens and consecutive rungs come back at
- * the SAME price. Live examples (2026-07-31, full 1,197-SKU sweep, 8 floored):
+ * the SAME price. Live examples (2026-08-02, full 4,015-SKU sweep, 39 floored):
  *
- *   GDR2025BK        3+ $186.04 | 5+ $182.20 | 10+ $180.79 | 20+ $180.79
- *   GTN2530XLBK-2PK  3+ $274.50 | 5+ $271.49 | 10+ $271.49 | 20+ $271.49
+ *   GDR2025BK   2+ $187.95 | 3+ $186.04 | 6+ $180.79 | 7+ $180.79
+ *   GW213CMY    2+ $1128.32 | 3+ $1124.49 | 5+ $1124.49 | 6+ $1124.49
  *
- * Rendering that ladder verbatim tells a customer to buy 20 to get a price they
- * already had at 10. `describeLadder()` therefore COLLAPSES any rung that is not
+ * Rendering that verbatim tells a customer to buy more units to get a price they
+ * already had. `describeLadder()` therefore COLLAPSES any rung that is not
  * strictly cheaper than the one before it. Every rung this module emits is a
  * real, distinct improvement.
  *
- * AT QUANTITY 1 A BUSINESS ACCOUNT PAYS FULL RETAIL. The entry rung is 3+ across
- * every live band, so there is no such thing as "the business price" of a SKU
- * any more — only the price at a quantity. Anything that shows one number
- * without a quantity beside it is lying.
+ * The Aug-2026 re-band made this MORE important, not less: the deepest two rungs
+ * are now a single unit apart in every band, so a duplicate rung asks the
+ * customer to buy one more unit for nothing.
+ *
+ * A LADDER CAN ALSO FLOOR AWAY COMPLETELY. 13 live SKUs come back with all four
+ * rungs priced AT retail (`effective_percent: 0`, `savings_amount: 0`) because
+ * the item is already too close to cost for any rung to clear the floor. Every
+ * rung is dropped, `describeLadder()` returns null, and the product renders
+ * plain retail with no B2B surface — silently, because that is a real answer
+ * rather than the unrecognised-payload case below, which must warn.
+ *
+ * AT QUANTITY 1 A BUSINESS ACCOUNT PAYS FULL RETAIL. There is no such thing as
+ * "the business price" of a SKU — only the price at a quantity. Anything that
+ * shows one number without a quantity beside it is lying.
+ *
+ * The entry rung is BAND-DEPENDENT: 2+ in the three bands from $100 up, 3+ in
+ * the three below. (Before 2026-08-02 it was 3+ everywhere, and this comment
+ * said so.) Never build on one of those numbers — read `ladder.entry`. The only
+ * durable invariant is that no band has ever had a qty-1 rung.
  *
  * Two endpoints, both auth-gated (verified live: 401 unauthenticated, vs 404 for
  * a bogus /api/business/nope path — the routes exist):
@@ -122,6 +137,10 @@ const Business = {
     _cacheOwner: undefined,
     _statusPromise: null,
     _priceCache: new Map(),   // sku -> item object from the API
+    // True when the last status call returned a NON-ANSWER (5xx, network, throw)
+    // rather than an honest "not a business account". Distinguishing the two is
+    // what stops an outage from looking like a deliberate downgrade (ERR-139).
+    _statusDegraded: false,
 
     // ─────────────────────────────────────────────────────────────────────────
     // Pure helpers (no I/O, no DOM) — these are what the test-suite executes.
@@ -235,7 +254,7 @@ const Business = {
      * @param {object} item  one element of data.items[]
      * @returns {{sku:(string|null), retailPrice:number, breaks:Array<object>,
      *            entry:object, best:object, collapsed:number,
-     *            anyFloored:boolean}|null}
+     *            droppedAtOrAboveRetail:number, anyFloored:boolean}|null}
      */
     describeLadder(item) {
         if (!item || typeof item !== 'object') return null;
@@ -257,6 +276,16 @@ const Business = {
         }
 
         const rungs = [];
+        // A rung can vanish here for a reason the COLLAPSE loop below never
+        // counts. That used to be unreachable: the shallowest ladder rung was
+        // 3%, so `business_price >= retail_price` could not happen. The Aug 2026
+        // re-seed put the entry rung at 0.5%, where a cheap SKU's discount can
+        // round away to nothing — the ladder then silently starts one rung
+        // higher than the matrix says while `collapsed` reports 0. Counted and
+        // returned so the conservation law
+        //   breaks.length + collapsed + droppedAtOrAboveRetail === quantity_breaks.length
+        // is checkable from outside this function.
+        let droppedAtOrAboveRetail = 0;
         for (const raw of item.quantity_breaks) {
             if (!raw || typeof raw !== 'object') continue;
 
@@ -265,9 +294,17 @@ const Business = {
             // A rung at qty < 2 is not a volume break; a rung at or above retail
             // has nothing to advertise. Both are dropped rather than rendered as
             // a "saving" of zero or less.
+            //
+            // `< 2` is LOAD-BEARING, not incidental. It used to sit safely below
+            // every band's entry rung (3+), so it never fired on live data. Since
+            // 2026-08-02 the three $100+ bands enter at 2+, which puts 2,261 of
+            // 4,015 SKUs' entry rung exactly on this boundary — tightening it to
+            // `< 3` would delete the first rung of over half the catalog while
+            // every other rung kept working, and the ladder would just quietly
+            // start one rung too high.
             if (!Number.isFinite(minQuantity) || minQuantity < 2) continue;
             if (!Number.isFinite(businessPrice) || businessPrice <= 0) continue;
-            if (businessPrice >= retailPrice) continue;
+            if (businessPrice >= retailPrice) { droppedAtOrAboveRetail++; continue; }
 
             // savings_amount is DEFINED by the contract as retail_price -
             // business_price. Preferring the server's figure and subtracting two
@@ -314,6 +351,7 @@ const Business = {
             entry: breaks[0],
             best: breaks[breaks.length - 1],
             collapsed,
+            droppedAtOrAboveRetail,
             anyFloored: breaks.some(r => r.floored)
         };
     },
@@ -386,13 +424,27 @@ const Business = {
     },
 
     /**
-     * Format a percent for display: 15 -> "15%", 6.3 -> "6.3%".
+     * Format a percent for display: 15 -> "15%", 6.3 -> "6.3%", 0.03 -> "<0.1%".
+     *
+     * The floor case is not cosmetic. The PDP chip renders this as
+     * `&minus;` + the string, so a percent that rounds to zero prints
+     * "-0%" NEXT TO A PRICE THAT IS GENUINELY LOWER THAN RETAIL. That was
+     * unreachable while the shallowest ladder rung was 3%; the Aug 2026
+     * re-seed put the entry rung at 0.5%, and the "never net below 5% after
+     * fees" floor can clamp a thin-margin unit below 0.05% from there.
+     *
+     * "<0.1%" and not "" — an empty string is falsy, the chip's ternary reads
+     * that as "no percent to show" and omits the badge entirely, and a badge
+     * silently missing from a real discount is the absence-reads-as-zero
+     * failure this whole module exists to prevent (ERR-063/068/139).
+     *
      * @param {number} pct
      * @returns {string}
      */
     formatPercent(pct) {
         if (!Number.isFinite(pct)) return '';
         const rounded = Math.round(pct * 10) / 10;
+        if (pct > 0 && rounded === 0) return '<0.1%';
         return (Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1)) + '%';
     },
 
@@ -442,6 +494,7 @@ const Business = {
         this._statusPromise = null;
         this._priceCache.clear();
         this._cacheOwner = undefined;
+        this._statusDegraded = false;
     },
 
     /**
@@ -477,8 +530,116 @@ const Business = {
         if (this._inited) return;
         this._inited = true;
         if (typeof Auth !== 'undefined' && Auth && typeof Auth.onAuthStateChange === 'function') {
-            Auth.onAuthStateChange(() => this.reset());
+            Auth.onAuthStateChange(() => {
+                this.reset();
+                // Sign-in/sign-out must add or drop the header shortcut without a
+                // reload — reset() has just binned the memoised status, so this
+                // re-asks rather than reading a stale answer.
+                this._evaluateHeaderLink();
+            });
         }
+        this.initHeaderLink();
+    },
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Header entry point — the "Business" shortcut
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /**
+     * sessionStorage key for the instant-show hint, keyed to the user id so one
+     * account's answer can never reveal the button for another.
+     */
+    HEADER_HINT_KEY: 'ink_business_header_hint',
+
+    /**
+     * Reveal the header "Business" shortcut for approved business accounts only.
+     *
+     * The link is CREATED here rather than shipped hidden in markup, for the same
+     * reason the Admin link is (main.js#initAdminHeaderLink): the site header is
+     * byte-identical across 29 pages and hashed by tests/navbar-parity-may2026,
+     * so a fourth static action item would mean editing all 29 in lockstep. It
+     * lands as the FIRST item in `.header-actions` — the slot the Admin shortcut
+     * vacated when it moved to `.header-lead` (Aug 2026).
+     *
+     * This is UI sugar, not an access gate. /business re-checks the account in
+     * BusinessPage.init(), and every endpoint behind it is `requireB2B` server
+     * side, so a wrongly-shown button grants nothing.
+     *
+     * UX: a per-session hint makes the button appear instantly on later page
+     * loads instead of popping in after each navigation. The authoritative
+     * getStatus() call always runs and reconciles it, so a revoked account or a
+     * stale hint self-corrects within one page load.
+     */
+    initHeaderLink() {
+        if (this._headerInited) return;
+        this._headerInited = true;
+        this._evaluateHeaderLink();
+    },
+
+    _ensureHeaderLink() {
+        const existing = document.getElementById('header-business-link');
+        if (existing) return existing;
+        const actions = document.querySelector('.header-actions');
+        if (!actions) return null;
+        const a = document.createElement('a');
+        a.href = '/business';
+        a.className = 'header-actions__item header-actions__item--business';
+        a.id = 'header-business-link';
+        a.setAttribute('aria-label', 'Business Centre');
+        a.innerHTML = '<span class="header-actions__icon">' +
+            '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></svg>' +
+            '</span><span>Business Centre</span>';
+        // First item, so it leads the cluster where Admin used to sit.
+        actions.insertBefore(a, actions.firstElementChild);
+        return a;
+    },
+
+    _removeHeaderLink() {
+        const el = document.getElementById('header-business-link');
+        if (el && el.parentNode) el.parentNode.removeChild(el);
+    },
+
+    _readHeaderHint() {
+        try { return sessionStorage.getItem(this.HEADER_HINT_KEY); } catch (e) { return null; }
+    },
+
+    _writeHeaderHint(value) {
+        try {
+            if (value) sessionStorage.setItem(this.HEADER_HINT_KEY, value);
+            else sessionStorage.removeItem(this.HEADER_HINT_KEY);
+        } catch (e) { /* private mode — the hint is an optimisation, not state */ }
+    },
+
+    /**
+     * Decide whether the shortcut should be on the page right now.
+     *
+     * The one subtlety: getStatus() folds "you are not a business account" and
+     * "we could not reach the backend" into the same inactive shape. Removing
+     * the button on an outage would take a working surface away from a customer
+     * who still has it, and would look exactly like a deliberate downgrade —
+     * the ERR-139 failure mode. So when the status call is DEGRADED we keep
+     * whatever the hint already decided instead of acting on a non-answer.
+     */
+    async _evaluateHeaderLink() {
+        if (typeof document === 'undefined' || !document.querySelector) return;
+        await this._waitForAuth();
+
+        // Guests never see it and never trigger a request.
+        if (!this._isAuthenticated()) {
+            this._removeHeaderLink();
+            this._writeHeaderHint(null);
+            return;
+        }
+
+        const uid = this._userId() || '';
+        if (uid && this._readHeaderHint() === uid) this._ensureHeaderLink();
+
+        const status = await this.getStatus();
+        if (this._statusDegraded) return;   // non-answer — leave the hint's verdict alone
+
+        if (status.active) this._ensureHeaderLink();
+        else this._removeHeaderLink();
+        this._writeHeaderHint(status.active && uid ? uid : null);
     },
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -500,6 +661,7 @@ const Business = {
         if (!this._isAuthenticated()) return Object.assign({}, this.INACTIVE_STATUS);
         if (this._statusPromise) return this._statusPromise;
 
+        this._statusDegraded = false;
         this._statusPromise = (async () => {
             try {
                 const res = await API.get('/api/business/status');
@@ -509,12 +671,18 @@ const Business = {
                     const code = res && res.code;
                     if (code && code !== 'B2B_REQUIRED' && code !== 'FORBIDDEN' && code !== 'UNAUTHORIZED') {
                         this._warn('[Business] status failed:', code, res && res.error);
+                        // A real "no" downgrades the storefront honestly; a 500 or a
+                        // dead backend is a NON-ANSWER wearing the same shape. Callers
+                        // that can hold their nerve (the header shortcut) read this
+                        // flag instead of treating silence as a denial (ERR-139).
+                        this._statusDegraded = true;
                     }
                     return Object.assign({}, this.INACTIVE_STATUS);
                 }
                 return this.readStatus(res.data);
             } catch (e) {
                 this._warn('[Business] status error:', e && e.message);
+                this._statusDegraded = true;
                 return Object.assign({}, this.INACTIVE_STATUS);
             }
         })();
@@ -717,7 +885,7 @@ const Business = {
     },
 
     /**
-     * "Add 1 more to reach 5+ — $32.19 each, saving $14.00 on this line."
+     * "Add 3 more to reach 7+ — $22.78 each, saving $11.97 on this line."
      *
      * The cart's own payload cannot produce this: cart lines carry retail
      * `price_snapshot` / `line_total` and no per-line B2B figure at all (the

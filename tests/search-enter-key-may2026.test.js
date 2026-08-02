@@ -228,7 +228,11 @@ test('every site-header search form keeps an explicit type="submit" button befor
         path.join(ROOT, 'inkcartridges', 'html'),
         path.join(ROOT, 'inkcartridges', 'account'),
         path.join(ROOT, 'inkcartridges', 'product'),
-        path.join(ROOT, 'inkcartridges', 'business'),
+        // `inkcartridges/business/` is NOT listed: it has not existed since
+        // 68ab525 (2026-04-22) and the walk silently no-ops on a missing dir,
+        // so it contributed nothing but the impression of coverage. The Aug-2026
+        // Business Centre is html/business.html and is covered by the html root
+        // above.
     ];
 
     function walk(dir) {

@@ -268,60 +268,25 @@
                 .filter((p) => !isNaN(p.t) && p.v > 0)
                 .sort((a, b) => a.t - b.t);
 
-            const cum = (arr) => { let s = 0; return arr.map((p) => ({ t: p.t, v: (s += p.v) })); };
-            const seriesA = cum(accrual);
-            const seriesB = cum(savings);
+            // Scaling, padding and SVG emission live in js/savings-chart.js so the
+            // Business Centre plots the same idea with the same maths. Series order
+            // is draw order: savings first, points-value on top — unchanged.
+            const drawn = SavingsChart.render(host, {
+                blockClass: 'loyalty-chart',
+                ariaLabel: 'Loyalty value and order savings over time',
+                series: [
+                    { modifier: 'savings', points: savings },
+                    { modifier: 'accrued', points: accrual }
+                ]
+            });
 
-            if (!seriesA.length && !seriesB.length) {
-                host.innerHTML = '';
+            if (!drawn.rendered) {
                 if (legend) legend.hidden = true;
                 if (emptyEl) emptyEl.hidden = false;
                 return;
             }
             if (emptyEl) emptyEl.hidden = true;
             if (legend) legend.hidden = false;
-
-            const allT = [...seriesA, ...seriesB].map((p) => p.t);
-            const allV = [...seriesA, ...seriesB].map((p) => p.v);
-            const minT = Math.min(...allT);
-            const maxT = Math.max(...allT);
-            const maxV = Math.max(1, ...allV);
-            const spanT = (maxT - minT) || 1;
-
-            const W = 600, H = 240, padL = 48, padR = 14, padT = 14, padB = 30;
-            const x = (t) => padL + ((t - minT) / spanT) * (W - padL - padR);
-            const y = (v) => (H - padB) - (v / maxV) * (H - padT - padB);
-
-            const toPoly = (s) => {
-                if (!s.length) return '';
-                const pts = [];
-                if (s[0].t > minT) pts.push(`${x(minT).toFixed(1)},${y(0).toFixed(1)}`);
-                s.forEach((p) => pts.push(`${x(p.t).toFixed(1)},${y(p.v).toFixed(1)}`));
-                const last = s[s.length - 1];
-                if (last.t < maxT) pts.push(`${x(maxT).toFixed(1)},${y(last.v).toFixed(1)}`);
-                return pts.join(' ');
-            };
-
-            const polyA = toPoly(seriesA);
-            const polyB = toPoly(seriesB);
-            const baselineY = y(0).toFixed(1);
-
-            const startLabel = esc(fmtDate(new Date(minT).toISOString()));
-            const endLabel = esc(fmtDate(new Date(maxT).toISOString()));
-            const maxLabel = esc(fmtMoney(maxV));
-
-            host.innerHTML = `
-                <svg class="loyalty-chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="Loyalty value and order savings over time">
-                    <line class="loyalty-chart__axis" x1="${padL}" y1="${padT}" x2="${padL}" y2="${baselineY}"></line>
-                    <line class="loyalty-chart__axis" x1="${padL}" y1="${baselineY}" x2="${W - padR}" y2="${baselineY}"></line>
-                    <text class="loyalty-chart__tick" x="${padL - 6}" y="${(padT + 8).toFixed(1)}" text-anchor="end">${maxLabel}</text>
-                    <text class="loyalty-chart__tick" x="${padL - 6}" y="${baselineY}" text-anchor="end">$0</text>
-                    <text class="loyalty-chart__tick" x="${padL}" y="${H - 8}" text-anchor="start">${startLabel}</text>
-                    <text class="loyalty-chart__tick" x="${W - padR}" y="${H - 8}" text-anchor="end">${endLabel}</text>
-                    ${polyB ? `<polyline class="loyalty-chart__line loyalty-chart__line--savings" points="${polyB}" fill="none"></polyline>` : ''}
-                    ${polyA ? `<polyline class="loyalty-chart__line loyalty-chart__line--accrued" points="${polyA}" fill="none"></polyline>` : ''}
-                </svg>
-            `;
 
             if (legend) {
                 legend.innerHTML = `

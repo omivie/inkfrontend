@@ -323,36 +323,76 @@ test('§7 contact.html loads the Cloudflare Turnstile script', () => {
     assert.match(src, /id="contact-turnstile"/, 'contact.html must render the Turnstile container element');
 });
 
-test('§7 the Business Accounts surface is fully retired', () => {
-    // Three layers must all be clean:
-    //   1. No customer page links to /business/apply (404 — page never existed).
-    //   2. No customer page links to the prefilled-contact alias
-    //      /contact?subject=Business...  (UI was retired 2026-05-15 —
-    //      it just opened the contact form with a pre-filled subject;
-    //      collapsed because it duplicated /contact and implied a
-    //      product surface we don't actually run).
-    //   3. footer.js must not re-introduce either form.
-    //   4. vercel.json must not carry the dead /business/apply rewrite —
-    //      keeping it around invited the orphan link to come back.
+test('§7 the business APPLICATION surface stays retired; /business is an explainer only', () => {
+    // HISTORY, CORRECTED (Aug 2026). This guard used to say the /business pages
+    // "never existed" and that a business CTA "implied a product surface we
+    // don't actually run". Both are wrong. html/business/{index,apply}.html DID
+    // ship (71a69bc "B2B hub", 70274b3 "redesign business landing") and were
+    // deleted on 2026-04-22 in 68ab525, "remove all B2B functionality
+    // site-wide" — a deliberate consumer-only simplification. This test was
+    // written three weeks later, against a tree where they were already gone,
+    // and recorded the wrong reason.
+    //
+    // We now DO run the programme: /api/business/status returns approved
+    // accounts with Net 30 and credit limits, and /api/business/pricing returns
+    // per-SKU volume ladders (swept live across 4,015 SKUs, 2026-08-02). So the
+    // public /business explainer is legitimate and is asserted for below.
+    //
+    // WHAT IS STILL RETIRED, AND WHY IT MUST STAY THAT WAY:
+    //   1. /business/apply — there is STILL no application endpoint, in the
+    //      frontend or in any backend handoff. A form posting to a route that
+    //      does not exist is ERR-138 exactly. The real, tested intake is
+    //      /quote -> POST /api/contact.
+    //   2. /contact?subject=Business... — a dead alias that only prefilled the
+    //      contact form's subject; collapsed into plain /contact 2026-05-15.
+    //   3. Neither may return via footer.js or a vercel.json rewrite.
+    //
+    // The "Business Accounts" label ban is deliberately GONE: the footer now
+    // carries the Business Centre link. It is worded "Business & Bulk Pricing"
+    // because under a volume model there is no account-level rate to advertise —
+    // the discount depends on the item and the quantity, never on who you are.
     const businessApplyRe   = /href="\/business\/apply"/;
     const businessSubjectRe = /href="\/contact\?subject=Business/i;
 
     for (const p of PAGES) {
         assert.ok(!businessApplyRe.test(SRC[p]),
-            `${p}: must not link to /business/apply (page does not exist)`);
+            `${p}: must not link to /business/apply — no application endpoint exists (ERR-138)`);
         assert.ok(!businessSubjectRe.test(SRC[p]),
-            `${p}: must not link to /contact?subject=Business... (Business Accounts CTA was retired)`);
+            `${p}: must not link to /contact?subject=Business... (dead alias, retired 2026-05-15)`);
     }
     assert.ok(!businessApplyRe.test(FOOTER_JS),
-        'footer.js must not link to /business/apply (page does not exist)');
+        'footer.js must not link to /business/apply — no application endpoint exists (ERR-138)');
     assert.ok(!businessSubjectRe.test(FOOTER_JS),
         'footer.js must not link to /contact?subject=Business... — that footer item was deleted on 2026-05-15');
-    assert.ok(!/Business Accounts/.test(FOOTER_JS),
-        'footer.js must not contain the "Business Accounts" label — link + label retired together');
 
     const VERCEL = fs.readFileSync(path.join(ROOT, 'inkcartridges', 'vercel.json'), 'utf8');
+    const SERVE  = fs.readFileSync(path.join(ROOT, 'inkcartridges', 'serve.json'), 'utf8');
     assert.ok(!/\/business\/apply/.test(VERCEL),
-        'vercel.json must not carry the /business/apply rewrite — destination page does not exist and the customer-facing link is gone');
+        'vercel.json must not carry the /business/apply rewrite — the destination page does not exist');
+
+    // ── The explainer itself ────────────────────────────────────────────────
+    const BIZ = fs.readFileSync(path.join(ROOT, 'inkcartridges', 'html', 'business.html'), 'utf8');
+
+    // The ONLY <form> allowed is the shared header search form. Anything else
+    // means an application form grew here, against an endpoint that does not
+    // exist.
+    const forms = BIZ.match(/<form\b[^>]*>/gi) || [];
+    assert.equal(forms.length, 1, '/business must carry exactly one <form> — the shared header search');
+    assert.match(forms[0], /id="site-search-form"/,
+        '/business must not grow an application form; the only intake is /quote (POST /api/contact)');
+
+    assert.match(BIZ, /href="\/quote"/,
+        '/business must route intent to the real /quote intake');
+
+    // Both rewrites, or it works live and 404s in local dev (ERR-092).
+    assert.match(VERCEL, /"source":\s*"\/business"/,
+        'vercel.json must rewrite /business');
+    assert.match(SERVE, /"source":\s*"business"/,
+        'serve.json must mirror the /business rewrite or it 404s in local dev (ERR-092)');
+
+    // A page nothing links to cannot close the discovery gap it was built for.
+    assert.match(FOOTER_JS, /href="\/business"/,
+        'footer.js must link to /business — every other B2B surface is behind a sign-in, so this is the only way a prospective business customer discovers volume pricing');
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

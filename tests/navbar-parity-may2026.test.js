@@ -52,7 +52,14 @@ function walkHtml(dir, out = []) {
         const p = path.join(dir, entry.name);
         if (entry.isDirectory()) {
             // Admin pages have their own chrome (admin-nav.js); skip.
-            if (entry.name === 'admin' || entry.name === 'business') continue;
+            //
+            // `business` was skipped here until Aug 2026 — a fossil of
+            // html/business/{index,apply}.html, deleted in 68ab525 (2026-04-22).
+            // This walk is the byte-identical-header check, so the skip meant a
+            // page could opt out of header parity by living in a folder named
+            // `business`. The new Business Centre is html/business.html and is
+            // checked like every other page.
+            if (entry.name === 'admin') continue;
             walkHtml(p, out);
         } else if (entry.name.endsWith('.html') && !p.endsWith('/admin.html')) {
             out.push(p);

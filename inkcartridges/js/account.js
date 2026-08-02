@@ -836,7 +836,8 @@ const AccountPage = {
         this.loadSavingsBanner();
         // Load loyalty points balance for the dashboard card (non-blocking)
         this.loadLoyaltyBalance();
-        // Business-account status + tier (non-blocking; hidden for retail users)
+        // Business-account status (non-blocking; hidden for retail users).
+        // No tier is fetched or shown — v2 retired them (ERR-139).
         this.loadBusinessStatus();
     },
 

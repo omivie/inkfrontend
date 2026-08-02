@@ -26,6 +26,7 @@
     { "source": "genuine-vs-compatible", "destination": "/html/genuine-vs-compatible.html" },
     { "source": "ribbons", "destination": "/html/ribbons.html" },
     { "source": "quote", "destination": "/html/quote.html" },
+    { "source": "business", "destination": "/html/business.html" },
     { "source": "auth/reset-password", "destination": "/html/account/reset-password.html" },
     { "source": "account", "destination": "/html/account/index.html" },
     { "source": "account/addresses", "destination": "/html/account/addresses.html" },

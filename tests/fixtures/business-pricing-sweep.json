@@ -1,0 +1,1133 @@
+{
+  "captured_at": "2026-08-02T04:00:24.668Z",
+  "api_base": "https://ink-backend-zaeq.onrender.com",
+  "source": "volume",
+  "migration_note": "backend re-seed 2026-08-02 (migration 127, backend commit a9bff6d)",
+  "totals": {
+    "catalog_skus": 4015,
+    "catalog_pagination_total": 4022,
+    "catalog_pagination_shortfall": 7,
+    "requested": 4015,
+    "answered": 4015,
+    "not_found": 0,
+    "inactive": 0,
+    "unanswered": 0,
+    "empty_ladder": 0,
+    "no_ladder_after_normalise": 13,
+    "any_floored_raw": 39,
+    "any_floored": 26,
+    "collapsed_rungs_total": 21,
+    "rungs_dropped_at_or_above_retail": 0
+  },
+  "bands": [
+    {
+      "ladder": "3:4,4:5,7:8,8:10",
+      "min": 5.49,
+      "max": 19.99,
+      "n": 312,
+      "example_sku": "CBCI3BK",
+      "entry_quantity": 3,
+      "top_quantity": 8,
+      "top_percent": 10
+    },
+    {
+      "ladder": "3:3,4:4,7:7,8:9",
+      "min": 20.49,
+      "max": 49.99,
+      "n": 811,
+      "example_sku": "C604XLC",
+      "entry_quantity": 3,
+      "top_quantity": 8,
+      "top_percent": 9
+    },
+    {
+      "ladder": "3:2,4:3,7:6,8:8",
+      "min": 50.49,
+      "max": 99.99,
+      "n": 618,
+      "example_sku": "GMP101A3",
+      "entry_quantity": 3,
+      "top_quantity": 8,
+      "top_percent": 8
+    },
+    {
+      "ladder": "2:2,3:3,6:6,7:8",
+      "min": 100.49,
+      "max": 299.99,
+      "n": 1100,
+      "example_sku": "G80MLBK",
+      "entry_quantity": 2,
+      "top_quantity": 7,
+      "top_percent": 8
+    },
+    {
+      "ladder": "2:1,3:2,6:5,7:7",
+      "min": 300.49,
+      "max": 497.49,
+      "n": 452,
+      "example_sku": "G2128307",
+      "entry_quantity": 2,
+      "top_quantity": 7,
+      "top_percent": 7
+    },
+    {
+      "ladder": "2:0.5,3:1,5:3,6:5",
+      "min": 500.49,
+      "max": 7654.49,
+      "n": 709,
+      "example_sku": "GPFI050KCMY",
+      "entry_quantity": 2,
+      "top_quantity": 6,
+      "top_percent": 5
+    }
+  ],
+  "percent_range": {
+    "min": 0.5,
+    "max": 10
+  },
+  "max_effective_percent": 10,
+  "floored_examples": [
+    {
+      "sku": "GDR2025BK",
+      "found": true,
+      "is_active": true,
+      "retail_price": 191.79,
+      "quantity_breaks": [
+        {
+          "min_quantity": 2,
+          "discount_percent": 2,
+          "business_price": 187.95,
+          "effective_percent": 2,
+          "savings_amount": 3.84,
+          "floored": false
+        },
+        {
+          "min_quantity": 3,
+          "discount_percent": 3,
+          "business_price": 186.04,
+          "effective_percent": 3,
+          "savings_amount": 5.75,
+          "floored": false
+        },
+        {
+          "min_quantity": 6,
+          "discount_percent": 6,
+          "business_price": 180.79,
+          "effective_percent": 5.7,
+          "savings_amount": 11,
+          "floored": true
+        },
+        {
+          "min_quantity": 7,
+          "discount_percent": 8,
+          "business_price": 180.79,
+          "effective_percent": 5.7,
+          "savings_amount": 11,
+          "floored": true
+        }
+      ]
+    },
+    {
+      "sku": "GDR233CLKCMY",
+      "found": true,
+      "is_active": true,
+      "retail_price": 223.99,
+      "quantity_breaks": [
+        {
+          "min_quantity": 2,
+          "discount_percent": 2,
+          "business_price": 219.51,
+          "effective_percent": 2,
+          "savings_amount": 4.48,
+          "floored": false
+        },
+        {
+          "min_quantity": 3,
+          "discount_percent": 3,
+          "business_price": 217.27,
+          "effective_percent": 3,
+          "savings_amount": 6.72,
+          "floored": false
+        },
+        {
+          "min_quantity": 6,
+          "discount_percent": 6,
+          "business_price": 212.49,
+          "effective_percent": 5.1,
+          "savings_amount": 11.5,
+          "floored": true
+        },
+        {
+          "min_quantity": 7,
+          "discount_percent": 8,
+          "business_price": 212.49,
+          "effective_percent": 5.1,
+          "savings_amount": 11.5,
+          "floored": true
+        }
+      ]
+    },
+    {
+      "sku": "GTN2530XLBK-2PK",
+      "found": true,
+      "is_active": true,
+      "retail_price": 282.99,
+      "quantity_breaks": [
+        {
+          "min_quantity": 2,
+          "discount_percent": 2,
+          "business_price": 277.33,
+          "effective_percent": 2,
+          "savings_amount": 5.66,
+          "floored": false
+        },
+        {
+          "min_quantity": 3,
+          "discount_percent": 3,
+          "business_price": 274.5,
+          "effective_percent": 3,
+          "savings_amount": 8.49,
+          "floored": false
+        },
+        {
+          "min_quantity": 6,
+          "discount_percent": 6,
+          "business_price": 271.49,
+          "effective_percent": 4.1,
+          "savings_amount": 11.5,
+          "floored": true
+        },
+        {
+          "min_quantity": 7,
+          "discount_percent": 8,
+          "business_price": 271.49,
+          "effective_percent": 4.1,
+          "savings_amount": 11.5,
+          "floored": true
+        }
+      ]
+    },
+    {
+      "sku": "GTN258XLBK-2PK",
+      "found": true,
+      "is_active": true,
+      "retail_price": 272.99,
+      "quantity_breaks": [
+        {
+          "min_quantity": 2,
+          "discount_percent": 2,
+          "business_price": 267.53,
+          "effective_percent": 2,
+          "savings_amount": 5.46,
+          "floored": false
+        },
+        {
+          "min_quantity": 3,
+          "discount_percent": 3,
+          "business_price": 264.8,
+          "effective_percent": 3,
+          "savings_amount": 8.19,
+          "floored": false
+        },
+        {
+          "min_quantity": 6,
+          "discount_percent": 6,
+          "business_price": 261.49,
+          "effective_percent": 4.2,
+          "savings_amount": 11.5,
+          "floored": true
+        },
+        {
+          "min_quantity": 7,
+          "discount_percent": 8,
+          "business_price": 261.49,
+          "effective_percent": 4.2,
+          "savings_amount": 11.5,
+          "floored": true
+        }
+      ]
+    },
+    {
+      "sku": "GCART055HCMY",
+      "found": true,
+      "is_active": true,
+      "retail_price": 1037.99,
+      "quantity_breaks": [
+        {
+          "min_quantity": 2,
+          "discount_percent": 0.5,
+          "business_price": 1032.8,
+          "effective_percent": 0.5,
+          "savings_amount": 5.19,
+          "floored": false
+        },
+        {
+          "min_quantity": 3,
+          "discount_percent": 1,
+          "business_price": 1027.61,
+          "effective_percent": 1,
+          "savings_amount": 10.38,
+          "floored": false
+        },
+        {
+          "min_quantity": 5,
+          "discount_percent": 3,
+          "business_price": 1006.85,
+          "effective_percent": 3,
+          "savings_amount": 31.14,
+          "floored": false
+        },
+        {
+          "min_quantity": 6,
+          "discount_percent": 5,
+          "business_price": 988.49,
+          "effective_percent": 4.8,
+          "savings_amount": 49.5,
+          "floored": true
+        }
+      ]
+    },
+    {
+      "sku": "GFX3BK",
+      "found": true,
+      "is_active": true,
+      "retail_price": 138.49,
+      "quantity_breaks": [
+        {
+          "min_quantity": 2,
+          "discount_percent": 2,
+          "business_price": 135.72,
+          "effective_percent": 2,
+          "savings_amount": 2.77,
+          "floored": false
+        },
+        {
+          "min_quantity": 3,
+          "discount_percent": 3,
+          "business_price": 134.34,
+          "effective_percent": 3,
+          "savings_amount": 4.15,
+          "floored": false
+        },
+        {
+          "min_quantity": 6,
+          "discount_percent": 6,
+          "business_price": 130.18,
+          "effective_percent": 6,
+          "savings_amount": 8.31,
+          "floored": false
+        },
+        {
+          "min_quantity": 7,
+          "discount_percent": 8,
+          "business_price": 128.49,
+          "effective_percent": 7.2,
+          "savings_amount": 10,
+          "floored": true
+        }
+      ]
+    },
+    {
+      "sku": "GW213CMY",
+      "found": true,
+      "is_active": true,
+      "retail_price": 1133.99,
+      "quantity_breaks": [
+        {
+          "min_quantity": 2,
+          "discount_percent": 0.5,
+          "business_price": 1128.32,
+          "effective_percent": 0.5,
+          "savings_amount": 5.67,
+          "floored": false
+        },
+        {
+          "min_quantity": 3,
+          "discount_percent": 1,
+          "business_price": 1124.49,
+          "effective_percent": 0.8,
+          "savings_amount": 9.5,
+          "floored": true
+        },
+        {
+          "min_quantity": 5,
+          "discount_percent": 3,
+          "business_price": 1124.49,
+          "effective_percent": 0.8,
+          "savings_amount": 9.5,
+          "floored": true
+        },
+        {
+          "min_quantity": 6,
+          "discount_percent": 5,
+          "business_price": 1124.49,
+          "effective_percent": 0.8,
+          "savings_amount": 9.5,
+          "floored": true
+        }
+      ]
+    },
+    {
+      "sku": "GW218CMY",
+      "found": true,
+      "is_active": true,
+      "retail_price": 512.99,
+      "quantity_breaks": [
+        {
+          "min_quantity": 2,
+          "discount_percent": 0.5,
+          "business_price": 510.43,
+          "effective_percent": 0.5,
+          "savings_amount": 2.56,
+          "floored": false
+        },
+        {
+          "min_quantity": 3,
+          "discount_percent": 1,
+          "business_price": 507.86,
+          "effective_percent": 1,
+          "savings_amount": 5.13,
+          "floored": false
+        },
+        {
+          "min_quantity": 5,
+          "discount_percent": 3,
+          "business_price": 497.6,
+          "effective_percent": 3,
+          "savings_amount": 15.39,
+          "floored": false
+        },
+        {
+          "min_quantity": 6,
+          "discount_percent": 5,
+          "business_price": 495.79,
+          "effective_percent": 3.4,
+          "savings_amount": 17.2,
+          "floored": true
+        }
+      ]
+    },
+    {
+      "sku": "GW213KCMY",
+      "found": true,
+      "is_active": true,
+      "retail_price": 1403.79,
+      "quantity_breaks": [
+        {
+          "min_quantity": 2,
+          "discount_percent": 0.5,
+          "business_price": 1396.77,
+          "effective_percent": 0.5,
+          "savings_amount": 7.02,
+          "floored": false
+        },
+        {
+          "min_quantity": 3,
+          "discount_percent": 1,
+          "business_price": 1389.75,
+          "effective_percent": 1,
+          "savings_amount": 14.04,
+          "floored": false
+        },
+        {
+          "min_quantity": 5,
+          "discount_percent": 3,
+          "business_price": 1388.99,
+          "effective_percent": 1.1,
+          "savings_amount": 14.8,
+          "floored": true
+        },
+        {
+          "min_quantity": 6,
+          "discount_percent": 5,
+          "business_price": 1388.99,
+          "effective_percent": 1.1,
+          "savings_amount": 14.8,
+          "floored": true
+        }
+      ]
+    },
+    {
+      "sku": "GCE32KCMY",
+      "found": true,
+      "is_active": true,
+      "retail_price": 750.49,
+      "quantity_breaks": [
+        {
+          "min_quantity": 2,
+          "discount_percent": 0.5,
+          "business_price": 746.74,
+          "effective_percent": 0.5,
+          "savings_amount": 3.75,
+          "floored": false
+        },
+        {
+          "min_quantity": 3,
+          "discount_percent": 1,
+          "business_price": 742.99,
+          "effective_percent": 1,
+          "savings_amount": 7.5,
+          "floored": false
+        },
+        {
+          "min_quantity": 5,
+          "discount_percent": 3,
+          "business_price": 727.98,
+          "effective_percent": 3,
+          "savings_amount": 22.51,
+          "floored": false
+        },
+        {
+          "min_quantity": 6,
+          "discount_percent": 5,
+          "business_price": 725.49,
+          "effective_percent": 3.3,
+          "savings_amount": 25,
+          "floored": true
+        }
+      ]
+    }
+  ],
+  "no_ladder_examples": [
+    {
+      "sku": "GCE74KCMY",
+      "found": true,
+      "is_active": true,
+      "retail_price": 2502.99,
+      "quantity_breaks": [
+        {
+          "min_quantity": 2,
+          "discount_percent": 0.5,
+          "business_price": 2502.99,
+          "effective_percent": 0,
+          "savings_amount": 0,
+          "floored": true
+        },
+        {
+          "min_quantity": 3,
+          "discount_percent": 1,
+          "business_price": 2502.99,
+          "effective_percent": 0,
+          "savings_amount": 0,
+          "floored": true
+        },
+        {
+          "min_quantity": 5,
+          "discount_percent": 3,
+          "business_price": 2502.99,
+          "effective_percent": 0,
+          "savings_amount": 0,
+          "floored": true
+        },
+        {
+          "min_quantity": 6,
+          "discount_percent": 5,
+          "business_price": 2502.99,
+          "effective_percent": 0,
+          "savings_amount": 0,
+          "floored": true
+        }
+      ]
+    },
+    {
+      "sku": "GCE74CMY",
+      "found": true,
+      "is_active": true,
+      "retail_price": 2098.49,
+      "quantity_breaks": [
+        {
+          "min_quantity": 2,
+          "discount_percent": 0.5,
+          "business_price": 2098.49,
+          "effective_percent": 0,
+          "savings_amount": 0,
+          "floored": true
+        },
+        {
+          "min_quantity": 3,
+          "discount_percent": 1,
+          "business_price": 2098.49,
+          "effective_percent": 0,
+          "savings_amount": 0,
+          "floored": true
+        },
+        {
+          "min_quantity": 5,
+          "discount_percent": 3,
+          "business_price": 2098.49,
+          "effective_percent": 0,
+          "savings_amount": 0,
+          "floored": true
+        },
+        {
+          "min_quantity": 6,
+          "discount_percent": 5,
+          "business_price": 2098.49,
+          "effective_percent": 0,
+          "savings_amount": 0,
+          "floored": true
+        }
+      ]
+    },
+    {
+      "sku": "GCF46CMY",
+      "found": true,
+      "is_active": true,
+      "retail_price": 3423.49,
+      "quantity_breaks": [
+        {
+          "min_quantity": 2,
+          "discount_percent": 0.5,
+          "business_price": 3423.49,
+          "effective_percent": 0,
+          "savings_amount": 0,
+          "floored": true
+        },
+        {
+          "min_quantity": 3,
+          "discount_percent": 1,
+          "business_price": 3423.49,
+          "effective_percent": 0,
+          "savings_amount": 0,
+          "floored": true
+        },
+        {
+          "min_quantity": 5,
+          "discount_percent": 3,
+          "business_price": 3423.49,
+          "effective_percent": 0,
+          "savings_amount": 0,
+          "floored": true
+        },
+        {
+          "min_quantity": 6,
+          "discount_percent": 5,
+          "business_price": 3423.49,
+          "effective_percent": 0,
+          "savings_amount": 0,
+          "floored": true
+        }
+      ]
+    },
+    {
+      "sku": "GCF46KCMY",
+      "found": true,
+      "is_active": true,
+      "retail_price": 4239.99,
+      "quantity_breaks": [
+        {
+          "min_quantity": 2,
+          "discount_percent": 0.5,
+          "business_price": 4239.99,
+          "effective_percent": 0,
+          "savings_amount": 0,
+          "floored": true
+        },
+        {
+          "min_quantity": 3,
+          "discount_percent": 1,
+          "business_price": 4239.99,
+          "effective_percent": 0,
+          "savings_amount": 0,
+          "floored": true
+        },
+        {
+          "min_quantity": 5,
+          "discount_percent": 3,
+          "business_price": 4239.99,
+          "effective_percent": 0,
+          "savings_amount": 0,
+          "floored": true
+        },
+        {
+          "min_quantity": 6,
+          "discount_percent": 5,
+          "business_price": 4239.99,
+          "effective_percent": 0,
+          "savings_amount": 0,
+          "floored": true
+        }
+      ]
+    },
+    {
+      "sku": "GC973CMY",
+      "found": true,
+      "is_active": true,
+      "retail_price": 3430.99,
+      "quantity_breaks": [
+        {
+          "min_quantity": 2,
+          "discount_percent": 0.5,
+          "business_price": 3430.99,
+          "effective_percent": 0,
+          "savings_amount": 0,
+          "floored": true
+        },
+        {
+          "min_quantity": 3,
+          "discount_percent": 1,
+          "business_price": 3430.99,
+          "effective_percent": 0,
+          "savings_amount": 0,
+          "floored": true
+        },
+        {
+          "min_quantity": 5,
+          "discount_percent": 3,
+          "business_price": 3430.99,
+          "effective_percent": 0,
+          "savings_amount": 0,
+          "floored": true
+        },
+        {
+          "min_quantity": 6,
+          "discount_percent": 5,
+          "business_price": 3430.99,
+          "effective_percent": 0,
+          "savings_amount": 0,
+          "floored": true
+        }
+      ]
+    }
+  ],
+  "sample_ladders": {
+    "clean_under_100": {
+      "sku": "C143ABK",
+      "found": true,
+      "is_active": true,
+      "retail_price": 30.79,
+      "quantity_breaks": [
+        {
+          "min_quantity": 3,
+          "discount_percent": 3,
+          "business_price": 29.87,
+          "effective_percent": 3,
+          "savings_amount": 0.92,
+          "floored": false
+        },
+        {
+          "min_quantity": 4,
+          "discount_percent": 4,
+          "business_price": 29.56,
+          "effective_percent": 4,
+          "savings_amount": 1.23,
+          "floored": false
+        },
+        {
+          "min_quantity": 7,
+          "discount_percent": 7,
+          "business_price": 28.63,
+          "effective_percent": 7,
+          "savings_amount": 2.16,
+          "floored": false
+        },
+        {
+          "min_quantity": 8,
+          "discount_percent": 9,
+          "business_price": 28.02,
+          "effective_percent": 9,
+          "savings_amount": 2.77,
+          "floored": false
+        }
+      ]
+    },
+    "entry_at_two": {
+      "sku": "C126ACMY",
+      "found": true,
+      "is_active": true,
+      "retail_price": 110.99,
+      "quantity_breaks": [
+        {
+          "min_quantity": 2,
+          "discount_percent": 2,
+          "business_price": 108.77,
+          "effective_percent": 2,
+          "savings_amount": 2.22,
+          "floored": false
+        },
+        {
+          "min_quantity": 3,
+          "discount_percent": 3,
+          "business_price": 107.66,
+          "effective_percent": 3,
+          "savings_amount": 3.33,
+          "floored": false
+        },
+        {
+          "min_quantity": 6,
+          "discount_percent": 6,
+          "business_price": 104.33,
+          "effective_percent": 6,
+          "savings_amount": 6.66,
+          "floored": false
+        },
+        {
+          "min_quantity": 7,
+          "discount_percent": 8,
+          "business_price": 102.11,
+          "effective_percent": 8,
+          "savings_amount": 8.88,
+          "floored": false
+        }
+      ]
+    },
+    "cheapest": {
+      "sku": "CBCI3BK",
+      "found": true,
+      "is_active": true,
+      "retail_price": 5.49,
+      "quantity_breaks": [
+        {
+          "min_quantity": 3,
+          "discount_percent": 4,
+          "business_price": 5.27,
+          "effective_percent": 4,
+          "savings_amount": 0.22,
+          "floored": false
+        },
+        {
+          "min_quantity": 4,
+          "discount_percent": 5,
+          "business_price": 5.22,
+          "effective_percent": 4.9,
+          "savings_amount": 0.27,
+          "floored": false
+        },
+        {
+          "min_quantity": 7,
+          "discount_percent": 8,
+          "business_price": 5.05,
+          "effective_percent": 8,
+          "savings_amount": 0.44,
+          "floored": false
+        },
+        {
+          "min_quantity": 8,
+          "discount_percent": 10,
+          "business_price": 4.94,
+          "effective_percent": 10,
+          "savings_amount": 0.55,
+          "floored": false
+        }
+      ]
+    },
+    "most_expensive": {
+      "sku": "G79L1HKCMY",
+      "found": true,
+      "is_active": true,
+      "retail_price": 7654.49,
+      "quantity_breaks": [
+        {
+          "min_quantity": 2,
+          "discount_percent": 0.5,
+          "business_price": 7616.22,
+          "effective_percent": 0.5,
+          "savings_amount": 38.27,
+          "floored": false
+        },
+        {
+          "min_quantity": 3,
+          "discount_percent": 1,
+          "business_price": 7577.95,
+          "effective_percent": 1,
+          "savings_amount": 76.54,
+          "floored": false
+        },
+        {
+          "min_quantity": 5,
+          "discount_percent": 3,
+          "business_price": 7424.86,
+          "effective_percent": 3,
+          "savings_amount": 229.63,
+          "floored": false
+        },
+        {
+          "min_quantity": 6,
+          "discount_percent": 5,
+          "business_price": 7271.77,
+          "effective_percent": 5,
+          "savings_amount": 382.72,
+          "floored": false
+        }
+      ]
+    }
+  },
+  "cart": {
+    "lines": [
+      {
+        "sku": "CLC431XLY",
+        "quantity": 1
+      },
+      {
+        "sku": "CTN1070BK",
+        "quantity": 4
+      },
+      {
+        "sku": "G712KCMY",
+        "quantity": 1
+      },
+      {
+        "sku": "C804XLBK",
+        "quantity": 1
+      },
+      {
+        "sku": "C02BK",
+        "quantity": 1
+      },
+      {
+        "sku": "G70LC",
+        "quantity": 1
+      }
+    ],
+    "b2b_discount": {
+      "company_name": "Home",
+      "effective_percent": 0.5,
+      "discount_amount": 3.92,
+      "floored_line_count": 0,
+      "source": "volume"
+    },
+    "summary_b2b_discount": 3.92,
+    "ladders": {
+      "CLC431XLY": {
+        "sku": "CLC431XLY",
+        "found": true,
+        "is_active": true,
+        "retail_price": 34.99,
+        "quantity_breaks": [
+          {
+            "min_quantity": 3,
+            "discount_percent": 3,
+            "business_price": 33.94,
+            "effective_percent": 3,
+            "savings_amount": 1.05,
+            "floored": false
+          },
+          {
+            "min_quantity": 4,
+            "discount_percent": 4,
+            "business_price": 33.59,
+            "effective_percent": 4,
+            "savings_amount": 1.4,
+            "floored": false
+          },
+          {
+            "min_quantity": 7,
+            "discount_percent": 7,
+            "business_price": 32.54,
+            "effective_percent": 7,
+            "savings_amount": 2.45,
+            "floored": false
+          },
+          {
+            "min_quantity": 8,
+            "discount_percent": 9,
+            "business_price": 31.84,
+            "effective_percent": 9,
+            "savings_amount": 3.15,
+            "floored": false
+          }
+        ]
+      },
+      "CTN1070BK": {
+        "sku": "CTN1070BK",
+        "found": true,
+        "is_active": true,
+        "retail_price": 24.49,
+        "quantity_breaks": [
+          {
+            "min_quantity": 3,
+            "discount_percent": 3,
+            "business_price": 23.76,
+            "effective_percent": 3,
+            "savings_amount": 0.73,
+            "floored": false
+          },
+          {
+            "min_quantity": 4,
+            "discount_percent": 4,
+            "business_price": 23.51,
+            "effective_percent": 4,
+            "savings_amount": 0.98,
+            "floored": false
+          },
+          {
+            "min_quantity": 7,
+            "discount_percent": 7,
+            "business_price": 22.78,
+            "effective_percent": 7,
+            "savings_amount": 1.71,
+            "floored": false
+          },
+          {
+            "min_quantity": 8,
+            "discount_percent": 9,
+            "business_price": 22.29,
+            "effective_percent": 9,
+            "savings_amount": 2.2,
+            "floored": false
+          }
+        ]
+      },
+      "G712KCMY": {
+        "sku": "G712KCMY",
+        "found": true,
+        "is_active": true,
+        "retail_price": 303.49,
+        "quantity_breaks": [
+          {
+            "min_quantity": 2,
+            "discount_percent": 1,
+            "business_price": 300.46,
+            "effective_percent": 1,
+            "savings_amount": 3.03,
+            "floored": false
+          },
+          {
+            "min_quantity": 3,
+            "discount_percent": 2,
+            "business_price": 297.42,
+            "effective_percent": 2,
+            "savings_amount": 6.07,
+            "floored": false
+          },
+          {
+            "min_quantity": 6,
+            "discount_percent": 5,
+            "business_price": 288.32,
+            "effective_percent": 5,
+            "savings_amount": 15.17,
+            "floored": false
+          },
+          {
+            "min_quantity": 7,
+            "discount_percent": 7,
+            "business_price": 282.25,
+            "effective_percent": 7,
+            "savings_amount": 21.24,
+            "floored": false
+          }
+        ]
+      },
+      "C804XLBK": {
+        "sku": "C804XLBK",
+        "found": true,
+        "is_active": true,
+        "retail_price": 72.99,
+        "quantity_breaks": [
+          {
+            "min_quantity": 3,
+            "discount_percent": 2,
+            "business_price": 71.53,
+            "effective_percent": 2,
+            "savings_amount": 1.46,
+            "floored": false
+          },
+          {
+            "min_quantity": 4,
+            "discount_percent": 3,
+            "business_price": 70.8,
+            "effective_percent": 3,
+            "savings_amount": 2.19,
+            "floored": false
+          },
+          {
+            "min_quantity": 7,
+            "discount_percent": 6,
+            "business_price": 68.61,
+            "effective_percent": 6,
+            "savings_amount": 4.38,
+            "floored": false
+          },
+          {
+            "min_quantity": 8,
+            "discount_percent": 8,
+            "business_price": 67.15,
+            "effective_percent": 8,
+            "savings_amount": 5.84,
+            "floored": false
+          }
+        ]
+      },
+      "C02BK": {
+        "sku": "C02BK",
+        "found": true,
+        "is_active": true,
+        "retail_price": 11.49,
+        "quantity_breaks": [
+          {
+            "min_quantity": 3,
+            "discount_percent": 4,
+            "business_price": 11.03,
+            "effective_percent": 4,
+            "savings_amount": 0.46,
+            "floored": false
+          },
+          {
+            "min_quantity": 4,
+            "discount_percent": 5,
+            "business_price": 10.92,
+            "effective_percent": 5,
+            "savings_amount": 0.57,
+            "floored": false
+          },
+          {
+            "min_quantity": 7,
+            "discount_percent": 8,
+            "business_price": 10.57,
+            "effective_percent": 8,
+            "savings_amount": 0.92,
+            "floored": false
+          },
+          {
+            "min_quantity": 8,
+            "discount_percent": 10,
+            "business_price": 10.34,
+            "effective_percent": 10,
+            "savings_amount": 1.15,
+            "floored": false
+          }
+        ]
+      },
+      "G70LC": {
+        "sku": "G70LC",
+        "found": true,
+        "is_active": true,
+        "retail_price": 209.49,
+        "quantity_breaks": [
+          {
+            "min_quantity": 2,
+            "discount_percent": 2,
+            "business_price": 205.3,
+            "effective_percent": 2,
+            "savings_amount": 4.19,
+            "floored": false
+          },
+          {
+            "min_quantity": 3,
+            "discount_percent": 3,
+            "business_price": 203.21,
+            "effective_percent": 3,
+            "savings_amount": 6.28,
+            "floored": false
+          },
+          {
+            "min_quantity": 6,
+            "discount_percent": 6,
+            "business_price": 196.92,
+            "effective_percent": 6,
+            "savings_amount": 12.57,
+            "floored": false
+          },
+          {
+            "min_quantity": 7,
+            "discount_percent": 8,
+            "business_price": 192.73,
+            "effective_percent": 8,
+            "savings_amount": 16.76,
+            "floored": false
+          }
+        ]
+      }
+    }
+  }
+}

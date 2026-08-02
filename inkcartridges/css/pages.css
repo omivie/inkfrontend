@@ -15291,8 +15291,10 @@ body.page-shop {
    distinct from the green loyalty rows and the red promotional discount badges.
    Every number in these blocks comes verbatim from /api/business/*.
 
-   Under v2 a business account pays full retail at quantity 1 — the entry rung
-   is 3+ — so nothing here shows a price without the quantity that unlocks it.
+   Under v2 a business account pays full retail at quantity 1 — no band has ever
+   had a qty-1 rung — so nothing here shows a price without the quantity that
+   unlocks it. (The entry rung itself is band-dependent: 2+ from $100 up, 3+
+   below. This comment said "3+" flatly until the 2026-08-02 re-band.)
    ========================================================================= */
 
 /* ── PDP quantity-break chips ──────────────────────────────────────────── */
@@ -15465,9 +15467,12 @@ body.page-shop {
 
 /* ── Cart line volume nudge ────────────────────────────────────────────── */
 
-/* "Add 1 more to reach 5+ — $32.19 each, saving $14.00 on this line."
+/* "Add 3 more to reach 7+ — $22.78 each, saving $11.97 on this line."
    The cart payload cannot produce this (lines carry retail only), so it is
-   decorated in from the ladder after the line renders. */
+   decorated in from the ladder after the line renders.
+   Kept byte-identical to the worked example in business.js's nudgeMarkup JSDoc
+   and to what the live CTN1070BK ladder actually renders — the three used to
+   quote three different prices. */
 .cart-item__volume-nudge {
     margin: var(--spacing-xs) 0 0;
     padding: 0.3rem 0.5rem;
@@ -15590,3 +15595,349 @@ body.page-shop {
 .coupon-form__blocked[hidden] {
     display: none;
 }
+
+
+/* =========================================================================
+   BUSINESS CENTRE (/business) — gate, tabs, stat tiles, charts, invoices
+   Aug 2026. Chart classes are the `business-chart` block passed to
+   SavingsChart.render(); the loyalty page passes `loyalty-chart` to the same
+   module, which is why both sets of line colours live in this one file.
+   ========================================================================= */
+
+.business-page {
+    padding: var(--spacing-6, 1.5rem) 0 var(--spacing-8, 2.5rem);
+}
+
+/* ── Gate states ──────────────────────────────────────────────────────── */
+
+.business-gate {
+    padding: var(--spacing-6, 1.5rem) 0;
+}
+
+.business-gate[hidden] { display: none; }
+
+.business-gate__heading {
+    font-size: var(--font-size-2xl, 1.5rem);
+    margin-bottom: var(--spacing-2, 0.5rem);
+}
+
+.business-gate__msg {
+    color: var(--steel-600, #475569);
+    max-width: 60ch;
+    margin-bottom: var(--spacing-4, 1rem);
+}
+
+/* Injected by BusinessPage.markGuest() for signed-out visitors only — the
+   secondary route for an already-approved customer who is simply signed out.
+   Quieter than the /quote button above it: that is the primary action here. */
+.business-gate__signin {
+    margin-top: var(--spacing-3, 0.75rem);
+    font-size: var(--font-size-sm, 0.875rem);
+    color: var(--steel-600, #475569);
+}
+
+/* ── Header ───────────────────────────────────────────────────────────── */
+
+.business-header {
+    margin-bottom: var(--spacing-5, 1.25rem);
+}
+
+.business-header__eyebrow {
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    font-size: 0.75rem;
+    font-weight: var(--font-weight-semibold, 600);
+    color: var(--color-primary, #267FB5);
+    margin-bottom: 0.15rem;
+}
+
+.business-header__title {
+    font-size: var(--font-size-2xl, 1.5rem);
+    margin: 0 0 var(--spacing-2, 0.5rem);
+}
+
+.business-header__facts {
+    list-style: none;
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--spacing-2, 0.5rem);
+    margin: 0;
+    padding: 0;
+}
+
+.business-header__fact {
+    background: var(--steel-100, #f1f5f9);
+    color: var(--steel-600, #475569);
+    border-radius: var(--radius-md, 8px);
+    padding: 0.25rem 0.6rem;
+    font-size: 0.8125rem;
+}
+
+.business-header__fact[hidden] { display: none; }
+
+/* ── Tabs ─────────────────────────────────────────────────────────────── */
+
+.business-tabs {
+    display: flex;
+    gap: var(--spacing-1, 0.25rem);
+    border-bottom: 1px solid var(--steel-200, #e2e8f0);
+    margin-bottom: var(--spacing-5, 1.25rem);
+    overflow-x: auto;
+}
+
+.business-tab {
+    appearance: none;
+    background: none;
+    border: 0;
+    border-bottom: 3px solid transparent;
+    padding: 0.6rem 0.9rem;
+    min-height: var(--tap-min, 48px);
+    font-size: var(--font-size-base, 1rem);
+    font-weight: var(--font-weight-medium, 500);
+    color: var(--steel-600, #475569);
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+.business-tab:hover { color: var(--color-primary, #267FB5); }
+
+.business-tab--active {
+    color: var(--color-primary, #267FB5);
+    border-bottom-color: var(--color-primary, #267FB5);
+}
+
+.business-panel[hidden] { display: none; }
+
+/* ── Stat tiles ───────────────────────────────────────────────────────── */
+
+.business-stats {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: var(--spacing-3, 0.75rem);
+    margin-bottom: var(--spacing-6, 1.5rem);
+}
+
+@media (min-width: 640px) {
+    .business-stats { grid-template-columns: repeat(3, 1fr); }
+}
+
+.business-stat {
+    background: #fff;
+    border: 1px solid var(--steel-200, #e2e8f0);
+    border-radius: var(--radius-lg, 12px);
+    padding: var(--spacing-4, 1rem);
+}
+
+.business-stat__label {
+    font-size: 0.8125rem;
+    color: var(--steel-500, #64748b);
+    margin-bottom: 0.35rem;
+}
+
+.business-stat__value {
+    font-size: var(--font-size-2xl, 1.5rem);
+    font-weight: var(--font-weight-bold, 700);
+    color: var(--steel-900, #0f172a);
+    line-height: 1.2;
+}
+
+.business-stat__sub {
+    font-size: 0.8125rem;
+    color: var(--steel-500, #64748b);
+    margin-top: 0.25rem;
+    min-height: 1em;
+}
+
+.business-stat__sub--alert {
+    color: var(--magenta-primary, #C71F6E);
+    font-weight: var(--font-weight-semibold, 600);
+}
+
+/* ── Sections + charts ────────────────────────────────────────────────── */
+
+.business-section {
+    margin-bottom: var(--spacing-6, 1.5rem);
+}
+
+.business-section__heading {
+    font-size: var(--font-size-lg, 1.125rem);
+    margin-bottom: var(--spacing-3, 0.75rem);
+}
+
+.business-section__more { margin-top: var(--spacing-3, 0.75rem); }
+
+.business-graph {
+    width: 100%;
+    background: #fff;
+    border: 1px solid var(--steel-200, #e2e8f0);
+    border-radius: var(--radius-lg, 12px);
+    padding: 0.75rem;
+}
+
+.business-chart { width: 100%; height: auto; display: block; }
+.business-chart__axis { stroke: var(--steel-200, #e2e8f0); stroke-width: 1; }
+.business-chart__tick { fill: var(--steel-500, #64748b); font-size: 11px; }
+.business-chart__line { stroke-width: 2.5; vector-effect: non-scaling-stroke; }
+.business-chart__line--b2b { stroke: #267FB5; }
+.business-chart__line--other { stroke: #C71F6E; }
+.business-chart__line--spend { stroke: #D4A017; }
+
+.business-graph__legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1.25rem;
+    margin-top: 0.6rem;
+    font-size: 0.8125rem;
+    color: var(--steel-600, #475569);
+}
+
+.business-graph__legend[hidden] { display: none; }
+
+.business-legend__item { display: inline-flex; align-items: center; gap: 0.4rem; }
+
+.business-legend__swatch {
+    width: 14px;
+    height: 3px;
+    border-radius: 2px;
+    display: inline-block;
+}
+
+.business-legend__swatch--b2b { background: #267FB5; }
+.business-legend__swatch--other { background: #C71F6E; }
+
+/* A partial chart has to LOOK partial — this line is never decorative. */
+.business-caveat {
+    margin-top: 0.5rem;
+    font-size: 0.8125rem;
+    color: var(--steel-600, #475569);
+    font-style: italic;
+}
+
+.business-caveat[hidden] { display: none; }
+
+/* ── Reorder tiles ────────────────────────────────────────────────────── */
+
+.business-reorder {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: var(--spacing-3, 0.75rem);
+}
+
+@media (min-width: 640px) {
+    .business-reorder { grid-template-columns: repeat(2, 1fr); }
+}
+
+.business-reorder__item {
+    background: #fff;
+    border: 1px solid var(--steel-200, #e2e8f0);
+    border-radius: var(--radius-lg, 12px);
+    padding: var(--spacing-3, 0.75rem);
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+    align-items: flex-start;
+}
+
+.business-reorder__name {
+    font-weight: var(--font-weight-semibold, 600);
+    color: var(--steel-900, #0f172a);
+    text-decoration: none;
+}
+
+.business-reorder__name:hover { color: var(--color-primary, #267FB5); }
+
+.business-reorder__meta {
+    font-size: 0.8125rem;
+    color: var(--steel-500, #64748b);
+}
+
+/* ── Invoices ─────────────────────────────────────────────────────────── */
+
+.business-filters {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--spacing-3, 0.75rem);
+    align-items: flex-end;
+    margin-bottom: var(--spacing-4, 1rem);
+}
+
+.business-filter { display: flex; flex-direction: column; gap: 0.25rem; }
+
+.business-filter__label {
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--steel-500, #64748b);
+}
+
+.business-filter__input {
+    min-height: var(--tap-min, 48px);
+    border: 1px solid var(--steel-200, #e2e8f0);
+    border-radius: var(--radius-md, 8px);
+    padding: 0 0.6rem;
+    font-size: var(--font-size-base, 1rem);
+    background: #fff;
+}
+
+.business-invoices { display: flex; flex-direction: column; gap: var(--spacing-2, 0.5rem); }
+
+.business-invoice {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 0.35rem var(--spacing-3, 0.75rem);
+    align-items: center;
+    background: #fff;
+    border: 1px solid var(--steel-200, #e2e8f0);
+    border-radius: var(--radius-lg, 12px);
+    padding: var(--spacing-3, 0.75rem);
+}
+
+@media (min-width: 768px) {
+    .business-invoice {
+        grid-template-columns: 1fr auto auto auto;
+    }
+}
+
+.business-invoice__number {
+    font-weight: var(--font-weight-semibold, 600);
+    color: var(--steel-900, #0f172a);
+}
+
+.business-invoice__meta {
+    font-size: 0.8125rem;
+    color: var(--steel-500, #64748b);
+}
+
+.business-invoice__total {
+    font-weight: var(--font-weight-semibold, 600);
+    white-space: nowrap;
+}
+
+.business-invoice__status {
+    font-size: 0.75rem;
+    font-weight: var(--font-weight-semibold, 600);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    border-radius: 999px;
+    padding: 0.2rem 0.6rem;
+    background: var(--steel-100, #f1f5f9);
+    color: var(--steel-600, #475569);
+    white-space: nowrap;
+    justify-self: start;
+}
+
+.business-invoice__status--paid { background: #dcfce7; color: #166534; }
+.business-invoice__status--unpaid { background: #fef3c7; color: #92400e; }
+.business-invoice__status--void { background: var(--steel-100, #f1f5f9); color: var(--steel-500, #64748b); }
+
+/* The PDF outcome is TOLD, not hidden: a download that couldn't be served
+   says so here rather than leaving a button that appears to do nothing. */
+.business-invoice__note {
+    grid-column: 1 / -1;
+    font-size: 0.8125rem;
+    color: var(--magenta-primary, #C71F6E);
+}
+
+.business-invoice__note[hidden] { display: none; }
+
+.business-error[hidden] { display: none; }

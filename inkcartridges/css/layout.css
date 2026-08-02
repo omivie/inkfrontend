@@ -70,7 +70,7 @@
      base            320–479   compact mobile — logo left + icon-only actions,
                                hamburger + full-width search row, tap-to-call chip
      min-width 480   480–767   large mobile — same composition, more air
-     min-width 768   768–1099  tablet — grid header (contact | logo | actions),
+     min-width 768   768–1099  tablet — grid header (lead | logo | actions),
                                tagline + labels return, STILL hamburger
      min-width 1100  1100+     desktop — full nav row (it measures ~870px of
                                nowrap links + 200px search; below ~1100 it clips)
@@ -97,6 +97,33 @@
     position: relative;
 }
 
+/* Header LEAD — the brand row's left column. Holds the phone/email contact
+   block and, for verified admins only, the JS-injected Admin shortcut
+   (main.js#initAdminHeaderLink), which sits at the column's INNER edge, hard
+   against the logo (Aug 2026).
+
+   This wrapper exists because the two can't share the left grid cell directly:
+   at 1100px that track measures ~280px and the phone+email block alone fills
+   it, so a `justify-self:end` sibling would sit ON TOP of the email. A flex
+   wrapper makes the track size to their sum and lets the email truncate
+   (min-width:0) instead of colliding.
+
+   It owns the column's own positioning (order/width on mobile, grid-column at
+   >=768px) — .header-contact below only styles the contact stack itself. */
+.header-lead {
+    display: flex;
+    align-items: center;
+    /* Mobile: the lead is its own full-width row under the logo, so keep the
+       admin shortcut hard against the contact chip. space-between would fling
+       it to the far right, under the cart icon — visually re-joining the very
+       actions cluster it was moved out of. */
+    justify-content: flex-start;
+    gap: var(--spacing-4);
+    min-width: 0;
+    order: 3;
+    width: 100%;
+}
+
 /* Header contact info — on mobile this is the compact tap-to-call utility
    row under the logo (S0.6, mobile-parity-may2026): phone only, email
    hidden until desktop. */
@@ -106,8 +133,7 @@
     align-items: center;
     gap: var(--spacing-3);
     min-width: 0;
-    order: 3;
-    width: 100%;
+    flex: 0 1 auto;
 }
 
 .header-contact__item {
@@ -395,12 +421,27 @@
     display: none;
 }
 
-.header-actions__item--admin {
+/* The two privileged shortcuts share one colour on purpose: Admin (owner-only,
+   in .header-lead on the left) and Business (approved B2B accounts, first item
+   in .header-actions). Both read as "this account has something extra", so they
+   must never drift apart — hence one rule, not two. */
+.header-actions__item--admin,
+.header-actions__item--business {
     color: var(--color-primary);
 }
 
-.header-actions__item--admin:hover {
+.header-actions__item--admin:hover,
+.header-actions__item--business:hover {
     color: var(--color-primary-dark);
+}
+
+/* "Business Centre" is the only two-word label in the cluster. Left to wrap it
+   breaks onto two lines and drops that item's text below the baseline of
+   Account / Favourites / Cart, which reads as a broken header rather than a
+   longer label. The labels only exist at >=1100px anyway (see MODE D), and the
+   measurements there leave room for the extra ~35px. */
+.header-actions__item--business > span:not(.header-actions__icon) {
+    white-space: nowrap;
 }
 
 
@@ -665,12 +706,22 @@
         gap: var(--spacing-3);
     }
 
-    /* Contact returns to a stacked column on the left (phone only —
-       the email would starve the grid until desktop). */
-    .header-contact {
+    /* The lead takes the left grid track; contact stacks inside it (phone only
+       — the email would starve the grid until desktop) and the admin shortcut,
+       when present, is pushed to the track's inner edge by space-between. */
+    .header-lead {
         order: 0;
         grid-column: 1;
-        justify-self: start;
+        /* stretch (not start) so space-between has room to push the admin
+           shortcut to the track's inner edge, beside the logo. With no admin
+           link the lone contact stack still sits flush left, as before. */
+        justify-self: stretch;
+        justify-content: space-between;
+        width: auto;
+        margin: 0;
+    }
+
+    .header-contact {
         flex-direction: column;
         align-items: flex-start;
         gap: var(--spacing-1);
@@ -702,8 +753,9 @@
 }
 
 /* Tagline returns once the centre column can afford its ~300px without
-   squeezing the action icons out of their 1fr track (measured: the
-   4-item admin case needs >=~250px per side, available from ~900px). */
+   squeezing the action icons out of their 1fr track (measured: the widest
+   case needs >=~250px per side, available from ~900px). Since Aug 2026 the
+   extra item is on the LEFT (contact + admin), not the right. */
 @media (min-width: 900px) {
     .logo__tagline {
         display: block;
@@ -732,12 +784,6 @@
 
     .logo__text {
         font-size: var(--font-size-3xl);
-    }
-
-    /* Labels return under the action icons (measured: with labels the
-       4-item admin case needs >=~300px per side — comfortable from 1100). */
-    .header-actions__item > span:not(.header-actions__icon) {
-        display: inline;
     }
 
     /* Fluid gap: ~17px at 1100 easing to the classic 32px by ~1600px —
@@ -837,6 +883,37 @@
         bottom: 0;
         background: rgba(0, 0, 0, 0.35);
         z-index: 5;
+    }
+}
+
+/* ==========================================================================
+   HEADER MODE E — wide desktop (>=1280px): the action LABELS return.
+   Aug 2026. They used to appear at 1100 alongside the desktop nav, which fitted
+   while the widest label was one short word. The cluster is now Business Centre
+   / Account / Favourites / Cart, and "Business Centre" alone measures ~124px:
+
+     labelled cluster  = 321px of items
+     1fr side track    = 307px at 1100  ·  389px at >=1280 (container caps at 1200)
+
+   At 1100 the labelled cluster does not fit even at ZERO gap — it overflows
+   leftward into the centred logo (measured: 27px into the tagline, 9px into the
+   wordmark). So labels now wait for 1280, where 321px + 3x20px gaps = 381px sits
+   inside the 389px track with room to spare. Between 1100 and 1279 the cluster
+   is icon-only, exactly as it is at every narrower width — each item keeps its
+   aria-label, so nothing is lost to assistive tech.
+
+   If you lengthen a label or add a fifth item, RE-MEASURE both numbers above.
+   ========================================================================== */
+@media (min-width: 1280px) {
+    .header-actions__item > span:not(.header-actions__icon) {
+        display: inline;
+    }
+
+    /* Flat, not fluid: the track stops growing once the container hits its
+       1200px cap, so a vw-based gap keeps widening into a fixed space and
+       reintroduces the collision above ~1500px. */
+    .header-actions {
+        gap: 20px;
     }
 }
 
@@ -2157,12 +2234,17 @@ summary.footer-column__heading::-webkit-details-marker {
     }
 
     /* Collapse the low-value rows once scrolled to reclaim vertical space.
-       HEIGHT-DELTA INVARIANT (ERR-101): hiding .header-contact removes ~44px
+       HEIGHT-DELTA INVARIANT (ERR-101): hiding .header-lead removes ~44px
        of document height. main.js#initStickyHeader uses a hysteresis gap
        (SCROLL_ON 80 / SCROLL_OFF 24 = 56px) that MUST stay larger than this
        collapse delta, or the scroll-clamp at a short page's bottom flip-flops
-       the header. If you grow what's hidden here past ~56px, widen that gap. */
-    .site-header--scrolled .header-contact {
+       the header. If you grow what's hidden here past ~56px, widen that gap.
+
+       This hides the WRAPPER, not .header-contact — the admin shortcut now
+       lives in the lead too, and hiding only the contact stack would leave the
+       admin item holding the row open, collapsing the delta to ~0 and killing
+       the reclaim. Cost: a scrolled admin loses the shortcut below 1100px. */
+    .site-header--scrolled .header-lead {
         display: none;
     }
     .site-header--scrolled .logo__tagline {

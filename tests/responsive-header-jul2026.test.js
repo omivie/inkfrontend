@@ -134,3 +134,54 @@ test('R5 retired header CSS does not return (.search-wrapper / storefront .mobil
     assert.ok(!/\.top-bar\s*[,{]/.test(LAYOUT),
         'the unused .top-bar utility bar CSS was removed Jul 2026');
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// R6 — the left column is a real wrapper (.header-lead), Aug 2026
+//
+// The Admin shortcut moved out of the right-hand .header-actions cluster (that
+// slot is reserved for the Business account button) into the header's LEFT
+// column, beside the logo. It cannot simply share the left grid cell with
+// .header-contact: at 1100px that track measures ~280px and the phone+email
+// block alone fills it, so a justify-self:end sibling would render ON TOP of
+// the email — the exact overlap class of bug R1 exists to prevent. The
+// .header-lead flex wrapper makes the track size to the sum instead.
+// ─────────────────────────────────────────────────────────────────────────────
+
+test('R6 .header-lead owns the left column and never absolutely positions itself', () => {
+    const blocks = LAYOUT.match(/^\s*\.header-lead\s*\{[^}]*\}/gm) || [];
+    assert.ok(blocks.length >= 1, '.header-lead must be styled in layout.css');
+    for (const block of blocks) {
+        assert.ok(!/position:\s*absolute/.test(block),
+            `.header-lead must stay in flow — found position:absolute in: ${block}`);
+    }
+    // It is a flex row so the contact stack and the admin shortcut sit side by
+    // side rather than stacking.
+    assert.match(LAYOUT, /^\s*\.header-lead\s*\{[^}]*display:\s*flex/m,
+        '.header-lead must be display:flex');
+    // space-between belongs to the GRID mode only. On mobile the lead is its
+    // own full-width row, where space-between would fling the admin shortcut to
+    // the far right, under the cart icon.
+    assert.match(LAYOUT, /@media \(min-width: 768px\)[\s\S]*?\.header-lead\s*\{[^}]*justify-content:\s*space-between/,
+        '.header-lead must use space-between at >=768px so the admin shortcut is pushed to the column\'s inner edge, beside the logo');
+    assert.match(LAYOUT, /^\s*\.header-lead\s*\{[^}]*justify-content:\s*flex-start/m,
+        'the base (mobile) .header-lead must keep the admin shortcut beside the contact chip, not right-aligned under the cart');
+    // The grid placement lives on the WRAPPER now, not on .header-contact —
+    // otherwise the contact stack and the wrapper fight for column 1.
+    assert.match(LAYOUT, /@media \(min-width: 768px\)[\s\S]*?\.header-lead\s*\{[^}]*grid-column:\s*1/,
+        '.header-lead must take grid-column 1 at >=768px');
+    const contactBlocks = LAYOUT.match(/^\s*\.header-contact\s*\{[^}]*\}/gm) || [];
+    for (const block of contactBlocks) {
+        assert.ok(!/grid-column/.test(block),
+            `.header-contact must no longer place itself in the grid — that moved to .header-lead. Found: ${block}`);
+    }
+});
+
+test('R6b the scrolled collapse hides .header-lead, preserving the ERR-101 height delta', () => {
+    // Hiding only .header-contact would leave the admin shortcut holding the
+    // row open, collapsing the reclaimed height to ~0 while initStickyHeader
+    // still assumes a ~44px delta against its 56px hysteresis gap.
+    assert.match(LAYOUT, /\.site-header--scrolled\s+\.header-lead\s*\{\s*display:\s*none/,
+        'the scrolled header must hide .header-lead (the whole left column), not just .header-contact');
+    assert.ok(!/\.site-header--scrolled\s+\.header-contact\s*\{/.test(LAYOUT),
+        'the old .site-header--scrolled .header-contact rule must be gone — it no longer collapses the row (ERR-101)');
+});

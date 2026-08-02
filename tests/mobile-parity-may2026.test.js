@@ -47,7 +47,11 @@ function walkHtml(dir, out = []) {
     for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
         const p = path.join(dir, e.name);
         if (e.isDirectory()) {
-            if (e.name === 'admin' || e.name === 'business') continue;
+            // `business` was skipped here until Aug 2026 — a fossil of the
+            // html/business/ pages deleted in 68ab525 (2026-04-22). Removed so
+            // the Business Centre (html/business.html) cannot dodge mobile
+            // parity by being moved into a folder later.
+            if (e.name === 'admin') continue;
             walkHtml(p, out);
         } else if (e.name.endsWith('.html')) {
             out.push(p);

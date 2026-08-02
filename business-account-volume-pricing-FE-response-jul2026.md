@@ -193,3 +193,81 @@ excluded, per §3 of the handoff.
 Never computed client-side: any price. `business_price`, `savings_amount` and `effective_percent`
 are rendered verbatim; `discount_percent` (the ceiling) is not read by any render path at all, since
 on a floored rung it is not what the customer gets.
+
+---
+
+# Addendum — the Aug 2026 re-band (2026-08-02)
+
+**Handoff:** `readfirst/business-volume-discount-range-update-aug2026.md` (migration 127,
+backend commit `a9bff6d`) · **Log:** ERR-140 · **Tests:** 83 (was 74)
+
+## Verdict: the handoff is correct
+
+Unlike the v1 and v2 documents, **every number in this one checks out.** Verified by sweeping
+`/api/business/pricing` across all **4,015** catalog SKUs (41 calls of 100) with a real approved
+account: 4,015 answered, 0 `found:false`, 0 empty ladders. Six bands, exactly as documented,
+with the break quantities and percentages as written. Thank you — that made this quick.
+
+The cart block was re-read live and is unchanged: `b2b_discount` object at the response top level,
+bare number in `summary`, still no per-line B2B figure.
+
+## No frontend code change was required
+
+Every rung, price and percent on the storefront is rendered verbatim from your endpoint, so the
+re-band landed with **zero** storefront edits. A sweep of every HTML, JS, CSS, meta and JSON-LD
+file found no hardcoded business-pricing numbers, which means §"What DOES need changing (static
+copy only)" had nothing to act on — there is no "Save up to 18%" anywhere to change to 10%.
+
+We ran the shipped `describeLadder()` over all 4,015 live payloads as a check: 4,002 ladders
+rendered, 13 fell back to retail (below), 21 non-improving rungs collapsed, percent range
+0.5%–10%, zero warnings.
+
+## Five things the handoff does not mention
+
+**1. The entry rung is 2+ in the three $100+ bands — 2,261 of 4,015 SKUs.** Worth stating
+explicitly next time, because "the entry rung is 3+ in every band" was true before this re-seed and
+was written into our code comments, this log and our project memory. Qty 1 is still full retail in
+every band, which is the claim our UI actually depends on.
+
+**2. Thirteen SKUs floor all the way to a zero discount.** Every rung comes back priced AT retail
+with `effective_percent: 0`, `savings_amount: 0`, `floored: true` — e.g. `GCE74KCMY` at $2,502.99,
+plus `GCE74CMY`, `GCE40KCMY`, `GCF46CMY`, `GCF46KCMY`, `GC973CMY`, `GCF31KCMY`, `GCF30KCMY`,
+`GCF30CMY`, `GCF36CMY`, `GCF36KCMY`, `GW212CMY`, `GW212KCMY`. We drop every rung and render plain
+retail with no B2B surface, which we believe is right. **Question:** would you rather emit an empty
+`quantity_breaks: []` for these? It would say "no volume discount applies" directly instead of
+making every consumer infer it from four rungs that all equal retail.
+
+**3. Flooring went UP, not down: 39 SKUs (was 8), and 21 rungs are non-improving.** Because the
+deepest two rungs are now a single unit apart (6→7 and 7→8), a floored ladder frequently emits two
+rungs at the same price — `GDR2025BK` charges $180.79 at both 6+ and 7+; `GW213CMY` charges
+$1,124.49 at 3+, 5+ **and** 6+. We collapse any rung that is not strictly cheaper than the previous
+one, so we never tell a customer to buy one more unit for $0. Flagging it again because the
+tighter rung spacing makes it much easier to hit than it was in July.
+
+**4. `effective_percent` can be fractional — `0.5%` on 722 SKUs.** No problem for us, just noting
+that any consumer treating these as integers will round the $500+ band's entry rung to 0% or 1%.
+
+**5. Not a bug, for the record:** 42 rungs have `effective_percent < discount_percent` while
+`floored: false` — that is cent-rounding (a 10% ceiling on $7.95 realises 9.937% → 9.9%), not the
+margin floor. We spent time confirming it; recording it so nobody else does.
+
+## One small data question
+
+`GET /api/products?limit=100&page=N` reports `pagination.total: 4022` but yields **4,015** distinct
+SKUs when walked to exhaustion — a shortfall of 7. Our sweep records the discrepancy rather than
+hiding it. Not urgent, but a paginated reader that trusts `total` will wait forever for 7 rows that
+never arrive.
+
+## What we changed on our side
+
+Nothing user-facing. The re-band exposed that our *record* of the matrix had rotted while our code
+stayed correct: 74 tests pinned the July numbers as inline literals and all 74 stayed green through
+a complete re-band. So we built `npm run sweep:b2b` — it sweeps your endpoint across the catalog,
+normalises through our real shipped ladder code, and writes a record the test suite cross-checks
+its literals against. `npm run sweep:b2b:check` exits non-zero on drift. Next time you re-seed, our
+suite will say so.
+
+**Copy:** we have not added "Save up to 10%". Only 312 of 4,015 SKUs can reach 10%, and only at
+qty 8+; 722 top out at 5% and 13 get 0%. A single headline number would contradict the per-SKU
+ladder on the PDP for most of the catalog, which is the parity risk your own closing section warns
+about. The storefront continues to describe volume pricing without asserting a percentage.

@@ -330,8 +330,11 @@
             // Business-account (B2B) discount. This page estimates its other
             // totals client-side, but a B2B discount CANNOT be estimated: it is
             // computed per line against the "never sell at a loss" floor, so on
-            // thin-margin items it is smaller than the tier %. The only correct
-            // source is the server summary — read it, never derive it.
+            // thin-margin items it is smaller than the ladder's CEILING % for
+            // that rung. ("the tier %" until Aug 2026 — v2 retired tiers; the
+            // ceiling now varies by price band and line quantity, which is all
+            // the more reason not to estimate it.) The only correct source is
+            // the server summary — read it, never derive it.
             const serverSummary = (typeof Cart !== 'undefined' && Cart.serverSummary) || null;
             const b2b = computeDiscountBreakdown(serverSummary);
             this.totals.b2bDiscount = b2b.b2b;

@@ -142,7 +142,15 @@ test('loyalty-page.js: graph derives points-accrued from ledger and savings from
     assert.match(src, /type === 'earn'[\s\S]{0,40}type === 'bonus'/, 'accrual series filters earn + bonus ledger rows');
     assert.match(src, /discount_amount/, 'savings series uses order.discount_amount (NOT subtotal − total)');
     assert.doesNotMatch(src, /Number\(o\.subtotal\)[\s\S]{0,20}Number\(o\.total\)/, 'must not compute savings as subtotal − total');
-    assert.match(src, /<polyline/, 'renders inline SVG polylines (no external chart library)');
+
+    // The polyline emission moved to js/savings-chart.js (Aug 2026) so the
+    // Business Centre shares the maths. The no-external-library guarantee is
+    // asserted where it now lives, plus the delegation itself.
+    assert.match(src, /SavingsChart\.render\(/, 'graph delegates to the shared inline-SVG renderer');
+    const chart = JS('savings-chart.js');
+    assert.match(chart, /<polyline/, 'renders inline SVG polylines (no external chart library)');
+    assert.doesNotMatch(chart, /cdn\.|createElement\(['"]script|import\(/,
+        'the shared chart must stay dependency-free — no CDN, no injected <script>, no dynamic import');
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -225,6 +233,12 @@ function runLoyaltyPage(loyaltyData, coupons, orders, opts = {}) {
     sandbox.window = sandbox;
     sandbox.globalThis = sandbox;
     const ctx = vm.createContext(sandbox);
+    // renderGraph() delegates its scaling + SVG emission to SavingsChart
+    // (Aug 2026 extraction, shared with the Business Centre), so the module has
+    // to be in the realm first. Every graph assertion below is deliberately
+    // UNCHANGED from before the extraction — they are the proof it preserved
+    // behaviour, so do not relax them to accommodate the new module.
+    vm.runInContext(JS('savings-chart.js'), ctx, { filename: 'savings-chart.js' });
     vm.runInContext(JS('loyalty-page.js'), ctx, { filename: 'loyalty-page.js' });
     return { els, run: async () => { for (const cb of domHandlers) { await cb(); } } };
 }

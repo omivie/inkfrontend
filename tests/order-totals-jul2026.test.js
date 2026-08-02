@@ -283,11 +283,17 @@ test('loyalty label carries the POINT COUNT when the backend reports it', () => 
 });
 
 test('B2B row uses businessDiscountLabel when cart.js is present, plain label otherwise', () => {
+    // The injected stub mirrors the REAL businessDiscountLabel in cart.js, which
+    // labels the row with `company_name`. It used to spell a `pricing_tier` here
+    // ("Business account (gold tier)") — dead vocabulary since v2 retired the
+    // flat bronze/silver/gold tiers, and it survived only because the stub is
+    // injected, so the test could keep passing against a field the API no longer
+    // sends. Under volume pricing there is no account-level rate to name.
     const withLabel = loadOrderTotals({
-        businessDiscountLabel: (meta) => `Business account (${meta.pricing_tier} tier)`
+        businessDiscountLabel: (meta) => `Business account — ${meta.company_name}`
     });
-    const t = { b2bDiscount: 4.68, b2bMeta: { pricing_tier: 'gold' } };
-    assert.equal(rowFor(withLabel.rows(t), 'b2b').label, 'Business account (gold tier)');
+    const t = { b2bDiscount: 4.68, b2bMeta: { company_name: 'Acme Print Co' } };
+    assert.equal(rowFor(withLabel.rows(t), 'b2b').label, 'Business account — Acme Print Co');
 
     // The receipt PDF and order-detail do not load cart.js — must not hard-depend.
     const bare = loadOrderTotals();
@@ -413,9 +419,13 @@ test('the two live B2B payload shapes both work (number vs object)', () => {
     assert.equal(asNumber.b2bDiscount, 4.68);
     assert.equal(asNumber.b2bMeta, null);
 
-    const asObject = OT.normalise({ b2b_discount: { pricing_tier: 'gold', discount_amount: 4.68 } });
+    // The live metadata object is { company_name, effective_percent,
+    // discount_amount, floored_line_count, source } — no pricing_tier since v2.
+    const asObject = OT.normalise({
+        b2b_discount: { company_name: 'Acme Print Co', discount_amount: 4.68, source: 'volume' }
+    });
     assert.equal(asObject.b2bDiscount, 4.68);
-    assert.equal(asObject.b2bMeta.pricing_tier, 'gold');
+    assert.equal(asObject.b2bMeta.company_name, 'Acme Print Co');
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -515,7 +525,7 @@ test('normalise(normalise(x)) === normalise(x) — every money field round-trips
         customer_email: 'buyer@example.com',
         subtotal: 89.98, shipping_fee: 0, gst_amount: 11.08, total: 84.98,
         loyalty_discount_amount: 5, loyalty_points_redeemed: 500,
-        b2b_discount: { pricing_tier: 'gold', discount_amount: 4 },
+        b2b_discount: { company_name: 'Acme Print Co', discount_amount: 4, source: 'volume' },
         discount_amount: 15, coupon_code: 'SAVE10', points_earned: 85,
         order_items: [{ product_sku: 'CN-045', product_name: 'Canon 045 Black', quantity: 2, unit_price: 44.99, line_total: 89.98 }]
     };
@@ -530,7 +540,7 @@ test('normalise(normalise(x)) === normalise(x) — every money field round-trips
         assert.deepEqual(plain(twice[f]), plain(once[f]), `${f} did not survive a second normalise()`);
     }
     assert.equal(twice.items.length, once.items.length, 'items must survive');
-    assert.equal(twice.b2bMeta && twice.b2bMeta.pricing_tier, 'gold', 'b2b metadata must survive');
+    assert.equal(twice.b2bMeta && twice.b2bMeta.company_name, 'Acme Print Co', 'b2b metadata must survive');
 
     // And the rendered rows must be identical, which is what the user actually sees.
     assert.deepEqual(plain(OT.rows(twice)), plain(OT.rows(once)));

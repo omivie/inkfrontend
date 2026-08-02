@@ -1067,10 +1067,15 @@
          * does not keep.
          *
          * WHY THIS IS A LADDER AND NOT A PRICE. Under v2 there is no such thing
-         * as "the business price" of a product: the entry rung is 3+ across every
-         * live band, so at quantity 1 a business account pays full retail. A
-         * single business price with no quantity beside it — which is what v1
-         * rendered — is now simply wrong.
+         * as "the business price" of a product: no band has ever had a qty-1
+         * rung, so at quantity 1 a business account pays full retail. A single
+         * business price with no quantity beside it — which is what v1 rendered
+         * — is now simply wrong.
+         *
+         * The entry rung itself is BAND-DEPENDENT and this comment used to claim
+         * otherwise ("3+ across every live band", true until 2026-08-02). It is
+         * now 2+ in the three bands from $100 up and 3+ in the three below, which
+         * is why `renderVolumePricing` reads `ladder.entry` and never a constant.
          *
          * Deliberately NOT touched: #product-price and its itemprop="price"
          * `content` attribute. That microdata mirrors the backend prerender and
