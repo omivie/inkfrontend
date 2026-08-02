@@ -435,13 +435,16 @@
     color: var(--color-primary-dark);
 }
 
-/* "Business Centre" is the only two-word label in the cluster. Left to wrap it
-   breaks onto two lines and drops that item's text below the baseline of
-   Account / Favourites / Cart, which reads as a broken header rather than a
-   longer label. The labels only exist at >=1100px anyway (see MODE D), and the
-   measurements there leave room for the extra ~35px. */
+/* "Business Centre" is the only two-word label in the cluster, and it is set on
+   TWO LINES (an explicit <br> in the injected markup). On one line it measures
+   ~124px against ~67px for the widest single-word label, which overflows the
+   cluster's grid track and collides with the centred logo. Stacked, the item is
+   no wider than "Favourites" and the whole cluster fits at every width where
+   labels show. The row top-aligns (see MODE D) so every icon stays on one line
+   with "Centre" hanging below. */
 .header-actions__item--business > span:not(.header-actions__icon) {
-    white-space: nowrap;
+    text-align: center;
+    line-height: 1.15;
 }
 
 
@@ -786,10 +789,20 @@
         font-size: var(--font-size-3xl);
     }
 
-    /* Fluid gap: ~17px at 1100 easing to the classic 32px by ~1600px —
-       measured so the 4-item admin case (~250px of items) stays inside its
-       ~320px grid track right at the breakpoint. */
+    /* Labels return under the action icons (measured: with labels the widest
+       case needs >=~300px per side — comfortable from 1100). The Business
+       Centre label is deliberately set on two lines so it stays as narrow as
+       the single-word labels; see the --business rule above. */
+    .header-actions__item > span:not(.header-actions__icon) {
+        display: inline;
+    }
+
+    /* TOP-align once labels exist. The two-line Business Centre item is taller
+       than its siblings, and centring would lift its icon out of line with the
+       other three. Top-aligned, every icon sits on one row and "Centre" simply
+       hangs below. */
     .header-actions {
+        align-items: flex-start;
         gap: clamp(var(--spacing-4), 3vw - 1rem, var(--spacing-xl));
     }
 
@@ -885,38 +898,6 @@
         z-index: 5;
     }
 }
-
-/* ==========================================================================
-   HEADER MODE E — wide desktop (>=1280px): the action LABELS return.
-   Aug 2026. They used to appear at 1100 alongside the desktop nav, which fitted
-   while the widest label was one short word. The cluster is now Business Centre
-   / Account / Favourites / Cart, and "Business Centre" alone measures ~124px:
-
-     labelled cluster  = 321px of items
-     1fr side track    = 307px at 1100  ·  389px at >=1280 (container caps at 1200)
-
-   At 1100 the labelled cluster does not fit even at ZERO gap — it overflows
-   leftward into the centred logo (measured: 27px into the tagline, 9px into the
-   wordmark). So labels now wait for 1280, where 321px + 3x20px gaps = 381px sits
-   inside the 389px track with room to spare. Between 1100 and 1279 the cluster
-   is icon-only, exactly as it is at every narrower width — each item keeps its
-   aria-label, so nothing is lost to assistive tech.
-
-   If you lengthen a label or add a fifth item, RE-MEASURE both numbers above.
-   ========================================================================== */
-@media (min-width: 1280px) {
-    .header-actions__item > span:not(.header-actions__icon) {
-        display: inline;
-    }
-
-    /* Flat, not fluid: the track stops growing once the container hits its
-       1200px cap, so a vw-based gap keeps widening into a fixed space and
-       reintroduces the collision above ~1500px. */
-    .header-actions {
-        gap: 20px;
-    }
-}
-
 
 /* Mega Menu Toggle Button */
 .nav-mega-toggle {

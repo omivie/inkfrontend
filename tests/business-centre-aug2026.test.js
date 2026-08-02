@@ -189,8 +189,17 @@ test('§2 the button is JS-injected as the FIRST action item, styled like Admin'
     assert.match(code, /header-actions__item--business/);
     assert.match(code, /a\.href = '\/business'/);
     assert.match(code, /aria-label', 'Business Centre'/);
-    assert.match(code, /<span>Business Centre<\/span>/,
-        'the visible label matches the page it opens — "Business Centre", not "Business"');
+    // The label is set on TWO LINES on purpose. On one line "Business Centre"
+    // measures ~124px against ~67px for the widest single-word label, which
+    // overflows the cluster's grid track and collides with the centred logo
+    // (measured: 27px into the tagline at 1512px). Stacked, the item is 72px —
+    // narrower than "Favourites" — and labels still fit at 1100px.
+    assert.match(code, /<span>Business<br>Centre<\/span>/,
+        'the header label must stay split across two lines; on one line it overflows the ' +
+        'action cluster into the logo. The aria-label carries the full name for assistive tech.');
+    assert.match(LAYOUT_CSS, /\.header-actions \{[^}]*align-items: flex-start/,
+        'the labelled cluster must top-align, or the taller two-line item lifts its icon ' +
+        'out of line with Account / Favourites / Cart');
 
     // No page may ship it statically: the header is byte-identical across 30
     // pages, so a static fourth item would mean editing all 30 in lockstep.

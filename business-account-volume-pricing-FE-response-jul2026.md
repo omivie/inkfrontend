@@ -251,12 +251,53 @@ that any consumer treating these as integers will round the $500+ band's entry r
 `floored: false` — that is cent-rounding (a 10% ceiling on $7.95 realises 9.937% → 9.9%), not the
 margin floor. We spent time confirming it; recording it so nobody else does.
 
-## One small data question
+## One documentation bug in the Aug handoff — please correct it
 
-`GET /api/products?limit=100&page=N` reports `pagination.total: 4022` but yields **4,015** distinct
-SKUs when walked to exhaustion — a shortfall of 7. Our sweep records the discrepancy rather than
-hiding it. Not urgent, but a paginated reader that trusts `total` will wait forever for 7 rows that
-never arrive.
+**The prose and the matrix table disagree about the $500+ band, and the table is right.**
+
+> "New breaks are **3 / 4 / 7 / 8** (bands under $100) and **2 / 3 / 6 / 7** (bands $100+)."
+
+That is true for $100–$299.99 and $300–$499.99, but **not** for $500+, which your own table gives
+as `2 → 0.5% · 3 → 1% · 5 → 3% · 6 → 5%` — quantities **2 / 3 / 5 / 6**. Live confirms the table:
+
+```
+C215AKCMY     $311.99   breaks at 2, 3, 6, 7   ← prose correct
+C206XKCMY     $520.49   breaks at 2, 3, 5, 6   ← prose wrong
+GCART055HCMY  $1037.99  breaks at 2, 3, 5, 6   ← prose wrong
+```
+
+That is **709 SKUs**, the largest band by value. Anyone who implements from the summary line rather
+than the table will show two wrong break quantities on your most expensive products. We took the
+numbers from the live API, so nothing shipped wrong here — but the next reader may not.
+
+## Two things about `GET /api/products` (unrelated to pricing, found while sweeping)
+
+**1. `meta.total` over-counts by exactly 7, consistently.** Walked to exhaustion at `limit=200`:
+
+```
+meta.total reported : 3976
+rows actually served: 3969   (20 pages, 0 duplicates, 0 null SKUs)
+shortfall           : 7
+```
+
+We saw the same **7** an hour earlier at a different catalog size (4022 reported / 4015 served), so
+it is a systematic off-by-7, not churn — most likely `total` counts rows the list query then filters
+out. A client that pages until `collected === meta.total` never terminates.
+
+**2. Requesting the page after the last one returns HTTP 500, not an empty page.**
+
+```
+GET /api/products?limit=200&page=21
+→ {"code":"INTERNAL_ERROR","message":"Failed to fetch products"}
+```
+
+Page 20 is the last with rows. An empty `products: []` would be the correct answer; a 500 makes
+"you have reached the end" indistinguishable from "the backend broke", which is the one distinction
+a sweep has to get right. Combined with (1), the natural implementation — trust `total`, keep
+paging — walks straight into a 500 every time.
+
+Also for the record: pagination lives in **`meta` at the response top level**, not inside `data`.
+And `/api/business/pricing` rate-limits at ~120/min/user; we pace chunks at 650ms.
 
 ## What we changed on our side
 

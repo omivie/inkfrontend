@@ -588,7 +588,13 @@ const Business = {
         a.setAttribute('aria-label', 'Business Centre');
         a.innerHTML = '<span class="header-actions__icon">' +
             '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></svg>' +
-            '</span><span>Business Centre</span>';
+            // Set on TWO LINES via an explicit <br>: "Business Centre" on one
+            // line measures ~124px against ~67px for the other labels, which
+            // overflows the cluster's grid track and collides with the centred
+            // logo. Stacked, the item is no wider than "Favourites". The
+            // aria-label above carries the name for assistive tech, so the
+            // break is presentational only.
+            '</span><span>Business<br>Centre</span>';
         // First item, so it leads the cluster where Admin used to sit.
         actions.insertBefore(a, actions.firstElementChild);
         return a;
