@@ -41,6 +41,190 @@ describing the same incident.
 
 ---
 
+## ERR-143 — A tri-colour handoff asked us to verify a swatch the storefront is forbidden to paint, and the one real defect was a yield regex nobody was looking at (2026-08-03)
+
+**The claim.** `tricolour-catalogue-corrections-FE-handoff-aug2026.md`: six products had their
+`color` corrected; "**Nothing to code.** Purge caches for the affected pages and eyeball the
+swatches." Three action items: purge caches, verify the CMY 3-stripe renders for all 6 SKUs, and
+spot-check `G804CLR` shows "the GENUINE tile fallback".
+
+**Two of the three describe states the code exists to prevent.** All six SKUs are *genuine*, and the
+storefront deliberately never paints a colour tile on a genuine row — the genuine-no-colour-tile
+invariant, enforced across seven render surfaces, because a striped tile is the visual language of a
+**compatible** cartridge and painting one on a genuine product misrepresents the brand. So there is
+no swatch to verify and there must not be. There is also no "GENUINE tile" artefact: `image_url =
+NULL` on a genuine row yields the neutral `placeholder-product.svg`. And there is no colour facet on
+the storefront at all (`filters.js` gates on `.shop-layout`, which no page renders), so the handoff's
+"colour-facet filtering now shows Tri-Colour" had no surface to be true on.
+
+**The flip itself was inert.** `ProductColors.map` has always mapped `'colour'` and `'tri-colour'` to
+the byte-identical gradient and `COLOR_RANK` ranked both 11. Five of the six rows changed nothing but
+a text label. Verified by executing the shipped `utils.js`, not by reading it.
+
+**The one real FE defect was in neither list.** `familyKey` PRIORITY-0 carried its own yield grammar,
+`/^([A-Z]+\d+)(XXL|XL|HY|H)([A-Z]*)$/` — a second, subtly different vocabulary from
+`SeriesCodes.YIELD_SUFFIX` (`[A-Z]*\d+`), 500 lines below it **in the same file**, whose own comment
+says it "covers 200/604/812 (Epson bare-numeric)". `[A-Z]+` required a letter before the digits, so
+bare-numeric codes never collapsed: `804XL` stayed `804XL` while `LC133XL` became `LC133`. Latent
+today only because the backend currently ships pre-collapsed `series_codes`; `api.js`'s
+`_enrichSeriesCodes` fallback emits the uncollapsed form.
+
+**The obvious fix was a regression, and only a measurement caught it.** Widening `[A-Z]+` to
+`[A-Z]*` looks like a one-character typo repair. Replayed over all **1,350** distinct `series_codes`
+live that day, it collapses **zero** codes correctly and **mangles three** — `34217HR → 34217R`,
+`64017HR → 64017R`, `64080HW → 64080W`, all real Lexmark SKUs — because the `H` branch starts eating
+letters out of a bare-numeric body. Delegating to `SeriesCodes.collapseYieldSuffix` was **zero-diff
+across all 1,350** while fixing the bare-numeric class. Both directions are now pinned by name.
+
+**The invariant itself had a hole, on the one path nobody had tested.** All three card renderers
+emitted a hidden `product-card__color-block` beside any image, gated on the colour alone and never on
+source, with `data-fallback="color-block"` — and the image `error` handler reveals it. So a *genuine*
+product whose image 404'd swapped itself for a striped compatible-style tile. Every existing test
+covered `image_url: null`; none covered *"the image failed to load"*, and the optimizer proxy
+rate-limits under load, so this was live rather than theoretical. Now gated on source in
+`products.js`, `shop-page.js` and `product-detail-page.js`, with a test asserting all three.
+
+**Three private colour maps had quietly forked the vocabulary.** `shop-page.js` `loadColorPacks`,
+`admin/pages/cc2-packs.js` `COLOR_DOT`, and `order-detail-page.js` `getColorPlaceholder` each carried
+their own colour→hex table; all three were PascalCase-keyed or name-derived and blind to
+`Tri-Colour`, and one interpolated a `color_hex` **array** straight into CSS
+(`background:#a,#b` — invalid, paints nothing). Same shape as ERR-075 / ERR-129 / ERR-135. A dead
+`isValuePack()` with zero call sites was deleted too: it classified `color === 'colour'` and any name
+containing `' pack'` as a pack, so it would have relabelled all 35 live tri-colour SINGLES the day
+anyone wired it up.
+
+**Eleven backend data defects, found by sweeping rather than reading.** The handoff fixed 5 of 13
+mislabelled rows. Also: `GPG510CLR-2PK` is the *exact* flattening the handoff says it **rejected** for
+PG640 — already shipped, a 2-pack stored as `pack_type: "single"`; `GPG640VPVP` and `GPG640CLR-2PK`
+are byte-identical product names at **$121.99 vs $93.99**; a fuser kit is tagged `Colour` with
+`series_codes: ["220V"]` (a voltage parsed as a product code); and `/api/products` serves 3,969 rows
+while `meta.total` claims 3,976. All in `tri-colour-catalogue-BACKEND-tasks-aug2026.md`.
+
+**The fix is a machine, not a memory.** `npm run audit:colours` sweeps the catalogue against the
+shipped vocabulary and fails on new drift. Its baseline record also fails when a recorded finding
+**stops** tripping — a record that can only go green-to-red rots exactly the way ERR-140's literals
+did.
+
+**Lessons.**
+1. *When two near-identical regexes exist, delete one — do not tune it.* And run the candidate over
+   the whole live key space before believing a one-character diff.
+2. A handoff that says "nothing to code" is a claim about our code, made by someone who cannot see
+   it. Verifying it is cheap; the two things it got wrong were both invariants we had deliberately
+   built and it had no way to know about.
+3. Eyeballing six rows finds six rows. Sweeping 3,969 found eleven defects, including two the handoff
+   believed it had prevented.
+
+---
+
+## ERR-142 — An invoice can never reach a customer's Business Centre, because no client can name the account (2026-08-03)
+
+**The claim.** `business-centre-backend-response-aug2026.md` §A2: invoices will be empty "until an
+operator opens the admin invoice editor and sets the contact-picker link on that customer's
+invoices". Rendered as a reassurance — not a bug, just an unperformed step.
+
+**That step does not exist, and could not be performed.** `grep -rn "business_account_id\|po_number"
+inkcartridges/js/admin/` returns **zero matches**. `buildPayload()` never sent either field, and the
+"Fill details from" picker (`loadFromContact`/`loadFromCustomer`) copies a contact's text and throws
+its `id` away — it is a copier, not a linker. So every invoice the admin tool has ever written
+carries `business_account_id = NULL`.
+
+**Building the picker did not fix it, because the id is not obtainable.** Verified against
+production with the live approved account:
+
+| Attempt | Result |
+|---|---|
+| `business_account_id` = `business_applications.id` | `500` — `violates foreign key constraint standalone_invoices_business_account_id_fkey` |
+| `business_account_id` = `user_id` | `500` — same FK violation |
+| `GET /api/admin/business-accounts` | `404` |
+| `GET /api/admin/business/accounts` | `404` |
+| `/api/business/status`, `/account/summary`, `/admin/business-applications` (list + detail) | `200`, and **none of them carries the account id** |
+
+`business_accounts` is a table distinct from `business_applications`, and **nothing exposes its
+primary key**. The one value that puts an invoice on a portal is unreachable from every client we
+have. This is a backend gap, not a frontend omission, and no amount of admin UI can close it.
+
+**A second bug fell out of testing the first.** `POST /api/admin/invoices` is **not atomic**: a
+payload whose `business_account_id` fails the FK returns `500 INTERNAL_ERROR` *after* inserting the
+invoice row. Two orphans (`3269`, `3270`) were created by two failed calls and had to be deleted by
+hand. A create that reports failure and leaves a numbered tax document behind is worse than either
+outcome on its own.
+
+**What shipped anyway, and why it is not a workaround.** `business_account_id` and `po_number` are
+now in the draft model, `draftFromInvoice()` and `buildPayload()`. That is worth doing on its own
+merits: `setStatusViaFullUpdate()` rehydrates a record by walking `Object.keys(payload)` and
+`documentDrift()` diffs the same key set, so **a field absent from the payload is invisible to
+both**. While `business_account_id` was missing, the first flick of the Paid toggle on a
+server-linked invoice would have silently dropped the link and removed the invoice from the
+customer's portal, with no symptom anywhere. The editor also now states the link in words — "Linked
+to Acme Ltd" or "**Not linked** — this invoice will not appear on any customer's Business Centre" —
+because an unlinked invoice has no other visible symptom, which is exactly the diagnosis problem
+the backend brief §7 flagged as a follow-on.
+
+**The one backend ask**, in `business-centre-FE-response-aug2026.md`: expose `business_accounts.id`
+(a `GET /api/admin/business-accounts` list, or the id on the existing applications payload). The
+picker is built and fails soft-and-loud until that lands; it needs no further frontend work.
+
+---
+
+## ERR-141 — Verifying one backend note found six ways the Business Centre stated things it did not know (2026-08-03)
+
+**The trigger.** `business-centre-backend-response-aug2026.md` said "Nothing for you to build" —
+all six endpoints live. Every endpoint was live, and the shapes matched. Verifying it anyway, with
+a real token against production, turned up six defects. Five were already there; one was *created*
+by the note.
+
+**1. The note made existing copy false.** §B/§1: waived shipping is **omitted** from
+`other_savings` — the backend can't reconstruct it and leaves it out rather than guessing. The
+chart legend still read "Coupons, loyalty **& shipping**", and the tile sub-line "Plus $X from
+coupons, loyalty **and shipping**". The page was naming a saving the data no longer contained. Now
+"Coupons & loyalty".
+
+**2. Two loaders fought over the same three tiles.** `saved` and `spend` come from
+`/analytics/series`; `outstanding` comes from `/account/summary`. They run under `allSettled`, and
+`loadSummary()`'s failure path wrote `'—' / 'Unavailable just now'` into **all three**. Whichever
+call lost the race won the tile: a summary 500 arriving after a good series response replaced two
+correct lifetime figures with "Unavailable". Each loader now owns only its own tiles, on failure
+as well as success.
+
+**3. Absence was rendered as a confident zero.** `Number(d.overdue_invoice_count) || 0` maps `null`
+to `0`, so an unreported count printed "**Nothing outstanding**" — a claim manufactured out of
+missing data, and a direct contradiction whenever `outstanding_balance` was itself rendering `—`.
+Guarded on `Number.isFinite` (ERR-063/068/073/075/076 family, again).
+
+**4. A brand-new account was shown a chart.** Verified live: an account with no orders gets twelve
+buckets of **real `0`s**, not nulls. `.filter(p => p.v !== null)` keeps every one, so `SavingsChart`
+drew a flat line pinned to the axis and `#savings-empty` never appeared. A flat line at zero looks
+like a measurement. `coverage.orders_counted === 0` is the backend saying it measured and found
+nothing, and that is the empty state's job. An account that *has* ordered but saved nothing keeps
+its flat line — that one is a genuine result.
+
+**5. The invoice list silently capped at 50.** `?limit=50`, everything rendered, no pager, and
+`pagination` returned and ignored. A customer with 128 invoices saw 50 and no indication there were
+more. Now paged at 20 with "Showing 20 of 128" and Load more — a cap that announces itself is not a
+cap.
+
+**6. A substituted document arrived in silence.** `BusinessInvoicePdf.download()` already returned
+`{ok:true, source:'generated'}` when it fell back to a local re-render, and `wirePdf()` showed a
+note **only** when `!out.ok`. So the one case the whole narrow-fallback design exists to make
+honest — you are getting a reproduction, not the file we emailed — was the case that said nothing
+on screen. The PDF was stamped internally; the page was not. Now stated in the UI.
+
+**Also consumed while in there** (built, shipped, and never surfaced): `po_number`,
+`amount_outstanding` on part-paid rows, a derived Overdue badge (the summary tile counted overdue
+invoices while nothing in the list marked which), the `overdue`/`void` server filters, today's
+price on reorder tiles via the live pricing path, and the entire §4 detail payload — `bill_to`,
+`lines`, `payment_terms`, `notes`, `emailed_at` — which was being fetched only by the PDF fallback
+and displayed nowhere.
+
+**§A1 needed no change, and that is worth recording.** The note is right that the wire format is
+`{ok:false, error:{code,…}}`, but `js/api.js:329-331` normalises it — `errorCode = data.error.code
+?? data.code` — and hands callers a **flat** `{ok:false, error:<message string>, code:<CODE>}`.
+Following the note into `res.error.code` would read `.code` off a *string*, get `undefined`, and
+send every error down the wrong branch. Pinned in §7 so the next reader of that note doesn't
+"fix" it.
+
+---
+
 ## ERR-140 — The B2B matrix was re-banded and every one of the 74 tests pinning it stayed green (2026-08-02)
 
 **The handoff.** `business-volume-discount-range-update-aug2026.md`: the backend re-seeded the

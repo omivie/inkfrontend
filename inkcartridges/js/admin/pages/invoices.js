@@ -283,6 +283,14 @@ function freshDraft() {
     payment_due_pref: '20',   // '10'|'20'|'30'|'eom' — carried from the contact when filled
     show_due_date: true,      // false = hide the "Payment due by …" line on the invoice
     source_order_id: null,
+    // The customer's OWN purchase-order reference. Printed on the invoice and
+    // shown on their /business portal so they can match it to their paperwork.
+    po_number: '',
+    // FK to business_accounts. This is the ONLY thing that puts an invoice on a
+    // customer's /business portal — GET /api/business/invoices filters on it and
+    // never on email, because a shared or mistyped address would expose another
+    // company's invoices. null = not linked = invisible to every portal.
+    business_account_id: null,
     seller: {
       name: L.legalEntity || 'Office Consumables Ltd',
       gst: L.gstNumber || '',
@@ -317,6 +325,8 @@ function draftFromInvoice(rec) {
   d.payment_due_pref = rec.payment_due_pref || '20';
   d.show_due_date = rec.show_due_date !== false;   // absent/true => keep showing the due date
   d.source_order_id = rec.source_order_id ?? null;
+  d.po_number = rec.po_number ?? '';
+  d.business_account_id = rec.business_account_id ?? null;
   // Server-owned send history — read-only, deliberately absent from buildPayload()
   // (a full-payload PUT would otherwise wipe it on every edit). `emailed_at` is
   // the name the backend actually returns; the last_emailed_* pair is the older
@@ -412,6 +422,14 @@ function buildPayload(d) {
     payment_due_pref: d.payment_due_pref || null,
     show_due_date: d.show_due_date !== false,
     source_order_id: d.source_order_id || null,
+    po_number: d.po_number || null,
+    // MUST be in this payload even when null, and not only so linking works.
+    // setStatusViaFullUpdate() rehydrates a record by walking Object.keys of
+    // THIS object, and documentDrift() diffs the same key set — so a field
+    // absent here is invisible to both. While `business_account_id` was missing,
+    // the Paid toggle's full-record PUT would have silently dropped an existing
+    // link and taken the invoice off the customer's portal, with no symptom.
+    business_account_id: d.business_account_id || null,
     seller: { ...d.seller, address: lines(d.seller.address) },
     customer: { ...d.customer, address: lines(d.customer.address) },
     // Sent only when filled; backend ignores unknown keys (cf. preview_totals) until
@@ -1017,6 +1035,10 @@ function openEditor(draft) {
   // Suggest the next number for a brand-new invoice — auto-filled but editable.
   // Best-effort: if the lookup fails or the operator already typed one, leave it.
   if (!draft.id && !draft.invoice_number) prefillNextNumber(token);
+
+  // Best-effort too: the block renders its own "checking / unavailable" states,
+  // so a slow or missing endpoint never blocks the editor from opening.
+  ensureBusinessAccounts();
 }
 
 // "Last emailed 8th July 2026 to itc@mcgrath.co.nz" — '' for a draft that has
@@ -1076,6 +1098,14 @@ function onFormInput(e) {
   const t = e.target;
   if (t.dataset.field) {
     setPath(_draft, t.dataset.field, t.type === 'checkbox' ? t.checked : t.value);
+    // Picking an account changes what the block SAYS ("Linked to Acme" vs "Not
+    // linked"), and that sentence is the only feedback that the invoice will
+    // now be visible to a customer. Re-render it rather than leaving the old
+    // state on screen next to the new selection.
+    if (t.dataset.field === 'business_account_id') {
+      const host = _editorRefs?.drawer?.body?.querySelector('#inv-biz-link');
+      if (host) host.outerHTML = businessLinkHtml(_draft);
+    }
     // Keep the (non-overridden) due date live as the order date changes.
     if (t.dataset.field === 'order_date' && !_draft.payment_due) {
       const due = _editorRefs.drawer?.body?.querySelector('#inv-due-date');
@@ -1108,6 +1138,20 @@ function onFormClick(e) {
     _draft.lines.splice(i, 1);
     if (!_draft.lines.length) _draft.lines.push(blankLine());
     renderLines(); refreshPreview();
+  } else if (act === 'link-business') {
+    // Only ever reached by an explicit click on the suggestion. Nothing in
+    // suggestedBusinessAccount() assigns — see businessLinkHtml().
+    const id = e.target.closest('[data-account-id]')?.dataset.accountId || null;
+    if (!id) return;
+    _draft.business_account_id = id;
+    const host = _editorRefs?.drawer?.body?.querySelector('#inv-biz-link');
+    if (host) host.outerHTML = businessLinkHtml(_draft);
+    Toast.success('Linked — save the invoice to publish it to their portal.');
+  } else if (act === 'unlink-business') {
+    _draft.business_account_id = null;
+    const host = _editorRefs?.drawer?.body?.querySelector('#inv-biz-link');
+    if (host) host.outerHTML = businessLinkHtml(_draft);
+    Toast.success('Unlinked — save to remove it from their portal.');
   } else if (act === 'clear-fill') {
     // Undo an auto-fill: blank the billing + delivery parties and drop the source link.
     _draft.customer = { attn: '', name: '', company: '', address: '', phone: '', email: '' };
@@ -1478,6 +1522,88 @@ function fillChipHtml() {
     <button type="button" class="inv-fill-chip__clear" data-form-action="clear-fill" title="Clear the filled details" aria-label="Clear filled details">✕</button></span></div>`;
 }
 
+// =========================================================================
+//  Business account link — what puts an invoice on a customer's portal
+// =========================================================================
+// undefined = not looked up yet · null = the endpoint is unavailable ·
+// Array = the approved accounts. null and [] are deliberately different: one
+// means "we couldn't ask", the other "there are none".
+let _bizAccounts;
+
+async function ensureBusinessAccounts() {
+  if (_bizAccounts !== undefined) return _bizAccounts;
+  const token = _editorToken;
+  _bizAccounts = await AdminAPI.listBusinessAccounts();
+  if (!editorAlive(token)) return _bizAccounts;
+  const host = _editorRefs?.drawer?.body?.querySelector('#inv-biz-link');
+  if (host) host.outerHTML = businessLinkHtml(_draft);
+  return _bizAccounts;
+}
+
+/** The account this invoice's customer probably belongs to — a SUGGESTION. */
+function suggestedBusinessAccount() {
+  if (!Array.isArray(_bizAccounts) || !_bizAccounts.length) return null;
+  const uid = _fillSource?.userId || null;
+  const email = String(_fillSource?.email || _draft?.customer?.email || '').trim().toLowerCase();
+  return _bizAccounts.find((a) => {
+    if (uid && a.user_id && a.user_id === uid) return true;
+    return email && String(a.contact_email || a.email || '').trim().toLowerCase() === email;
+  }) || null;
+}
+
+const bizAccountLabel = (a) => a?.company_name || a?.name || 'Business account';
+
+/**
+ * Three states, and the middle one is why this block exists.
+ *
+ * LINKED    — names the company, offers Unlink.
+ * NOT LINKED— says so IN WORDS. "Not linked" has to be visible, because the
+ *             failure it prevents is invisible: an unlinked invoice is simply
+ *             absent from the customer's Business Centre, and an operator with
+ *             no indicator here cannot answer "why isn't my invoice showing?".
+ * SUGGESTED — when the filled-from party matches an approved account we offer
+ *             the link and NEVER apply it. Linking publishes this document to
+ *             that account's portal, so an email match is a prompt for a human
+ *             decision, not authority to grant access.
+ */
+function businessLinkHtml(d) {
+  const linkedId = d.business_account_id || null;
+  const known = Array.isArray(_bizAccounts) ? _bizAccounts : [];
+  const linkedAcct = linkedId ? known.find((a) => a.id === linkedId) : null;
+
+  let body;
+  if (linkedId) {
+    const who = linkedAcct ? esc(bizAccountLabel(linkedAcct)) : 'a business account';
+    body = `<p class="inv-biz__state inv-biz__state--on">Linked to <strong>${who}</strong> — this invoice appears in their Business Centre.</p>
+      <button type="button" class="admin-btn admin-btn--ghost admin-btn--sm" data-form-action="unlink-business">Unlink</button>`;
+  } else if (_bizAccounts === undefined) {
+    body = `<p class="inv-biz__state">Checking business accounts&hellip;</p>`;
+  } else if (_bizAccounts === null) {
+    // Loud, not silent. The operator needs to know the control is missing
+    // rather than conclude this customer simply has no account.
+    body = `<p class="inv-biz__state inv-biz__state--off">Not linked — this invoice will not appear on any customer's Business Centre.</p>
+      <p class="inv-field__hint">Linking is unavailable: the backend has no endpoint that exposes business-account ids yet. See <code>business-centre-FE-response-aug2026.md</code>.</p>`;
+  } else {
+    const suggestion = suggestedBusinessAccount();
+    const options = ['<option value="">— not linked —</option>']
+      .concat(known.map((a) => `<option value="${escA(a.id)}">${esc(bizAccountLabel(a))}${a.contact_email ? ` (${esc(a.contact_email)})` : ''}</option>`))
+      .join('');
+    body = `<p class="inv-biz__state inv-biz__state--off">Not linked — this invoice will not appear on any customer's Business Centre.</p>`
+      + (suggestion
+        ? `<p class="inv-biz__suggest">${esc(_fillSource?.label || 'This customer')} has an approved account:
+             <strong>${esc(bizAccountLabel(suggestion))}</strong>
+             <button type="button" class="admin-btn admin-btn--sm" data-form-action="link-business" data-account-id="${escA(suggestion.id)}">Link to their portal</button></p>`
+        : '')
+      + `<label class="inv-field"><span class="inv-field__label">Business account <span class="inv-field__hint">(sets portal visibility)</span></span>
+           <select class="admin-select" id="inv-biz-select" data-field="business_account_id">${options}</select></label>`;
+  }
+
+  return `<section class="inv-section" id="inv-biz-link">
+      <div class="inv-section__title">Business account (portal access)</div>
+      ${body}
+    </section>`;
+}
+
 function editorBodyHtml(d) {
   const numberLine = `<label class="inv-field"><span class="inv-field__label">Invoice No <span class="inv-field__hint">(auto-filled — edit to override)</span></span>`
     + `<input class="admin-input" type="text" inputmode="numeric" data-field="invoice_number" value="${escA(d.invoice_number)}" placeholder="Auto"></label>`;
@@ -1499,6 +1625,8 @@ function editorBodyHtml(d) {
         ${fillChipHtml()}
       </section>
 
+      ${businessLinkHtml(d)}
+
       <section class="inv-section">
         <div class="inv-section__title">Invoice details</div>
         <div class="inv-grid-2">
@@ -1508,6 +1636,8 @@ function editorBodyHtml(d) {
             <input class="admin-input" type="date" data-field="order_date" value="${escA(d.order_date)}" required></label>
           <label class="inv-field"><span class="inv-field__label">Payment due date <span class="inv-field__hint">(auto-filled from order date + terms — edit to override)</span></span>
             <input class="admin-input" type="date" id="inv-due-date" data-field="payment_due" value="${escA(effectiveDueDate(d))}"></label>
+          <label class="inv-field"><span class="inv-field__label">PO number <span class="inv-field__hint">(the customer's own reference — printed, and shown on their portal)</span></span>
+            <input class="admin-input" type="text" data-field="po_number" value="${escA(d.po_number)}" placeholder="e.g. PO-9921"></label>
           <label class="inv-field"><span class="inv-field__label">Paid status <span class="inv-field__hint">(internal — not shown to the customer)</span></span>
             <select class="admin-select" data-field="status">
               ${['unpaid', 'paid'].map((s) => `<option value="${s}"${d.status === s ? ' selected' : ''}>${STATUS_META[s].label}</option>`).join('')}
@@ -1780,7 +1910,10 @@ function loadFromContact(c) {
   // (drop any prior manual override so the new term takes effect).
   _draft.payment_due_pref = c.payment_due_pref || '20';
   _draft.payment_due = '';
-  _fillSource = { type: 'contact', label: c.label || b.name || b.company || 'contact' };
+  // The email is carried so the business-account block can SUGGEST a link.
+  // It is a suggestion only — see businessLinkHtml(): a loose email match must
+  // never grant a customer access to an invoice on its own.
+  _fillSource = { type: 'contact', label: c.label || b.name || b.company || 'contact', email: b.email || '' };
   rebuildEditor();
   Toast.success(`Filled from contact ${_fillSource.label}`.trim());
 }
@@ -1805,7 +1938,7 @@ async function loadFromCustomer(c) {
       email: b.email || c.email || '',
     };
     _draft.delivery = { attn: d.attn || '', company: d.company || '', address: joinLines(d.address), phone: d.phone || '' };
-    _fillSource = { type: 'customer', label: name };
+    _fillSource = { type: 'customer', label: name, userId: c.id || null, email: c.email || '' };
     rebuildEditor();
     Toast.success(`Filled customer ${name}`.trim());
     return;
@@ -1825,7 +1958,7 @@ async function loadFromCustomer(c) {
       [addr.city, addr.region, addr.postal_code].filter(Boolean).join(', '), addr.country].filter(Boolean).join('\n');
     if (!_draft.customer.phone) _draft.customer.phone = addr.phone || '';
   }
-  _fillSource = { type: 'customer', label: name };
+  _fillSource = { type: 'customer', label: name, userId: c.id || null, email: c.email || '' };
   rebuildEditor();
   Toast.success(`Filled customer ${name}`.trim());
 }

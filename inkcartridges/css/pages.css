@@ -2555,6 +2555,8 @@
     align-items: center;
     justify-content: center;
     border-radius: var(--radius-lg);
+    /* See components.css — near-white finishes need a visible edge (ERR-141). */
+    border: 1px solid var(--border, #e0e0e0);
 }
 
 /* Product Error State */
@@ -11395,6 +11397,8 @@ body.page-shop {
     width: 100%;
     height: 100%;
     border-radius: var(--radius-sm);
+    /* See components.css — near-white finishes need a visible edge (ERR-141). */
+    border: 1px solid var(--border, #e0e0e0);
 }
 
 .product-card__content {
@@ -15929,6 +15933,95 @@ body.page-shop {
 .business-invoice__status--paid { background: #dcfce7; color: #166534; }
 .business-invoice__status--unpaid { background: #fef3c7; color: #92400e; }
 .business-invoice__status--void { background: var(--steel-100, #f1f5f9); color: var(--steel-500, #64748b); }
+/* Overdue is DERIVED (unpaid + past due) and outranks the plain unpaid chip —
+   the summary tile counts overdue invoices, so the list has to show WHICH. */
+.business-invoice__status--overdue { background: #fee2e2; color: #991b1b; }
+
+/* Part-paid: the row's headline is the invoice total, so what is still owed
+   has to sit beside it or the row misstates the debt. */
+.business-invoice__outstanding {
+    display: block;
+    font-size: 0.75rem;
+    font-weight: var(--font-weight-normal, 400);
+    color: #92400e;
+}
+
+.business-invoice__actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--spacing-2, 0.5rem);
+    justify-self: start;
+}
+
+@media (min-width: 768px) {
+    .business-invoice__actions { justify-self: end; }
+}
+
+/* ── Invoice detail (§4: bill_to, lines, terms, notes, emailed_at) ────────── */
+
+.business-invoice__detail {
+    grid-column: 1 / -1;
+    border-top: 1px solid var(--steel-200, #e2e8f0);
+    margin-top: var(--spacing-2, 0.5rem);
+    padding-top: var(--spacing-3, 0.75rem);
+}
+
+.business-invoice__detail[hidden] { display: none; }
+
+.business-detail__facts,
+.business-detail__totals { display: flex; flex-direction: column; gap: 0.25rem; margin: 0 0 var(--spacing-3, 0.75rem); }
+.business-detail__facts > div,
+.business-detail__totals > div { display: flex; justify-content: space-between; gap: var(--spacing-3, 0.75rem); font-size: 0.875rem; }
+.business-detail__facts dt,
+.business-detail__totals dt { color: var(--steel-500, #64748b); }
+.business-detail__facts dd,
+.business-detail__totals dd { margin: 0; color: var(--steel-900, #0f172a); }
+
+.business-detail__grand {
+    border-top: 1px solid var(--steel-200, #e2e8f0);
+    padding-top: 0.35rem;
+    font-weight: var(--font-weight-semibold, 600);
+}
+
+.business-detail__billto { font-size: 0.875rem; color: var(--steel-600, #475569); margin-bottom: var(--spacing-3, 0.75rem); }
+.business-detail__label { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--steel-500, #64748b); }
+
+/* The line table scrolls in its OWN box — the page body must never scroll
+   sideways on a phone because an invoice had a long description. */
+.business-detail__scroll { overflow-x: auto; margin-bottom: var(--spacing-3, 0.75rem); }
+
+.business-detail__lines { width: 100%; border-collapse: collapse; font-size: 0.8125rem; min-width: 34rem; }
+.business-detail__lines th,
+.business-detail__lines td { text-align: left; padding: 0.4rem 0.5rem; border-bottom: 1px solid var(--steel-100, #f1f5f9); }
+.business-detail__lines th { color: var(--steel-500, #64748b); font-weight: var(--font-weight-semibold, 600); white-space: nowrap; }
+.business-detail__num { text-align: right; white-space: nowrap; }
+
+.business-detail__notes { font-size: 0.8125rem; color: var(--steel-500, #64748b); }
+.business-detail__empty { font-size: 0.875rem; color: var(--steel-500, #64748b); }
+.business-detail__loading { font-size: 0.875rem; color: var(--steel-500, #64748b); }
+.business-detail__error { font-size: 0.875rem; color: var(--magenta-primary, #C71F6E); margin-bottom: var(--spacing-2, 0.5rem); }
+
+/* ── Pager. "Showing 20 of 128" is the anti-silent-cap control. ───────────── */
+
+.business-pager {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--spacing-2, 0.5rem);
+    margin-top: var(--spacing-3, 0.75rem);
+}
+
+.business-pager__count { font-size: 0.8125rem; color: var(--steel-500, #64748b); }
+
+#invoices-more[hidden] { display: none; }
+
+/* Today's price on a reorder tile — read live, never from order history. */
+.business-reorder__price {
+    font-size: 0.8125rem;
+    font-weight: var(--font-weight-semibold, 600);
+    color: var(--steel-700, #334155);
+}
 
 /* The PDF outcome is TOLD, not hidden: a download that couldn't be served
    says so here rather than leaving a button that appears to do nothing. */

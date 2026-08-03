@@ -117,6 +117,17 @@
         async download(id, number) {
             const name = `Invoice-${(number || id || 'invoice').replace(/[^\w.-]+/g, '')}.pdf`;
 
+            // DEVELOPMENT ONLY (js/business-demo.js, localhost + ?demo=1). A
+            // generated invoice has no stored file, so take the no-stored-file
+            // route directly. That is also the branch worth seeing: it produces
+            // the locally-rendered copy, stamped as a copy.
+            if (typeof BusinessDemo !== 'undefined' && BusinessDemo.active()) {
+                const made = await this.generateCopy(id, name);
+                return made.ok
+                    ? { ok: true, source: 'generated' }
+                    : { ok: false, message: made.message };
+            }
+
             let res;
             try {
                 const base = (typeof Config !== 'undefined' && Config.API_URL) || '';
@@ -161,7 +172,10 @@
 
             let inv;
             try {
-                const r = await API.get(`/api/business/invoices/${encodeURIComponent(id)}`);
+                const path = `/api/business/invoices/${encodeURIComponent(id)}`;
+                const r = (typeof BusinessDemo !== 'undefined' && BusinessDemo.active())
+                    ? BusinessDemo.get(path)
+                    : await API.get(path);
                 if (!r || r.ok === false) return { ok: false, message: "Couldn't load that invoice." };
                 inv = r.data;
             } catch (e) {
@@ -192,6 +206,11 @@
             line(`TAX INVOICE ${inv.invoice_number || ''}`, 16, 10);
             if (inv.issue_date) line(`Date: ${inv.issue_date}`, 10);
             if (inv.due_date) line(`Payment due: ${inv.due_date}`, 10);
+            // The customer's OWN reference. Without it this reproduction can't
+            // be matched against their purchase order, which is most of why
+            // they wanted the document.
+            if (inv.po_number) line(`PO number: ${inv.po_number}`, 10);
+            if (inv.payment_terms) line(`Terms: ${inv.payment_terms}`, 10);
             const billTo = inv.bill_to || {};
             if (billTo.company || billTo.name) line(`Bill to: ${billTo.company || billTo.name}`, 10);
 

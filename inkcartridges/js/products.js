@@ -58,7 +58,17 @@ const Products = {
         const swatchStale = ProductColors.isPlaceholderSwatchImage(product.image_url) && colorStyle;
         if (imageUrl && imageUrl !== '/assets/images/placeholder-product.svg' && !swatchStale) {
             // Has image URL - use it with error fallback (listeners attached after DOM insertion)
-            if (colorStyle) {
+            //
+            // The colour-block fallback is COMPATIBLE-ONLY (ERR-143). This
+            // branch used to gate on `colorStyle` alone, so a GENUINE product
+            // with an image shipped a hidden striped tile that
+            // bindImageFallbacks reveals the moment the image 404s — and a
+            // striped tile is the visual language of a compatible cartridge.
+            // The genuine-no-colour-tile invariant was enforced everywhere
+            // EXCEPT the image-error path, because every test covered
+            // `image_url: null` and none covered "the image failed to load".
+            // Genuine rows fall back to the neutral placeholder instead.
+            if (colorStyle && product.source === 'compatible') {
                 return `<img src="${Security.escapeAttr(imageUrl)}"
                              alt="${Security.escapeAttr(product.name)}"
                              class="product-card__image"

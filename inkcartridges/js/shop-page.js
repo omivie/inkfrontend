@@ -2448,13 +2448,20 @@
                 }
                 if (allPacks.length === 0) return;
 
-                const colorHex = { Black: '#1a1a1a', Cyan: '#00bcd4', Magenta: '#e91e63', Yellow: '#ffc107' };
-
                 grid.innerHTML = allPacks.map(pack => {
                     const items = pack.items || [];
+                    // ONE colour vocabulary — ProductColors in js/utils.js, never
+                    // a private map (ERR-141). The literal that used to sit here
+                    // was PascalCase-keyed with only K/C/M/Y, so 'Tri-Colour',
+                    // 'CMY' and every lowercase value fell through to grey. It
+                    // also interpolated `item.color_hex` directly, and that field
+                    // is an ARRAY — `background:${['#a','#b']}` stringifies to
+                    // "background:#a,#b", which is invalid CSS and paints
+                    // nothing. getProductStyle handles the array, the gradient
+                    // colours and the name fallback.
                     const swatches = items.map(item => {
-                        const hex = item.color_hex || colorHex[item.color] || '#888';
-                        return `<span class="color-pack-card__swatch" style="background:${hex}" title="${Security.escapeHtml(item.color || '')}"></span>`;
+                        const style = ProductColors.getProductStyle(item, 'background-color: #888;');
+                        return `<span class="color-pack-card__swatch" style="${style}" title="${Security.escapeHtml(item.color || '')}"></span>`;
                     }).join('');
 
                     const itemList = items.map(item =>
@@ -3510,25 +3517,13 @@
             return ProductColors.getStyle(colorName, 'background-color: #e0e0e0;');
         },
 
-        // Check if product is a value pack / multi-pack
-        isValuePack(product) {
-            const name = (product.name || '').toLowerCase();
-            const color = (product.color || '').toLowerCase();
-
-            // Check for value packs / multi-packs
-            if (name.includes('value pack') || name.includes('combo') || name.includes('bundle') ||
-                name.includes('multi') || name.includes('-pack') || name.includes(' pack')) {
-                return true;
-            }
-
-            // Check for multi-color (CMY, BCMY, etc.)
-            if (color === 'cmy' || color === 'bcmy' || color === 'cmyk' ||
-                color.includes('tri-colo') || color === 'color' || color === 'colour') {
-                return true;
-            }
-
-            return false;
-        },
+        // `isValuePack()` was DELETED here in Aug 2026 (ERR-141). It had zero
+        // call sites and classified `color === 'colour'`, `color === 'cmyk'`
+        // and any name containing ' pack' / 'multi' / 'bundle' as a pack — so
+        // the day anyone wired it up it would have mislabelled all 35 live
+        // Tri-Colour SINGLES as multi-cartridge packs. The tested answers are
+        // `ProductSort.packRank(product)` (reads `pack_type`) and
+        // `ProductSort.PACK_NAME_REGEX_3` / `_4`, both in js/utils.js.
 
         // Render products with the canonical (code → yield → color) override.
         //
@@ -3731,7 +3726,12 @@
             if (resolvedImageUrl && resolvedImageUrl !== '/assets/images/placeholder-product.svg' && !swatchStale) {
                 const srcsetHtml = srcsetAttr ? ` srcset="${Security.escapeAttr(srcsetAttr)}" sizes="${sizesAttr}"` : '';
                 const rawAttr = rawImageUrl && rawImageUrl !== resolvedImageUrl ? ` data-raw-src="${Security.escapeAttr(rawImageUrl)}"` : '';
-                if (colorStyle) {
+                // COMPATIBLE-ONLY colour fallback (ERR-143) — see
+                // Products.getProductImageHTML. Gating on `colorStyle` alone
+                // let a genuine card reveal a striped tile when its image
+                // failed to load, which is the one path the
+                // genuine-no-colour-tile invariant was never tested on.
+                if (colorStyle && isCompatible) {
                     imageContent = `<img src="${Security.escapeAttr(resolvedImageUrl)}" alt="${Security.escapeAttr(product.name)}"${srcsetHtml} loading="lazy" data-fallback="color-block"${rawAttr}>
                         <div class="product-card__color-block" style="${colorStyle}; display: none;"></div>`;
                 } else {

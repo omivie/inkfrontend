@@ -8,6 +8,9 @@
     "test": "node --test tests/*.test.js",
     "test:e2e": "LIVE_E2E=1 npx playwright test tests/e2e-may2026-spec.spec.js",
     "audit:fit": "node inkcartridges/scripts/fit-audit.js",
+    "audit:colours": "node scripts/audit-colour-vocabulary.mjs",
+    "audit:colours:static": "node scripts/audit-colour-vocabulary.mjs --static",
+    "verify:business": "node scripts/verify-business-centre.mjs",
     "sweep:b2b": "node scripts/sweep-business-pricing.mjs",
     "sweep:b2b:check": "node scripts/sweep-business-pricing.mjs --check"
   },

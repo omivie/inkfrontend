@@ -1,0 +1,217 @@
+{
+  "captured_at": "2026-08-03",
+  "api_base": "https://ink-backend-zaeq.onrender.com",
+  "note": "Backend-owned findings already reported. See tri-colour-catalogue-BACKEND-tasks-aug2026.md. An entry that stops tripping FAILS the audit — delete it when the backend fixes it.",
+  "accepted": [
+    {
+      "check": "L0-catalogue-count-mismatch",
+      "subject": "https://ink-backend-zaeq.onrender.com/api/products",
+      "detail": "walked every page to has_next=false and collected 3969 products, but meta.total claims 3976 — 7 row(s) are counted by the API but never served by it. Everything below was checked against the 3969 rows that ARE reachable; any product in the gap is unaudited AND invisible to the storefront.",
+      "reason": "reported to backend",
+      "reported_to_backend": "2026-08-03"
+    },
+    {
+      "check": "L1-colour-not-offerable",
+      "subject": "GBCI16VP",
+      "detail": "color=\"Colour\" is not in ProductColors.OPTIONS — the admin drawer shows it as \"(legacy)\" and any save silently re-spells it",
+      "reason": "reported to backend",
+      "reported_to_backend": "2026-08-03"
+    },
+    {
+      "check": "L3-vague-colour",
+      "subject": "GBCI16VP",
+      "detail": "color=\"Colour\" is ambiguous — it names no cartridge count. Pick \"Tri-Colour\" (one body) or \"CMY\"/\"KCMY\" (separate cartridges)",
+      "reason": "reported to backend",
+      "reported_to_backend": "2026-08-03"
+    },
+    {
+      "check": "L1-colour-not-offerable",
+      "subject": "GCL586",
+      "detail": "color=\"Colour\" is not in ProductColors.OPTIONS — the admin drawer shows it as \"(legacy)\" and any save silently re-spells it",
+      "reason": "reported to backend",
+      "reported_to_backend": "2026-08-03"
+    },
+    {
+      "check": "L3-vague-colour",
+      "subject": "GCL586",
+      "detail": "color=\"Colour\" but the name/SKU says tri-colour — should be \"Tri-Colour\" (a SINGLE cartridge), not a word that could mean a 3-pack",
+      "reason": "reported to backend",
+      "reported_to_backend": "2026-08-03"
+    },
+    {
+      "check": "L1-colour-not-offerable",
+      "subject": "GCL586XL",
+      "detail": "color=\"Colour\" is not in ProductColors.OPTIONS — the admin drawer shows it as \"(legacy)\" and any save silently re-spells it",
+      "reason": "reported to backend",
+      "reported_to_backend": "2026-08-03"
+    },
+    {
+      "check": "L3-vague-colour",
+      "subject": "GCL586XL",
+      "detail": "color=\"Colour\" but the name/SKU says tri-colour — should be \"Tri-Colour\" (a SINGLE cartridge), not a word that could mean a 3-pack",
+      "reason": "reported to backend",
+      "reported_to_backend": "2026-08-03"
+    },
+    {
+      "check": "L1-colour-not-offerable",
+      "subject": "GCL646",
+      "detail": "color=\"Colour\" is not in ProductColors.OPTIONS — the admin drawer shows it as \"(legacy)\" and any save silently re-spells it",
+      "reason": "reported to backend",
+      "reported_to_backend": "2026-08-03"
+    },
+    {
+      "check": "L3-vague-colour",
+      "subject": "GCL646",
+      "detail": "color=\"Colour\" but the name/SKU says tri-colour — should be \"Tri-Colour\" (a SINGLE cartridge), not a word that could mean a 3-pack",
+      "reason": "reported to backend",
+      "reported_to_backend": "2026-08-03"
+    },
+    {
+      "check": "L1-colour-not-offerable",
+      "subject": "GCL646XL",
+      "detail": "color=\"Colour\" is not in ProductColors.OPTIONS — the admin drawer shows it as \"(legacy)\" and any save silently re-spells it",
+      "reason": "reported to backend",
+      "reported_to_backend": "2026-08-03"
+    },
+    {
+      "check": "L3-vague-colour",
+      "subject": "GCL646XL",
+      "detail": "color=\"Colour\" but the name/SKU says tri-colour — should be \"Tri-Colour\" (a SINGLE cartridge), not a word that could mean a 3-pack",
+      "reason": "reported to backend",
+      "reported_to_backend": "2026-08-03"
+    },
+    {
+      "check": "L1-colour-not-offerable",
+      "subject": "GCL661",
+      "detail": "color=\"Colour\" is not in ProductColors.OPTIONS — the admin drawer shows it as \"(legacy)\" and any save silently re-spells it",
+      "reason": "reported to backend",
+      "reported_to_backend": "2026-08-03"
+    },
+    {
+      "check": "L3-vague-colour",
+      "subject": "GCL661",
+      "detail": "color=\"Colour\" but the name/SKU says tri-colour — should be \"Tri-Colour\" (a SINGLE cartridge), not a word that could mean a 3-pack",
+      "reason": "reported to backend",
+      "reported_to_backend": "2026-08-03"
+    },
+    {
+      "check": "L1-colour-not-offerable",
+      "subject": "GCL661XL",
+      "detail": "color=\"Colour\" is not in ProductColors.OPTIONS — the admin drawer shows it as \"(legacy)\" and any save silently re-spells it",
+      "reason": "reported to backend",
+      "reported_to_backend": "2026-08-03"
+    },
+    {
+      "check": "L3-vague-colour",
+      "subject": "GCL661XL",
+      "detail": "color=\"Colour\" but the name/SKU says tri-colour — should be \"Tri-Colour\" (a SINGLE cartridge), not a word that could mean a 3-pack",
+      "reason": "reported to backend",
+      "reported_to_backend": "2026-08-03"
+    },
+    {
+      "check": "L1-colour-not-offerable",
+      "subject": "GCLI36C",
+      "detail": "color=\"Colour\" is not in ProductColors.OPTIONS — the admin drawer shows it as \"(legacy)\" and any save silently re-spells it",
+      "reason": "reported to backend",
+      "reported_to_backend": "2026-08-03"
+    },
+    {
+      "check": "L3-vague-colour",
+      "subject": "GCLI36C",
+      "detail": "color=\"Colour\" is ambiguous — it names no cartridge count. Pick \"Tri-Colour\" (one body) or \"CMY\"/\"KCMY\" (separate cartridges)",
+      "reason": "reported to backend",
+      "reported_to_backend": "2026-08-03"
+    },
+    {
+      "check": "L4-pack-sku-stored-single",
+      "subject": "GPG510CLR-2PK",
+      "detail": "SKU asserts a multi-cartridge pack but pack_type=\"single\" — the storefront renders no pack UI at all (name: \"Canon Genuine PG510/CL511CLR Ink Cartridge PG510/CL511 Tri-Colour (244 pages)\")",
+      "reason": "reported to backend",
+      "reported_to_backend": "2026-08-03"
+    },
+    {
+      "check": "L6-tricolour-no-image",
+      "subject": "GPG510CLR-2PK",
+      "detail": "color=\"Tri-Colour\" with image_url=NULL. Genuine rows never render a colour swatch (the genuine-no-colour-tile invariant), so this shows a blank placeholder in every listing until a photo lands.",
+      "reason": "reported to backend",
+      "reported_to_backend": "2026-08-03"
+    },
+    {
+      "check": "L1-colour-not-offerable",
+      "subject": "GCE506A",
+      "detail": "color=\"Colour\" is not in ProductColors.OPTIONS — the admin drawer shows it as \"(legacy)\" and any save silently re-spells it",
+      "reason": "reported to backend",
+      "reported_to_backend": "2026-08-03"
+    },
+    {
+      "check": "L3-vague-colour",
+      "subject": "GCE506A",
+      "detail": "color=\"Colour\" is ambiguous — it names no cartridge count. Pick \"Tri-Colour\" (one body) or \"CMY\"/\"KCMY\" (separate cartridges)",
+      "reason": "reported to backend",
+      "reported_to_backend": "2026-08-03"
+    },
+    {
+      "check": "L5-colour-on-accessory",
+      "subject": "GCE506A",
+      "detail": "color=\"Colour\" on what the name says is a machine part, not a marking agent: \"HP Genuine 220V LaserJet Fuser Kit 220V\"",
+      "reason": "reported to backend",
+      "reported_to_backend": "2026-08-03"
+    },
+    {
+      "check": "L6-tricolour-no-image",
+      "subject": "G60CLR",
+      "detail": "color=\"Tri-Colour\" with image_url=NULL. Genuine rows never render a colour swatch (the genuine-no-colour-tile invariant), so this shows a blank placeholder in every listing until a photo lands.",
+      "reason": "reported to backend",
+      "reported_to_backend": "2026-08-03"
+    },
+    {
+      "check": "L6-tricolour-no-image",
+      "subject": "G61CLR",
+      "detail": "color=\"Tri-Colour\" with image_url=NULL. Genuine rows never render a colour swatch (the genuine-no-colour-tile invariant), so this shows a blank placeholder in every listing until a photo lands.",
+      "reason": "reported to backend",
+      "reported_to_backend": "2026-08-03"
+    },
+    {
+      "check": "L1-colour-not-offerable",
+      "subject": "G68",
+      "detail": "color=\"Colour\" is not in ProductColors.OPTIONS — the admin drawer shows it as \"(legacy)\" and any save silently re-spells it",
+      "reason": "reported to backend",
+      "reported_to_backend": "2026-08-03"
+    },
+    {
+      "check": "L3-vague-colour",
+      "subject": "G68",
+      "detail": "color=\"Colour\" is ambiguous — it names no cartridge count. Pick \"Tri-Colour\" (one body) or \"CMY\"/\"KCMY\" (separate cartridges)",
+      "reason": "reported to backend",
+      "reported_to_backend": "2026-08-03"
+    },
+    {
+      "check": "L6-tricolour-no-image",
+      "subject": "G804CLR",
+      "detail": "color=\"Tri-Colour\" with image_url=NULL. Genuine rows never render a colour swatch (the genuine-no-colour-tile invariant), so this shows a blank placeholder in every listing until a photo lands.",
+      "reason": "reported to backend",
+      "reported_to_backend": "2026-08-03"
+    },
+    {
+      "check": "L1-colour-not-offerable",
+      "subject": "GCE980A",
+      "detail": "color=\"Colour\" is not in ProductColors.OPTIONS — the admin drawer shows it as \"(legacy)\" and any save silently re-spells it",
+      "reason": "reported to backend",
+      "reported_to_backend": "2026-08-03"
+    },
+    {
+      "check": "L3-vague-colour",
+      "subject": "GCE980A",
+      "detail": "color=\"Colour\" is ambiguous — it names no cartridge count. Pick \"Tri-Colour\" (one body) or \"CMY\"/\"KCMY\" (separate cartridges)",
+      "reason": "reported to backend",
+      "reported_to_backend": "2026-08-03"
+    },
+    {
+      "check": "L8-duplicate-name-price-fork",
+      "subject": "GPG640CLR-2PK+GPG640VPVP",
+      "detail": "2 products share the name \"canon genuine pg640/cl641 ink cartridge 2-pack\" at different prices — GPG640VPVP $121.99 vs GPG640CLR-2PK $93.99. Customers see identical cards with different prices.",
+      "reason": "reported to backend",
+      "reported_to_backend": "2026-08-03"
+    }
+  ]
+}

@@ -184,15 +184,22 @@ test('order-confirmation-page.js — getItemImageHtml gates color tile on item.s
 });
 
 test('order-detail-page.js — getColorPlaceholder takes source and short-circuits to neutral SVG for genuine', () => {
-    const m = ORDER_DETAIL_SRC.match(/getColorPlaceholder\(productName,\s*source\)\s*\{([\s\S]*?)\n\s{8}\},/);
-    assert.ok(m, 'order-detail-page.js must define getColorPlaceholder(productName, source)');
+    // Aug 2026 (ERR-141): gained a third `color` arg when the private 7-word
+    // name-scan map was replaced by ProductColors.getProductStyle. The
+    // short-circuit below is what the invariant actually rests on, and it still
+    // runs FIRST — the colour argument is only ever consulted for compatibles.
+    const m = ORDER_DETAIL_SRC.match(/getColorPlaceholder\(productName,\s*source,\s*color\)\s*\{([\s\S]*?)\n\s{8}\},/);
+    assert.ok(m, 'order-detail-page.js must define getColorPlaceholder(productName, source, color)');
     const body = m[1];
     // For non-compatible (i.e. genuine) the function must short-circuit to the
     // neutral cartridge SVG before any color-derivation branches run.
     assert.match(body, /source\s*&&\s*source\s*!==\s*['"]compatible['"]/,
         'getColorPlaceholder must short-circuit to neutral SVG when source is set and not "compatible"');
+    // The genuine gate must precede every colour-derivation branch.
+    assert.ok(body.indexOf('!== \'compatible\'') < body.indexOf('getProductStyle'),
+        'the genuine short-circuit must run BEFORE any ProductColors lookup');
     // The caller must pass item.source through.
-    assert.match(ORDER_DETAIL_SRC, /this\.getColorPlaceholder\(item\.product_name,\s*item\.source\)/,
+    assert.match(ORDER_DETAIL_SRC, /this\.getColorPlaceholder\(item\.product_name,\s*item\.source,/,
         'order-item render must pass item.source to getColorPlaceholder');
 });
 
@@ -227,6 +234,11 @@ function loadProducts() {
                 const map = {
                     black: 'background-color: #1a1a1a;',
                     kcmy: 'background: linear-gradient(to right, #1a1a1a 0%, #1a1a1a 25%, #00bcd4 25%, #00bcd4 50%, #e91e63 50%, #e91e63 75%, #ffeb3b 75%, #ffeb3b 100%);',
+                    // Aug 2026 (ERR-143): the stub MUST be able to paint
+                    // tri-colour, or the G804CLR test below would pass because
+                    // the stub had no entry rather than because the genuine
+                    // gate fired — a green test proving nothing.
+                    'tri-colour': 'background: linear-gradient(to right, #00bcd4 0%, #00bcd4 33.33%, #e91e63 33.33%, #e91e63 66.66%, #ffeb3b 66.66%, #ffeb3b 100%);',
                 };
                 return map[(name || '').toLowerCase()] || null;
             },
@@ -344,6 +356,41 @@ test('runtime: genuine single (color="Black", image_url=null) also gets placehol
 // COMPATIBLE NAME FORMAT (May 2026) — title + slug shape
 // ─────────────────────────────────────────────────────────────────────────────
 
+test('runtime: genuine Tri-Colour single with image_url=NULL (G804CLR) gets the placeholder, NOT a CMY tile', () => {
+    // ERR-143 — the citable answer to the Aug 2026 tri-colour handoff, which
+    // asked us to "verify the tri-colour swatch renders for all 6 SKUs …
+    // driven off color === 'Tri-Colour'". All six are GENUINE, and a genuine
+    // row must never paint a colour tile: a CMY 3-stripe is the visual
+    // language of a COMPATIBLE cartridge, so painting one on a genuine
+    // product misrepresents the brand the customer is buying.
+    //
+    // G804CLR is the live case — a genuine HP 804 Tri-Colour single shipped
+    // with image_url = NULL. The correct render is the neutral placeholder.
+    // If this test ever fails because someone "fixed" the swatch, they have
+    // reintroduced the bug this invariant exists to prevent.
+    const Products = loadProducts();
+    const g804clr = {
+        ...GENUINE_PACK,
+        sku: 'G804CLR',
+        name: 'HP Genuine 804CLR Ink Cartridge 804 Tri-Colour (165 pages)',
+        color: 'Tri-Colour',
+        pack_type: 'single',
+        image_url: null,
+    };
+    const html = Products.renderCard(g804clr, 0);
+
+    // Prove the stub COULD have painted it — so the assertion below is
+    // evidence of the gate firing, not of a missing map entry.
+    const compatibleTwin = Products.renderCard({ ...g804clr, source: 'compatible' }, 0);
+    assert.match(compatibleTwin, /class="product-card__color-block"/,
+        'a COMPATIBLE tri-colour single with no image must still get the tile — the gate must not over-correct');
+
+    assert.match(html, /placeholder-product\.svg/,
+        'genuine Tri-Colour single with no image must render the neutral placeholder');
+    assert.doesNotMatch(html, /class="product-card__color-block"/,
+        'genuine Tri-Colour single must NOT render a CMY 3-stripe tile');
+});
+
 test('runtime: new compatible pack name lands intact in the card title attr (no truncation in HTML)', () => {
     const Products = loadProducts();
     const longName = 'Compatible Ink Cartridge Replacement for Brother LC37/LC57 KCMY 4-Pack';
@@ -363,4 +410,66 @@ test('runtime: card href prefers product.canonical_url path (so old-slug bookmar
     const html = Products.renderCard(COMPATIBLE_PACK, 0);
     assert.match(html, /href="\/products\/compatible-toner-cartridge-replacement-for-hp-410x-kcmy-4-pack\/C-HP-CF410X-TNR-KCMY-4PK"/,
         'card href must use the canonical_url path (new slug + sku) so card clicks always land on the canonical URL');
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Aug 2026 (ERR-143) — THE IMAGE-ERROR PATH
+//
+// Every test above covers `image_url: null`. None covered "the product HAS an
+// image and the image fails to load" — and that was where the invariant
+// leaked. All three card renderers emitted
+//
+//     <img data-fallback="color-block"><div class="product-card__color-block"
+//          style="<gradient>; display: none;">
+//
+// gated on `colorStyle` alone, never on source. bindImageFallbacks() reveals
+// that hidden div on the img's error event, so any GENUINE product whose image
+// 404'd swapped itself for a striped tile — the visual language of a
+// COMPATIBLE cartridge. The optimizer proxy (api.inkcartridges.co.nz/api/
+// images/optimize) 429s under load, so this is a live path, not a theoretical
+// one. Genuine rows must fall back to the neutral placeholder instead.
+// ─────────────────────────────────────────────────────────────────────────────
+
+test('runtime: GENUINE product WITH an image must not carry a hidden colour-block fallback', () => {
+    const Products = loadProducts();
+    const withImage = {
+        ...GENUINE_PACK,
+        color: 'Tri-Colour',
+        pack_type: 'single',
+        image_url: 'https://example.test/images/g804clr/product.webp',
+    };
+    const html = Products.renderCard(withImage, 0);
+    assert.match(html, /data-fallback="placeholder"/,
+        'a genuine image must fall back to the neutral placeholder');
+    assert.doesNotMatch(html, /data-fallback="color-block"/,
+        'a genuine image must NEVER fall back to a colour block');
+    assert.doesNotMatch(html, /class="product-card__color-block"/,
+        'no hidden striped tile may be emitted for a genuine product, even display:none');
+});
+
+test('runtime: COMPATIBLE product WITH an image keeps its colour-block fallback', () => {
+    const Products = loadProducts();
+    const withImage = {
+        ...COMPATIBLE_PACK,
+        image_url: 'https://example.test/images/c804xlclr/product.webp',
+    };
+    const html = Products.renderCard(withImage, 0);
+    assert.match(html, /data-fallback="color-block"/,
+        'compatibles keep the colour fallback — the gate must not over-correct');
+    assert.match(html, /class="product-card__color-block"[^>]*display: none/,
+        'and the hidden block must still be emitted for them');
+});
+
+test('all three card renderers gate the colour-block fallback on source', () => {
+    // products.js, shop-page.js and product-detail-page.js each build their own
+    // image markup. A fix applied to one and not the others leaves the hole open.
+    const PRODUCTS = PRODUCTS_SRC;
+    const SHOP = stripComments(READ('shop-page.js'));
+    const PDP = PDP_SRC;
+    assert.match(PRODUCTS, /if \(colorStyle && product\.source === 'compatible'\)/,
+        'products.js must gate the colour-block fallback on source');
+    assert.match(SHOP, /if \(colorStyle && isCompatible\)/,
+        'shop-page.js must gate the colour-block fallback on source');
+    assert.match(PDP, /if \(colorStyle && info\.isCompatible\)/,
+        'product-detail-page.js must gate the colour-block fallback on source');
 });

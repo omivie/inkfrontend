@@ -436,3 +436,152 @@ test('§6 supplier cost can never reach a customer surface', () => {
             `${name} must never reference supplier cost or margin — that is internal-only`);
     }
 });
+
+// ═════════════════════════════════════════════════════════════════════════════
+// §7 — the Aug-2026 backend response (business-centre-backend-response-aug2026)
+//
+// All six endpoints went live. Verifying that document against production found
+// six defects and one piece of copy the document itself made false (ERR-141),
+// and proved the invoice→portal link is unreachable from any client (ERR-142).
+// These pin the fixes.
+// ═════════════════════════════════════════════════════════════════════════════
+
+test('§7 error codes are read FLAT, never res.error.code', () => {
+    // The wire format really is {ok:false, error:{code,message}} — the backend
+    // note is right about that. But api.js normalises it before any caller sees
+    // it, and on an error envelope `res.error` is a MESSAGE STRING. Reading
+    // `.code` off a string yields undefined and sends every error down the
+    // wrong branch, silently.
+    const api = codeOnly(JS('api.js'));
+    assert.match(api, /err\.code\s*:\s*data\.code/,
+        'api.js must keep unwrapping error.code into a flat top-level code');
+
+    for (const [name, src] of [
+        ['business-page.js', PAGE_JS],
+        ['business.js', BUSINESS_JS],
+        ['business-invoice-pdf.js', PDF_JS],
+    ]) {
+        assert.ok(!/res\.error\.code|\berror\.code\b/.test(codeOnly(src)),
+            `${name} must read the FLAT res.code — api.js already unwrapped error.code, ` +
+            'and res.error is a string on the failure path');
+    }
+});
+
+test('§7 each loader owns its own tiles — they race under allSettled', () => {
+    const code = codeOnly(PAGE_JS);
+    const summary = code.slice(code.indexOf('async loadSummary()'), code.indexOf('async loadSeries()'));
+    assert.ok(summary.length > 100, 'loadSummary must still exist ahead of loadSeries');
+
+    // saved/spend belong to /analytics/series. loadSummary writing them means a
+    // slow summary failure overwrites two correct lifetime figures with
+    // "Unavailable just now" — whichever call loses the race wins the tile.
+    for (const owned of ['stat-saved-value', 'stat-spend-value', 'stat-saved-sub', 'stat-spend-sub']) {
+        assert.ok(!summary.includes(owned),
+            `loadSummary must not write #${owned} — that tile is fed by /analytics/series`);
+    }
+    assert.match(summary, /stat-outstanding-value/, 'loadSummary owns the outstanding tile');
+    assert.match(code, /setSeriesTiles\(null\)/,
+        'a failed series call must set its OWN tiles to an explicit unknown');
+});
+
+test('§7 a nullable count is never rendered as "Nothing outstanding"', () => {
+    const code = codeOnly(PAGE_JS);
+    assert.ok(!/Number\((?:d|res)\.\w*(?:overdue|unpaid)\w*\)\s*\|\|\s*0/.test(code),
+        '`Number(x) || 0` turns "not reported" into a confident zero (ERR-063 family)');
+    const summary = code.slice(code.indexOf('async loadSummary()'), code.indexOf('async loadSeries()'));
+    assert.match(summary, /overdue !== null/,
+        'the overdue count must be distinguished from null before it is believed');
+});
+
+test('§7 the savings legend does not claim a saving the payload omits', () => {
+    // Waived shipping is deliberately NOT part of other_savings — the backend
+    // can't reconstruct it and leaves it out rather than guessing.
+    const code = codeOnly(PAGE_JS);
+    const legend = code.slice(code.indexOf("legend.innerHTML"), code.indexOf("legend.innerHTML") + 600);
+    assert.ok(!/shipping/i.test(legend),
+        'the legend must not name shipping — other_savings does not contain it');
+
+    const saved = code.slice(code.indexOf('savedSub.textContent'), code.indexOf('savedSub.textContent') + 300);
+    assert.ok(!/shipping/i.test(saved),
+        'the saved-tile sub-line must not name shipping either');
+});
+
+test('§7 an account with measurably no orders gets the empty state, not a flat $0 line', () => {
+    const code = codeOnly(PAGE_JS);
+    assert.match(code, /orders_counted/,
+        'a new account gets twelve buckets of REAL zeros; plotted, that is a flat line ' +
+        'pinned to the axis, which looks like data');
+    assert.match(code, /nothingToChart/,
+        'the measured-zero case must be named and routed to the empty state');
+    // ...but a real flat line still has to be possible: ordered-but-saved-nothing
+    // is a genuine result and must NOT be suppressed.
+    assert.match(code, /num\(cov\.orders_counted\) === 0/,
+        'only orders_counted === 0 suppresses the chart — not "all values are zero"');
+});
+
+test('§7 the invoice list is paged, and the cap announces itself', () => {
+    const code = codeOnly(PAGE_JS);
+    assert.match(code, /pagination/, 'the pager reads pagination.total from the response');
+    assert.match(code, /Showing \$\{this\._invoiceShown\}/,
+        'a truncated list must say how much of itself is on screen');
+    assert.match(code, /_invoiceShown < total/,
+        'Load more appears only while there is provably more');
+    assert.match(PAGE, /id="invoices-more"/);
+    assert.match(PAGE, /id="invoices-summary"/);
+    assert.match(code, /p\.append\('status'/, 'paging must not have displaced server-side filtering');
+});
+
+test('§7 a locally reproduced PDF says so ON THE PAGE, not only inside the file', () => {
+    const code = codeOnly(PAGE_JS);
+    assert.match(code, /out\.source === 'generated'/,
+        'the narrow fallback exists to be honest about a substitution; showing the note only ' +
+        'when !out.ok means the one case it was built for is the one that says nothing');
+    // And the fallback itself must stay narrow.
+    assert.match(codeOnly(PDF_JS), /res\.status === 404 \|\| res\.status === 409/);
+});
+
+test('§7 overdue is derived the way the backend derives it, and never from a Date', () => {
+    const code = codeOnly(PAGE_JS);
+    assert.match(code, /const isOverdue =/, 'one helper, not a repeated inline comparison');
+    assert.match(code, /'unpaid'/, 'overdue is unpaid AND past due — status is half of it');
+    assert.match(code, /todayISO\(\)/,
+        'due_date is date-only; parsing it to a Date makes it UTC midnight, which reads as ' +
+        '"yesterday" all morning in NZ and would brand a same-day invoice overdue');
+
+    // The filter must offer exactly the values the server accepts. Drafts are
+    // never returned to a customer, so there must be no Draft option.
+    const select = PAGE.slice(PAGE.indexOf('id="invoice-filter-status"'), PAGE.indexOf('</select>'));
+    for (const v of ['unpaid', 'overdue', 'paid', 'void']) {
+        assert.match(select, new RegExp(`value="${v}"`), `the status filter must offer ${v}`);
+    }
+    assert.ok(!/value="draft"/.test(select),
+        'drafts are never returned to a customer — offering the filter implies they might be');
+});
+
+test('§7 the §4 detail payload is displayed, under the customer-facing name', () => {
+    const code = codeOnly(PAGE_JS);
+    for (const f of ['bill_to', 'payment_terms', 'emailed_at', 'po_number', 'unit_price_excl_gst']) {
+        assert.ok(code.includes(f), `the detail panel must render ${f} — it was fetched and shown nowhere`);
+    }
+    assert.ok(!/unit_cost_excl_gst/.test(code),
+        'unit_cost_excl_gst is the INTERNAL name and sits one word from supplier_cost_excl_gst');
+    assert.match(code, /'lines'\)/,
+        'a detail response with no `lines` array is MALFORMED, not an empty invoice');
+
+    // The R2 ban re-run over everything §7 added.
+    const banned = /supplier_?[Cc]ost|cost_source|profit_excl_gst|margin_percent/;
+    for (const [name, src] of [['business.html', PAGE], ['business-page.js', PAGE_JS], ['business-invoice-pdf.js', PDF_JS]]) {
+        assert.ok(!banned.test(codeOnly(src)), `${name} must never reference supplier cost or margin`);
+    }
+});
+
+test('§7 today’s reorder price comes from the live pricing path, never from history', () => {
+    const code = codeOnly(PAGE_JS);
+    assert.match(code, /Business\.getPricing/,
+        '/top-products carries no price on purpose — a March figure is not today’s price');
+    assert.match(code, /Business\.describeLadder/, 'the ladder interpreter is the one authority');
+    assert.ok(!/\*\s*retail|retail\s*\*|\/\s*1\.15|\*\s*0\.\d/.test(code),
+        'the frontend must not compute a business price — ERR-139');
+    assert.match(code, /price unavailable/,
+        'a SKU the pricing call could not answer for renders an explicit unknown, not a guess');
+});

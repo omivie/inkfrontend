@@ -119,6 +119,42 @@ const ProductColors = {
         'grey': '#9e9e9e',
         'light gray': '#bdbdbd',
         'light grey': '#bdbdbd',
+        // Specialty singles present in production (Aug 2026 census of all
+        // 3,969 live products). Before this block these painted NOTHING —
+        // getStyle returned the caller's fallback, so a compatible row with
+        // no image showed a blank/grey tile instead of its colour. Every
+        // value here is a real stored products.color string; keep this map,
+        // OPTIONS and COLOR_RANK in step (pinned by the colour-vocabulary
+        // tests and by `npm run audit:colours`).
+        'photo cyan': '#4dd0e1',
+        'photo magenta': '#f06292',
+        'vivid magenta': '#d81b60',
+        'vivid light magenta': '#f8bbd0',
+        'light black': '#424242',
+        'photo grey': '#757575',
+        'photo gray': '#757575',
+        'photo blue': '#5c6bc0',
+        'photo': '#616161',
+        'violet': '#7c4dff',
+        'purple': '#9c27b0',
+        'orange': '#ff9800',
+        'chromatic red': '#d32f2f',
+        'white': '#ffffff',
+        // Finishes, not inks — a coating that adds gloss/chroma rather than
+        // colour. A neutral near-white reads as "clear coat" instead of
+        // implying a hue the cartridge does not print. These rely on the
+        // 1px border on .product-card__color-block / .product-gallery__color-block
+        // to stay visible against a white card.
+        'clear': '#eceff1',
+        'chroma optimizer': '#eceff1',
+        'gloss enhancer': '#eceff1',
+        'gloss optimiser': '#eceff1',
+        'gloss optimizer': '#eceff1',
+        // Dual-chamber / dual-label SINGLES — one cartridge, two inks. Two
+        // stripes, same explicit-stop syntax as the pack gradients below.
+        'black/red': 'linear-gradient(to right, #1a1a1a 0%, #1a1a1a 50%, #f44336 50%, #f44336 100%)',
+        'blue/green': 'linear-gradient(to right, #2196f3 0%, #2196f3 50%, #4caf50 50%, #4caf50 100%)',
+        'magenta/yellow': 'linear-gradient(to right, #e91e63 0%, #e91e63 50%, #ffeb3b 50%, #ffeb3b 100%)',
         // Multi-color packs - vertical stripes
         'cmy': 'linear-gradient(to right, #00bcd4 0%, #00bcd4 33.33%, #e91e63 33.33%, #e91e63 66.66%, #ffeb3b 66.66%, #ffeb3b 100%)',
         'bcmy': 'linear-gradient(to right, #1a1a1a 0%, #1a1a1a 25%, #00bcd4 25%, #00bcd4 50%, #e91e63 50%, #e91e63 75%, #ffeb3b 75%, #ffeb3b 100%)',
@@ -128,8 +164,19 @@ const ProductColors = {
         '4-pack': 'linear-gradient(to right, #1a1a1a 0%, #1a1a1a 25%, #00bcd4 25%, #00bcd4 50%, #e91e63 50%, #e91e63 75%, #ffeb3b 75%, #ffeb3b 100%)',
         '4 pack': 'linear-gradient(to right, #1a1a1a 0%, #1a1a1a 25%, #00bcd4 25%, #00bcd4 50%, #e91e63 50%, #e91e63 75%, #ffeb3b 75%, #ffeb3b 100%)',
         'tri-colour': 'linear-gradient(to right, #00bcd4 0%, #00bcd4 33.33%, #e91e63 33.33%, #e91e63 66.66%, #ffeb3b 66.66%, #ffeb3b 100%)',
+        // Unhyphenated spellings — COLOR_RANK ranks these, so the map must be
+        // able to paint them or a row sorts correctly and renders blank.
+        'tricolour': 'linear-gradient(to right, #00bcd4 0%, #00bcd4 33.33%, #e91e63 33.33%, #e91e63 66.66%, #ffeb3b 66.66%, #ffeb3b 100%)',
+        'tricolor': 'linear-gradient(to right, #00bcd4 0%, #00bcd4 33.33%, #e91e63 33.33%, #e91e63 66.66%, #ffeb3b 66.66%, #ffeb3b 100%)',
+        'black and red': 'linear-gradient(to right, #1a1a1a 0%, #1a1a1a 50%, #f44336 50%, #f44336 100%)',
         'color': 'linear-gradient(to right, #00bcd4 0%, #00bcd4 33.33%, #e91e63 33.33%, #e91e63 66.66%, #ffeb3b 66.66%, #ffeb3b 100%)',
-        'colour': 'linear-gradient(to right, #00bcd4 0%, #00bcd4 33.33%, #e91e63 33.33%, #e91e63 66.66%, #ffeb3b 66.66%, #ffeb3b 100%)'
+        'colour': 'linear-gradient(to right, #00bcd4 0%, #00bcd4 33.33%, #e91e63 33.33%, #e91e63 66.66%, #ffeb3b 66.66%, #ffeb3b 100%)',
+        // Pack labels that name no colour at all. Stored on real rows
+        // ("Value Pack" ×20 live), so they need a swatch or the tile is blank.
+        // Black + colour set → the same K/C/M/Y stripe as 'kcmy'.
+        'black/colour': 'linear-gradient(to right, #1a1a1a 0%, #1a1a1a 25%, #00bcd4 25%, #00bcd4 50%, #e91e63 50%, #e91e63 75%, #ffeb3b 75%, #ffeb3b 100%)',
+        'value pack': 'linear-gradient(to right, #1a1a1a 0%, #1a1a1a 25%, #00bcd4 25%, #00bcd4 50%, #e91e63 50%, #e91e63 75%, #ffeb3b 75%, #ffeb3b 100%)',
+        'multipack': 'linear-gradient(to right, #1a1a1a 0%, #1a1a1a 25%, #00bcd4 25%, #00bcd4 50%, #e91e63 50%, #e91e63 75%, #ffeb3b 75%, #ffeb3b 100%)'
     },
 
     /**
@@ -280,6 +327,14 @@ const ProductColors = {
     // CL-541, etc.) and sits at rank 11 alongside other specialty singles.
     // The two are deliberately distinct dropdown entries — they have
     // different prices, different print yields, and different fitments.
+    //
+    // 'Colour' / 'Color' are DELIBERATELY ABSENT (Aug 2026, ERR-141). They
+    // remain in `map` and COLOR_RANK so the rows still stored that way keep
+    // rendering and sorting correctly — but offering them here is exactly how
+    // 13 tri-colour singles came to be labelled with a value that says
+    // nothing about how many cartridges you get. An unlisted stored value
+    // renders as "Colour (legacy)" in the admin drawer, which is the nudge an
+    // editor should get. `npm run audit:colours` reports the stragglers.
     OPTIONS: [
         { value: 'Black',         label: 'Black' },
         { value: 'Photo Black',   label: 'Photo Black' },
@@ -293,16 +348,40 @@ const ProductColors = {
         { value: 'Yellow',        label: 'Yellow' },
         { value: 'CMY',           label: 'CMY (3-Pack — three separate cartridges)' },
         { value: 'KCMY',          label: 'KCMY (4-Pack — four separate cartridges)' },
+        { value: 'CMYK',          label: 'CMYK (4-Pack — four separate cartridges)' },
         { value: 'Tri-Colour',    label: 'Tri-Colour (single cartridge with C/M/Y)' },
         { value: 'Photo',         label: 'Photo' },
         { value: 'Red',           label: 'Red' },
+        { value: 'Chromatic Red', label: 'Chromatic Red' },
         { value: 'Blue',          label: 'Blue' },
+        { value: 'Photo Blue',    label: 'Photo Blue' },
         { value: 'Green',         label: 'Green' },
-        { value: 'Gray',          label: 'Gray' },
-        { value: 'Light Gray',    label: 'Light Gray' },
+        { value: 'Orange',        label: 'Orange' },
+        { value: 'Violet',        label: 'Violet' },
+        { value: 'Purple',        label: 'Purple' },
+        { value: 'Vivid Magenta', label: 'Vivid Magenta' },
+        { value: 'Vivid Light Magenta', label: 'Vivid Light Magenta' },
+        { value: 'Light Black',   label: 'Light Black' },
+        // British spelling is what production actually stores (33 rows as of
+        // Aug 2026); the US spellings are kept so existing rows and the
+        // pinned dropdown ordering stay valid, but labelled so an editor
+        // never picks them by accident.
+        { value: 'Grey',          label: 'Grey' },
+        { value: 'Light Grey',    label: 'Light Grey' },
+        { value: 'Photo Grey',    label: 'Photo Grey' },
+        { value: 'Gray',          label: 'Gray (US spelling — prefer Grey)' },
+        { value: 'Light Gray',    label: 'Light Gray (US spelling — prefer Light Grey)' },
         { value: 'White',         label: 'White' },
+        // Finishes — coatings, not inks.
         { value: 'Clear',         label: 'Clear' },
+        { value: 'Chroma Optimizer', label: 'Chroma Optimizer (finish, not an ink)' },
+        { value: 'Gloss Enhancer',   label: 'Gloss Enhancer (finish, not an ink)' },
+        { value: 'Gloss Optimiser',  label: 'Gloss Optimiser (finish, not an ink)' },
+        // Dual-chamber / dual-label SINGLES — one cartridge, two inks.
         { value: 'Black/Red',     label: 'Black/Red' },
+        { value: 'Blue/Green',    label: 'Blue/Green' },
+        { value: 'Magenta/Yellow', label: 'Magenta/Yellow' },
+        { value: 'Black/Colour',  label: 'Black/Colour (black + tri-colour set)' },
         { value: 'Value Pack',    label: 'Value Pack' },
         { value: 'Multipack',     label: 'Multipack' }
     ],
@@ -312,7 +391,13 @@ const ProductColors = {
     // that doesn't exactly match a stored products.color string silently
     // matches ZERO rows (the ERR-075 drum/paper failure mode).
     // 'Tri-Colour' is deliberately NOT here — it's ONE cartridge (see note above).
-    PACK_VALUES: ['CMY', 'KCMY', 'Value Pack', 'Multipack']
+    //
+    // 'CMYK' and 'Black/Colour' added Aug 2026 (ERR-141): all 5 live rows
+    // carrying them are pack_type='value_pack' 4-packs (G702XLCMYK, G288CMYK,
+    // G3YP09AACMYK, G932XLCMYK, G60BKCLRVP), so the admin Packs filter was
+    // showing them as singles. ERR-075 cuts both ways — a pack colour MISSING
+    // from this list hides real packs just as surely as a bogus value shows none.
+    PACK_VALUES: ['CMY', 'KCMY', 'CMYK', 'Black/Colour', 'Value Pack', 'Multipack']
 };
 
 // Make ProductColors available globally (browser-only; Node test runs skip this).
@@ -640,6 +725,8 @@ const ProductSort = (function() {
         'matte black':         5,
         'mb':                  5,
         'mbk':                 5,
+        'light black':         5.5,   // K-family, after matte black
+        'lbk':                 5.5,
         'light cyan':          6,
         'lc':                  6,
         'photo cyan':          6.5,
@@ -648,6 +735,8 @@ const ProductSort = (function() {
         'lm':                  7,
         'photo magenta':       7.5,
         'pm':                  7.5,
+        'vivid magenta':       7.8,
+        'vm':                  7.8,
         'vivid light magenta': 8,
         'vlm':                 8,
         'grey':                9,
@@ -657,6 +746,7 @@ const ProductSort = (function() {
         'photo grey':          9.6,
         'photo gray':          9.6,
         'violet':             10,
+        'purple':             10.5,
         'tri-colour':         11,
         'tri-color':          11,
         'tricolour':          11,
@@ -665,8 +755,10 @@ const ProductSort = (function() {
         'color':              11,
         'red':                12,
         'r':                  12,
+        'chromatic red':      12.5,
         'blue':               13,
         'b':                  13,
+        'photo blue':         13.5,
         'green':              14,
         'g':                  14,
         'orange':             15,
@@ -675,6 +767,19 @@ const ProductSort = (function() {
         'w':                  16,
         'black/red':          17,
         'black and red':      17,
+        'blue/green':         17.2,   // dual-chamber singles join Black/Red
+        'magenta/yellow':     17.4,
+        // Finishes (18.x) — coatings, not inks. Last among singles but still
+        // below RANK_UNKNOWN_SINGLE (19) so a genuinely unknown colour stays
+        // distinguishable from a known finish, and below 20 so colorTier()
+        // keeps bucketing them as SPECIALTY rather than as a pack.
+        'clear':              18.0,
+        'chroma optimizer':   18.2,
+        'co':                 18.2,
+        'gloss enhancer':     18.4,
+        'gloss optimiser':    18.4,
+        'gloss optimizer':    18.4,
+        'photo':              18.6,   // generic "Photo", ahead of unknown
 
         // Pack ranks (20-21) — colorOrder values for canonical pack labels.
         // Pack-name regex still wins over these so a "Black" value pack
@@ -1005,11 +1110,37 @@ const ProductSort = (function() {
                 .filter(Boolean)
                 .sort((a, b) => a.length - b.length || a.localeCompare(b));
             if (codes.length) {
-                // Strip yield prefix from the chosen base so std/XL/XXL all
-                // resolve to the same family even if the backend included
-                // them as separate codes.
+                // Strip the yield suffix from the chosen base so std/XL/XXL all
+                // resolve to the same family even if the backend included them
+                // as separate codes.
+                //
+                // ONE YIELD VOCABULARY (Aug 2026). This used to carry its own
+                // regex — /^([A-Z]+\d+)(XXL|XL|HY|H)([A-Z]*)$/ — a second,
+                // subtly different grammar from SeriesCodes.YIELD_SUFFIX ~500
+                // lines below in this same file. `[A-Z]+` required a letter
+                // before the digits, so BARE-NUMERIC codes never collapsed:
+                // '804XL' stayed '804XL' and '604XL' stayed '604XL' while
+                // 'LC133XL' became 'LC133'. That forks HP 804 / Epson 604 rows
+                // off their own std siblings whenever a payload carries the XL
+                // code — which api.js::_enrichSeriesCodes emits for any product
+                // shipped without backend series_codes.
+                //
+                // DO NOT "fix" this by widening to `[A-Z]*`. Measured over all
+                // 1,350 distinct series_codes live on 2026-08-03, that widening
+                // collapses ZERO codes correctly and MANGLES THREE — the `H`
+                // branch eats a letter out of a bare-numeric body:
+                // 34217HR→34217R, 64017HR→64017R, 64080HW→64080W (real Lexmark
+                // SKUs). collapseYieldSuffix only strips X{1,3}L and was
+                // zero-diff across all 1,350. See ERR-141.
+                //
+                // Reference SeriesCodes directly, NOT window.SeriesCodes: the
+                // latter is undefined under require() and would silently
+                // disable this in every unit test. Safe despite the const being
+                // declared below — familyKey only ever runs at render/sort
+                // time, long after module evaluation (same TDZ reasoning as the
+                // CompatSource note further down).
                 let base = codes[0];
-                base = base.replace(/^([A-Z]+\d+)(XXL|XL|HY|H)([A-Z]*)$/, '$1$3');
+                base = SeriesCodes.collapseYieldSuffix(base) || base;
                 return (brand ? 'B:' + brand + ':' : '') + base;
             }
         }
@@ -1400,6 +1531,12 @@ const ProductName = (function () {
     const TYPE_RE = /\b(Ink Print Head|Ink Cartridge|Toner Cartridge|Print Head|Ink Tank|Toner)\b/i;
     const collapseWs = (s) => s.replace(/\s+/g, ' ').trim();
 
+    // Trailing parentheticals on the readable half — the page-yield suffix
+    // ("(600 pages)", "(30,000 pages)") and occasionally an OEM part number
+    // before it ("… Colour (7FP20TA) (120 pages)"). One or more groups,
+    // anchored to the end.
+    const TRAILING_PARENS_RE = /(\s*\([^()]*\))+\s*$/;
+
     function clean(product) {
         const raw = (product && product.name != null ? String(product.name) : '').trim();
         if (!raw) return raw;
@@ -1409,7 +1546,7 @@ const ProductName = (function () {
 
         const type = tm[0];
         const before = raw.slice(0, tm.index).trim();          // "HP Genuine 70 130mlCY"
-        const after = raw.slice(tm.index + type.length).trim(); // "70 130ml Cyan"
+        let after = raw.slice(tm.index + type.length).trim();   // "70 130ml Cyan"
         if (!before || !after) return raw;
 
         // brandPrefix = "<Brand> Genuine" (or the leading brand word); compact = the rest.
@@ -1424,6 +1561,22 @@ const ProductName = (function () {
         if (!/\d/.test(leadCode)) return raw;
         if (!compact.toUpperCase().startsWith(leadCode.toUpperCase())) return raw;
 
+        // Peel any trailing parenthetical BEFORE the colour split, then put it
+        // back at the very end (Aug 2026, ERR-141). Most genuine names carry a
+        // page-yield tail, so without this the colour is never "trailing" and
+        // every one of them fell to the type-last fallback below, emitting
+        // "Brother Genuine LC133 Black (600 pages) Ink Cartridge" — the type
+        // phrase stranded after the page count. Measured over all 3,969 live
+        // products: 1,947 titles improve, and every previously-pinned fixture
+        // (which carry no parenthetical) is byte-identical.
+        let parens = '';
+        const pm = after.match(TRAILING_PARENS_RE);
+        if (pm) {
+            parens = pm[0].trim();
+            after = after.slice(0, pm.index).trim();
+        }
+        if (!after) return raw;   // the readable half was ONLY a parenthetical
+
         // Split the trailing colour off the readable half so we can re-emit it last.
         const color = (product && product.color ? String(product.color) : '').trim();
         let codeVol = after;
@@ -1433,10 +1586,10 @@ const ProductName = (function () {
         }
 
         if (color && codeVol && codeVol !== after) {
-            return collapseWs(`${brandPrefix} ${codeVol} ${type} ${color}`);   // colour last
+            return collapseWs(`${brandPrefix} ${codeVol} ${type} ${color} ${parens}`);   // colour last
         }
         // Colour unknown / not trailing → drop only the compact token, keep readable order.
-        return collapseWs(`${brandPrefix} ${after} ${type}`);
+        return collapseWs(`${brandPrefix} ${after} ${type} ${parens}`);
     }
 
     // ─────────────────────────────────────────────────────────────────────

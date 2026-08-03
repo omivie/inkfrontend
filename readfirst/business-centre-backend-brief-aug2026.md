@@ -3,18 +3,24 @@
 **Date:** 2026-08-02
 **Audience:** backend dev + backend CLI Claude (the `ink-backend-zaeq` service / Supabase)
 **Repo affected:** backend API only — the frontend is already built and deployed
-**Status:** frontend is LIVE and fail-soft. Every panel below currently renders an
-error + Retry because its endpoint 404s. Nothing breaks while you implement this;
-each endpoint lights up its panel the moment it ships.
-**Priority:** medium-high — `/business` is linked from the footer on all 30 pages
-and from a header button shown to every approved business account, so approved
-customers can already reach a page that is mostly error panes.
+**Status (updated 2026-08-03): ALL SEVEN ROUTES ARE NOW LIVE.** This brief has been
+implemented. Re-probed against production on 2026-08-03: every route below answers
+`401 UNAUTHORIZED` unauthenticated, while an unknown path under the same prefix
+(`/api/business/invoices/abc/nope`) answers `404 NOT_FOUND` — so the 401s are real
+route matches, not a blanket prefix guard. **The §0 table's original "404 — build it"
+rows were correct on 2026-08-02 and are now obsolete; do not re-implement them.**
+The remaining open item is §7 (the `invoices.business_account_id` FK), without which
+no admin-created invoice can appear on a customer's portal.
+**Priority:** the endpoint work is DONE. §7 is the live gap.
 
 This document is self-contained. You should not need the frontend repo.
 
 ---
 
-## 0. What already exists (verified against production, 2026-08-02)
+## 0. What already exists
+
+> **Re-verified 2026-08-03: the whole table is now "Live".** The states below are the
+> 2026-08-02 snapshot, kept only so the history reads straight. See the Status note above.
 
 | Endpoint | State |
 |---|---|

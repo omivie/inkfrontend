@@ -2971,6 +2971,33 @@ const AdminAPI = {
     }
   },
 
+  // Approved business accounts, for the invoice editor's portal-link picker.
+  //
+  // `standalone_invoices.business_account_id` is a FK to business_accounts(id),
+  // and that id is the ONE value that puts an invoice on a customer's /business
+  // portal. As of 2026-08-03 NO endpoint exposes it: /api/admin/business-accounts
+  // is a 404, and the FK rejects both business_applications.id and user_id
+  // (verified against production — see business-centre-FE-response-aug2026.md).
+  //
+  // So this resolves null today and the editor says so out loud rather than
+  // offering a picker that would write a value the database refuses. It lights
+  // up the moment the endpoint ships. `null` = "we don't know", which is NOT the
+  // same as `[]` = "there are no approved accounts", and the caller renders them
+  // differently.
+  //
+  // @returns {Promise<Array|null>} approved accounts, or null when unavailable
+  async listBusinessAccounts() {
+    try {
+      const resp = await window.API.get('/api/admin/business-accounts?limit=200');
+      const rows = resp?.data?.accounts ?? resp?.data?.items ?? (Array.isArray(resp?.data) ? resp.data : null);
+      if (!Array.isArray(rows)) return null;
+      return rows.filter((r) => r && (r.status == null || r.status === 'approved' || r.status === 'active'));
+    } catch (e) {
+      adminApiWarn('Business accounts unavailable (portal linking is disabled)', e);
+      return null;
+    }
+  },
+
   async getInvoice(invoiceId) {
     try {
       const resp = await window.API.get(`/api/admin/invoices/${encodeURIComponent(invoiceId)}`);

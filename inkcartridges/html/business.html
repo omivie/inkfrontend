@@ -20,9 +20,9 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link rel="stylesheet" href="/css/base.css?v=e9b82f71">
     <link rel="stylesheet" href="/css/layout.css?v=77f71285">
-    <link rel="stylesheet" href="/css/components.css?v=51f6dd56">
+    <link rel="stylesheet" href="/css/components.css?v=18c35419">
     <link rel="stylesheet" href="/css/modern-effects.css?v=afe20f45">
-    <link rel="stylesheet" href="/css/pages.css?v=401d6069">
+    <link rel="stylesheet" href="/css/pages.css?v=dd434a11">
     <link rel="stylesheet" href="/css/search.css?v=c28f09ef">
     <meta name="twitter:card" content="summary_large_image">
     <meta name="twitter:title" content="Business Centre | InkCartridges.co.nz">
@@ -253,7 +253,11 @@
                         <div class="business-invoices" id="recent-invoices-list"></div>
                         <p class="business-section__more"><button type="button" class="btn btn--secondary" data-tab-link="invoices">See all invoices</button></p>
                         <div class="account-empty" id="recent-invoices-empty" hidden>
-                            <p>No invoices yet.</p>
+                            <!-- An invoice only reaches this list once it is
+                                 linked to the business account, so "none yet"
+                                 can be true for a customer who has in fact been
+                                 invoiced. The state has to offer a way out. -->
+                            <p>No invoices yet. If you've been invoiced recently and don't see it here, <a href="/contact">let us know</a> and we'll connect it to your account.</p>
                         </div>
                         <div class="account-empty business-error" id="recent-invoices-error" hidden>
                             <p>We couldn't load your invoices.</p>
@@ -270,10 +274,17 @@
                         <div class="business-filters">
                             <label class="business-filter">
                                 <span class="business-filter__label">Status</span>
+                                <!-- Every value here is a SERVER-side filter the
+                                     backend accepts. `overdue` is derived there
+                                     (unpaid + past due); drafts are never
+                                     returned to a customer at all, so there is
+                                     deliberately no Draft option. -->
                                 <select class="business-filter__input" id="invoice-filter-status">
                                     <option value="">All</option>
                                     <option value="unpaid">Unpaid</option>
+                                    <option value="overdue">Overdue</option>
                                     <option value="paid">Paid</option>
+                                    <option value="void">Void</option>
                                 </select>
                             </label>
                             <label class="business-filter">
@@ -288,6 +299,15 @@
                         </div>
 
                         <div class="business-invoices" id="invoices-list"></div>
+
+                        <!-- "Showing 20 of 128" + Load more. The list is paged
+                             server-side, so without these a customer with more
+                             than one page's worth is shown a truncated list that
+                             looks complete — a silent cap. -->
+                        <div class="business-pager">
+                            <p class="business-pager__count" id="invoices-summary" aria-live="polite"></p>
+                            <button type="button" class="btn btn--secondary" id="invoices-more" hidden>Load more invoices</button>
+                        </div>
 
                         <div class="account-empty" id="invoices-empty" hidden>
                             <p id="invoices-empty-msg">No invoices yet.</p>
@@ -306,7 +326,7 @@
     <script defer src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.98.0" integrity="sha384-Sm2s7OXxsAMTyJ4iIyRBgVpeGUvMPk2lRQnnZhE78Wej7oggIoolKt+SCt0XJbUB" crossorigin="anonymous"></script>
     <script defer src="/js/config.js?v=57d2621d"></script>
     <script defer src="/js/security.js?v=790f00f3"></script>
-    <script defer src="/js/utils.js?v=0fab5ab7"></script>
+    <script defer src="/js/utils.js?v=2e543423"></script>
     <script defer src="/js/api.js?v=c40a8e6b"></script>
     <script defer src="/js/schema.js?v=dd78df4e"></script>
     <script defer src="/js/auth.js?v=55cfdbef"></script>
@@ -321,8 +341,8 @@
     <script defer src="/js/cart.js?v=49f84157"></script>
     <script defer src="/js/order-totals.js?v=530c73d7"></script>
     <script defer src="/js/savings-chart.js?v=faedbb31"></script>
-    <script defer src="/js/business-invoice-pdf.js?v=86b6d6bd"></script>
-    <script defer src="/js/business-page.js?v=9fcbe46e"></script>
+    <script defer src="/js/business-invoice-pdf.js?v=973007a8"></script>
+    <script defer src="/js/business-page.js?v=6a5de815"></script>
     <script defer src="/js/analytics.js?v=8c9ee196"></script>
     <script defer src="/js/site-guard.js?v=e0b0e4ba"></script>
 </body>

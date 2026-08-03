@@ -168,6 +168,38 @@ test('familyKey collapses HP 804XL Black + Tri-Colour (CLR) onto the same base',
     assert.equal(fk('804XLBK Compatible Ink Cartridge for HP 804XL Black (600 pages)'), base);
 });
 
+test('familyKey PRIORITY-0 collapses bare-numeric yield codes (Aug 2026, ERR-143)', () => {
+    // Every familyKey test above this line exercises the NAME-SCRAPE path,
+    // because none of them pass `series_codes`. PRIORITY-0 — the branch that
+    // actually runs on live payloads — carried its own yield regex,
+    // /^([A-Z]+\d+)(XXL|XL|HY|H)([A-Z]*)$/, whose `[A-Z]+` required a letter
+    // before the digits. So HP and Epson bare-numeric codes never collapsed
+    // while letter-prefixed ones did, and a payload carrying '804XL' forked
+    // off the sibling carrying '804'.
+    const fk = (codes, brand) =>
+        ProductSort.familyKey({ name: 'x', brand: { name: brand }, series_codes: codes });
+
+    assert.equal(fk(['804XL'], 'HP'), 'B:HP:804', 'bare-numeric XL must collapse');
+    assert.equal(fk(['604XL'], 'Epson'), 'B:EPSON:604');
+    assert.equal(fk(['200XXL'], 'Epson'), 'B:EPSON:200');
+    assert.equal(fk(['804'], 'HP'), 'B:HP:804', 'the std sibling is the join target');
+    assert.equal(fk(['LC133XL'], 'Brother'), 'B:BROTHER:LC133', 'letter-prefixed must not regress');
+});
+
+test('familyKey PRIORITY-0 leaves bare-numeric Lexmark H-codes intact (the [A-Z]* trap)', () => {
+    // Measured 2026-08-03 over all 1,350 distinct live series_codes: widening
+    // the old regex to `[A-Z]*` collapses ZERO codes correctly and mangles
+    // exactly these three, because the `H` yield branch starts eating letters
+    // out of a bare-numeric body (34217HR -> 34217R). Delegating to
+    // SeriesCodes.collapseYieldSuffix — which only strips X{1,3}L — was
+    // zero-diff across all 1,350. Do not "simplify" this back.
+    const fk = (code) =>
+        ProductSort.familyKey({ name: 'x', brand: { name: 'Lexmark' }, series_codes: [code] });
+    assert.equal(fk('34217HR'), 'B:LEXMARK:34217HR');
+    assert.equal(fk('64017HR'), 'B:LEXMARK:64017HR');
+    assert.equal(fk('64080HW'), 'B:LEXMARK:64080HW');
+});
+
 test('familyKey ignores trailing page-count parens for bare-numeric codes (HP)', () => {
     // "HP Genuine 975A Ink Cartridge Black (450 Pages)" must pick 975A,
     // not 450. Bare-numeric pass uses the FIRST match for exactly this reason.

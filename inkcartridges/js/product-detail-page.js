@@ -817,7 +817,11 @@
             // detection rule. Pinned by tests/stale-color-swatch.test.js.
             const _swatchStale = ProductColors.isPlaceholderSwatchImage(info.image_url) && colorStyle && info.isCompatible;
             if (info.image_url && !_swatchStale) {
-                if (colorStyle) {
+                // COMPATIBLE-ONLY colour fallback (ERR-143) — see
+                // Products.getProductImageHTML. Gating on `colorStyle` alone
+                // meant a genuine PDP whose hero image 404'd swapped in a
+                // striped tile, the visual language of a compatible cartridge.
+                if (colorStyle && info.isCompatible) {
                     // Image with color fallback on error
                     productImageEl.innerHTML = `
                         <img src="${Security.escapeAttr(Security.sanitizeUrl(info.image_url))}" alt="${Security.escapeAttr(info.displayName)}"${detailSrcsetHtml}${zoomSrcHtml} style="max-width: 100%; height: auto;"

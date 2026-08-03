@@ -134,3 +134,80 @@ test('PDP, shop card, products.renderCard and cart render via ProductName.clean'
     assert.match(CART, /ProductName\.clean\(item\)/,
         'cart line items should render via ProductName.clean');
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Aug 2026 (ERR-143) — the page-yield tail
+//
+// Almost every genuine name carries a "(N pages)" suffix, so the trailing
+// colour was never actually trailing and every one of those titles fell to
+// the type-last fallback, rendering
+//   "Brother Genuine LC133 Black (600 pages) Ink Cartridge"
+// with the product type stranded after the page count. clean() now peels the
+// parenthetical off first and re-appends it last.
+//
+// Measured over all 3,969 live products: 2,373 titles improve and every
+// fixture pinned above (none of which carries a parenthetical) is unchanged.
+// ─────────────────────────────────────────────────────────────────────────────
+
+test('page-yield tail moves to the END, after the colour', () => {
+    assert.equal(
+        ProductName.clean({
+            name: 'Brother Genuine LC133BK Ink Cartridge LC133 Black (600 pages)',
+            color: 'Black'
+        }),
+        'Brother Genuine LC133 Ink Cartridge Black (600 pages)');
+});
+
+test('the Aug 2026 tri-colour SKUs read correctly', () => {
+    assert.equal(
+        ProductName.clean({
+            name: 'HP Genuine 804CLR Ink Cartridge 804 Tri-Colour (165 pages)',
+            color: 'Tri-Colour'
+        }),
+        'HP Genuine 804 Ink Cartridge Tri-Colour (165 pages)');
+    assert.equal(
+        ProductName.clean({
+            name: 'Canon Genuine CL511CLR Ink Cartridge CL511 Tri-Colour (244 pages)',
+            color: 'Tri-Colour'
+        }),
+        'Canon Genuine CL511 Ink Cartridge Tri-Colour (244 pages)');
+});
+
+test('MULTIPLE trailing parentheticals are peeled together (HP 68)', () => {
+    // Real live name: an OEM part number followed by the page yield.
+    assert.equal(
+        ProductName.clean({
+            name: 'HP Genuine 68 Ink Cartridge 68 Colour (7FP20TA) (120 pages)',
+            color: 'Colour'
+        }),
+        'HP Genuine 68 Ink Cartridge Colour (7FP20TA) (120 pages)');
+});
+
+test('a pack name with a page tail keeps the pack label before the type', () => {
+    // Colour is not trailing here, so the type-last fallback still applies —
+    // the parenthetical just stops stranding the type behind it.
+    assert.equal(
+        ProductName.clean({
+            name: 'Brother Genuine LC133CMY Ink Cartridge LC133 CMY 3-Pack (600 pages)',
+            color: 'CMY'
+        }),
+        'Brother Genuine LC133 CMY 3-Pack Ink Cartridge (600 pages)');
+});
+
+test('cleaning an already-cleaned name is idempotent (no drift on re-render)', () => {
+    // Cards, PDP and cart each call clean() independently; a non-idempotent
+    // rewrite would show a different title depending on which surface ran.
+    const product = {
+        name: 'HP Genuine 804CLR Ink Cartridge 804 Tri-Colour (165 pages)',
+        color: 'Tri-Colour'
+    };
+    const once = ProductName.clean(product);
+    const twice = ProductName.clean({ name: once, color: product.color });
+    assert.equal(twice, once);
+});
+
+test('a name that is ONLY a parenthetical after the type is returned verbatim', () => {
+    // Guard against emitting a title with the readable half amputated.
+    const name = 'HP Genuine 123 Ink Cartridge (500 pages)';
+    assert.equal(ProductName.clean({ name, color: 'Black' }), name);
+});

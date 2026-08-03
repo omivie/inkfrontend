@@ -110,14 +110,38 @@ test('ProductColors.OPTIONS includes every PascalCase color the backend stores i
     // tests/stale-color-swatch.test.js — admin OPTIONS must expose it so
     // editors can categorise these products correctly instead of forcing
     // them into the CMY pack bucket.
+    // Aug 2026 (ERR-143) — the May 2026 note above was a 1,200-row SAMPLE.
+    // A full census of all 3,969 live products found 20 distinct stored
+    // colour values the dropdown could not offer, covering ~89 products.
+    // Every one of them rendered as "<value> (legacy)" in the admin drawer,
+    // and the single largest was 'Grey' (27 rows) — production has always
+    // used the British spelling while this list only carried the US 'Gray'.
+    // That is the mechanism by which a free-text colour column drifts.
+    // `npm run audit:colours` now fails on any value that is not here.
     const required = [
         'Black', 'Cyan', 'Magenta', 'Yellow',
-        'CMY', 'KCMY',
+        'CMY', 'KCMY', 'CMYK',
         'Tri-Colour',
         'Photo',
-        'Black/Red',
+        'Black/Red', 'Blue/Green', 'Magenta/Yellow', 'Black/Colour',
         'Value Pack',
         'White',
+        // Aug 2026 census additions, with live row counts:
+        'Grey',                 // 27
+        'Purple',               // 15
+        'Light Grey',           //  6
+        'Chroma Optimizer',     //  6
+        'Photo Blue',           //  4
+        'Photo Grey',           //  3
+        'Orange',               //  2
+        'Vivid Light Magenta',  //  2
+        'Gloss Enhancer',       //  2
+        'Violet',               //  1
+        'Light Black',          //  1
+        'Vivid Magenta',        //  1
+        'Gloss Optimiser',      //  1
+        'Chromatic Red',        //  1
+        'Clear',
     ];
     const values = ProductColors.OPTIONS.map(o => o.value);
     for (const need of required) {

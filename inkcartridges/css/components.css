@@ -626,6 +626,10 @@
     align-items: center;
     justify-content: center;
     border-radius: var(--radius-sm);
+    /* Aug 2026 (ERR-141): the colour vocabulary now covers White and the
+       finishes (Clear / Chroma Optimizer / Gloss Enhancer), which are
+       near-white and would be invisible on a white card without an edge. */
+    border: 1px solid var(--border, #e0e0e0);
 }
 
 .product-card__badge {

@@ -112,7 +112,7 @@
                                 <div class="order-item__image">
                                     ${(imageUrl && !_swatchStale)
                                         ? `<img src="${escAttr(imageUrl)}" alt="${escAttr(item.product_name)}" data-fallback="placeholder">`
-                                        : this.getColorPlaceholder(item.product_name, item.source)
+                                        : this.getColorPlaceholder(item.product_name, item.source, item.product?.color || item.color)
                                     }
                                 </div>
                                 <div class="order-item__details">
@@ -286,38 +286,30 @@
             return statusMap[status] || status;
         },
 
-        getColorPlaceholder(productName, source) {
+        getColorPlaceholder(productName, source, color) {
             // Genuine-no-color-tile invariant: when the order line is for a
             // genuine product with no image_url (e.g. the new genuine packs
             // that ship before the composite-image generator catches up),
             // never render a colored tile. Fall straight through to the
             // neutral cartridge SVG. Compatible items keep the color tile —
             // it helps customers recognize what they bought.
+            // THIS GATE RUNS FIRST AND IS LOAD-BEARING — do not reorder.
             if (source && source !== 'compatible') {
                 return `<svg width="60" height="60" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="6" y="2" width="12" height="20" rx="2"/><line x1="9" y1="6" x2="15" y2="6"/></svg>`;
             }
 
-            const name = (productName || '').toLowerCase();
-            const colors = {
-                'black': '#1a1a1a',
-                'cyan': '#00bcd4',
-                'magenta': '#e91e63',
-                'yellow': '#ffeb3b',
-                'red': '#f44336',
-                'blue': '#2196f3',
-                'green': '#4caf50'
-            };
-
-            // Check for color in name
-            for (const [colorName, colorValue] of Object.entries(colors)) {
-                if (name.includes(colorName)) {
-                    return `<div style="width: 60px; height: 60px; background-color: ${colorValue}; border-radius: 8px;"></div>`;
-                }
-            }
-
-            // Check for multi-color packs
-            if (name.includes('4-pack') || name.includes('4 pack') || name.includes('combo') || name.includes('value')) {
-                return `<div style="width: 60px; height: 60px; background: linear-gradient(to right, #1a1a1a 25%, #00bcd4 25%, #00bcd4 50%, #e91e63 50%, #e91e63 75%, #ffeb3b 75%); border-radius: 8px;"></div>`;
+            // ONE colour vocabulary — ProductColors in js/utils.js (ERR-141).
+            // This used to carry a private 7-word map scanned against the
+            // product NAME and ignored the stored `color` entirely, so a
+            // "…Tri-Colour" line matched nothing and a cartridge whose name
+            // merely mentioned a printer in "Red" matched the wrong hue.
+            // getProductStyle reads color_hex, then `color`, then falls back to
+            // detectFromName — a strict superset of the loop it replaced.
+            const style = (typeof ProductColors !== 'undefined')
+                ? ProductColors.getProductStyle({ color, name: productName }, null)
+                : null;
+            if (style) {
+                return `<div style="width: 60px; height: 60px; ${style} border-radius: 8px;"></div>`;
             }
 
             // Default placeholder

@@ -5025,6 +5025,20 @@ button.admin-active-dot--clickable:hover::after { opacity: 1; }
 @media (max-width: 640px) { .admin-ac__menu--product { width: 92vw; } }
 
 /* Source chip shown after a pick fills the invoice from a contact/customer/order. */
+/* Business-account link block. "Not linked" is styled to be READ, not skimmed:
+   an unlinked invoice is simply absent from the customer's Business Centre, and
+   that absence has no other symptom an operator could notice. */
+.inv-biz__state { font-size: 13px; margin-bottom: 8px; }
+.inv-biz__state--on { color: var(--success, #16a34a); }
+.inv-biz__state--off { color: var(--text-secondary); }
+.inv-biz__state--off::before { content: '○ '; }
+.inv-biz__state--on::before { content: '● '; }
+.inv-biz__suggest {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
+  margin-bottom: 10px; padding: 8px 10px; border-radius: 6px; font-size: 13px;
+  background: var(--input-bg); border: 1px solid var(--border);
+}
+
 .inv-fill-chip {
   display: inline-flex; align-items: center; gap: 6px; margin-top: 6px;
   padding: 3px 10px; border-radius: 999px; font-size: 12px;

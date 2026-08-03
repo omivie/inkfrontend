@@ -501,3 +501,61 @@ test('Tri-Colour single (rank 11) ranks BELOW the Red specialty (rank 12)', () =
     assert.ok(ProductSort.colorOrder({ color: 'Tri-Colour' }) <
               ProductSort.colorOrder({ color: 'CMY', pack_type: 'value_pack' }));
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Aug 2026 (ERR-143) — census additions
+//
+// A full sweep of all 3,969 live products found 20 stored colour values with
+// no COLOR_RANK entry, no swatch, or both. They were added as FRACTIONAL
+// ranks, which is the documented extension mechanism: every pinned integer
+// above keeps its exact value, and the new entries slot between them.
+// ─────────────────────────────────────────────────────────────────────────────
+
+test('Aug 2026 additions slot in without moving a single pinned rank', () => {
+    const r = ProductSort.COLOR_RANK;
+    // The pinned integers from the tests above must be untouched.
+    assert.equal(r['black'], 0);
+    assert.equal(r['yellow'], 3);
+    assert.equal(r['tri-colour'], 11);
+    assert.equal(r['red'], 12);
+    assert.equal(r['black/red'], 17);
+    assert.equal(r['cmy'], 20);
+    assert.equal(r['kcmy'], 21);
+    // …and each addition lands strictly between its neighbours.
+    assert.ok(r['light black'] > r['matte black'] && r['light black'] < r['light cyan'],
+        'Light Black belongs in the K family, after Matte Black');
+    assert.ok(r['vivid magenta'] > r['photo magenta'] && r['vivid magenta'] < r['vivid light magenta']);
+    assert.ok(r['purple'] > r['violet'] && r['purple'] < r['tri-colour']);
+    assert.ok(r['chromatic red'] > r['red'] && r['chromatic red'] < r['blue']);
+    assert.ok(r['photo blue'] > r['blue'] && r['photo blue'] < r['green']);
+    assert.ok(r['blue/green'] > r['black/red'] && r['magenta/yellow'] > r['blue/green']);
+});
+
+test('finishes rank after every ink but still ahead of unknown', () => {
+    // Clear / Chroma Optimizer / Gloss Enhancer are COATINGS, not inks — they
+    // add gloss or chroma and print no colour. They sort last among singles,
+    // but must stay below RANK_UNKNOWN_SINGLE so a genuinely unrecognised
+    // colour is still distinguishable from a known finish.
+    const unknown = ProductSort.colorOrder({ color: 'Nonexistent Ink' });
+    assert.equal(unknown, 19, 'unknown singles must still land on RANK_UNKNOWN_SINGLE');
+    for (const finish of ['Clear', 'Chroma Optimizer', 'Gloss Enhancer', 'Gloss Optimiser']) {
+        const rank = ProductSort.colorOrder({ color: finish });
+        assert.ok(rank > ProductSort.colorOrder({ color: 'Black/Red' }),
+            `${finish} must rank after the coloured inks`);
+        assert.ok(rank < unknown, `${finish} must rank ahead of a truly unknown colour`);
+    }
+});
+
+test('every Aug 2026 addition stays a SPECIALTY single, never a pack tier', () => {
+    // Anything >= 20 would be bucketed as a pack by colorTier() and would
+    // sort into the multi-cartridge block. Every addition is < 19.
+    const additions = ['Light Black', 'Vivid Magenta', 'Purple', 'Chromatic Red',
+        'Photo Blue', 'Blue/Green', 'Magenta/Yellow', 'Clear',
+        'Chroma Optimizer', 'Gloss Enhancer', 'Photo'];
+    for (const colour of additions) {
+        const rank = ProductSort.colorOrder({ color: colour });
+        assert.ok(rank < 19, `${colour} ranks ${rank}; must stay below RANK_UNKNOWN_SINGLE`);
+        assert.equal(ProductSort.colorTier({ color: colour }), ProductSort.TIERS.SPECIALTY,
+            `${colour} must bucket as a specialty single, not a pack`);
+    }
+});

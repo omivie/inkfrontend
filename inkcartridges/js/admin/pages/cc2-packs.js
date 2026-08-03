@@ -35,12 +35,19 @@ let _state = {
   selected: new Set(),
 };
 
-const COLOR_DOT = {
-  Cyan: '#22d3ee',
-  Magenta: '#ec4899',
-  Yellow: '#facc15',
-  Black: '#18181b',
-};
+// Constituent colour dot. ONE colour vocabulary — ProductColors in
+// js/utils.js — never a private map (ERR-141). The literal that used to live
+// here was PascalCase-keyed with only K/C/M/Y, so every Tri-Colour, CMY, CMYK
+// and lowercase value fell through to grey. getProductStyle also handles
+// `color_hex` arrays and gradient colours, which a hex map cannot.
+//
+// utils.js is a classic `<script defer>` in html/admin/index.html and module
+// scripts run after defer, so window.ProductColors is always present by first
+// render; the guard is for unit tests and any future standalone mount.
+function colorDotStyle(item) {
+  const PC = (typeof window !== 'undefined' && window.ProductColors) || null;
+  return (PC && PC.getProductStyle(item, 'background: #999;')) || 'background: #999;';
+}
 
 function fmtMoney(n, fallback = '—') {
   if (n == null || !Number.isFinite(Number(n))) return fallback;
@@ -176,7 +183,7 @@ function packTreeBody(p) {
   const driftClass = `cc2-drift-banner cc2-drift-banner--${sev}`;
   const constituentsHtml = (p.constituents || []).map(c => `
     <li class="cc2-constituent">
-      <span class="cc2-color-dot" style="background:${COLOR_DOT[c.color] || '#999'}" aria-hidden="true"></span>
+      <span class="cc2-color-dot" style="${colorDotStyle(c)}" aria-hidden="true"></span>
       <span class="cc2-constituent__body">
         <span class="cc2-constituent__name">${esc(c.name || `(${c.color} — missing)`)}</span>
         <span class="cc2-constituent__sku cell-mono">${esc(c.sku || '—')}</span>
