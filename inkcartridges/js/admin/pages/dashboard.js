@@ -207,11 +207,16 @@ function isCumulativeMode() {
   return FilterState.get('granularity') === 'all';
 }
 
-// Format a backend bucket_start for the x-axis at the active granularity.
+// Format a backend bucket_start for the x-axis at the active granularity. Chart.js reuses
+// this same string as the tooltip title, so axis and tooltip can never disagree about
+// which period a point belongs to — one formatter, one vocabulary.
 // The backend sends an Auckland-LOCAL label, not a UTC ISO timestamp:
 //   day/week/month/quarter → "YYYY-MM-DD". We parse it as a LOCAL date (never
 // `new Date("YYYY-MM-DD")`, which is UTC and would shift the label a day in NZ)
-// so bars line up with the Orders list.
+// so bars line up with the Orders list — and so the weekday named below is the NZ
+// weekday the owner actually traded on.
+const WEEKDAY = (d) => d.toLocaleDateString('en-NZ', { weekday: 'short' });
+
 function fmtBucket(v) {
   if (v == null) return '';
   const s = String(v);
@@ -229,7 +234,13 @@ function fmtBucket(v) {
   }
   if (g === 'month') return d.toLocaleDateString('en-NZ', { month: 'long' });
   if (g === 'quarter') return d.toLocaleDateString('en-NZ', { month: 'short', year: '2-digit' });
-  return d.toLocaleDateString('en-NZ', { day: 'numeric', month: 'short' });
+  // Day grain leads with the weekday ("Fri 12 Jun"). Day-of-week is the strongest cycle in
+  // this data (weekday trade vs weekend), and a bare "12 Jun" hides it — every peak looks
+  // like a one-off. The two-call format is deliberate: one call with weekday+day+month
+  // renders "Fri, 12 Jun" in en-NZ, and the comma reads as a separator between two dates
+  // on a crowded axis. Only the `day` grain gets it — a week/month/quarter bucket spans
+  // every weekday, so naming one would be a false claim.
+  return WEEKDAY(d) + ' ' + d.toLocaleDateString('en-NZ', { day: 'numeric', month: 'short' });
 }
 
 function rangeLabel() {
