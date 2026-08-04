@@ -1,7 +1,19 @@
 /**
  * SEARCH.JS — Smart Autocomplete
  * ================================
- * Row-based typeahead dropdown backed by GET /api/search/suggest.
+ * Card-grid typeahead dropdown backed by GET /api/search/smart.
+ *
+ * ⚠️ NOT /api/search/suggest. It was, once; the migration to /smart is
+ * described at ENDPOINT below. This header said "backed by GET
+ * /api/search/suggest" until 2026-08-04, and the backend read it, concluded
+ * the dropdown fed off /suggest, and spent a commit (`99d798b`) adding
+ * ribbon "FOR USE IN" blob search to /suggest + /autocomplete to fix a
+ * dropdown gap that /smart had already closed on 2026-07-30. That change was
+ * not harmless here — /suggest is this app's results-page literal CONTROL
+ * SET, and widening it broke the "Fits <model>" chip (ERR-144). If you
+ * repoint this file at a different endpoint, fix this comment in the same
+ * edit, and check API.searchSuggest in js/api.js, which is a DIFFERENT
+ * consumer with a different job.
  *
  * Public API: window.SmartSearch.init(form, input)
  *   main.js wires this to every .search-form in the DOM.
@@ -14,9 +26,14 @@
     // the full enriched envelope (products[] with retail_price/color/source/
     // series_codes/discounts, plus matched_printer + did_you_mean) and accepts
     // limit up to 40. The literal /suggest endpoint we used previously is
-    // hard-capped at 24 by the backend, so it cannot surface the 40 products we
-    // now want; driving the dropdown off /smart also makes it group and render
-    // identically to the product/shop grid (byCodeThenColor + row-breaks below).
+    // hard-capped by the backend at 24 — re-measured 2026-08-04: limit=24 gives
+    // 24 rows and limit=25 is a hard `400 Validation failed` — so it cannot
+    // surface the 40 products we now want, and asking anyway is an error rather
+    // than a short list; driving the dropdown off /smart also makes it group and render
+    // identically to the product/shop grid (byCodeThenColor + row-breaks below),
+    // and it is why the dropdown already showed ribbon "for use in" matches with
+    // their "Fits <model>" chip from 2026-07-30 (ERR-133), months before
+    // /suggest learned to.
     const ENDPOINT = '/api/search/smart';
     // 250ms debounce — backend bucket is 120 req/min/IP; a fast typer hammering
     // backspace at <250ms intervals can still trip it, so we err on the safe side.
@@ -142,7 +159,10 @@
         return `/shop?q=${encodeURIComponent(p.name || '')}`;
     }
 
-    async function fetchSuggest(query, signal) {
+    // Named for the endpoint it actually calls. It was `fetchSuggest` until
+    // 2026-08-04 — a name left over from the pre-/smart dropdown, and half the
+    // reason the backend misidentified this surface's feed (ERR-144).
+    async function fetchSmart(query, signal) {
         const base = (typeof Config !== 'undefined' && Config.API_URL) ? Config.API_URL : '';
         const url = `${base}${ENDPOINT}?q=${encodeURIComponent(query)}&limit=${LIMIT}`;
         // Public search read — cookies explicitly omitted (ERR-124).
@@ -419,6 +439,23 @@
             const compatibleItems = list.filter(isCompatibleProduct);
             const genuineItems = list.filter((p) => !isCompatibleProduct(p));
 
+            // KEYBOARD-NAV CONTRACT: this array must end up in the SAME order as
+            // the .product-card elements the browser paints, because setActive(i)
+            // highlights DOM card i while the Enter handler navigates to
+            // state.results[i]. renderSection pushes each row as it emits that
+            // row's card, across both sections, so the two can't disagree.
+            //
+            // They used to. state.results held the raw API array while the cards
+            // were emitted after the compatible/genuine partition AND
+            // ProductSort.byCodeThenColor — i.e. reordered on essentially every
+            // query, since compatible rows are hoisted above genuine ones.
+            // Arrowing to a card and pressing Enter opened a DIFFERENT product
+            // than the highlighted one, and the bug was silent because nothing
+            // is filtered out, so `count` stayed correct and only the identity
+            // was wrong. A customer could land on (and buy) the wrong cartridge.
+            // Fixed 2026-08-04 alongside ERR-144.
+            const renderedOrder = [];
+
             const renderSection = (items, badgeClass, label) => {
                 if (!items.length) return '';
                 const sorted = (typeof ProductSort !== 'undefined' && ProductSort.byCodeThenColor)
@@ -427,10 +464,15 @@
                 const breaks = (typeof ProductSort !== 'undefined' && ProductSort.rowBreakIndices)
                     ? new Set(ProductSort.rowBreakIndices(sorted))
                     : new Set();
-                const cards = sorted.map((p, i) =>
-                    (breaks.has(i) ? '<div class="products-row__break" aria-hidden="true"></div>' : '')
-                    + Products.renderCard(adaptForCard(p), i)
-                ).join('');
+                const cards = sorted.map((p, i) => {
+                    // Push the RAW row (not the adaptForCard copy) — productHref
+                    // reads canonical_url/slug/sku, all of which survive intact,
+                    // and keeping the raw object means analytics/identity stay
+                    // consistent with what the API returned.
+                    renderedOrder.push(p);
+                    return (breaks.has(i) ? '<div class="products-row__break" aria-hidden="true"></div>' : '')
+                        + Products.renderCard(adaptForCard(p), i);
+                }).join('');
                 return `<div class="smart-ac__section">`
                     + `<div class="smart-ac__section-head"><span class="products-section__badge ${badgeClass}">${label}</span></div>`
                     + `<div class="product-grid smart-ac__grid">${cards}</div>`
@@ -440,6 +482,10 @@
             const sectionsHTML =
                 renderSection(compatibleItems, 'products-section__badge--compatible', 'Compatible')
                 + renderSection(genuineItems, 'products-section__badge--genuine', 'Genuine');
+            // Re-point state.results at the painted order (see the contract note
+            // above). Length is unchanged — the partition and sort never drop a
+            // row — so `count` in the keyboard handler stays correct either way.
+            state.results = renderedOrder;
             // Spec (search-dropdown-routing.md, "Three-handler invariant"):
             // the "View all results" footer ALWAYS goes to /search?q=<query>,
             // independent of matched_printer. Branching on matched_printer here
@@ -456,11 +502,21 @@
 
             // Apply <mark> highlighting to the (already-escaped) product titles.
             // Spec §1.2: highlight name+sku, never highlight description HTML.
+            //
+            // The "+sku" half is satisfied by the title pass, not by a second
+            // selector. Products.renderCard exposes the SKU only as a data-sku
+            // ATTRIBUTE — the card has no SKU text node anywhere — so there is
+            // nothing else to mark. A `[data-sku-text]` query lived here until
+            // 2026-08-04 and matched zero elements on every render, because that
+            // attribute is emitted nowhere in this repo; it read as working
+            // code, which is worse than an honest gap. In practice product names
+            // embed their code ("… Time Clock Ribbon RED/BLACK 360001.02"), so a
+            // SKU-shaped query already highlights inside the title. If a real
+            // SKU line is ever added to the card, mark it here — and note the
+            // card renderer is SHARED with the results grid, so it is not a
+            // dropdown-local change.
             if (q) {
                 state.list.querySelectorAll('.smart-ac__grid .product-card__title').forEach(el => {
-                    el.innerHTML = highlightTokens(el.innerHTML, q);
-                });
-                state.list.querySelectorAll('.smart-ac__grid [data-sku-text]').forEach(el => {
                     el.innerHTML = highlightTokens(el.innerHTML, q);
                 });
             }
@@ -554,7 +610,7 @@
             }, SKELETON_DELAY_MS);
 
             try {
-                const data = await fetchSuggest(query, signal);
+                const data = await fetchSmart(query, signal);
                 clearTimeout(state.skeletonTimer);
                 if (signal.aborted) return;
                 renderResults(data);

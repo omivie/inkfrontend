@@ -247,12 +247,20 @@ test('soft-miss only swaps when the literal set strictly beats smart count', () 
     // strict-beat structure below it is unchanged.
     // Jul 30 2026 (ERR-133): the count compared against is now `directCount`,
     // not `smartCount`. Compat rows ("for use in" matches) are in `smartCount`
-    // but can NEVER be in the literal set, so they inflated the bar with rows
+    // but could NEVER be in the literal set, so they inflated the bar with rows
     // the literal set structurally cannot supply — q=CE50's 5-row literal set
     // lost `> 5` and two cartridges went unshown. The strict-beat rule itself is
     // unchanged; only the population it is measured against is now honest.
+    // Aug 4 2026 (ERR-144): backend `99d798b` put the ribbon "for use in" blob
+    // search on /api/search/suggest, which IS half the literal union, so compat
+    // rows can now arrive on the literal side too — untagged, because the
+    // typeahead payloads carry no match_reason. The strict-beat rule is STILL
+    // unchanged; the literal side just has to be counted the same way the smart
+    // side always was, hence `mergedSplit.direct.length` (mergedSplit is the
+    // partition taken after reattachCompatProvenance re-labels the smuggled
+    // rows). Both sides direct, or neither.
     assert.match(SHOP_CODE,
-        /shouldUseFallback\s*=\s*exactMode[\s\S]{0,80}\(hijack\s*\|\|\s*hardMiss\)[\s\S]{0,150}mergedUsed\.length\s*>\s*directCount/);
+        /shouldUseFallback\s*=\s*exactMode[\s\S]{0,80}\(hijack\s*\|\|\s*hardMiss\)[\s\S]{0,200}mergedSplit\.direct\.length\s*>\s*directCount/);
 });
 
 test('fallback path still uses SEARCH_PAGE_SIZE + page so pagination keeps working', () => {

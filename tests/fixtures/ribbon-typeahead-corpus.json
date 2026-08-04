@@ -1,0 +1,178 @@
+{
+  "generated_for": "ERR-144",
+  "backend_commit": "99d798b",
+  "api": "https://api.inkcartridges.co.nz",
+  "corpus": [
+    {
+      "query": "AP830",
+      "direct": 1,
+      "compat": 2,
+      "suggest": 3,
+      "products": 0,
+      "swapped": false,
+      "lost": 0
+    },
+    {
+      "query": "AP8100",
+      "direct": 1,
+      "compat": 2,
+      "suggest": 3,
+      "products": 0,
+      "swapped": false,
+      "lost": 0
+    },
+    {
+      "query": "CE60",
+      "direct": 1,
+      "compat": 1,
+      "suggest": 2,
+      "products": 1,
+      "swapped": false,
+      "lost": 0
+    },
+    {
+      "query": "CE50",
+      "direct": 3,
+      "compat": 2,
+      "suggest": 5,
+      "products": 5,
+      "swapped": true,
+      "lost": 0
+    },
+    {
+      "query": "AX220",
+      "direct": 1,
+      "compat": 1,
+      "suggest": 2,
+      "products": 0,
+      "swapped": false,
+      "lost": 0
+    },
+    {
+      "query": "VP6000",
+      "direct": 0,
+      "compat": 3,
+      "suggest": 3,
+      "products": 0,
+      "swapped": false,
+      "lost": 0
+    },
+    {
+      "query": "AP1000",
+      "direct": 2,
+      "compat": 3,
+      "suggest": 3,
+      "products": 0,
+      "swapped": false,
+      "lost": 0
+    },
+    {
+      "query": "SP1000",
+      "direct": 1,
+      "compat": 1,
+      "suggest": 2,
+      "products": 0,
+      "swapped": false,
+      "lost": 0
+    },
+    {
+      "query": "XR20",
+      "direct": 3,
+      "compat": 1,
+      "suggest": 1,
+      "products": 0,
+      "swapped": false,
+      "lost": 0
+    },
+    {
+      "query": "GX6750",
+      "direct": 0,
+      "compat": 1,
+      "suggest": 1,
+      "products": 0,
+      "swapped": false,
+      "lost": 0
+    },
+    {
+      "query": "TCX-11",
+      "direct": 4,
+      "compat": 2,
+      "suggest": 2,
+      "products": 0,
+      "swapped": false,
+      "lost": 0
+    },
+    {
+      "query": "ET-3300",
+      "direct": 7,
+      "compat": 2,
+      "suggest": 2,
+      "products": 0,
+      "swapped": false,
+      "lost": 0
+    },
+    {
+      "query": "TR910",
+      "direct": 0,
+      "compat": 2,
+      "suggest": 2,
+      "products": 0,
+      "swapped": false,
+      "lost": 0
+    },
+    {
+      "query": "NS-5100",
+      "direct": 1,
+      "compat": 2,
+      "suggest": 2,
+      "products": 0,
+      "swapped": false,
+      "lost": 0
+    },
+    {
+      "query": "EX-9000",
+      "direct": 1,
+      "compat": 2,
+      "suggest": 2,
+      "products": 0,
+      "swapped": false,
+      "lost": 0
+    },
+    {
+      "query": "TS-4000i",
+      "direct": 1,
+      "compat": 2,
+      "suggest": 2,
+      "products": 0,
+      "swapped": false,
+      "lost": 0
+    },
+    {
+      "query": "PIX-200",
+      "direct": 2,
+      "compat": 2,
+      "suggest": 2,
+      "products": 0,
+      "swapped": false,
+      "lost": 0
+    },
+    {
+      "query": "PIX-4000",
+      "direct": 12,
+      "compat": 2,
+      "suggest": 2,
+      "products": 0,
+      "swapped": false,
+      "lost": 0
+    },
+    {
+      "query": "lc233",
+      "direct": 13,
+      "compat": 0,
+      "suggest": 13,
+      "products": 13,
+      "swapped": false,
+      "lost": 0
+    }
+  ]
+}

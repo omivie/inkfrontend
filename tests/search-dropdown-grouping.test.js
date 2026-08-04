@@ -45,12 +45,17 @@ test('search.js — dropdown LIMIT is 40', () => {
         'spec: dropdown shows up to 40 products (user requirement)');
 });
 
-test('search.js — fetchSuggest reads /smart\'s data.products into the results slot', () => {
+test('search.js — fetchSmart reads /smart\'s data.products into the results slot', () => {
     // /smart returns the result set under `products`; /suggest used
     // `suggestions`. The mapping must prefer products so the 40-card set
     // actually surfaces.
+    // ERR-144: the function was renamed fetchSuggest → fetchSmart on
+    // 2026-08-04. The old name outlived the endpoint it described and helped
+    // convince the backend this dropdown still fed off /api/search/suggest.
     assert.match(SEARCH_JS, /Array\.isArray\(data\.products\)/,
-        'fetchSuggest must read data.products from the /smart envelope');
+        'fetchSmart must read data.products from the /smart envelope');
+    assert.match(SEARCH_JS, /async function fetchSmart\(/,
+        'the fetcher is named for the endpoint it calls — see ERR-144');
 });
 
 test('search.js — renderResults applies the product-grid grouping (byCodeThenColor + rowBreakIndices)', () => {

@@ -132,10 +132,17 @@ test('main.js — initBasicAutocomplete and its DOM are deleted', () => {
 
 test('api.js — dead autocomplete wrappers stay deleted (getAutocomplete, getAutocompleteRich)', () => {
     // initBasicAutocomplete was deleted; nothing in the storefront calls
-    // /api/search/autocomplete any more. As of Jun 2026 the dropdown also
-    // drives off /api/search/smart (search.js fetchSuggest — same endpoint as
-    // the results page, limit 40, grouped like the product grid); the literal
-    // /suggest endpoint is retired from the storefront (it capped at 24).
+    // /api/search/autocomplete any more — still true, re-verified 2026-08-04.
+    // As of Jun 2026 the dropdown also drives off /api/search/smart (search.js
+    // fetchSmart — same endpoint as the results page, limit 40, grouped like
+    // the product grid).
+    //
+    // ERR-144 corrects the rest of what this comment used to claim. /suggest is
+    // NOT "retired from the storefront": API.searchSuggest still calls it, from
+    // shop-page.js loadSearchResults, as the results page's literal-match
+    // control set. That one surviving caller is why backend `99d798b` — which
+    // added ribbon "for use in" blob matches to /suggest and /autocomplete —
+    // reached this app at all, despite touching no endpoint the dropdown uses.
     //
     // searchByPart was previously listed here as "never called" — it's now
     // restored intentionally for the May 2026 search-enrichment contract

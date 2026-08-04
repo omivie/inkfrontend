@@ -445,10 +445,20 @@ test('§3 the soft-miss thinness bound and strict-beat both measure DIRECT rows'
     const soft = SHOP_CODE.match(/const\s+softMiss\s*=([\s\S]*?);/);
     assert.match(soft[1], /directCount\s*<\s*SOFT_MISS_THRESHOLD/,
         'thinness is a property of the direct rows, not of the padded total');
-    assert.match(SHOP_CODE, /mergedUsed\.length\s*>\s*directCount/,
-        'the literal set must out-count only the rows it could actually replace');
+    // ERR-144 updated this pin. It used to require the literal side to be a raw
+    // `mergedUsed.length`, which was only ever correct because the literal union
+    // could not contain a compat row. Backend `99d798b` broke that, so BOTH
+    // sides must now be counted the same way — direct vs direct. The invariant
+    // is unchanged; only its expression had to become symmetric. (Pinning the
+    // old line verbatim is exactly the ERR-053 failure mode: a source pin that
+    // freezes a bug in place.)
+    assert.match(SHOP_CODE, /mergedSplit\.direct\.length\s*>\s*directCount/,
+        'the literal set must out-count only the rows it could actually replace, counting DIRECT rows on both sides');
     assert.doesNotMatch(SHOP_CODE, /mergedUsed\.length\s*>\s*smartCount/,
-        'comparing against smartCount is the CE50 bug — compat rows inflate the bar');
+        'comparing against smartCount is the CE50 bug — compat rows inflate the bar from the /smart side');
+    assert.doesNotMatch(SHOP_CODE, /mergedUsed\.length\s*>\s*directCount/,
+        'comparing a raw mergedUsed.length is the ERR-144 bug — post-99d798b /api/search/suggest '
+        + 'smuggles compat rows into the literal set, so they inflate the bar from the literal side instead');
 });
 
 test('§3 the swap re-appends the compat rows, deduped against the literal set', () => {

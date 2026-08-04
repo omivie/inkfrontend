@@ -204,12 +204,24 @@
     // separate them:
     //   • direct rows are what the literal-search reconciliation below is
     //     allowed to second-guess and replace;
-    //   • compat rows literally do NOT appear in name/SKU, so the literal
-    //     union (/api/products?search= ∪ /api/search/suggest) can never
-    //     contain them — replacing a set with that union therefore DELETES
-    //     them (ERR-083, and again via exact mode in ERR-133). They must
-    //     always be carried across a swap, never counted as rows the literal
-    //     set is competing to beat.
+    //   • compat rows are a weaker answer than a name/SKU hit, so they must
+    //     never be counted among the rows the literal set is competing to
+    //     beat, never outrank a direct hit, and never be dropped by a swap.
+    //
+    // ⚠️ ERR-144 — the reason this partition exists changed underneath it.
+    // Until backend `99d798b` (2026-08-04) a compat row literally did NOT
+    // appear in name/SKU, so the literal union (/api/products?search= ∪
+    // /api/search/suggest) could never contain one; replacing a set with that
+    // union therefore DELETED them (ERR-083, and again via exact mode in
+    // ERR-133), and "carry them across the swap" was the whole fix. That
+    // commit made the "for use in" blob searchable on /api/search/suggest too,
+    // so the literal union CAN now contain compat rows — but the typeahead
+    // payload carries no match_reason, so they arrive UNTAGGED and this
+    // function classifies them as `direct`. See reattachCompatProvenance
+    // below: the reconciliation re-labels them from /smart's own rows BEFORE
+    // partitioning, so everything downstream of that point is sound again.
+    // Do not "simplify" this by trusting the literal set's provenance — it
+    // has none.
     //
     // STABLE: backend order is preserved within each group, so callers can
     // concat direct+compat to get "direct hits first, then also-fits rows"
@@ -229,6 +241,65 @@
             else direct.push(p);
         }
         return { direct, compat };
+    }
+
+    // ERR-144 — restore the provenance a dedup would otherwise throw away.
+    //
+    // THE FRONTEND NEVER ASSERTS COMPATIBILITY (ERR-135). This function does
+    // not violate that, and the distinction is the whole justification for it:
+    // A COMPAT ROW MAY BE RE-LABELLED, NEVER LABELLED. Every match_reason /
+    // matched_token written here is copied off /smart's OWN row, for the SAME
+    // product, resolved in the SAME request cycle for the SAME query. Nothing
+    // is derived, guessed, or matched locally — if /smart did not call a
+    // product a compatibility hit, nothing here can make it one.
+    //
+    // Why it's needed: backend `99d798b` made the "for use in" blob searchable
+    // on /api/search/suggest, which this page uses as its literal-match CONTROL
+    // SET (loadSearchResults below), not as a dropdown feed. Those rows carry
+    // no match_reason — the typeahead endpoints deliberately omit it — so the
+    // same ribbon exists twice: tagged in /smart's set, untagged in the literal
+    // union. mergeLiteralResults prefers the literal copy (it carries richer
+    // fields), and rowsNotAlreadyIn then sees the row as "already supplied" and
+    // re-appends nothing. Net effect before this fix: the "Fits <model>" chip
+    // ERR-133 shipped silently vanished on every swap path, and the row sorted
+    // among the direct hits. Measured live 2026-08-04 on AP830, AP8100, VP6000,
+    // AP1000, SP1000, TR910, GX6750, AX220, CE50, CE60.
+    //
+    // Identity goes through productIdentityKeys — the SAME notion of "same
+    // product" as mergeLiteralResults and rowsNotAlreadyIn. Do not invent a
+    // second one; three implementations is how the ERR-135 pair drifted.
+    //
+    // Pure, order-preserving, non-mutating (rows are copied, never patched in
+    // place), never drops a row, and IDEMPOTENT — a row that already carries a
+    // match_reason of its own is returned untouched, so a /smart-sourced set
+    // passes through unchanged and running it twice changes nothing.
+    // Pinned by tests/ribbon-typeahead-compat-aug2026.test.js.
+    function reattachCompatProvenance(rows, compatRows) {
+        if (!Array.isArray(rows)) return [];
+        if (!Array.isArray(compatRows) || compatRows.length === 0) return rows;
+        const byKey = new Map();
+        for (const c of compatRows) {
+            if (!c || c.match_reason !== 'compatibility') continue;
+            for (const k of productIdentityKeys(c)) {
+                if (!byKey.has(k)) byKey.set(k, c);
+            }
+        }
+        if (byKey.size === 0) return rows;
+        return rows.map((row) => {
+            // An own match_reason is the backend's verdict for THIS row — never
+            // overwrite it. Only a row the backend told us nothing about can be
+            // re-labelled, and only from a row it did speak about.
+            if (!row || row.match_reason) return row;
+            let source = null;
+            for (const k of productIdentityKeys(row)) {
+                if (byKey.has(k)) { source = byKey.get(k); break; }
+            }
+            if (!source) return row;
+            return Object.assign({}, row, {
+                match_reason: source.match_reason,
+                matched_token: source.matched_token,
+            });
+        });
     }
 
     // search-ux-frontend-jul2026 §1 — tally the provenance tags /smart stamps on
@@ -266,14 +337,18 @@
     }
 
     // Test hook — exercised by tests/search-results-parity-may2026.test.js,
-    // tests/compat-search-badge-jul2026.test.js and
-    // tests/ribbon-compat-search-additive-jul2026.test.js.
+    // tests/compat-search-badge-jul2026.test.js,
+    // tests/ribbon-compat-search-additive-jul2026.test.js and
+    // tests/ribbon-typeahead-compat-aug2026.test.js. Also loaded by
+    // scripts/audit-ribbon-typeahead.mjs so the live audit runs the SHIPPED
+    // helpers rather than a copy of them.
     // Not a public surface; product code calls the locals directly.
     if (typeof window !== 'undefined') {
         window._searchParityHelpers = {
             normalizeForMatch, productMatchesQuery, adaptSuggestProduct, mergeLiteralResults,
             queryCodeMatch, hasCompatibilityMatch, summarizeMatchReasons,
             partitionCompatRows, productIdentityKeys, rowsNotAlreadyIn,
+            reattachCompatProvenance,
         };
     }
 
@@ -2853,16 +2928,16 @@
                     // compat-search-jul2026 / ERR-133 — split the set by provenance.
                     // A compat row (q names a machine in a product's "for use in"
                     // list, e.g. q=VP6000 → the AP800 ribbon) is a real backend hit
-                    // that literally does NOT appear in name/sku, so the literal
-                    // union below can never contain it. Two consequences, and they
-                    // are the entire point of this partition:
+                    // that is a WEAKER answer than a name/SKU hit. Two consequences,
+                    // and they are the entire point of this partition:
                     //   1. compat rows must NOT be counted among the rows the
                     //      literal set has to out-number — they inflate the bar with
-                    //      rows that set structurally cannot supply. Measured live
-                    //      2026-07-30: q=CE50 returned 3 direct + 2 compat, and the
-                    //      5-row literal set (which had two cartridges /smart missed,
-                    //      G05ABK + G05XBK) failed `> 5` and was declined. Compare
-                    //      against directCount and it correctly wins `> 3`.
+                    //      rows a name/SKU search cannot be expected to supply.
+                    //      Measured live 2026-07-30: q=CE50 returned 3 direct +
+                    //      2 compat, and the 5-row literal set (which had two
+                    //      cartridges /smart missed, G05ABK + G05XBK) failed `> 5`
+                    //      and was declined. Compare against directCount and it
+                    //      correctly wins `> 3`.
                     //   2. compat rows must SURVIVE a swap. Until ERR-133 they were
                     //      protected by suppressing softMiss/hijack outright, which
                     //      only worked while compat sets were mutually exclusive with
@@ -2871,6 +2946,19 @@
                     //      rendered a ZERO-RESULTS screen over three good ribbons.
                     //      Preserving them across the swap is strictly stronger than
                     //      suppressing the repair, and it covers every path.
+                    //
+                    // ⚠️ ERR-144 — BOTH consequences used to rest on "the literal
+                    // union cannot contain a compat row". Backend `99d798b`
+                    // (2026-08-04) put the "for use in" blob search on
+                    // /api/search/suggest as well, and that endpoint is half of the
+                    // literal union below. So the union CAN now contain compat rows,
+                    // it supplies them with NO match_reason (the typeahead payloads
+                    // omit it by design), and both consequences quietly inverted:
+                    // the bar got inflated from the literal side instead, and the
+                    // rows survived a swap only by shedding the very tag that makes
+                    // them legible. reattachCompatProvenance + the mergedSplit
+                    // direct-vs-direct bar below restore both properties
+                    // symmetrically.
                     const { direct: directRows, compat: compatRows } = partitionCompatRows(products);
                     const directCount = directRows.length;
                     const hardMiss = products.length === 0 && !smartData?.matched_printer;
@@ -2918,6 +3006,22 @@
                                 mergedFiltered = true;
                             }
                         }
+                        // ERR-144 — re-label the compat rows /api/search/suggest
+                        // now smuggles into the literal union. They arrive with no
+                        // match_reason, so without this every downstream test of
+                        // provenance ("is this a weaker also-fits row?") answers
+                        // "no" for them: the swap bar counts them as direct hits,
+                        // compatLast sorts them among real name/SKU matches, and
+                        // createProductCard drops the "Fits <model>" chip. The tag
+                        // is copied off /smart's own row for the same product —
+                        // re-labelled, never labelled (see the helper's contract).
+                        // Runs AFTER the on-topic filter so we only pay for rows
+                        // that actually survive to the page.
+                        mergedUsed = reattachCompatProvenance(mergedUsed, compatRows);
+                        // Provenance-aware view of the literal set, needed twice
+                        // below. Post-reattach, so a smuggled ribbon counts as
+                        // compat on BOTH sides of every comparison.
+                        const mergedSplit = partitionCompatRows(mergedUsed);
                         // exactMode: always take the literal set (even when
                         // empty) so the raw query is honoured verbatim and the
                         // correction banner never re-appears — the honest
@@ -2926,22 +3030,44 @@
                         // (it is empty or provably wrong). softMiss: only swap
                         // when the literal set strictly out-counts the DIRECT
                         // rows, so we never trade away a good ranking for a flat
-                        // one — and never lose the comparison to compat rows the
-                        // literal set could not have contained (ERR-133).
+                        // one — and never lose the comparison to compat rows a
+                        // name/SKU search could not be expected to supply
+                        // (ERR-133).
+                        //
+                        // ERR-144 — the softMiss comparison is DIRECT-vs-DIRECT.
+                        // Counting the whole of mergedUsed reintroduced the exact
+                        // asymmetry ERR-133 removed, only mirrored: compat rows
+                        // were excluded from directCount but included in the
+                        // literal tally, so a set of pure also-fits rows could
+                        // "out-count" the direct hits and win a swap it had not
+                        // earned. Measured live 2026-08-04: q=VP6000 (0 direct,
+                        // 3 compat) had an empty literal set in July and kept
+                        // /smart's three badged rows; post-99d798b /suggest
+                        // returned those same three ribbons, 3 > 0 swapped, and
+                        // the page rendered them stripped of their chips.
                         const shouldUseFallback = exactMode
                             ? true
                             : (hijack || hardMiss)
                                 ? mergedUsed.length > 0
-                                : mergedUsed.length > directCount;
+                                : mergedSplit.direct.length > directCount;
                         if (shouldUseFallback) {
-                            // ERR-133 — carry the compat rows across. The literal
-                            // union matches on name/SKU only, so it structurally
-                            // cannot contain a "for use in" match; assigning it
-                            // raw is what deleted the ribbons on every swap path,
-                            // exactMode included. rowsNotAlreadyIn keeps the union
-                            // authoritative for any row it does supply (it carries
-                            // richer fields), and re-appends only the genuinely
-                            // absent compat rows, after the direct results.
+                            // ERR-133 — carry the compat rows across. Assigning the
+                            // literal union raw is what deleted the ribbons on every
+                            // swap path, exactMode included. rowsNotAlreadyIn keeps
+                            // the union authoritative for any row it does supply (it
+                            // carries richer fields), and re-appends only the
+                            // genuinely absent compat rows, after the direct results.
+                            //
+                            // ERR-144 — this line is no longer sufficient ON ITS OWN.
+                            // A compat row that /api/search/suggest also supplied is
+                            // "already in" mergedUsed, so nothing is re-appended and
+                            // the union's untagged copy is what renders. That copy is
+                            // the RIGHT row to keep — it is richer — but it needs its
+                            // provenance back, which is why reattachCompatProvenance
+                            // ran above. The two mechanisms are complementary and
+                            // both are load-bearing: re-attach covers the rows the
+                            // union DID supply, re-append covers the rows it did not.
+                            // Dropping either one loses chips on a different corpus.
                             //
                             // The "Fits <model>" chip keeps rendering on them even
                             // though smartData is nulled below: createProductCard
@@ -2965,7 +3091,16 @@
                             // so the pager is already hidden in all reachable
                             // cases; gating on preservedCompat.length keeps it fully
                             // functional whenever nothing was appended.
+                            //
+                            // ERR-144 — gate on "any compat row is on this page",
+                            // not just "we re-appended one". A compat row that
+                            // arrived via /api/search/suggest is uncounted by
+                            // fallback.meta in exactly the same way as a re-appended
+                            // one (meta comes from /api/products alone), so the old
+                            // gate went trivially true the moment 99d798b shipped
+                            // and would have restored a pager over a curated page.
                             if (!mergedFiltered && preservedCompat.length === 0
+                                && mergedSplit.compat.length === 0
                                 && fallback.meta && fallback.meta.total_pages != null) {
                                 pagination = {
                                     total: fallback.meta.total,

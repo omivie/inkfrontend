@@ -2123,8 +2123,14 @@ const API = {
     //   - getAutocomplete(q, limit)        — used only by initBasicAutocomplete (deleted)
     //   - getAutocompleteRich(q, limit)    — never called anywhere
     //   - searchByPart(q, options)         — never called anywhere
-    // /api/search/suggest is now invoked directly from search.js's fetchSuggest;
-    // /api/search/smart is the canonical search endpoint via API.smartSearch.
+    // /api/search/smart is the canonical search endpoint (API.smartSearch), and
+    // it is what the search-bar dropdown calls too — search.js's fetchSmart.
+    // /api/search/suggest survives here for ONE caller, API.searchSuggest below,
+    // where it is a literal-match control set for the results page rather than a
+    // typeahead feed. /api/search/autocomplete has NO caller in this repo.
+    // (ERR-144 — this comment used to say suggest was "invoked directly from
+    // search.js's fetchSuggest", which stopped being true when the dropdown
+    // moved to /smart, and misled a backend change into widening /suggest.)
 
     /**
      * Search for printers
@@ -2164,7 +2170,7 @@ const API = {
         // by the Cache Rule *today* (cf-cache-status: DYNAMIC), but the moment
         // it is, an authenticated search response becomes storable in the shared
         // public entry. The other two call paths to this endpoint —
-        // search.js's fetchSuggest and _rawJsonFetch's SKU fallback — are
+        // search.js's fetchSmart and _rawJsonFetch's SKU fallback — are
         // already tokenless; this was the odd one out.
         //
         // (Previously: `typeof searchConfig !== 'undefined' ? searchConfig.apiUrl : '/api/search/smart'` —
@@ -2180,24 +2186,35 @@ const API = {
     },
 
     /**
-     * Typeahead suggest — the literal-substring search the dropdown uses.
+     * Literal-match CONTROL SET for the results page. NOT the dropdown's feed.
      *
-     * This is the SAME endpoint search.js's fetchSuggest hits, surfaced on
-     * the API object so the full results page can reconcile against it.
+     * The search-bar dropdown calls /api/search/smart (js/search.js), not this.
+     * The one caller is shop-page.js loadSearchResults, which unions this
+     * shortlist with /api/products?search= to decide whether /smart's set is
+     * bad enough to replace (softMiss / hijack / exactMode). The value is that
      * /api/search/smart classifies "intent" and will autocorrect a query it
-     * judges ambiguous (q=511 → "Lexmark MX 511"); /api/search/suggest does a
-     * plain substring match and returns exactly what the dropdown shows.
-     * loadSearchResults unions this shortlist into its fallback so the two
-     * surfaces can never disagree. Pinned by
-     * tests/search-results-parity-may2026.test.js.
+     * judges ambiguous (q=511 → "Lexmark MX 511") while /api/search/suggest
+     * does a plainer match, so it is a useful second opinion — plus it catches
+     * loose digit matches /products misses (the "165.11" ribbon for q=511).
+     * Pinned by tests/search-results-parity-may2026.test.js.
+     *
+     * ⚠️ ERR-144 — THIS IS NO LONGER A PURE NAME/SKU SET. Backend `99d798b`
+     * (2026-08-04) made a ribbon's "for use in" blob searchable here, so the
+     * rows can include compatibility matches — carrying NO match_reason /
+     * matched_token, because the typeahead payloads omit them by design. The
+     * reconciliation therefore runs reattachCompatProvenance() over this list
+     * before trusting its provenance; do not add a caller that treats these
+     * rows as "things that literally matched the query text".
      *
      * Returns a bare array of suggestion rows (never throws — yields [] on
      * any failure so the caller's reconcile path degrades gracefully). The
-     * backend caps `limit` low (≈20); values above that return an empty set,
-     * so callers should request 20 or fewer.
+     * backend caps `limit` at 24 (re-measured 2026-08-04) and enforces it with
+     * a hard `400 Validation failed`, not a silent truncation — so a caller
+     * that raises its limit past 24 gets [] here and no clue why. Request 24
+     * or fewer; the live caller asks for 20.
      *
      * @param {string} query - Raw user query.
-     * @param {number} limit - Max rows (default 10, keep <= 20).
+     * @param {number} limit - Max rows (default 10, keep <= 24).
      * @returns {Promise<Array>} suggestion rows, or [] on miss/failure.
      */
     async searchSuggest(query, limit = 10) {

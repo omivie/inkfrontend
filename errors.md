@@ -41,6 +41,138 @@ describing the same incident.
 
 ---
 
+## ERR-144 — `/api/search/suggest` was never our dropdown, it was our results-page control set, so widening it silently deleted the "Fits &lt;model&gt;" chip (2026-08-04)
+
+**The claim.** `ribbon-for-use-in-typeahead-FE-handoff-aug2026.md` (backend `99d798b`): the ribbon
+"FOR USE IN" blob (`compatible_devices_html`) is now searchable on `/api/search/suggest` **and**
+`/api/search/autocomplete`, so a customer typing their time-clock model finally sees the ribbon in the
+search-bar dropdown, not just after pressing Enter. "Response contracts are **unchanged**. Nothing to
+build." Second consecutive handoff on this feature to say no FE changes were required; second one to
+be wrong, in a completely different way.
+
+**Everything it asserts about the backend is true.** Re-run independently against prod 2026-08-04:
+`TCX-11`, `ET-3300`, `TR910`, `NS-5100`, `EX-9000`, `TS-4000i`, `PIX-200`, `PIX-4000` all return
+`36000.01`/`36000.02` from `/suggest`; `/autocomplete` agrees in its lean shape; `lc233` stays
+ribbon-free; the bare-numeric gate holds; and the ranking claim survives a probe the handoff didn't
+run — `/suggest?q=CE50&limit=1` returns `GCE506A` alone, so blob rows really do only fill leftover
+slots. The defect was never in the endpoint.
+
+### Finding 1 — our dropdown does not call `/suggest`, and three of our own comments said it did
+
+`search.js` has had `const ENDPOINT = '/api/search/smart'` since Jun 2026 — `/suggest` caps at 24 and
+the dropdown shows 40 cards. So the customer-facing gap the handoff set out to close **was already
+closed on 2026-07-30**, by `/smart`'s blob search plus the ERR-133 frontend work. What survived was
+the prose: the file header said "backed by GET /api/search/suggest", the fetcher was still named
+`fetchSuggest()` while calling `/smart`, and `api.js` described `searchSuggest` as "the literal
+substring search **the dropdown uses**". Anyone scoping a change by reading our source got three
+independent confirmations of a false premise. **A stale comment is not a cosmetic defect when it is
+load-bearing for someone else's planning.**
+
+### Finding 2 — `/suggest` is this app's literal-match CONTROL SET, and widening it deleted the chip
+
+`API.searchSuggest` has exactly one caller: `shop-page.js loadSearchResults`, where it forms half the
+literal union (`/api/products?search=` ∪ `/suggest`) that decides whether `/smart`'s set should be
+replaced (`softMiss` / `hijack` / `exactMode`). ERR-133's whole design rested on a property that
+`99d798b` falsified — stated verbatim in the code and in the test file:
+
+> the literal union matches on name/SKU only, so it can NEVER contain a "for use in" match
+
+It can now. And because the typeahead payloads deliberately omit `match_reason`/`matched_token`, those
+rows arrive **indistinguishable from direct hits**. Four consequences, all at once:
+
+1. **The chip died.** `mergeLiteralResults` prefers the literal copy (richer fields);
+   `rowsNotAlreadyIn(compatRows, mergedUsed)` then sees the row as already supplied and re-appends
+   nothing; the rendered row carries no `match_reason`, so `createProductCard`'s
+   `match_reason === 'compatibility' && matched_token` test fails and the teal "Fits &lt;model&gt;"
+   chip vanishes. This is ERR-133 Defect 3 — "the dropdown showed compat ribbons with no explanation"
+   — reopened through a door that did not exist when it was fixed.
+2. **The swap bar inverted.** `mergedUsed.length > directCount` excluded compat rows from the
+   right-hand side but counted them on the left. Mirror image of the original CE50 bug.
+3. **Ordering broke.** `compatLast` keys on `match_reason`, so untagged rows sorted among real hits.
+4. **The pager gate went trivially true** (`preservedCompat.length === 0`), which could restore a
+   pager over a curated page whose rows `fallback.meta.total` never counted — the ERR-113 cross-field
+   contradiction.
+
+**Measured — the shipped helpers, live payloads, before vs after** (`lost` = compat rows reaching the
+page with no `matched_token`):
+
+| query | compat | before (`HEAD`) | after |
+|---|---|---|---|
+| AP830 / AP8100 | 2 / 2 | swap, 2 lost / 2 lost | no swap, 0 / 0 |
+| VP6000 / AP1000 | 3 / 3 | swap, 3 lost / 3 lost | no swap, 0 / 0 |
+| CE60 / AX220 / SP1000 / GX6750 | 1 each | swap, 1 lost each | no swap, 0 |
+| TR910 | 2 | swap, 2 lost | no swap, 0 |
+| **CE50** | 2 | swap, **2 lost** | **swap, 0 lost** |
+| XR20 / TCX-11 / ET-3300 / lc233 | 1/2/2/0 | no swap, 0 lost | no swap, 0 lost |
+| | | **18 chips lost** | **0** |
+
+`CE50` is the one to read twice: it *should* swap (the literal set really does carry `G05ABK` +
+`G05XBK`, which `/smart` missed) and after the fix it still does, with both ribbons keeping their
+chips. The repair and the provenance stopped being in tension.
+
+**The fix.** `reattachCompatProvenance(rows, compatRows)` (js/shop-page.js) re-labels a literal row
+from `/smart`'s OWN row — same product, same query, same request cycle. Nothing is derived, matched or
+inferred locally, which is what keeps it on the right side of ERR-135: **a compat row may be
+RE-labelled, never labelled.** Identity goes through the existing `productIdentityKeys` (no fourth
+notion of "same product"). Pure, order-preserving, non-mutating, idempotent. Wired in after the digit
+on-topic filter and before the swap decision; the bar became `mergedSplit.direct.length > directCount`
+(direct on both sides); the pager gate became "is any compat row on this page". `rowsNotAlreadyIn`
+stays — the two mechanisms cover different rows (re-attach for rows the union supplied, re-append for
+rows it didn't) and dropping either loses chips on a different corpus.
+
+**Two source-pin tests had frozen the bug in place** — `product-surface-consistency-may2026` and
+`ribbon-compat-search-additive-jul2026` §3 both pinned the literal string `mergedUsed.length >
+directCount`. Re-pinned to the invariant (direct-vs-direct, whatever its expression) plus an explicit
+`doesNotMatch` on the old form. ERR-053's lesson, hit again: **pin the invariant, not the line, when
+the line embodies behaviour.**
+
+**Fixed alongside (found while tracing the dropdown, unrelated to the handoff).**
+(a) *Arrow-key + Enter opened the wrong product.* `state.results` held the raw API array while cards
+were painted after the compatible/genuine partition **and** `byCodeThenColor` — reordered on
+essentially every query. `setActive(i)` highlighted DOM card `i` while Enter navigated to
+`state.results[i]`. Silent, because nothing is filtered out so the *count* stayed right and only the
+identity was wrong; a customer could land on and buy the wrong cartridge. `renderResults` now records
+the painted order as it emits each card. (b) *A dead highlight selector.* `[data-sku-text]` matched
+zero elements on every render — `Products.renderCard` exposes the SKU only as a `data-sku` attribute
+and the card has no SKU text node at all. Removed rather than faked: adding a visible SKU line would
+change every product card site-wide, and product names already embed their code so a SKU-shaped query
+highlights inside the title.
+
+**Verified.** 37 new tests (`tests/ribbon-typeahead-compat-aug2026.test.js`); full suite 3617/0 vs a
+3580/0 baseline at `c34cd56`. New live audit `npm run audit:typeahead` — 43 checks green against prod,
+7 backend findings baselined. Real browser (isolated Chromium, local dev + prod API):
+`/search?q=AP830`, `q=VP6000`, `q=CE50`, `q=AP830&exact=1` render the chip with the correct token,
+compat rows below direct hits **within each section** (`compatLast` is per-section — Compatible was
+`CCART319BK → C05XBK → C143LOT* → 154.11*`, Genuine was `G05ABK → G05XBK → GCE506A`); `q=lc233`
+untouched; dropdown `TCX-11` shows both Amano ribbons chipped and visible (the scoped
+`.smart-ac__grid` CSS exception still works), and 3×ArrowDown + Enter lands on the highlighted card.
+
+**Watch out for.** `/api/search/autocomplete` has **zero** consumers in this repo — the backend
+widened it too, and it reaches no code here. `/suggest` caps at **24**, enforced with a hard
+`400 Validation failed` (not a silent truncation), and `API.searchSuggest` swallows that into `[]` —
+so a caller that raises its limit sees "no suggestions" and never learns why. Our own first
+measurement of this got it wrong by parsing an error envelope as "0 rows", which is precisely the
+absence-as-zero mistake the fail-soft rule exists to prevent; the audit now asserts the 400 explicitly.
+
+**Backend asks.** BF-031 — emit `match_reason`/`matched_token` on `/suggest` + `/autocomplete`, which
+retires the FE workaround entirely (the frontend cannot label these rows itself; ERR-135 forbids it).
+Still open from July and re-measured today: compat rows still bury a direct hit (`q=AP1000`:
+`G45BK` → three tier-3 rows → `G45BK-2PK`), query normalisation is still separator-sensitive
+(`TCX 11` and `TCX-11` return disjoint sets), and the 19 empty-`compatible_devices_html` SKUs are
+still unlisted. All written up in `ribbon-typeahead-FE-response-aug2026.md`; the first two are
+baselined **two-sided** in the audit, so if the backend fixes them the audit FAILS and tells us to
+delete the workaround.
+
+**Lesson.** When a backend widens what an endpoint may return, every consumer that relied on the
+endpoint's *narrowness* breaks silently — and those consumers are invisible to the endpoint's author,
+because the breakage is not in the payload but in the **role** the payload plays. Search for consumers
+by role, not by name: `/suggest` was our control set, not our typeahead, and the word "suggest" in
+three of our own comments is what hid that from everyone, us included. A handoff that widens a
+contract should say so as a contract delta — "this endpoint may now return rows that do not match on
+name or SKU" — separately from the feature it enables.
+
+---
+
 ## ERR-143 — A tri-colour handoff asked us to verify a swatch the storefront is forbidden to paint, and the one real defect was a yield regex nobody was looking at (2026-08-03)
 
 **The claim.** `tricolour-catalogue-corrections-FE-handoff-aug2026.md`: six products had their
