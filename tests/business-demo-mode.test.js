@@ -170,14 +170,89 @@ const summary = unwrap(D.get('/api/business/account/summary'));
 const allInvoices = unwrap(D.get('/api/business/invoices')).invoices;
 const close = (a, b, tol, msg) => assert.ok(Math.abs(a - b) <= tol, `${msg} (${a} vs ${b})`);
 
-test('§3 series totals are the sum of the buckets the chart plots', () => {
-    const sum = (k) => series.points.reduce((t, p) => t + p[k], 0);
-    close(series.totals.lifetime_spend_incl_gst, sum('spend_incl_gst'), 0.01,
-        'the Total spend tile and the spend chart are read side by side');
-    close(series.totals.lifetime_b2b_savings, sum('b2b_savings'), 0.01,
-        'the Saved tile and the savings chart are read side by side');
-    close(series.totals.lifetime_other_savings, sum('other_savings'), 0.01);
-    assert.equal(series.coverage.orders_counted, series.points.reduce((t, p) => t + p.orders, 0));
+/** The whole history, at whichever grain — the window the tiles summarise. */
+const WHOLE = '?from=1900-01-01&to=2100-01-01';
+const wholeMonth = unwrap(D.get(`/api/business/analytics/series${WHOLE}&granularity=month`));
+const wholeWeek = unwrap(D.get(`/api/business/analytics/series${WHOLE}&granularity=week`));
+const sumOf = (pts, k) => pts.reduce((t, p) => t + p[k], 0);
+
+test('§3 the LIFETIME totals are the sum of the whole history, not of the window', () => {
+    // The tiles say "All time" and must not move when the range control does, so
+    // `totals` is summed from the full base while `points` is only the slice
+    // asked for. Over the whole window the two coincide — which is exactly the
+    // fixture the page's window-vs-lifetime consistency gate runs against.
+    close(wholeMonth.totals.lifetime_spend_incl_gst, sumOf(wholeMonth.points, 'spend_incl_gst'), 0.01,
+        'the Total spend tile and the chart are read side by side');
+    close(wholeMonth.totals.lifetime_b2b_savings, sumOf(wholeMonth.points, 'b2b_savings'), 0.01,
+        'the Saved tile and the savings band are read side by side');
+    close(wholeMonth.totals.lifetime_other_savings, sumOf(wholeMonth.points, 'other_savings'), 0.01);
+
+    // ...and the default 12-month window is a SUBSET, or the range control is
+    // doing nothing and the demo teaches that it doesn't work.
+    assert.ok(sumOf(series.points, 'spend_incl_gst') < wholeMonth.totals.lifetime_spend_incl_gst,
+        'the default window must be narrower than all time, or nothing is being filtered');
+    assert.equal(series.coverage.orders_counted, sumOf(series.points, 'orders'),
+        'coverage is WINDOW-scoped and must match the rows returned beside it');
+});
+
+test('§3 switching the grain does not change the story', () => {
+    // Weekly and monthly buckets are two views of ONE daily base. If they were
+    // generated independently they could disagree, and pressing "Weekly" would
+    // silently change the customer's total spend — a bug the demo would be
+    // teaching rather than exposing.
+    for (const k of ['spend_incl_gst', 'b2b_savings', 'other_savings', 'orders']) {
+        close(sumOf(wholeMonth.points, k), sumOf(wholeWeek.points, k), 0.01,
+            `${k} must total the same at every grain`);
+    }
+    assert.ok(wholeWeek.points.length > wholeMonth.points.length,
+        'weekly must actually be a finer grain');
+});
+
+test('§3 the served window and grain are ECHOED, clamped to the history that exists', () => {
+    // The page labels its axis from this echo and warns when it differs from the
+    // request. A fixture that parroted the request back would hide the only bug
+    // that check exists to catch.
+    assert.equal(wholeWeek.granularity, 'week');
+    assert.equal(wholeMonth.granularity, 'month');
+    assert.equal(wholeMonth.from, wholeMonth.points[0].period_start);
+    assert.equal(wholeMonth.to, wholeMonth.points[wholeMonth.points.length - 1].period_start);
+    assert.ok(wholeMonth.from > '1900-01-01',
+        'an out-of-range request must echo the CLAMP, not the ask');
+
+    // A no-parameter call gets the contract default: the last 12 months, monthly.
+    const def = unwrap(D.get('/api/business/analytics/series'));
+    assert.equal(def.granularity, 'month');
+    assert.equal(def.points.length, 12);
+});
+
+test('§3 a narrower window is the TAIL of a wider one, bucket for bucket', () => {
+    // Proves the range control slices one history rather than regenerating a
+    // different one — otherwise every range would tell a different story.
+    const twelve = unwrap(D.get('/api/business/analytics/series?granularity=month')).points;
+    const tail = wholeMonth.points.slice(-twelve.length);
+    assert.deepEqual(twelve, tail,
+        'the 12-month view must be the last 12 buckets of the full history');
+});
+
+test('§3 demo_profile=partial is opt-in, and makes the not-recorded states reachable', () => {
+    // Without it every bucket is a number, so the hatched not-recorded marks, the
+    // broken running total and the discount-breakdown caveat are all unreachable
+    // in review — the states most likely to be got wrong.
+    const P = load({ search: '?demo=1&demo_profile=partial' });
+    const partial = unwrap(P.get('/api/business/analytics/series?granularity=month'));
+    const blanked = partial.points.filter((p) => p.b2b_savings === null);
+    assert.ok(blanked.length >= 1, 'the partial profile must blank at least one bucket');
+    for (const p of blanked) {
+        assert.equal(p.other_savings, null, 'both halves of the split go together');
+        assert.equal(typeof p.orders, 'number',
+            'the orders HAPPENED — it is the breakdown that is missing');
+    }
+    // ...and the count reported is exactly the orders in those buckets.
+    assert.equal(partial.coverage.orders_missing_discount_breakdown,
+        blanked.reduce((t, p) => t + p.orders, 0));
+
+    // The healthy default keeps every figure, so the caveat stays hidden.
+    assert.equal(series.coverage.orders_missing_discount_breakdown, 0);
 });
 
 test('§3 coverage is present and zero, so the partial-data caveat stays hidden', () => {
@@ -219,13 +294,26 @@ test('§3 the mix is a HEALTHY account: mostly paid, a couple open, one overdue'
         'the overdue sub-line and its alert styling need a row to exercise them');
 });
 
-test('§3 fourteen monthly buckets, in ascending order, none null', () => {
-    assert.equal(series.points.length, 14);
-    for (let i = 1; i < series.points.length; i++) {
-        assert.ok(series.points[i].period_start > series.points[i - 1].period_start,
+test('§3 buckets ascend, are contiguous, and none is null in the healthy profile', () => {
+    // The base runs long enough that 2 years and All are genuinely different
+    // views — a 14-month history would make three of the five range presets
+    // identical and the control would look broken.
+    assert.ok(wholeMonth.points.length >= 24,
+        'the history must outrun the 2y preset, or All and 2y show the same thing');
+
+    for (let i = 1; i < wholeMonth.points.length; i++) {
+        assert.ok(wholeMonth.points[i].period_start > wholeMonth.points[i - 1].period_start,
             'buckets must ascend or the chart draws backwards');
     }
-    for (const p of series.points) {
+    // Contiguous: the x-axis is CATEGORICAL, so a skipped month would close up
+    // and vanish rather than leaving a hole.
+    const first = wholeMonth.points[0].period_start;
+    const last = wholeMonth.points[wholeMonth.points.length - 1].period_start;
+    const months = (Number(last.slice(0, 4)) - Number(first.slice(0, 4))) * 12 +
+        (Number(last.slice(5, 7)) - Number(first.slice(5, 7))) + 1;
+    assert.equal(wholeMonth.points.length, months, 'every month in the span needs a bucket');
+
+    for (const p of wholeMonth.points) {
         for (const k of ['spend_incl_gst', 'b2b_savings', 'other_savings']) {
             assert.equal(typeof p[k], 'number', `${k} must be a number in the healthy profile`);
         }
@@ -235,7 +323,8 @@ test('§3 fourteen monthly buckets, in ascending order, none null', () => {
 test('§3 the B2B saving rate stays inside what the live ladder can actually produce', () => {
     // Entry rung 0.5%, top band 10%. A demo showing 25% would misrepresent the
     // product to the person deciding how to present it.
-    for (const p of series.points) {
+    for (const p of wholeMonth.points) {
+        if (!p.spend_incl_gst) continue;   // a month with no orders saves nothing
         const pct = (p.b2b_savings / p.spend_incl_gst) * 100;
         assert.ok(pct > 0 && pct <= 10,
             `a ${pct.toFixed(1)}% bucket is outside the real 0.5–10% band`);

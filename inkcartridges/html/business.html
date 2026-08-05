@@ -22,7 +22,7 @@
     <link rel="stylesheet" href="/css/layout.css?v=77f71285">
     <link rel="stylesheet" href="/css/components.css?v=18c35419">
     <link rel="stylesheet" href="/css/modern-effects.css?v=afe20f45">
-    <link rel="stylesheet" href="/css/pages.css?v=dd434a11">
+    <link rel="stylesheet" href="/css/pages.css?v=3a1ff400">
     <link rel="stylesheet" href="/css/search.css?v=c28f09ef">
     <meta name="twitter:card" content="summary_large_image">
     <meta name="twitter:title" content="Business Centre | InkCartridges.co.nz">
@@ -190,15 +190,35 @@
                 <!-- ── Overview ──────────────────────────────────────────── -->
                 <div class="business-panel" id="panel-overview" role="tabpanel" aria-labelledby="tab-overview">
 
+                    <!-- The scope chip on each series-fed tile is STATIC, not written
+                         by the loader. These four figures are LIFETIME while the chart
+                         below is windowed by the range control, so the tiles have to
+                         say "All time" even on the failure path — a tile that loses
+                         its scope while the chart keeps a range reads as a bug in the
+                         arithmetic rather than a difference in scope. -->
                     <section class="business-stats" aria-label="Summary">
                         <div class="business-stat" id="stat-saved">
-                            <p class="business-stat__label">Saved with your business account</p>
+                            <p class="business-stat__label">Saved on bulk orders</p>
                             <p class="business-stat__value" id="stat-saved-value">&mdash;</p>
+                            <p class="business-stat__scope">All time</p>
                             <p class="business-stat__sub" id="stat-saved-sub"></p>
+                        </div>
+                        <div class="business-stat" id="stat-other">
+                            <p class="business-stat__label">Coupons &amp; loyalty</p>
+                            <p class="business-stat__value" id="stat-other-value">&mdash;</p>
+                            <p class="business-stat__scope">All time</p>
+                            <p class="business-stat__sub" id="stat-other-sub"></p>
+                        </div>
+                        <div class="business-stat business-stat--total" id="stat-total-saved">
+                            <p class="business-stat__label">Total saved</p>
+                            <p class="business-stat__value" id="stat-total-saved-value">&mdash;</p>
+                            <p class="business-stat__scope">All time</p>
+                            <p class="business-stat__sub" id="stat-total-saved-sub"></p>
                         </div>
                         <div class="business-stat" id="stat-spend">
                             <p class="business-stat__label">Total spend</p>
                             <p class="business-stat__value" id="stat-spend-value">&mdash;</p>
+                            <p class="business-stat__scope">All time</p>
                             <p class="business-stat__sub" id="stat-spend-sub"></p>
                         </div>
                         <div class="business-stat" id="stat-outstanding">
@@ -208,31 +228,65 @@
                         </div>
                     </section>
 
-                    <section class="business-section" id="savings-section" aria-labelledby="savings-heading">
-                        <h2 class="business-section__heading" id="savings-heading">Savings over time</h2>
-                        <div class="business-graph" id="savings-graph"></div>
-                        <div class="business-graph__legend" id="savings-legend" hidden></div>
+                    <section class="business-section" id="performance-section" aria-labelledby="performance-heading">
+                        <div class="business-perf__head">
+                            <h2 class="business-section__heading" id="performance-heading">Performance overview</h2>
+                            <!-- The window and grain the SERVER ACTUALLY SERVED, never
+                                 the ones we asked for. -->
+                            <p class="business-perf__served" id="perf-served"></p>
+                        </div>
+
+                        <div class="business-perf__controls" id="perf-controls">
+                            <div class="business-perf__group" role="group" aria-label="Date range">
+                                <button type="button" class="business-perf__btn" data-perf-range="6m">6 months</button>
+                                <button type="button" class="business-perf__btn business-perf__btn--active" data-perf-range="12m" aria-pressed="true">12 months</button>
+                                <button type="button" class="business-perf__btn" data-perf-range="2y">2 years</button>
+                                <button type="button" class="business-perf__btn" data-perf-range="all">All</button>
+                                <button type="button" class="business-perf__btn" data-perf-range="custom">Custom</button>
+                            </div>
+                            <div class="business-perf__group" role="group" aria-label="Bucket width">
+                                <button type="button" class="business-perf__btn business-perf__btn--active" data-perf-grain="month" aria-pressed="true">Monthly</button>
+                                <button type="button" class="business-perf__btn" data-perf-grain="week">Weekly</button>
+                            </div>
+                            <div class="business-perf__group" role="group" aria-label="How to plot">
+                                <button type="button" class="business-perf__btn business-perf__btn--active" data-perf-mode="period" aria-pressed="true">Per period</button>
+                                <button type="button" class="business-perf__btn" data-perf-mode="cumulative">Running total</button>
+                            </div>
+                        </div>
+
+                        <div class="business-perf__custom" id="perf-custom" hidden>
+                            <label class="business-filter">
+                                <span class="business-filter__label">From</span>
+                                <input type="date" class="business-filter__input" id="perf-from">
+                            </label>
+                            <label class="business-filter">
+                                <span class="business-filter__label">To</span>
+                                <input type="date" class="business-filter__input" id="perf-to">
+                            </label>
+                            <button type="button" class="btn btn--secondary" id="perf-custom-apply">Apply</button>
+                            <p class="business-perf__note business-perf__note--alert" id="perf-range-error" hidden></p>
+                        </div>
+
+                        <div class="business-graph business-graph--perf" id="perf-chart"></div>
+
+                        <!-- The arithmetic a reader is about to attempt anyway: the
+                             chart is windowed, the tiles above are lifetime. -->
+                        <p class="business-perf__window" id="perf-window-totals" hidden></p>
+
+                        <!-- Echo mismatches, contiguity shortfalls and the
+                             window-vs-lifetime consistency gate all land here. -->
+                        <div class="business-perf__notes" id="perf-notes"></div>
+
                         <!-- Rendered when coverage.orders_missing_discount_breakdown > 0.
                              A partial chart has to LOOK partial (ERR-063 family). -->
                         <p class="business-caveat" id="savings-caveat" hidden></p>
-                        <div class="account-empty" id="savings-empty" hidden>
-                            <p>We'll chart your volume savings here as you order.</p>
-                        </div>
-                        <div class="account-empty business-error" id="savings-error" hidden>
-                            <p>We couldn't load your savings history.</p>
-                            <button type="button" class="btn btn--secondary" data-retry="savings">Retry</button>
-                        </div>
-                    </section>
 
-                    <section class="business-section" id="spend-section" aria-labelledby="spend-heading">
-                        <h2 class="business-section__heading" id="spend-heading">Spend over time</h2>
-                        <div class="business-graph" id="spend-graph"></div>
-                        <div class="account-empty" id="spend-empty" hidden>
-                            <p>We'll chart your spend here as you order.</p>
+                        <div class="account-empty" id="perf-empty" hidden>
+                            <p id="perf-empty-msg">We'll chart your spend and savings here as you order.</p>
                         </div>
-                        <div class="account-empty business-error" id="spend-error" hidden>
-                            <p>We couldn't load your spend history.</p>
-                            <button type="button" class="btn btn--secondary" data-retry="spend">Retry</button>
+                        <div class="account-empty business-error" id="perf-error" hidden>
+                            <p>We couldn't load your spend and savings history.</p>
+                            <button type="button" class="btn btn--secondary" data-retry="performance">Retry</button>
                         </div>
                     </section>
 
@@ -327,11 +381,11 @@
     <script defer src="/js/config.js?v=57d2621d"></script>
     <script defer src="/js/security.js?v=790f00f3"></script>
     <script defer src="/js/utils.js?v=2e543423"></script>
-    <script defer src="/js/api.js?v=c40a8e6b"></script>
+    <script defer src="/js/api.js?v=26174a1b"></script>
     <script defer src="/js/schema.js?v=dd78df4e"></script>
     <script defer src="/js/auth.js?v=55cfdbef"></script>
     <script defer src="/js/business.js?v=8249b5ba"></script>
-    <script defer src="/js/search.js?v=b69f1ae8"></script>
+    <script defer src="/js/search.js?v=b6e840d5"></script>
     <script defer src="/js/main.js?v=04ea9f2f"></script>
     <script defer src="/js/legal-config.js?v=2db8a49b"></script>
     <script defer src="/js/footer.js?v=a33877cd"></script>
@@ -340,9 +394,9 @@
     <script defer src="/js/modern-effects.js?v=ad8bff1e"></script>
     <script defer src="/js/cart.js?v=49f84157"></script>
     <script defer src="/js/order-totals.js?v=530c73d7"></script>
-    <script defer src="/js/savings-chart.js?v=faedbb31"></script>
+    <script defer src="/js/business-chart.js?v=997236cc"></script>
     <script defer src="/js/business-invoice-pdf.js?v=973007a8"></script>
-    <script defer src="/js/business-page.js?v=6a5de815"></script>
+    <script defer src="/js/business-page.js?v=f227ce16"></script>
     <script defer src="/js/analytics.js?v=8c9ee196"></script>
     <script defer src="/js/site-guard.js?v=e0b0e4ba"></script>
 </body>

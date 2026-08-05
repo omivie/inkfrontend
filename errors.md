@@ -41,6 +41,107 @@ describing the same incident.
 
 ---
 
+## ERR-145 — The Business Centre's "All" range asked for nothing, and the endpoint's no-parameter default is twelve months (2026-08-05)
+
+**The change.** `/business` Overview was rebuilt into an admin-style **Performance overview**: one
+banded SVG chart in place of two feature-less line charts, with range / bucket-width / per-period-vs-
+running-total controls. For the first time the page sends `?from=&to=&granularity=` to
+`/api/business/analytics/series` instead of the hardcoded `?granularity=month`.
+
+**The bug.** `perfWindow()` returned `{from:'', to:''}` for the `all` preset and `seriesQuery()`
+omitted both parameters — expressing "no filter" by sending no filter. That reads as obviously
+correct, and it is wrong here: the endpoint documents its **no-parameter default as the last twelve
+months** (backend brief §1). So pressing **All** returned a payload byte-identical to **12 months**,
+under a button that said otherwise. Nothing errored, nothing looked broken, and the chart was simply
+not showing two of the account's three years.
+
+**It was caught by the feature's own honesty gates, on their first run against real fixtures.** Two
+independent notes fired, neither written for this:
+
+- `checkWindowAgainstLifetime()` — when the range is All and nothing is missing, the plotted buckets
+  must add up to the lifetime totals, because both are the backend's own figures. It reported *"the
+  periods plotted add up to $1,630.26 of bulk-order savings, but the all-time total reads
+  $3,066.05 — a gap of $1,435.79."*
+- The window echo — *"your first order was 13 Mar 2024, but this chart starts at 1 Sept 2025 — the
+  server returned a narrower range than we asked for."*
+
+The second sentence is slightly unfair to the server, which returned exactly what it was asked for.
+That is the correct behaviour for the check: it names the observable discrepancy, and the reader
+(here, the author) works out which side is wrong.
+
+**The fix is not "send an old date".** Probed against production 2026-08-05, the endpoint neither
+clamps nor rejects a wide floor: `from=2000-01-01` returns **320 monthly buckets**, nearly all empty,
+and the chart becomes an unreadable smear. So **All** asks for `totals.first_order_at` — always known
+by the time it can be clicked, because the first paint is the twelve-month default — and falls back
+to a `2000-01-01` floor only when no payload has arrived yet. The unclamped behaviour is now printed
+by `npm run verify:business` §1b as a measurement rather than hidden behind a threshold check that
+would have quietly passed.
+
+**Verified.** The live endpoint does honour all three parameters and echoes the window exactly;
+`granularity=week` returns real weekly buckets. `npm run verify:business` 38 passed / 0 failed.
+
+**The lesson.** "Send nothing" is not a neutral way to say "no filter" — it delegates the decision to
+a server-side default, and that default may be a *narrow* one. A control whose off-state is an
+omitted parameter is only as honest as the behaviour behind the omission: ask for what you mean. And
+a consistency gate pays for itself the moment it catches the person who wrote it.
+
+---
+
+## ERR-146 — The demo fixture's daily base ran to `new Date()`, so after 11am it grew a row dated tomorrow (2026-08-05)
+
+**Context.** `business-demo.js` was rebuilt onto a **daily** base that is aggregated up to monthly or
+weekly buckets on request, so that switching bucket width cannot change the customer's totals — one
+truth, two views. Lifetime totals are summed from the whole base; the chart plots whatever window was
+asked for.
+
+**The bug.** With ERR-145 fixed, the same consistency gate still fired, now with a $23.08 gap between
+the all-time chart and the lifetime tiles. `buildBase()` measured its span as
+`Math.round((new Date() - start) / 86400000)` against a **midnight** start. Run after about 11:00
+local, the leftover fraction of a day rounds the span *up*, and the base gains one extra row dated
+**tomorrow**. The lifetime totals include it; every window ends at `to=today` and clips it out. The
+tiles therefore led the chart by exactly one day's trading — but only in the afternoon, which is the
+kind of intermittence that gets blamed on the chart rather than the fixture.
+
+**The fix.** Normalise to midnight before measuring:
+`new Date(now.getFullYear(), now.getMonth(), now.getDate())`. `Math.round` is deliberately kept —
+NZ daylight saving makes two days a year 23 or 25 hours long, and flooring would drop a day around
+those transitions.
+
+**Verified.** With `range=all`, the "In this range" line and all four lifetime tiles agree to the
+cent, and the gate is silent.
+
+**The lesson.** A "days between" span measured from `new Date()` is a time-of-day-dependent
+off-by-one that is invisible every morning. Normalise both ends to midnight before subtracting. And a
+fixture whose totals disagree with its own rows counterfeits a bug in shipped code — this one very
+nearly sent someone hunting through `business-page.js` for arithmetic that was correct.
+
+---
+
+## ERR-147 — `.visually-hidden` does not clip a `<table>`, so the screen-reader data table scrolled the whole page sideways (2026-08-05)
+
+**Context.** The new chart module ships a `visually-hidden` table of buckets × series, so the figures
+are readable without sight rather than locked inside an SVG. At a 375px viewport,
+`document.body.scrollWidth` measured **555** against a client width of 375. Removing that one table
+from the DOM restored it to exactly 375.
+
+**Root cause.** `.visually-hidden` in `css/base.css` uses the standard recipe —
+`position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0,0,0,0)` — and that recipe
+works on a block box. **`overflow` does not apply to a `display:table` box.** The table laid itself
+out at its full natural width and contributed that width to the page's scrollable overflow. Because
+`clip` only suppresses *painting*, nothing was visible: the page simply scrolled sideways with
+apparently nothing in the extra 180px.
+
+**The fix.** Wrap it: `<div class="visually-hidden"><table>…</table></div>`. A div honours
+`overflow:hidden`. A test pins the wrapper specifically, with the reason in the assertion message so
+it does not get "tidied" back onto the table.
+
+**The lesson.** The visually-hidden recipe is not element-agnostic. Anything that brings its own
+layout mode needs a plain block wrapper to be clipped by it. And accessibility markup is still
+layout — after adding any off-screen content, measure `body.scrollWidth` against
+`documentElement.clientWidth` before assuming it costs nothing.
+
+---
+
 ## ERR-144 — `/api/search/suggest` was never our dropdown, it was our results-page control set, so widening it silently deleted the "Fits &lt;model&gt;" chip (2026-08-04)
 
 **The claim.** `ribbon-for-use-in-typeahead-FE-handoff-aug2026.md` (backend `99d798b`): the ribbon

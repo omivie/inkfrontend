@@ -15722,7 +15722,13 @@ body.page-shop {
 }
 
 @media (min-width: 640px) {
-    .business-stats { grid-template-columns: repeat(3, 1fr); }
+    .business-stats { grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }
+}
+
+/* Five tiles fit one row here; below this they wrap two-and-three rather than
+   squeezing five money figures into 150px each. */
+@media (min-width: 1100px) {
+    .business-stats { grid-template-columns: repeat(5, 1fr); }
 }
 
 .business-stat {
@@ -15744,6 +15750,25 @@ body.page-shop {
     color: var(--steel-900, #0f172a);
     line-height: 1.2;
 }
+
+/* SCOPE, not decoration. These figures are lifetime while the chart below is
+   windowed by the range control, so without this the two look like they should
+   reconcile and don't. Shipped in the markup, never written by a loader. */
+.business-stat__scope {
+    display: inline-block;
+    margin-top: 0.3rem;
+    padding: 0.1rem 0.45rem;
+    border-radius: 999px;
+    background: var(--steel-100, #f1f5f9);
+    color: var(--steel-500, #64748b);
+    font-size: 0.6875rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+/* The derived tile. Tinted so it reads as the sum of its two neighbours rather
+   than a third independent measurement. */
+.business-stat--total { background: #f8fafc; border-color: var(--steel-300, #cbd5e1); }
 
 .business-stat__sub {
     font-size: 0.8125rem;
@@ -15778,36 +15803,255 @@ body.page-shop {
     padding: 0.75rem;
 }
 
+.business-graph--perf { padding: 0.75rem 0.5rem 0.25rem; }
+
 .business-chart { width: 100%; height: auto; display: block; }
 .business-chart__axis { stroke: var(--steel-200, #e2e8f0); stroke-width: 1; }
 .business-chart__tick { fill: var(--steel-500, #64748b); font-size: 11px; }
-.business-chart__line { stroke-width: 2.5; vector-effect: non-scaling-stroke; }
+
+/* THE FOUR SERIES COLOURS. One declaration each, reused by the line, the bar,
+   the hover marker, the legend chip and the tooltip row — so a series can never
+   be one colour in the chart and another in the legend. */
+.business-chart__line { stroke-width: 2.5; fill: none; vector-effect: non-scaling-stroke; }
 .business-chart__line--b2b { stroke: #267FB5; }
 .business-chart__line--other { stroke: #C71F6E; }
 .business-chart__line--spend { stroke: #D4A017; }
+.business-chart__line--orders { stroke: #0F766E; }
 
-.business-graph__legend {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 1.25rem;
-    margin-top: 0.6rem;
+.business-chart__bar--b2b { fill: #267FB5; }
+.business-chart__bar--other { fill: #C71F6E; }
+.business-chart__bar--spend { fill: #D4A017; }
+.business-chart__bar--orders { fill: #0F766E; }
+
+.business-chart__dot--b2b, .business-chart__marker--b2b { fill: #267FB5; }
+.business-chart__dot--other, .business-chart__marker--other { fill: #C71F6E; }
+.business-chart__dot--spend, .business-chart__marker--spend { fill: #D4A017; }
+.business-chart__dot--orders, .business-chart__marker--orders { fill: #0F766E; }
+
+.business-chart__frame { position: relative; }
+.business-chart__frame:focus-visible {
+    outline: 2px solid var(--color-primary, #267FB5);
+    outline-offset: 3px;
+    border-radius: var(--radius-md, 8px);
+}
+
+.business-chart__grid { stroke: var(--steel-200, #e2e8f0); stroke-width: 1; }
+.business-chart__grid--base { stroke: var(--steel-300, #cbd5e1); }
+
+.business-chart__band-label {
+    fill: var(--steel-600, #475569);
+    font-size: 11px;
+    font-weight: var(--font-weight-semibold, 600);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+}
+
+.business-chart__band-hidden { fill: var(--steel-400, #94a3b8); font-size: 12px; font-style: italic; }
+
+/* NOT-RECORDED, drawn positively. In bar mode a missing bar and a $0 bar are the
+   same pixels, so the absence has to be a mark of its own. */
+.business-chart__nodata-bg { fill: #f8fafc; }
+.business-chart__nodata-line { stroke: var(--steel-300, #cbd5e1); stroke-width: 2; }
+.business-chart__unknown { fill: rgba(148, 163, 184, 0.14); }
+
+.business-chart__crosshair {
+    stroke: var(--steel-400, #94a3b8);
+    stroke-width: 1;
+    stroke-dasharray: 3 3;
+    pointer-events: none;
+}
+
+.business-chart__marker { stroke: #fff; stroke-width: 2; pointer-events: none; }
+.business-chart__hit { cursor: crosshair; }
+
+/* ── Chart tooltip ────────────────────────────────────────────────────── */
+
+.business-chart__tooltip {
+    position: absolute;
+    top: 8px;
+    z-index: 2;
+    min-width: 190px;
+    padding: 0.5rem 0.65rem;
+    background: #fff;
+    border: 1px solid var(--steel-200, #e2e8f0);
+    border-radius: var(--radius-md, 8px);
+    box-shadow: 0 6px 18px rgba(15, 23, 42, 0.12);
     font-size: 0.8125rem;
+    pointer-events: none;
+    transform: translateX(12px);
+}
+
+.business-chart__tooltip--flip { transform: translateX(calc(-100% - 12px)); }
+.business-chart__tooltip[hidden] { display: none; }
+
+.business-chart__tooltip-title {
+    font-weight: var(--font-weight-semibold, 600);
+    color: var(--steel-900, #0f172a);
+    margin: 0 0 0.35rem;
+}
+
+.business-chart__tooltip-row {
+    display: grid;
+    grid-template-columns: 14px 1fr auto;
+    align-items: center;
+    gap: 0.45rem;
+    margin: 0 0 0.15rem;
     color: var(--steel-600, #475569);
 }
 
-.business-graph__legend[hidden] { display: none; }
+.business-chart__tooltip-value {
+    font-variant-numeric: tabular-nums;
+    color: var(--steel-900, #0f172a);
+}
 
-.business-legend__item { display: inline-flex; align-items: center; gap: 0.4rem; }
+/* ── Chart legend (chips toggle a series) ─────────────────────────────── */
 
-.business-legend__swatch {
+.business-chart__legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-top: 0.6rem;
+}
+
+.business-chart__chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.3rem 0.7rem;
+    min-height: 36px;
+    background: #fff;
+    border: 1px solid var(--steel-200, #e2e8f0);
+    border-radius: 999px;
+    font-size: 0.8125rem;
+    color: var(--steel-700, #334155);
+    cursor: pointer;
+}
+
+.business-chart__chip:hover { border-color: var(--steel-400, #94a3b8); }
+
+/* Toggled off: muted AND dashed, so it reads as "switched off" rather than
+   "greyed out because it's unavailable". */
+.business-chart__chip[aria-pressed="false"] {
+    border-style: dashed;
+    color: var(--steel-400, #94a3b8);
+}
+
+.business-chart__chip[aria-pressed="false"] .business-chart__swatch { opacity: 0.3; }
+
+.business-chart__swatch {
     width: 14px;
     height: 3px;
     border-radius: 2px;
     display: inline-block;
+    flex: none;
 }
 
-.business-legend__swatch--b2b { background: #267FB5; }
-.business-legend__swatch--other { background: #C71F6E; }
+.business-chart__swatch--b2b { background: #267FB5; }
+.business-chart__swatch--other { background: #C71F6E; }
+.business-chart__swatch--spend { background: #D4A017; }
+.business-chart__swatch--orders { background: #0F766E; }
+
+/* ── Performance-overview controls + notes ────────────────────────────── */
+
+.business-perf__head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 0.5rem;
+}
+
+/* The window and grain the SERVER SERVED. Never styled away — it is the only
+   thing that tells the reader what they are actually looking at. */
+.business-perf__served {
+    font-size: 0.8125rem;
+    color: var(--steel-500, #64748b);
+    font-variant-numeric: tabular-nums;
+}
+
+.business-perf__controls {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem 1rem;
+    margin-bottom: var(--spacing-3, 0.75rem);
+}
+
+.business-perf__group {
+    display: inline-flex;
+    flex-wrap: wrap;
+    gap: 0.25rem;
+    padding: 0.2rem;
+    background: var(--steel-100, #f1f5f9);
+    border-radius: 999px;
+}
+
+.business-perf__btn {
+    appearance: none;
+    background: none;
+    border: 0;
+    border-radius: 999px;
+    padding: 0.4rem 0.85rem;
+    min-height: 36px;
+    font-size: 0.8125rem;
+    font-weight: var(--font-weight-medium, 500);
+    color: var(--steel-600, #475569);
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+.business-perf__btn:hover { color: var(--color-primary, #267FB5); }
+
+.business-perf__btn--active {
+    background: #fff;
+    color: var(--color-primary, #267FB5);
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08);
+}
+
+.business-perf__custom {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    gap: var(--spacing-3, 0.75rem);
+    margin-bottom: var(--spacing-3, 0.75rem);
+}
+
+.business-perf__custom[hidden] { display: none; }
+
+.business-perf__window {
+    margin-top: 0.6rem;
+    font-size: 0.8125rem;
+    color: var(--steel-600, #475569);
+    font-variant-numeric: tabular-nums;
+}
+
+.business-perf__window[hidden] { display: none; }
+
+.business-perf__notes { margin-top: 0.35rem; }
+
+.business-perf__note {
+    margin: 0.35rem 0 0;
+    font-size: 0.8125rem;
+    color: var(--steel-600, #475569);
+}
+
+/* Fail-soft has to be LOUD. A window that quietly differs from the one asked
+   for, or two backend figures that disagree, gets this treatment — not a
+   footnote the eye slides past. */
+.business-perf__note--alert {
+    padding: 0.5rem 0.7rem;
+    border-left: 3px solid var(--magenta-primary, #C71F6E);
+    background: #fdf2f8;
+    border-radius: var(--radius-sm, 6px);
+    color: #831843;
+    font-weight: var(--font-weight-medium, 500);
+}
+
+.business-perf__note--alert[hidden] { display: none; }
+
+@media (max-width: 640px) {
+    .business-perf__controls { gap: 0.4rem; }
+    .business-perf__btn { padding: 0.4rem 0.6rem; }
+}
 
 /* A partial chart has to LOOK partial — this line is never decorative. */
 .business-caveat {

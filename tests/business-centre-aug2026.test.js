@@ -45,6 +45,8 @@ const PAGE = read('html/business.html');
 const PAGE_JS = JS('business-page.js');
 const PDF_JS = JS('business-invoice-pdf.js');
 const CHART_JS = JS('savings-chart.js');
+const PERF_JS = JS('business-chart.js');
+const LOYALTY_PAGE = read('html/account/loyalty.html');
 const BUSINESS_JS = JS('business.js');
 const LAYOUT_CSS = read('css/layout.css');
 const PAGES_CSS = read('css/pages.css');
@@ -57,6 +59,18 @@ const codeOnly = (src) => src
     .replace(/(^|[^:])\/\/.*$/gm, '$1');
 
 const hash = (s) => crypto.createHash('sha256').update(s).digest('hex');
+
+/**
+ * BusinessChart under a bare context. A plain `{innerHTML}` stand-in has no DOM,
+ * so the emitted markup IS the contract — which is the point: the module must be
+ * able to say everything it needs to say in the markup alone.
+ */
+function loadPerfChart() {
+    const ctx = vm.createContext({ window: {}, module: { exports: {} }, console });
+    ctx.globalThis = ctx;
+    vm.runInContext(PERF_JS, ctx, { filename: 'business-chart.js' });
+    return ctx.window.BusinessChart;
+}
 
 function extractBlock(html, openTag, closeTag) {
     const s = html.indexOf(openTag);
@@ -110,14 +124,24 @@ test('§1 head carries what the page-sweep tests require of a private page', () 
 test('§1 script order: legal-config before footer, and every dependency present', () => {
     const idx = (f) => PAGE.indexOf(`/js/${f}?`);
     for (const f of ['config.js', 'security.js', 'utils.js', 'api.js', 'auth.js',
-        'business.js', 'main.js', 'order-totals.js', 'savings-chart.js',
+        'business.js', 'main.js', 'order-totals.js', 'business-chart.js',
         'business-invoice-pdf.js', 'business-page.js']) {
         assert.ok(idx(f) > -1, `business.html must load /js/${f}`);
     }
     assert.ok(idx('legal-config.js') < idx('footer.js'),
         'legal-config.js must precede footer.js — `defer` preserves document order');
-    assert.ok(idx('savings-chart.js') < idx('business-page.js'),
-        'savings-chart.js must precede business-page.js — the controller calls SavingsChart.render()');
+    assert.ok(idx('business-chart.js') < idx('business-page.js'),
+        'business-chart.js must precede business-page.js — the controller calls BusinessChart.render()');
+
+    // savings-chart.js was this page's chart until the Performance overview
+    // replaced it. Shipping it here now would be a dead request, and the
+    // ordering assertion above would be asserting a reason that isn't true.
+    assert.ok(!/savings-chart\.js/.test(PAGE),
+        'business.html no longer draws with SavingsChart — drop the script tag');
+    // ...but the module is NOT dead: the Loyalty page still draws with it, and a
+    // future reader must not read the line above as permission to delete it.
+    assert.match(LOYALTY_PAGE, /\/js\/savings-chart\.js\?/,
+        'the loyalty page still draws with SavingsChart — it is frozen, not retired');
     assert.ok(idx('order-totals.js') < idx('business-page.js'),
         'order-totals.js must precede business-page.js — OrderTotals.format() renders every nullable figure');
     assert.ok(!/auth-redirect\.js/.test(PAGE),
@@ -296,6 +320,7 @@ test('§4 a failed fetch shows an error + Retry, never the empty state', () => {
     const code = codeOnly(PAGE_JS);
     // Each loader must, on failure, hide the empty state and show the error.
     for (const [empty, error] of [
+        ['perf-empty', 'perf-error'],
         ['top-products-empty', 'top-products-error'],
         ['recent-invoices-empty', 'recent-invoices-error'],
         ['invoices-empty', 'invoices-error'],
@@ -326,10 +351,33 @@ test('§4 invoice filters go to the SERVER, not applied to a fetched page', () =
     }
 });
 
-test('§4 a null series bucket is dropped, not plotted as zero', () => {
+test('§4 a null series bucket is a visible GAP, not a dropped one and not a zero', () => {
+    // This test used to pin the literal `.filter((p) => p.v !== null)` while its
+    // own message asked for a gap — because the old chart plotted on epoch time
+    // and could only DROP an unknown bucket, quietly shortening the series.
+    // BusinessChart plots categorically, so the bucket keeps its slot and the
+    // absence gets a mark of its own. Dropping is now the wrong answer.
     const code = codeOnly(PAGE_JS);
-    assert.match(code, /\.filter\(\(p\) => p\.v !== null\)/,
-        'an unrecorded month must leave a gap, not draw a $0 point');
+    assert.ok(!/\.filter\(\(p\) => p\.v !== null\)/.test(code),
+        'a dropped bucket silently shortens the series — the slot must survive');
+    assert.ok(!/points\s*:\s*pts\.filter/.test(code),
+        'the raw points go to the chart; it is the chart that decides how to show a gap');
+    assert.match(code, /points:\s*pts/,
+        'nulls must reach BusinessChart intact so it can mark them as not recorded');
+});
+
+test('§4 the window figures are READ off the chart, never re-added by the page', () => {
+    // The page may read a payload field, compare two scalars and label. It may
+    // not fold a collection — that is how "the outstanding balance is summed
+    // from page 1" happens. All folding lives in the chart module, which folds
+    // only the window the server actually sent.
+    const code = codeOnly(PAGE_JS);
+    assert.match(code, /seam\.totals\.b2b/,
+        'the "In this range" line reads the chart’s own totals');
+    assert.match(code, /sumOrNull/,
+        'the one derived tile gets a named helper, so the null rule is stated once');
+    assert.ok(!/lifetime_b2b_savings\s*\)?\s*\|\|\s*0|\|\|\s*0\s*\)\s*\+/.test(code),
+        '`|| 0` on a nullable component turns "not reported" into a confident total');
 });
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -375,15 +423,179 @@ test('§5 an empty series draws NO line (absence must not become a flat zero)', 
 });
 
 test('§5 pages.css declares a colour for every series the page draws', () => {
-    for (const mod of ['b2b', 'other', 'spend']) {
+    // Every series is drawn FOUR ways — line, bar, hover marker and legend
+    // swatch — and a series that is one colour in the chart and another in the
+    // legend is worse than no legend at all.
+    for (const mod of ['b2b', 'other', 'spend', 'orders']) {
         assert.match(PAGES_CSS, new RegExp(`\\.business-chart__line--${mod} \\{ stroke:`),
             `a series with no stroke colour renders invisible — missing --${mod}`);
+        assert.match(PAGES_CSS, new RegExp(`\\.business-chart__bar--${mod} \\{ fill:`),
+            `per-period mode draws bars — missing a fill for --${mod}`);
+        assert.match(PAGES_CSS, new RegExp(`\\.business-chart__swatch--${mod}`),
+            `the legend chip for --${mod} needs the same colour as its series`);
     }
-    // The loyalty page passes blockClass 'loyalty-chart' to the SAME module.
+    // The loyalty page passes blockClass 'loyalty-chart' to SavingsChart.
     for (const mod of ['accrued', 'savings']) {
         assert.match(PAGES_CSS, new RegExp(`\\.loyalty-chart__line--${mod}`),
             `the extraction must not have orphaned the loyalty chart's --${mod} colour`);
     }
+});
+
+// ═════════════════════════════════════════════════════════════════════════════
+// §5b — the Performance overview module
+// ═════════════════════════════════════════════════════════════════════════════
+
+test('§5b BusinessChart does no I/O and pulls in no library', () => {
+    const code = codeOnly(PERF_JS);
+    for (const banned of [/API\./, /fetch\(/, /localStorage/, /sessionStorage/, /cdn\./, /import\(/, /Math\.random/, /\bconsole\./]) {
+        assert.ok(!banned.test(code), `business-chart.js must stay pure — found ${banned}`);
+    }
+    assert.match(code, /role="img"/);
+    assert.match(code, /aria-label=/);
+    // Deliberately NOT savings-chart.js's `preserveAspectRatio="none"`: a chart
+    // with gridline labels, tick labels and round hover markers cannot survive a
+    // non-uniform scale. The viewBox is the MEASURED width instead.
+    assert.ok(!/preserveAspectRatio="none"/.test(code),
+        'non-uniform scaling stretches every glyph and turns the hover markers into ellipses');
+    assert.match(code, /clientWidth/, 'the viewBox width must come from the measured host');
+});
+
+test('§5b nulls survive as marks and gaps, and never as zero', () => {
+    const Chart = loadPerfChart();
+    const host = { innerHTML: '' };
+    const out = Chart.render(host, {
+        blockClass: 'business-chart',
+        width: 800,
+        points: [
+            { period_start: '2026-01-01', spend_incl_gst: 1200, b2b_savings: 60, other_savings: 0, orders: 4 },
+            { period_start: '2026-02-01', spend_incl_gst: 1500, b2b_savings: null, other_savings: 5, orders: 5 },
+            { period_start: '2026-03-01', spend_incl_gst: 1800, b2b_savings: 90, other_savings: 8, orders: 6 },
+        ],
+    });
+    assert.equal(out.rendered, true);
+    assert.equal(out.buckets, 3);
+
+    // A bar mode gap must be a POSITIVE mark: a missing bar and a $0 bar are the
+    // same pixels, so absence has to be drawn, not left out.
+    assert.equal((host.innerHTML.match(/__nodata"/g) || []).length, 1,
+        'the unrecorded bucket needs exactly one not-recorded mark');
+    // ...and a measured zero still draws, or "we looked and it was zero" and
+    // "we never looked" become the same picture from the other direction.
+    assert.equal((host.innerHTML.match(/__bar /g) || []).length, 8,
+        '3 spend + 2 b2b (one unrecorded) + 3 other, including the $0 one');
+
+    // A total that skipped the unknown would be a confident wrong number.
+    assert.equal(out.totals.b2b, null);
+    assert.equal(out.nulls.b2b, 1);
+    assert.equal(out.totals.spend, 4500);
+    assert.equal(out.nulls.spend, 0);
+});
+
+test('§5b a running total BREAKS at the first unknown and stays broken', () => {
+    const Chart = loadPerfChart();
+    const host = { innerHTML: '' };
+    const out = Chart.render(host, {
+        blockClass: 'business-chart',
+        mode: 'cumulative',
+        width: 800,
+        points: [
+            { period_start: '2026-01-01', spend_incl_gst: 100, b2b_savings: 10, other_savings: 1, orders: 1 },
+            { period_start: '2026-02-01', spend_incl_gst: 100, b2b_savings: null, other_savings: 1, orders: 1 },
+            { period_start: '2026-03-01', spend_incl_gst: 100, b2b_savings: 10, other_savings: 1, orders: 1 },
+        ],
+    });
+    // Carrying the total across the gap would understate it by an unknown amount
+    // while looking complete — the failure mode the old chart had.
+    assert.equal(out.breakIndex.b2b, 1);
+    assert.equal(out.breakIndex.spend, null);
+    assert.match(host.innerHTML, /__unknown/,
+        'the unknowable tail must be marked, not left as a line that merely stops');
+});
+
+test('§5b each band scales independently, and money axes include zero', () => {
+    const Chart = loadPerfChart();
+    const small = { innerHTML: '' };
+    const huge = { innerHTML: '' };
+    const base = { period_start: '2026-01-01', b2b_savings: 50, other_savings: 10, orders: 3 };
+    Chart.render(small, { blockClass: 'business-chart', width: 800, points: [{ ...base, spend_incl_gst: 1000 }] });
+    Chart.render(huge, { blockClass: 'business-chart', width: 800, points: [{ ...base, spend_incl_gst: 100000 }] });
+
+    // Money ticks are emitted band by band: five for spend, then five for
+    // savings. A hundredfold jump in SPEND must move the first five and leave
+    // the second five untouched — that is the entire reason the bands exist
+    // rather than one shared axis with savings smeared along the baseline.
+    // Axis ticks only — the screen-reader table below the chart is full of money
+    // too, and counting that would make this test measure the wrong thing.
+    const ticks = (html) => (html.match(/class="business-chart__tick"[^>]*>([^<]*)</g) || [])
+        .map((s) => s.slice(s.lastIndexOf('>') + 1, -1))
+        .filter((t) => t.startsWith('$'));
+    const a = ticks(small.innerHTML);
+    const b = ticks(huge.innerHTML);
+    assert.equal(a.length, 10, 'five money ticks per money band');
+    assert.notDeepEqual(a.slice(0, 5), b.slice(0, 5), 'the spend band must have rescaled');
+    assert.deepEqual(a.slice(5), b.slice(5), 'the savings band must NOT have moved');
+    for (const t of [a, b]) {
+        assert.ok(t.includes('$0'), 'a money axis that omits zero exaggerates every wiggle');
+    }
+});
+
+test('§5b hiding a series removes it from the plot and the legend says so', () => {
+    const Chart = loadPerfChart();
+    const host = { innerHTML: '' };
+    const out = Chart.render(host, {
+        blockClass: 'business-chart',
+        width: 800,
+        hidden: ['other'],
+        points: [
+            { period_start: '2026-01-01', spend_incl_gst: 100, b2b_savings: 10, other_savings: 1, orders: 1 },
+            { period_start: '2026-02-01', spend_incl_gst: 120, b2b_savings: 12, other_savings: 2, orders: 2 },
+        ],
+    });
+    assert.ok(!/__bar--other/.test(host.innerHTML), 'a hidden series must not draw');
+    assert.match(host.innerHTML, /data-series="other"[^>]*aria-pressed="false"/,
+        'the chip has to say which state it is in, for a screen reader too');
+    // ...but the figures the PAGE prints must not move: a legend click is a view
+    // preference, not a change to what the server reported.
+    assert.equal(out.totals.other, 3);
+});
+
+test('§5b the markup is deterministic, escaped and reachable without a mouse', () => {
+    const Chart = loadPerfChart();
+    const pts = [{ period_start: '2026-01-01', spend_incl_gst: 100, b2b_savings: 10, other_savings: 1, orders: 1 }];
+    const a = { innerHTML: '' };
+    const b = { innerHTML: '' };
+    Chart.render(a, { blockClass: 'business-chart', width: 800, points: pts });
+    Chart.render(b, { blockClass: 'business-chart', width: 800, points: pts });
+    assert.equal(a.innerHTML, b.innerHTML, 'identical input must give identical markup');
+
+    // The chart is not the only way to read the numbers.
+    // The DIV is load-bearing: `.visually-hidden` clips with `overflow:hidden`,
+    // which does not apply to a table box — the class on the <table> itself left
+    // the whole page scrolling sideways on a phone.
+    assert.match(a.innerHTML, /<div class="visually-hidden"><table>/,
+        'a screen reader gets the buckets as a table, and the table must be clipped by a div');
+    assert.match(a.innerHTML, /aria-live="polite"/,
+        'arrow-key navigation needs somewhere to announce itself');
+    assert.match(a.innerHTML, /tabindex="0"/, 'the chart must be reachable by keyboard');
+
+    // A hostile label must not become markup.
+    const evil = { innerHTML: '' };
+    Chart.render(evil, {
+        blockClass: 'business-chart', width: 800, points: pts,
+        ariaLabel: '"><script>x</script>',
+    });
+    assert.ok(!/<script>/.test(evil.innerHTML), 'every label goes through Security.escapeHtml');
+});
+
+test('§5b an empty series draws nothing, and the CALLER owns the empty state', () => {
+    const Chart = loadPerfChart();
+    const host = { innerHTML: 'stale' };
+    const out = Chart.render(host, { blockClass: 'business-chart', points: [] });
+    assert.equal(out.rendered, false);
+    assert.equal(host.innerHTML, '');
+    // Only the page knows whether "nothing" means "no orders yet", "nothing in
+    // this range" or "the fetch failed", and they are three different sentences.
+    assert.equal(out.totals, undefined);
 });
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -475,13 +687,73 @@ test('§7 each loader owns its own tiles — they race under allSettled', () => 
     // saved/spend belong to /analytics/series. loadSummary writing them means a
     // slow summary failure overwrites two correct lifetime figures with
     // "Unavailable just now" — whichever call loses the race wins the tile.
-    for (const owned of ['stat-saved-value', 'stat-spend-value', 'stat-saved-sub', 'stat-spend-sub']) {
+    for (const owned of ['stat-saved-value', 'stat-spend-value', 'stat-saved-sub', 'stat-spend-sub',
+        'stat-other-value', 'stat-other-sub', 'stat-total-saved-value', 'stat-total-saved-sub']) {
         assert.ok(!summary.includes(owned),
             `loadSummary must not write #${owned} — that tile is fed by /analytics/series`);
     }
     assert.match(summary, /stat-outstanding-value/, 'loadSummary owns the outstanding tile');
     assert.match(code, /setSeriesTiles\(null\)/,
         'a failed series call must set its OWN tiles to an explicit unknown');
+});
+
+test('§7 a lifetime tile is never un-set by a later range click', () => {
+    // These four figures are ALL TIME. Once a real number is on one, a failed
+    // refetch caused by changing the chart's range must not replace it with
+    // "Unavailable just now" — a lifetime figure cannot become unknown because
+    // somebody asked to see six months.
+    const code = codeOnly(PAGE_JS);
+    const fn = code.slice(code.indexOf('setSeriesTiles(payload) {'), code.indexOf('wirePerfControls() {'));
+    assert.ok(fn.length > 200, 'setSeriesTiles must still exist');
+    assert.match(fn, /if \(this\._tilesSet\) return;/,
+        'the unknown branch must bail once a real figure has been written');
+    assert.match(fn, /this\._tilesSet = true;/, 'a successful write must latch');
+});
+
+test('§7 a slow response for the old range cannot repaint the new one', () => {
+    // Click 6m then 2y quickly and the 6m answer may land last. Without a token
+    // it wins the chart AND the "showing…" label, so the page would draw six
+    // months of data under a two-year heading.
+    const code = codeOnly(PAGE_JS);
+    const fn = code.slice(code.indexOf('async loadSeries()'), code.indexOf('setSeriesTiles(payload) {'));
+    assert.match(fn, /const req = \+\+this\._seriesSeq;/, 'each request takes a token');
+    assert.ok(fn.indexOf('if (req !== this._seriesSeq) return;') > fn.indexOf('await this.get'),
+        'the token must be re-checked AFTER the await and before anything is written');
+});
+
+test('§7 the axis is labelled with what the SERVER SERVED, and a mismatch is loud', () => {
+    const code = codeOnly(PAGE_JS);
+    // The window on screen comes from the response, never from the request —
+    // labelling a chart with the range you asked for is how a silently-ignored
+    // parameter stays invisible for months.
+    const served = code.slice(code.indexOf('renderServed(d, seam, servedGrain) {'),
+        code.indexOf('renderWindowTotals(seam) {'));
+    assert.match(served, /seam\.window\.from/, 'the label reads the plotted window');
+    assert.ok(!/this\._perfRange|this\.perfWindow\(\)/.test(served),
+        'the label must not be built from the range we requested');
+
+    assert.match(code, /servedGrain !== this\._perfGrain/,
+        'the granularity echo has to be compared, not assumed');
+    assert.match(code, /didn't apply the/,
+        'a server that ignored the bucket width must say so on the page');
+    assert.match(code, /checkWindowAgainstLifetime/,
+        'the window sums and the lifetime totals are both ours — a disagreement is reported, never hidden');
+});
+
+test('§7 the tiles say their scope in the MARKUP, so a failure cannot strip it', () => {
+    // The tiles are lifetime and the chart is windowed. Without the scope on the
+    // tile the two look like they should reconcile and don't — and a scope
+    // written by the loader would vanish on exactly the failure path where the
+    // reader most needs to know what they are looking at.
+    for (const id of ['stat-saved', 'stat-other', 'stat-total-saved', 'stat-spend']) {
+        const tile = extractBlock(PAGE, `<div class="business-stat" id="${id}"`, '</div>')
+            || extractBlock(PAGE, `id="${id}"`, '</div>');
+        assert.ok(tile && /business-stat__scope/.test(tile),
+            `#${id} is a lifetime figure and must carry its scope chip in the HTML`);
+    }
+    const code = codeOnly(PAGE_JS);
+    assert.ok(!/business-stat__scope/.test(code),
+        'the scope chip is markup, not something a loader writes');
 });
 
 test('§7 a nullable count is never rendered as "Nothing outstanding"', () => {
@@ -493,17 +765,23 @@ test('§7 a nullable count is never rendered as "Nothing outstanding"', () => {
         'the overdue count must be distinguished from null before it is believed');
 });
 
-test('§7 the savings legend does not claim a saving the payload omits', () => {
+test('§7 nothing on this surface claims a saving the payload omits', () => {
     // Waived shipping is deliberately NOT part of other_savings — the backend
-    // can't reconstruct it and leaves it out rather than guessing.
-    const code = codeOnly(PAGE_JS);
-    const legend = code.slice(code.indexOf("legend.innerHTML"), code.indexOf("legend.innerHTML") + 600);
+    // can't reconstruct it and leaves it out rather than guessing. The legend
+    // labels now live in the chart module's SERIES table, so the ban has to
+    // cover that too or it just moved somewhere the test wasn't looking.
+    const series = codeOnly(PERF_JS).slice(codeOnly(PERF_JS).indexOf('const SERIES = ['));
+    const legend = series.slice(0, series.indexOf('];'));
+    assert.match(legend, /Coupons & loyalty/, 'the series labels are the legend');
     assert.ok(!/shipping/i.test(legend),
         'the legend must not name shipping — other_savings does not contain it');
 
+    const code = codeOnly(PAGE_JS);
     const saved = code.slice(code.indexOf('savedSub.textContent'), code.indexOf('savedSub.textContent') + 300);
     assert.ok(!/shipping/i.test(saved),
         'the saved-tile sub-line must not name shipping either');
+    assert.ok(!/shipping/i.test(code.slice(code.indexOf('renderWindowTotals(seam) {'), code.indexOf('renderCaveat(cov)'))),
+        'the "in this range" line must not name shipping either');
 });
 
 test('§7 an account with measurably no orders gets the empty state, not a flat $0 line', () => {
@@ -517,6 +795,13 @@ test('§7 an account with measurably no orders gets the empty state, not a flat 
     // is a genuine result and must NOT be suppressed.
     assert.match(code, /num\(cov\.orders_counted\) === 0/,
         'only orders_counted === 0 suppresses the chart — not "all values are zero"');
+
+    // A range control makes "nothing in the window you picked" the COMMON empty
+    // case, and it is a different sentence from "you haven't ordered yet".
+    // first_order_at is what tells them apart.
+    assert.match(code, /totals\.first_order_at\s*\n?\s*\?/,
+        'the two empty states must be chosen by first_order_at, not merged');
+    assert.match(code, /No orders in this date range/);
 });
 
 test('§7 the invoice list is paged, and the cap announces itself', () => {

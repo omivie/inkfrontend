@@ -76,10 +76,52 @@
         : (Number.isFinite(Number(v)) ? Number(v) : null));
 
     /** Local calendar date as YYYY-MM-DD, for string-comparing date-only fields. */
-    const todayISO = () => {
-        const d = new Date();
+    const dateISO = (d) => {
         const p = (n) => String(n).padStart(2, '0');
         return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+    };
+    const todayISO = () => dateISO(new Date());
+
+    /**
+     * Two nullable figures added. `null` the moment either half is unknown.
+     *
+     * "Total saved" sits directly beside the two figures it is made of, so a
+     * total that quietly treated a missing component as 0 would be visibly wrong
+     * to anyone who added the tiles up — and invisibly wrong to everyone else.
+     * There is deliberately no `|| 0` anywhere near this (ERR-063 family).
+     */
+    const sumOrNull = (a, b) => (a === null || b === null ? null : Math.round((a + b) * 100) / 100);
+
+    /** Performance-overview range presets. */
+    const RANGE_DAYS = { '6m': 183, '12m': 365, '2y': 730 };
+
+    /**
+     * The floor "All" falls back to before we know when the account started.
+     *
+     * "All" has to ASK for everything explicitly: sending no window looks like
+     * the right way to say "no filter", but the endpoint's no-parameter default
+     * is *the last 12 months* (brief §1), so an omitted range would quietly make
+     * All identical to 12 months while the button claimed otherwise.
+     *
+     * It cannot just send a very old date either. Probed against production
+     * 2026-08-05, the endpoint neither clamps nor errors — `from=2000-01-01`
+     * returns **320 monthly buckets**, all but a handful empty, and the chart
+     * becomes an unreadable smear. So All really asks for `first_order_at`, and
+     * only falls back here when no payload has told us that yet.
+     */
+    const ALL_TIME_FROM = '2000-01-01';
+
+    /** Buckets a window SHOULD contain, so a short series can announce itself. */
+    const expectedBuckets = (from, to, grain) => {
+        const a = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(from || ''));
+        const b = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(to || ''));
+        if (!a || !b) return 0;
+        if (grain === 'week') {
+            const da = new Date(Number(a[1]), Number(a[2]) - 1, Number(a[3]));
+            const db = new Date(Number(b[1]), Number(b[2]) - 1, Number(b[3]));
+            return Math.floor((db - da) / 604800000) + 1;
+        }
+        return (Number(b[1]) - Number(a[1])) * 12 + (Number(b[2]) - Number(a[2])) + 1;
     };
 
     /**
@@ -118,6 +160,23 @@
         _invoicePage: 1,
         _invoiceShown: 0,
         _detailCache: {},
+
+        // ── Performance overview ────────────────────────────────────────────
+        // `range` and `grain` are SERVER state — changing either refetches.
+        // `mode` and `hidden` are ours alone and redraw from the payload we
+        // already have, so a legend click never costs a round trip.
+        _perfRange: '12m',
+        _perfGrain: 'month',
+        _perfMode: 'period',
+        _perfHidden: [],
+        _perfFrom: '',
+        _perfTo: '',
+        _perfPayload: null,
+        /** Monotonic request token. A slow 6m response must not repaint a 2y view. */
+        _seriesSeq: 0,
+        /** Once a real figure is on a lifetime tile, no later failure may take it off. */
+        _tilesSet: false,
+        _resizeTimer: null,
 
         async init() {
             if (!$('business-main')) return;   // not this page
@@ -175,6 +234,8 @@
             });
             const more = $('invoices-more');
             if (more) more.addEventListener('click', () => this.loadInvoices(true));
+
+            this.wirePerfControls();
 
             window.addEventListener('hashchange', () => this.setTab(this.readTab(), false));
 
@@ -376,8 +437,7 @@
 
         reload(what) {
             const map = {
-                savings: () => this.loadSeries(),
-                spend: () => this.loadSeries(),
+                performance: () => this.loadSeries(),
                 topProducts: () => this.loadTopProducts(),
                 recentInvoices: () => this.loadRecentInvoices(),
                 invoices: () => this.loadInvoices()
@@ -458,41 +518,220 @@
             sub.classList.toggle('business-stat__sub--alert', alert);
         },
 
-        /** Owns ONLY the saved + spend tiles and the two charts. */
+        /** Owns ONLY the four lifetime savings/spend tiles and the Performance overview. */
         async loadSeries() {
-            show('savings-error', false);
-            show('spend-error', false);
-            const res = await this.get('/api/business/analytics/series?granularity=month');
+            // A range click fires a new request while the last one may still be in
+            // flight. Whoever answers last would otherwise win the chart AND the
+            // "showing…" label, so a slow 6m response could repaint a 2y view and
+            // then label it 2y. The token makes the newest request the only one
+            // allowed to write.
+            const req = ++this._seriesSeq;
+            show('perf-error', false);
+
+            const res = await this.get(`/api/business/analytics/series${this.seriesQuery()}`);
+            if (req !== this._seriesSeq) return;
+
             if (!res.ok) {
-                // Hide the chart frames too: an empty bordered box above an error
+                // Hide the chart frame too: an empty bordered box above an error
                 // message reads as a chart that failed to draw rather than one we
                 // never had data for.
-                show('savings-graph', false);
-                show('spend-graph', false);
-                show('savings-legend', false);
+                this._perfPayload = null;
+                show('perf-chart', false);
+                show('perf-empty', false);
+                show('perf-error', true);
+                show('perf-window-totals', false);
                 show('savings-caveat', false);
-                show('savings-error', true);
-                show('spend-error', true);
-                show('savings-empty', false);
-                show('spend-empty', false);
+                this.setPerfNotes([]);
+                const served = $('perf-served');
+                if (served) served.textContent = '';
                 this.setSeriesTiles(null);
                 return;
             }
-            const d = res.data || {};
+
+            this._perfPayload = res.data || {};
+            this.setSeriesTiles({
+                totals: this._perfPayload.totals || {},
+                coverage: this._perfPayload.coverage || {}
+            });
+            this.drawPerf();
+        },
+
+        /**
+         * The four LIFETIME tiles, and nobody else's.
+         *
+         * `null` means the series call failed — an explicit unknown rather than a
+         * stale figure left to look current. But a lifetime figure cannot become
+         * unknown because somebody clicked "6 months", so once a real number is on
+         * a tile a later failure is not allowed to take it back off; only a
+         * success may ever overwrite one.
+         */
+        setSeriesTiles(payload) {
+            const savedEl = $('stat-saved-value');
+            const savedSub = $('stat-saved-sub');
+            const otherEl = $('stat-other-value');
+            const otherSub = $('stat-other-sub');
+            const totalEl = $('stat-total-saved-value');
+            const totalSub = $('stat-total-saved-sub');
+            const spendEl = $('stat-spend-value');
+            const spendSub = $('stat-spend-sub');
+
+            if (!payload) {
+                if (this._tilesSet) return;
+                for (const [el, sub] of [[savedEl, savedSub], [otherEl, otherSub], [totalEl, totalSub], [spendEl, spendSub]]) {
+                    if (el) el.textContent = '—';
+                    if (sub) sub.textContent = 'Unavailable just now';
+                }
+                return;
+            }
+            this._tilesSet = true;
+
+            const totals = payload.totals || {};
+            const cov = payload.coverage || {};
+
+            const b2b = num(totals.lifetime_b2b_savings);
+            const otherTotal = num(totals.lifetime_other_savings);
+            const allSaved = sumOrNull(b2b, otherTotal);
+
+            if (savedEl) savedEl.textContent = money(b2b);
+            if (savedSub) {
+                // NB: waived shipping is deliberately NOT part of `other_savings`
+                // — the backend can't reconstruct it from recorded discounts and
+                // leaves it out rather than guessing. Naming it anywhere on this
+                // page would claim a saving these figures do not contain.
+                savedSub.textContent = (b2b !== null && allSaved !== null && allSaved > 0)
+                    ? `${Math.round((b2b / allSaved) * 100)}% of everything you've saved`
+                    : '';
+            }
+
+            if (otherEl) otherEl.textContent = money(otherTotal);
+            if (otherSub) otherSub.textContent = '';
+
+            if (totalEl) totalEl.textContent = money(allSaved);
+            if (totalSub) {
+                totalSub.textContent = allSaved === null
+                    ? "We can't total this while one part isn't reported"
+                    : 'Bulk orders plus coupons and loyalty';
+            }
+
+            if (spendEl) spendEl.textContent = money(num(totals.lifetime_spend_incl_gst));
+            if (spendSub) {
+                const counted = num(cov.orders_counted);
+                const since = totals.first_order_at ? fmtDate(totals.first_order_at) : '';
+                if (counted === null) spendSub.textContent = '';
+                else if (counted === 0) spendSub.textContent = 'No orders yet';
+                else spendSub.textContent = `${counted} order${counted === 1 ? '' : 's'}${since ? ` since ${since}` : ''} · incl. GST`;
+            }
+        },
+
+        // ── Performance overview ────────────────────────────────────────────
+
+        wirePerfControls() {
+            document.querySelectorAll('[data-perf-range]').forEach((btn) => {
+                btn.addEventListener('click', () => {
+                    this._perfRange = btn.getAttribute('data-perf-range');
+                    this.syncPerfControls();
+                    show('perf-custom', this._perfRange === 'custom');
+                    // Custom waits for Apply — refetching on every keystroke of a
+                    // half-typed date would ask the server for windows nobody chose.
+                    if (this._perfRange !== 'custom') this.loadSeries();
+                });
+            });
+            document.querySelectorAll('[data-perf-grain]').forEach((btn) => {
+                btn.addEventListener('click', () => {
+                    this._perfGrain = btn.getAttribute('data-perf-grain') === 'week' ? 'week' : 'month';
+                    this.syncPerfControls();
+                    this.loadSeries();
+                });
+            });
+            document.querySelectorAll('[data-perf-mode]').forEach((btn) => {
+                btn.addEventListener('click', () => {
+                    this._perfMode = btn.getAttribute('data-perf-mode') === 'cumulative' ? 'cumulative' : 'period';
+                    this.syncPerfControls();
+                    // Mode is ours alone — redraw the payload we already hold.
+                    this.drawPerf();
+                });
+            });
+            const apply = $('perf-custom-apply');
+            if (apply) apply.addEventListener('click', () => this.applyCustomRange());
+
+            // The SVG's viewBox is the measured width, so a resize needs a redraw
+            // rather than a stretch. Debounced: a drag fires this continuously.
+            window.addEventListener('resize', () => {
+                if (this._resizeTimer) clearTimeout(this._resizeTimer);
+                this._resizeTimer = setTimeout(() => this.drawPerf(), 180);
+            });
+        },
+
+        syncPerfControls() {
+            const mark = (attr, value) => {
+                document.querySelectorAll(`[${attr}]`).forEach((btn) => {
+                    const on = btn.getAttribute(attr) === value;
+                    btn.classList.toggle('business-perf__btn--active', on);
+                    btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+                });
+            };
+            mark('data-perf-range', this._perfRange);
+            mark('data-perf-grain', this._perfGrain);
+            mark('data-perf-mode', this._perfMode);
+        },
+
+        applyCustomRange() {
+            const from = ($('perf-from') || {}).value || '';
+            const to = ($('perf-to') || {}).value || '';
+            const err = $('perf-range-error');
+            const fail = (msg) => {
+                if (err) { err.textContent = msg; err.hidden = false; }
+            };
+            if (!from || !to) { fail('Pick both a start and an end date.'); return; }
+            if (from > to) { fail('The start date is after the end date.'); return; }
+            if (err) { err.textContent = ''; err.hidden = true; }
+            this._perfFrom = from;
+            this._perfTo = to;
+            this.loadSeries();
+        },
+
+        /** The window this page is ASKING for. What it gets back is checked separately. */
+        perfWindow() {
+            if (this._perfRange === 'all') {
+                const first = (this._perfPayload && this._perfPayload.totals || {}).first_order_at;
+                return { from: first ? String(first).slice(0, 10) : ALL_TIME_FROM, to: todayISO() };
+            }
+            if (this._perfRange === 'custom') return { from: this._perfFrom, to: this._perfTo };
+            const days = RANGE_DAYS[this._perfRange] || 365;
+            const now = new Date();
+            return {
+                from: dateISO(new Date(now.getFullYear(), now.getMonth(), now.getDate() - days)),
+                to: todayISO()
+            };
+        },
+
+        seriesQuery() {
+            const w = this.perfWindow();
+            const p = new URLSearchParams();
+            if (w.from) p.append('from', w.from);
+            if (w.to) p.append('to', w.to);
+            p.append('granularity', this._perfGrain);
+            return `?${p.toString()}`;
+        },
+
+        togglePerfSeries(key) {
+            const i = this._perfHidden.indexOf(key);
+            if (i >= 0) this._perfHidden.splice(i, 1);
+            else this._perfHidden.push(key);
+            this.drawPerf();
+        },
+
+        /**
+         * Draw from the payload already in hand. Called by loadSeries after a
+         * fetch, and directly by the mode toggle, the legend and a resize — none
+         * of which change what the server said.
+         */
+        drawPerf() {
+            const d = this._perfPayload;
+            if (!d) return;
             const pts = Array.isArray(d.points) ? d.points : [];
             const cov = d.coverage || {};
-
-            const at = (p) => new Date(p.period_start).getTime();
-
-            // A null bucket is "not recorded" and is dropped, not plotted as 0.
-            // The chart is CUMULATIVE, so an unknown bucket cannot be added to a
-            // running total — dropping it is the only honest option, and the
-            // caveat below is what makes the resulting shortfall visible.
-            const b2b = pts.map((p) => ({ t: at(p), v: num(p.b2b_savings) })).filter((p) => p.v !== null);
-            const other = pts.map((p) => ({ t: at(p), v: num(p.other_savings) })).filter((p) => p.v !== null);
-            const spend = pts.map((p) => ({ t: at(p), v: num(p.spend_incl_gst) })).filter((p) => p.v !== null);
-
-            this.setSeriesTiles({ totals: d.totals || {}, coverage: cov });
+            const totals = d.totals || {};
 
             // A brand-new account gets twelve buckets of REAL zeros, not nulls.
             // Plotted, that is a flat line pinned to the axis — a chart that
@@ -500,99 +739,208 @@
             // measured and found nothing, which is the empty state's job. An
             // account that HAS ordered but saved nothing keeps its flat line,
             // because that is a genuine result.
-            const nothingToChart = num(cov.orders_counted) === 0;
+            //
+            // `points.length === 0` is checked too: the brief does not say whether
+            // `coverage` is scoped to the window or to the account, and if it is
+            // lifetime then a window with no orders would never trip the test above.
+            const nothingToChart = num(cov.orders_counted) === 0 || pts.length === 0;
 
-            const drawnSavings = this.drawChart('savings-graph', nothingToChart, {
-                ariaLabel: 'Savings over time',
-                series: [
-                    { modifier: 'other', points: other },
-                    { modifier: 'b2b', points: b2b }
-                ]
-            });
-            show('savings-graph', drawnSavings.rendered);
-            show('savings-empty', !drawnSavings.rendered);
-
-            const legend = $('savings-legend');
-            if (legend) {
-                legend.hidden = !drawnSavings.rendered;
-                // NB: waived shipping is deliberately NOT part of `other_savings`
-                // — the backend can't reconstruct it from recorded discounts and
-                // leaves it out rather than guessing. Naming it here would claim
-                // a saving this chart does not contain.
-                legend.innerHTML =
-                    '<span class="business-legend__item"><span class="business-legend__swatch business-legend__swatch--b2b"></span>Volume savings</span>' +
-                    '<span class="business-legend__item"><span class="business-legend__swatch business-legend__swatch--other"></span>Coupons &amp; loyalty</span>';
+            const servedGrain = d.granularity === 'week' ? 'week' : 'month';
+            const host = $('perf-chart');
+            let seam = { rendered: false };
+            if (!nothingToChart && typeof BusinessChart !== 'undefined') {
+                seam = BusinessChart.render(host, {
+                    blockClass: 'business-chart',
+                    points: pts,
+                    grain: servedGrain,
+                    mode: this._perfMode,
+                    hidden: this._perfHidden,
+                    onToggle: (key) => this.togglePerfSeries(key)
+                });
+            } else if (host) {
+                host.innerHTML = '';
             }
 
-            // A partial chart has to look partial.
-            const missing = num(cov.orders_missing_discount_breakdown);
-            const caveat = $('savings-caveat');
-            if (caveat) {
-                const has = missing !== null && missing > 0;
-                caveat.hidden = !has;
-                caveat.textContent = has
-                    ? `${missing} order${missing === 1 ? '' : 's'} couldn't be broken down by discount type, so they're not in this chart.`
-                    : '';
+            show('perf-chart', seam.rendered);
+            show('perf-empty', !seam.rendered);
+
+            const emptyMsg = $('perf-empty-msg');
+            if (emptyMsg) {
+                // "You haven't ordered yet" and "nothing in the window you picked"
+                // are different sentences, and a range control makes the second one
+                // the common case.
+                emptyMsg.textContent = totals.first_order_at
+                    ? 'No orders in this date range. Try a wider range.'
+                    : "We'll chart your spend and savings here as you order.";
             }
 
-            const drawnSpend = this.drawChart('spend-graph', nothingToChart, {
-                ariaLabel: 'Spend over time',
-                series: [{ modifier: 'spend', points: spend }]
-            });
-            show('spend-graph', drawnSpend.rendered);
-            show('spend-empty', !drawnSpend.rendered);
+            this.renderServed(d, seam, servedGrain);
+            this.renderWindowTotals(seam);
+            this.renderCaveat(cov);
+            this.setPerfNotes(this.perfNotes(d, seam, cov, totals, servedGrain));
         },
 
-        /** One chart, or an emptied host when there is measurably nothing to plot. */
-        drawChart(hostId, nothingToChart, opts) {
-            const host = $(hostId);
-            if (nothingToChart) {
-                if (host) host.innerHTML = '';
-                return { rendered: false };
-            }
-            return SavingsChart.render(host, Object.assign({ blockClass: 'business-chart' }, opts));
+        /** Always the window and grain the SERVER SERVED — never the ones we asked for. */
+        renderServed(d, seam, servedGrain) {
+            const el = $('perf-served');
+            if (!el) return;
+            if (!seam.rendered) { el.textContent = ''; return; }
+            const words = servedGrain === 'week' ? 'weekly buckets' : 'monthly buckets';
+            const mode = this._perfMode === 'cumulative' ? ' · running total' : '';
+            el.textContent = `${fmtDate(seam.window.from)} – ${fmtDate(seam.window.to)} · ${words}${mode}`;
         },
 
         /**
-         * The saved + spend tiles, and nobody else's. `null` means the series
-         * call failed — an explicit unknown rather than a stale figure left to
-         * look current.
+         * The arithmetic the reader is about to attempt. The tiles above are
+         * lifetime and the chart is windowed, so stating the window's own totals
+         * turns "these don't add up" into "of course, one is a subset".
          */
-        setSeriesTiles(payload) {
-            const savedEl = $('stat-saved-value');
-            const savedSub = $('stat-saved-sub');
-            const spendEl = $('stat-spend-value');
-            const spendSub = $('stat-spend-sub');
+        renderWindowTotals(seam) {
+            const el = $('perf-window-totals');
+            if (!el) return;
+            if (!seam.rendered) { el.hidden = true; el.textContent = ''; return; }
+            const t = seam.totals;
+            el.textContent = 'In this range: ' +
+                `${money(t.b2b)} saved on bulk orders · ` +
+                `${money(t.other)} from coupons and loyalty · ` +
+                `${money(t.spend)} spent`;
+            el.hidden = false;
+        },
 
-            if (!payload) {
-                if (savedEl) savedEl.textContent = '—';
-                if (savedSub) savedSub.textContent = 'Unavailable just now';
-                if (spendEl) spendEl.textContent = '—';
-                if (spendSub) spendSub.textContent = 'Unavailable just now';
-                return;
+        /** A partial chart has to look partial. */
+        renderCaveat(cov) {
+            const caveat = $('savings-caveat');
+            if (!caveat) return;
+            const missing = num(cov.orders_missing_discount_breakdown);
+            const has = missing !== null && missing > 0;
+            caveat.hidden = !has;
+            caveat.textContent = has
+                ? `${missing} order${missing === 1 ? '' : 's'} couldn't be broken down by discount type, so they're not in this chart.`
+                : '';
+        },
+
+        setPerfNotes(notes) {
+            const el = $('perf-notes');
+            if (!el) return;
+            el.innerHTML = (notes || []).map((n) =>
+                `<p class="business-perf__note${n.alert ? ' business-perf__note--alert' : ''}">${esc(n.text)}</p>`).join('');
+        },
+
+        /**
+         * Everything the chart cannot say for itself. Fail-soft has to be LOUD:
+         * a window that quietly differs from the one requested, a series that
+         * cannot be totalled, or two backend figures that disagree.
+         */
+        perfNotes(d, seam, cov, totals, servedGrain) {
+            const notes = [];
+            const asked = this.perfWindow();
+
+            // 1. The grain echo. This one is unambiguous — the field is enumerated.
+            if (!d.granularity) {
+                notes.push({
+                    text: `The server didn't say which bucket width it used, so this is labelled with the ${this._perfGrain === 'week' ? 'weekly' : 'monthly'} width we asked for.`,
+                    alert: true
+                });
+            } else if (servedGrain !== this._perfGrain) {
+                notes.push({
+                    text: `Showing ${servedGrain === 'week' ? 'weekly' : 'monthly'} buckets — the server didn't apply the ${this._perfGrain === 'week' ? 'weekly' : 'monthly'} width we asked for.`,
+                    alert: true
+                });
             }
 
-            const totals = payload.totals || {};
-            const cov = payload.coverage || {};
+            if (seam.rendered) {
+                // 2. The window echo. A server may legitimately clamp to the history
+                // it has; it may not legitimately start AFTER an order we know about.
+                const first = totals.first_order_at ? String(totals.first_order_at).slice(0, 10) : '';
+                const start = String(seam.window.from).slice(0, 10);
+                if (first && (!asked.from || asked.from <= first) && start > first) {
+                    notes.push({
+                        text: `Your first order was ${fmtDate(totals.first_order_at)}, but this chart starts at ${fmtDate(seam.window.from)} — the server returned a narrower range than we asked for.`,
+                        alert: true
+                    });
+                }
 
-            if (savedEl) savedEl.textContent = money(num(totals.lifetime_b2b_savings));
-            const otherTotal = num(totals.lifetime_other_savings);
-            if (savedSub) {
-                savedSub.textContent = otherTotal !== null
-                    ? `Plus ${money(otherTotal)} from coupons and loyalty`
-                    : '';
+                // 3. Contiguity. The axis is categorical, so a period the server
+                // simply omitted closes up and becomes invisible.
+                const want = expectedBuckets(d.from, d.to, servedGrain);
+                if (want && seam.buckets < want) {
+                    const gap = want - seam.buckets;
+                    notes.push({
+                        text: `${gap} ${servedGrain === 'week' ? 'week' : 'month'}${gap === 1 ? '' : 's'} in this range came back with no row at all, so the axis skips over them.`,
+                        alert: false
+                    });
+                }
+
+                // 4. Series that cannot be totalled, named rather than left as a bare `—`.
+                const unTotalled = [];
+                if (seam.totals.b2b === null) unTotalled.push('bulk-order savings');
+                if (seam.totals.other === null) unTotalled.push('coupons and loyalty');
+                if (seam.totals.spend === null) unTotalled.push('spend');
+                if (unTotalled.length) {
+                    const worst = Math.max(seam.nulls.b2b, seam.nulls.other, seam.nulls.spend);
+                    notes.push({
+                        text: `${worst} of ${seam.buckets} periods have no recorded figure, so ${unTotalled.join(', ')} can't be totalled for this range.`,
+                        alert: false
+                    });
+                }
+
+                // 5. A running total cannot cross an unknown — say so, and say what to do.
+                if (this._perfMode === 'cumulative') {
+                    const broke = ['spend', 'b2b', 'other', 'orders'].some((k) => seam.breakIndex[k] !== null);
+                    if (broke) {
+                        notes.push({
+                            text: "A running total can't carry past a period with no recorded figure, so the affected lines stop there. Switch to Per period to see the periods we do have.",
+                            alert: false
+                        });
+                    }
+                }
+
+                const gate = this.checkWindowAgainstLifetime(seam, cov, totals);
+                if (gate) notes.push(gate);
             }
 
-            if (spendEl) spendEl.textContent = money(num(totals.lifetime_spend_incl_gst));
-            if (spendSub) {
-                // #stat-spend-sub shipped in the markup and nothing ever wrote
-                // it. Both figures are already on the payload.
-                const counted = num(cov.orders_counted);
-                const since = totals.first_order_at ? fmtDate(totals.first_order_at) : '';
-                if (counted === null) spendSub.textContent = '';
-                else if (counted === 0) spendSub.textContent = 'No orders yet';
-                else spendSub.textContent = `${counted} order${counted === 1 ? '' : 's'}${since ? ` since ${since}` : ''} · incl. GST`;
+            return notes;
+        },
+
+        /**
+         * The consistency gate (the discipline behind ERR-113).
+         *
+         * When the range is the whole history and nothing is missing, the buckets
+         * must add up to the lifetime totals — and BOTH sides are the backend's
+         * own figures, so a disagreement is the backend contradicting itself.
+         * Picking one to display would be guessing, so it is reported instead.
+         *
+         * Suppressed when orders couldn't be broken down: a shortfall is EXPECTED
+         * then, already explained by #savings-caveat, and crying wolf here would
+         * teach the reader to ignore the alert that matters.
+         */
+        checkWindowAgainstLifetime(seam, cov, totals) {
+            if (this._perfRange !== 'all') return null;
+            const missing = num(cov.orders_missing_discount_breakdown);
+            const pairs = [
+                ['bulk-order savings', seam.totals.b2b, num(totals.lifetime_b2b_savings)],
+                ['coupons and loyalty', seam.totals.other, num(totals.lifetime_other_savings)],
+                ['spend', seam.totals.spend, num(totals.lifetime_spend_incl_gst)]
+            ];
+            // Cent-level rounding across N buckets, plus a floor for the single-bucket case.
+            const tolerance = Math.max(0.05, (seam.buckets || 1) / 100);
+
+            for (const [label, windowed, lifetime] of pairs) {
+                if (windowed === null || lifetime === null) continue;
+                const gap = windowed - lifetime;
+                if (Math.abs(gap) <= tolerance) continue;
+                if (missing !== null && missing > 0 && gap < 0) {
+                    return {
+                        text: `The periods plotted add up to ${money(windowed)} of ${label}, less than the ${money(lifetime)} all-time figure, because ${missing} order${missing === 1 ? '' : 's'} couldn't be broken down by discount type.`,
+                        alert: false
+                    };
+                }
+                return {
+                    text: `These two figures disagree: the periods plotted add up to ${money(windowed)} of ${label}, but the all-time total reads ${money(lifetime)} — a gap of ${money(Math.abs(gap))}. Both come from us, so please treat either with caution until we've checked.`,
+                    alert: true
+                };
             }
+            return null;
         },
 
         async loadTopProducts() {

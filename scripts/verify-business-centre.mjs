@@ -130,6 +130,51 @@ async function main() {
     }
     check(!BANNED.test(series.text), 'no cost/margin field leaks (R2)', 'a banned field appeared');
 
+    // ── §1b the range + grain the Performance overview depends on ────────────
+    // The chart labels its axis from the ECHO, not from what it asked for, and
+    // says so on the page when the two differ. These checks are what tell you
+    // whether that warning should be firing.
+    console.log('\n§1b analytics/series honours from / to / granularity');
+    const today = new Date().toISOString().slice(0, 10);
+    const yearAgo = new Date(Date.now() - 365 * 86400000).toISOString().slice(0, 10);
+
+    const windowed = await get(`/api/business/analytics/series?from=${yearAgo}&to=${today}&granularity=month`);
+    check(windowed.status === 200, 'accepts from/to/granularity', `got ${windowed.status}`);
+    const w = windowed.json?.data || {};
+    check(w.from === yearAgo && w.to === today,
+        'echoes the window it served',
+        `asked ${yearAgo}..${today}, got ${w.from}..${w.to} — the page will warn about this`);
+
+    const weekly = await get(`/api/business/analytics/series?from=${yearAgo}&to=${today}&granularity=week`);
+    check(weekly.json?.data?.granularity === 'week',
+        'honours granularity=week',
+        `echoed "${weekly.json?.data?.granularity}" — the page will show the grain-mismatch note`);
+    check((weekly.json?.data?.points || []).length > (w.points || []).length,
+        'weekly really is a finer grain than monthly',
+        'same bucket count at both grains — the parameter is being ignored');
+
+    // NOT a pass/fail — a measurement, and the reason the "All" preset asks for
+    // `first_order_at` rather than a wide floor. Probed 2026-08-05, an old
+    // `from` is neither clamped nor rejected: it returns one bucket per month
+    // since that date, nearly all empty. Any threshold here would just be a
+    // number someone invented, so print the count and let the reader judge.
+    const wide = await get(`/api/business/analytics/series?from=2000-01-01&to=${today}&granularity=month`);
+    console.log(`    note: from=2000-01-01 returns ${(wide.json?.data?.points || []).length} monthly buckets ` +
+        '— unclamped, which is why "All" asks for first_order_at instead');
+
+    // OPEN QUESTION for the backend: the brief does not say whether `coverage`
+    // is scoped to the requested window or to the account's whole history. The
+    // page defends against both (an empty `points` also routes to the empty
+    // state), but the answer decides whether that test can be trusted alone.
+    const narrow = await get(`/api/business/analytics/series?from=${today}&to=${today}&granularity=month`);
+    const narrowCount = narrow.json?.data?.coverage?.orders_counted;
+    const wholeCount = d.coverage?.orders_counted;
+    console.log(`    note: coverage.orders_counted — one-day window ${narrowCount}, default window ${wholeCount}. ` +
+        (wholeCount ? (narrowCount === wholeCount
+            ? 'EQUAL ⇒ coverage is NOT window-scoped.'
+            : 'DIFFERENT ⇒ coverage IS window-scoped.')
+            : 'INCONCLUSIVE while the account has no orders — re-run once it does.'));
+
     // ── §2 top-products ──────────────────────────────────────────────────────
     console.log('\n§2  GET /api/business/top-products');
     const top = await get('/api/business/top-products?limit=8');

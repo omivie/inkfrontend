@@ -112,7 +112,10 @@
     ];
 
     const COMPANY = 'Kereru Print & Office Ltd';
-    const MONTHS = 14;
+    /** How far back the generated history runs, so 2y and All are different views. */
+    const BASE_MONTHS = 30;
+    /** Invoices only cover the recent tail — the list is a fixture for paging, not a ledger. */
+    const INVOICE_MONTHS = 14;
     // Comfortably above the outstanding balance: an account sitting at 99% of
     // its credit limit is a stressed account, not the healthy one being shown.
     const CREDIT_LIMIT = 12000;
@@ -125,52 +128,198 @@
         return new Date(now.getFullYear(), now.getMonth() - back, 1);
     }
 
+    /** `YYYY-MM-DD` parsed by components — `new Date(str)` is UTC and slips a day. */
+    function parseISO(s) {
+        const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(s || ''));
+        return m ? new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])) : null;
+    }
+
+    /** Monday of the week containing `d`. */
+    function weekStart(d) {
+        const back = (d.getDay() + 6) % 7;
+        return new Date(d.getFullYear(), d.getMonth(), d.getDate() - back);
+    }
+
     /**
-     * Fourteen monthly buckets for a growing small office.
+     * THE BASE IS DAILY, and every grain is aggregated from it.
+     *
+     * The page can now ask for monthly OR weekly buckets, and a fixture that
+     * generated each grain independently would let the two disagree — switching
+     * "Weekly" would change the customer's total spend, and the demo would be
+     * teaching a bug that does not exist in the real service. One truth, two
+     * views: exactly the rule the invoice fixtures already follow, where every
+     * total is summed from the rows it summarises.
+     *
+     * Daily also preserves the weekday/weekend rhythm, which is the reason a
+     * weekly view is worth offering at all.
      *
      * b2b_savings runs ~3-8% of spend, which is the range the live six-band
      * ladder actually produces (entry 0.5%, top 10%) — a demo that showed 25%
      * would misrepresent the product.
      */
-    function buildSeries() {
+    function buildBase() {
         const rnd = seeded(20260803);
-        const points = [];
-        for (let i = MONTHS - 1; i >= 0; i--) {
-            const t = (MONTHS - 1 - i) / (MONTHS - 1);
-            const base = 620 + t * 1780;                 // ~$620 → ~$2,400/mo
-            const spend = round2(base * (0.86 + rnd() * 0.3));
-            const b2bPct = 0.03 + rnd() * 0.05;          // 3-8%
-            const otherPct = 0.004 + rnd() * 0.014;      // coupons, loyalty, waived freight
-            points.push({
-                period_start: iso(monthStart(i)),
-                spend_incl_gst: spend,
-                b2b_savings: round2(spend * b2bPct),
-                other_savings: round2(spend * otherPct),
-                orders: 2 + Math.floor(rnd() * 5)
-            });
+        const now = new Date();
+        // Normalised to midnight before the span is measured. Taken from `new
+        // Date()` directly, half a day of clock time rounds the span UP and the
+        // base gains a row dated TOMORROW — which any `to=today` window then
+        // clips out, leaving the lifetime totals permanently ahead of the
+        // all-time chart by one day's trading.
+        const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+        const start = monthStart(BASE_MONTHS - 1);
+        const span = Math.round((today.getTime() - start.getTime()) / 86400000);
+        const rows = [];
+        for (let i = 0; i <= span; i++) {
+            const d = new Date(start.getFullYear(), start.getMonth(), start.getDate() + i);
+            const t = span ? i / span : 1;
+            const weekend = d.getDay() === 0 || d.getDay() === 6;
+            // A growing print-and-office account: busier weekdays, bigger baskets
+            // over time. Weekend zeros are REAL measured zeros, not gaps.
+            const chance = weekend ? 0.02 : 0.20 + t * 0.10;
+            let orders = 0, spend = 0, b2b = 0, other = 0;
+            if (rnd() < chance) {
+                orders = 1 + (rnd() < 0.12 ? 1 : 0);
+                const per = 150 + t * 260;
+                spend = round2(orders * per * (0.7 + rnd() * 0.7));
+                b2b = round2(spend * (0.03 + rnd() * 0.05));
+                other = round2(spend * (0.004 + rnd() * 0.014));
+            }
+            rows.push({ date: iso(d), spend, b2b, other, orders });
         }
+        return rows;
+    }
+
+    /**
+     * Roll the daily base up to one grain across one window. Every bucket in the
+     * window appears, including the ones that measured zero — a backend that
+     * silently omitted an empty month would make a categorical axis close the gap
+     * and hide it, so the fixture must not model that.
+     */
+    function aggregate(base, grain, from, to) {
+        const map = new Map();
+        const keys = [];
+        for (const row of base) {
+            if (from && row.date < from) continue;
+            if (to && row.date > to) continue;
+            const d = parseISO(row.date);
+            const key = iso(grain === 'week' ? weekStart(d) : new Date(d.getFullYear(), d.getMonth(), 1));
+            let b = map.get(key);
+            if (!b) {
+                b = { period_start: key, spend_incl_gst: 0, b2b_savings: 0, other_savings: 0, orders: 0 };
+                map.set(key, b);
+                keys.push(key);
+            }
+            b.spend_incl_gst += row.spend;
+            b.b2b_savings += row.b2b;
+            b.other_savings += row.other;
+            b.orders += row.orders;
+        }
+        keys.sort();
+        return keys.map((k) => {
+            const b = map.get(k);
+            b.spend_incl_gst = round2(b.spend_incl_gst);
+            b.b2b_savings = round2(b.b2b_savings);
+            b.other_savings = round2(b.other_savings);
+            return b;
+        });
+    }
+
+    /**
+     * DEVELOPMENT ONLY, opt-in — `?demo=1&demo_profile=partial`.
+     *
+     * The healthy profile has no gaps, which leaves the whole "we didn't record
+     * this" family of states unreachable in review: the hatched not-recorded
+     * marks, the broken running total, the un-totalled range line and the
+     * discount-breakdown caveat. This profile makes them all visible. Behind the
+     * same AND-guard as everything else here.
+     */
+    function partialMode() {
+        // BOTH, always — written as one AND so the source-level guard check that
+        // bans `isLocalHost() ||` can see it. Either condition alone is a
+        // production hazard.
+        if (!(isLocalHost() && optedIn())) return false;
+        try {
+            return new URLSearchParams(location.search).get('demo_profile') === 'partial';
+        } catch { return false; }
+    }
+
+    /**
+     * Blank the discount split on two buckets a third of the way in, and report
+     * exactly the orders that went unsplit. `orders` stays a real number: the
+     * orders happened, it is the BREAKDOWN that is missing.
+     */
+    function applyPartial(points) {
+        let missing = 0;
+        const at = Math.floor(points.length / 3);
+        for (const i of [at, at + 1]) {
+            if (i < 0 || i >= points.length) continue;
+            points[i].b2b_savings = null;
+            points[i].other_savings = null;
+            missing += points[i].orders;
+        }
+        return missing;
+    }
+
+    /**
+     * The series endpoint, honouring `from` / `to` / `granularity` exactly as the
+     * real one does — and ECHOING THE WINDOW IT ACTUALLY SERVED, clamped to the
+     * history that exists, never the window it was asked for. The page checks
+     * that echo and says so when it differs, so a fixture that parroted the
+     * request back would hide the only bug this check exists to catch.
+     */
+    function seriesFor(params) {
+        const d = dataset();
+        const base = d.base;
+        const first = base[0].date;
+        const last = base[base.length - 1].date;
+
+        const grain = params.get('granularity') === 'week' ? 'week' : 'month';
+        let from = params.get('from') || '';
+        let to = params.get('to') || '';
+        if (!from && !to) {
+            // The contract's default: the last 12 months, monthly.
+            from = iso(monthStart(11));
+            to = last;
+        }
+        if (!from || from < first) from = first;
+        if (!to || to > last) to = last;
+
+        const points = aggregate(base, grain, from, to);
+        const missing = partialMode() ? applyPartial(points) : 0;
+
+        let counted = 0;
+        for (const p of points) counted += p.orders;
 
         return {
-            granularity: 'month',
+            granularity: grain,
             currency: 'NZD',
-            from: points[0].period_start,
-            to: points[points.length - 1].period_start,
+            from: points.length ? points[0].period_start : from,
+            to: points.length ? points[points.length - 1].period_start : to,
             points,
-            // Summed from the buckets above, never typed in separately: the
-            // tiles and the chart are read side by side and must agree.
-            totals: {
-                lifetime_spend_incl_gst: sum2(points, (p) => p.spend_incl_gst),
-                lifetime_b2b_savings: sum2(points, (p) => p.b2b_savings),
-                lifetime_other_savings: sum2(points, (p) => p.other_savings),
-                first_order_at: `${points[0].period_start}T21:14:00Z`
-            },
+            // LIFETIME, summed from the WHOLE base rather than the slice above —
+            // the tiles say "All time" and must not move when the range moves.
+            totals: d.lifetime,
             coverage: {
-                orders_counted: points.reduce((t, p) => t + p.orders, 0),
-                // 0 is a real value: every order was broken down, so the
-                // "couldn't be broken down" caveat stays hidden. This is the
-                // healthy case on purpose.
-                orders_missing_discount_breakdown: 0
+                // Window-scoped, and matching the rows actually returned. `0` is a
+                // real value in the healthy profile: every order was broken down,
+                // so the caveat stays hidden.
+                orders_counted: counted,
+                orders_missing_discount_breakdown: missing
             }
+        };
+    }
+
+    /** Lifetime totals, summed from the daily base they summarise. */
+    function buildLifetime(base) {
+        let firstOrder = null;
+        for (const row of base) {
+            if (row.orders > 0) { firstOrder = row.date; break; }
+        }
+        return {
+            lifetime_spend_incl_gst: sum2(base, (r) => r.spend),
+            lifetime_b2b_savings: sum2(base, (r) => r.b2b),
+            lifetime_other_savings: sum2(base, (r) => r.other),
+            first_order_at: firstOrder ? `${firstOrder}T21:14:00Z` : null
         };
     }
 
@@ -187,13 +336,13 @@
      * their sum, total is GST-inclusive. Derived from the total downward so
      * subtotal + freight + gst === total exactly, to the cent.
      */
-    function buildInvoices(series) {
+    function buildInvoices(points) {
         const rnd = seeded(760214);
         const today = new Date();
         const rows = [];
         let n = 0;
 
-        series.points.forEach((p) => {
+        points.forEach((p) => {
             const perMonth = 1 + Math.floor(rnd() * 2);      // 1 or 2
             for (let k = 0; k < perMonth; k++) {
                 const issue = new Date(p.period_start);
@@ -270,9 +419,9 @@
         };
     }
 
-    function buildTopProducts(series) {
+    function buildTopProducts(points) {
         const rnd = seeded(41177);
-        const last = series.points[series.points.length - 1].period_start;
+        const last = points[points.length - 1].period_start;
         return CATALOGUE.map((p, i) => {
             const orderCount = 9 - i + Math.floor(rnd() * 2);
             // The last tile is deliberately out of stock: a row that can't be
@@ -338,9 +487,19 @@
 
     function dataset() {
         if (_cache) return _cache;
-        const series = buildSeries();
-        const invoices = buildInvoices(series);
-        _cache = { series, invoices, summary: buildSummary(invoices), topProducts: buildTopProducts(series) };
+        const base = buildBase();
+        const monthly = aggregate(base, 'month', '', '');
+        // Invoices cover only the recent tail: the list is a fixture for the
+        // pager (deliberately more than one page of 20), not a full ledger.
+        const invoices = buildInvoices(monthly.slice(-INVOICE_MONTHS));
+        _cache = {
+            base,
+            monthly,
+            lifetime: buildLifetime(base),
+            invoices,
+            summary: buildSummary(invoices),
+            topProducts: buildTopProducts(monthly)
+        };
         return _cache;
     }
 
@@ -483,7 +642,7 @@
                 return { ok: true, data: s };
             }
             if (route === '/api/business/analytics/series') {
-                return { ok: true, data: d.series };
+                return { ok: true, data: seriesFor(params) };
             }
             if (route === '/api/business/top-products') {
                 const limit = parseInt(params.get('limit'), 10);
