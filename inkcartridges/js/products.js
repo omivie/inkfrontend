@@ -485,7 +485,7 @@ const Products = {
 
                 // Render products
                 container.innerHTML = this.renderCards(products);
-                this.decorateBusinessPricing(container);
+                this.decorateBusinessPricing(container, products);
 
                 // Render pagination
                 const paginationContainer = document.getElementById('pagination');
@@ -626,7 +626,7 @@ const Products = {
                 container.innerHTML = products.map(p => this.renderCard(p)).join('');
                 this.bindImageFallbacks(container);
                 this.bindAddToCartEvents(container);
-                this.decorateBusinessPricing(container);
+                this.decorateBusinessPricing(container, products);
             }
         } catch (error) {
             DebugLog.error('Error loading featured products:', error);
@@ -634,17 +634,23 @@ const Products = {
     },
 
     /**
-     * Overlay the signed-in business customer's price onto rendered cards.
+     * Overlay the bulk price onto rendered cards, for every shopper.
+     *
+     * Pass the products that were just rendered: their `quantity_breaks` are the
+     * public ladder, so handing them over means the overlay costs no request at
+     * all. Omit them and only a signed-in business account gets decorated, via
+     * the legacy authed route.
      *
      * Fire-and-forget on purpose: the retail cards are already painted and
-     * correct for everyone, so this only ever adds. Guests and retail accounts
-     * short-circuit inside Business.decorateCards without a network request.
+     * correct for everyone, so this only ever adds.
      * @param {Element} container
+     * @param {Array<object>} [products]  the payload the cards were rendered from
      */
-    decorateBusinessPricing(container) {
+    decorateBusinessPricing(container, products) {
         if (typeof Business === 'undefined' || !container) return;
+        if (products) Business.ingest(products);
         Business.decorateCards(container).catch(e =>
-            DebugLog.warn('[Products] business pricing overlay failed:', e && e.message));
+            DebugLog.warn('[Products] bulk pricing overlay failed:', e && e.message));
     },
 
     /**

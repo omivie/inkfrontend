@@ -126,6 +126,11 @@ test('canonical site-header keeps every load-bearing element', () => {
         '<div class="header-main">',
         'href="tel:0274740115"',
         'href="mailto:support@inkcartridges.co.nz"',
+        // The IC brand mark at the inner edge of the left column. Static markup
+        // (unlike the JS-injected Admin/Business shortcuts) — it is public
+        // branding, shown to every visitor.
+        'class="header-lead__logo"',
+        'src="/apple-touch-icon.png"',
         '<div class="logo-block">',
         '<a href="/account"',
         // The Admin shortcut is NOT in static markup — it is JS-injected for

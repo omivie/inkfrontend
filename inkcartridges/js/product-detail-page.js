@@ -1099,9 +1099,13 @@
 
             let ladder;
             try {
+                // The product payload carries the public ladder — hand it over
+                // first so this resolves with no request and no auth wait, for
+                // guests included.
+                Business.ingest(this.product);
                 ladder = await Business.getLadderFor(sku);
             } catch (e) {
-                DebugLog.warn('[PDP] business pricing unavailable:', e && e.message);
+                DebugLog.warn('[PDP] volume pricing unavailable:', e && e.message);
                 return;
             }
 
@@ -1145,7 +1149,7 @@
                 : '';
 
             section.innerHTML =
-                `<p class="volume-pricing__eyebrow">Business volume pricing</p>` +
+                `<p class="volume-pricing__eyebrow">Buy more, save more</p>` +
                 `<div class="volume-pricing__chips" role="group" aria-label="Quantity price breaks">${chips}</div>` +
                 `<p class="volume-pricing__status" id="volume-pricing-status" data-testid="volume-status" role="status" aria-live="polite"></p>` +
                 flooredNote;

@@ -86,22 +86,35 @@ function computeDiscountBreakdown(summary, total, b2bBlock) {
 if (typeof window !== 'undefined') window.computeDiscountBreakdown = computeDiscountBreakdown;
 
 /**
- * Label for a B2B summary row, e.g. "Business account — Acme Print Co".
+ * Label for a volume-discount summary row, e.g. "Volume discount — Acme Print Co".
  *
  * v1 named the pricing TIER here ("Business account (Gold tier)"). Volume
- * pricing retired tiers entirely — the live `b2b_discount` block carries
+ * pricing retired tiers entirely — the live discount block carries
  * `company_name` and no tier at all — and there is deliberately no replacement
  * percentage in this label: the block's `effective_percent` is the realised rate
  * across the WHOLE cart (0.7% on a live cart whose one qualifying line was
- * discounted 5%), so putting it beside the word "account" would read as the
- * customer's discount rate and be wrong on every mixed cart.
+ * discounted 5%), so putting it beside the name would read as the customer's
+ * discount rate and be wrong on every mixed cart.
  *
- * @param {object|null} b2bMeta  the cart response's b2b_discount block
+ * WHY THE FALLBACK IS NOT "Business account" (ERR-149)
+ * ----------------------------------------------------
+ * It used to be. That was safe only while the backend applied this discount to
+ * business carts exclusively, and this row is NOT gated on anything — every
+ * renderer prints it whenever the server reports an amount > 0 (cart.js,
+ * checkout-page.js, payment-page.js, order-totals.js). The moment volume pricing
+ * reaches retail carts, a guest with three of one item is told they have a
+ * "Business account". An absent `company_name` means "the server did not name a
+ * company", which is not evidence of anything about the shopper.
+ *
+ * The company name is still appended when there IS one, so a business customer
+ * still sees which account the discount landed against.
+ *
+ * @param {object|null} b2bMeta  the cart response's volume/b2b discount block
  * @returns {string}
  */
 function businessDiscountLabel(b2bMeta) {
     const company = b2bMeta && typeof b2bMeta.company_name === 'string' ? b2bMeta.company_name.trim() : '';
-    return company ? `Business account — ${company}` : 'Business account';
+    return company ? `Volume discount — ${company}` : 'Volume discount';
 }
 if (typeof window !== 'undefined') window.businessDiscountLabel = businessDiscountLabel;
 
@@ -2069,23 +2082,36 @@ const Cart = {
     },
 
     /**
-     * Business volume nudges on cart lines: "Add 1 more to reach 5+ — $32.19
-     * each, saving $14.00 on this line."
+     * Volume nudges on cart lines: "Add 1 more to reach 5+ — $32.19 each,
+     * saving $14.00 on this line."
      *
      * Fire-and-forget and additive: the retail lines are already painted and
-     * correct for everyone. Guests and retail accounts short-circuit inside
-     * Business.decorateCartLines without a network request.
+     * correct for everyone; this only ever appends.
      *
-     * This cannot come from the cart payload. Cart lines carry retail
-     * `price_snapshot` / `line_total` and no per-line B2B figure at all — the
-     * discount surfaces only as one cart-level `b2b_discount.discount_amount` —
-     * so the ladder is the only route from "you saved $4.88" to "here is how to
-     * save more", which is the entire point of a volume scheme.
+     * The ladder is ingested from the cart's own lines, because /cart is a
+     * surface a shopper can land on cold — no grid and no PDP has run, so
+     * nothing else has handed a ladder over, and the nudge is exactly the
+     * surface where "buy one more" pays for itself.
+     *
+     * The line's `price` is a legitimate `retail_price` fallback here: cart
+     * lines carry the RETAIL `price_snapshot` and no per-line discount at all —
+     * the discount surfaces only as one cart-level `b2b_discount.discount_amount`
+     * — so this can never feed a discounted price in as the retail one.
      *
      * @param {Element} container
      */
     decorateVolumeNudges: function(container) {
         if (typeof Business === 'undefined' || !container) return;
+        if (Array.isArray(this.items)) {
+            Business.ingest(this.items.map(function(i) {
+                return {
+                    sku: i.sku,
+                    retail_price: (i.retail_price !== null && i.retail_price !== undefined)
+                        ? i.retail_price : i.price,
+                    quantity_breaks: i.quantity_breaks
+                };
+            }));
+        }
         Business.decorateCartLines(container, this.MAX_QUANTITY).catch(function(e) {
             DebugLog.warn('[Cart] volume nudges failed:', e && e.message);
         });

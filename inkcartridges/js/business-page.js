@@ -190,12 +190,17 @@
                 //
                 // This used to redirect to /account/login?redirect=/business.
                 // That made the page unreachable for the one audience it most
-                // needed to reach: every other B2B surface — PDP ladders, card
-                // overlays, cart nudges, the account panel — already renders
-                // only for a signed-in APPROVED account, so a prospective
-                // business customer had NO way to discover that volume pricing
-                // exists. The footer's "Business & Bulk Pricing" link led
-                // straight to a sign-in form that explained nothing.
+                // needed to reach: at the time every other B2B surface — PDP
+                // ladders, card overlays, cart nudges, the account panel —
+                // rendered only for a signed-in APPROVED account, so a
+                // prospective business customer had NO way to discover any of
+                // it. The footer's "Business & Bulk Pricing" link led straight
+                // to a sign-in form that explained nothing.
+                //
+                // The ladders are public now, so discovery is no longer the
+                // argument — but the reasoning holds for what is still gated
+                // (invoices, Net 30, credit), and a guest who clicks through
+                // still deserves an explanation rather than a login wall.
                 //
                 // #business-denied says exactly what they need ("this area is
                 // for approved business accounts… request a quote") and carries

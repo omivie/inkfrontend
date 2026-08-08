@@ -329,13 +329,15 @@
             });
         }
 
-        // Business account (B2B) volume discount. Not a "tier" — the flat
-        // bronze/silver/gold tiers were retired with v2 (ERR-139); this is a
-        // per-line quantity discount and the label names the COMPANY.
+        // Volume discount. Not a "tier" — the flat bronze/silver/gold tiers were
+        // retired with v2 (ERR-139); this is a per-line quantity discount, and the
+        // label names the COMPANY only when the server supplied one. This row is
+        // ungated, so the no-company fallback must not claim a business account
+        // (ERR-149) — it is printed to whoever the server discounted.
         if (positive(o.b2bDiscount)) {
             const label = (typeof window !== 'undefined' && typeof window.businessDiscountLabel === 'function')
                 ? window.businessDiscountLabel(o.b2bMeta)
-                : 'Business account';
+                : 'Volume discount';
             out.push({
                 key: 'b2b', label: label,
                 value: '-' + format(o.b2bDiscount), kind: 'negative', amount: o.b2bDiscount

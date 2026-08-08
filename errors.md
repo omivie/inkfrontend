@@ -41,6 +41,96 @@ describing the same incident.
 
 ---
 
+## Scope note (no ERR number) — the homepage trust-stats band was removed; the footer one-liner is now the only mount point (2026-08-08)
+
+**Not a defect.** ERR-125 shipped the trust stats deliberately invisible: `/api/site/trust` returned
+`null` for all three counts because the backend's nightly sweep had never run, so both mount points
+stayed `hidden` and would "switch themselves on later with no deploy". That is exactly what
+happened — the sweep ran, and the homepage grew a band of three big-number tiles under the hero
+trust bar reading `73+ CUSTOMERS SERVED · 81+ ORDERS SHIPPED · 100+ CARTRIDGES SOLD`, sitting
+between the trust bar and the Ink Finder card. The owner did not want those counts that prominent
+on the landing page and asked for the band gone.
+
+**Removed** (homepage only, deleted outright rather than hidden — a permanently-hidden section is
+dead code that the next reader has to re-derive): the `<section class="trust-stats">` and its
+explanatory comment in `inkcartridges/index.html`; `loadTrustStats()` and its call site in
+`js/landing.js`; the whole `.trust-stats*` block in `css/pages.css`. Also corrected the docblock on
+`correctInkFinderScroll()` — it listed `#trust-stats` un-hiding as one of three things that shift
+the Ink Finder scroll target mid-flight, and only two remain (header pins, mobile header collapses).
+The scroll logic itself is generic and unchanged (ERR-137).
+
+**Deliberately NOT removed.** The footer one-liner (`#footer-trust-stats` in `js/footer.js`,
+`.footer-stats` in `css/layout.css`) renders the same three counts on every page and is now the
+**only** surface — it survives by the owner's choice. `TrustStats` in `js/utils.js` is untouched:
+`footer.js` and `seo-meta.js` (which delegates its `/api/site/trust` fetch to it so shared pages
+issue one request, not two) both depend on it. Ripping the module out would have forced `seo-meta.js`
+back onto its own fetch for no gain.
+
+**Rule:** `TrustStats.band()` still returns `null` — never a string — for null/0/NaN, so the footer
+can never read `0+` or `null+`. Absence is not zero (ERR-063/068/073/075/076). And re-adding a
+homepage band is a **product decision, not a bug fix**: `traffic-conversion-jul2026.test.js` §2 now
+asserts `index.html` contains no `trust-stats` and `landing.js` no `TrustStats`, so a well-meaning
+"restore the missing social proof" fails the suite first.
+
+**Verified:** full suite **3615 pass / 0 fail / 19 skipped**. Browser-verified (Playwright, bundled
+Chromium) at 1400/1024/480px: band gone from the DOM, trust bar sits flush against the Ink Finder
+band with a 0px gap and one clean divider (`.trust-bar` carries its own `border-bottom`, so nothing
+had to be added back), no page errors, the hero "Find My Exact Cartridge" CTA still lands the finder
+card correctly, and the footer line still reads `73+ customers served · 81+ orders shipped · 100+
+cartridges sold` on both `/` and `/html/shop.html`. Cache tokens restamped (`npm run build`).
+
+---
+
+## ERR-149 — An ungated summary row inherited a gated label, so widening volume pricing would have told every guest they had a "Business account" (2026-08-08)
+
+**Context.** Work started on making volume pricing available to every shopper rather than approved
+business accounts only. Before touching the pricing path, an audit of what the *cart* already does
+turned up a row that needs no change to break: the B2B discount line.
+
+**Root cause.** Two different things were gated by two different rules, and only one of them was
+obvious. The **ladder** (PDP chips, card overlay, cart nudge) is gated hard — everything funnels
+through `Business.getPricing()`, which returns nothing unless `getStatus().active`. The **summary
+row** is gated by nothing at all: `js/cart.js:2124`, `js/checkout-page.js:559`,
+`js/payment-page.js:297` and `js/order-totals.js:335` each print it whenever the server reports an
+amount `> 0`. That was correct, and deliberately so — the server is the only thing that knows what it
+charged.
+
+The bug was in the label. `businessDiscountLabel()` (`js/cart.js:102`) read `company_name` off the
+discount block and fell back to the bare string `'Business account'` when there wasn't one. That
+fallback was only ever true by coincidence: while the backend applied this discount to business carts
+exclusively, "discounted" and "business account" described the same set of people, so the label could
+stand in for the gate. The moment the backend discounts a retail cart, a signed-out guest who adds
+three of one item is shown **"Business account −$1.48"** — told they hold an account they never
+opened, on the checkout page, in the totals block.
+
+Note the shape: an **absent** `company_name` was read as evidence *about the shopper*. It means only
+that the server declined to name a company. Same family as ERR-063/068/073/075/076 — absence read as
+a value rather than as absence.
+
+**The fix.** The fallback is now `Volume discount`, with `— {company}` still appended whenever the
+server does supply a name, so a business customer still sees which account the discount landed
+against. The four static defaults that ship in the markup (`html/cart.html:254`,
+`html/checkout.html:410`, `html/payment.html:772`, `html/order-confirmation.html:145`) were changed
+in lockstep — they are what a customer sees between first paint and the first cart response, so
+leaving them would have reintroduced the same claim for a few hundred milliseconds. `order-totals.js`
+carries its own copy of the fallback because the receipt PDF and order-detail do not load `cart.js`;
+that one was changed too, and a test now asserts it.
+
+Pinned by a dedicated test that loops the whole family of no-company inputs (`{}`, `null`,
+`undefined`, a numeric `company_name`, a whitespace-only one) and asserts the result matches no
+`/business/i` at all — so the next person to reach for a "sensible default" here has to argue with an
+assertion that names the reason.
+
+**The lesson.** When a renderer is deliberately ungated, its **copy** is part of the gate and inherits
+none of the protection. This row was written to be driven purely by the server's number, which is
+right — and then labelled with a claim that only the *other*, gated path had ever established. A
+default string is an assertion; ours asserted the reader's account type from the absence of a field.
+The tell was available in the diff-free state of the file: the row's condition mentions only an
+amount, while its label mentions an account. Any time those two disagree about what they know, the
+label is the one that's lying.
+
+---
+
 ## ERR-145 — The Business Centre's "All" range asked for nothing, and the endpoint's no-parameter default is twelve months (2026-08-05)
 
 **The change.** `/business` Overview was rebuilt into an admin-style **Performance overview**: one
@@ -114,6 +204,45 @@ cent, and the gate is silent.
 off-by-one that is invisible every morning. Normalise both ends to midnight before subtracting. And a
 fixture whose totals disagree with its own rows counterfeits a bug in shipped code — this one very
 nearly sent someone hunting through `business-page.js` for arithmetic that was correct.
+
+---
+
+## ERR-148 — A header gap sized in `vw` inside a container capped at `1200px` got worse the wider the screen, and a fifth action item made it visible (2026-08-07)
+
+**Context.** Three header changes shipped together: the IC brand mark took the left column's inner
+edge, the Admin shortcut moved from that slot to the far right of `.header-actions`, and the action
+cluster was re-centred in the white bar. The first two are a swap; only the third looked like a
+layout change. In fact the *move* was the layout change.
+
+**Root cause.** `.header-actions` had `gap: clamp(1rem, 3vw - 1rem, 2rem)` at ≥1100px. `.site-header`
+deliberately re-locks `--container-max-width: 1200px`, so past a ~1230px viewport the container stops
+growing while a `vw`-driven gap keeps growing. Measured: the right grid track is a flat **357px** from
+1200px up, but the cluster's four gaps grew 109px → 128px. For an account that is both admin and B2B
+the cluster is now **five** labelled items — 322px of items alone — so it ran 50px into the centred
+wordmark at 1440px and **93px** at 1920px. The overlap got *worse* on bigger screens, which is the
+opposite of where anyone tests.
+
+A second, separate overflow sat below 1100px: there the cluster is icon-only and every item holds its
+48px `--tap-min` floor, so five items measure 240px + gaps against a ~251px track at 768px, and at
+390px they wrapped the brand row outright.
+
+**The fix.** Two levers, both measured before being chosen (five candidates were diffed in a real
+browser at six widths):
+
+- Gap that tops out instead of running away — `clamp(var(--spacing-2), 1vw, var(--spacing-4))`.
+- `padding-left/right: 0` and `min-width: 0` on `.header-actions__item` at ≥1100px only.
+  `--tap-min` is a **touch** floor; ≥1100px is a pointer device, `min-height: 48px` is untouched, and
+  the narrowest item (Cart, ~32px) still clears WCAG 2.5.8's 24×24 by a wide margin.
+
+Worst-case clearance went from **−50px (overlapping)** to **+17px** at 1100 and ~+50px above it.
+Below 1100px the fifth item is simply not affordable, so Admin is `display:none` there — shrinking
+the items instead would put sub-48px touch targets on tablets, which is the worse trade.
+
+**The lesson.** A `vw`-based length inside a max-width container is a bug waiting for a trigger: the
+two stop agreeing at the cap, and the error grows without bound in the direction nobody checks.
+Size against the container, not the viewport, or clamp to a real ceiling. And "move an element from
+A to B" is never neutral when A and B have different width budgets — the element that left made room,
+the one that arrived took it, and only one of those is visible in the diff.
 
 ---
 

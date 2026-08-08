@@ -206,24 +206,34 @@ test('§2 the button is JS-injected as the FIRST action item, styled like Admin'
     assert.match(code, /initHeaderLink\(\)/, 'business.js must define initHeaderLink()');
     assert.match(code, /_headerInited/, 'initHeaderLink must be idempotent');
     assert.match(code, /querySelector\('\.header-actions'\)/,
-        'the button belongs in .header-actions — the slot Admin vacated');
+        'the button belongs in the right-hand .header-actions cluster');
     assert.match(code, /insertBefore\(a, actions\.firstElementChild\)/,
-        'it must lead the cluster, where the Admin shortcut used to sit');
+        'it must LEAD the cluster. The two privileged shortcuts bracket the customer ones: ' +
+        'Business first, Admin appended last (main.js#initAdminHeaderLink).');
     assert.match(code, /id = 'header-business-link'/);
     assert.match(code, /header-actions__item--business/);
     assert.match(code, /a\.href = '\/business'/);
     assert.match(code, /aria-label', 'Business Centre'/);
-    // The label is set on TWO LINES on purpose. On one line "Business Centre"
-    // measures ~124px against ~67px for the widest single-word label, which
-    // overflows the cluster's grid track and collides with the centred logo
-    // (measured: 27px into the tagline at 1512px). Stacked, the item is 72px —
-    // narrower than "Favourites" — and labels still fit at 1100px.
-    assert.match(code, /<span>Business<br>Centre<\/span>/,
-        'the header label must stay split across two lines; on one line it overflows the ' +
-        'action cluster into the logo. The aria-label carries the full name for assistive tech.');
-    assert.match(LAYOUT_CSS, /\.header-actions \{[^}]*align-items: flex-start/,
-        'the labelled cluster must top-align, or the taller two-line item lifts its icon ' +
-        'out of line with Account / Favourites / Cart');
+    // The visible label is the single word "Business" (Aug 2026). Two forces:
+    //   WIDTH — "Business Centre" on one line measures ~124px against ~67px for
+    //   the widest single-word label, which overflows the cluster's grid track
+    //   and collides with the centred logo (measured: 27px into the tagline at
+    //   1512px). "Business" is ~60px, narrower than "Favourites".
+    //   HEIGHT — the earlier fix stacked it on two lines via a <br>, which cured
+    //   the width but made this the tallest item in the cluster and forced the
+    //   whole row to top-align, parking the other icons ~9px above the white
+    //   bar's centre line. One word is one line is uniform height.
+    // The aria-label asserted above carries the full name for assistive tech.
+    assert.match(code, /<span>Business<\/span>/,
+        'the header label must be the single word "Business" — "Business Centre" on one line ' +
+        'overflows the action cluster into the logo, and stacking it on two lines makes this ' +
+        'item taller than its siblings and forces the cluster off the bar\'s centre line.');
+    assert.ok(!/<br>/.test(code),
+        'do not re-stack the label with a <br>: it reintroduces the taller item and the ' +
+        'top-alignment override that lifted Account / Favourites / Cart off centre');
+    assert.ok(!/\.header-actions \{[^}]*align-items: flex-start/.test(LAYOUT_CSS),
+        'the labelled cluster must NOT top-align any more — every item is one line tall now, ' +
+        'so it inherits align-items: center and sits on the white bar\'s centre line');
 
     // No page may ship it statically: the header is byte-identical across 30
     // pages, so a static fourth item would mean editing all 30 in lockstep.

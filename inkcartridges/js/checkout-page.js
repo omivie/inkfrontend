@@ -1132,7 +1132,10 @@
             const msg = (data && data.message) || (source && source.error);
             return typeof msg === 'string' && msg.trim()
                 ? msg.trim()
-                : 'Business accounts get automatic volume pricing — promo codes can’t be combined. Your loyalty points still work.';
+                // No longer "business accounts get automatic volume pricing" —
+                // every shopper does now, so that clause stopped explaining the
+                // rule. Mirrors B2B_COUPON_COPY in cart-page.js.
+                : 'Promo codes can’t be combined with your business account pricing. Your loyalty points still work.';
         },
 
         /**

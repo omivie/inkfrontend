@@ -3,14 +3,16 @@
  * ==============================
  *
  * A privileged "Admin" shortcut lets a verified admin jump to /admin from any
- * page. It lives in the global site header's LEFT column (`.header-lead`,
- * after the phone/email contact block and hard against the logo).
+ * page. It lives at the FAR RIGHT of the global site header — appended LAST in
+ * the `.header-actions` cluster, past the cart.
  *
- * MOVED — Aug 2026: it used to sit at the head of the right-hand
- * `.header-actions` cluster. That slot is now reserved for the customer-facing
- * Business account button, so the shortcut was relocated to `.header-lead` —
- * a wrapper added around `.header-contact` in all 29 shared headers precisely
- * so the two can share the left grid track without overlapping.
+ * MOVED TWICE — it began at the HEAD of `.header-actions`; in Aug 2026 it was
+ * relocated to the left column (`.header-lead`) to free the leading slot for
+ * the customer-facing Business Centre button; days later it returned to
+ * `.header-actions` as the LAST item, so the two privileged shortcuts bracket
+ * the customer ones (Business first, Admin last) and the left column's inner
+ * edge could take the IC brand mark instead. `.header-lead` survives the move
+ * and now hosts that mark — see the wrapper test below.
  *
  * REVISED — Google Merchant Center audit (Jul 2026):
  * The link used to ship in every page's static markup as `hidden`. That put
@@ -22,8 +24,8 @@
  * Hard requirements:
  *   1. NO customer-facing page ships the admin link (or a bare href="/admin")
  *      in its static header markup — guests/customers never receive it.
- *   2. main.js#initAdminHeaderLink() creates and inserts the link into
- *      `.header-lead`, only after a server-side role check
+ *   2. main.js#initAdminHeaderLink() creates and appends the link to
+ *      `.header-actions`, only after a server-side role check
  *      (API.verifyAdmin → GET /api/admin/verify). Client state is never
  *      trusted for the gate; /admin re-verifies server-side regardless.
  *   3. Guests are skipped (Auth.isAuthenticated) so no verify call fires for
@@ -95,14 +97,28 @@ test('no customer-facing page ships the admin link in static header markup', () 
     }
 });
 
-test('every shared header ships the .header-lead wrapper the shortcut is injected into', () => {
-    // ensureLink() bails when .header-lead is missing, so a page that skipped
-    // the Aug 2026 wrapper edit would silently lose the Admin shortcut.
+test('every shared header ships the .header-actions cluster the shortcut is appended to', () => {
+    // ensureLink() bails when .header-actions is missing, so a page that lost
+    // the cluster would silently lose the Admin shortcut.
     for (const { file, header } of PAGES_WITH_HEADER) {
-        assert.ok(header.includes('class="header-lead"'),
-            `${rel(file)} is missing the .header-lead wrapper — main.js#initAdminHeaderLink has nowhere to inject the shortcut`);
+        assert.ok(header.includes('class="header-actions"'),
+            `${rel(file)} is missing the .header-actions cluster — main.js#initAdminHeaderLink has nowhere to append the shortcut`);
+    }
+});
+
+test('the .header-lead wrapper survives the move and holds the IC brand mark', () => {
+    // The wrapper is load-bearing, not a fossil of the Aug-2026 admin placement.
+    // The left grid track is ~350px at 1100px and the phone+email stack alone
+    // nearly fills it, so a `justify-self: end` sibling in the same grid CELL
+    // renders ON TOP of the email (same overlap class as ERR-088). The flex
+    // wrapper makes the track size to the sum instead. The sibling is now the
+    // brand mark rather than the admin link, so the wrapper matters MORE: the
+    // mark ships for every visitor, not just verified admins.
+    for (const { file, header } of PAGES_WITH_HEADER) {
         assert.match(header, /<div class="header-lead">\s*<div class="header-contact">/,
-            `${rel(file)}: .header-lead must directly wrap .header-contact so the contact stack and the admin shortcut share the left grid track`);
+            `${rel(file)}: .header-lead must directly wrap .header-contact so the contact stack and the brand mark share the left grid track without overlapping`);
+        assert.match(header, /<a href="\/" class="header-lead__logo"[\s\S]*?src="\/apple-touch-icon\.png"[\s\S]*?<\/a>\s*<\/div>/,
+            `${rel(file)}: .header-lead must end with the IC brand mark — space-between is what pushes it to the track's inner edge, beside the wordmark`);
     }
 });
 
@@ -119,22 +135,20 @@ test('main.js defines initAdminHeaderLink() and runs it on DOMContentLoaded', ()
         'main.js must call initAdminHeaderLink() on DOMContentLoaded');
 });
 
-test('initAdminHeaderLink() injects the link into .header-lead (not static markup)', () => {
+test('initAdminHeaderLink() injects the link into .header-actions (not static markup)', () => {
     const fn = MAIN_JS.slice(MAIN_JS.indexOf('function initAdminHeaderLink('));
     const body = fn.slice(0, fn.indexOf('\n}\n') + 2);
     assert.ok(body.includes("createElement('a')") || body.includes('createElement("a")'),
         'initAdminHeaderLink() must create the anchor element in JS');
     assert.ok(/header-admin-link/.test(body),
         'initAdminHeaderLink() must set the header-admin-link id on the injected node');
-    assert.ok(/querySelector\((['"])\.header-lead\1\)/.test(body),
-        'initAdminHeaderLink() must insert the link into .header-lead (the header\'s left column), not the right-hand .header-actions cluster');
-    assert.ok(/insertBefore|appendChild/.test(body),
-        'initAdminHeaderLink() must attach the injected link to the DOM');
-    // The shortcut keeps the .header-actions__item styling even though it no
-    // longer lives in .header-actions — that is what makes the move purely
-    // positional (same shield icon, same icon-over-label treatment).
+    assert.ok(/querySelector\((['"])\.header-actions\1\)/.test(body),
+        'initAdminHeaderLink() must insert the link into the right-hand .header-actions cluster, not .header-lead (the left column now holds the IC brand mark)');
+    assert.ok(/appendChild/.test(body),
+        'initAdminHeaderLink() must APPEND the link so it lands LAST in the cluster, past the cart. ' +
+        'insertBefore would put it at the head, where business.js puts the Business Centre button.');
     assert.ok(/header-actions__item--admin/.test(body),
-        'the injected link must keep the header-actions__item--admin class so its styling is unchanged by the move');
+        'the injected link must keep the header-actions__item--admin class — that is the rule it shares with --business, so the two privileged shortcuts can never drift apart');
 });
 
 test('initAdminHeaderLink() gates the reveal on a server-side admin check', () => {

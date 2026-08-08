@@ -290,14 +290,17 @@ test('B2B row uses businessDiscountLabel when cart.js is present, plain label ot
     // injected, so the test could keep passing against a field the API no longer
     // sends. Under volume pricing there is no account-level rate to name.
     const withLabel = loadOrderTotals({
-        businessDiscountLabel: (meta) => `Business account — ${meta.company_name}`
+        businessDiscountLabel: (meta) => `Volume discount — ${meta.company_name}`
     });
     const t = { b2bDiscount: 4.68, b2bMeta: { company_name: 'Acme Print Co' } };
-    assert.equal(rowFor(withLabel.rows(t), 'b2b').label, 'Business account — Acme Print Co');
+    assert.equal(rowFor(withLabel.rows(t), 'b2b').label, 'Volume discount — Acme Print Co');
 
     // The receipt PDF and order-detail do not load cart.js — must not hard-depend.
+    // The built-in fallback must also not claim a business account: this row is
+    // ungated and prints wherever the server reports an amount (ERR-149).
     const bare = loadOrderTotals();
-    assert.equal(rowFor(bare.rows(t), 'b2b').label, 'Business account');
+    assert.equal(rowFor(bare.rows(t), 'b2b').label, 'Volume discount');
+    assert.doesNotMatch(rowFor(bare.rows(t), 'b2b').label, /business/i);
 });
 
 test('coupon row is the aggregate discount NET of loyalty and B2B — no double count', () => {

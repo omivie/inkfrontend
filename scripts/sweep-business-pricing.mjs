@@ -34,11 +34,24 @@
  *      collected count disagrees with `pagination.total`: a plausible-but-short
  *      catalog is precisely the failure this exists to prevent.
  *
- *   2. PRICING pass — signs in as an approved business account and sweeps every
- *      SKU through `/api/business/pricing` in serial chunks of 100. Each item is
- *      normalised by the REAL `describeLadder()` loaded out of
- *      inkcartridges/js/business.js, never a reimplementation — if the sweep
- *      re-derived the collapse rule it could certify a UI that does not exist.
+ *   2. PRICING pass — TWO ROUTES, and the catalog decides which:
+ *
+ *      a. If the public products carry `quantity_breaks` (BF-032 — volume
+ *         pricing is public now), pass 1 already collected every ladder. Pass 2
+ *         is free, needs no credentials, and issues no requests. Every row must
+ *         carry the field: a product with no discount sends an EMPTY array, so
+ *         a MISSING one means the ladder is only half-published and the sweep
+ *         stops rather than record "no discount" for the silent half.
+ *
+ *      b. Otherwise the ladder is still business-only: sign in as an approved
+ *         account and sweep every SKU through `/api/business/pricing` in serial
+ *         chunks of 100. Credentials are mandatory here, because an anonymous
+ *         sweep of a gated endpoint returns "0 ladders found" and looks clean.
+ *
+ *      Either way each item is normalised by the REAL `describeLadder()` loaded
+ *      out of inkcartridges/js/business.js, never a reimplementation — if the
+ *      sweep re-derived the collapse rule it could certify a UI that does not
+ *      exist.
  *
  * Usage:
  *   node scripts/sweep-business-pricing.mjs             # sweep + write the record
@@ -47,7 +60,9 @@
  *   node scripts/sweep-business-pricing.mjs --json      # machine-readable summary on stdout
  *
  * Credentials come from .env (gitignored) or the environment — never argv,
- * which leaks into `ps`:
+ * which leaks into `ps`. Required only on route (b); on route (a) they are
+ * optional and buy one extra thing: the cart consistency gate, which re-derives
+ * a real cart's discount from the ladders and asserts it to the cent.
  *   BUSINESS_EMAIL=...
  *   BUSINESS_PASSWORD=...
  *   API_BASE=...            (optional; defaults to the Render origin)
@@ -222,7 +237,16 @@ async function collectCatalog() {
 
         for (const p of items) {
             if (p && typeof p.sku === 'string' && p.sku.trim()) {
-                rows.push({ sku: p.sku.trim(), name: p.name || null });
+                // `quantity_breaks` on a PUBLIC product is BF-032: the ladder is
+                // no longer business-only, so the catalog walk can answer pass 2
+                // on its own and the sweep needs no credentials at all. Captured
+                // whenever present; main() decides whether it is usable.
+                rows.push({
+                    sku: p.sku.trim(),
+                    name: p.name || null,
+                    retail_price: p.retail_price,
+                    quantity_breaks: Array.isArray(p.quantity_breaks) ? p.quantity_breaks : null
+                });
             }
         }
         say(`  page ${page}: +${items.length} (running ${rows.length}${meta.total ? '/' + meta.total : ''})`);
@@ -267,7 +291,43 @@ async function collectCatalog() {
     if (shortfall > 0) {
         say(`     note: meta.total ${total} exceeds the ${unique.length} rows actually served (shortfall ${shortfall}) — recorded`);
     }
-    return { skus: unique, total, shortfall };
+    // How much of the catalog answered the pricing question by itself.
+    const withLadder = unique.filter(r => r.quantity_breaks !== null).length;
+
+    return { skus: unique, total, shortfall, withLadder };
+}
+
+/**
+ * Build the pass-2 result straight out of the catalog walk.
+ *
+ * Only legal when EVERY row carried `quantity_breaks`. A partial answer is not
+ * a smaller answer — it is an inconsistent backend, and normalising the silent
+ * rows to "no discount" would put a confident, wrong matrix into the record
+ * that the whole suite then asserts against. Same rule as the catalog
+ * shortfall guard above: a plausible-but-incomplete sweep must stop.
+ */
+function ladderFromCatalog(catalog) {
+    const missing = catalog.skus.filter(r => r.quantity_breaks === null);
+    if (missing.length) {
+        die(
+            `${missing.length} of ${catalog.skus.length} public products carry no quantity_breaks ` +
+            `(e.g. ${missing.slice(0, 5).map(r => r.sku).join(', ')}).\n` +
+            '  A product with no volume discount must send an EMPTY array, not omit the field —\n' +
+            '  otherwise "no discount" and "not implemented" are indistinguishable and the record\n' +
+            '  would be confidently wrong. Refusing to sweep a half-published ladder.'
+        );
+    }
+    const answered = new Map();
+    for (const r of catalog.skus) {
+        answered.set(r.sku, {
+            sku: r.sku,
+            found: true,
+            is_active: true,
+            retail_price: r.retail_price,
+            quantity_breaks: r.quantity_breaks
+        });
+    }
+    return answered;
 }
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -523,48 +583,79 @@ function markdownTable(record) {
 async function main() {
     const email = process.env.BUSINESS_EMAIL;
     const password = process.env.BUSINESS_PASSWORD;
-    if (!email || !password) {
-        die(
-            'BUSINESS_EMAIL and BUSINESS_PASSWORD are required (put them in .env, which is gitignored).\n' +
-            '  Both /api/business/* endpoints 401 without an approved business session, and an\n' +
-            '  anonymous sweep would report "0 ladders found" as a clean result. Refusing to run.'
-        );
-    }
 
     const Business = loadBusiness();
     if (typeof Business.describeLadder !== 'function') {
         die('inkcartridges/js/business.js no longer exposes describeLadder() — the sweep must not re-implement it');
     }
 
-    say(`\nB2B volume-pricing sweep\n  API   ${API_BASE}\n  as    ${email}\n`);
+    say(`\nVolume-pricing sweep\n  API   ${API_BASE}\n`);
 
     say('1/4  catalog walk (anonymous)…');
     const catalog = await collectCatalog();
-    say(`     ${catalog.skus.length} SKUs, walk terminated on has_next=false (meta.total ${catalog.total})\n`);
+    say(`     ${catalog.skus.length} SKUs, walk terminated on has_next=false (meta.total ${catalog.total})`);
 
-    say('2/4  signing in…');
-    const token = await signIn(email, password);
-    const status = await getJson(`${API_BASE}/api/business/status`, { Authorization: `Bearer ${token}` });
-    if (!status.body || status.body.ok !== true || !status.body.data) {
-        die(`/api/business/status did not answer: ${JSON.stringify(status.body)}`);
-    }
-    const sd = status.body.data;
-    if (!['approved', 'active'].includes(sd.status)) {
-        die(`this account's business status is "${sd.status}" — an approved account is required to sweep pricing`);
-    }
-    if ('pricing_tier' in sd) {
-        console.error('⚠  /api/business/status has grown pricing_tier back — v2 retired tiers; investigate before trusting this sweep');
-    }
-    say(`     approved${sd.application && sd.application.company_name ? ` (${sd.application.company_name})` : ''}\n`);
+    // Which pass 2 do we need? The public catalog carrying `quantity_breaks` is
+    // BF-032 — the ladder is public, so the anonymous walk we just did already
+    // holds every number, and signing in would be theatre. Until then the authed
+    // route is the only source and credentials are mandatory: an anonymous sweep
+    // of a gated endpoint reports "0 ladders found" as a clean result, which is
+    // the exact silent-zero failure this script exists to prevent.
+    const publicLadder = catalog.withLadder > 0;
+    say(publicLadder
+        ? `     ${catalog.withLadder} carry a PUBLIC quantity_breaks — no sign-in needed\n`
+        : '     no public quantity_breaks yet (pre-BF-032) — the authed route is required\n');
 
-    say('3/4  pricing sweep…');
-    const answered = await sweepPricing(catalog.skus.map(s => s.sku), token);
-    say(`     ${answered.size} answered\n`);
+    let token = null;
+    let answered;
+
+    if (publicLadder) {
+        say('2/4  skipping sign-in (the ladder is public)…\n');
+        say('3/4  reading ladders off the catalog walk…');
+        answered = ladderFromCatalog(catalog);
+        say(`     ${answered.size} answered, 0 requests\n`);
+        // Optional: a token still buys the cart consistency gate below.
+        if (email && password) token = await signIn(email, password);
+    } else {
+        if (!email || !password) {
+            die(
+                'BUSINESS_EMAIL and BUSINESS_PASSWORD are required (put them in .env, which is gitignored).\n' +
+                '  The public catalog carries no quantity_breaks yet, so the ladder is still only\n' +
+                '  available from /api/business/pricing, which 401s without an approved business\n' +
+                '  session — and an anonymous sweep would report "0 ladders found" as a clean\n' +
+                '  result. Refusing to run.'
+            );
+        }
+        say(`2/4  signing in as ${email}…`);
+        token = await signIn(email, password);
+        const status = await getJson(`${API_BASE}/api/business/status`, { Authorization: `Bearer ${token}` });
+        if (!status.body || status.body.ok !== true || !status.body.data) {
+            die(`/api/business/status did not answer: ${JSON.stringify(status.body)}`);
+        }
+        const sd = status.body.data;
+        if (!['approved', 'active'].includes(sd.status)) {
+            die(`this account's business status is "${sd.status}" — an approved account is required to sweep pricing`);
+        }
+        if ('pricing_tier' in sd) {
+            console.error('⚠  /api/business/status has grown pricing_tier back — v2 retired tiers; investigate before trusting this sweep');
+        }
+        say(`     approved${sd.application && sd.application.company_name ? ` (${sd.application.company_name})` : ''}\n`);
+
+        say('3/4  pricing sweep…');
+        answered = await sweepPricing(catalog.skus.map(s => s.sku), token);
+        say(`     ${answered.size} answered\n`);
+    }
 
     say('4/4  analysing…');
     const analysis = analyse(answered, catalog, Business);
 
-    const cart = await fetchCart(token);
+    // The cart consistency gate needs a real signed-in cart. Without credentials
+    // the sweep is still complete — every ladder came from the public walk — but
+    // that one cross-check is absent, and silence is not the same as agreement.
+    if (!token) {
+        say('     note: no credentials, so the cart consistency gate was NOT run\n');
+    }
+    const cart = token ? await fetchCart(token) : null;
     if (cart) {
         // The consistency gate needs the ladder for every line in the cart, not
         // just the four sample SKUs: it re-derives each line's rung from these

@@ -185,3 +185,59 @@ test('R6b the scrolled collapse hides .header-lead, preserving the ERR-101 heigh
     assert.ok(!/\.site-header--scrolled\s+\.header-contact\s*\{/.test(LAYOUT),
         'the old .site-header--scrolled .header-contact rule must be gone — it no longer collapses the row (ERR-101)');
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// R7 — the Admin shortcut pins to the WINDOW's right edge, not the container's
+//
+// Owner request (Aug 2026): Admin belongs at the far right of the white bar,
+// out past the action cluster. The cluster's right edge is the 1200px
+// container's content edge, so reaching the window edge means anchoring to
+// .header-main — which is full-bleed — rather than to .container.
+//
+// This is a containing-block contract, and it fails SILENTLY: if .container is
+// positioned too, the pin resolves against the 1200px box and Admin lands back
+// beside the cart. That reads as a wrong `right` value, not as the ancestor bug
+// it actually is, which is why both halves are pinned here.
+// ─────────────────────────────────────────────────────────────────────────────
+
+// This file's rules are heavily commented, and those comments quote the very
+// declarations being asserted against ("NO `position: relative` here"). Strip
+// comments before testing a block or the prose fails the test.
+const declarationsOnly = (css) => css.replace(/\/\*[\s\S]*?\*\//g, '');
+
+test('R7 .header-main is the positioned ancestor and .header-main .container is not', () => {
+    const mainBlocks = (LAYOUT.match(/^\s*\.header-main\s*\{[^}]*\}/gm) || []).map(declarationsOnly);
+    assert.ok(mainBlocks.length >= 1, '.header-main must be styled in layout.css');
+    assert.ok(mainBlocks.some((b) => /position:\s*relative/.test(b)),
+        '.header-main must be position:relative — it is the containing block the pinned Admin shortcut anchors to. Without it the pin falls through to .site-header and Admin drifts out of the white bar.');
+
+    const containerBlocks = (LAYOUT.match(/^\s*\.header-main \.container\s*\{[^}]*\}/gm) || []).map(declarationsOnly);
+    assert.ok(containerBlocks.length >= 1, '.header-main .container must be styled in layout.css');
+    for (const block of containerBlocks) {
+        assert.ok(!/position:\s*(relative|absolute|sticky)/.test(block),
+            `.header-main .container must stay unpositioned, or it steals the containing block from .header-main and the pinned Admin shortcut snaps back to the 1200px container edge. Nothing anchors to it (.cart-badge anchors to .header-actions__icon). Found: ${block}`);
+    }
+
+    // .primary-nav .container IS relative on purpose — it anchors .nav-menu.
+    // Different selector; the rule above must not be "tidied" to cover it.
+    assert.match(LAYOUT, /\.primary-nav \.container\s*\{[^}]*position:\s*relative/,
+        '.primary-nav .container must stay position:relative — .nav-menu is absolutely positioned against it');
+});
+
+test('R7b the Admin pin is gated on there being a gutter to pin into', () => {
+    // Below the gate the container fills the viewport, so a pinned Admin would
+    // land on top of the cart — a customer-facing break, not a cosmetic one.
+    const pin = LAYOUT.match(/@media \(min-width: (\d+)px\)\s*\{\s*\.header-actions__item--admin\s*\{([^}]*)\}/);
+    assert.ok(pin, 'a min-width media query must pin .header-actions__item--admin (MODE E)');
+    assert.ok(Number(pin[1]) >= 1300,
+        `the Admin pin must not engage before ~1300px — measured, a 1280px viewport leaves only ~5px between the cluster and the pinned shortcut. Found ${pin[1]}px.`);
+    assert.match(pin[2], /position:\s*absolute/, 'the pinned Admin shortcut must be position:absolute');
+    assert.match(pin[2], /right:/, 'the pinned Admin shortcut must be offset from the RIGHT edge');
+
+    // Below 1100 it is hidden outright (five icon-only items at the 48px tap
+    // floor do not fit the track — ERR-148).
+    assert.match(LAYOUT, /^\s*\.header-actions__item--admin\s*\{\s*display:\s*none/m,
+        'Admin must default to display:none — it is only affordable at >=1100px');
+    assert.match(LAYOUT, /@media \(min-width: 1100px\)[\s\S]*?\.header-actions__item--admin\s*\{[^}]*display:\s*flex/,
+        'Admin must be revealed at >=1100px');
+});

@@ -483,11 +483,12 @@ const RibbonsPage = {
             container.insertBefore(grid, pagination);
         });
 
-        // Business bulk-price overlay — additive, and a no-op without a network
-        // request for guests and retail shoppers.
+        // Bulk-price overlay — additive, and free of any network request: the
+        // ladder rides on the ribbons payload this grid was rendered from.
         if (typeof Business !== 'undefined') {
+            Business.ingest(ribbons);
             Business.decorateCards(container).catch(e =>
-                DebugLog.warn('[Ribbons] business pricing overlay failed:', e && e.message));
+                DebugLog.warn('[Ribbons] bulk pricing overlay failed:', e && e.message));
         }
 
         // Image fallback listeners

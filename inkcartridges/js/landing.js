@@ -145,10 +145,9 @@
 
     /**
      * Re-measure once the scroll has settled and nudge if the target moved.
-     * Three things shift it mid-flight: the header only becomes sticky partway
-     * down, the mobile header collapses (.site-header--scrolled shrinks the
-     * document), and #trust-stats can un-hide from /api/site/trust and push the
-     * card down. Any user input, or landing far from where we aimed, cancels —
+     * Two things shift it mid-flight: the header only becomes sticky partway
+     * down, and the mobile header collapses (.site-header--scrolled shrinks the
+     * document). Any user input, or landing far from where we aimed, cancels —
      * never yank a viewport the user has taken over.
      */
     function correctInkFinderScroll(aimedTop) {
@@ -259,40 +258,6 @@
     }
 
     // ============================================
-    // TRUST STATS  (traffic-conversion-jul2026 §2)
-    // ============================================
-    // Sitewide social proof under the hero trust bar: "47+ customers served".
-    //
-    // Counts are floored to honest bands server-side, hence the trailing "+".
-    // A null count means NOT COMPUTED, not zero — its tile is dropped rather
-    // than painted as "0+", and when all three are null the section stays
-    // hidden and the homepage is byte-identical to before. That IS the current
-    // production state (the backend's nightly sweep has never run), so this
-    // ships invisible and switches itself on later with no deploy.
-    //
-    // Fail-open: TrustStats.raw() resolves to {} on any error.
-
-    async function loadTrustStats() {
-        const section = document.getElementById('trust-stats');
-        const list = document.getElementById('trust-stats-list');
-        if (!section || !list || typeof TrustStats === 'undefined') return;
-
-        const lines = TrustStats.lines(await TrustStats.stats());
-        if (!lines.length) {
-            section.hidden = true;
-            return;
-        }
-        list.innerHTML = lines.map((row) => `
-            <li class="trust-stats__item" data-stat="${Security.escapeAttr(row.key)}">
-                <span class="trust-stats__value">${Security.escapeHtml(row.value)}</span>
-                <span class="trust-stats__label">${Security.escapeHtml(row.label)}</span>
-            </li>`).join('');
-        section.hidden = false;
-    }
-
-    loadTrustStats();
-
-    // ============================================
     // FEATURED PRODUCTS
     // ============================================
 
@@ -352,10 +317,10 @@
                 Products.bindImageFallbacks(grid);
             }
 
-            // Business bulk-price overlay — additive, and a no-op without a
-            // network request for guests and retail shoppers, so this public
-            // marketing strip is byte-for-byte unchanged for everyone else.
+            // Bulk-price overlay — additive and request-free: the ladder rides
+            // on the same payload this strip was rendered from.
             if (typeof Business !== 'undefined') {
+                Business.ingest(products);
                 Business.decorateCards(grid).catch(() => { /* featured strip is optional */ });
             }
 

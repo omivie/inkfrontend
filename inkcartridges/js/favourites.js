@@ -150,6 +150,20 @@ const Favourites = {
                 is_active: fav.product?.is_active !== false,
                 addedAt: fav.added_at
             }));
+
+            // Take the public volume ladder off the RAW payload, not off
+            // `this.items` above: that mapping renames retail_price -> price and
+            // carries no quantity_breaks, so ingesting the mapped shape would
+            // silently take in nothing. A no-op until the backend ships
+            // quantity_breaks (BF-032).
+            if (typeof Business !== 'undefined') {
+                Business.ingest(favourites.map(fav => ({
+                    sku: fav.product_sku,
+                    retail_price: fav.product?.retail_price,
+                    quantity_breaks: fav.product?.quantity_breaks
+                })));
+            }
+
             this.loaded = true;
         } catch (error) {
             // Network/parse failures still throw. Surface them too — do not
@@ -518,13 +532,12 @@ const Favourites = {
             Products.bindImageFallbacks(grid);
         }
 
-        // Business bulk-price overlay. Favourites is a REORDER list for a trade
-        // account — the surface most likely to be bought in tens — so it gets
-        // the volume ladder like every other grid. Guests and retail shoppers
-        // short-circuit without a request.
+        // Bulk-price overlay. Favourites is a REORDER list — the surface most
+        // likely to be bought in tens — so it gets the volume ladder like every
+        // other grid. The ladder was ingested when the payload loaded.
         if (typeof Business !== 'undefined') {
             Business.decorateCards(grid).catch(e =>
-                DebugLog.warn('[Favourites] business pricing overlay failed:', e && e.message));
+                DebugLog.warn('[Favourites] bulk pricing overlay failed:', e && e.message));
         }
 
         // Bind add to cart buttons

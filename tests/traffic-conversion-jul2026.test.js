@@ -40,6 +40,8 @@
  *   §1  Review stars on every card renderer, and the empty-state that must
  *       render NOTHING.
  *   §2  Trust-stat banding: "+" suffix, null hidden, never "0+" or "null+".
+ *       The footer one-liner is now the ONLY mount point — the homepage
+ *       big-number band was removed Aug 2026 and must not creep back.
  *   §3  PDP pack savings (dollars only), waitlist proof (no CTA), printer proof,
  *       and the printer_slug plumbing that makes the last one possible.
  *   §4  Dispatch countdown: absolute-deadline math, drift immunity, teardown.
@@ -346,17 +348,23 @@ test('§2 no rendered stat string can ever read "0+" or "null+"', () => {
     assert.equal(rendered, '5+ cartridges sold');
 });
 
-test('§2 both mount points ship hidden and are only revealed by data', () => {
-    const home = READ('index.html');
-    assert.match(home, /<section class="trust-stats"[^>]*hidden>/,
-        'the homepage stats section must ship hidden');
+test('§2 the footer is the only mount point, and it ships hidden', () => {
     const footer = JS('footer.js');
     assert.match(footer, /id="footer-trust-stats"[^>]*hidden/,
         'the footer stats line must ship hidden');
-    for (const [name, src] of [['landing.js', JS('landing.js')], ['footer.js', footer]]) {
-        assert.match(src, /if \(!lines\.length\)[\s\S]{0,120}hidden = true/,
-            `${name} must re-hide its mount point when there are no lines`);
-    }
+    assert.match(footer, /if \(!lines\.length\)[\s\S]{0,120}hidden = true/,
+        'footer.js must re-hide its mount point when there are no lines');
+
+    // The homepage big-number band was REMOVED (Aug 2026, owner's call): three
+    // tiles under the hero trust bar reading "73+ customers served / 81+ orders
+    // shipped / 100+ cartridges sold". It was never wrong — the nightly sweep
+    // finally ran and the owner did not want those counts that prominent.
+    // The footer one-liner is the surviving surface. Re-adding a homepage band
+    // is a product decision, not a bug fix, so it fails here first.
+    assert.doesNotMatch(READ('index.html'), /trust-stats/,
+        'the homepage trust-stats band was removed — do not re-add it silently');
+    assert.doesNotMatch(JS('landing.js'), /TrustStats/,
+        'landing.js must not paint trust stats; the footer owns the only surface');
 });
 
 test('§2 TrustStats owns one shared fetch, and seo-meta.js delegates to it', () => {
@@ -369,11 +377,9 @@ test('§2 TrustStats owns one shared fetch, and seo-meta.js delegates to it', ()
 
 test('§2 trust rendering never interpolates a raw count into markup', () => {
     // Counts are backend numbers, but the labels sit in user-visible copy;
-    // both mount points use textContent / escaped interpolation.
+    // the surviving mount point uses textContent, never innerHTML.
     assert.match(JS('footer.js'), /el\.textContent = lines\.map/,
         'the footer line must be built with textContent');
-    assert.match(JS('landing.js'), /Security\.escapeHtml\(row\.value\)/,
-        'the homepage tiles must escape their interpolated values');
 });
 
 // ═════════════════════════════════════════════════════════════════════════

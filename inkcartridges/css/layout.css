@@ -86,6 +86,11 @@
 .header-main {
     padding: var(--spacing-2) 0;
     background-color: var(--color-background);
+    /* CONTAINING BLOCK for the pinned Admin shortcut (MODE E, >=1360px). This
+       element is full-bleed; .container inside it is capped at 1200px. Admin
+       has to reach the WINDOW's right edge, so it must anchor here — hence the
+       relative, and hence .container below must NOT be positioned. */
+    position: relative;
 }
 
 .header-main .container {
@@ -94,7 +99,13 @@
     align-items: center;
     justify-content: space-between;
     gap: var(--spacing-2);
-    position: relative;
+    /* NO `position: relative` here — it used to be, and it was vestigial: the
+       only absolutely-positioned descendant of this row is .cart-badge, which
+       anchors to .header-actions__icon. Putting it back silently re-parents the
+       pinned Admin shortcut to the 1200px container and drops it back beside
+       the cart, which reads as a broken `right` value rather than a
+       containing-block bug. (.primary-nav .container IS relative on purpose —
+       it anchors .nav-menu. Different selector, don't confuse them.) */
 }
 
 /* Header LEAD — the brand row's left column. Holds the phone/email contact
@@ -134,6 +145,42 @@
     gap: var(--spacing-3);
     min-width: 0;
     flex: 0 1 auto;
+}
+
+/* The IC brand mark that sits at the INNER edge of the left column, beside the
+   wordmark — pushed there by .header-lead's space-between at >=768px (Aug 2026;
+   it took the slot the Admin shortcut used to hold, which moved to the far
+   right of .header-actions).
+
+   Desktop-only on purpose: below 768px the lead is its own full-width row
+   UNDER the wordmark, so a second brand mark would sit beneath the one it
+   duplicates, and the scrolled collapse hides the whole lead anyway. */
+.header-lead__logo {
+    display: none;
+    flex: 0 0 auto;
+    /* the img is inline — kill the descender gap so the box is its stated size */
+    line-height: 0;
+}
+
+/* Sized HERE, not on the shared .logo__icon (which the footer brand also uses
+   and overrides to 40px at layout.css:.footer-brand__logo). 54px is the header
+   mark's own size — 50% up from the 36px it launched at, on owner request.
+
+   LEFT-TRACK BUDGET, measured 2026-08-08. 1100px is the tightest width: it is
+   where the email first appears (MODE D) while the left grid track is still at
+   its narrowest. There, the gap between the end of the email text and the mark
+   is 10px — real separation, nothing clips (scrollWidth === clientWidth on the
+   email at every width) — widening to 18px at 1150 and 41px+ from 1199 up.
+   Below 1100 the email is hidden, so the phone alone leaves ~50px spare.
+
+   That 10px is the whole budget: a materially larger mark, a longer support
+   address, or a bigger contact font would start eating the email. Measure
+   before changing any of the three. Do NOT buy room back by shrinking
+   .header-lead's gap — that gap IS the separation being measured here. */
+.header-lead__logo .logo__icon {
+    height: 54px;
+    /* 4px reads pinched at this size — matches the footer's 40px lockup */
+    border-radius: 6px;
 }
 
 .header-contact__item {
@@ -421,13 +468,27 @@
     display: none;
 }
 
-/* The two privileged shortcuts share one colour on purpose: Admin (owner-only,
-   in .header-lead on the left) and Business (approved B2B accounts, first item
-   in .header-actions). Both read as "this account has something extra", so they
-   must never drift apart — hence one rule, not two. */
+/* The two privileged shortcuts share one colour on purpose: Business (approved
+   B2B accounts, FIRST item in .header-actions) and Admin (owner-only, LAST item
+   in .header-actions, past the cart). Both read as "this account has something
+   extra", so they must never drift apart — hence one rule, not two. */
 .header-actions__item--admin,
 .header-actions__item--business {
     color: var(--color-primary);
+}
+
+/* Admin is DESKTOP-ONLY (>=1100px, revealed in MODE D). Below that the cluster
+   is icon-only and every item holds its 48px --tap-min touch floor, so five of
+   them measure 240px + gaps against a ~251px right track at 768px — the fifth
+   item drives the whole cluster into the centred wordmark, and at 390px it
+   wraps the brand row outright. The customer-facing four are not negotiable, so
+   the owner-only shortcut is the one that goes. Shrinking the items instead
+   would put sub-48px touch targets on tablets, which is the worse trade
+   (mobile-parity S0.1). Admins on a narrow viewport can still type /admin —
+   and already lost this shortcut below 1100px whenever the header collapsed on
+   scroll (ERR-101), so this extends an accepted trade-off rather than a new one. */
+.header-actions__item--admin {
+    display: none;
 }
 
 .header-actions__item--admin:hover,
@@ -435,16 +496,22 @@
     color: var(--color-primary-dark);
 }
 
-/* "Business Centre" is the only two-word label in the cluster, and it is set on
-   TWO LINES (an explicit <br> in the injected markup). On one line it measures
-   ~124px against ~67px for the widest single-word label, which overflows the
-   cluster's grid track and collides with the centred logo. Stacked, the item is
-   no wider than "Favourites" and the whole cluster fits at every width where
-   labels show. The row top-aligns (see MODE D) so every icon stays on one line
-   with "Centre" hanging below. */
+/* The visible label is the single word "Business" — the full "Business Centre"
+   lives on the link's aria-label, so nothing is lost to assistive tech.
+   Two facts keep it one word (Aug 2026):
+     - WIDTH. "Business Centre" on one line measures ~124px against ~67px for
+       "Favourites", the widest single-word label; it overflows the cluster's
+       grid track and collides with the centred logo. "Business" is ~60px —
+       NARROWER than "Favourites" — so the cluster is no wider than before.
+     - HEIGHT. It used to be stacked on two lines (an explicit <br>) to solve
+       the width problem, which made it the tallest item and forced the whole
+       row to top-align. That left the other icons sitting high in the white
+       bar. One word means uniform item heights, so the row centres (MODE D)
+       and every icon still sits on one line.
+   Do not re-stack it: that reintroduces both the top-alignment and the ~9px
+   optical lift it caused. */
 .header-actions__item--business > span:not(.header-actions__icon) {
-    text-align: center;
-    line-height: 1.15;
+    white-space: nowrap;
 }
 
 
@@ -710,18 +777,23 @@
     }
 
     /* The lead takes the left grid track; contact stacks inside it (phone only
-       — the email would starve the grid until desktop) and the admin shortcut,
-       when present, is pushed to the track's inner edge by space-between. */
+       — the email would starve the grid until desktop) and the IC brand mark is
+       pushed to the track's inner edge by space-between. */
     .header-lead {
         order: 0;
         grid-column: 1;
-        /* stretch (not start) so space-between has room to push the admin
-           shortcut to the track's inner edge, beside the logo. With no admin
-           link the lone contact stack still sits flush left, as before. */
+        /* stretch (not start) so space-between has room to push the brand mark
+           to the track's inner edge, beside the wordmark. Unlike the admin
+           shortcut this replaced, the mark ships for every visitor, so the
+           two-child layout is now the only case. */
         justify-self: stretch;
         justify-content: space-between;
         width: auto;
         margin: 0;
+    }
+
+    .header-lead__logo {
+        display: block;
     }
 
     .header-contact {
@@ -797,13 +869,31 @@
         display: inline;
     }
 
-    /* TOP-align once labels exist. The two-line Business Centre item is taller
-       than its siblings, and centring would lift its icon out of line with the
-       other three. Top-aligned, every icon sits on one row and "Centre" simply
-       hangs below. */
+    /* Alignment is inherited from the base rule (align-items: center) and must
+       stay that way. This block used to override it to flex-start because the
+       two-line "Business Centre" label made that item taller than its siblings,
+       so centring broke the icon row. The label is one word now, every item is
+       the same height, and top-aligning would only park the whole cluster ~9px
+       above the white bar's centre line.
+
+       WIDTH BUDGET — measured Aug 2026, and tight. A fully privileged account
+       shows FIVE labelled items (Business, Account, Favourites, Cart, Admin)
+       since the Admin shortcut moved into this cluster. Measured at 1440px:
+       the right grid track is 357px and the five labels alone total 322px,
+       leaving ~35px for four gaps. The old `clamp(1rem, 3vw - 1rem, 2rem)`
+       spent 109-128px on those gaps and drove the cluster ~50-93px into the
+       centred logo. It was also plain wrong above 1200px: the container is
+       capped at 1200px (see .site-header) so it stops growing, while a
+       vw-driven gap keeps growing — the overlap got WORSE on wider screens.
+       Hence a gap that tops out, not one that runs away. */
     .header-actions {
-        align-items: flex-start;
-        gap: clamp(var(--spacing-4), 3vw - 1rem, var(--spacing-xl));
+        gap: clamp(var(--spacing-2), 1vw, var(--spacing-4));
+    }
+
+    /* The fifth item is affordable only here — see the --admin rule above.
+       Above 1360px it leaves the flow entirely (MODE E). */
+    .header-actions__item--admin {
+        display: flex;
     }
 
     .nav-toggle {
@@ -896,6 +986,60 @@
         bottom: 0;
         background: rgba(0, 0, 0, 0.35);
         z-index: 5;
+    }
+}
+
+/* ==========================================================================
+   HEADER MODE D-narrow (1100-1360px) — five items still share one grid track.
+
+   The squeeze below exists ONLY because a fully privileged account shows five
+   labelled items in a ~322-357px track (ERR-148). --tap-min is a TOUCH floor
+   (WCAG 2.5.5, mobile-parity S0.1); at >=1100px we are on a pointer device, so
+   the horizontal padding and the 48px min-width can go. min-height: 48px is
+   untouched, so every target stays 48px tall and the narrowest (Cart, ~32px
+   wide) still clears WCAG 2.5.8's 24x24 by a wide margin.
+
+   It stops at 1360 because MODE E pulls Admin out of the flow there, leaving
+   four items with ~40px to spare — so the full 48px targets come back at the
+   widths most desktops actually use. Do not widen this band without redoing
+   the measurement; do not delete it, or 1100-1360 overlaps the logo again.
+   ========================================================================== */
+@media (min-width: 1100px) and (max-width: 1359.98px) {
+    .header-actions__item {
+        padding-left: 0;
+        padding-right: 0;
+        min-width: 0;
+    }
+}
+
+/* ==========================================================================
+   HEADER MODE E — >=1360px. The Admin shortcut leaves the action cluster and
+   pins to the WINDOW's right edge.
+
+   Owner request: "far right side within the right side border … it doesn't
+   need to be displayed too pretty, just so that the admin can get to it." The
+   cluster's right edge is the 1200px container's content edge, so on a wide
+   screen there is a large empty stretch of white bar to its right. Admin now
+   lives out there instead of crowding the four customer actions.
+
+   It anchors to .header-main (full-bleed, position: relative) — NOT to
+   .container, which is why .container must stay unpositioned. `top: 50%`
+   against .header-main is the white bar's true vertical centre, so Admin stays
+   in line with the cluster.
+
+   WHY 1360 AND NOT ALWAYS: the gutter only exists once the viewport clears the
+   1200px container by more than Admin's width plus insets. Pin it any narrower
+   and it lands on top of the cart — a customer-facing break, not a cosmetic
+   one. Below 1360 Admin stays the last in-flow item (MODE D), and below 1100
+   it is hidden entirely. Threshold is measured, not guessed: see the clearance
+   figures in the MODE D-narrow note above.
+   ========================================================================== */
+@media (min-width: 1360px) {
+    .header-actions__item--admin {
+        position: absolute;
+        right: var(--spacing-4);
+        top: 50%;
+        transform: translateY(-50%);
     }
 }
 

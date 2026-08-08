@@ -23,10 +23,20 @@ document.addEventListener('DOMContentLoaded', () => {
 
 /**
  * Copy for the business-account coupon exclusion, used when the backend does
- * not supply its own. Module-level because three call sites need it: the
- * preview, the apply, and the ?coupon= recovery-link path.
+ * not supply its own. Module-level because FOUR call sites need it: the
+ * preview, the apply, the ?coupon= recovery-link path, and the field lock in
+ * initBusinessCouponLock() — which used to carry its own copy of this literal,
+ * so the two could drift.
+ *
+ * It no longer says "business accounts get automatic volume pricing", because
+ * every shopper does now — that clause explained the rule while the two groups
+ * were the same people, and became false the moment volume pricing went public.
+ * The rule itself is unchanged and still business-account-only; this states it
+ * without asserting a reason that is no longer true (see BF-035/BF-036 in
+ * public-volume-pricing-backend-brief-aug2026.md, where its rationale is an
+ * open question with the backend).
  */
-const B2B_COUPON_COPY = 'Business accounts get automatic volume pricing — promo codes can’t be combined. Your loyalty points still work.';
+const B2B_COUPON_COPY = 'Promo codes can’t be combined with your business account pricing. Your loyalty points still work.';
 
 /**
  * True when a response is the business-account coupon exclusion.
@@ -448,9 +458,10 @@ function syncDiscountAccordion() {
 /**
  * Lock the promo-code field for a signed-in business account.
  *
- * Business accounts receive automatic volume pricing and cannot also apply a
- * coupon: a coupon is not floor-clamped, so stacking the two could sell a line
- * below cost. The backend enforces it with a 400 `B2B_COUPON_EXCLUDED`, and
+ * Business accounts cannot apply a coupon: a coupon is not floor-clamped, so
+ * stacking it on volume pricing could sell a line below cost. (That hazard now
+ * exists on retail carts too — see BF-035 — but the exclusion itself is still
+ * business-only.) The backend enforces it with a 400 `B2B_COUPON_EXCLUDED`, and
  * initCouponForm() handles that response — but letting a trade customer type a
  * code and press Apply just to be told no spends one of their limited attempts
  * against an endpoint that locks out, to teach them a rule we already knew.
@@ -479,7 +490,7 @@ async function initBusinessCouponLock() {
 
     const note = document.getElementById('cart-coupon-blocked');
     if (note) {
-        note.textContent = 'Business accounts get automatic volume pricing — promo codes can’t be combined. Your loyalty points still work.';
+        note.textContent = B2B_COUPON_COPY;
         note.hidden = false;
     }
     syncDiscountAccordion();

@@ -985,7 +985,7 @@ test('business.js documents the ceiling-not-guarantee rule and the duplicate-run
     assert.match(BUSINESS_SRC, /CEILING/);
     assert.match(BUSINESS_SRC, /never sell at a loss/i);
     assert.match(BUSINESS_SRC, /DUPLICATE RUNGS/i);
-    assert.match(BUSINESS_SRC, /AT QUANTITY 1 A BUSINESS ACCOUNT PAYS FULL RETAIL/);
+    assert.match(BUSINESS_SRC, /AT QUANTITY 1 EVERYONE PAYS FULL RETAIL/);
 });
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -1068,15 +1068,30 @@ test('computeDiscountBreakdown: b2b and loyalty are both netted out of "You Save
 
 test('businessDiscountLabel: names the COMPANY and never a percentage', () => {
     const { businessDiscountLabel } = loadCartHelpers();
-    assert.equal(businessDiscountLabel(LIVE_CART.b2b_discount), 'Business account — Home');
-    assert.equal(businessDiscountLabel({ company_name: '  Acme Print Co  ' }), 'Business account — Acme Print Co');
-    assert.equal(businessDiscountLabel({}), 'Business account');
-    assert.equal(businessDiscountLabel(null), 'Business account');
-    assert.equal(businessDiscountLabel({ company_name: 123 }), 'Business account');
+    assert.equal(businessDiscountLabel(LIVE_CART.b2b_discount), 'Volume discount — Home');
+    assert.equal(businessDiscountLabel({ company_name: '  Acme Print Co  ' }), 'Volume discount — Acme Print Co');
 
     // effective_percent is the realised rate over the WHOLE cart (0.7% live on a
     // cart whose one qualifying line got 5%), so it must not ride in this label.
     assert.doesNotMatch(businessDiscountLabel(LIVE_CART.b2b_discount), /%/);
+});
+
+test('businessDiscountLabel: the no-company fallback never claims a business account (ERR-149)', () => {
+    const { businessDiscountLabel } = loadCartHelpers();
+
+    // This row is UNGATED — cart.js, checkout-page.js, payment-page.js and
+    // order-totals.js all print it purely on "server reported an amount > 0".
+    // While volume pricing was business-only that made "Business account" a safe
+    // fallback; once retail carts are discounted it tells a guest they have an
+    // account they never opened. An absent company_name is the server declining
+    // to name a company, not evidence about the shopper.
+    for (const meta of [{}, null, undefined, { company_name: 123 }, { company_name: '   ' }]) {
+        const label = businessDiscountLabel(meta);
+        assert.equal(label, 'Volume discount',
+            `no company name must fall back to the neutral label, got "${label}"`);
+        assert.doesNotMatch(label, /business/i,
+            'the fallback must not assert anything about the shopper\'s account type');
+    }
 });
 
 test('the cart b2b note frames effective_percent as a cart-wide average, never a rate', () => {
@@ -1232,7 +1247,10 @@ test('PDP: the floored explainer never advertises the ceiling it did not reach',
 test('cardMarkup: the quantity is part of the claim — never a bare "business price"', () => {
     const B = loadBusiness();
     const html = B.cardMarkup(B.describeLadder(LIVE_LADDER_CLEAN));
-    assert.match(html, /Business bulk price/);
+    // "Bulk price", not "Business bulk price": every shopper gets the ladder now,
+    // so naming an account type on a public card would be false for most readers.
+    assert.match(html, /Bulk price/);
+    assert.doesNotMatch(html, /Business/);
     assert.match(html, /\$33\.94/, 'the ENTRY rung — the achievable one');
     assert.match(html, / ea/);
     assert.match(html, /Buy 3\+/, 'a price with no quantity beside it is a lie at qty 1');
@@ -1315,12 +1333,21 @@ test('isB2BCouponExcluded recognises BOTH channels the backend answers on', () =
 
 test('b2bCouponText prefers the backend wording and always has a fallback', () => {
     const { b2bCouponText } = loadCouponHelpers();
+    // The backend's own sentence is passed through verbatim when it sends one.
     assert.match(b2bCouponText(LIVE_COUPON_PREVIEW), /automatic volume pricing/);
     assert.match(b2bCouponText(LIVE_COUPON_APPLY_ERROR), /automatic volume pricing/);
-    assert.match(b2bCouponText(null), /volume pricing/);
-    assert.match(b2bCouponText({}), /loyalty points still work/i,
-        'say what DOES still work, or the message is pure denial');
-    assert.match(b2bCouponText({ message: '   ' }), /volume pricing/, 'blank is not a message');
+
+    // OUR fallback no longer explains the rule with "business accounts get
+    // automatic volume pricing" — every shopper does now, so that clause stopped
+    // being a reason and became a non-sequitur. It states the rule and what
+    // survives it, and asserts no rationale it cannot support (BF-036).
+    for (const blank of [null, {}, { message: '   ' }]) {
+        const text = b2bCouponText(blank);
+        assert.match(text, /promo codes/i, 'name the thing that was refused');
+        assert.match(text, /can’t be combined|cannot be combined/i);
+        assert.match(text, /loyalty points still work/i,
+            'say what DOES still work, or the message is pure denial');
+    }
 });
 
 test('the exclusion NEVER routes through the suggestion nudge, on any of the three paths', () => {
@@ -1376,7 +1403,18 @@ test('LOYALTY POINTS ARE NOT BLOCKED — only coupons are', () => {
     assert.doesNotMatch(body, /cart-loyalty/, 'the lock must not reach into the loyalty control');
     assert.doesNotMatch(body, /loyalty[A-Za-z]*\.disabled/i);
     assert.doesNotMatch(body, /applyLoyalty|removeLoyalty|renderCartLoyalty/);
-    assert.match(body, /loyalty points still work/i, 'and it must say what DOES still work');
+
+    // It must still SAY what works — but via the shared constant, not its own
+    // copy of the sentence. The lock used to inline a duplicate of
+    // B2B_COUPON_COPY, so the field's wording and the apply/preview wording
+    // could drift apart without either one looking wrong on its own.
+    assert.match(body, /B2B_COUPON_COPY/,
+        'the lock must reuse the module constant, not carry a second copy of the copy');
+    assert.match(CART_PAGE_SRC, /const B2B_COUPON_COPY = '[^']*loyalty points still work/i,
+        'and that constant must say what DOES still work');
+    const inlineCopies = (stripComments(CART_PAGE_SRC).match(/loyalty points still work/gi) || []);
+    assert.equal(inlineCopies.length, 1,
+        `the sentence must exist in exactly ONE executable place, found ${inlineCopies.length}`);
 });
 
 test('the ?coupon= recovery link does not reopen a dead field for a business account', () => {

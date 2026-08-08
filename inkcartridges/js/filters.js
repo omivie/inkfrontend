@@ -235,10 +235,11 @@ const Filters = {
                         productGrid.innerHTML = Products.renderCards(products);
                         Products.bindImageFallbacks(productGrid);
                         Products.bindAddToCartEvents(productGrid);
-                        // Business bulk-price overlay. Every grid that paints
-                        // product cards has to do this or a business customer
-                        // sees volume pricing on some pages and not others.
-                        Products.decorateBusinessPricing(productGrid);
+                        // Bulk-price overlay. Every grid that paints product
+                        // cards has to do this, passing the payload it rendered
+                        // from, or a shopper sees volume pricing on some pages
+                        // and not others.
+                        Products.decorateBusinessPricing(productGrid, products);
                     }
 
                     // Update pagination

@@ -302,66 +302,6 @@
 .trust-bar__item:nth-child(4) .trust-bar__icon { color: var(--cyan-dark); }
 
 /* ==========================================================================
-   TRUST STATS — sitewide social proof (traffic-conversion-jul2026 §2)
-   ==========================================================================
-   Big-number tiles under the trust bar: "47+ / customers served". Populated by
-   js/landing.js from /api/site/trust; the section ships `hidden` and only
-   unhides when at least one count comes back non-null, so nothing here has to
-   cope with an empty or "0+" state. Flex-wrap (not a fixed grid) so 1, 2 or 3
-   surviving tiles all centre correctly — any of those is a real possibility
-   since each count can be null independently.
-   ========================================================================== */
-
-.trust-stats {
-    padding: var(--spacing-lg) 0;
-    background-color: var(--white-primary);
-    border-bottom: 1px solid var(--color-border);
-}
-
-.trust-stats__list {
-    display: flex;
-    justify-content: center;
-    flex-wrap: wrap;
-    gap: clamp(var(--spacing-lg), 6vw, var(--spacing-2xl));
-    margin: 0;
-    padding: 0;
-    list-style: none;
-}
-
-.trust-stats__item {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 2px;
-    text-align: center;
-}
-
-.trust-stats__value {
-    font-size: clamp(1.5rem, 4vw, 2rem);
-    font-weight: 700;
-    line-height: 1.1;
-    color: var(--cyan-dark);
-    font-variant-numeric: tabular-nums;
-}
-
-/* CMY rotation, matching the trust bar directly above it. */
-.trust-stats__item:nth-child(2) .trust-stats__value { color: var(--magenta-primary); }
-.trust-stats__item:nth-child(3) .trust-stats__value { color: var(--yellow-dark); }
-
-.trust-stats__label {
-    font-size: var(--font-size-xs);
-    color: var(--steel-700);
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-}
-
-@media (max-width: 480px) {
-    .trust-stats__list {
-        gap: var(--spacing-md) var(--spacing-lg);
-    }
-}
-
-/* ==========================================================================
    FIND YOUR INK FAST - Guided Printer Finder
    ========================================================================== */
 

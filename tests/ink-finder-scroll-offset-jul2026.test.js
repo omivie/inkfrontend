@@ -13,7 +13,7 @@
  * Fix: one shared scrollToInkFinder() that centres the card in the space BELOW
  * the pinned header, with a MEASURED header height and a settle pass that
  * re-corrects after the mid-flight layout shifts (header pins, mobile header
- * collapses, #trust-stats un-hides from /api/site/trust). The geometry lives in
+ * collapses). The geometry lives in
  * landing.js — next to the observer that pins the header, and on exactly the
  * two pages that have the finder; main.js only delegates via
  * window.InkFinderScroll (which also keeps it under its 750-line audit budget,
@@ -306,7 +306,7 @@ test('F4d landing.js ships on every page that has the finder', () => {
 test('F5 correctInkFinderScroll re-measures after settle with a Safari fallback', () => {
     assert.match(LANDING_JS, /function\s+correctInkFinderScroll\s*\(/,
         'expected a settle/correction pass — the target moves mid-flight when the ' +
-        'header pins, the mobile header collapses, or #trust-stats un-hides');
+        'header pins or the mobile header collapses');
     const block = LANDING_JS.match(/function\s+correctInkFinderScroll\s*\([\s\S]*?\n {4}\}\n/)[0];
     assert.match(block, /'scrollend'/, 'must settle on scrollend where available');
     assert.match(block, /setTimeout\(settle/, 'Safari has no scrollend — needs a timeout fallback');

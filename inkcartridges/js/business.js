@@ -1,10 +1,37 @@
 /**
  * BUSINESS.JS
  * ===========
- * B2B "Business Account" VOLUME pricing for InkCartridges.co.nz.
+ * VOLUME pricing for InkCartridges.co.nz, plus the business-account surfaces.
  *
  * Backend handoff: readfirst/business-account-pricing-v2-FE-handoff-jul2026.md
  * FE response:     business-account-volume-pricing-FE-response-jul2026.md
+ * Public ladder:   public-volume-pricing-backend-brief-aug2026.md (BF-032…BF-038)
+ *
+ * TWO THINGS LIVE IN THIS FILE, AND ONLY ONE OF THEM IS GATED
+ * -----------------------------------------------------------
+ * 1. THE LADDER — the quantity price breaks. Public. Every shopper gets it,
+ *    including signed-out guests, because buying three of something is not a
+ *    privilege. It arrives on the catalog payload the page already fetched
+ *    (`quantity_breaks[]` on a product object) and is handed to `ingest()`.
+ * 2. THE ACCOUNT — `getStatus()`, the header shortcut, the Business Centre, the
+ *    coupon lock. Gated, signed-in only, and still the only thing that fires a
+ *    request to `/api/business/*`.
+ *
+ * Keeping both here is deliberate: `describeLadder()` must stay the ONE
+ * interpreter of a ladder, and the coupon lock has to ask about the account.
+ * But the caches are separate and the gates are not shared — see `_ladderCache`.
+ *
+ * A ladder on a public payload IS the backend's promise that the cart charges
+ * those prices at those quantities. We never infer it, and we never render a
+ * quantity price we were not handed: advertising a break the cart does not
+ * honour is the one failure mode worse than showing no break at all.
+ *
+ * WHAT THIS DESIGNED OUT (the ERR-139 shape)
+ * ------------------------------------------
+ * No pricing surface reads `/api/business/status` any more, so a status outage
+ * can no longer take a customer's ladder away — `_statusDegraded` now affects
+ * only the header shortcut. Previously a 500 on an unrelated endpoint silently
+ * downgraded every price on the page.
  *
  * WHAT v2 CHANGED (and why the v1 frontend went silently dark)
  * -----------------------------------------------------------
@@ -60,23 +87,36 @@
  * plain retail with no B2B surface — silently, because that is a real answer
  * rather than the unrecognised-payload case below, which must warn.
  *
- * AT QUANTITY 1 A BUSINESS ACCOUNT PAYS FULL RETAIL. There is no such thing as
- * "the business price" of a SKU — only the price at a quantity. Anything that
- * shows one number without a quantity beside it is lying.
+ * AT QUANTITY 1 EVERYONE PAYS FULL RETAIL — a business account included. There
+ * is no such thing as "the bulk price" of a SKU, only the price at a quantity.
+ * Anything that shows one number without a quantity beside it is lying.
  *
  * The entry rung is BAND-DEPENDENT: 2+ in the three bands from $100 up, 3+ in
  * the three below. (Before 2026-08-02 it was 3+ everywhere, and this comment
  * said so.) Never build on one of those numbers — read `ladder.entry`. The only
  * durable invariant is that no band has ever had a qty-1 rung.
  *
- * Two endpoints, both auth-gated (verified live: 401 unauthenticated, vs 404 for
- * a bogus /api/business/nope path — the routes exist):
- *   GET /api/business/status                -> is this user a business account
- *   GET /api/business/pricing?skus=A,B,...  -> per-SKU volume ladder (max 100)
+ * WHERE A LADDER COMES FROM, in order:
+ *   1. `ingest(products)` — the public `quantity_breaks[]` off a catalog payload
+ *      the page already fetched. No request, no auth, works for guests.
+ *   2. GET /api/business/pricing?skus=A,B,...  — the legacy authed route, still
+ *      consulted ONLY for an active business account, and only for SKUs step 1
+ *      did not answer. This is the compatibility path: it keeps approved
+ *      accounts whole until BF-032 ships and disappears on its own afterwards,
+ *      because step 1 will answer everything.
+ * Plus GET /api/business/status, which now decides account questions only.
+ * Both endpoints are auth-gated (verified live 2026-08-08: 401 unauthenticated).
  *
- * CACHING: in-memory ONLY, and wiped whenever the signed-in user changes.
- * Business prices are per-account and must never leak to another shopper, so
- * localStorage/sessionStorage are deliberately not used here.
+ * A guest therefore still fires ZERO requests to /api/business/* — the ladder
+ * reaches them on a payload they were already being sent.
+ *
+ * CACHING: in-memory ONLY; localStorage/sessionStorage are deliberately not used
+ * for prices. TWO caches, and the split is a safety property, not tidiness:
+ *   `_ladderCache` — public, identical for every shopper, never wiped.
+ *   `_priceCache`  — whatever the authed route returned, wiped on every auth
+ *                    change. If a per-account rate is ever reintroduced it lands
+ *                    here and still cannot leak to the next shopper.
+ * Collapsing them would quietly delete that guarantee.
  *
  * FAIL-SOFT, LOUDLY: a SKU the server declined to answer for is NOT the same as
  * a SKU that is genuinely absent from the catalog. The first lands in `missed`
@@ -136,7 +176,12 @@ const Business = {
     // sign out, account switch) throws the whole cache away before it can be read.
     _cacheOwner: undefined,
     _statusPromise: null,
-    _priceCache: new Map(),   // sku -> item object from the API
+    _priceCache: new Map(),   // sku -> item from the AUTHED route; owner-scoped
+    // sku -> item built from a PUBLIC catalog payload. Identical for every
+    // shopper, so it is deliberately NOT owner-scoped and reset() leaves it
+    // alone: signing in or out cannot change a public price, and binning it
+    // would make every post-login grid repaint go dark until the next fetch.
+    _ladderCache: new Map(),
     // True when the last status call returned a NON-ANSWER (5xx, network, throw)
     // rather than an honest "not a business account". Distinguishing the two is
     // what stops an outage from looking like a deliberate downgrade (ERR-139).
@@ -176,6 +221,66 @@ const Business = {
         const out = [];
         for (let i = 0; i < list.length; i += n) out.push(list.slice(i, i + n));
         return out;
+    },
+
+    /**
+     * Take the public volume ladder off a catalog payload the page already has.
+     *
+     * This is how every shopper gets price breaks: grids and the PDP hand over
+     * the products they just fetched, and no request is made for pricing at all.
+     * Call it immediately before decorateCards()/getLadderFor() with whatever
+     * array or single product the caller is holding — it is cheap, idempotent,
+     * and safe to call on every repaint.
+     *
+     * ABSENCE IS NOT AN EMPTY LADDER. A product with no `quantity_breaks` field
+     * is a backend that has not shipped BF-032 yet, and it is stored as nothing
+     * at all, so the caller falls through to the authed route (business account)
+     * or renders plain retail (everyone else). A product WITH an empty array is
+     * the documented "this band has no volume discount" and IS stored, so we
+     * stop asking about it. Treating the first as the second would turn a
+     * missing feature into a confident "no discount available" — the
+     * ERR-063/068/073/149 shape, and the one this module exists to avoid.
+     *
+     * `found`/`is_active` are synthesised because a catalog product carries
+     * neither; being in the catalog response is what "found" means here.
+     *
+     * @param {object|Array<object>} productOrList  catalog product object(s)
+     * @returns {number} how many ladders were taken in
+     */
+    ingest(productOrList) {
+        const list = Array.isArray(productOrList) ? productOrList
+            : (productOrList ? [productOrList] : []);
+        let taken = 0;
+        for (const p of list) {
+            if (!p || typeof p !== 'object') continue;
+            const sku = typeof p.sku === 'string' ? p.sku.trim() : '';
+            if (!sku) continue;
+            if (!Array.isArray(p.quantity_breaks)) continue;   // not shipped yet — say nothing
+            const retail = Number(p.retail_price);
+            if (!Number.isFinite(retail) || retail <= 0) continue;
+            this._ladderCache.set(sku, {
+                sku,
+                found: true,
+                is_active: true,
+                retail_price: retail,
+                quantity_breaks: p.quantity_breaks
+            });
+            taken++;
+        }
+        return taken;
+    },
+
+    /**
+     * Do we have a public ladder for at least one of these SKUs?
+     * Lets the decorators skip the auth round-trip entirely on the common path.
+     * @param {Array<string>} skus
+     * @returns {boolean}
+     */
+    hasLadderFor(skus) {
+        for (const sku of this.normalizeSkus(skus)) {
+            if (this._ladderCache.has(sku)) return true;
+        }
+        return false;
     },
 
     /**
@@ -489,7 +594,14 @@ const Business = {
             typeof Auth.isAuthenticated === 'function' && Auth.isAuthenticated();
     },
 
-    /** Drop every cached status and price. Called on any auth change. */
+    /**
+     * Drop every cached status and per-account price. Called on any auth change.
+     *
+     * `_ladderCache` is deliberately NOT cleared: it holds public prices that are
+     * identical for every shopper, so there is nothing to leak and nothing that
+     * signing in could change. Clearing it would blank the ladder on every grid
+     * already painted at the moment a session resolves.
+     */
     reset() {
         this._statusPromise = null;
         this._priceCache.clear();
@@ -588,14 +700,17 @@ const Business = {
         a.setAttribute('aria-label', 'Business Centre');
         a.innerHTML = '<span class="header-actions__icon">' +
             '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></svg>' +
-            // Set on TWO LINES via an explicit <br>: "Business Centre" on one
-            // line measures ~124px against ~67px for the other labels, which
-            // overflows the cluster's grid track and collides with the centred
-            // logo. Stacked, the item is no wider than "Favourites". The
-            // aria-label above carries the name for assistive tech, so the
-            // break is presentational only.
-            '</span><span>Business<br>Centre</span>';
-        // First item, so it leads the cluster where Admin used to sit.
+            // ONE WORD, one line. "Business Centre" on one line measures ~124px
+            // against ~67px for the widest other label and collides with the
+            // centred logo; it used to be stacked on two lines via a <br>, which
+            // fixed the width but made this the tallest item and forced the whole
+            // cluster to top-align (see .header-actions__item--business in
+            // layout.css). "Business" alone is ~60px — narrower than
+            // "Favourites" — and the same height as its siblings, so the row
+            // centres in the white bar. The aria-label above carries the full
+            // name for assistive tech, so the shortened label is visual only.
+            '</span><span>Business</span>';
+        // First item, so it leads the cluster; Admin is appended last (main.js).
         actions.insertBefore(a, actions.firstElementChild);
         return a;
     },
@@ -702,7 +817,12 @@ const Business = {
     },
 
     /**
-     * Fetch volume ladders for a set of SKUs.
+     * Resolve volume ladders for a set of SKUs, for ANY shopper.
+     *
+     * Two sources, in order: the public ladder handed over by `ingest()`, then —
+     * only for an active business account, and only for what is still
+     * unanswered — the legacy authed route. A guest resolves entirely from
+     * source one or not at all, and never touches the network here.
      *
      * Returns BOTH what we got and what we failed to get. `missed` is part of
      * the return value on purpose: a caller that renders retail for a missed
@@ -713,19 +833,35 @@ const Business = {
      * @returns {Promise<{items: Map<string, object>, missed: Array<string>}>}
      */
     async getPricing(skus) {
-        const status = await this.getStatus();
         const result = { items: new Map(), missed: [] };
-
-        // Not a business account: not an error, and not a miss. Nothing to show.
-        if (!status.active) return result;
-
-        this._syncCacheOwner();
 
         const wanted = this.normalizeSkus(skus);
         if (!wanted.length) return result;
 
-        const need = [];
+        // STEP 1 — the public ladder, for everyone. No auth, no request, no wait.
+        // Deliberately before getStatus(): that call awaits Auth's async session
+        // bootstrap for up to 3s, and making a guest's grid paint queue behind
+        // an auth handshake to render a public price would be absurd.
+        const unresolved = [];
         for (const sku of wanted) {
+            if (this._ladderCache.has(sku)) result.items.set(sku, this._ladderCache.get(sku));
+            else unresolved.push(sku);
+        }
+        if (!unresolved.length) return result;
+
+        // STEP 2 — the legacy authed route, for an active business account only.
+        // Compatibility path: it keeps approved accounts whole until BF-032 puts
+        // quantity_breaks on the public payload, after which step 1 answers
+        // everything and this never runs. A guest reaching here has simply not
+        // been handed a ladder, which is not a miss and not an error — the same
+        // silent retail fallback as a SKU whose band has no volume discount.
+        const status = await this.getStatus();
+        if (!status.active) return result;
+
+        this._syncCacheOwner();
+
+        const need = [];
+        for (const sku of unresolved) {
             if (this._priceCache.has(sku)) result.items.set(sku, this._priceCache.get(sku));
             else need.push(sku);
         }
@@ -817,7 +953,7 @@ const Business = {
             : `Buy ${this.breakLabel(entry)}`;
         return (
             `<span class="product-card__biz-price" data-testid="business-card-price">` +
-                `<span class="product-card__biz-label">Business bulk price</span>` +
+                `<span class="product-card__biz-label">Bulk price</span>` +
                 `<span class="product-card__biz-amount">${Security.escapeHtml(this._money(entry.businessPrice))}` +
                     `<span class="product-card__biz-unit"> ea</span></span>` +
                 `<span class="product-card__biz-save">${Security.escapeHtml(sub)}</span>` +
@@ -830,7 +966,7 @@ const Business = {
      * Six grids render product tiles from four different bits of markup
      * (products.js, shop-page.js, ribbons-page.js, landing.js) plus the saved
      * list (favourites.js); listing them here rather than in each caller is what
-     * keeps a business customer from seeing bulk pricing on /shop and not on
+     * keeps a shopper from seeing bulk pricing on /shop and not on
      * /account/favourites — which is the surface where they actually reorder.
      */
     CARD_SELECTOR: '.product-card[data-sku], .favourite-item[data-sku]',
@@ -860,9 +996,12 @@ const Business = {
     },
 
     /**
-     * Decorate already-rendered product cards with the signed-in business
-     * customer's bulk pricing. Runs after a grid renders; no-ops instantly for
-     * guests and retail shoppers, so the card renderers stay untouched.
+     * Decorate already-rendered product cards with their bulk price. Runs after a
+     * grid renders, for every shopper, so the card renderers stay untouched.
+     * No-ops instantly when nothing has a ladder.
+     *
+     * Call `ingest()` with the grid's products first — otherwise there is no
+     * public ladder to find and only a business account gets decorated.
      *
      * @param {Element|Document} [root=document]
      * @returns {Promise<number>} how many cards were decorated
@@ -870,13 +1009,21 @@ const Business = {
     async decorateCards(root) {
         const scope = root || document;
         if (!scope || typeof scope.querySelectorAll !== 'function') return 0;
-        if (!(await this.isActive())) return 0;
 
         const cards = Array.from(scope.querySelectorAll(this.CARD_SELECTOR))
             .filter(card => !card.querySelector('.product-card__biz-price'));
         if (!cards.length) return 0;
 
-        const { items } = await this.getPricing(cards.map(c => c.getAttribute('data-sku')));
+        const skus = cards.map(c => c.getAttribute('data-sku'));
+
+        // Cheapest sufficient guard. A public ladder means we can decorate right
+        // now with no request and no auth wait; otherwise only an active business
+        // account has anything to fetch. This replaced a bare isActive() check —
+        // dropping the guard altogether would put an auth round-trip in front of
+        // every grid paint for every visitor.
+        if (!this.hasLadderFor(skus) && !(await this.isActive())) return 0;
+
+        const { items } = await this.getPricing(skus);
 
         let decorated = 0;
         for (const card of cards) {
@@ -926,7 +1073,7 @@ const Business = {
 
     /**
      * Decorate rendered cart lines with their next volume break. Mirrors
-     * decorateCards: one batched pricing call, no-op for guests and retail.
+     * decorateCards: resolves from the public ladder, no-op when there is none.
      *
      * Reads `data-sku` / `data-quantity` off each `.cart-item`.
      *
@@ -937,10 +1084,12 @@ const Business = {
     async decorateCartLines(root, maxQuantity) {
         const scope = root || document;
         if (!scope || typeof scope.querySelectorAll !== 'function') return 0;
-        if (!(await this.isActive())) return 0;
 
         const lines = Array.from(scope.querySelectorAll('.cart-item[data-sku]'));
         if (!lines.length) return 0;
+
+        const skus = lines.map(l => l.getAttribute('data-sku'));
+        if (!this.hasLadderFor(skus) && !(await this.isActive())) return 0;
 
         // Repaint from scratch every time: a quantity change moves the nudge.
         for (const line of lines) {
@@ -948,7 +1097,7 @@ const Business = {
             if (stale) stale.remove();
         }
 
-        const { items } = await this.getPricing(lines.map(l => l.getAttribute('data-sku')));
+        const { items } = await this.getPricing(skus);
 
         let decorated = 0;
         for (const line of lines) {

@@ -267,10 +267,14 @@
                                 <li><a href="/quote">Request a Quote</a></li>
                                 <!-- The ONLY site-wide entry point to /business.
                                      Without it the Business Centre is an orphan:
-                                     every other B2B surface is gated behind a
-                                     signed-in approved account, so a prospective
-                                     business customer has no way to discover that
-                                     volume pricing exists at all.
+                                     every remaining B2B surface (invoices, Net 30,
+                                     the account panel) is gated behind a signed-in
+                                     approved account, so a prospective business
+                                     customer would have no way to discover it.
+                                     Volume pricing is no longer part of that
+                                     argument — the ladder is public and visible on
+                                     every product page — but the Centre itself
+                                     still needs a door.
                                      Labelled "Business & Bulk Pricing", never the
                                      retired "Business Accounts" wording — there is
                                      no account-level rate under a volume model, and

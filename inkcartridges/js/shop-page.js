@@ -3788,12 +3788,14 @@
                 Products.bindImageFallbacks(container);
             }
 
-            // Business-account pricing overlay. Batches the grid's SKUs in one
-            // call and no-ops instantly for guests and retail shoppers, so the
-            // card renderer itself stays synchronous and untouched.
+            // Bulk-price overlay, for every shopper. ingest() takes the ladder
+            // straight off the payload this grid was rendered from, so the
+            // overlay costs no request; the card renderer itself stays
+            // synchronous and untouched.
             if (typeof Business !== 'undefined') {
+                Business.ingest(products);
                 Business.decorateCards(container).catch(e =>
-                    DebugLog.warn('[Shop] business pricing overlay failed:', e && e.message));
+                    DebugLog.warn('[Shop] bulk pricing overlay failed:', e && e.message));
             }
         },
 
