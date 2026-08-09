@@ -4,6 +4,7 @@
  */
 import { PRODUCT_TYPE_TO_SHOP_CATEGORY } from './utils/product-codes.js';
 import { normalisePurgeResult } from './utils/order-deletability.js';
+import { BusinessAccountRegistry } from './utils/business-accounts.js';
 
 // Direct RPC via Supabase REST — avoids creating a second GoTrueClient
 async function rpc(fnName, params = {}, signal = null) {
@@ -87,6 +88,14 @@ const INVOICE_STATUSES = Object.freeze(['draft', 'unpaid', 'paid']);
 // would have been in the contract doc that was never delivered, so we chunk
 // conservatively and sequentially rather than assume there is no ceiling.
 const PURGE_CHUNK = 25;
+
+// `GET /api/admin/business/applications` rejects limit > 100 with a 400 — it does
+// NOT clamp — so the page size is a hard ceiling, not a preference. Ten pages is
+// the walk-away point: it covers 1,000 applications, and beyond that the honest
+// answer ("we only read part of the queue") is better than an unbounded loop
+// against a 30/min admin limiter.
+const BUSINESS_APPLICATION_PAGE_MAX = 100;
+const BUSINESS_APPLICATION_MAX_PAGES = 10;
 
 /**
  * Turn a non-ok `{ ok:false, error, code, status, request_id }` envelope into an
@@ -2975,25 +2984,145 @@ const AdminAPI = {
   //
   // `standalone_invoices.business_account_id` is a FK to business_accounts(id),
   // and that id is the ONE value that puts an invoice on a customer's /business
-  // portal. As of 2026-08-03 NO endpoint exposes it: /api/admin/business-accounts
-  // is a 404, and the FK rejects both business_applications.id and user_id
-  // (verified against production — see business-centre-FE-response-aug2026.md).
+  // portal. NO endpoint exposes it: GET /api/admin/business/accounts is a 404
+  // (re-probed 2026-08-09), and the FK rejects both business_applications.id and
+  // user_id (see business-centre-FE-response-aug2026.md).
   //
-  // So this resolves null today and the editor says so out loud rather than
-  // offering a picker that would write a value the database refuses. It lights
-  // up the moment the endpoint ships. `null` = "we don't know", which is NOT the
-  // same as `[]` = "there are no approved accounts", and the caller renders them
-  // differently.
+  // THE PATH WAS WRONG UNTIL 2026-08-09 (ERR-152). This asked for
+  // `/api/admin/business-accounts`, in a namespace the backend does not use —
+  // every admin business route lives under the `/api/admin/business/` prefix.
+  // (Written out rather than glob-punctuated on purpose: a literal slash-star in
+  // a line comment opens a block comment as far as the test suite's source
+  // stripper is concerned, and silently swallows the next 2.7kB of real code.)
+  // The old comment
+  // promised it would "light up the moment the endpoint ships"; it would not
+  // have, ever, and nothing would have said so, because a guessed URL and a
+  // correct-but-unshipped one produce the identical fail-soft null.
+  //
+  // `null` = "we don't know", which is NOT the same as `[]` = "there are no
+  // approved accounts", and the caller renders them differently.
+  //
+  // Accounts this device recorded at creation time are merged in, tagged
+  // `_source: 'device'`, so the picker works for accounts the sales team made
+  // here. They are NOT the list of business accounts and the caller labels them
+  // as local — see utils/business-accounts.js.
   //
   // @returns {Promise<Array|null>} approved accounts, or null when unavailable
   async listBusinessAccounts() {
+    const local = BusinessAccountRegistry.all().accounts
+      .filter((a) => a.status !== 'closed')
+      .map((a) => ({
+        id: a.business_account_id,
+        user_id: a.user_id,
+        company_name: a.company_name,
+        contact_email: a.contact_email,
+        status: a.status,
+        _source: 'device',
+      }));
     try {
-      const resp = await window.API.get('/api/admin/business-accounts?limit=200');
+      const resp = await window.API.get('/api/admin/business/accounts?limit=200');
       const rows = resp?.data?.accounts ?? resp?.data?.items ?? (Array.isArray(resp?.data) ? resp.data : null);
-      if (!Array.isArray(rows)) return null;
-      return rows.filter((r) => r && (r.status == null || r.status === 'approved' || r.status === 'active'));
+      if (!Array.isArray(rows)) return local.length ? local : null;
+      const server = rows.filter((r) => r && (r.status == null || r.status === 'approved' || r.status === 'active'));
+      const seen = new Set(server.map((r) => String(r.id)));
+      return server.concat(local.filter((a) => !seen.has(String(a.id))));
     } catch (e) {
       adminApiWarn('Business accounts unavailable (portal linking is disabled)', e);
+      return local.length ? local : null;
+    }
+  },
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // BUSINESS ACCOUNTS — in-person upgrade (super_admin)
+  // Contract: readfirst/business-one-click-upgrade-FE-handoff-aug2026.md
+  // ─────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Upgrade an existing customer to a Business account, in one call.
+   *
+   * THE RETURNED `id` IS UNRECOVERABLE. There is no GET for business accounts
+   * and the 409 body carries no id, so this response is the only place it ever
+   * appears. Callers MUST hand it to BusinessAccountRegistry.record() before
+   * doing anything else, or PATCH becomes unreachable for that account forever.
+   *
+   * Throws with `.code` (CONFLICT | NOT_FOUND | VALIDATION_FAILED | …) and
+   * `.details[]` — feed it to describeCreateError().
+   *
+   * @returns {Promise<{id:string, application_id:string}>}
+   */
+  async createBusinessAccount(payload) {
+    const resp = await window.API.post('/api/admin/business/accounts', payload);
+    if (resp && resp.ok === false) throw invoiceError(resp, 'Could not upgrade this customer');
+    return resp?.data ?? null;
+  },
+
+  /**
+   * Manage an existing business account: credit_limit, net30_approved, status
+   * (active | suspended | closed). Suspending/closing takes effect immediately.
+   */
+  async updateBusinessAccount(businessAccountId, patch) {
+    const resp = await window.API.patch(
+      `/api/admin/business/accounts/${encodeURIComponent(businessAccountId)}`,
+      patch,
+    );
+    if (resp && resp.ok === false) throw invoiceError(resp, 'Could not update that business account');
+    return resp?.data?.account ?? resp?.data ?? null;
+  },
+
+  /**
+   * The business applications queue.
+   *
+   * ONLY `status` IS A REAL FILTER. The endpoint accepts `user_id=` and
+   * `search=` and silently ignores both — verified 2026-08-09, a bogus user_id
+   * returns the entire table. Sending either would hand the caller every row
+   * while it believed it had one customer's. Match on user_id client-side with
+   * matchApplications() instead; never widen this parameter list (ERR-151).
+   *
+   * Two live routes serve this with different envelopes — `/business/applications`
+   * reports `data.pagination` (default limit 20), `/business-applications`
+   * reports a top-level `meta` with `total_pages` (default limit 50). js/api.js
+   * copies `meta` onto `data.pagination`, so read the normalised one and keep
+   * `total` even when it is absent, because a missing total means "we cannot
+   * tell if this page is the whole table".
+   *
+   * `limit` IS CAPPED AT 100 — 101 is a 400, not a silent clamp (verified
+   * 2026-08-09). So this PAGES until it has the whole table, because the
+   * question every caller actually asks is "does THIS customer have an
+   * application", and only a complete read can answer no. Stopping at one page
+   * would quietly turn every answer into "unknown" the day the queue passes 100.
+   *
+   * It stops at BUSINESS_APPLICATION_MAX_PAGES and returns what it has; the
+   * shortfall is then visible as `applications.length < pagination.total`, which
+   * matchApplications() reads as an incomplete read. Truncation is never
+   * silent — see the page's "Showing the first N of M" note.
+   *
+   * @returns {Promise<{applications:Array, pagination:object|null}|null>} null when unreadable
+   */
+  async listBusinessApplications({ status = null, limit = 100 } = {}) {
+    const perPage = Math.min(Math.max(1, Number(limit) || 100), BUSINESS_APPLICATION_PAGE_MAX);
+    try {
+      const collected = [];
+      let pagination = null;
+      for (let page = 1; page <= BUSINESS_APPLICATION_MAX_PAGES; page++) {
+        const params = new URLSearchParams();
+        params.set('page', page);
+        params.set('limit', perPage);
+        if (status) params.set('status', status);
+        const resp = await window.API.get(`/api/admin/business/applications?${params}`);
+        if (!resp || resp.ok === false) return page === 1 ? null : { applications: collected, pagination };
+        const rows = resp?.data?.applications ?? (Array.isArray(resp?.data) ? resp.data : null);
+        if (!Array.isArray(rows)) return page === 1 ? null : { applications: collected, pagination };
+        pagination = resp?.data?.pagination ?? resp?.meta ?? pagination;
+        collected.push(...rows);
+        // An EMPTY page ends pagination — a short page does not necessarily
+        // (ERR-134). Also stop once the reported total is covered.
+        const total = pagination && Number(pagination.total);
+        if (!rows.length) break;
+        if (Number.isFinite(total) && collected.length >= total) break;
+      }
+      return { applications: collected, pagination };
+    } catch (e) {
+      adminApiWarn('Business applications unavailable', e);
       return null;
     }
   },

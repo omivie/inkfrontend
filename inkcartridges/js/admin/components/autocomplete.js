@@ -99,6 +99,20 @@ export function attachAutocomplete(input, opts) {
   menu.id = acId;
   menu.setAttribute('role', 'listbox');
   if (menuClass) menu.classList.add(...String(menuClass).split(/\s+/).filter(Boolean));
+  // An input INSIDE a modal needs a menu above that modal.
+  //
+  // The portalled menu deliberately sits at z-index 1150 — over the drawer
+  // (1001) and the product modal (1100) but UNDER .admin-modal-backdrop (1200),
+  // so a confirm dialog covers an autocomplete left open behind it. That is
+  // right for every existing caller, and exactly wrong for an autocomplete that
+  // lives in the dialog: the menu renders, is hit-tested behind the backdrop,
+  // and the operator clicks a result that cannot be clicked. Found live on the
+  // Business page's customer picker, the first autocomplete mounted inside a
+  // plain .admin-modal.
+  //
+  // Raised only for that case, measured from the anchor rather than passed in by
+  // the caller, so no caller can forget it.
+  if (input.closest('.admin-modal-backdrop')) menu.classList.add('admin-ac__menu--over-modal');
   document.body.appendChild(menu);
 
   input.setAttribute('role', 'combobox');

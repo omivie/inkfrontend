@@ -41,6 +41,198 @@ describing the same incident.
 
 ---
 
+## ERR-151 — The business-applications endpoint accepts `user_id=`, ignores it, and returns the whole table, so a per-customer lookup would have named a stranger's company (2026-08-09)
+
+**Context.** The one-click Business upgrade puts an "Upgrade to Business" button on the admin customer
+drawer. Before offering it, the drawer should say what the customer's standing already is — already a
+business account, application pending, or neither — because upgrading auto-closes any pending
+application as superseded, and re-upgrading an existing account is a 409. The only readable evidence
+is `GET /api/admin/business-applications`, which returns `user_id` on every row. The obvious call is
+`?user_id=<the customer>`.
+
+**Root cause.** That parameter is accepted and silently ignored. Measured against production:
+`?user_id=00000000-0000-0000-0000-000000000000` — a UUID belonging to nobody — returns the full table,
+and so does `?search=zzzznotreal`. Only `status=` filters, and it is Joi-validated, so a bogus *status*
+400s loudly while a bogus *identity* returns everything quietly.
+
+Had the frontend trusted it, `applications[0]` would have been treated as "this customer's
+application" for every customer in the system. The drawer would have reported the first row's company
+name — a real business, someone else's — as this customer's, marked them already upgraded, and hidden
+the button. Every customer, one wrong answer, no error anywhere.
+
+**Why it looked right.** The parameter is the obvious name, the endpoint returns 200, the payload has
+the right shape, and the rows contain a `user_id` field — which reads as confirmation that the server
+understood the question. Nothing in the response distinguishes "filtered to your customer" from "here
+is everything".
+
+**The fix.** `matchApplications(rows, userId, pagination)` in
+`js/admin/utils/business-accounts.js` matches on `user_id` in the frontend, over rows fetched with no
+identity parameter at all, and `AdminAPI.listBusinessApplications` refuses to send one — pinned by a
+source-level test, because the trap is invisible at runtime.
+
+The same function draws the line that matters afterwards: a page of rows can prove **presence**, but
+only a complete read can prove **absence**. A partial or failed read that finds no match returns
+`unknown`, never "not a business account", and the drawer renders that as a read problem rather than a
+verdict. The endpoint caps `limit` at 100 with a 400 rather than clamping, so the read pages until it
+has covered `pagination.total`.
+
+**Verified:** live in the admin centre against production. The queue renders its one real row; a
+customer with no application resolves to "Not a business account. No application on file."; a real
+409 from the live endpoint renders "This customer already has a business account."
+
+**The lesson.** ERR-075 was a filter whose bogus value returned **nothing**, silently. This is the
+same defect pointing the other way, and the other way is worse: zero rows looks like a bug and gets
+investigated, whereas a full table looks like data and gets rendered. **An accepted query parameter is
+not an honoured one.** The test is one request with a value that must match nothing — if it comes back
+full, the server is ignoring you. Run it before building anything on top of a filter, and do the
+matching locally when the answer has to be right.
+
+---
+
+## ERR-152 — A fail-soft lookup pointed at a URL nobody had ever served, and "waiting for the endpoint" looked identical to asking the wrong question (2026-08-09)
+
+**Context.** `standalone_invoices.business_account_id` is the one value that puts an invoice on a
+customer's Business Centre. On 2026-08-03 no endpoint exposed a `business_accounts.id`, so
+`AdminAPI.listBusinessAccounts()` was written to fail soft — resolve `null`, let the invoice editor
+say the control is unavailable, and, in its own comment, "light up the moment the endpoint ships".
+
+**Root cause.** It asked for `/api/admin/business-accounts`. Every admin business route the backend
+actually serves sits under the `/api/admin/business/` prefix — `…/business/applications`,
+`…/business/accounts`. The hyphenated path is in a namespace that has never existed for accounts, so
+the call was not waiting for anything. It would have 404'd forever, and the day the real endpoint
+shipped it would have kept on 404ing.
+
+**Why it looked right.** Because a fail-soft read cannot tell you which failure it is having. `null`
+meant "we could not ask", and "we could not ask" was true — the reason just wasn't the one written in
+the comment. The UI state was correct, the tests were green, and the code was honest about its
+uncertainty in every respect except the one that mattered. A promise that something will start working
+later is only worth the URL it is pointed at, and nothing checks a URL that is expected to fail.
+
+**The fix.** Repointed at `/api/admin/business/accounts` (still a 404 today — but now a 404 from the
+namespace the backend uses, so it really will light up), with a test asserting the prefix so the guess
+cannot come back. Accounts created through the new upgrade flow are merged in from the device-local
+registry tagged `_source: 'device'`, and when every option carries that tag the invoice editor says so
+in words rather than presenting a picker that implies the endpoint shipped.
+
+**The lesson.** **A URL you expect to fail still has to be verified.** The whole point of fail-soft is
+that nothing downstream notices, which is exactly why a typo, a wrong prefix or a retired path can sit
+in one for months. When writing "this lights up when X ships", curl it once and record the status you
+got and the date — a 404 from a real namespace and a 404 from a fictional one are the same response
+and completely different facts. The sibling probe from ERR-140 is the tool: ask for a route you know
+is bogus and compare.
+
+---
+
+## ERR-153 — The new business-account management endpoint is PATCH, and this API still refuses PATCH at CORS, so it cannot be called from a browser at all (2026-08-09)
+
+**Context.** The one-click upgrade handoff pairs `POST /api/admin/business/accounts` with
+`PATCH /api/admin/business/accounts/:id` for credit limit, Net 30 and suspend/close. Both were
+verified live with curl before any code was written: 401 unauthenticated, correct 400/404 validation,
+correct 404 for an unknown account id. Both work.
+
+**Root cause.** Neither works from a browser. The API answers a PATCH preflight with
+
+```
+Access-Control-Allow-Methods: GET,POST,PUT,DELETE,OPTIONS
+```
+
+— no PATCH — so Chrome kills the request before it is sent. This is **BF-021**, first measured
+2026-07-25 for the invoice paid-toggle and still open. The invoice case had somewhere to go:
+`PUT /api/admin/invoices/:id` exists, so `setStatusWithFallback` falls back to a full update. Here
+there is nowhere: `PUT`, `POST` and `DELETE` on `…/business/accounts/:id` all 404, and
+`X-HTTP-Method-Override` is not in `Access-Control-Allow-Headers`. PATCH is the only verb, and it is
+the one verb the browser may not use.
+
+**Why curl said it was fine.** curl does not do preflight. Every probe that verified this contract was
+correct about the server and silent about the transport, because CORS is not a property of the
+endpoint — it is a property of the browser's relationship to it. A route can be simultaneously live,
+correct, and unreachable.
+
+**The fix (frontend side).** The failure is named instead of dressed up. `isNetworkFailure()` — no
+status and no code, because there was no response to read either out of — routes to copy that says the
+request was **never sent**, that **nothing was changed**, and that it needs a one-line backend fix.
+The generic `TypeError: Failed to fetch` would have read as a timeout, and a timeout is the single
+interpretation under which the write might have landed. The local record is not mirrored on failure.
+
+PATCH is still attempted first and directly, so the feature starts working the day BF-021 lands with
+no frontend change — the invoices precedent.
+
+**Still open, and now blocking a second feature.** Filed again in
+`business-one-click-upgrade-FE-response-aug2026.md` as ask 1.
+
+**The lesson.** **Verify a contract with the transport that will actually use it.** A curl probe
+proves the route exists; it does not prove the browser may call it. When a handoff introduces a verb
+this API has not used from the frontend before, send one `OPTIONS` with
+`Access-Control-Request-Method` before writing the client — it costs one request and it is the
+difference between shipping a feature and shipping a button that throws.
+
+---
+
+## ERR-154 — A slash-star inside a line comment swallowed 2.7kB of real code from the test suite's source stripper (2026-08-09)
+
+**Context.** Structural tests in this repo assert against source with comments stripped, so a literal
+in a docblock cannot satisfy an assertion. Two new source-level tests sliced
+`AdminAPI.listBusinessAccounts` out of the stripped `js/admin/api.js` and both failed with
+`Cannot read properties of null` — the regex had matched nothing.
+
+**Root cause.** A comment written minutes earlier, explaining this very fix:
+
+```js
+// every admin business route lives under `/api/admin/business/*`. The comment
+```
+
+The stripper removes block comments with `/\/\*[\s\S]*?\*\//g` before line comments. That `/*` inside
+backticks inside a `//` comment is, to a regex, a block-comment opener. It ran forward to the next
+`*/` — the end of a JSDoc block 2,698 characters later — and deleted everything between: the whole of
+`listBusinessAccounts`, `createBusinessAccount` and half of `updateBusinessAccount`.
+
+**Why it was nearly missed.** The file was syntactically perfect and every runtime path worked; only
+the test's *view* of it was mutilated. The failure mode is silent in the dangerous direction — a
+stripped-away function makes `doesNotMatch` assertions **pass**. Had those two tests been written as
+"this bad path must not appear" rather than "this good path must", the swallowed region would have
+made them green, and the region a comment can eat is unbounded.
+
+**The fix.** Write the prefix out (`the /api/admin/business/ prefix`) instead of glob-punctuating it,
+with a note in place saying why. A repo-wide grep found no other instance.
+
+**The lesson.** In a codebase whose tests read source as text, **`/*` inside a line comment is not
+punctuation, it is an operator.** Prose in comments is normally free; here it can delete code from
+every structural assertion in the suite. And the tell was available: a source regex returning `null`
+means the anchor is gone, which is either a rename or — much more interesting — a stripper that ate
+it. Print the stripped region before assuming the regex is wrong.
+
+---
+
+## ERR-155 — The portalled autocomplete sits below the modal backdrop on purpose, which makes it unclickable for the first autocomplete put inside a modal (2026-08-09)
+
+**Context.** The new Business page picks a customer with `attachAutocomplete` inside a plain
+`.admin-modal`. The menu rendered, the right customer appeared in it, and clicking did nothing.
+Playwright named it exactly: `<div class="admin-form-help"> … intercepts pointer events`.
+
+**Root cause.** ERR-107 portalled the menu to `<body>` at `position: fixed` to escape overflow
+clipping, and pinned it at `z-index: 1150` — above `.admin-drawer` (1001) and
+`.admin-product-modal` (1100), deliberately **below** `.admin-modal-backdrop` (1200) so a confirm
+dialog would cover a menu left open behind it. That is right for every caller that existed. It is
+exactly wrong for an input that lives *inside* the dialog: the menu paints, hit-testing hands every
+click to the backdrop above it, and the control is inert.
+
+**Why it looked right.** The menu was visible and correctly positioned. Nothing was hidden, nothing
+errored, and a screenshot would have shown a working picker. Only a hit-test at the menu item's own
+centre — `document.elementFromPoint` returning `admin-form-help` — showed what was on top.
+
+**The fix.** `.admin-ac__menu--over-modal { z-index: 1250 }`, applied by `autocomplete.js` from
+`input.closest('.admin-modal-backdrop')` — measured from the anchor rather than passed in by the
+caller, so no future caller can forget it, and the default keeps holding for every autocomplete
+outside a dialog. A test asserts all three z-indexes in relation to each other rather than by value.
+
+**The lesson.** A stacking rule is written against the containers that exist when it is written, and
+"below X so X can cover it" silently becomes "below X so X can *block* it" the first time the element
+moves inside X. **When reusing a portalled component in a new container, hit-test it — do not look at
+it.** `elementFromPoint` at the centre of the thing you mean to click is the one-line check, and it is
+the only one that distinguishes visible from clickable.
+
+---
+
 ## Scope note (no ERR number) — the homepage trust-stats band was removed; the footer one-liner is now the only mount point (2026-08-08)
 
 **Not a defect.** ERR-125 shipped the trust stats deliberately invisible: `/api/site/trust` returned

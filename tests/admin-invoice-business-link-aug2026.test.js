@@ -159,13 +159,25 @@ test('§3 all three block states exist: linked, unavailable, and pickable', () =
 test('§4 listBusinessAccounts resolves null when it could not ask, never []', () => {
     // Anchored on the full signature: `async getInvoice` also matches
     // getInvoicePreviewUrl, which sits ~250 lines EARLIER and would slice backwards.
-    const fn = API_CODE.slice(API_CODE.indexOf('async listBusinessAccounts'), API_CODE.indexOf('async getInvoice(invoiceId)'));
+    const fn = API_CODE.slice(API_CODE.indexOf('async listBusinessAccounts'), API_CODE.indexOf('async createBusinessAccount'));
     assert.ok(fn.length > 50, 'listBusinessAccounts must exist');
-    assert.match(fn, /if \(!Array\.isArray\(rows\)\) return null/,
+    assert.ok(!/return \[\]/.test(fn), 'an empty array would claim there are no business accounts');
+    // Aug 2026: accounts this browser created are merged in, so an unreachable
+    // server list resolves to those rather than to null — but ONLY when there
+    // are some. With nothing local the tri-state is unchanged.
+    assert.match(fn, /local\.length \? local : null/,
         '[] means "there are no approved accounts"; null means "we could not ask" — the editor ' +
         'renders them differently and collapsing them hides an outage');
-    assert.match(fn, /return null;/, 'a thrown request must also degrade to null');
-    assert.ok(!/return \[\]/.test(fn), 'an empty array would claim there are no business accounts');
+    assert.equal((fn.match(/local\.length \? local : null/g) || []).length, 2,
+        'both the non-array response AND the thrown request must degrade the same way');
+});
+
+test('§4 a device-only account list says so, instead of implying the endpoint shipped', () => {
+    const fn = CODE.slice(CODE.indexOf('function businessLinkHtml'), CODE.indexOf('function editorBodyHtml'));
+    assert.match(fn, /_source === 'device'/,
+        'a picker that silently works would claim the backend now lists business accounts, and ' +
+        'that its options are all of them — neither is true while GET …/business/accounts 404s');
+    assert.match(fn, /accounts upgraded from this browser/i);
 });
 
 test('§4 the editor still opens when the accounts lookup is slow or dead', () => {

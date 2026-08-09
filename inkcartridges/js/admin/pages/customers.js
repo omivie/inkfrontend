@@ -7,6 +7,9 @@ import { Drawer } from '../components/drawer.js';
 import { Modal } from '../components/modal.js';
 import { Toast } from '../components/toast.js';
 import { Charts } from '../components/charts.js';
+import {
+  readBusinessState, businessPanelHtml, bindBusinessPanel, prefillFor, resetApplicationsCache,
+} from '../components/business-upgrade.js';
 
 const formatPrice = (v) => window.formatPrice ? window.formatPrice(v) : `$${Number(v).toFixed(2)}`;
 const MISSING = '\u2014';
@@ -139,10 +142,38 @@ async function openCustomerDrawer(customer) {
   // Loyalty Points
   html += loyaltyPanelBlock(loyaltyState);
 
+  // Business account (owner-only). Rendered in its loading state and filled in
+  // below — the applications queue is a second round-trip and the drawer should
+  // not wait on it.
+  html += businessBlock();
+
   // Saved invoicing profile (owner-only)
   html += invoicingBlock(customer);
 
   drawer.setBody(html);
+
+  // Owner-only: resolve business standing, then wire the panel's buttons. Every
+  // re-render re-binds, because the panel is replaced in place on success.
+  if (AdminAuth.isOwner()) {
+    const paint = async () => {
+      const state = await readBusinessState(customer);
+      if (!drawer.el.isConnected) return;
+      const panel = drawer.body.querySelector('#cust-business-panel');
+      if (!panel) return;
+      panel.innerHTML = businessPanelHtml(state);
+      bindBusinessPanel(panel, {
+        customer,
+        prefill: prefillFor(customer, state),
+        onChanged: async () => {
+          // The upgrade mints a fresh approved application, so the cached table
+          // is now behind the truth it is used to assert.
+          resetApplicationsCache();
+          await paint();
+        },
+      });
+    };
+    paint();
+  }
 
   // Owner-only: wire the "Adjust points" action. The button is only rendered for
   // owners (loyaltyPanelBlock), so this is a no-op for non-owner admins.
@@ -271,6 +302,20 @@ function collectInvoicing(scope) {
     out[grp][key] = key === 'address' ? textToLines(el.value) : el.value.trim();
   });
   return out;
+}
+
+// ---- Business account (owner-only) ----
+// The in-person upgrade: the sales team visits a business and upgrades this
+// customer on the spot. Owner-gated because the backend requires super_admin,
+// which AdminAuth normalises to the 'owner' role (auth.js:46) — showing the
+// button to a plain admin would only ever produce a 403.
+// Shared UI: ../components/business-upgrade.js.
+function businessBlock() {
+  if (!AdminAuth.isOwner()) return '';
+  return `<div class="admin-detail-block">
+    <div class="admin-detail-block__title">Business account</div>
+    <div id="cust-business-panel"><p class="admin-text-muted">Checking business account…</p></div>
+  </div>`;
 }
 
 function loyaltyPanelBlock(loyalty) {
@@ -612,6 +657,9 @@ export default {
     _search = '';
     _page = 1;
     _activeTab = 'all';
+    // The applications table is fetched once per page session; a stale copy must
+    // not outlive the navigation that read it.
+    resetApplicationsCache();
   },
 
   async onFilterChange() {

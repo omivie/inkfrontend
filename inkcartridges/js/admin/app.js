@@ -1,7 +1,7 @@
 /**
  * Admin SPA — Entry point, router, shell
  */
-const APP_VERSION = '2026.08.04-dashboard-day-of-week-labels';
+const APP_VERSION = '2026.08.09-business-one-click-upgrade';
 
 // STATIC IMPORTS CARRY NO `?v=` TOKEN — do not add one (ERR-124).
 //
@@ -88,6 +88,9 @@ const NAV_ITEMS = [
   { key: 'quick-order', label: 'Quick Order', icon: 'orders', ownerOnly: true },
   { key: 'invoices', label: 'Invoices', icon: 'invoice', ownerOnly: true },
   { key: 'customers', label: 'Customers', icon: 'customers' },
+  // B2B. Owner-only because every write here is super_admin server-side
+  // (POST/PATCH /api/admin/business/accounts) — a plain admin would see 403s.
+  { key: 'business', label: 'Business', icon: 'customers', ownerOnly: true },
   // Kept top-level (not folded into an Orders tab) so its pending-count badge
   // stays visible as a fulfilment queue.
   { key: 'tracking-requests', label: 'Tracking Requests', icon: 'fulfillment', badge: true },

@@ -1588,7 +1588,16 @@ function businessLinkHtml(d) {
     const options = ['<option value="">— not linked —</option>']
       .concat(known.map((a) => `<option value="${escA(a.id)}">${esc(bizAccountLabel(a))}${a.contact_email ? ` (${esc(a.contact_email)})` : ''}</option>`))
       .join('');
+    // Every option came from this browser's own record of accounts it created
+    // (AdminAPI.listBusinessAccounts merges them in, tagged `_source:'device'`),
+    // which means the server list is STILL unavailable. A picker that just works
+    // would imply the endpoint shipped and that this is every business account —
+    // it is neither. Say which list this is.
+    const deviceOnly = known.length > 0 && known.every((a) => a._source === 'device');
     body = `<p class="inv-biz__state inv-biz__state--off">Not linked — this invoice will not appear on any customer's Business Centre.</p>`
+      + (deviceOnly
+        ? `<p class="inv-field__hint">The backend still has no endpoint listing business accounts, so these are only the accounts upgraded from this browser. Others cannot be linked yet — see <code>business-one-click-upgrade-FE-response-aug2026.md</code>.</p>`
+        : '')
       + (suggestion
         ? `<p class="inv-biz__suggest">${esc(_fillSource?.label || 'This customer')} has an approved account:
              <strong>${esc(bizAccountLabel(suggestion))}</strong>
