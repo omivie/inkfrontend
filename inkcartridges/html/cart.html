@@ -24,7 +24,7 @@
     <link rel="stylesheet" href="/css/layout.css?v=e3cfe5ab">
     <link rel="stylesheet" href="/css/components.css?v=18c35419">
     <link rel="stylesheet" href="/css/modern-effects.css?v=afe20f45">
-    <link rel="stylesheet" href="/css/pages.css?v=fef83330">
+    <link rel="stylesheet" href="/css/pages.css?v=cb67bfce">
     <link rel="stylesheet" href="/css/search.css?v=c28f09ef">
     <meta name="twitter:card" content="summary_large_image">
     <meta name="twitter:title" content="Shopping Cart | InkCartridges.co.nz">
@@ -246,6 +246,11 @@
                                 <span>You Save</span>
                                 <span id="cart-savings">$0.00</span>
                             </div>
+                            <!-- Shown when the backend REDUCED a promo code because
+                                 lines are already at their volume-price floor
+                                 (BF-035). Filled by Cart._renderDiscountRows from
+                                 the cart response's coupon block. -->
+                            <p class="cart-summary__note" id="cart-coupon-note" data-testid="coupon-clamp-note" hidden></p>
                             <div class="cart-summary__row cart-summary__row--loyalty" id="cart-loyalty-row" hidden>
                                 <span>Loyalty points applied</span>
                                 <span id="cart-loyalty-discount">$0.00</span>
@@ -486,9 +491,9 @@
     <script defer src="/js/mega-nav.js?v=9a073f70"></script>
     <script defer src="/js/rewards-nudge.js?v=f5a2df30"></script>
     <script defer src="/js/modern-effects.js?v=ad8bff1e"></script>
-    <script defer src="/js/cart.js?v=9801a84a"></script>
+    <script defer src="/js/cart.js?v=b48d5413"></script>
     <script defer src="/js/cart-analytics.js?v=b2724a74"></script>
-    <script defer src="/js/cart-page.js?v=c7a21b72"></script>
+    <script defer src="/js/cart-page.js?v=ec3e4d49"></script>
     <script defer src="/js/analytics.js?v=8c9ee196"></script>
     <script defer src="/js/site-guard.js?v=e0b0e4ba"></script>
 </body>

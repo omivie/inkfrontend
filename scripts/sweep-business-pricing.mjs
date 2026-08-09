@@ -527,14 +527,23 @@ async function fetchCart(token) {
         if (!body || body.ok !== true || !body.data) return null;
         const d = body.data;
         const items = d.items || d.cart_items || [];
-        const b2b = (d.b2b_discount && typeof d.b2b_discount === 'object') ? d.b2b_discount : null;
+        // `volume_discount` is the current field; `b2b_discount` is the backend's
+        // transitional alias for the identical object. Read both, because a hard
+        // cutover here would return null and SILENTLY disable the consistency
+        // gate — the suite skips that test when the cart record is absent, so it
+        // would go green while checking nothing.
+        const isObj = (v) => !!v && typeof v === 'object';
+        const b2b = [d.volume_discount, d.b2b_discount].find(isObj) || null;
+        const summaryAmount = d.summary
+            ? (d.summary.volume_discount !== undefined ? d.summary.volume_discount : d.summary.b2b_discount)
+            : undefined;
         if (!items.length || !b2b) return null;
         return {
             lines: items
                 .map(i => ({ sku: (i.sku || (i.product && i.product.sku) || '').trim(), quantity: Number(i.quantity) }))
                 .filter(l => l.sku && Number.isFinite(l.quantity)),
             b2b_discount: b2b,
-            summary_b2b_discount: d.summary ? d.summary.b2b_discount : undefined
+            summary_b2b_discount: summaryAmount
         };
     } catch {
         return null;

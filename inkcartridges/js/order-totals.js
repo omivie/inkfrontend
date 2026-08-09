@@ -168,16 +168,20 @@
             o.loyalty && o.loyalty.points_redeemed
         );
 
-        // B2B: two live payload shapes, same as computeDiscountBreakdown() —
-        // whichever source carries the object is the metadata, whichever is
-        // numeric is the amount. See cart.js:32-43.
-        const b2bMeta = (o.b2b_discount && typeof o.b2b_discount === 'object')
-            ? o.b2b_discount
-            : (o.b2bMeta && typeof o.b2bMeta === 'object' ? o.b2bMeta : null);
+        // Volume discount: several live payload shapes, same as
+        // computeDiscountBreakdown() — whichever source carries the object is the
+        // metadata, whichever is numeric is the amount. See cart.js:32-43.
+        // `volume_discount` is the current field name; `b2b_discount` is the
+        // backend's transitional alias for the identical object, and `b2bMeta` is
+        // this function's OWN output (normalise must stay idempotent).
+        const isObj = (v) => !!v && typeof v === 'object';
+        const b2bMeta = [o.volume_discount, o.b2b_discount, o.b2bMeta].find(isObj) || null;
         const b2bDiscount = pick(
             b2bMeta && b2bMeta.discount_amount,
+            o.volume_discount_amount,
             o.b2b_discount_amount,
             o.b2bDiscount,
+            typeof o.volume_discount === 'number' ? o.volume_discount : null,
             typeof o.b2b_discount === 'number' ? o.b2b_discount : null,
             o.business_discount_amount
         );

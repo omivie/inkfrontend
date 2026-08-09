@@ -6,6 +6,35 @@
 `business-account-volume-pricing-FE-response-jul2026.md` (what the FE verified),
 `catalog-edge-caching-backend-brief-jul2026.md` (the edge-cache contract this has to live inside).
 
+---
+
+## Start here
+
+| Ask | What it wants | Blocking? |
+|---|---|---|
+| **BF-032** | Put `quantity_breaks[]` on the public catalog payloads | **yes** — primary ask |
+| **BF-033** | A batch endpoint — **fallback only**, if BF-032 is refused | no |
+| **BF-034** | Apply the volume discount to **every** cart, guests included | **yes** |
+| **BF-035** | **Does the loss floor compose with a coupon?** | **yes** — answer before launch |
+| **BF-036** | Scope `B2B_COUPON_EXCLUDED` to business accounts, not to "cart has a discount" | **yes** |
+| **BF-037** | Keep the loss floor; keep the prerender at retail | no — a "don't change this" |
+| **BF-038** | Confirm the Cloudflare Cache Rule covers whatever path ships | no |
+
+**Two things to read before the rest:**
+
+1. **BF-035 is a commercial decision, not an implementation.** It is the only item here that we cannot
+   answer for you and cannot detect from the client. Everything else can proceed in parallel; this one
+   gates launch.
+2. **Ordering: BF-034 must ship BEFORE or WITH BF-032 — never after.** The presence of
+   `quantity_breaks` on a public payload is what the storefront treats as your promise that the cart
+   charges it. Payload-first means we advertise "$21.82 at 3+" to a guest whom checkout then charges
+   full retail. Cart-first is merely a pleasant surprise. Details under "The contract we're relying on".
+
+Nothing on the storefront changes for shoppers until BF-032/BF-034 land — the frontend work is done
+and inert, so there is no clock on your side beyond BF-035.
+
+---
+
 ## What we want
 
 **Every shopper gets volume pricing — including signed-out guests.** Today the quantity ladder

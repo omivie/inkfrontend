@@ -37,6 +37,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
+const vm = require('node:vm');
 
 const ROOT = path.join(__dirname, '..', 'inkcartridges');
 const JS = (rel) => fs.readFileSync(path.join(ROOT, 'js', rel), 'utf8');
@@ -53,8 +54,47 @@ const BUSINESS_CODE = stripComments(BUSINESS_SRC);
 const PDP_SRC = JS('product-detail-page.js');
 const PDP_CODE = stripComments(PDP_SRC);
 const CART_SRC = JS('cart.js');
-const CART_PAGE_CODE = stripComments(JS('cart-page.js'));
-const CHECKOUT_CODE = stripComments(JS('checkout-page.js'));
+const CART_PAGE_SRC = JS('cart-page.js');
+const CART_PAGE_CODE = stripComments(CART_PAGE_SRC);
+const CHECKOUT_SRC = JS('checkout-page.js');
+const CHECKOUT_CODE = stripComments(CHECKOUT_SRC);
+
+/**
+ * Pull one top-level `function name(...) {...}` out of a source file by
+ * brace-matching. Same technique as business-account-pricing-jul2026.test.js —
+ * running all of cart-page.js would need a full DOM.
+ */
+function extractFunction(src, name) {
+    const start = src.indexOf(`function ${name}(`);
+    assert.notEqual(start, -1, `${name} must be a top-level function declaration`);
+    let depth = 0;
+    let i = src.indexOf('{', start);
+    const open = i;
+    for (; i < src.length; i++) {
+        if (src[i] === '{') depth++;
+        else if (src[i] === '}' && --depth === 0) break;
+    }
+    return src.slice(start, i + 1) + (open === -1 ? '' : '');
+}
+
+/** The coupon-clamp helpers, actually executed. */
+function loadClampHelpers() {
+    // couponClampText() closes over the module-level fallback constant, so it
+    // has to come along or the fallback path throws instead of returning copy.
+    const copyLine = CART_PAGE_SRC.match(/^const COUPON_CLAMPED_COPY = .*$/m);
+    assert.ok(copyLine, 'the clamp fallback copy must be a module-level const');
+
+    const sandbox = { console };
+    vm.createContext(sandbox);
+    vm.runInContext(
+        copyLine[0] + '\n' +
+        extractFunction(CART_PAGE_SRC, 'isCouponClamped') + '\n' +
+        extractFunction(CART_PAGE_SRC, 'couponClampText') + '\n' +
+        ';globalThis.__c = isCouponClamped; globalThis.__t = couponClampText;',
+        sandbox
+    );
+    return { isCouponClamped: sandbox.__c, couponClampText: sandbox.__t };
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Harness — mirrors business-account-pricing-jul2026.test.js so the two suites
@@ -511,4 +551,185 @@ test('business prices are still never written to web storage', () => {
 test('the module still documents that guests fire no business request', () => {
     assert.match(BUSINESS_SRC, /guest therefore still fires ZERO requests/i,
         'this is the invariant the whole design turns on; say it where it will be read');
+});
+
+// ═════════════════════════════════════════════════════════════════════════════
+// 9. The cart parser carries the ladder through (ERR-150)
+// ═════════════════════════════════════════════════════════════════════════════
+
+test('_parseServerCart preserves quantity_breaks and retail_price on every line', () => {
+    // The item map is a WHITELIST — every field not named is discarded. Omitting
+    // these two made decorateVolumeNudges ingest `undefined` for every line, so
+    // no cart nudge ever rendered, silently, for anyone (ERR-150).
+    const fn = CART_SRC.slice(CART_SRC.indexOf('_parseServerCart: function'));
+    const body = fn.slice(0, fn.indexOf('return { items'));
+    assert.match(body, /quantity_breaks:\s*Array\.isArray\(item\.quantity_breaks\)/,
+        'the line ladder must survive the parser');
+    assert.match(body, /retail_price:\s*item\.product\.retail_price/,
+        'the ladder is compared against retail, so retail must survive under its own name');
+});
+
+test('a server cart line ingests and produces a nudge for a guest', async () => {
+    const B = loadBusiness();
+    // The shape _parseServerCart now emits, with the live nesting: the ladder is
+    // at the ITEM level while sku/retail_price come off item.product.
+    const line = {
+        sku: 'CLC133CMY',
+        retail_price: 22.49,
+        quantity: 3,
+        quantity_breaks: productWithLadder('CLC133CMY', 22.49).quantity_breaks
+    };
+    assert.equal(B.ingest([line]), 1, 'a parsed cart line must be ingestable as-is');
+
+    const ladder = await B.getLadderFor('CLC133CMY');
+    assert.ok(ladder);
+    const nudge = B.nudgeMarkup(ladder, 3, 99);
+    assert.match(nudge, /Add 1 more to reach 4\+/,
+        'at qty 3 the next rung is 4+ — this is the whole point of the cart surface');
+    assert.deepEqual(B.__calls, []);
+});
+
+test('decorateVolumeNudges hands the parsed lines straight to ingest', () => {
+    const code = stripComments(CART_SRC);
+    const fn = code.slice(code.indexOf('decorateVolumeNudges: function'));
+    const body = fn.slice(0, fn.indexOf('\n    },'));
+    assert.match(body, /Business\.ingest\(this\.items\)/,
+        'pass the parsed lines through unchanged — re-mapping them to a local shape ' +
+        'is exactly how the field went missing in the first place (ERR-150)');
+    assert.ok(body.indexOf('Business.ingest') < body.indexOf('Business.decorateCartLines'));
+});
+
+// ═════════════════════════════════════════════════════════════════════════════
+// 10. The coupon clamp is explained, never silent (BF-035)
+// ═════════════════════════════════════════════════════════════════════════════
+
+test('isCouponClamped only fires on an explicit true', () => {
+    const { isCouponClamped } = loadClampHelpers();
+    assert.equal(isCouponClamped({ limited_by_volume_pricing: true }), true);
+    for (const notClamped of [null, undefined, {}, { limited_by_volume_pricing: false },
+        { limited_by_volume_pricing: 'true' }, { limited_by_volume_pricing: 1 }]) {
+        assert.equal(isCouponClamped(notClamped), false,
+            'a truthy-ish value is not the flag: inventing a clamp explains away a ' +
+            'discount that was never reduced');
+    }
+});
+
+test('couponClampText prefers the backend wording and always has a fallback', () => {
+    const { couponClampText } = loadClampHelpers();
+    assert.equal(
+        couponClampText({ limited_by_volume_pricing: true, message: '  Capped at your floor.  ' }),
+        'Capped at your floor.',
+        'the server explains its own arithmetic better than we can guess at it');
+    for (const blank of [null, {}, { message: '   ' }, { message: 42 }]) {
+        const text = couponClampText(blank);
+        assert.ok(text && text.trim().length > 10, 'never an empty explanation');
+        assert.doesNotMatch(text, /business/i,
+            'the clamp applies to every shopper — naming an account type would be wrong ' +
+            'for almost everyone who sees it');
+    }
+});
+
+test('the cart renders the clamp note only when the flag is set', () => {
+    const code = stripComments(CART_SRC);
+    const fn = code.slice(code.indexOf('_renderDiscountRows: function'));
+    const body = fn.slice(0, fn.indexOf('\n    },'));
+    assert.match(body, /cart-coupon-note/, 'the cart needs somewhere to say it');
+    assert.match(body, /isCouponClamped|limited_by_volume_pricing/);
+    assert.match(body, /couponNote\.hidden = true/,
+        'and it must go away again when the next cart is not clamped');
+    assert.match(HTML('html/cart.html'), /id="cart-coupon-note"[^>]*hidden/,
+        'it ships hidden — an empty note next to the totals is a rendering bug');
+});
+
+test('the parser keeps the WHOLE coupon object, not just code and amount', () => {
+    const fn = CART_SRC.slice(CART_SRC.indexOf('_parseServerCart: function'));
+    const body = fn.slice(0, fn.indexOf('\n    },'));
+    assert.match(body, /self\.serverCoupon\s*=/,
+        'limited_by_volume_pricing and message were being discarded at this boundary');
+    assert.match(body, /coupon: self\.serverCoupon/, 'and returned so callers can read it');
+});
+
+test('the checkout pill escapes the backend message and wraps it onto its own line', () => {
+    // Anchor on the DEFINITION, not the first call site.
+    const code = CHECKOUT_CODE.slice(CHECKOUT_CODE.indexOf('async refreshAppliedCouponUI('));
+    const body = code.slice(0, code.indexOf('\n        },'));
+    assert.match(body, /Security\.escapeHtml\(this\.couponClampText\(coupon\)\)/,
+        'the pill is an innerHTML template and the message is backend-supplied');
+
+    // The base pill is a single-line flex row; a whole sentence must not squeeze
+    // the code and the Remove button.
+    const css = fs.readFileSync(path.join(ROOT, 'css', 'pages.css'), 'utf8');
+    assert.match(css, /\.coupon-applied--limited\s*\{[^}]*flex-wrap:\s*wrap/,
+        'the clamped variant has to wrap');
+    assert.match(css, /\.coupon-applied--limited \.coupon-applied__desc\s*\{[^}]*flex:\s*1 0 100%/);
+});
+
+test('both apply paths mention the clamp at the moment the code is applied', () => {
+    // The summary note alone is not enough: applying is when the shopper compares
+    // the number against what the code promised.
+    assert.match(CART_PAGE_CODE, /isCouponClamped\(serverCoupon\)/,
+        'cart-page apply path must check for the clamp');
+    assert.match(CHECKOUT_CODE, /this\.isCouponClamped\(appliedCouponBlock\)/,
+        'checkout apply path must check for the clamp');
+});
+
+// ═════════════════════════════════════════════════════════════════════════════
+// 11. volume_discount cutover — both spellings resolve
+// ═════════════════════════════════════════════════════════════════════════════
+
+test('computeDiscountBreakdown reads volume_discount AND the b2b_discount alias', () => {
+    const sandbox = { console };
+    vm.createContext(sandbox);
+    vm.runInContext(
+        extractFunction(CART_SRC, 'computeDiscountBreakdown') +
+        ';globalThis.__b = computeDiscountBreakdown;', sandbox);
+    const compute = sandbox.__b;
+
+    const block = { company_name: null, effective_percent: 3, discount_amount: 2.01, source: 'volume' };
+
+    // The current field.
+    let r = compute({ discount: 2.01, volume_discount: block }, 2.01);
+    assert.equal(r.b2b, 2.01);
+    assert.equal(r.b2bMeta.source, 'volume');
+
+    // The transitional alias, so the backend can drop it whenever without a
+    // frontend deploy — and so we keep working if they drop it tomorrow.
+    r = compute({ discount: 2.01, b2b_discount: block }, 2.01);
+    assert.equal(r.b2b, 2.01);
+    assert.equal(r.b2bMeta.source, 'volume');
+
+    // Bare numbers, both spellings.
+    assert.equal(compute({ discount: 5, volume_discount: 5 }, 5).b2b, 5);
+    assert.equal(compute({ discount: 5, b2b_discount: 5 }, 5).b2b, 5);
+});
+
+test('the parser folds the volume block under BOTH keys, or the surfaces split-brain', () => {
+    const fn = CART_SRC.slice(CART_SRC.indexOf('_parseServerCart: function'));
+    const body = fn.slice(0, fn.indexOf('\n    },'));
+    assert.match(body, /summary\.volume_discount = volumeBlock/);
+    assert.match(body, /summary\.b2b_discount = volumeBlock/,
+        'cart and checkout call computeDiscountBreakdown with no second source, so they ' +
+        'see the metadata ONLY via this fold — writing one key and reading the other ' +
+        'silently drops the company label and the floored note on those two surfaces');
+});
+
+test('order-totals normalise accepts volume_discount in every live shape', () => {
+    // order-totals.js is an IIFE that exports onto window/module — mirrors
+    // loadOrderTotals() in order-totals-jul2026.test.js.
+    const sandbox = { console, Math, JSON, Number, String, Array, Object, module: { exports: {} } };
+    sandbox.window = sandbox;
+    sandbox.globalThis = sandbox;
+    sandbox.formatPrice = (n) => '$' + Number(n).toFixed(2);
+    vm.runInContext(JS('order-totals.js'), vm.createContext(sandbox), { filename: 'order-totals.js' });
+    const OT = sandbox.OrderTotals;
+    assert.ok(OT, 'OrderTotals must load');
+
+    const obj = { company_name: 'Acme Print Co', discount_amount: 4.68, source: 'volume' };
+    assert.equal(OT.normalise({ volume_discount: obj }).b2bDiscount, 4.68);
+    assert.equal(OT.normalise({ volume_discount: obj }).b2bMeta.company_name, 'Acme Print Co');
+    assert.equal(OT.normalise({ volume_discount: 4.68 }).b2bDiscount, 4.68);
+    // The alias still works, and normalise stays idempotent over its own output.
+    assert.equal(OT.normalise({ b2b_discount: obj }).b2bDiscount, 4.68);
+    const once = OT.normalise({ volume_discount: obj });
+    assert.equal(OT.normalise(once).b2bMeta.company_name, 'Acme Print Co');
 });

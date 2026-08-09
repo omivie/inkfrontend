@@ -1132,10 +1132,28 @@
             const msg = (data && data.message) || (source && source.error);
             return typeof msg === 'string' && msg.trim()
                 ? msg.trim()
-                // No longer "business accounts get automatic volume pricing" —
-                // every shopper does now, so that clause stopped explaining the
-                // rule. Mirrors B2B_COUPON_COPY in cart-page.js.
-                : 'Promo codes can’t be combined with your business account pricing. Your loyalty points still work.';
+                // States the rule with no "because": every shopper gets volume
+                // pricing now, and since the backend clamps coupons against the
+                // loss floor (BF-035) combining is no longer the hazard either.
+                // Mirrors B2B_COUPON_COPY in cart-page.js.
+                : 'Promo codes aren’t available on business accounts. Your loyalty points still work.';
+        },
+
+        /**
+         * True when the backend REDUCED this coupon because the cart already has
+         * volume-pricing discounts (BF-035). Not a failure — the code applied,
+         * it just saved less than its headline.
+         */
+        isCouponClamped(coupon) {
+            return !!coupon && coupon.limited_by_volume_pricing === true;
+        },
+
+        /** The backend's explanation for the clamp when it sent one, ours otherwise. */
+        couponClampText(coupon) {
+            const msg = coupon && coupon.message;
+            return typeof msg === 'string' && msg.trim()
+                ? msg.trim()
+                : 'This code was reduced because some items are already at their best volume price.';
         },
 
         /**
@@ -1374,8 +1392,13 @@
                         // POST /cart/coupon returns only coupon info, not the full cart.
                         // Refetch GET /cart so totals (incl. recalculated shipping) come from
                         // the server's summary rather than client-side arithmetic.
+                        // Declared OUTSIDE the try: the coupon block is read further
+                        // down for the volume-pricing clamp, and a `const` inside
+                        // the block would be a ReferenceError there — on the success
+                        // path of every coupon application.
+                        let cartRes = null;
                         try {
-                            const cartRes = await API.getCart();
+                            cartRes = await API.getCart();
                             const summary = cartRes?.data?.summary;
                             if (summary) {
                                 if (summary.subtotal != null) this.totals.subtotal = summary.subtotal;
@@ -1416,7 +1439,18 @@
                         // reports into #coupon-preview-hint, so success and
                         // failure now land in the same place instead of one
                         // inline and one in a modal dialog.
-                        setHint(response.message || `Coupon applied! You saved ${formatPrice(this.totals.discount)}`, 'success');
+                        // A clamped coupon must say why at the moment it is
+                        // applied, not only once refreshAppliedCouponUI()
+                        // repaints the pill on the next load.
+                        const appliedCouponBlock = cartRes?.data?.coupon || null;
+                        const appliedMsg = response.message
+                            || `Coupon applied! You saved ${formatPrice(this.totals.discount)}`;
+                        setHint(
+                            this.isCouponClamped(appliedCouponBlock)
+                                ? `${appliedMsg} — ${this.couponClampText(appliedCouponBlock)}`
+                                : appliedMsg,
+                            'success'
+                        );
                     } else if (response.code === 'EMAIL_NOT_VERIFIED') {
                         setHint('Please verify your email address before applying coupons. Check your inbox for a verification link.', 'error');
                         couponBtn.textContent = 'Apply';
@@ -1677,11 +1711,22 @@
                 }
                 formEl.style.display = 'none';
 
+                // A coupon the backend reduced against the volume-pricing floor
+                // (BF-035) shows a smaller "Saved" figure than the code promises.
+                // The reason rides in the pill so it cannot be missed — this is
+                // the last screen before payment. escapeHtml because the message
+                // is backend-supplied and this is an innerHTML template.
+                const clamped = this.isCouponClamped(coupon);
+                const clampHtml = clamped
+                    ? `<span class="coupon-applied__desc">${Security.escapeHtml(this.couponClampText(coupon))}</span>`
+                    : '';
+
                 const pill = document.createElement('div');
-                pill.className = 'coupon-applied';
+                pill.className = 'coupon-applied' + (clamped ? ' coupon-applied--limited' : '');
                 pill.innerHTML = `
                     <span class="coupon-applied__code">${Security.escapeHtml(coupon.code)}</span>
                     <span class="coupon-applied__saved">Saved ${formatPrice(this.totals.discount)}</span>
+                    ${clampHtml}
                     <button type="button" class="coupon-applied__remove btn btn--link" aria-label="Remove coupon">Remove</button>
                 `;
                 wrapper.appendChild(pill);

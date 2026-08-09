@@ -259,9 +259,11 @@
                 // row; both are netted out of the generic discount line so they
                 // aren't double-counted (summary.discount is the aggregate).
                 // Shared with cart.js so the two summaries cannot drift.
-                // cartData.b2b_discount is the response-level metadata object;
-                // summary.b2b_discount is the bare amount. The helper takes both.
-                const breakdown = computeDiscountBreakdown(summary, this.totals.discount, cartData.b2b_discount);
+                // cartData.volume_discount is the response-level metadata object
+                // (b2b_discount is the backend's transitional alias for the same
+                // object); summary.* is the bare amount. The helper takes both.
+                const volumeBlock = cartData.volume_discount || cartData.b2b_discount;
+                const breakdown = computeDiscountBreakdown(summary, this.totals.discount, volumeBlock);
                 const loyaltyDiscount = breakdown.loyalty;
                 const b2bDiscount = breakdown.b2b;
                 const otherDiscount = breakdown.other;

@@ -371,17 +371,17 @@ const LIVE_NOT_FOUND = { sku: 'NOPE-1', found: false };
  * `npm run sweep:b2b`; `npm run sweep:b2b:check` fails on drift without writing.
  */
 const LIVE_BANDS = [
-    { ladder: '3:4,4:5,7:8,8:10', min: 5.49, max: 19.99, n: 312 },
-    { ladder: '3:3,4:4,7:7,8:9', min: 20.49, max: 49.99, n: 811 },
-    { ladder: '3:2,4:3,7:6,8:8', min: 50.49, max: 99.99, n: 618 },
-    { ladder: '2:2,3:3,6:6,7:8', min: 100.49, max: 299.99, n: 1100 },
-    { ladder: '2:1,3:2,6:5,7:7', min: 300.49, max: 497.49, n: 452 },
-    { ladder: '2:0.5,3:1,5:3,6:5', min: 500.49, max: 7654.49, n: 709 }
+    { ladder: '3:4,4:5,7:8,8:10', min: 5.49, max: 19.99, n: 305 },
+    { ladder: '3:3,4:4,7:7,8:9', min: 20.49, max: 49.99, n: 789 },
+    { ladder: '3:2,4:3,7:6,8:8', min: 50.49, max: 99.99, n: 625 },
+    { ladder: '2:2,3:3,6:6,7:8', min: 100.49, max: 299.79, n: 1105 },
+    { ladder: '2:1,3:2,6:5,7:7', min: 300.49, max: 497.49, n: 444 },
+    { ladder: '2:0.5,3:1,5:3,6:5', min: 500.49, max: 7654.49, n: 686 }
 ];
 
-/** Catalog SKUs answered by the pricing endpoint in that sweep. */
-const LIVE_SKU_COUNT = 4015;
-/** ...of which this many floor away to no ladder at all and render plain retail. */
+/** Catalog SKUs answered by the pricing sweep (re-recorded 2026-08-09). */
+const LIVE_SKU_COUNT = 3967;
+/** ...of which this many have no usable ladder at all and render plain retail. */
 const LIVE_NO_LADDER_COUNT = 13;
 
 /**
@@ -1337,16 +1337,19 @@ test('b2bCouponText prefers the backend wording and always has a fallback', () =
     assert.match(b2bCouponText(LIVE_COUPON_PREVIEW), /automatic volume pricing/);
     assert.match(b2bCouponText(LIVE_COUPON_APPLY_ERROR), /automatic volume pricing/);
 
-    // OUR fallback no longer explains the rule with "business accounts get
-    // automatic volume pricing" — every shopper does now, so that clause stopped
-    // being a reason and became a non-sequitur. It states the rule and what
-    // survives it, and asserts no rationale it cannot support (BF-036).
+    // OUR fallback states the rule with NO "because". Two rationales expired in
+    // turn: "business accounts get automatic volume pricing" (every shopper does
+    // now) and "can't be COMBINED with it" (the backend clamps coupons against
+    // the loss floor since BF-035, so combining is no longer the hazard either).
+    // What is left is a policy, and the copy says so plainly (BF-036).
     for (const blank of [null, {}, { message: '   ' }]) {
         const text = b2bCouponText(blank);
         assert.match(text, /promo codes/i, 'name the thing that was refused');
-        assert.match(text, /can’t be combined|cannot be combined/i);
+        assert.match(text, /business accounts/i, 'name who it applies to');
         assert.match(text, /loyalty points still work/i,
             'say what DOES still work, or the message is pure denial');
+        assert.doesNotMatch(text, /combin|because|automatic volume pricing/i,
+            'no expired rationale: the rule is a policy, not a consequence');
     }
 });
 
@@ -1598,7 +1601,17 @@ test('the recorded bands match the swept record, so the literals above cannot ro
             LIVE_BANDS.map(b => ({ ladder: b.ladder, min: b.min, max: b.max, n: b.n })));
 
         assert.equal(SWEEP_RECORD.totals.answered, LIVE_SKU_COUNT);
-        assert.equal(SWEEP_RECORD.totals.no_ladder_after_normalise, LIVE_NO_LADDER_COUNT);
+        // The SKUs with no usable ladder can arrive in either of two buckets and
+        // the count is what matters, not which. Before BF-032 the backend sent
+        // four zero-saving rungs and describeLadder() stripped them
+        // (`no_ladder_after_normalise: 13`); it now sends `[]` at source
+        // (`empty_ladder: 13`), which is the same 13 products stated honestly one
+        // step earlier. Pinning a single bucket would have failed this on a
+        // change that made the contract better.
+        assert.equal(
+            SWEEP_RECORD.totals.empty_ladder + SWEEP_RECORD.totals.no_ladder_after_normalise,
+            LIVE_NO_LADDER_COUNT,
+            'the count of ladder-less SKUs is pinned; which bucket reports them is not');
         assert.equal(SWEEP_RECORD.percent_range.max, 10, 'the top discount is 10%, down from 18%');
         assert.equal(SWEEP_RECORD.percent_range.min, 0.5);
 

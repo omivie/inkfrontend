@@ -31,12 +31,45 @@ document.addEventListener('DOMContentLoaded', () => {
  * It no longer says "business accounts get automatic volume pricing", because
  * every shopper does now — that clause explained the rule while the two groups
  * were the same people, and became false the moment volume pricing went public.
+ * Nor does it say "can't be COMBINED with your business account pricing": since
+ * the backend clamps coupons against the loss floor (BF-035), combining is no
+ * longer the hazard, so that phrasing implied a reason that had also expired.
  * The rule itself is unchanged and still business-account-only; this states it
- * without asserting a reason that is no longer true (see BF-035/BF-036 in
- * public-volume-pricing-backend-brief-aug2026.md, where its rationale is an
- * open question with the backend).
+ * flatly and says what survives. Retiring the rule is now a product decision
+ * with no floor risk — deliberately deferred (BF-036).
  */
-const B2B_COUPON_COPY = 'Promo codes can’t be combined with your business account pricing. Your loyalty points still work.';
+const B2B_COUPON_COPY = 'Promo codes aren’t available on business accounts. Your loyalty points still work.';
+
+/**
+ * Copy for a coupon the backend REDUCED because the cart already has
+ * volume-pricing discounts (BF-035). Used when the backend sends no message.
+ *
+ * This is not a failure and not a rule — the code applied, it just saved less
+ * than its headline. Silence here is the dishonest option: the shopper sees a
+ * smaller number than the code advertises and no reason for it.
+ */
+const COUPON_CLAMPED_COPY = 'This code was reduced because some items are already at their best volume price.';
+
+/**
+ * True when the cart's coupon block reports a volume-pricing clamp.
+ * @param {object|null} coupon  the cart response's `coupon` object
+ * @returns {boolean}
+ */
+function isCouponClamped(coupon) {
+    return !!coupon && coupon.limited_by_volume_pricing === true;
+}
+
+/**
+ * The backend's own explanation when it sent one, ours otherwise. Same
+ * message-wins-with-local-fallback shape as b2bCouponText() below, deliberately
+ * — one pattern for "the server has better words than we do".
+ * @param {object|null} coupon
+ * @returns {string}
+ */
+function couponClampText(coupon) {
+    const msg = coupon && coupon.message;
+    return typeof msg === 'string' && msg.trim() ? msg.trim() : COUPON_CLAMPED_COPY;
+}
 
 /**
  * True when a response is the business-account coupon exclusion.
@@ -257,11 +290,21 @@ function initCouponForm() {
                     if (typeof Cart.loadFromServer === 'function') await Cart.loadFromServer();
                     if (typeof Cart.updateUI === 'function') Cart.updateUI();
                 }
-                const saved = res.data?.discount_amount;
+                // Prefer the server's own figure after the reload: a clamped
+                // coupon's authoritative amount is the one on the refreshed cart,
+                // not the one the apply call echoed back.
+                const serverCoupon = (typeof Cart !== 'undefined' && Cart.serverCoupon) || res.data;
+                const saved = (serverCoupon && serverCoupon.discount_amount) || res.data?.discount_amount;
+                const applied = saved && typeof formatPrice === 'function'
+                    ? `Coupon applied — you saved ${formatPrice(saved)}.`
+                    : 'Coupon applied.';
+                // When the floor clamped it, say so HERE as well as in the summary
+                // note. The moment of applying is when the shopper is comparing
+                // the number against what the code promised.
                 setFeedback(
-                    saved && typeof formatPrice === 'function'
-                        ? `Coupon applied — you saved ${formatPrice(saved)}.`
-                        : 'Coupon applied.',
+                    isCouponClamped(serverCoupon)
+                        ? `${applied} ${couponClampText(serverCoupon)}`
+                        : applied,
                     'ok'
                 );
             } else if (isB2BCouponExcluded(res)) {

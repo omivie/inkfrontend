@@ -4773,6 +4773,34 @@ body.filter-sort-open { overflow: hidden; }
     color: var(--color-text-muted);
 }
 
+/* A coupon the backend reduced against the volume-pricing floor (BF-035) carries
+   a whole sentence of explanation. The base pill is a single-line flex row, so
+   the message gets its own full-width second line rather than squeezing the code
+   and the Remove button. Scoped to the modifier: an unclamped pill is unchanged. */
+.coupon-applied--limited {
+    flex-wrap: wrap;
+    align-items: baseline;
+}
+
+.coupon-applied--limited .coupon-applied__desc {
+    flex: 1 0 100%;
+    line-height: 1.45;
+}
+
+/* Explanatory line under a cart summary row (#cart-b2b-note, #cart-coupon-note).
+   Both shipped before this rule existed and rendered at full body size next to
+   the money rows. */
+.cart-summary__note {
+    margin: calc(var(--spacing-xs) * -1) 0 var(--spacing-sm);
+    font-size: var(--font-size-xs, 0.8125rem);
+    line-height: 1.45;
+    color: var(--color-text-muted);
+}
+
+.cart-summary__note[hidden] {
+    display: none;
+}
+
 .coupon-remove-btn {
     background: none;
     border: none;

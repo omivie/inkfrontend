@@ -70,10 +70,15 @@ function computeDiscountBreakdown(summary, total, b2bBlock) {
     const aggregate = Number.isFinite(Number(total)) ? Math.max(0, Number(total)) : num(s.discount);
     const loyalty = num(s.loyalty_discount_amount);
 
-    // Metadata: whichever source carries the object.
-    const b2bMeta = isObj(b2bBlock) ? b2bBlock : (isObj(s.b2b_discount) ? s.b2b_discount : null);
+    // Metadata: whichever source carries the object. `volume_discount` is the
+    // current field; `b2b_discount` is the backend's transitional alias for the
+    // identical object, kept only as a fallback so they can drop it unannounced.
+    const b2bMeta = isObj(b2bBlock)
+        ? b2bBlock
+        : (isObj(s.volume_discount) ? s.volume_discount : (isObj(s.b2b_discount) ? s.b2b_discount : null));
     // Amount: prefer the object's own figure, else whichever source is numeric.
-    const b2b = num(b2bMeta && b2bMeta.discount_amount) || num(s.b2b_discount) || num(b2bBlock);
+    const b2b = num(b2bMeta && b2bMeta.discount_amount)
+        || num(s.volume_discount) || num(s.b2b_discount) || num(b2bBlock);
 
     return {
         loyalty,
@@ -1162,7 +1167,16 @@ const Cart = {
                 // Per-line value-pack upsell (mobile-ux-audit-jul2026 §3c/§6):
                 // present on single-colour lines that have a cheaper KCMY/CMY
                 // pack; absent otherwise. Render-only — never used for pricing.
-                pack_suggestion_for_line: item.pack_suggestion_for_line || null
+                pack_suggestion_for_line: item.pack_suggestion_for_line || null,
+                // The line's PUBLIC volume ladder, straight off the cart payload
+                // (BF-032). This map is a whitelist — every field not named here
+                // is discarded — so omitting these two made decorateVolumeNudges
+                // ingest `undefined` for every line and no nudge ever rendered
+                // (ERR-150). `retail_price` is carried under its own name as well
+                // as `price` because the ladder is compared against retail, and a
+                // renamed field is exactly what hid the bug.
+                retail_price: item.product.retail_price,
+                quantity_breaks: Array.isArray(item.quantity_breaks) ? item.quantity_breaks : null
             };
             parsed.key = self.cartItemKey(parsed);
             return parsed;
@@ -1172,18 +1186,41 @@ const Cart = {
         const summary = responseData.summary
             ? { ...responseData.summary }
             : null;
-        // Normalise the B2B block at the boundary. The live API puts the
-        // metadata OBJECT at the response top level and leaves
-        // `summary.b2b_discount` as a bare NUMBER (the amount). Folding the
+        // Normalise the volume-discount block at the boundary. The live API puts
+        // the metadata OBJECT at the response top level and leaves
+        // `summary.volume_discount` as a bare NUMBER (the amount). Folding the
         // object into the summary here means every one of the ~15
-        // `this.serverSummary = parsed.summary` assignments carries the tier
-        // and floored_line_count for free, instead of threading a new field
+        // `this.serverSummary = parsed.summary` assignments carries the company
+        // name and floored_line_count for free, instead of threading a new field
         // through all of them. The bare number is kept when no object is sent.
         // See computeDiscountBreakdown() above. (ERR-110)
-        if (summary && responseData.b2b_discount && typeof responseData.b2b_discount === 'object') {
-            summary.b2b_discount = responseData.b2b_discount;
+        //
+        // `volume_discount` is the current name; `b2b_discount` is the backend's
+        // transitional alias for the same object and is read only as a fallback,
+        // so they can drop it whenever. Both the READ and the WRITTEN key move
+        // together on purpose: cart.js's _renderDiscountRows and
+        // checkout-page.js's calculateDiscount call computeDiscountBreakdown with
+        // NO second source, so they see this metadata only because it was folded
+        // in here. Renaming one side alone would drop the company label and the
+        // floored-lines note on those two surfaces while payment-page — which
+        // reads the top level directly — kept working. A very quiet split-brain.
+        const volumeBlock = [responseData.volume_discount, responseData.b2b_discount]
+            .find(v => v && typeof v === 'object') || null;
+        if (summary && volumeBlock) {
+            summary.volume_discount = volumeBlock;
+            summary.b2b_discount = volumeBlock;
         }
 
+        // The WHOLE coupon object, not just its code and amount. The backend now
+        // clamps a coupon against the volume-pricing loss floor and explains it
+        // with `limited_by_volume_pricing` + `message` — fields that were being
+        // discarded here, which is the difference between "your code saved less
+        // than it says" and silence. Stashed as a side effect for the same reason
+        // as serverCartMeta below: the ~5 `this.items = parsed.items` call sites
+        // would otherwise each need a new line.
+        self.serverCoupon = (responseData.coupon && typeof responseData.coupon === 'object')
+            ? responseData.coupon
+            : null;
         const couponCode = responseData.coupon?.code || null;
         const discountAmount = responseData.coupon?.discount_amount || summary?.discount || 0;
 
@@ -1208,7 +1245,7 @@ const Cart = {
             cart_saved_until: responseData.cart_saved_until || null
         };
 
-        return { items, summary, couponCode, discountAmount, loyalty, meta: self.serverCartMeta };
+        return { items, summary, couponCode, discountAmount, loyalty, coupon: self.serverCoupon, meta: self.serverCartMeta };
     },
 
     /**
@@ -2091,27 +2128,15 @@ const Cart = {
      * The ladder is ingested from the cart's own lines, because /cart is a
      * surface a shopper can land on cold — no grid and no PDP has run, so
      * nothing else has handed a ladder over, and the nudge is exactly the
-     * surface where "buy one more" pays for itself.
-     *
-     * The line's `price` is a legitimate `retail_price` fallback here: cart
-     * lines carry the RETAIL `price_snapshot` and no per-line discount at all —
-     * the discount surfaces only as one cart-level `b2b_discount.discount_amount`
-     * — so this can never feed a discounted price in as the retail one.
+     * surface where "buy one more" pays for itself. `_parseServerCart` carries
+     * `quantity_breaks`/`retail_price` through for exactly this; it used to drop
+     * them, which made every call here a no-op (ERR-150).
      *
      * @param {Element} container
      */
     decorateVolumeNudges: function(container) {
         if (typeof Business === 'undefined' || !container) return;
-        if (Array.isArray(this.items)) {
-            Business.ingest(this.items.map(function(i) {
-                return {
-                    sku: i.sku,
-                    retail_price: (i.retail_price !== null && i.retail_price !== undefined)
-                        ? i.retail_price : i.price,
-                    quantity_breaks: i.quantity_breaks
-                };
-            }));
-        }
+        if (Array.isArray(this.items)) Business.ingest(this.items);
         Business.decorateCartLines(container, this.MAX_QUANTITY).catch(function(e) {
             DebugLog.warn('[Cart] volume nudges failed:', e && e.message);
         });
@@ -2175,6 +2200,26 @@ const Cart = {
                 note.hidden = false;
             } else {
                 note.hidden = true;
+            }
+        }
+
+        // A promo code the backend CLAMPED against the volume-pricing floor
+        // (BF-035) saves less than its headline. Saying nothing would leave the
+        // shopper to spot a smaller number than the code advertises and guess
+        // why, so the reason is stated next to the savings row. The server's own
+        // wording wins; ours is the fallback.
+        const couponNote = document.getElementById('cart-coupon-note');
+        if (couponNote) {
+            const clamped = typeof isCouponClamped === 'function'
+                ? isCouponClamped(this.serverCoupon)
+                : !!(this.serverCoupon && this.serverCoupon.limited_by_volume_pricing === true);
+            if (clamped) {
+                couponNote.textContent = typeof couponClampText === 'function'
+                    ? couponClampText(this.serverCoupon)
+                    : 'This code was reduced because some items are already at their best volume price.';
+                couponNote.hidden = false;
+            } else {
+                couponNote.hidden = true;
             }
         }
     },

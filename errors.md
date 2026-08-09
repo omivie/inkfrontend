@@ -81,6 +81,54 @@ cartridges sold` on both `/` and `/html/shop.html`. Cache tokens restamped (`npm
 
 ---
 
+## ERR-150 — The cart's volume nudge was wired to a field the cart parser throws away, so it never rendered for anyone (2026-08-09)
+
+**Context.** Volume pricing went public on 2026-08-08 (see ERR-149 and the public-volume-pricing
+brief). `Business.ingest()` takes the ladder off the payload a page already fetched; six grids and the
+PDP feed it, and so does the cart, because `/cart` is a surface a shopper can land on cold. The cart's
+job is the per-line nudge — "add 1 more to reach 4+" — which is the entire point of a volume scheme.
+It has never once rendered.
+
+**Root cause.** `_parseServerCart` (`js/cart.js:1139`) maps each server line onto a **whitelist** of
+14 named fields. It is not a spread; every field not named is discarded — `quantity_breaks`,
+`price_snapshot`, `line_total`, `in_stock` and the line's own `id` all vanish at that boundary, by
+design and for good reasons.
+
+`decorateVolumeNudges` then read `i.quantity_breaks` off those parsed items. Always `undefined`.
+`ingest()` correctly refuses anything without an array of rungs — its whole contract is that a missing
+field means "not shipped yet", never "no discount" — so it skipped every line and returned 0. No
+error, no warning, no nudge. The guard that exists precisely to stop absence being read as an answer
+worked perfectly, on data that a layer above had quietly deleted.
+
+Worse, the code *looked* careful. It mapped the lines explicitly and even carried a fallback,
+`retail_price: i.retail_price ?? i.price`, with a comment justifying why `price` was a safe stand-in.
+Both fields were undefined. The care was real and pointed at the wrong layer.
+
+The same mistake was avoided one file away: for favourites I mapped from the RAW server payload
+because I had noticed that `this.items` renames `retail_price` to `price`. Here I mapped from the
+already-normalised local shape without checking what survived it — and the field I needed was
+introduced by the backend the day *after* the parser was written.
+
+**The fix.** Carry `quantity_breaks` and `retail_price` through the parser and hand the parsed lines
+to `ingest()` unchanged — `Business.ingest(this.items)`, with no re-mapping to invent a shape. A test
+asserts the parser preserves both fields, and a second one drives a realistic line through
+`ingest` → `getLadderFor` → `nudgeMarkup` and asserts the rendered string says "Add 1 more to reach
+4+", so the pipeline is checked end to end rather than one link at a time.
+
+**The lesson.** A whitelist parser is a **silent** contract: adding a field upstream changes nothing
+downstream, and nothing anywhere says so. When a new field has to reach a consumer, the boundary it
+crosses is the thing to check first — not the consumer, which will look correct, and not the producer,
+which will be sending it. The tell was available and I walked past it: I had already discovered, in
+the neighbouring file, that this codebase renames and drops fields when it normalises. That is a
+property of the layer, not a quirk of one function, and it should have sent me to read the cart parser
+before writing a line against `this.items`.
+
+Second tell, for next time: `ingest()` returns a **count**. Nothing called it in a context that looked
+at the number. A fail-soft function that reports how much work it did is telling you to check, and
+"0 of 3 lines" would have been visible from the first render.
+
+---
+
 ## ERR-149 — An ungated summary row inherited a gated label, so widening volume pricing would have told every guest they had a "Business account" (2026-08-08)
 
 **Context.** Work started on making volume pricing available to every shopper rather than approved
