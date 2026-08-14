@@ -147,25 +147,51 @@ test('buildSelect: object-form options ({value,label}) preserve legacy values to
 // B. AdminAPI.updateProduct surfaces request_id and structured fields
 // ─────────────────────────────────────────────────────────────────────────────
 
+// Aug 2026: updateProduct stopped hand-building its Error and now shares
+// productWriteError() with createProduct, which had been throwing a BARE Error
+// with none of this (ERR-164). These assertions used to regex the hand-built
+// lines; they RUN the helper instead, so the contract survives the next
+// refactor of how it is spelled.
+function loadProductWriteError() {
+  const grab = (sig) => {
+    const start = ADMIN_API_SRC.indexOf(sig);
+    assert.notEqual(start, -1, `not found: ${sig}`);
+    let depth = 0, i = ADMIN_API_SRC.indexOf('{', start);
+    for (; i < ADMIN_API_SRC.length; i++) {
+      if (ADMIN_API_SRC[i] === '{') depth++;
+      else if (ADMIN_API_SRC[i] === '}') { depth--; if (depth === 0) break; }
+    }
+    return ADMIN_API_SRC.slice(start, i + 1);
+  };
+  const src = `${grab('function errorFromEnvelope(resp, fallbackMessage)')}\n${grab('function productWriteError(resp, fallbackMessage)')}`;
+  return vm.runInNewContext(`${src}; productWriteError`);
+}
+
 test('AdminAPI.updateProduct rethrows with code/status/request_id attached', () => {
   // Pin the contract: the toast and any caller can read e.code, e.status,
   // and e.request_id from the thrown Error. Backend CORS exposes
   // x-request-id cross-origin, so request_id is now reliably populated.
-  assert.match(ADMIN_API_SRC, /err\.code\s*=\s*resp\.code/,
-    'updateProduct must attach resp.code to the thrown Error');
-  assert.match(ADMIN_API_SRC, /err\.status\s*=\s*resp\.status/,
-    'updateProduct must attach resp.status to the thrown Error');
-  assert.match(ADMIN_API_SRC, /err\.request_id\s*=\s*resp\.request_id/,
-    'updateProduct must attach resp.request_id to the thrown Error');
+  const err = loadProductWriteError()(
+    { ok: false, error: 'Validation failed', code: 'VALIDATION_FAILED', status: 400, request_id: 'e72595af-1111-2222' },
+    'Update failed');
+  assert.equal(err.code, 'VALIDATION_FAILED');
+  assert.equal(err.status, 400);
+  assert.equal(err.request_id, 'e72595af-1111-2222');
+  // Both product writes must go through it — create was the one that did not.
+  assert.match(ADMIN_API_SRC, /throw productWriteError\(resp, 'Update failed'\)/);
+  assert.match(ADMIN_API_SRC, /throw productWriteError\(resp, 'Create failed'\)/);
 });
 
 test('AdminAPI.updateProduct error message includes the 8-char request_id ref when present', () => {
   // Verified end-to-end 2026-05-12 against prod: a 400 VALIDATION_FAILED
   // surfaced as `Save failed: ... (ref e72595af)` in the admin toast.
-  assert.match(ADMIN_API_SRC, /String\(resp\.request_id\)\.slice\(0,\s*8\)/,
-    'updateProduct must slice request_id to 8 chars when appending to the message');
-  assert.match(ADMIN_API_SRC, /\(ref \$\{[^}]+\}\)/,
-    'updateProduct must format the request_id as "(ref XXXXXXXX)"');
+  const productWriteError = loadProductWriteError();
+  assert.equal(
+    productWriteError({ ok: false, error: 'Validation failed', request_id: 'e72595af-1111-2222' }, 'Update failed').message,
+    'Validation failed (ref e72595af)');
+  assert.equal(
+    productWriteError({ ok: false, error: 'Validation failed' }, 'Update failed').message,
+    'Validation failed', 'no request_id means no empty "(ref )" tail');
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -191,7 +217,12 @@ test('Save catch is the simple generic toast — no INTERNAL_ERROR special case'
     'Save catch must not retain the legacy-row INTERNAL_ERROR special case');
   assert.doesNotMatch(PRODUCTS_SRC, /Pending operator fix/,
     'Save catch must not retain the "Pending operator fix" copy — backend fix shipped');
-  // Generic toast still present
-  assert.match(PRODUCTS_SRC, /Toast\.error\(`Save failed: \$\{e\.message\}`\)/,
-    'Save catch must keep the generic `Save failed: ${e.message}` toast');
+  // The catch still reports the backend's own message with a "Save failed:"
+  // prefix — it just routes through showProductWriteError(), which additionally
+  // gives a long validation sentence enough time on screen to be read and marks
+  // the offending field (Aug 2026, ERR-164).
+  assert.match(PRODUCTS_SRC, /showProductWriteError\(modal, 'Save failed', e\)/,
+    'Save catch must surface the backend message, not a hardcoded sentence');
+  assert.match(PRODUCTS_SRC, /const text = `\$\{prefix\}: \$\{message\}`/,
+    'the toast text must stay "<prefix>: <backend message>"');
 });

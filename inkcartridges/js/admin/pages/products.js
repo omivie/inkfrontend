@@ -11,7 +11,8 @@ import { computeProfitability, marginBadge, formatProfitDollars } from '../utils
 import { GST_INCL, GST_EXCL, GST_BASE } from '../utils/gst-basis.js';
 import { PRODUCT_TYPE_TO_SHOP_CATEGORY, describeCodesWriteError, describeScopes, paginate, pagerHtml } from '../utils/product-codes.js';
 import {
-  PRODUCT_TYPE_LABELS, RIBBON_PRODUCT_TYPES, typeFilterGroup, typeFilterOptions,
+  PRODUCT_TYPE_OPTIONS, RIBBON_PRODUCT_TYPES, productTypeLabel, productTypeNoun,
+  typeFilterGroup, typeFilterOptions,
 } from '../utils/product-types.js';
 import { attachProductAutocomplete } from '../components/product-search.js';
 // Supplier + pack-origin rendering, shared verbatim with the Orders modal's
@@ -1110,23 +1111,7 @@ function openCreateProductModal() {
     </div>
     <div class="admin-form-row">
       ${formGroup('Brand', buildBrandSelect(null))}
-      ${formGroup('Product Type', buildSelect('edit-type', [
-        { value: 'ink_cartridge',    label: 'Ink Cartridge' },
-        { value: 'ink_bottle',       label: 'Ink Bottle' },
-        { value: 'toner_cartridge',  label: 'Toner Cartridge' },
-        { value: 'drum_unit',        label: 'Drum Unit' },
-        { value: 'waste_toner',      label: 'Waste Toner' },
-        { value: 'belt_unit',        label: 'Belt Unit' },
-        { value: 'fuser_kit',        label: 'Fuser Kit' },
-        { value: 'fax_film',         label: 'Fax Film' },
-        { value: 'fax_film_refill',  label: 'Fax Film Refill' },
-        { value: 'printer_ribbon',   label: 'Printer Ribbon' },
-        { value: 'typewriter_ribbon', label: 'Typewriter Ribbon' },
-        { value: 'correction_tape',  label: 'Correction Tape' },
-        { value: 'label_tape',       label: 'Label Tape' },
-        { value: 'photo_paper',      label: 'Photo Paper' },
-        { value: 'printer',          label: 'Printer' },
-      ], empty.product_type))}
+      ${formGroup('Product Type', buildSelect('edit-type', PRODUCT_TYPE_OPTIONS, empty.product_type))}
     </div>
     <div class="admin-form-row">
       ${formGroup('Color', buildColorSelect('edit-color', empty.color))}
@@ -1284,7 +1269,7 @@ function openCreateProductModal() {
       loadProducts();
       if (newProduct?.id) openProductDrawer(newProduct);
     } catch (e) {
-      Toast.error(`Create failed: ${e.message}`);
+      showProductWriteError(modal, 'Create failed', e);
       saveBtn.disabled = false;
       saveBtn.innerHTML = `${icon('products', 14, 14)} Create Product`;
     }
@@ -1365,23 +1350,7 @@ function buildProductModalTabs(modal, full, isOwner) {
     </div>
     <div class="admin-form-row">
       ${formGroup('Brand', buildBrandSelect(full.brand_id || full.brand), 'brand_id')}
-      ${formGroup('Product Type', buildSelect('edit-type', [
-        { value: 'ink_cartridge',    label: 'Ink Cartridge' },
-        { value: 'ink_bottle',       label: 'Ink Bottle' },
-        { value: 'toner_cartridge',  label: 'Toner Cartridge' },
-        { value: 'drum_unit',        label: 'Drum Unit' },
-        { value: 'waste_toner',      label: 'Waste Toner' },
-        { value: 'belt_unit',        label: 'Belt Unit' },
-        { value: 'fuser_kit',        label: 'Fuser Kit' },
-        { value: 'fax_film',         label: 'Fax Film' },
-        { value: 'fax_film_refill',  label: 'Fax Film Refill' },
-        { value: 'printer_ribbon',   label: 'Printer Ribbon' },
-        { value: 'typewriter_ribbon', label: 'Typewriter Ribbon' },
-        { value: 'correction_tape',  label: 'Correction Tape' },
-        { value: 'label_tape',       label: 'Label Tape' },
-        { value: 'photo_paper',      label: 'Photo Paper' },
-        { value: 'printer',          label: 'Printer' },
-      ], full.product_type), 'product_type')}
+      ${formGroup('Product Type', buildSelect('edit-type', PRODUCT_TYPE_OPTIONS, full.product_type), 'product_type')}
     </div>
     <div class="admin-form-row">
       ${formGroup('Color', buildColorSelect('edit-color', full.color), 'color')}
@@ -2118,7 +2087,7 @@ async function wireProductCodesSection(modal, full) {
     brandSlug = brandName.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
   }
   const productType = full.product_type || '';
-  const typeLabel = PRODUCT_TYPE_LABELS[productType] || productType || '—';
+  const typeLabel = productTypeLabel(productType) || '—';
   const category  = PRODUCT_TYPE_TO_SHOP_CATEGORY[productType] || '';
 
   brandEl.textContent = brandName || '—';
@@ -2773,6 +2742,69 @@ async function buildFaqSection(modal, product) {
       }
     }
   });
+}
+
+/**
+ * Report a failed product create/update.
+ *
+ * On 2026-08-13 an admin typed the SUPPLIER's code (`E502`) into SKU for a
+ * product whose site SKU is `GT502` — which already existed. The backend
+ * answered `500 "Failed to create product"`, the toast said
+ * "Create failed: Failed to create product", and the real cause stayed
+ * invisible. The backend now answers 400 with a ~250-character sentence that
+ * names the SKU, explains the grammar and gives examples. Two things have to be
+ * true for that to actually help:
+ *
+ *   1. It has to be READABLE. Toast.error auto-dismisses after 6s, which is not
+ *      long enough for a paragraph, so anything past a one-liner gets 16s. The
+ *      toast has no line-clamp, so it wraps in full.
+ *   2. It has to point somewhere. A sentence about the SKU while the modal sits
+ *      on the Pricing tab is a puzzle; the field gets the same red border and
+ *      inline note that a blank required field gets, and the modal jumps to it.
+ *
+ * Anything that is NOT client-fixable (auth, network, 5xx) just toasts — there
+ * is no field to blame, and marking one would be a lie.
+ */
+function showProductWriteError(modal, prefix, e) {
+  const message = (e && e.message) || 'Something went wrong. Please try again.';
+  const text = `${prefix}: ${message}`;
+  Toast.error(text, message.length > 90 ? 16000 : undefined);
+
+  const clientFixable = e && (e.status === 400 || e.status === 409
+    || ['BAD_REQUEST', 'VALIDATION_FAILED', 'CONFLICT', 'DUPLICATE'].includes(e.code));
+  if (!modal || !clientFixable) return;
+
+  // Which field the backend is complaining about. SKU is the only one it
+  // rejects by grammar today; a per-field `details` list wins when present.
+  const field = Array.isArray(e.details) && e.details.find(d => d && d.field)
+    ? String(e.details.find(d => d.field).field)
+    : (/\bsku\b/i.test(message) ? 'sku' : '');
+  const inputId = { sku: 'edit-sku', name: 'edit-name', retail_price: 'edit-retail-price' }[field];
+  const el = inputId && modal.querySelector(`#${inputId}`);
+  if (!el) return;
+
+  // Reveal it by asking the FIELD which panel it lives in. The two modals do
+  // not share a tab order — the Edit modal inserts "Product Codes" before
+  // Pricing — so a hardcoded index would open the wrong tab in one of them.
+  const tabIdx = el.closest('.admin-product-modal__tab-panel')?.dataset.panel;
+  if (tabIdx !== undefined) {
+    modal.querySelectorAll('.admin-product-modal__tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tabIdx));
+    modal.querySelectorAll('.admin-product-modal__tab-panel').forEach(p => p.classList.toggle('active', p.dataset.panel === tabIdx));
+  }
+
+  el.style.borderColor = 'var(--danger)';
+  if (!el.nextElementSibling?.classList.contains('field-error')) {
+    const note = document.createElement('div');
+    note.className = 'field-error';
+    note.style.cssText = 'font-size:11px;color:var(--danger);margin-top:4px';
+    note.textContent = message;
+    el.after(note);
+  }
+  el.focus();
+  el.addEventListener('input', () => {
+    el.style.borderColor = '';
+    if (el.nextElementSibling?.classList.contains('field-error')) el.nextElementSibling.remove();
+  }, { once: true });
 }
 
 function formGroup(label, inputHtml, overrideField) {
@@ -3646,7 +3678,7 @@ function bindProductModalActions(modal, product) {
       // AdminAPI.updateProduct already appends `(ref XXXXXXXX)` from the backend's
       // x-request-id when present (CORS exposes it as of 2026-05-11), so this
       // toast carries everything support needs to grep Render stderr.
-      Toast.error(`Save failed: ${e.message}`);
+      showProductWriteError(modal, 'Save failed', e);
       const saveBtn = modal.querySelector('[data-action="save"]');
       if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = 'Save Changes'; }
     }
@@ -4014,40 +4046,34 @@ function generateSEO(product) {
   const codeMatch = name.match(/\b([A-Z]{1,3}[\-]?\d{2,5}[A-Z]*(?:XL)?)\b/i);
   const code = codeMatch ? codeMatch[1] : '';
 
-  // Readable type labels
-  const typeLabel = {
-    ink_cartridge: 'Ink Cartridge',
-    ink_bottle: 'Ink Bottle',
-    toner_cartridge: 'Toner Cartridge',
-    drum_unit: 'Drum Unit',
-    waste_toner: 'Waste Toner',
-    belt_unit: 'Belt Unit',
-    fuser_kit: 'Fuser Kit',
-    fax_film: 'Fax Film',
-    fax_film_refill: 'Fax Film Refill',
-    ribbon: 'Printer Ribbon',
-    printer_ribbon: 'Printer Ribbon',
-    typewriter_ribbon: 'Typewriter Ribbon',
-    correction_tape: 'Correction Tape',
-    label_tape: 'Label Tape',
-    photo_paper: 'Photo Paper',
-    printer: 'Printer',
-  }[type] || '';
+  // Readable type label — from the shared vocabulary, never a private copy.
+  // This map used to be hand-written here, and it missed `maintenance_box`
+  // (ERR-162): typeLabel fell to '' and GT502's generated title came out
+  // "Buy Epson T502  NZ - Genuine | …" — a doubled space where the product
+  // noun should be, on a page whose whole job is telling Google what the
+  // product IS. `ribbon` is a legacy column value, not a current enum member,
+  // so it stays as an explicit alias.
+  const typeLabel = type === 'ribbon' ? 'Printer Ribbon' : productTypeNoun(type);
   const sourceLabel = source === 'genuine' ? 'Genuine' : source === 'compatible' ? 'Compatible' : source === 'remanufactured' ? 'Remanufactured' : '';
 
   // ---- Meta Title (50-60 chars ideal) ----
   // Pattern: "Buy {Brand} {Code} {Type} NZ | InkCartridges.co.nz"
-  let metaTitle;
-  if (code && sourceLabel) {
-    metaTitle = `Buy ${brand} ${code} ${typeLabel} NZ - ${sourceLabel} | InkCartridges.co.nz`;
-  } else if (code) {
-    metaTitle = `Buy ${brand} ${code} ${typeLabel} NZ | InkCartridges.co.nz`;
-  } else {
-    metaTitle = `Buy ${name} NZ | InkCartridges.co.nz`;
-  }
-  if (metaTitle.length > 60) {
-    metaTitle = `Buy ${brand} ${code || name.split(' ').slice(1, 3).join(' ')} NZ | InkCartridges.co.nz`;
-  }
+  //
+  // Shortened one step at a time, keeping the most valuable words longest. The
+  // fallback used to be a single jump from the full pattern straight to
+  // brand+code, which threw away the type noun even when it comfortably fitted:
+  // "Buy Epson T502 Maintenance Box NZ - Genuine | …" is 65 chars, so GT502's
+  // title collapsed to "Buy Epson T502 NZ | …" (39) — 21 characters unused and
+  // no statement of what the product IS. Longer type nouns (Typewriter Ribbon,
+  // Correction Tape, Fax Film Refill) hit the same cliff. Dropping the source
+  // qualifier first keeps the noun wherever it fits.
+  const candidates = [];
+  if (code && sourceLabel) candidates.push(`Buy ${brand} ${code} ${typeLabel} NZ - ${sourceLabel} | InkCartridges.co.nz`);
+  if (code) candidates.push(`Buy ${brand} ${code} ${typeLabel} NZ | InkCartridges.co.nz`);
+  if (!code) candidates.push(`Buy ${name} NZ | InkCartridges.co.nz`);
+  candidates.push(`Buy ${brand} ${code || name.split(' ').slice(1, 3).join(' ')} NZ | InkCartridges.co.nz`);
+  const metaTitle = candidates.map(t => t.replace(/\s{2,}/g, ' ')).find(t => t.length <= 60)
+    || candidates[candidates.length - 1].replace(/\s{2,}/g, ' ');
 
   // ---- Meta Description (150-160 chars ideal) ----
   const colorPart = color && color.toLowerCase() !== 'n/a' ? ` ${color}` : '';

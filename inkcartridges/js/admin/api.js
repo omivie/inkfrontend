@@ -127,6 +127,40 @@ function errorFromEnvelope(resp, fallbackMessage) {
   return e;
 }
 
+/**
+ * errorFromEnvelope + the two things a PRODUCT write envelope carries that the
+ * generic helper has no business knowing about:
+ *
+ *   - `details` — a per-field validation LIST. Appended, because for a product
+ *     save that list IS the user-facing copy ("name: required, sku: too long").
+ *     An object `details` is machine payload and is attached, never stringified
+ *     (js/api.js:420 documents why — a stringified object once went into an
+ *     alert() verbatim).
+ *   - `(ref XXXXXXXX)` — the 8-char Render request_id, so an admin looking at a
+ *     generic 500 can hand support something greppable. CORS has exposed
+ *     x-request-id since 2026-05-11.
+ *
+ * updateProduct had both and built its Error by hand; createProduct had the
+ * details append, no ref, and threw a BARE `new Error(msg)` that discarded
+ * `code`, `status` and `request_id` entirely (ERR-164). So the one write an
+ * admin performs least often — creating a product — was the one that told them
+ * the least when it failed. Both go through here now.
+ */
+function productWriteError(resp, fallbackMessage) {
+  const e = errorFromEnvelope(resp, fallbackMessage);
+  const details = resp?.details ?? (resp?.error && typeof resp.error === 'object' ? resp.error.details : undefined);
+  let msg = e.message;
+  if (Array.isArray(details) && details.length) {
+    msg += ': ' + details.map(d => (d && d.message) || d).join(', ');
+  } else if (details != null && typeof details !== 'object') {
+    msg += ': ' + details;
+  }
+  if (details !== undefined) e.details = details;
+  if (e.request_id) msg += ` (ref ${String(e.request_id).slice(0, 8)})`;
+  e.message = msg;
+  return e;
+}
+
 
 // Rich-text product columns that the backend's HTML sanitiser mangles.
 //
@@ -1003,25 +1037,7 @@ const AdminAPI = {
   async updateProduct(productId, data) {
     try {
       const resp = await window.API.put(`/api/admin/products/${productId}`, data);
-      if (resp && resp.ok === false) {
-        let msg = resp.error || 'Update failed';
-        if (resp.details) {
-          if (Array.isArray(resp.details)) {
-            msg += ': ' + resp.details.map(d => d.message || d).join(', ');
-          } else if (typeof resp.details === 'string') {
-            msg += ': ' + resp.details;
-          }
-        }
-        // Append the 8-char Render request_id so admins can grep stderr when
-        // the backend returns a generic 500. Cross-origin exposure of
-        // x-request-id shipped 2026-05-11 (CORS allowlist now includes it).
-        if (resp.request_id) msg += ` (ref ${String(resp.request_id).slice(0, 8)})`;
-        const err = new Error(msg);
-        err.code = resp.code;
-        err.status = resp.status;
-        err.request_id = resp.request_id;
-        throw err;
-      }
+      if (resp && resp.ok === false) throw productWriteError(resp, 'Update failed');
       // Repair the rich-text columns the backend sanitiser strips. The product
       // itself saved fine above, so this is intentionally non-fatal.
       await this.persistRichTextColumns(productId, data);
@@ -1068,15 +1084,7 @@ const AdminAPI = {
   async createProduct(data) {
     try {
       const resp = await window.API.post('/api/admin/products', data);
-      if (resp && resp.ok === false) {
-        let msg = resp.error || 'Create failed';
-        if (resp.details) {
-          msg += ': ' + (Array.isArray(resp.details)
-            ? resp.details.map(d => d.message || d).join(', ')
-            : resp.details);
-        }
-        throw new Error(msg);
-      }
+      if (resp && resp.ok === false) throw productWriteError(resp, 'Create failed');
       const result = resp?.data ?? resp;
       // Repair the rich-text columns the backend sanitiser strips on create.
       const newId = result?.product?.id ?? result?.id;

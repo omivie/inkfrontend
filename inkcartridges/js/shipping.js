@@ -187,7 +187,7 @@ const Shipping = {
         const getItemCategory = (item) => {
             const pt = (item.product_type || '').toLowerCase();
             if (pt === 'printer') return 'printer';
-            if (pt === 'drum_unit' || pt === 'waste_toner' || pt === 'belt_unit' || pt === 'fuser_kit') return 'drum';
+            if (pt === 'drum_unit' || pt === 'waste_toner' || pt === 'maintenance_box' || pt === 'belt_unit' || pt === 'fuser_kit') return 'drum';
             if (pt === 'toner_cartridge') return 'toner';
             if (pt === 'ink_cartridge' || pt === 'ink_bottle') return 'ink';
             if (pt === 'photo_paper') return 'paper';

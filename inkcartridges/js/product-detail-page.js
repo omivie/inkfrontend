@@ -349,9 +349,15 @@
                 case 'toner_cartridge': return 'toner';
                 case 'drum_unit':
                 case 'waste_toner':
+                // Waste-ink collectors got their own type in Aug 2026
+                // (migration 136). Without this case GT502 "Epson Genuine T502
+                // Maintenance Box" fell through to normalizeCategory('CON-INK')
+                // → 'ink' and its Related Products queried the ink family — the
+                // exact ERR-132 failure the comment below this switch describes,
+                // repeated four products later.
+                case 'maintenance_box':
                 case 'belt_unit':
-                case 'fuser_kit':
-                case 'maintenance_kit': return 'drum';
+                case 'fuser_kit':       return 'drum';
                 case 'ribbon':
                 case 'printer_ribbon':
                 case 'typewriter_ribbon':
@@ -1934,13 +1940,27 @@
                 const firstLabel  = isCompatible ? 'compatible' : 'genuine';
                 const secondLabel = isCompatible ? 'genuine'    : 'compatible';
 
+                // Which grid a related product belongs in. The `drum` bucket was
+                // added Aug 2026 (ERR-165): before it, everything that was not a
+                // ribbon or a toner fell through to 'ink', so a drum unit, a
+                // fuser kit, a waste-toner bottle and a maintenance box were all
+                // filed under a heading that read "<Brand> Ink Cartridges". That
+                // is a false statement about the product, on the product's own
+                // page, in a heading — and it applied to the entire ~280-product
+                // drums family, not just the four new maintenance boxes.
+                const DRUM_TYPES = ['drum_unit', 'waste_toner', 'maintenance_box', 'belt_unit', 'fuser_kit', 'fax_film', 'fax_film_refill'];
                 const inferProductType = (p) => {
                     const pt = (p.product_type || '').toLowerCase();
                     if (pt.includes('ribbon') || pt === 'correction_tape') return 'ribbon';
                     if (pt === 'toner_cartridge') return 'toner';
                     if (pt === 'ink_cartridge' || pt === 'ink_bottle') return 'ink';
+                    if (DRUM_TYPES.includes(pt)) return 'drum';
                     const n = (p.name || '').toLowerCase();
                     if (n.includes('ribbon') || n.includes('correction tape')) return 'ribbon';
+                    // Name-led fallback for rows with no product_type. "Drum",
+                    // "maintenance box/tank/cart", "waste toner", "fuser" and
+                    // "transfer belt" are all self-describing.
+                    if (/\b(drum|maintenance\s+(?:box|tank|cart)|waste\s+toner|fuser|transfer\s+belt)\b/.test(n)) return 'drum';
                     return n.includes('toner') ? 'toner' : 'ink';
                 };
 
@@ -1955,11 +1975,17 @@
                     const ribbons = products.filter(p => inferProductType(p) === 'ribbon');
                     const inks    = products.filter(p => inferProductType(p) === 'ink');
                     const toners  = products.filter(p => inferProductType(p) === 'toner');
+                    const drums   = products.filter(p => inferProductType(p) === 'drum');
 
                     const buildTypeGrid = (items, productType) => {
                         if (!items.length) return '';
+                        // "Drums & Supplies" is the /shop category name for this
+                        // family (shop-page.js categories[]) — the customer has
+                        // already seen those exact words on the tile they
+                        // browsed through.
                         const label = productType === 'ribbon' ? 'Ribbons' :
-                                     productType === 'toner' ? 'Toner Cartridges' : 'Ink Cartridges';
+                                     productType === 'toner' ? 'Toner Cartridges' :
+                                     productType === 'drum' ? 'Drums & Supplies' : 'Ink Cartridges';
                         const heading = `${brandName} ${label}`.trim();
 
                         // Splice row-breaks between (familyKey, yieldTier)
@@ -1988,6 +2014,7 @@
                             ${buildTypeGrid(ribbons, 'ribbon')}
                             ${buildTypeGrid(inks, 'ink')}
                             ${buildTypeGrid(toners, 'toner')}
+                            ${buildTypeGrid(drums, 'drum')}
                         </div>
                     `;
                 };

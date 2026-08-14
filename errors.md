@@ -203,6 +203,207 @@ it. Print the stripped region before assuming the regex is wrong.
 
 ---
 
+## ERR-166 — The admin's "Delete Products" button calls an endpoint that does not exist — **OPEN (backend, BF-041)** (2026-08-14)
+
+**Date**: 2026-08-14
+**Context**: found while cleaning up `TEST-MBOX1`, a product created deliberately to verify the
+`maintenance_box` create path (ERR-162). Creating it worked. Deleting it did not.
+
+**What happens.** `DELETE /api/admin/products/:id` returns
+`404 {"ok":false,"error":{"code":"NOT_FOUND","message":"Endpoint not found"}}` — note the message:
+not "product not found", **"Endpoint not found"**. The route is not registered. Four plausible
+alternatives were probed with a live owner token and all four 404 the same way:
+`DELETE /api/admin/product/:id`, `POST /api/admin/products/:id/delete`,
+`DELETE /api/admin/products?id=`, `DELETE /api/admin/products/sku/:sku`.
+
+**So the UI is a button that cannot work.** `bulkDeleteProducts` (`js/admin/pages/products.js`
+~4234) shows a confirm dialog saying "This will permanently delete N products. This action cannot
+be undone", then calls `AdminAPI.deleteProduct(id)` per row → `API.delete('/api/admin/products/:id')`
+(`js/api.js:3124`). Every call rejects. `Promise.allSettled` counts them, so the admin gets
+`N deleted, 0 failed`… no: it gets `0 deleted, N failed` — the toast is honest. What is not honest
+is offering the action at all, and phrasing the confirm as though the rows are about to go.
+
+**Not fixed here.** The right fix is the backend route; hiding the button would remove the only
+signal that products cannot be deleted, and stubbing a soft-delete would be inventing a contract.
+Logged, and the FE-side follow-up (disable the action behind a capability check, or restate the
+confirm) is queued rather than guessed at.
+
+**Live residue.** `TEST-MBOX1` (`7f88d112-f0ad-4966-88b0-fdc6d66ae674`) could not be deleted, so it
+was set `is_active: false` and renamed `ZZ DO NOT USE — FE acceptance probe 2026-08-14…` with the
+reason in `internal_notes`. It is absent from `/api/products` and from anon Supabase reads (RLS
+hides inactive rows). It needs one SQL `DELETE` whenever someone is next in the database.
+
+**Lesson**: a destructive action's confirm dialog is a promise about what is about to happen. Nobody
+had ever pressed it.
+
+---
+
+## ERR-165 — Every drum, fuser, belt and maintenance box on the site was headed "Ink Cartridges" — RESOLVED (2026-08-14)
+
+**Date**: 2026-08-14
+**Context**: found while checking where a `maintenance_box` surfaces on the storefront.
+
+**Root cause**: `product-detail-page.js` `inferProductType()` bucketed Related Products into three
+grids — ribbon, toner, ink — and *defaulted to ink*:
+
+```js
+return n.includes('toner') ? 'toner' : 'ink';
+```
+
+`buildTypeGrid` then titled the grid `${brand} ${label}` where label was `'Ink Cartridges'` for
+everything that was not a ribbon or a toner. So the Related Products block on an OKI drum-unit page
+read **"GENUINE OKI Ink Cartridges"** over a grid of drum units. Same for waste-toner bottles,
+transfer belts, fuser kits — ~280 products, every one of them stating in an `<h3>` that it is
+something it is not.
+
+Invisible because it is *plausible*: a heading with the right brand and the right badge over the
+right products. Only the noun is wrong, and nobody reads the noun on a page about a drum.
+
+**Fix**: a fourth bucket. `DRUM_TYPES` (the drums family) → `'drum'` → **"Drums & Supplies"**, the
+same words the customer clicked on the /shop tile. Name-led fallback added for rows with no
+`product_type` (`drum`, `maintenance box/tank/cart`, `waste toner`, `fuser`, `transfer belt`).
+
+**Verified live**: `GC5650BK` PDP heading now reads `GENUINE OKI Drums & Supplies` with 2 related
+cards. `GT502` has no siblings, so its section stays correctly hidden — an empty section is the one
+case where hiding is honest (ERR-134).
+
+---
+
+## ERR-164 — `createProduct` threw a bare Error, so the one write admins do least often told them least — RESOLVED (2026-08-14)
+
+**Date**: 2026-08-14
+**Context**: 2026-08-13, an admin creating the Epson T502 maintenance box typed the SUPPLIER's code
+`E502` into SKU. The site SKU is `GT502`, which already existed. The toast said:
+
+> Create failed: Failed to create product
+
+They could not act on that, and neither could anyone reading it later.
+
+**Root cause, two layers.**
+
+1. The backend answered `500 "Failed to create product"` for a CHECK-constraint violation.
+   `js/api.js:409` correctly returns 5xx as an envelope, so `resp.error` was that generic string and
+   the toast faithfully repeated it. **Fixed backend-side**: it now returns `400 BAD_REQUEST` with a
+   sentence naming the SKU, the grammar and examples.
+2. `AdminAPI.createProduct` unwrapped the envelope with `throw new Error(msg)` — no `code`, no
+   `status`, no `request_id`. `updateProduct` built its own Error by hand with all three plus the
+   `(ref XXXXXXXX)` suffix. So the two sibling writes disagreed about how much of the failure
+   survived, and create was the poorer one. This is the ERR-077/ERR-132 trap that
+   `errorFromEnvelope()` was written to end — its own docstring says "Never construct a bare Error
+   from an envelope again", eight hundred lines above two functions that did.
+
+**Fix**:
+- `productWriteError(resp, fallback)` in `js/admin/api.js` = `errorFromEnvelope` + the two things a
+  product-write envelope carries: a `details` list appended as user copy (an object `details` is
+  attached, never stringified — that is how a coupon suggestion once landed in an `alert()`), and
+  the 8-char `(ref …)`. Both `createProduct` and `updateProduct` use it.
+- `showProductWriteError(modal, prefix, e)` in `pages/products.js` for both save handlers. A
+  ~250-char validation sentence gets 16s instead of the 6s default (the toast has no line-clamp, so
+  it wraps in full), and when the rejection names a field the modal jumps to that field's tab and
+  marks it with the same red border and inline note a blank required field gets. The tab index comes
+  from `el.closest('.admin-product-modal__tab-panel')` — the New and Edit modals have **different**
+  tab orders, so a hardcoded index would open the wrong one.
+
+**Verified live**: creating with SKU `E502X` now shows the full grammar sentence in the toast AND
+under a red-bordered `#edit-sku`. Screenshot in the FE response doc.
+
+**Lesson**: two functions that do the same job in the same file will not stay the same. The one that
+runs less often is the one that rots, and it rots where nobody is watching.
+
+---
+
+## ERR-163 — `maintenance_kit`: a filter option that had never matched a single row — RESOLVED (2026-08-14)
+
+**Date**: 2026-08-14
+**Context**: found by counting, while adding `maintenance_box`.
+
+**Root cause**: `maintenance_kit` sat in `PRODUCT_TYPE_LABELS`, in the "All Types" filter menu, in
+`PRODUCT_TYPE_TO_SHOP_CATEGORY`, in `API._CATEGORY_PRODUCT_TYPES.drums` and in three
+`shop-page.js` consumable predicates. Live row count: **zero**. Not "few" — zero, and it is not in
+the backend enum at all; the importer classifies "Maintenance Kit" / "Maint Kit" as `fuser_kit`.
+
+This is `drum`/`paper` again (ERR-075), which the very module it lived in was created to prevent —
+its header documents that exact lesson. A type filter with no matching rows does not error. It
+returns an empty table, which is indistinguishable from "no products match your other filters".
+
+**Fix**: `RETIRED_PRODUCT_TYPES = { maintenance_kit: 'Maintenance Kit (retired)' }` +
+`productTypeLabel()` (canonical → retired → raw). Removed from every menu and every membership
+list. **Retired loudly, not deleted**: a row that somehow still carries the value renders a human
+label marked retired, and `buildSelect`'s legacy branch keeps it selectable so saving that row
+cannot rewrite its type. Removing a fallback is a behaviour change, not cleanup (ERR-158).
+
+**Gate**: `npm run audit:types` check `T8-retired-type-is-alive` fails if a retired type ever comes
+back with rows, and `T1-offered-but-empty` fails for any *new* option that matches nothing.
+
+---
+
+## ERR-162 — A new backend product type was missing from all SIX frontend vocabularies, and nothing broke — RESOLVED (2026-08-14)
+
+**Date**: 2026-08-14
+**Context**: backend handoff `maintenance-box-product-type-aug2026.md`. On 2026-08-13 the catalog
+gained `maintenance_box` for waste-ink collectors (Epson T502 / T366100, Epson S2100 tank, Canon
+MC-G01 cart, Brother LEB445001). The brief scoped the frontend work as "**~2 small changes (one
+`<option>`, one error-toast tweak)**".
+
+**Root cause**: the frontend was carrying **six** independent product-type vocabularies. The new
+value was in none of them:
+
+| # | surface | what it silently did |
+|---|---|---|
+| 1 | `admin/utils/product-types.js` — the "All Types" filter | the 4 live boxes were unfilterable |
+| 2 | `admin/pages/products.js` — New Product modal `<select>` | nobody could create one |
+| 3 | `admin/pages/products.js` — Edit modal `<select>` (a byte-copy of #2) | GT502 rendered `maintenance_box (legacy)` |
+| 4 | `admin/pages/products.js` — `generateSEO()`'s private label map | `typeLabel` fell to `''`: `Buy Epson T502␣␣NZ - Genuine \| …` |
+| 5 | `js/api.js` — `_CATEGORY_PRODUCT_TYPES.drums` | manual code chips could not recover one |
+| 6 | `js/shop-page.js` — three longhand `consumable` predicates | the brand facet counted 0 for products /shop was listing |
+
+Plus `product-detail-page.js` `normalizeProductType` (fell through to `normalizeCategory('CON-INK')`
+→ `'ink'`, so Related Products queried the wrong family — ERR-132, one line above the comment
+describing ERR-132), `shipping.js` `maySplitShipment`, and
+`PRODUCT_TYPE_TO_SHOP_CATEGORY` (which was also missing `fax_film`/`fax_film_refill`, live members
+of `drums` since the IA reorg).
+
+**Not broken — quiet.** None of those throw on an unknown type. A filter returns nothing, a
+membership test returns false, a label map returns `undefined`. This is the fourth entry of this
+exact shape: ERR-075, ERR-132, ERR-150, ERR-160. Every one was found by a person noticing.
+
+**What was already right, and worth recording**: `buildSelect()` appends an unmatched value as a
+pre-selected `"(legacy)"` option, so GT502 was **never** silently retyped to `ink_cartridge` on
+save. The brief's data-corruption worry was already handled by a guard written for an unrelated
+enum drift in May 2026. That guard is now covered by tests so it cannot be "tidied away".
+
+**Fix**:
+- `PRODUCT_TYPE_OPTIONS` in `admin/utils/product-types.js` = the backend enum verbatim, in backend
+  order, `maintenance_box` after `waste_toner`. Both modals build from it; `generateSEO` takes its
+  noun from it (`productTypeNoun`); the drawer labels through `productTypeLabel`.
+- `CONSUMABLE_PRODUCT_TYPES` in `shop-page.js` replaces the three longhand predicates, and must
+  stay identical to `API._CATEGORY_PRODUCT_TYPES.drums` — a facet count computed from a different
+  list than the query it labels is a *wrong* number, not a missing one.
+- While there: the meta-title fallback shortened in one jump from the full pattern to brand+code,
+  throwing away the type noun even when it fitted. It now degrades one step at a time (drop the
+  source qualifier first), so `Buy Epson T502 Maintenance Box NZ | InkCartridges.co.nz` (55 chars)
+  survives where it used to collapse to `Buy Epson T502 NZ | …` (39).
+
+**Two gates, because "every surface calls X" is a list nobody maintains (ERR-160)**:
+- `tests/product-type-vocabulary-aug2026.test.js` — 26 tests. Declares the backend enum once and
+  asserts every surface is enrolled; executes `buildSelect`, `generateSEO`, `normalizeProductType`,
+  `inferProductType`, `maySplitShipment` and `productWriteError` rather than regexing them.
+- `npm run audit:types` (`scripts/audit-product-types.mjs`) — READ-ONLY live oracle, no write path
+  of any kind. Walks `/api/products` to exhaustion and fails **in both directions**: a type we offer
+  with zero live rows, and a live type we do not offer. Negative-tested by temporarily adding a
+  bogus type and removing a live one — both fired by name.
+
+**Verified live** (admin, owner session, 2026-08-14): GT502's edit modal shows **Maintenance Box**
+selected with no "(legacy)"; saving it untouched leaves `product_type = maintenance_box`; the New
+Product modal offers it directly after Waste Toner; `TEST-MBOX1` was created as `maintenance_box`
+and stored as such. 3843 tests / 3824 pass / 0 fail. `npm run audit:types`: 15 live types, all
+enrolled.
+
+**Lesson**: when a handoff says "one `<option>`", count the vocabularies first. The cost of the
+missing option was zero errors and six wrong answers.
+
+---
+
 ## ERR-155 — The portalled autocomplete sits below the modal backdrop on purpose, which makes it unclickable for the first autocomplete put inside a modal (2026-08-09)
 
 **Context.** The new Business page picks a customer with `attachAutocomplete` inside a plain

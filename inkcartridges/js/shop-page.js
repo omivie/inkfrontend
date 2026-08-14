@@ -1,3 +1,20 @@
+    // The `product_type` values behind the "Drums & Supplies" tile — every
+    // non-cartridge consumable. Three predicates in this file used to spell the
+    // list out longhand, so each one was its own chance to miss a new type, and
+    // in Aug 2026 all three did: the backend added `maintenance_box` and the
+    // brand facet counted 0 for products /shop was itself listing. They all read
+    // this constant now.
+    //
+    // It MUST stay identical to API._CATEGORY_PRODUCT_TYPES.drums in js/api.js,
+    // which is the same membership on the request side; a client-side facet that
+    // disagrees with the query it labels is a wrong number, not a missing one.
+    // tests/product-type-vocabulary-aug2026.test.js pins the two together, and
+    // `npm run audit:types` checks both against the live catalogue.
+    const CONSUMABLE_PRODUCT_TYPES = [
+        'drum_unit', 'waste_toner', 'maintenance_box', 'belt_unit', 'fuser_kit',
+        'fax_film', 'fax_film_refill',
+    ];
+
     // ============================================
     // SEARCH RESULT RECONCILIATION HELPERS
     // ============================================
@@ -46,7 +63,16 @@
         return Object.assign({}, p, {
             retail_price: p.retail_price != null ? p.retail_price : p.price,
             sku: p.sku || '',
-            source: p.source || (p.is_genuine ? 'genuine' : 'compatible'),
+            // ONE brand-source vocabulary (BrandSource, utils.js, ERR-157).
+            // The old expression INVENTED 'compatible' for a row carrying
+            // neither `source` nor `is_genuine`, because `undefined ? … : …`
+            // takes the false branch. BrandSource reads `source` first, then
+            // `is_genuine` but only when it is a real boolean, and answers null
+            // otherwise — an unknown row is now sorted as unknown rather than
+            // silently asserted third-party.
+            // /api/search/suggest sends `is_genuine` on every row (verified
+            // live 2026-08-12), so real payloads resolve exactly as before.
+            source: BrandSource.of(p),
             brand: p.brand || null,
             category: p.category || null,
         });
@@ -1100,6 +1126,14 @@
             // Hide all levels first
             this.hideAllLevels();
 
+            // search-click-tracking-aug2026 — the click beacon is armed-OFF by
+            // default. /search is a Vercel rewrite to this same shop HTML, so
+            // ONE controller serves both search results and /shop browsing;
+            // disarming here means only loadSearchResults can re-arm it, and no
+            // other drilldown level can ever log a click as a search click.
+            const clickBeacon = (typeof window !== 'undefined' && window.SearchClickBeacon) || null;
+            if (clickBeacon) clickBeacon.disarm();
+
             switch (this.state.level) {
                 case 'brands':
                     await this.loadBrands(expectedVersion);
@@ -1499,11 +1533,7 @@
                                 } else if (categoryId === 'toner') {
                                     return productType === 'toner_cartridge';
                                 } else if (categoryId === 'consumable') {
-                                    return productType === 'drum_unit' ||
-                                           productType === 'waste_toner' ||
-                                           productType === 'belt_unit' ||
-                                           productType === 'fuser_kit' ||
-                                           productType === 'maintenance_kit';
+                                    return CONSUMABLE_PRODUCT_TYPES.includes(productType);
                                 } else if (categoryId === 'label_tape') {
                                     return productType === 'label_tape';
                                 } else if (categoryId === 'paper') {
@@ -1735,7 +1765,7 @@
                             const productType = (p.product_type || '').toLowerCase();
                             if (categoryId === 'ink') return productType === 'ink_cartridge' || productType === 'ink_bottle';
                             if (categoryId === 'toner') return productType === 'toner_cartridge';
-                            if (categoryId === 'consumable') return productType === 'drum_unit' || productType === 'waste_toner' || productType === 'belt_unit' || productType === 'fuser_kit' || productType === 'maintenance_kit';
+                            if (categoryId === 'consumable') return CONSUMABLE_PRODUCT_TYPES.includes(productType);
                             if (categoryId === 'label_tape') return productType === 'label_tape';
                             if (categoryId === 'paper') return productType === 'photo_paper';
                             return true;
@@ -1755,7 +1785,7 @@
                         const productType = (p.product_type || '').toLowerCase();
                         if (categoryId === 'ink') return productType === 'ink_cartridge' || productType === 'ink_bottle';
                         if (categoryId === 'toner') return productType === 'toner_cartridge';
-                        if (categoryId === 'consumable') return productType === 'drum_unit' || productType === 'waste_toner' || productType === 'belt_unit' || productType === 'fuser_kit' || productType === 'maintenance_kit';
+                        if (categoryId === 'consumable') return CONSUMABLE_PRODUCT_TYPES.includes(productType);
                         if (categoryId === 'label_tape') return productType === 'label_tape';
                         if (categoryId === 'paper') return productType === 'photo_paper';
                         return true;
@@ -2835,6 +2865,13 @@
                 // corrected_from / facets / pagination / intent / recovery).
                 let smartData = null;
                 let pagination = null;
+                // SKUs /api/search/smart returned for THIS query — the click
+                // beacon's provenance allow-list (search-click-beacon.js rule 2).
+                const smartSkus = new Set();
+                // Read off `window`, never as a bare identifier: a module that
+                // hasn't loaded is `undefined` here, whereas a bare name would
+                // throw in the temporal dead zone (the CompatSource lesson).
+                const clickBeacon = (typeof window !== 'undefined' && window.SearchClickBeacon) || null;
 
                 {
                     const response = await API.smartSearch(searchQuery, {
@@ -2845,6 +2882,17 @@
                     if (navVersion !== undefined && this.navigationVersion !== navVersion) return;
                     smartData = (response && response.ok) ? (response.data || null) : null;
                     products = (smartData && Array.isArray(smartData.products)) ? smartData.products : [];
+
+                    // search-click-tracking-aug2026 — snapshot which SKUs came
+                    // from /smart, HERE, before the reconciliation block below
+                    // can null `smartData`. The click beacon may only fire for
+                    // /smart-sourced cards, and a swapped page is a MIX: the
+                    // literal union replaces `products` but PRESERVES /smart's
+                    // compat rows, so a page-level "was this smart?" flag would
+                    // be wrong in both directions. Per-SKU provenance is exact.
+                    for (const p of products) {
+                        if (p && typeof p.sku === 'string' && p.sku) smartSkus.add(p.sku);
+                    }
                     if (smartData && smartData.pagination && smartData.pagination.total_pages != null) {
                         pagination = smartData.pagination;
                     }
@@ -3244,6 +3292,18 @@
                     // so /smart's row order never reaches the DOM anyway.
                     this.renderProducts(compatible, this.elements.compatibleProducts, this.elements.compatibleSection, true);
                     this.renderProducts(genuine, this.elements.genuineProducts, this.elements.genuineSection, false);
+
+                    // search-click-tracking-aug2026 — arm the click beacon for
+                    // the cards now painted. `searchQuery` is the string sent to
+                    // /smart verbatim (NOT the backend's corrected form), so CTR
+                    // is attributed to the query that actually ran.
+                    if (clickBeacon) {
+                        clickBeacon.arm({
+                            query: searchQuery,
+                            page: requestedPage,
+                            skus: smartSkus,
+                        });
+                    }
 
                     if (genuine.length === 0 && compatible.length === 0) {
                         this.renderSearchPagination(null);

@@ -16,11 +16,18 @@
  * Several types share one category (ink = ink_cartridge + ink_bottle), which is
  * why a code edit is scoped to a brand+CATEGORY rather than a brand+type: it's
  * the grain the customer's chip grid actually has.
+ *
+ * A type MISSING from this map has no category, so the drawer's code picker
+ * silently offers nothing to scope against. Aug 2026 additions: `maintenance_box`
+ * (new enum member) and `fax_film`/`fax_film_refill` (live under drums since the
+ * IA reorg, never listed here). `maintenance_kit` removed — zero rows, ever.
+ * Membership must match API._CATEGORY_PRODUCT_TYPES in js/api.js.
  */
 export const PRODUCT_TYPE_TO_SHOP_CATEGORY = {
   ink_cartridge: 'ink', ink_bottle: 'ink', toner_cartridge: 'toner',
-  drum_unit: 'drums', waste_toner: 'drums', belt_unit: 'drums',
-  fuser_kit: 'drums', maintenance_kit: 'drums',
+  drum_unit: 'drums', waste_toner: 'drums', maintenance_box: 'drums',
+  belt_unit: 'drums', fuser_kit: 'drums',
+  fax_film: 'drums', fax_film_refill: 'drums',
   label_tape: 'label', photo_paper: 'paper',
   printer_ribbon: 'ribbons', typewriter_ribbon: 'ribbons', correction_tape: 'ribbons',
 };

@@ -1352,10 +1352,18 @@ const API = {
 
     // apiCategory (the value shop-page passes as params.category) → product_type[].
     // Mirrors the category→product_type mapping in shop-page.js.
+    //
+    // `drums` is the /shop "Drums & Supplies" tile and is the catch-all for
+    // every non-cartridge consumable. Aug 2026 corrections (ERR-162/163):
+    //   + maintenance_box — the new waste-ink-collector type (4 live products)
+    //   + fax_film / fax_film_refill — all 7 are filed under drums server-side,
+    //     verified live and documented at product-detail-page.js:361; this map
+    //     never listed them, so a manual code chip could not recover one
+    //   - maintenance_kit — never matched a single row, in any month
     _CATEGORY_PRODUCT_TYPES: {
         ink:     ['ink_cartridge', 'ink_bottle'],
         toner:   ['toner_cartridge'],
-        drums:   ['drum_unit', 'waste_toner', 'belt_unit', 'fuser_kit', 'maintenance_kit'],
+        drums:   ['drum_unit', 'waste_toner', 'maintenance_box', 'belt_unit', 'fuser_kit', 'fax_film', 'fax_film_refill'],
         label:   ['label_tape'],
         paper:   ['photo_paper'],
         ribbons: ['printer_ribbon', 'typewriter_ribbon', 'correction_tape'],

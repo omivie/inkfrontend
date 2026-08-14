@@ -451,7 +451,7 @@ function loadWire() {
   const src = extractFunction(PRODUCTS_SRC, 'async function wireProductCodesSection(');
   const factory = new Function(
     'AdminAPI', 'Toast', 'esc', 'DebugLog', 'window',
-    'extractBrandName', '_brands', 'PRODUCT_TYPE_LABELS', 'PRODUCT_TYPE_TO_SHOP_CATEGORY',
+    'extractBrandName', '_brands', 'productTypeLabel', 'PRODUCT_TYPE_TO_SHOP_CATEGORY',
     'describeScopes', 'describeCodesWriteError', 'paginate', 'pagerHtml', 'RIBBON_PRODUCT_TYPES',
     `${src}; return wireProductCodesSection;`);
   return (deps) => factory(
@@ -462,7 +462,10 @@ function loadWire() {
     deps.window || makeWindow(),
     deps.extractBrandName || ((p) => (p && p.brand && p.brand.name) || (p && p.brand_name) || ''),
     deps._brands || [{ id: 'b1', name: 'Brother', slug: 'brother' }],
-    deps.PRODUCT_TYPE_LABELS || { ink_cartridge: 'Ink Cartridges', toner_cartridge: 'Toner Cartridges' },
+    // Aug 2026: the drawer resolves its type label through the shared
+    // productTypeLabel() (canonical → retired → raw) rather than indexing a
+    // label map directly, so the injected dependency is the function.
+    deps.productTypeLabel || ((t) => ({ ink_cartridge: 'Ink Cartridges', toner_cartridge: 'Toner Cartridges' }[t] || t || '')),
     deps.PRODUCT_TYPE_TO_SHOP_CATEGORY || { ink_cartridge: 'ink', toner_cartridge: 'toner' },
     DESCRIBE_SCOPES,
     deps.describeCodesWriteError || ((e) => (e && e.message) || 'unknown error'),
